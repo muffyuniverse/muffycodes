@@ -133,6 +133,21 @@ val testForks = (providers.gradleProperty("muffy.testForks").orNull
 
 tasks.withType<Test>().configureEach {
     maxParallelForks = testForks
+
+    // The tests are always really run, never taken from the build cache.
+    //
+    // Gradle can hand back the results of a previous run instead of running
+    // anything, and it says so with "FROM-CACHE". That is sound in principle —
+    // the cache is keyed on the things the tests read, so identical inputs mean
+    // identical results — but it makes the answer to "did this commit pass?" a
+    // question about a cache rather than about the code. It also hides anything
+    // the cache does not know it depends on, such as the machine's own state,
+    // which is exactly what the screen tests depend on.
+    //
+    // The tests are the only evidence there is, so they are run. The cost was
+    // measured at sixteen seconds on a warm cache, which is a cheap price for
+    // knowing that the answer is about the code and not about a cache entry.
+    outputs.upToDateWhen { false }
 }
 
 /**
