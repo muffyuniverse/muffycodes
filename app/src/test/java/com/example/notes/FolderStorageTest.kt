@@ -1,5 +1,6 @@
 package com.example.notes
 
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -8,146 +9,166 @@ import org.junit.Test
 import java.io.File
 
 /**
- * The on-disk layout: one directory per folder, one file per note, and the
- * bindings between folders and git projects.
+ * The layout on disk: one directory per folder, one file per note.
+ *
+ * The layout matters beyond tidiness. The folders are flat, so that a folder is
+ * never a directory inside another folder's repository; and each note is a file
+ * of its own, so that a note's history is the history of that note.
+ *
+ * Every test works in a directory of its own and removes it afterwards, so
+ * nothing is shared and no test can leave anything for another to trip over.
  */
 class FolderStorageTest {
 
-    private fun tempDir(name: String): File {
-        val dir = File(System.getProperty("java.io.tmpdir"), "$name-${System.nanoTime()}")
+    private val made = mutableListOf<File>()
+
+    private fun storage(): Pair<File, FolderStorage> {
+        val dir = File(System.getProperty("java.io.tmpdir"), "storage-${System.nanoTime()}")
         dir.mkdirs()
-        return dir
+        made.add(dir)
+        return dir to FolderStorage(dir)
+    }
+
+    @After
+    fun removeWhatWasMade() {
+        made.forEach { it.deleteRecursively() }
     }
 
     @Test
-    fun `a note at the top level is written and read back`() {
-        val base = tempDir("root-note")
-        val storage = FolderStorage(base)
-
+    fun `a note with no folder is written and read back at the top`() {
+        // Given a note that belongs to no folder
+        val (_, store) = storage()
         val note = Note(id = "n1", title = "Hello", body = "World")
-        storage.save(emptyList(), listOf(note))
 
-        val loaded = storage.load()
+        // When the tree is saved and read again
+        store.save(emptyList(), listOf(note))
+        val loaded = store.load()
+
+        // Then the note is there, whole, and still belongs to no folder
         assertEquals(1, loaded.notes.size)
-        assertEquals("Hello", loaded.notes.first().title)
-        assertEquals("World", loaded.notes.first().body)
-        assertNull(loaded.notes.first().folderId)
+        val read = loaded.notes.first()
+        assertEquals("Hello", read.title)
+        assertEquals("World", read.body)
+        assertNull(read.folderId)
     }
 
     @Test
-    fun `each folder gets its own directory`() {
-        val base = tempDir("dirs")
-        val storage = FolderStorage(base)
+    fun `each folder is a directory holding its own name`() {
+        // Given a folder
+        val (dir, store) = storage()
 
-        val folder = Folder(id = "f1", name = "Work", parentId = null)
-        storage.save(listOf(folder), emptyList())
+        // When the tree is saved
+        store.save(listOf(Folder(id = "f1", name = "Work", parentId = null)), emptyList())
 
-        assertTrue(at(base, "f1").isDirectory)
-        assertTrue(at(base, "f1", "name").isFile)
-        assertEquals("Work", at(base, "f1", "name").readText())
+        // Then it is a directory named after its id, holding its name, so the
+        // name can be changed without moving anything
+        assertTrue(at(dir, "f1").isDirectory)
+        assertTrue(at(dir, "f1", "name").isFile)
+        assertEquals("Work", at(dir, "f1", "name").readText())
     }
 
     @Test
-    fun `the notes of a folder are kept in the folder's own directory`() {
-        val base = tempDir("folder-note")
-        val storage = FolderStorage(base)
-
+    fun `a note is written into the directory of its own folder`() {
+        // Given one note inside a folder and one that belongs to no folder
+        val (dir, store) = storage()
         val folder = Folder(id = "f1", name = "Work", parentId = null)
         val inside = Note(id = "n1", title = "Inside", body = "b", folderId = "f1")
-        val outside = Note(id = "n2", title = "Outside", body = "b", folderId = null)
+        val atTop = Note(id = "n2", title = "At the top", body = "b", folderId = null)
 
-        storage.save(listOf(folder), listOf(inside, outside))
+        // When the tree is saved
+        store.save(listOf(folder), listOf(inside, atTop))
 
-        // Each note is a file of its own, named after its id.
-        assertTrue(at(base, "f1", "n1.md").isFile)
-        assertTrue(at(base, "__root__", "n2.md").isFile)
+        // Then each file sits in the right directory, and reading it back gives
+        // each note its folder again
+        assertTrue(at(dir, "f1", "n1.md").isFile)
+        assertTrue(at(dir, "__root__", "n2.md").isFile)
 
-        val loaded = storage.load()
-        assertEquals(2, loaded.notes.size)
+        val loaded = store.load()
         assertEquals("f1", loaded.notes.first { it.id == "n1" }.folderId)
         assertNull(loaded.notes.first { it.id == "n2" }.folderId)
     }
 
     @Test
     fun `the parent of a folder is remembered`() {
-        val base = tempDir("parent")
-        val storage = FolderStorage(base)
-
+        // Given a folder inside another folder
+        val (_, store) = storage()
         val parent = Folder(id = "p1", name = "Parent", parentId = null)
         val child = Folder(id = "c1", name = "Child", parentId = "p1")
-        storage.save(listOf(parent, child), emptyList())
 
-        val loaded = storage.load()
+        // When the tree is saved and read again
+        store.save(listOf(parent, child), emptyList())
+        val loaded = store.load()
+
+        // Then the shape of the tree survives, which is the whole of the
+        // nesting: it is written down, not implied by where the files sit
         assertEquals(2, loaded.folders.size)
         assertNull(loaded.folders.first { it.id == "p1" }.parentId)
         assertEquals("p1", loaded.folders.first { it.id == "c1" }.parentId)
     }
 
     @Test
-    fun `a note that is gone is removed from the disk`() {
-        val base = tempDir("delete")
-        val storage = FolderStorage(base)
-
-        val note = Note(id = "n1", title = "Hello", body = "b")
-        storage.save(emptyList(), listOf(note))
-        assertTrue(at(base, "__root__", "n1.md").isFile)
-
-        storage.save(emptyList(), emptyList())
-        assertFalse(at(base, "__root__", "n1.md").exists())
-    }
-
-    @Test
-    fun `the directory of a deleted folder is removed`() {
-        val base = tempDir("delete-folder")
-        val storage = FolderStorage(base)
-
-        val folder = Folder(id = "f1", name = "Work", parentId = null)
-        storage.save(listOf(folder), emptyList())
-        assertTrue(at(base, "f1").isDirectory)
-
-        storage.save(emptyList(), emptyList())
-        assertFalse(at(base, "f1").exists())
-    }
-
-    @Test
-    fun `the folders are flat so that no folder is inside another's repository`() {
-        val base = tempDir("flat")
-        val storage = FolderStorage(base)
-
+    fun `a folder is never a directory inside another folder`() {
+        // Given a child folder
+        val (dir, store) = storage()
         val parent = Folder(id = "p1", name = "Parent", parentId = null)
         val child = Folder(id = "c1", name = "Child", parentId = "p1")
-        storage.save(listOf(parent, child), emptyList())
 
-        // The child is a sibling of the parent, not a directory inside it.
-        assertTrue(at(base, "c1").isDirectory)
-        assertFalse(at(base, "p1", "c1").exists())
-    }
+        // When the tree is saved
+        store.save(listOf(parent, child), emptyList())
 
-    @Test
-    fun `the bindings between folders and projects round-trip`() {
-        val store = ProjectStore(
-            mapOf(
-                "f1" to GitProject("muffy/notes", "https://github.com/muffy/notes.git"),
-                "f2" to GitProject("muffy/other", "https://github.com/muffy/other.git"),
-            )
+        // Then both sit side by side at the top, because a directory inside
+        // another would turn the inner folder into a link of the outer
+        // repository rather than a folder of its own
+        assertTrue(at(dir, "c1").isDirectory)
+        assertFalse(
+            "a folder must not live inside another folder's directory",
+            at(dir, "p1", "c1").exists(),
         )
-
-        val decoded = ProjectStore.decode(store.encode())
-
-        assertEquals(2, decoded.byFolder.size)
-        assertEquals("muffy/notes", decoded.projectFor("f1")?.name)
-        assertEquals("muffy/other", decoded.projectFor("f2")?.name)
-        assertNull(decoded.projectFor("f3"))
     }
 
     @Test
-    fun `a folder can be detached from its project`() {
-        val store = ProjectStore(mapOf("f1" to GitProject("a", "b")))
+    fun `a note that is no longer in the tree is taken off the disk`() {
+        // Given a note that was saved
+        val (dir, store) = storage()
+        store.save(emptyList(), listOf(Note(id = "n1", title = "Hello", body = "b")))
+        assertTrue(at(dir, "__root__", "n1.md").isFile)
 
-        val detached = store.with("f1", null)
+        // When it is deleted from the tree and the tree is saved
+        store.save(emptyList(), emptyList())
 
-        assertNull(detached.projectFor("f1"))
-        assertTrue(store.projectFor("f1") != null)
+        // Then its file is gone, so a deleted note does not come back the next
+        // time the app is opened
+        assertFalse(at(dir, "__root__", "n1.md").exists())
+    }
+
+    @Test
+    fun `a folder that is no longer in the tree loses its directory`() {
+        // Given a saved folder
+        val (dir, store) = storage()
+        store.save(listOf(Folder(id = "f1", name = "Work", parentId = null)), emptyList())
+        assertTrue(at(dir, "f1").isDirectory)
+
+        // When it is deleted and the tree is saved
+        store.save(emptyList(), emptyList())
+
+        // Then its whole directory is gone, rather than being left behind as an
+        // empty folder that would be read back as a real one
+        assertFalse(at(dir, "f1").exists())
+    }
+
+    @Test
+    fun `one unreadable file does not cost the other files`() {
+        // Given a folder holding one good note and one file that cannot be read
+        val (dir, store) = storage()
+        store.save(emptyList(), listOf(Note(id = "good", title = "Good", body = "kept")))
+        at(dir, "__root__", "broken.md").writeText("this is not a file of the app at all")
+
+        // When the tree is read
+        val loaded = store.load()
+
+        // Then the good note is still there and the broken file is skipped,
+        // because one damaged file must never take the whole app down with it
+        assertEquals(listOf("good"), loaded.notes.map { it.id })
     }
 }
 

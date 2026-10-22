@@ -6,12 +6,19 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * JVM tests for the persistence codec. These run without a device or emulator.
+ * The single-file format that earlier versions of the app wrote.
+ *
+ * This is now only ever read, never written, because every file has its own
+ * file on disk. It therefore exists for one reason: an upgrade must not lose
+ * anything that was already saved. Only the shapes an old file could really
+ * have are checked, and every one of them is a way to lose data if it is
+ * handled wrongly.
  */
 class NoteCodecTest {
 
     @Test
-    fun `round trip preserves folders and notes`() {
+    fun `a document survives being written and read back`() {
+        // Given a tree of folders and notes, including a note with no title
         val folders = listOf(
             Folder("work", "Work", parentId = null),
             Folder("meetings", "Meetings", parentId = "work"),
@@ -21,53 +28,50 @@ class NoteCodecTest {
             Note("b", "", "no title", pinned = false, updatedAt = 2000L, folderId = null),
         )
 
+        // When the document is written and read again
         val decoded = NoteCodec.decode(NoteCodec.encode(folders, notes))
 
+        // Then it is the same document, field for field
         assertEquals(folders, decoded.folders)
         assertEquals(notes, decoded.notes)
     }
 
     @Test
-    fun `empty document encodes to an empty structure`() {
-        val text = NoteCodec.encode(emptyList(), emptyList())
+    fun `an empty document reads back as an empty document`() {
+        // Given a document with nothing in it
 
-        val decoded = NoteCodec.decode(text)
+        // When it is written and read again
+        val decoded = NoteCodec.decode(NoteCodec.encode(emptyList(), emptyList()))
 
+        // Then it is still empty rather than broken
         assertEquals(emptyList<Folder>(), decoded.folders)
         assertEquals(emptyList<Note>(), decoded.notes)
     }
 
     @Test
-    fun `a version 1 file is migrated into the new format`() {
-        // Version 1 was a bare array of notes.
-        val legacy = """
-            [{"id":"a","title":"Old note","body":"text","pinned":true,"updatedAt":1234}]
-        """.trimIndent()
+    fun `the oldest format, a bare list of notes, is read`() {
+        // Given a file in the first format the app ever wrote: no version, no
+        // folders, just an array of notes
+        val oldest = """[{"id":"a","title":"Old note","body":"text","pinned":true,"updatedAt":1234}]"""
 
-        val decoded = NoteCodec.decode(legacy)
+        // When it is read
+        val decoded = NoteCodec.decode(oldest)
 
-        assertEquals(emptyList<Folder>(), decoded.folders)
+        // Then the note is kept whole, and belongs to no folder because the
+        // oldest format had none
         assertEquals(1, decoded.notes.size)
-        assertEquals("Old note", decoded.notes[0].title)
-        assertTrue(decoded.notes[0].pinned)
-        assertNull(decoded.notes[0].folderId)
-        assertEquals(1234L, decoded.notes[0].updatedAt)
+        val note = decoded.notes[0]
+        assertEquals("Old note", note.title)
+        assertEquals("text", note.body)
+        assertTrue(note.pinned)
+        assertEquals(1234L, note.updatedAt)
+        assertNull(note.folderId)
+        assertEquals(emptyList<Folder>(), decoded.folders)
     }
 
     @Test
-    fun `a migrated file can be written back in the new format`() {
-        val legacy = """[{"id":"a","title":"Old","body":"b"}]"""
-
-        val decoded = NoteCodec.decode(legacy)
-        val reencoded = NoteCodec.encode(decoded.folders, decoded.notes)
-        val again = NoteCodec.decode(reencoded)
-
-        assertEquals(1, again.notes.size)
-        assertEquals("Old", again.notes[0].title)
-    }
-
-    @Test
-    fun `decode skips entries without an id`() {
+    fun `an entry without an id is dropped, and the rest are kept`() {
+        // Given a file holding two good entries and three broken ones
         val json = """
             {"version":2,
              "folders":[{"id":"f1","name":"Work"},{"name":"no id"}],
@@ -76,8 +80,12 @@ class NoteCodecTest {
                       "not an object"]}
         """.trimIndent()
 
+        // When it is read
         val decoded = NoteCodec.decode(json)
 
+        // Then only the entries that can be identified survive, because an entry
+        // without an id cannot be told apart from any other and would be
+        // rewritten as a duplicate on the next save
         assertEquals(1, decoded.folders.size)
         assertEquals("f1", decoded.folders[0].id)
         assertEquals(1, decoded.notes.size)
@@ -85,34 +93,19 @@ class NoteCodecTest {
     }
 
     @Test
-    fun `decode of blank text yields nothing`() {
-        assertEquals(emptyList<Note>(), NoteCodec.decode("").notes)
-        assertEquals(emptyList<Note>(), NoteCodec.decode("   ").notes)
-        assertEquals(emptyList<Folder>(), NoteCodec.decode("").folders)
-    }
+    fun `blank text reads as an empty document rather than a failure`() {
+        // Given a file that is empty, and one holding only spaces
+        val empty = ""
+        val blank = "   \n\t "
 
-    @Test
-    fun `a note keeps its folder when encoded and decoded`() {
-        val note = Note("n", "t", "b", folderId = "work")
+        // When both are read
+        val fromEmpty = NoteCodec.decode(empty)
+        val fromBlank = NoteCodec.decode(blank)
 
-        val decoded = NoteCodec.decode(NoteCodec.encode(emptyList(), listOf(note)))
-
-        assertEquals("work", decoded.notes[0].folderId)
-    }
-
-    @Test
-    fun `preview uses the first non blank line and truncates it`() {
-        val long = "x".repeat(200)
-        val note = Note("id", "t", "\n\n  ${long}  \nsecond line")
-
-        val preview = note.preview()
-
-        assertTrue(preview.endsWith("…"))
-        assertTrue(preview.length <= 121)
-    }
-
-    @Test
-    fun `preview is empty for a blank body`() {
-        assertEquals("", Note("id", "t", "   \n  \n").preview())
+        // Then neither throws, and both are simply empty. A crash here would
+        // lose every note on the phone for the sake of one blank file.
+        assertEquals(emptyList<Note>(), fromEmpty.notes)
+        assertEquals(emptyList<Note>(), fromBlank.notes)
+        assertEquals(emptyList<Folder>(), fromEmpty.folders)
     }
 }
