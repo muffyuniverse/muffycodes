@@ -45,10 +45,18 @@ MIN_SPREAD = 3.0
 # a perfectly honest screen.
 FEW_COLOURS = 4
 
-# Two pictures of the same screen in two themes must differ in at least this
-# share of their pixels. Two themes that merely look alike still differ almost
-# everywhere, while a theme that was never applied changes nothing.
-SAME_PICTURE = 0.02
+# How different a channel must be before a pixel counts as changed. A theme
+# that changes a screen at all changes it by more than this. A bigger number
+# would miss the palest themes, whose backgrounds sit only a few units apart.
+PIXEL_TOLERANCE = 2
+
+# Two pictures of the same screen count as "the theme was not applied" when
+# fewer than this share of their pixels changed. The number is deliberately
+# very small: the question is whether the theme reached the screen AT ALL, not
+# how strongly it was applied. How much it differs is reported instead, so that
+# two themes that happen to look alike can be judged by a person and not by a
+# test that would be guessing at design.
+SAME_PICTURE = 0.002
 
 # WCAG calls 3:1 the least contrast for large text and 4.5:1 for body text.
 # The check only insists on the lowest bar, because the point is to catch text
@@ -308,13 +316,12 @@ def check_picture(path, problems, notes):
                      % (name, len(flat), ', '.join(flat[:6])))
 
 
-def difference(first, second, step=3):
+def difference(first, second, step=2):
     """The share of pixels that look different in two pictures of one size.
 
     Counting differing pixels is far more telling than comparing average
-    colours: two themes that merely look similar still differ in most of their
-    pixels, while a theme that was never applied gives pictures that differ in
-    almost none.
+    colours: two themes that look alike still differ in some of their pixels,
+    while a theme that was never applied gives pictures that differ in none.
     """
     width, height, a = first
     other_width, other_height, b = second
@@ -322,14 +329,15 @@ def difference(first, second, step=3):
         return None
     different = 0
     total = 0
+    tolerance = PIXEL_TOLERANCE
     for y in range(0, height, step):
         base = y * width * 4
         for x in range(0, width, step):
             i = base + x * 4
             total += 1
-            if (abs(a[i] - b[i]) > 8
-                    or abs(a[i + 1] - b[i + 1]) > 8
-                    or abs(a[i + 2] - b[i + 2]) > 8):
+            if (abs(a[i] - b[i]) > tolerance
+                    or abs(a[i + 1] - b[i + 1]) > tolerance
+                    or abs(a[i + 2] - b[i + 2]) > tolerance):
                 different += 1
     return different / total if total else 0.0
 
@@ -348,20 +356,32 @@ def check_themes(pictures, problems, notes):
             notes.append('%s: cannot be read (%s)' % (os.path.basename(picture), e))
 
     same = []
+    shares = []
+    closest = None
     for i in range(len(read)):
         for j in range(i + 1, len(read)):
             share = difference(read[i][1], read[j][1])
             if share is None:
                 notes.append('%s and %s are not the same size, so they cannot '
                              'be compared' % (read[i][0], read[j][0]))
-            elif share < SAME_PICTURE:
-                same.append('%s and %s differ in only %.0f%% of their pixels'
+                continue
+            shares.append(share)
+            if closest is None or share < closest[0]:
+                closest = (share, read[i][0], read[j][0])
+            if share < SAME_PICTURE:
+                same.append('%s and %s differ in only %.2f%% of their pixels'
                             % (read[i][0], read[j][0], share * 100))
     if same:
         problems.append(
-            'the themes did not change the screen: %s. A theme changes the '
-            'colours of the same screen, so two themes must give two '
-            'different pictures.' % '; '.join(same))
+            'the theme did not reach the screen: %s. A theme changes the '
+            'colours of the same screen, so every theme must give a picture '
+            'of its own; a pair that matches was not applied.'
+            % '; '.join(same))
+    elif closest is not None:
+        notes.append(
+            'the themes differ from each other in %.1f%% to %.1f%% of their '
+            'pixels; the closest pair is %s and %s'
+            % (min(shares) * 100, max(shares) * 100, closest[1], closest[2]))
 
     # The palest theme and the darkest are far apart in brightness, so the set
     # as a whole should cover a wide range. Reported, not failed on: a tour of
