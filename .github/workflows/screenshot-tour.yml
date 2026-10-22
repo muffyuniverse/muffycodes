@@ -68,6 +68,14 @@ jobs:
 
       - name: Walk through the app and take the pictures
         uses: reactivecircus/android-emulator-runner@v2
+        env:
+          # The action runs every line of the script in its own shell, so the
+          # values for the tour are given through the environment.
+          ADB: adb
+          SKIP_LAUNCH: "1"
+          SHOT_DIR: ${{ github.workspace }}/screenshots
+          TOUR_FILE: ${{ github.workspace }}/tools/${{ inputs.tour_file || 'default-tour.txt' }}
+          TRACE_FILE: ${{ github.workspace }}/tour-trace.log
         with:
           api-level: ${{ inputs.api_level || '34' }}
           target: default
@@ -84,14 +92,7 @@ jobs:
             adb shell am start -n com.example.notes/com.example.notes.MainActivity
             sleep 8
 
-            # The tour walks through the app and takes the pictures. The
-            # values are handed over through the environment, so that the
-            # line stays one line. The app is already started, so the tour
-            # does not start it again.
-            export ADB=adb
-            export SKIP_LAUNCH=1
-            export SHOT_DIR="${{ github.workspace }}/screenshots"
-            export TOUR_FILE="${{ github.workspace }}/tools/${{ inputs.tour_file || 'default-tour.txt' }}"
+            # The tour walks through the app and takes the pictures.
             bash tools/screenshot-tour.sh
 
             # The pictures are the point of the run, so a step that did not
@@ -109,7 +110,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: screenshots
-          path: screenshots/*.png
+          path: |
+            screenshots/*.png
+            tour-trace.log
           if-no-files-found: warn
           retention-days: 30
 

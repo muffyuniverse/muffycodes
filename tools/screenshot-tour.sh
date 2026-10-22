@@ -36,6 +36,15 @@ BASE_H=2400
 
 adb() { "$ADB" "$@"; }
 
+# Every command that talks to the device is written down, so that a problem
+# can be found afterwards.
+TRACE_FILE="${TRACE_FILE:-}"
+
+trace() {
+    [ -z "$TRACE_FILE" ] && return 0
+    echo "$(date +%H:%M:%S) $*" >> "$TRACE_FILE"
+}
+
 # Runs a command that talks to the device, and tries again when it does not
 # work. The emulator is sometimes not ready yet, even after it says it has
 # booted.
@@ -56,6 +65,7 @@ wait_for_device() {
     local i
     for i in $(seq 1 30); do
         if adb shell true >/dev/null 2>&1; then
+            trace "the device answers"
             return 0
         fi
         sleep 2
@@ -98,6 +108,7 @@ take_shot() {
     # picture is taken again when it fails.
     local attempt
     for attempt in 1 2 3; do
+        trace "picture: $SHOT_FILE"
         if adb exec-out screencap -p > "$SHOT_FILE" 2>/dev/null && [ -s "$SHOT_FILE" ]; then
             echo "  picture: $SHOT_FILE"
             return 0
@@ -237,8 +248,10 @@ if [ -z "${SKIP_LAUNCH:-}" ]; then
     wait_for_device
     # The app is stopped first, so that the tour always starts at the same
     # place. A failure here is not fatal: the app may already be running.
+    trace "stopping the app"
     adb shell am force-stop "$PACKAGE" >/dev/null 2>&1 || true
     sleep 1
+    trace "starting the app"
     retry adb shell am start -n "$PACKAGE/$ACTIVITY" >/dev/null 2>&1 || true
     sleep 4
 fi
