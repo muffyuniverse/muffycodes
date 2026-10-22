@@ -63,6 +63,8 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
 
     # How many runners share the suite, set by the repository variable
     # TEST_SHARDS, which holds a list of shard indexes. Unset means `[0]`: one
@@ -159,7 +161,7 @@ jobs:
       # post step is wasted work.
       - name: Set up Gradle
         if: steps.which.outputs.verdict != 'NONE'
-        uses: gradle/actions/setup-gradle@v6
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
         with:
           cache-cleanup: never
           cache-read-only: ${{ github.event_name == 'pull_request' }}
@@ -225,9 +227,23 @@ jobs:
           # only one entry would survive. The others would restore a cache
           # holding somebody else's entry, miss, and recompute — which measured
           # as both shards reporting a miss on two consecutive runs.
-          key: config-cache-v1-tests-${{ matrix.shard }}-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle.properties', 'gradle/wrapper/gradle-wrapper.properties') }}
-          restore-keys: |
-            config-cache-v1-tests-${{ matrix.shard }}-${{ runner.os }}-
+          # An exact match or nothing. There is no `restore-keys` fallback here,
+          # and that is the whole safety of this cache.
+          #
+          # The configuration cache holds references to classes compiled from
+          # the build script itself, so an entry made by a different script loads
+          # and then fails with `Class 'Build_gradle$4$1' not found` — a red run
+          # that looks like a broken build and is really a stale cache. A
+          # fallback key would hand over exactly such an entry whenever the real
+          # one is missing, which is what happened here.
+          #
+          # A miss is cheap: the configuration phase is worked out again. A wrong
+          # hit costs a build nobody can explain. So a miss is taken every time.
+          # The version is part of the key because an action cache entry can
+          # never be overwritten once it exists. A bad entry under a key would
+          # then be restored forever after, so raising the version is how the
+          # cache is cleared when it is wrong.
+          key: config-cache-v2-tests-${{ matrix.shard }}-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle.properties', 'gradle/wrapper/gradle-wrapper.properties') }}
       - name: Run the tests
         # Nothing that could change the app was touched, so the app being tested
         # is byte for byte the one that already passed. Running a suite to
@@ -282,6 +298,8 @@ jobs:
   # -------------------------------------------------------------------------
   lint:
     name: Deep checks
+    permissions:
+      contents: read
     # Main only. Lint reads the whole project and costs sixty seconds doing it,
     # and a pull request cannot afford that as its longest job: it would be the
     # critical path, and the answer a pull request needs is about the tests.
@@ -313,7 +331,7 @@ jobs:
           java-version: '17'
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
         with:
           cache-cleanup: never
           cache-read-only: true
@@ -330,7 +348,7 @@ jobs:
         # It costs nothing to give up here: this job runs only on main, where the
         # release build is the longer of the two, so the fifteen seconds the cache
         # would save were never on the critical path.
-        run: ./gradlew --parallel --no-daemon lintVitalRelease
+        run: ./gradlew --parallel --no-daemon --no-configuration-cache lintVitalRelease
 
   # -------------------------------------------------------------------------
   # The release, built while the tests are still running. Only ever on main.
@@ -340,6 +358,10 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    # It only reads the repository and writes the key from a secret. It does not
+    # publish, so it never needs to write anything to GitHub.
+    permissions:
+      contents: read
 
     outputs:
       version_name: ${{ steps.version.outputs.name }}
@@ -362,7 +384,7 @@ jobs:
       # remembering about the build has already been remembered by the test job,
       # so there is nothing to add and no reason to spend time writing.
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
         with:
           cache-cleanup: never
           cache-read-only: true
@@ -386,27 +408,46 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           CHOSEN_VERSION: ${{ inputs.version_name }}
           REPOSITORY: ${{ github.repository }}
+          RUN_NUMBER: ${{ github.run_number }}
         run: |
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+          # The name is for people to read. A release made by hand may be named
+          # anything at all, so it is taken as given and only checked for
+          # characters that would be unsafe in a tag or a shell word.
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "${CHOSEN_VERSION:-}" ]; then
             version_name="$CHOSEN_VERSION"
           else
-            # The version is the number of the last release, plus one, so the
-            # numbers only ever go up.
-            last="$(gh release list --repo "$REPOSITORY" --limit 1 \
-              --json tagName --jq '.[0].tagName // ""' | sed 's/^v//')"
-            version_name="$(( ${last:-0} + 1 ))"
+            # One more than the largest number ever released, so the numbers
+            # only ever go up even if a release was named out of order.
+            highest="$(gh release list --repo "$REPOSITORY" --limit 100 \
+              --json tagName \
+              --jq '[.[] | .tagName | sub("^v";"") | select(test("^[0-9]+$")) | tonumber] | max // 0')"
+            version_name="$(( ${highest:-0} + 1 ))"
           fi
 
-          # The version code is what Android compares to decide whether an APK
-          # is newer than the one installed, so it must be a number that only
-          # goes up. It sits a thousand above the version, so it is always
-          # bigger than any release made by hand before.
-          if ! printf '%s' "$version_name" | grep -qE '^[0-9]+$'; then
-            last="$(gh release list --repo "$REPOSITORY" --limit 1 \
-              --json tagName --jq '.[0].tagName // ""' | sed 's/^v//')"
-            version_name="$(( ${last:-0} + 1 ))"
+          case "$version_name" in
+            ''|*[!A-Za-z0-9._-]*)
+              echo "The version name may only hold letters, digits, dots and dashes."
+              exit 1
+              ;;
+          esac
+
+          # The version code is what Android compares to decide whether an APK is
+          # newer than the one installed, so it must be a number that only goes up.
+          #
+          # It comes from the clock rather than from the name, and that separation
+          # is the whole point: a name is free-form and may go backwards, and if
+          # the code were derived from it then a hand-made release called 5 would
+          # be treated as older than release 46 and could not be installed over it.
+          # Seconds since the epoch cannot go backwards and needs no bookkeeping.
+          #
+          # It does have a horizon: Android holds a version code in a signed
+          # 32-bit integer, so the epoch seconds run out in 2038. If the build
+          # ever runs past that, fall back to the run number, which is the
+          # other integer GitHub guarantees to increase.
+          version_code="$(date +%s)"
+          if [ "$version_code" -gt 2147483647 ]; then
+            version_code="$(( RUN_NUMBER + 1500000000 ))"
           fi
-          version_code="$(( version_name + 1000 ))"
 
           echo "name=${version_name}" >> "$GITHUB_OUTPUT"
           echo "code=${version_code}" >> "$GITHUB_OUTPUT"
@@ -426,10 +467,12 @@ jobs:
           VERSION_CODE: ${{ steps.version.outputs.code }}
           VERSION_NAME: ${{ steps.version.outputs.name }}
         run: |
-          # No --configuration-cache here, deliberately: this invocation carries
-          # a version code and name that differ on every release, so the entry
-          # could never be reused and storing it would be a cost with no payoff.
-          ./gradlew --parallel --no-daemon assembleRelease \
+          # --no-configuration-cache, deliberately: this invocation carries a
+          # version code and name that differ on every release, so the entry could
+          # never be reused and storing it would be a cost with no payoff. Saying
+          # it in the command matters, because the project turns the cache on by
+          # default and a comment does not turn it off.
+          ./gradlew --parallel --no-daemon --no-configuration-cache assembleRelease \
             -x lintVitalRelease \
             -Pmuffy.versionCode="$VERSION_CODE" \
             -Pmuffy.versionName="$VERSION_NAME"
@@ -485,6 +528,11 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
+      # The attestation below signs the provenance of the APK, and signing is
+      # what needs to be able to prove who this job is. Both are granted only
+      # here; every other job reads.
+      id-token: write
+      attestations: write
       # Reading the branch head is what the guard above needs to know whether
       # this run has been overtaken.
       actions: read
@@ -494,6 +542,16 @@ jobs:
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: release-apk
+
+      # Before anything is published, say where the file came from. The
+      # attestation binds the APK to this commit and this workflow run in a way
+      # anybody can check afterwards, which is the difference between "a file
+      # called app-release.apk" and "the APK built from this commit". It is free
+      # for a public repository.
+      - name: Attest that this APK came from this commit
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-path: app-release.apk
 
       - name: Publish the release
         env:

@@ -127,6 +127,22 @@ android {
  * This changes only how fast the work is done, never what is tested: every
  * test runs either way, and a failure is reported the same.
  */
+/**
+ * Android Lint's analysis is a whole-program pass that keeps a UAST environment
+ * alive. It caches without complaint and then dies when the entry is read back,
+ * which cost a release check to discover.
+ *
+ * Declaring it is what makes the difference: a declared incompatibility means the
+ * configuration state is discarded at the end of the build rather than remembered,
+ * so nothing is ever read back that could not survive being read back. The tasks
+ * that do cache still do.
+ */
+tasks.matching { it.name.startsWith("lint") }.configureEach {
+    notCompatibleWithConfigurationCache(
+        "Lint's UAST environment does not survive being read back from the cache",
+    )
+}
+
 val testForks = (providers.gradleProperty("muffy.testForks").orNull
     ?: Runtime.getRuntime().availableProcessors().toString())
     .toIntOrNull()?.coerceAtLeast(1) ?: 1
@@ -147,7 +163,17 @@ tasks.withType<Test>().configureEach {
     // The tests are the only evidence there is, so they are run. The cost was
     // measured at sixteen seconds on a warm cache, which is a cheap price for
     // knowing that the answer is about the code and not about a cache entry.
-    outputs.upToDateWhen { false }
+    // The tests are always really run, never taken from the build cache.
+    //
+    // `doNotTrackState` rather than `outputs.upToDateWhen { false }`, and the
+    // difference matters more than it looks. The rule is the same — this task is
+    // never up to date — but `upToDateWhen` takes a lambda, and the configuration
+    // cache keeps a reference to the class behind that lambda. Written to a cache
+    // and read back on another runner, the class is gone and the build dies with
+    // `Class 'Build_gradle$4$1' not found`, which looks like a broken build and is
+    // really a stale cache. `doNotTrackState` takes only a reason and a lambda is
+    // never made, so nothing is remembered that cannot survive being remembered.
+    doNotTrackState("the tests are the evidence, so they run every time")
 }
 
 /**
