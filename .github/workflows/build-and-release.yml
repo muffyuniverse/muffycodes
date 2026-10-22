@@ -82,7 +82,7 @@ jobs:
 
     steps:
       - name: Check out the code
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Only the commit being built is needed. A full history would be
           # fetched for nothing, and the repository is not asked to care about
@@ -319,7 +319,7 @@ jobs:
 
     steps:
       - name: Check out the code
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
           persist-credentials: false
@@ -370,7 +370,7 @@ jobs:
 
     steps:
       - name: Check out the code
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Two commits: this one and the one before it, because the question
           # below is "what did this change" and that needs something to compare
