@@ -154,6 +154,49 @@ more. It also already costs no wall clock, because it has a job of its own
 running beside the others. Making it selective would buy nothing and lose
 something.
 
+
+## What a pull request costs, by kind of change
+
+Measured on the same day, same repository:
+
+| the change | what runs | wall clock |
+|---|---|---|
+| words only (a document, a picture, the tooling that takes pictures) | nothing: `NONE` | **24s** |
+| one source file | that file's tests, and lint | **74s** |
+| anything unclassifiable, or a change to the build | everything | **74s** |
+| a change to a workflow | everything, because a workflow is validated by running it | **77s** |
+
+The words-only case was 74s before, for an app that was byte for byte the one
+that had already passed. Now it is 24s, and the 24s is the floor: two jobs
+starting, deciding there is nothing to do, and reporting.
+
+## The floor, and what is above it
+
+For a pull request that really changes the app, the wall clock is no longer the
+tests. It is the release checks:
+
+| | time |
+|---|---|
+| lint (`lintVitalRelease`) | **60s** |
+| tests, whole suite | 20s (of which about 9s is the tests actually running) |
+| setup in each job | ~13s |
+
+The tests are cheap because they are small; lint is expensive because it reads
+the whole project by design. They run side by side, so the pull request takes
+as long as lint plus setup.
+
+### Can lint be skipped for a smaller change?
+
+Not for a *small* one, and the distinction matters. The cost of a change is not
+proportional to its size: deleting one line that a resource depends on is a
+vital lint failure and a crash at run time. A rule that says "the diff is
+short, so skip the check" would skip exactly the changes that are most likely to
+break something quietly.
+
+What *can* be skipped is a change that cannot reach the app at all — which is
+what the words-only rule above does, and it is a statement about the files, not
+about their size.
+
 ## The floor
 
 Roughly **17 seconds of unavoidable per-job setup** (machine, checkout, Java, and
