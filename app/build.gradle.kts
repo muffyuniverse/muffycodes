@@ -163,7 +163,17 @@ tasks.withType<Test>().configureEach {
     // The tests are the only evidence there is, so they are run. The cost was
     // measured at sixteen seconds on a warm cache, which is a cheap price for
     // knowing that the answer is about the code and not about a cache entry.
-    outputs.upToDateWhen { false }
+    // The tests are always really run, never taken from the build cache.
+    //
+    // `doNotTrackState` rather than `outputs.upToDateWhen { false }`, and the
+    // difference matters more than it looks. The rule is the same — this task is
+    // never up to date — but `upToDateWhen` takes a lambda, and the configuration
+    // cache keeps a reference to the class behind that lambda. Written to a cache
+    // and read back on another runner, the class is gone and the build dies with
+    // `Class 'Build_gradle$4$1' not found`, which looks like a broken build and is
+    // really a stale cache. `doNotTrackState` takes only a reason and a lambda is
+    // never made, so nothing is remembered that cannot survive being remembered.
+    doNotTrackState("the tests are the evidence, so they run every time")
 }
 
 /**
