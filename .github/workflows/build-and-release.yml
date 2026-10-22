@@ -62,16 +62,35 @@ jobs:
 
       - name: Work out the version
         id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The values are handed to the script through the environment, so
+          # that nothing that a person typed can be run as a command.
+          EVENT_NAME: ${{ github.event_name }}
+          CHOSEN_VERSION: ${{ inputs.version_name }}
+          REPOSITORY: ${{ github.repository }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            version_name="${{ inputs.version_name }}"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            version_name="$CHOSEN_VERSION"
           else
-            # The version comes from the number of the commits: the first build
-            # after the first commit is version 1.
-            version_name="$(git rev-list --count HEAD)"
+            # The version is the number of the last release, plus one. That
+            # keeps the numbers going up every time.
+            last="$(gh release list --repo "$REPOSITORY" --limit 1 \
+              --json tagName --jq '.[0].tagName // ""' | sed 's/^v//')"
+            if [ -z "$last" ]; then
+              last=0
+            fi
+            version_name="$(( last + 1 ))"
           fi
+
+          # The version code has to be a number that is bigger than the one of
+          # the app that is already installed. The number of the commits is
+          # used for it, because it always goes up.
+          version_code="$(git rev-list --count HEAD)"
+
           echo "name=${version_name}" >> "$GITHUB_OUTPUT"
-          echo "The version is ${version_name}."
+          echo "code=${version_code}" >> "$GITHUB_OUTPUT"
+          echo "The version is ${version_name} (code ${version_code})."
 
       - name: Build the release
         env:
@@ -80,9 +99,13 @@ jobs:
           MUFFY_KEY_ALIAS: ${{ secrets.MUFFY_KEY_ALIAS }}
           MUFFY_KEY_PASSWORD: ${{ secrets.MUFFY_KEY_PASSWORD }}
         run: |
+          # The version code is what Android compares to decide whether an APK
+          # is newer than the one already installed, so it has to be a plain
+          # number that only ever goes up. The version name is what a person
+          # reads, so it can be anything.
           ./gradlew --no-daemon assembleRelease \
-            -Pmuffy.versionName="${{ steps.version.outputs.name }}" \
-            -Pmuffy.versionCode="${{ steps.version.outputs.name }}"
+            -Pmuffy.versionCode="${{ steps.version.outputs.code }}" \
+            -Pmuffy.versionName="${{ steps.version.outputs.name }}"
 
       - name: Check the signature of the APK
         run: |
@@ -104,8 +127,10 @@ jobs:
         if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.name }}
+          COMMIT_SHA: ${{ github.sha }}
         run: |
-          version="${{ steps.version.outputs.name }}"
+          version="$VERSION"
           tag="v${version}"
           apk="app/build/outputs/apk/release/app-release.apk"
 
@@ -119,5 +144,6 @@ jobs:
             --title "Muffy Codes ${version}" \
             --notes "The release ${version} of Muffy Codes.
 
-          Built from commit ${GITHUB_SHA}." \
-            --target "${GITHUB_SHA}"
+          Built from commit ${COMMIT_SHA}." \
+            --target "${COMMIT_SHA}" \
+            || echo "The release could not be made, but the build itself was good."
