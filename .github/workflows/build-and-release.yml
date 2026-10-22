@@ -227,9 +227,23 @@ jobs:
           # only one entry would survive. The others would restore a cache
           # holding somebody else's entry, miss, and recompute — which measured
           # as both shards reporting a miss on two consecutive runs.
-          key: config-cache-v1-tests-${{ matrix.shard }}-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle.properties', 'gradle/wrapper/gradle-wrapper.properties') }}
-          restore-keys: |
-            config-cache-v1-tests-${{ matrix.shard }}-${{ runner.os }}-
+          # An exact match or nothing. There is no `restore-keys` fallback here,
+          # and that is the whole safety of this cache.
+          #
+          # The configuration cache holds references to classes compiled from
+          # the build script itself, so an entry made by a different script loads
+          # and then fails with `Class 'Build_gradle$4$1' not found` — a red run
+          # that looks like a broken build and is really a stale cache. A
+          # fallback key would hand over exactly such an entry whenever the real
+          # one is missing, which is what happened here.
+          #
+          # A miss is cheap: the configuration phase is worked out again. A wrong
+          # hit costs a build nobody can explain. So a miss is taken every time.
+          # The version is part of the key because an action cache entry can
+          # never be overwritten once it exists. A bad entry under a key would
+          # then be restored forever after, so raising the version is how the
+          # cache is cleared when it is wrong.
+          key: config-cache-v2-tests-${{ matrix.shard }}-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle.properties', 'gradle/wrapper/gradle-wrapper.properties') }}
       - name: Run the tests
         # Nothing that could change the app was touched, so the app being tested
         # is byte for byte the one that already passed. Running a suite to
