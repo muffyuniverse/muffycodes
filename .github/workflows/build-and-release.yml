@@ -68,19 +68,21 @@ jobs:
             robolectric-${{ runner.os }}-
 
       - name: Run the tests
-        env:
-          # The settings that suit this project's own container (one worker, a
-          # small heap) are wrong for a machine with several processors, so the
-          # machine of the run is told what it has. These only affect how fast
-          # the work is done, never what is tested.
-          GRADLE_OPTS: >-
-            -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=1g"
-            -Dorg.gradle.parallel=true
-            -Dorg.gradle.workers.max=4
         run: |
-          ./gradlew --no-daemon testDebugUnitTest \
+          # The settings that suit this project's own container (one worker, a
+          # small heap, no parallel work) are wrong for a machine with several
+          # processors. They are given on the command line, where Gradle always
+          # reads them, and they change only how fast the work is done, never
+          # what is tested: every test runs either way.
+          #
+          # A build made by hand in the container is left alone by this: the
+          # file it reads there still says one worker.
+          ./gradlew --no-daemon \
+            --parallel --max-workers=4 \
+            -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=1g" \
+            -Dorg.gradle.caching=true \
             -Pmuffy.testForks=2 \
-            --stacktrace
+            testDebugUnitTest
 
       - name: Keep the test report when something failed
         if: failure()
