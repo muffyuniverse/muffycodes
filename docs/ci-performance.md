@@ -208,3 +208,5 @@ is worth.
 Further gains from here are seconds, not minutes. If they are wanted, the honest
 options are: accept the lint cost less often (only on main), or stop caching
 test results so the tests always really execute.
+
+Only words.
