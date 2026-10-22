@@ -23,6 +23,12 @@ wait 3
 swipe 540 1500 540 700 400 none
 wait 2
 
+# The names that are really on the screen are written down, so that a theme
+# that could not be found can be told apart from a theme that was not scrolled
+# into view. Only .png files are compared, so this file does no harm to the
+# comparison.
+dumpfile 00-what-is-visible
+
 # --- the five themes, one after the other ---
 # The rest of the screen never changes, so any difference between the pictures
 # is the theme and nothing else.

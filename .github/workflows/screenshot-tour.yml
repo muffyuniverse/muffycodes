@@ -113,11 +113,13 @@ jobs:
             # screen in every theme, into a folder of its own: those pictures
             # are compared with each other, which would make no sense mixed in
             # with the pictures of the other screens.
+            #
+            # The values are given on the same line as the command, and not on
+            # lines of their own, because every line of this script is run in a
+            # shell of its own: a line that only sets a value would set it for
+            # that line and nothing else.
             mkdir -p "$THEME_SHOT_DIR"
-            SHOT_DIR="$THEME_SHOT_DIR" \
-              TOUR_FILE="$THEME_TOUR_FILE" \
-              TRACE_FILE="$THEME_TRACE_FILE" \
-              bash tools/screenshot-tour.sh
+            SHOT_DIR="$THEME_SHOT_DIR" TOUR_FILE="$THEME_TOUR_FILE" TRACE_FILE="$THEME_TRACE_FILE" bash tools/screenshot-tour.sh
             bash tools/check-pictures.sh "$THEME_SHOT_DIR"
 
       - name: Check the pictures are right
