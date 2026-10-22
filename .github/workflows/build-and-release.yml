@@ -133,8 +133,8 @@ jobs:
       # does, so the same check costs nothing here, and the release job skips it
       # (see there). It still gates the release, because publishing waits for
       # this job to pass.
-      - name: Run the tests, and the release checks
-        run: ./gradlew --no-daemon testDebugUnitTest lintVitalRelease
+      - name: Run the tests
+        run: ./gradlew --no-daemon testDebugUnitTest
 
       # Kept only when something failed, because it is the only thing that
       # explains a failure: the report carries the per-class timings and the
@@ -153,6 +153,47 @@ jobs:
             app/build/test-results/**
           if-no-files-found: warn
           retention-days: 7
+
+  # -------------------------------------------------------------------------
+  # The release checks, on their own runner so that neither of the other two
+  # jobs has to carry them.
+  #
+  # Android attaches lintVitalRelease to assembleRelease whether or not it is
+  # asked for, and it is the single slowest check in the build. Run in the test
+  # job it made that job the slowest of the three; run in the release job it
+  # delayed the APK. On a runner of its own it costs nothing but a machine,
+  # because the other two are busy at the same time.
+  #
+  # It is a gate all the same: publishing waits for this job, so a release that
+  # would fail the check is never published.
+  # -------------------------------------------------------------------------
+  lint:
+    name: Release checks
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-cleanup: never
+          cache-read-only: true
+
+      - name: Check the release
+        run: ./gradlew --no-daemon lintVitalRelease
 
   # -------------------------------------------------------------------------
   # The release, built while the tests are still running. Only ever on main.
@@ -281,7 +322,7 @@ jobs:
   publish:
     name: Publish
     if: github.event_name != 'pull_request'
-    needs: [test, build-release]
+    needs: [test, build-release, lint]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
