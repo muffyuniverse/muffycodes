@@ -19,3 +19,5 @@ data class Note(
         return if (line.length > 120) line.take(120) + "…" else line
     }
 }
+
+// A comment, so the suite runs again without touching configuration.
