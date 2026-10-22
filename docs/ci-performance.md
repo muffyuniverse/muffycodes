@@ -91,6 +91,37 @@ Each of these was tried or measured, not guessed about:
 | **Forcing the tests to run** | done, and it is not an optimisation but a correction: they were being replaced by cached results |
 | **Dedicated larger runners** | available for public repositories, and they would cut compile and lint time. Against that: queue times are less predictable on them, and the current cost is already near the floor of *setup*, not of work |
 
+
+## A hazard with a date on it: the runner image is changing now
+
+`ubuntu-latest` is moving from Ubuntu 24.04 to **26.04 between 19 October and
+19 November 2026** — during that window two runs of the same commit can get
+different images. Checked against the published image manifest, the things that
+matter here:
+
+| | 24.04 | 26.04 | effect on this project |
+|---|---|---|---|
+| default JDK | 17 | **25** | none: the workflow pins `java-version: 17`, and both images carry 17 |
+| Android SDK | present | present, `ANDROID_HOME=/usr/local/lib/android/sdk` | none |
+| build-tools | 34, 35 | 34, 35.0.0, 35.0.1, 36, 37 | none: the workflow no longer names a version |
+| preinstalled Gradle | 8.x | 9.8.1 | none: the wrapper decides the version |
+
+Two changes were made because of this:
+
+- **The build-tools version is no longer written into the workflow.** It used to
+  say `35.0.0`, which happens to survive 26.04 — but naming a version that the
+  image chooses is a break waiting for a date. The newest present is used, which
+  is safe because `apksigner` and `zipalign` read APKs of any age.
+- **Pinning Java 17 is now load-bearing, not just tidy.** The default becomes 25,
+  and the screen tests run on Robolectric, which supports a narrower range of
+  JDKs than Gradle does.
+
+Not changed, on purpose: the actions stay on `@v4`. Their own documentation
+still recommends v4 even though newer tags exist, and GitHub currently forces
+those versions onto Node 24 where they work — our releases have been succeeding
+on them. Jumping six major versions for a deprecation warning would trade a
+working pipeline for an untested one.
+
 ## The floor
 
 Roughly **17 seconds of unavoidable per-job setup** (machine, checkout, Java, and

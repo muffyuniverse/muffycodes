@@ -47,7 +47,11 @@ jobs:
           java-version: "17"
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          # The post step otherwise starts a second Gradle in a fresh daemon
+          # just to prune the cache, which measured twenty-eight seconds here.
+          cache-cleanup: never
 
       # The emulator needs to be able to use the processor of the machine.
       # Without this the emulator runs so slowly that it never finishes
