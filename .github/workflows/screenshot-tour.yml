@@ -84,10 +84,13 @@ jobs:
             adb shell am start -n com.example.notes/com.example.notes.MainActivity
             sleep 5
 
-            # The tour walks through the app and takes the pictures.
-            ADB="adb" SHOT_DIR="${{ github.workspace }}/screenshots" \
-              TOUR_FILE="${{ github.workspace }}/tools/${{ inputs.tour_file || 'default-tour.txt' }}" \
-              bash tools/screenshot-tour.sh
+            # The tour walks through the app and takes the pictures. The
+            # values are handed over through the environment, so that the
+            # line stays one line.
+            export ADB=adb
+            export SHOT_DIR="${{ github.workspace }}/screenshots"
+            export TOUR_FILE="${{ github.workspace }}/tools/${{ inputs.tour_file || 'default-tour.txt' }}"
+            bash tools/screenshot-tour.sh
 
       - name: Put the pictures in the run
         if: always()
