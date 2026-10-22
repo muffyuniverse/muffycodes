@@ -40,10 +40,12 @@ android {
             val keyAliasEnv = System.getenv("MUFFY_KEY_ALIAS")
             val keyPasswordEnv = System.getenv("MUFFY_KEY_PASSWORD")
 
-            var resolvedStoreFile: File? = null
-            var resolvedStorePassword: String? = null
-            var resolvedKeyAlias: String? = null
-            var resolvedKeyPassword: String? = null
+            // The key is worked out once, as a value. Declaring these with a
+            // default they never keep reads as if the default could survive.
+            val keyFile: File?
+            val keyStorePassword: String?
+            val keyName: String?
+            val keyPass: String?
 
             if (base64Key != null && storePasswordEnv != null) {
                 // A build on the continuous integration: the key arrives as
@@ -51,29 +53,27 @@ android {
                 val temp = File.createTempFile("muffy-release", ".jks")
                 temp.deleteOnExit()
                 temp.writeBytes(Base64.getDecoder().decode(base64Key))
-                resolvedStoreFile = temp
-                resolvedStorePassword = storePasswordEnv
-                resolvedKeyAlias = keyAliasEnv ?: "notes"
-                resolvedKeyPassword = keyPasswordEnv ?: storePasswordEnv
+                keyFile = temp
+                keyStorePassword = storePasswordEnv
+                keyName = keyAliasEnv ?: "notes"
+                keyPass = keyPasswordEnv ?: storePasswordEnv
             } else {
-                resolvedStoreFile = keystoreProperties.getProperty("storeFile")
+                keyFile = keystoreProperties.getProperty("storeFile")
                     ?.let { rootProject.file(it) }
-                resolvedStorePassword = keystoreProperties.getProperty("storePassword")
-                resolvedKeyAlias = keystoreProperties.getProperty("keyAlias")
-                resolvedKeyPassword = keystoreProperties.getProperty("keyPassword")
+                keyStorePassword = keystoreProperties.getProperty("storePassword")
+                keyName = keystoreProperties.getProperty("keyAlias")
+                keyPass = keystoreProperties.getProperty("keyPassword")
             }
 
-            val hasKeystore = resolvedStoreFile != null &&
-                resolvedStoreFile.exists() &&
-                resolvedStorePassword != null &&
-                resolvedKeyAlias != null &&
-                resolvedKeyPassword != null
-
-            if (hasKeystore) {
-                storeFile = resolvedStoreFile
-                storePassword = resolvedStorePassword
-                keyAlias = resolvedKeyAlias
-                keyPassword = resolvedKeyPassword
+            // A key is only used when every part of it is there and the file
+            // really exists, so a half-configured key cannot sign anything.
+            if (keyFile != null && keyFile.exists() &&
+                keyStorePassword != null && keyName != null && keyPass != null
+            ) {
+                storeFile = keyFile
+                storePassword = keyStorePassword
+                keyAlias = keyName
+                keyPassword = keyPass
             }
             // Sign with v1 (JAR) and v3 as well as v2, so the APK installs on
             // older and newer Android versions alike.
@@ -102,9 +102,63 @@ android {
         compose = true
     }
 
+    testOptions {
+        unitTests {
+            // Robolectric needs the manifest and the resources of the app, so
+            // that a screen can be built the same way the phone builds it.
+            isIncludeAndroidResources = true
+        }
+    }
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
+}
+
+/**
+ * How many test classes run at the same time.
+ *
+ * The default is every processor the machine has, because that is what the
+ * machine is for: a runner with four of them should use four. A host that
+ * cannot spare them says so through the property `muffy.testForks` in its own
+ * Gradle home, which is not part of this repository.
+ *
+ * This changes only how fast the work is done, never what is tested: every
+ * test runs either way, and a failure is reported the same.
+ */
+val testForks = (providers.gradleProperty("muffy.testForks").orNull
+    ?: Runtime.getRuntime().availableProcessors().toString())
+    .toIntOrNull()?.coerceAtLeast(1) ?: 1
+
+tasks.withType<Test>().configureEach {
+    maxParallelForks = testForks
+}
+
+/**
+ * The screen tests run on Robolectric, which starts Android's TLS stack. The
+ * library that does it (conscrypt) is published for Windows, macOS and x86_64
+ * Linux only, so on any other processor the tests cannot even start: they die
+ * while the test runner is being built, before any test code runs.
+ *
+ * Such a machine skips the class outright and says so, rather than reporting a
+ * failure that is about the processor and not about the app. The machines of
+ * the continuous integration are x86_64, so that is where the screens are
+ * really tested.
+ */
+val processor = System.getProperty("os.arch").orEmpty()
+val canRunScreenTests = processor == "amd64" || processor == "x86_64"
+
+tasks.withType<Test>().configureEach {
+    if (!canRunScreenTests) {
+        filter {
+            excludeTestsMatching("com.example.notes.ScreenTest")
+        }
+        doFirst {
+            logger.lifecycle(
+                "The screen tests are skipped on $processor: the TLS library they " +
+                    "need is not published for it. They run on x86_64."
+            )
         }
     }
 }
@@ -152,6 +206,16 @@ dependencies {
     // android.jar's org.json is a stub that throws at runtime; the JVM unit tests
     // need a real implementation on the classpath.
     testImplementation("org.json:json:20231013")
+
+    // Robolectric runs the real Android framework on the plain JVM, so the
+    // screens can be driven by the names of their parts without an emulator:
+    // no device, no graphics processor, and no picture to look at. It is what
+    // makes testing the user interface take seconds instead of minutes.
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("androidx.test.ext:junit:1.2.1")
+    testImplementation(composeBom)
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 
     // JGit: a pure-Java git implementation, so no native code is needed on Android.
     implementation("org.eclipse.jgit:org.eclipse.jgit:6.10.1.202505221210-r")

@@ -1,7 +1,16 @@
 name: Build and release
 
-# Every push and every pull request is built and tested. When the tests pass,
-# a signed release is published as a GitHub release with the APK attached.
+# Every push and every pull request is tested. A pull request stops there: it is
+# the tests that answer whether a change is good, and a signed release is only
+# ever made from main.
+#
+# When the tests pass on main, a signed release is published as a GitHub release
+# with the APK attached.
+#
+# It is one job with steps that some runs skip, and not two jobs, on purpose: a
+# second job would pay for setting up the machine a second time (about sixteen
+# seconds) to gain nothing, because the release needs exactly what the tests
+# already built.
 on:
   push:
     branches: [main]
@@ -14,10 +23,13 @@ on:
         required: true
         type: string
 
-# Only one build at a time, so a release is never published twice.
+# A second push to the same pull request makes the first run pointless, so it is
+# stopped: waiting for a result nobody reads is the most expensive thing a run
+# can do. A release is never cancelled, because half a release is worse than a
+# late one.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: write
@@ -31,6 +43,13 @@ jobs:
     steps:
       - name: Check out the code
         uses: actions/checkout@v4
+        with:
+          # Only the commit that is being built is needed, so no more of the
+          # history is fetched than that.
+          fetch-depth: 1
+          # The tests never push anything, so the token has no business being
+          # left in the git configuration of the machine afterwards.
+          persist-credentials: false
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -41,13 +60,48 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Give the build more memory
-        run: echo "org.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=1g" >> "$GITHUB_ENV"
+      # One line, so that what the run had to work with is on the record: a
+      # guess about how big a runner is is no way to judge whether a build is
+      # using it.
+      - name: Say what this machine has
+        run: |
+          echo "processors: $(nproc)"
+          awk '/MemTotal/ {printf "memory: %.1f GB\n", $2/1024/1024}' /proc/meminfo
+
+      # Robolectric downloads the Android runtime it runs against (a jar of well
+      # over a hundred megabytes) the first time it needs it, and would
+      # otherwise do that again on every run. It keeps them in the local Maven
+      # repository, so that directory is what is kept between runs.
+      - name: Remember the runtime the tests need
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: robolectric-${{ runner.os }}-${{ hashFiles('app/build.gradle.kts') }}
+          restore-keys: |
+            robolectric-${{ runner.os }}-
 
       - name: Run the tests
-        run: ./gradlew --no-daemon testDebugUnitTest --stacktrace
+        run: |
+          # The project's own gradle.properties carries no per-host limits, so
+          # this machine uses everything it was given: all its processors, the
+          # incremental compilation and the build cache.
+          ./gradlew --no-daemon testDebugUnitTest
+
+      - name: Keep the test report when something failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: |
+            app/build/reports/tests/**
+            app/build/test-results/**
+          if-no-files-found: warn
+          retention-days: 7
+
+      # ---- from here on, only a push to main goes any further ----
 
       - name: Put the signing key in place
+        if: github.event_name != 'pull_request'
         env:
           MUFFY_KEYSTORE_BASE64: ${{ secrets.MUFFY_KEYSTORE_BASE64 }}
           MUFFY_KEYSTORE_PASSWORD: ${{ secrets.MUFFY_KEYSTORE_PASSWORD }}
@@ -61,11 +115,12 @@ jobs:
           fi
 
       - name: Work out the version
+        if: github.event_name != 'pull_request'
         id: version
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # The values are handed to the script through the environment, so
-          # that nothing that a person typed can be run as a command.
+          # The values are handed to the script through the environment, so that
+          # nothing that a person typed can be run as a command.
           EVENT_NAME: ${{ github.event_name }}
           CHOSEN_VERSION: ${{ inputs.version_name }}
           REPOSITORY: ${{ github.repository }}
@@ -99,8 +154,8 @@ jobs:
           # The version code is what Android compares to decide whether an APK
           # is newer than the one already installed, so it has to be a number
           # that only ever goes up. It is the number of the release, plus a
-          # thousand, so it is always bigger than any version that was made
-          # by hand before.
+          # thousand, so it is always bigger than any version that was made by
+          # hand before.
           version_code="$(( version_number + 1000 ))"
 
           echo "name=${version_name}" >> "$GITHUB_OUTPUT"
@@ -108,21 +163,23 @@ jobs:
           echo "The version is ${version_name} (code ${version_code})."
 
       - name: Build the release
+        if: github.event_name != 'pull_request'
         env:
           MUFFY_KEYSTORE_BASE64: ${{ secrets.MUFFY_KEYSTORE_BASE64 }}
           MUFFY_KEYSTORE_PASSWORD: ${{ secrets.MUFFY_KEYSTORE_PASSWORD }}
           MUFFY_KEY_ALIAS: ${{ secrets.MUFFY_KEY_ALIAS }}
           MUFFY_KEY_PASSWORD: ${{ secrets.MUFFY_KEY_PASSWORD }}
+          # The version is given through the environment, so that a value that
+          # came from a tag or a person is never pasted into the script.
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
         run: |
-          # The version code is what Android compares to decide whether an APK
-          # is newer than the one already installed, so it has to be a plain
-          # number that only ever goes up. The version name is what a person
-          # reads, so it can be anything.
           ./gradlew --no-daemon assembleRelease \
-            -Pmuffy.versionCode="${{ steps.version.outputs.code }}" \
-            -Pmuffy.versionName="${{ steps.version.outputs.name }}"
+            -Pmuffy.versionCode="$VERSION_CODE" \
+            -Pmuffy.versionName="$VERSION_NAME"
 
       - name: Check the signature of the APK
+        if: github.event_name != 'pull_request'
         run: |
           APK=app/build/outputs/apk/release/app-release.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK"
@@ -132,6 +189,7 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c 4 "$APK"
 
       - name: Keep the APK
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: MuffyCodes-${{ steps.version.outputs.name }}
@@ -142,23 +200,15 @@ jobs:
         if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ steps.version.outputs.name }}
-          COMMIT_SHA: ${{ github.sha }}
+          REPOSITORY: ${{ github.repository }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
         run: |
-          version="$VERSION"
-          tag="v${version}"
-          apk="app/build/outputs/apk/release/app-release.apk"
-
-          # The tag is the version, so it can be checked out again later.
-          if git ls-remote --tags origin "refs/tags/${tag}" | grep -q .; then
-            echo "The tag ${tag} already exists, the release is not made again."
-            exit 0
-          fi
-
-          gh release create "${tag}" "${apk}" \
-            --title "Muffy Codes ${version}" \
-            --notes "The release ${version} of Muffy Codes.
-
-          Built from commit ${COMMIT_SHA}." \
-            --target "${COMMIT_SHA}" \
+          # The release is the last step, so a failure before it leaves nothing
+          # half-published. If it still cannot be made, the build itself was
+          # good and only the publishing failed, so that is said plainly.
+          gh release create "v${VERSION_NAME}" \
+            --repo "$REPOSITORY" \
+            --title "Muffy Codes ${VERSION_NAME}" \
+            --notes "Version ${VERSION_NAME} of Muffy Codes, built and tested by the workflow." \
+            app/build/outputs/apk/release/app-release.apk \
             || echo "The release could not be made, but the build itself was good."
