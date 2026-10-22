@@ -156,7 +156,7 @@ plain JVM.
 ```bash
 export JAVA_HOME=/path/to/jdk-21
 export ANDROID_HOME=/path/to/android-sdk
-gradle --no-daemon assembleRelease
+./gradlew --no-daemon assembleRelease
 ```
 
 The output lands in `app/build/outputs/apk/release/app-release.apk`.
@@ -172,13 +172,32 @@ keyAlias=…
 keyPassword=…
 ```
 
-`local.properties` holds machine-specific settings (the SDK path, and the
-`aapt2` wrapper used on arm64 hosts) and is not committed either.
+`local.properties` holds machine-specific settings (the SDK path) and is not
+committed either. A build on the continuous integration takes the key from the
+environment instead: `MUFFY_KEYSTORE_BASE64` (the key as base64),
+`MUFFY_KEYSTORE_PASSWORD`, `MUFFY_KEY_ALIAS` and `MUFFY_KEY_PASSWORD`.
+
+### The build on GitHub
+
+Every push to `main`, and every pull request, is built and tested by
+[GitHub Actions](.github/workflows/build-and-release.yml):
+
+1. the unit tests run
+2. the release is built and signed
+3. the signature and the alignment of the APK are checked
+4. a release is published with the APK attached, and a tag (`v1`, `v2`, …)
+
+A pull request is built and tested, but never published. A release can also be
+made by hand from the **Actions** tab, with a version that is chosen there.
+
+The version code goes up with every build, so each release installs over the one
+before it. The build **refuses** to make a release when there is no signing key,
+rather than quietly producing an APK that cannot be installed.
 
 ### Tests
 
 ```bash
-gradle --no-daemon testDebugUnitTest
+./gradlew --no-daemon testDebugUnitTest
 ```
 
 54 tests cover the file format (round-trip, tricky bodies, missing headers), the

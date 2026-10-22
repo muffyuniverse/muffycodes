@@ -83,10 +83,25 @@ jobs:
             version_name="$(( last + 1 ))"
           fi
 
-          # The version code has to be a number that is bigger than the one of
-          # the app that is already installed. The number of the commits is
-          # used for it, because it always goes up.
-          version_code="$(git rev-list --count HEAD)"
+          # The number of the release has to be a number, because it is also
+          # used for the version code.
+          version_number="$version_name"
+          if ! printf '%s' "$version_number" | grep -qE '^[0-9]+$'; then
+            version_number="$(gh release list --repo "$REPOSITORY" --limit 1 \
+              --json tagName --jq '.[0].tagName // ""' | sed 's/^v//')"
+            if ! printf '%s' "$version_number" | grep -qE '^[0-9]+$'; then
+              version_number=1
+            fi
+            version_number="$(( version_number + 1 ))"
+            version_name="$version_number"
+          fi
+
+          # The version code is what Android compares to decide whether an APK
+          # is newer than the one already installed, so it has to be a number
+          # that only ever goes up. It is the number of the release, plus a
+          # thousand, so it is always bigger than any version that was made
+          # by hand before.
+          version_code="$(( version_number + 1000 ))"
 
           echo "name=${version_name}" >> "$GITHUB_OUTPUT"
           echo "code=${version_code}" >> "$GITHUB_OUTPUT"
