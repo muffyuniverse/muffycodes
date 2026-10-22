@@ -102,9 +102,44 @@ android {
         compose = true
     }
 
+    testOptions {
+        unitTests {
+            // Robolectric needs the manifest and the resources of the app, so
+            // that a screen can be built the same way the phone builds it.
+            isIncludeAndroidResources = true
+        }
+    }
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
+}
+
+/**
+ * The screen tests run on Robolectric, which starts Android's TLS stack. The
+ * library that does it (conscrypt) is published for Windows, macOS and x86_64
+ * Linux only, so on any other processor the tests cannot even start: they die
+ * while the test runner is being built, before any test code runs.
+ *
+ * Such a machine skips the class outright and says so, rather than reporting a
+ * failure that is about the processor and not about the app. The machines of
+ * the continuous integration are x86_64, so that is where the screens are
+ * really tested.
+ */
+val processor = System.getProperty("os.arch").orEmpty()
+val canRunScreenTests = processor == "amd64" || processor == "x86_64"
+
+tasks.withType<Test>().configureEach {
+    if (!canRunScreenTests) {
+        filter {
+            excludeTestsMatching("com.example.notes.ScreenTest")
+        }
+        doFirst {
+            logger.lifecycle(
+                "The screen tests are skipped on $processor: the TLS library they " +
+                    "need is not published for it. They run on x86_64."
+            )
         }
     }
 }
@@ -152,6 +187,16 @@ dependencies {
     // android.jar's org.json is a stub that throws at runtime; the JVM unit tests
     // need a real implementation on the classpath.
     testImplementation("org.json:json:20231013")
+
+    // Robolectric runs the real Android framework on the plain JVM, so the
+    // screens can be driven by the names of their parts without an emulator:
+    // no device, no graphics processor, and no picture to look at. It is what
+    // makes testing the user interface take seconds instead of minutes.
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("androidx.test.ext:junit:1.2.1")
+    testImplementation(composeBom)
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 
     // JGit: a pure-Java git implementation, so no native code is needed on Android.
     implementation("org.eclipse.jgit:org.eclipse.jgit:6.10.1.202505221210-r")
