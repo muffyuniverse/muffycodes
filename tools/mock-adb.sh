@@ -5,6 +5,13 @@ set -uo pipefail
 LOG="${MOCK_ADB_LOG:-/tmp/mock-adb.log}"
 echo "=== $*" >> "$LOG"
 
+# The real adb reads from the standard input when it talks to the device, and
+# eats what is there. The mock does the same, so that the bug where the
+# tour is cut short can be found without a device.
+if [ "${MOCK_ADB_EATS_STDIN:-1}" = "1" ]; then
+    cat >/dev/null 2>&1 || true
+fi
+
 case "$1 $2" in
     "shell wm")
         echo "Physical size: 1080x2400"

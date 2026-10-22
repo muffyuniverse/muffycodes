@@ -170,22 +170,19 @@ find_text_bounds() {
 }
 
 # --- the tour ---------------------------------------------------------------
-# The tour is read from the file named by TOUR_FILE, or from the tour that
-# comes with the script when TOUR_FILE is not set.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEFAULT_TOUR="$SCRIPT_DIR/default-tour.txt"
-
-tour_text() {
-    if [ -n "${TOUR_FILE:-}" ] && [ -f "$TOUR_FILE" ]; then
-        cat "$TOUR_FILE"
-    else
-        cat "$DEFAULT_TOUR"
-    fi
-}
 
 run_tour() {
     local line verb rest
-    while IFS= read -r line; do
+    # The tour is read from the file, and the file is read again for every
+    # line. The commands that talk to the device would otherwise eat the
+    # lines that are still to come, because they read from the same place.
+    local tour_file="${TOUR_FILE:-}"
+    if [ -z "$tour_file" ] || [ ! -f "$tour_file" ]; then
+        tour_file="$SCRIPT_DIR/default-tour.txt"
+    fi
+
+    while IFS= read -r line <&3; do
         # Skip the empty lines and the comments.
         case "$line" in
             ''|'#'*) continue ;;
@@ -258,7 +255,7 @@ run_tour() {
                 echo "?? unknown step: $line" >&2
                 ;;
         esac
-    done
+    done 3< "$tour_file"
 }
 
 # --- start ------------------------------------------------------------------
@@ -278,10 +275,10 @@ if [ -z "${SKIP_LAUNCH:-}" ]; then
     sleep 4
 fi
 
-run_tour < <(tour_text)
+run_tour
 
 echo "The tour is done. The pictures are in $SHOT_DIR."
 
 # The count of the pictures is written out, so that the run can tell whether
 # the tour made anything.
-find "$SHOT_DIR" -name '*.png' -size +0 2>/dev/null | wc -l | tr -d ' ' > "$SHOT_DIR/count.txt"
+find "$SHOT_DIR" -name '*.png' -size +0c 2>/dev/null | wc -l | tr -d ' ' > "$SHOT_DIR/count.txt" 2>/dev/null || echo "0" > "$SHOT_DIR/count.txt"
