@@ -20,14 +20,19 @@ on:
         required: true
         type: string
 
-# A second push to the same pull request makes the first run pointless, so it is
-# stopped: waiting for a result nobody reads is the most expensive thing a run
-# can do. A release is never cancelled, because half a release is worse than a
-# late one. The group is per-commit as well as per-branch, so that a newer push
-# to main does not cancel a release that is already being assembled.
+# A second push makes the first run pointless, so the first one is stopped
+# immediately, on a branch and on main alike: a run that nobody will read is the
+# most expensive thing a run can do, and pushing twice in a minute should not
+# cost two full pipelines.
+#
+# Cancelling a release is safe because the version is worked out from the last
+# published release rather than counted, so a skipped run leaves no gap. It is
+# made safer by a check before publishing: the job that publishes verifies the
+# commit it is publishing is still the head of main, so a run that was
+# overtaken while it was assembling can never publish.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 # The tests only read the repository. Writing is granted to the one job that
 # publishes a release, so a mistake elsewhere cannot change anything on GitHub.
@@ -116,12 +121,20 @@ jobs:
       # compilation, and the build cache.
       #
       # Deliberately NOT split into shards. Measured on a 58-test suite: the
-      # tests take 18s while setting a job up costs 17s, so two shards would each
-      # pay the setup in full to halve 18s — eight seconds slower in wall clock
-      # and twice the runners. Sharding pays when the work dwarfs the setup; it
-      # is worth revisiting if the suite ever exceeds about two minutes.
-      - name: Run the tests
-        run: ./gradlew --no-daemon testDebugUnitTest
+      # tests take 16s while setting a job up costs 17s, so two shards would each
+      # pay the setup in full to halve a little work — slower in wall clock and
+      # twice the runners. Sharding pays when the work dwarfs the setup; worth
+      # revisiting if the suite ever passes about two minutes.
+      #
+      # The release lint runs here rather than in the release build, and that is
+      # the single biggest remaining saving. Measured, it is seventeen seconds of
+      # the release build's forty, and it is needed by `assembleRelease` only
+      # because Android says so. This job finishes well before the release job
+      # does, so the same check costs nothing here, and the release job skips it
+      # (see there). It still gates the release, because publishing waits for
+      # this job to pass.
+      - name: Run the tests, and the release checks
+        run: ./gradlew --no-daemon testDebugUnitTest lintVitalRelease
 
       # Kept only when something failed, because it is the only thing that
       # explains a failure: the report carries the per-class timings and the
@@ -221,6 +234,10 @@ jobs:
           echo "code=${version_code}" >> "$GITHUB_OUTPUT"
           echo "The version is ${version_name} (code ${version_code})."
 
+      # `-x lintVitalRelease` is not a check being dropped: Android attaches it
+      # to `assembleRelease`, and it is the same analysis the test job already
+      # ran. Running it twice would add seventeen seconds here and change
+      # nothing, because the release is not published unless that job passed.
       - name: Build the release
         env:
           MUFFY_KEYSTORE_BASE64: ${{ secrets.MUFFY_KEYSTORE_BASE64 }}
@@ -231,6 +248,7 @@ jobs:
           VERSION_NAME: ${{ steps.version.outputs.name }}
         run: |
           ./gradlew --no-daemon assembleRelease \
+            -x lintVitalRelease \
             -Pmuffy.versionCode="$VERSION_CODE" \
             -Pmuffy.versionName="$VERSION_NAME"
 
@@ -268,6 +286,9 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
+      # Reading the branch head is what the guard above needs to know whether
+      # this run has been overtaken.
+      actions: read
 
     steps:
       - name: Take the APK
@@ -281,6 +302,18 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           VERSION_NAME: ${{ needs.build-release.outputs.version_name }}
         run: |
+          # A run that was overtaken while it was assembling must never publish:
+          # a newer push has cancelled it, but it could have got this far before
+          # the cancellation arrived. Publishing a commit that is no longer the
+          # head of main would put an old build behind the newest version number.
+          if [ -n "${GITHUB_REF_NAME:-}" ] && [ -n "${GITHUB_SHA:-}" ]; then
+            head="$(gh api "repos/${REPOSITORY}/commits/${GITHUB_REF_NAME}" --jq '.sha' 2>/dev/null)"
+            if [ -n "$head" ] && [ "$head" != "$GITHUB_SHA" ]; then
+              echo "This run was overtaken by a newer commit; nothing is published."
+              exit 0
+            fi
+          fi
+
           # The release is the last thing that happens, so a failure earlier
           # leaves nothing half-published. If it still cannot be made, the build
           # itself was good and only the publishing failed, which is said plainly.
