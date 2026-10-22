@@ -98,12 +98,9 @@ jobs:
             # The pictures are the point of the run, so a step that did not
             # work does not fail the run: what was made is still worth
             # looking at. But a run that made nothing at all is a failure.
-            count="$(cat "${{ github.workspace }}/screenshots/count.txt" 2>/dev/null || echo 0)"
-            echo "The tour made ${count} pictures."
-            if [ "${count:-0}" -lt 1 ]; then
-              echo "::error::The tour made no pictures at all."
-              exit 1
-            fi
+            # Every line of this script is run in a shell of its own, so the
+            # check is done by a small script of its own.
+            bash tools/check-pictures.sh "${{ github.workspace }}/screenshots"
 
       - name: Put the pictures in the run
         if: always()

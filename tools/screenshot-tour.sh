@@ -151,11 +151,12 @@ find_text_bounds() {
     dump="$(adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1; adb shell cat /sdcard/window.xml 2>/dev/null | tr -d '\r')"
     [ -z "$dump" ] && return 0
 
-    # The text may be the text of a label, or the label of a button that has
-    # no text of its own (a picture button, for example).
+    # The text may be the text of a label, the label of a button that has no
+    # text of its own (a picture button, for example), or the hint of a field
+    # that is empty.
     node="$(printf '%s' "$dump" | tr '>' '\n' | while IFS= read -r n; do
         case "$n" in
-            *"text=\"$wanted\""*|*"content-desc=\"$wanted\""*) printf '%s\n' "$n"; break ;;
+            *"text=\"$wanted\""*|*"content-desc=\"$wanted\""*|*"hint=\"$wanted\""*) printf '%s\n' "$n"; break ;;
         esac
     done)"
     [ -z "$node" ] && return 0
@@ -167,6 +168,16 @@ find_text_bounds() {
     read -r l t r b <<<"$box"
     [ -z "$l" ] || [ -z "$t" ] || [ -z "$r" ] || [ -z "$b" ] && return 0
     printf '%d,%d\n' $(( (l + r) / 2 )) $(( (t + b) / 2 ))
+}
+
+# Writes the tree of the screen to a file, so that the steps of a tour can be
+# written with the real names that the app shows.
+dump_screen() {
+    adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1
+    adb shell cat /sdcard/window.xml 2>/dev/null | tr -d '\r' \
+        | sed 's/></>\n</g' \
+        | grep -oE '(text|content-desc|hint)="[^"]*"' \
+        | sort -u
 }
 
 # --- the tour ---------------------------------------------------------------
@@ -243,6 +254,11 @@ run_tour() {
             key)
                 echo "key: $rest"
                 adb shell input keyevent "$rest" || true
+                ;;
+            dump)
+                # The names that are on the screen, so that a tour can be
+                # written with them.
+                dump_screen
                 ;;
             shot)
                 take_shot "$rest"
