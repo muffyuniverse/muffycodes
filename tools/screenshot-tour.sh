@@ -260,6 +260,14 @@ run_tour() {
                 # written with them.
                 dump_screen
                 ;;
+            dumpfile)
+                # The names that are on the screen, written to a file, so that
+                # they can be looked at later.
+                local file
+                file="$SHOT_DIR/$(printf '%02d-%s' "$step_number" "$rest").txt"
+                dump_screen > "$file"
+                echo "  names: $file"
+                ;;
             shot)
                 take_shot "$rest"
                 ;;

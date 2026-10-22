@@ -1,0 +1,81 @@
+name: Look at the app
+
+# A short run that only looks at the app and writes down what is on the
+# screen. It is used to write the steps of the tour with the real names.
+#
+# It is started by hand, and it is not part of the normal build.
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_level:
+        description: "The Android version to use"
+        required: false
+        default: "34"
+
+permissions:
+  contents: read
+
+jobs:
+  look:
+    name: Look at the app
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Let the emulator use the processor
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Build the app
+        run: |
+          ./gradlew --no-daemon assembleDebug \
+            -Pmuffy.versionName="look" \
+            -Pmuffy.versionCode=1
+
+      - name: Look at the app
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          ADB: adb
+          SKIP_LAUNCH: "1"
+          SHOT_DIR: ${{ github.workspace }}/screenshots
+          TOUR_FILE: ${{ github.workspace }}/tools/look-tour.txt
+        with:
+          api-level: ${{ inputs.api_level || '34' }}
+          target: default
+          arch: x86_64
+          profile: pixel_2
+          cores: 2
+          ram-size: 2048M
+          emulator-options: -no-window -no-snapshot -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          emulator-boot-timeout: 600
+          script: |
+            adb install -r app/build/outputs/apk/debug/app-debug.apk
+            adb shell am start -n com.example.notes/com.example.notes.MainActivity
+            sleep 8
+            bash tools/screenshot-tour.sh
+
+      - name: Put the names in the run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screen-names
+          path: |
+            screenshots/*.txt
+          if-no-files-found: warn
