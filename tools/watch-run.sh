@@ -53,13 +53,25 @@ fi
 
 deadline=$(( $(date +%s) + TIMEOUT_MINUTES * 60 ))
 
+# The name of the workflow, which is what the run list calls it. Read once, so
+# that the loop below makes one request per check rather than two.
+WORKFLOW_NAME="$(gh workflow list --repo "$REPO" --all --json name,path \
+    --jq ".[] | select(.path | endswith(\"/$WORKFLOW\")) | .name" 2>/dev/null | head -1)"
+if [ -z "$WORKFLOW_NAME" ]; then
+    echo "RESULT: failure (no workflow called $WORKFLOW in $REPO)"
+    exit 1
+fi
+
 # The run to watch. With a commit given, that commit is watched exactly; that
 # is the reliable way, because "the newest run" can be a run of a push that came
 # after the one being asked about.
+#
+# The run list can carry the name of the workflow, so the run that is wanted is
+# chosen in the one request that lists runs. Asking for each run separately to
+# find out what it belongs to would be a request per run, for no gain.
 pick_run() {
-    local args=(--repo "$REPO" --limit 10
-        --json databaseId,headSha,status,conclusion,url,createdAt
-        --jq '.[] | "\(.databaseId) \(.headSha) \(.status) \(.conclusion // "-") \(.url)"')
+    local args=(--repo "$REPO" --limit 20 --json databaseId,headSha,status,conclusion,url,workflowName
+        --jq ".[] | select(.workflowName == \"$WORKFLOW_NAME\") | \"\(.databaseId) \(.headSha) \(.status) \(.conclusion // \"-\")\"")
     if [ -n "$SHA" ]; then
         args+=(--commit "$SHA")
     else
@@ -72,18 +84,7 @@ echo "watching $REPO ${SHA:-on $BRANCH} ($WORKFLOW)"
 
 RUN=""
 while [ -z "$RUN" ]; do
-    line="$(pick_run)"
-    if [ -n "$line" ]; then
-        RUN_ID="$(printf '%s' "$line" | cut -d' ' -f1)"
-        # The workflow name is not in the list above, so the run is checked
-        # once to be sure it is the one that was asked for.
-        name="$(gh run view "$RUN_ID" --repo "$REPO" --json workflowName \
-            --jq '.workflowName' 2>/dev/null)"
-        if [ "$name" = "$(gh workflow view "$WORKFLOW" --repo "$REPO" \
-                --json name --jq '.name' 2>/dev/null)" ] || [ -z "$name" ]; then
-            RUN="$line"
-        fi
-    fi
+    RUN="$(pick_run)"
     if [ -z "$RUN" ]; then
         if [ "$(date +%s)" -gt "$deadline" ]; then
             echo "RESULT: timeout (no run appeared)"

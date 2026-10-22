@@ -40,10 +40,12 @@ android {
             val keyAliasEnv = System.getenv("MUFFY_KEY_ALIAS")
             val keyPasswordEnv = System.getenv("MUFFY_KEY_PASSWORD")
 
-            var resolvedStoreFile: File? = null
-            var resolvedStorePassword: String? = null
-            var resolvedKeyAlias: String? = null
-            var resolvedKeyPassword: String? = null
+            // The key is worked out once, as a value. Declaring these with a
+            // default they never keep reads as if the default could survive.
+            val keyFile: File?
+            val keyStorePassword: String?
+            val keyName: String?
+            val keyPass: String?
 
             if (base64Key != null && storePasswordEnv != null) {
                 // A build on the continuous integration: the key arrives as
@@ -51,29 +53,27 @@ android {
                 val temp = File.createTempFile("muffy-release", ".jks")
                 temp.deleteOnExit()
                 temp.writeBytes(Base64.getDecoder().decode(base64Key))
-                resolvedStoreFile = temp
-                resolvedStorePassword = storePasswordEnv
-                resolvedKeyAlias = keyAliasEnv ?: "notes"
-                resolvedKeyPassword = keyPasswordEnv ?: storePasswordEnv
+                keyFile = temp
+                keyStorePassword = storePasswordEnv
+                keyName = keyAliasEnv ?: "notes"
+                keyPass = keyPasswordEnv ?: storePasswordEnv
             } else {
-                resolvedStoreFile = keystoreProperties.getProperty("storeFile")
+                keyFile = keystoreProperties.getProperty("storeFile")
                     ?.let { rootProject.file(it) }
-                resolvedStorePassword = keystoreProperties.getProperty("storePassword")
-                resolvedKeyAlias = keystoreProperties.getProperty("keyAlias")
-                resolvedKeyPassword = keystoreProperties.getProperty("keyPassword")
+                keyStorePassword = keystoreProperties.getProperty("storePassword")
+                keyName = keystoreProperties.getProperty("keyAlias")
+                keyPass = keystoreProperties.getProperty("keyPassword")
             }
 
-            val hasKeystore = resolvedStoreFile != null &&
-                resolvedStoreFile.exists() &&
-                resolvedStorePassword != null &&
-                resolvedKeyAlias != null &&
-                resolvedKeyPassword != null
-
-            if (hasKeystore) {
-                storeFile = resolvedStoreFile
-                storePassword = resolvedStorePassword
-                keyAlias = resolvedKeyAlias
-                keyPassword = resolvedKeyPassword
+            // A key is only used when every part of it is there and the file
+            // really exists, so a half-configured key cannot sign anything.
+            if (keyFile != null && keyFile.exists() &&
+                keyStorePassword != null && keyName != null && keyPass != null
+            ) {
+                storeFile = keyFile
+                storePassword = keyStorePassword
+                keyAlias = keyName
+                keyPassword = keyPass
             }
             // Sign with v1 (JAR) and v3 as well as v2, so the APK installs on
             // older and newer Android versions alike.

@@ -1,11 +1,16 @@
 name: Build and release
 
-# Every push and every pull request is tested. A pull request stops there: it
-# is the tests that answer whether a change is good, and a signed release is
-# only ever made from the main branch.
+# Every push and every pull request is tested. A pull request stops there: it is
+# the tests that answer whether a change is good, and a signed release is only
+# ever made from main.
 #
-# When the tests pass on main, a signed release is published as a GitHub
-# release with the APK attached.
+# When the tests pass on main, a signed release is published as a GitHub release
+# with the APK attached.
+#
+# It is one job with steps that some runs skip, and not two jobs, on purpose: a
+# second job would pay for setting up the machine a second time (about sixteen
+# seconds) to gain nothing, because the release needs exactly what the tests
+# already built.
 on:
   push:
     branches: [main]
@@ -18,10 +23,10 @@ on:
         required: true
         type: string
 
-# A second push to the same pull request makes the first run pointless, so it
-# is stopped: waiting for a result nobody reads is the most expensive thing a
-# test run can do. A release is never cancelled, because half a release is
-# worse than a late one.
+# A second push to the same pull request makes the first run pointless, so it is
+# stopped: waiting for a result nobody reads is the most expensive thing a run
+# can do. A release is never cancelled, because half a release is worse than a
+# late one.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -30,18 +35,18 @@ permissions:
   contents: write
 
 jobs:
-  # ---------------------------------------------------------------------------
-  # The tests. This is the only job a pull request runs.
-  # ---------------------------------------------------------------------------
-  test:
-    name: Test
+  build:
+    name: Build and test
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: Check out the code
         uses: actions/checkout@v4
         with:
+          # Only the commit that is being built is needed, so no more of the
+          # history is fetched than that.
+          fetch-depth: 1
           # The tests never push anything, so the token has no business being
           # left in the git configuration of the machine afterwards.
           persist-credentials: false
@@ -63,24 +68,23 @@ jobs:
           echo "processors: $(nproc)"
           awk '/MemTotal/ {printf "memory: %.1f GB\n", $2/1024/1024}' /proc/meminfo
 
-      # Robolectric downloads the Android runtime it runs against (a jar of
-      # well over a hundred megabytes) the first time it needs it, and would
+      # Robolectric downloads the Android runtime it runs against (a jar of well
+      # over a hundred megabytes) the first time it needs it, and would
       # otherwise do that again on every run. It keeps them in the local Maven
       # repository, so that directory is what is kept between runs.
       - name: Remember the runtime the tests need
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository
-          key: robolectric-${{ runner.os }}-${{ hashFiles('app/build.gradle.kts', 'gradle/libs.versions.toml') }}
+          key: robolectric-${{ runner.os }}-${{ hashFiles('app/build.gradle.kts') }}
           restore-keys: |
             robolectric-${{ runner.os }}-
 
       - name: Run the tests
         run: |
-          # The project's own gradle.properties has no per-host limits, so this
-          # machine uses everything it was given: all its processors, all the
-          # memory the run allows, and the incremental compilation and caches
-          # that make a second run cheaper than the first.
+          # The project's own gradle.properties carries no per-host limits, so
+          # this machine uses everything it was given: all its processors, the
+          # incremental compilation and the build cache.
           ./gradlew --no-daemon testDebugUnitTest
 
       - name: Keep the test report when something failed
@@ -94,32 +98,10 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-  # ---------------------------------------------------------------------------
-  # The release. Only from main, and only once the tests have passed.
-  # ---------------------------------------------------------------------------
-  release:
-    name: Release
-    needs: test
-    # A pull request is tested, never released: the work in it is not on main
-    # yet, and a release made from a branch is a release of nothing.
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-      - name: Check out the code
-        uses: actions/checkout@v4
-
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+      # ---- from here on, only a push to main goes any further ----
 
       - name: Put the signing key in place
+        if: github.event_name != 'pull_request'
         env:
           MUFFY_KEYSTORE_BASE64: ${{ secrets.MUFFY_KEYSTORE_BASE64 }}
           MUFFY_KEYSTORE_PASSWORD: ${{ secrets.MUFFY_KEYSTORE_PASSWORD }}
@@ -133,11 +115,12 @@ jobs:
           fi
 
       - name: Work out the version
+        if: github.event_name != 'pull_request'
         id: version
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # The values are handed to the script through the environment, so
-          # that nothing that a person typed can be run as a command.
+          # The values are handed to the script through the environment, so that
+          # nothing that a person typed can be run as a command.
           EVENT_NAME: ${{ github.event_name }}
           CHOSEN_VERSION: ${{ inputs.version_name }}
           REPOSITORY: ${{ github.repository }}
@@ -171,8 +154,8 @@ jobs:
           # The version code is what Android compares to decide whether an APK
           # is newer than the one already installed, so it has to be a number
           # that only ever goes up. It is the number of the release, plus a
-          # thousand, so it is always bigger than any version that was made
-          # by hand before.
+          # thousand, so it is always bigger than any version that was made by
+          # hand before.
           version_code="$(( version_number + 1000 ))"
 
           echo "name=${version_name}" >> "$GITHUB_OUTPUT"
@@ -180,6 +163,7 @@ jobs:
           echo "The version is ${version_name} (code ${version_code})."
 
       - name: Build the release
+        if: github.event_name != 'pull_request'
         env:
           MUFFY_KEYSTORE_BASE64: ${{ secrets.MUFFY_KEYSTORE_BASE64 }}
           MUFFY_KEYSTORE_PASSWORD: ${{ secrets.MUFFY_KEYSTORE_PASSWORD }}
@@ -190,15 +174,12 @@ jobs:
           VERSION_CODE: ${{ steps.version.outputs.code }}
           VERSION_NAME: ${{ steps.version.outputs.name }}
         run: |
-          # The version code is what Android compares to decide whether an APK
-          # is newer than the one already installed, so it has to be a plain
-          # number that only ever goes up. The version name is what a person
-          # reads, so it can be anything.
           ./gradlew --no-daemon assembleRelease \
             -Pmuffy.versionCode="$VERSION_CODE" \
             -Pmuffy.versionName="$VERSION_NAME"
 
       - name: Check the signature of the APK
+        if: github.event_name != 'pull_request'
         run: |
           APK=app/build/outputs/apk/release/app-release.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK"
@@ -208,6 +189,7 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c 4 "$APK"
 
       - name: Keep the APK
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: MuffyCodes-${{ steps.version.outputs.name }}
@@ -215,6 +197,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish the release
+        if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
