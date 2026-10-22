@@ -1,3 +1,9 @@
+# muffycodes
+
+just another ai app
+
+---
+
 # Muffy Codes — an Android notes app
 
 A small, dependency-light note-taking app written in **Kotlin** with **Jetpack Compose**
