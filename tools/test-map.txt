@@ -1,0 +1,27 @@
+# Which tests belong to which files.
+#
+# One line per test class, naming every source file that class exercises. The
+# selector (tools/changed-tests.sh) reads this to decide which tests a pull
+# request has to run: a change to a file on a line runs that line's test class.
+#
+# The rule that makes this safe is what happens with a file that is on no line
+# at all: everything runs. Unknown means full, never "nothing affected", so a
+# file added tomorrow cannot slip through a gap in this table.
+#
+# Format:  <test class>   <space separated list of sources>
+#
+# Add a line when a new test class appears, and extend a line when a test starts
+# covering another file. Getting this wrong is not dangerous in the direction
+# that matters: the worst it can do is run too many tests. It can only run too
+# few if a source is named here that the test does not really exercise, so name
+# dependencies honestly.
+
+AppThemeTest        app/src/main/java/com/example/notes/AppTheme.kt
+ScreenTest          app/src/main/java/com/example/notes/NotesListScreen.kt app/src/main/java/com/example/notes/NoteEditorScreen.kt app/src/main/java/com/example/notes/AppTheme.kt
+FolderTreeTest      app/src/main/java/com/example/notes/FolderTree.kt
+NoteFileTest        app/src/main/java/com/example/notes/NoteFile.kt
+NoteCodecTest       app/src/main/java/com/example/notes/NoteCodec.kt
+NotePreviewTest     app/src/main/java/com/example/notes/Note.kt
+FolderStorageTest   app/src/main/java/com/example/notes/FolderStorage.kt app/src/main/java/com/example/notes/NoteFile.kt
+ProjectStoreTest    app/src/main/java/com/example/notes/NoteStore.kt
+GitProjectsTest     app/src/main/java/com/example/notes/GitProjects.kt app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/GitHubClient.kt
