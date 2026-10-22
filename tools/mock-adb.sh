@@ -15,9 +15,22 @@ case "$1 $2" in
     "shell cat")
         cat "${MOCK_ADB_XML:-/tmp/mock-window.xml}" 2>/dev/null
         ;;
-    "exec-out screencap")
+    "shell screencap")
+        # Pretend the picture was made on the device.
+        echo "created on the device"
+        ;;
+    "shell rm")
+        echo ""
+        ;;
+    "pull "*)
         # A one-pixel PNG, so the file is not empty.
-        printf '\x89PNG\r\n\x1a\n' >/dev/null
+        python3 -c "
+import base64,sys
+png=base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==')
+open(sys.argv[1],'wb').write(png)
+" "${3:-/tmp/shot.png}"
+        ;;
+    "exec-out screencap")
         python3 -c "
 import base64,sys
 png=base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==')

@@ -36,6 +36,13 @@ BASE_H=2400
 
 adb() { "$ADB" "$@"; }
 
+# Runs adb in a session of its own. The emulator's adb sometimes crashes,
+# and when it does it can take the whole tour down with it. A session of its
+# own keeps the crash where it belongs.
+if command -v setsid >/dev/null 2>&1; then
+    adb() { setsid "$ADB" "$@"; }
+fi
+
 # Every command that talks to the device is written down, so that a problem
 # can be found afterwards.
 TRACE_FILE="${TRACE_FILE:-}"
@@ -109,15 +116,30 @@ take_shot() {
     local attempt
     for attempt in 1 2 3; do
         trace "picture: $SHOT_FILE"
-        if adb exec-out screencap -p > "$SHOT_FILE" 2>/dev/null && [ -s "$SHOT_FILE" ]; then
+        if capture_picture; then
             echo "  picture: $SHOT_FILE"
             return 0
         fi
         echo "  .. the picture failed, trying again ($attempt of 3)" >&2
-        sleep 2
+        sleep 3
     done
     echo "  !! the picture failed: $SHOT_FILE" >&2
     return 1
+}
+
+# Takes a picture of the screen.
+#
+# The picture is first made on the device and then fetched, because the
+# straight way of reading it out can come back empty when the emulator is
+# busy.
+capture_picture() {
+    local remote="/sdcard/muffy-shot.png"
+
+    adb shell screencap -p "$remote" >/dev/null 2>&1 || return 1
+    adb pull "$remote" "$SHOT_FILE" >/dev/null 2>&1 || return 1
+    adb shell rm -f "$remote" >/dev/null 2>&1 || true
+
+    [ -s "$SHOT_FILE" ]
 }
 
 # Asks the app where a piece of text is on the screen, and answers with the
