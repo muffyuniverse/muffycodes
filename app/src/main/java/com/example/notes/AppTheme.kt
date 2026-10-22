@@ -1,0 +1,268 @@
+package com.example.notes
+
+import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.ui.graphics.Color
+
+/**
+ * The five colour themes. Each one is a full Material 3 scheme with a light and a
+ * dark variant, so the palette spans from the pale "Milk" theme to the near-black
+ * "Dark Chocolate" one.
+ */
+enum class AppTheme(
+    val displayName: String,
+    val swatch: Color,
+) {
+    MILK("Milk", Color(0xFFF7F1E3)),
+    CARAMEL("Caramel", Color(0xFFD9A05B)),
+    GOLD("Gold", Color(0xFFD4A017)),
+    BROWNIE("Brownie", Color(0xFF6B4423)),
+    DARK_CHOCOLATE("Dark Chocolate", Color(0xFF2A1A12));
+
+    /** The light scheme for this theme. */
+    fun lightScheme(): ColorScheme = when (this) {
+        MILK -> lightColorScheme(
+            primary = Color(0xFF8A6D3B),
+            onPrimary = Color(0xFFFFFFFF),
+            primaryContainer = Color(0xFFF2E2C4),
+            onPrimaryContainer = Color(0xFF2E1F08),
+            secondary = Color(0xFF7A5C3A),
+            onSecondary = Color(0xFFFFFFFF),
+            secondaryContainer = Color(0xFFF0DDBB),
+            onSecondaryContainer = Color(0xFF2B1A05),
+            tertiary = Color(0xFF5C6B45),
+            onTertiary = Color(0xFFFFFFFF),
+            tertiaryContainer = Color(0xFFDDE8C2),
+            onTertiaryContainer = Color(0xFF182204),
+            background = Color(0xFFFFFBF2),
+            onBackground = Color(0xFF201A10),
+            surface = Color(0xFFFFFBF2),
+            onSurface = Color(0xFF201A10),
+            surfaceVariant = Color(0xFFEDE0C9),
+            onSurfaceVariant = Color(0xFF4C4436),
+            outline = Color(0xFF7E7666),
+            error = Color(0xFFB3261E),
+            onError = Color(0xFFFFFFFF),
+        )
+
+        CARAMEL -> lightColorScheme(
+            primary = Color(0xFF8B5722),
+            onPrimary = Color(0xFFFFFFFF),
+            primaryContainer = Color(0xFFFFDCC0),
+            onPrimaryContainer = Color(0xFF2F1500),
+            secondary = Color(0xFF77574A),
+            onSecondary = Color(0xFFFFFFFF),
+            secondaryContainer = Color(0xFFFFDBCB),
+            onSecondaryContainer = Color(0xFF2C1509),
+            tertiary = Color(0xFF63633A),
+            onTertiary = Color(0xFFFFFFFF),
+            tertiaryContainer = Color(0xFFE8E8B4),
+            onTertiaryContainer = Color(0xFF1E1E00),
+            background = Color(0xFFFFF8F2),
+            onBackground = Color(0xFF221A12),
+            surface = Color(0xFFFFF8F2),
+            onSurface = Color(0xFF221A12),
+            surfaceVariant = Color(0xFFF2DED1),
+            onSurfaceVariant = Color(0xFF52443A),
+            outline = Color(0xFF85736A),
+            error = Color(0xFFB3261E),
+            onError = Color(0xFFFFFFFF),
+        )
+
+        GOLD -> lightColorScheme(
+            primary = Color(0xFF7A5900),
+            onPrimary = Color(0xFFFFFFFF),
+            primaryContainer = Color(0xFFFFDF9B),
+            onPrimaryContainer = Color(0xFF261A00),
+            secondary = Color(0xFF6C5C3F),
+            onSecondary = Color(0xFFFFFFFF),
+            secondaryContainer = Color(0xFFF6E0BB),
+            onSecondaryContainer = Color(0xFF241A04),
+            tertiary = Color(0xFF46664A),
+            onTertiary = Color(0xFFFFFFFF),
+            tertiaryContainer = Color(0xFFC8EBBE),
+            onTertiaryContainer = Color(0xFF04210F),
+            background = Color(0xFFFFFBF0),
+            onBackground = Color(0xFF1E1B10),
+            surface = Color(0xFFFFFBF0),
+            onSurface = Color(0xFF1E1B10),
+            surfaceVariant = Color(0xFFEDE2C8),
+            onSurfaceVariant = Color(0xFF4C4639),
+            outline = Color(0xFF7D7667),
+            error = Color(0xFFB3261E),
+            onError = Color(0xFFFFFFFF),
+        )
+
+        BROWNIE -> lightColorScheme(
+            primary = Color(0xFF6B4423),
+            onPrimary = Color(0xFFFFFFFF),
+            primaryContainer = Color(0xFFFFDCC0),
+            onPrimaryContainer = Color(0xFF2A1500),
+            secondary = Color(0xFF6D5C4F),
+            onSecondary = Color(0xFFFFFFFF),
+            secondaryContainer = Color(0xFFF7DDC8),
+            onSecondaryContainer = Color(0xFF27190E),
+            tertiary = Color(0xFF51633F),
+            onTertiary = Color(0xFFFFFFFF),
+            tertiaryContainer = Color(0xFFD4E8C3),
+            onTertiaryContainer = Color(0xFF0F1F04),
+            background = Color(0xFFFFF8F4),
+            onBackground = Color(0xFF201A15),
+            surface = Color(0xFFFFF8F4),
+            onSurface = Color(0xFF201A15),
+            surfaceVariant = Color(0xFFF1DFD2),
+            onSurfaceVariant = Color(0xFF52443A),
+            outline = Color(0xFF85736A),
+            error = Color(0xFFB3261E),
+            onError = Color(0xFFFFFFFF),
+        )
+
+        DARK_CHOCOLATE -> lightColorScheme(
+            primary = Color(0xFF4E3423),
+            onPrimary = Color(0xFFFFFFFF),
+            primaryContainer = Color(0xFF6B4832),
+            onPrimaryContainer = Color(0xFFFFDBC8),
+            secondary = Color(0xFF5E5148),
+            onSecondary = Color(0xFFFFFFFF),
+            secondaryContainer = Color(0xFF77685D),
+            onSecondaryContainer = Color(0xFFEBDBCF),
+            tertiary = Color(0xFF4C6A52),
+            onTertiary = Color(0xFFFFFFFF),
+            tertiaryContainer = Color(0xFF36513C),
+            onTertiaryContainer = Color(0xFFC8EBBC),
+            background = Color(0xFFFBF0E8),
+            onBackground = Color(0xFF201A15),
+            surface = Color(0xFFFBF0E8),
+            onSurface = Color(0xFF201A15),
+            surfaceVariant = Color(0xFFEDDCD1),
+            onSurfaceVariant = Color(0xFF51443B),
+            outline = Color(0xFF84756B),
+            error = Color(0xFFB3261E),
+            onError = Color(0xFFFFFFFF),
+        )
+    }
+
+    /** The dark scheme for this theme. */
+    fun darkScheme(): ColorScheme = when (this) {
+        MILK -> darkColorScheme(
+            primary = Color(0xFFE3C08A),
+            onPrimary = Color(0xFF412D0C),
+            primaryContainer = Color(0xFF5C421F),
+            onPrimaryContainer = Color(0xFFFFDDB0),
+            secondary = Color(0xFFDCC1A0),
+            onSecondary = Color(0xFF412D17),
+            secondaryContainer = Color(0xFF5A422B),
+            onSecondaryContainer = Color(0xFFF9DDBB),
+            tertiary = Color(0xFFBFCFA4),
+            onTertiary = Color(0xFF2A3418),
+            tertiaryContainer = Color(0xFF414B2E),
+            onTertiaryContainer = Color(0xFFDCEBC0),
+            background = Color(0xFF191512),
+            onBackground = Color(0xFFEFE1D3),
+            surface = Color(0xFF191512),
+            onSurface = Color(0xFFEFE1D3),
+            surfaceVariant = Color(0xFF50453A),
+            onSurfaceVariant = Color(0xFFD5C3B1),
+            outline = Color(0xFF9D8E80),
+            error = Color(0xFFF2B8B5),
+            onError = Color(0xFF601410),
+        )
+
+        CARAMEL -> darkColorScheme(
+            primary = Color(0xFFFFB77C),
+            onPrimary = Color(0xFF4A2800),
+            primaryContainer = Color(0xFF693C00),
+            onPrimaryContainer = Color(0xFFFFDCC0),
+            secondary = Color(0xFFE7BFA8),
+            onSecondary = Color(0xFF442A1F),
+            secondaryContainer = Color(0xFF5D4034),
+            onSecondaryContainer = Color(0xFFFFDBCB),
+            tertiary = Color(0xFFCACB9F),
+            onTertiary = Color(0xFF33340F),
+            tertiaryContainer = Color(0xFF4A4A29),
+            onTertiaryContainer = Color(0xFFE6E7BD),
+            background = Color(0xFF18120D),
+            onBackground = Color(0xFFEFE0D6),
+            surface = Color(0xFF18120D),
+            onSurface = Color(0xFFEFE0D6),
+            surfaceVariant = Color(0xFF50443B),
+            onSurfaceVariant = Color(0xFFD5C3B5),
+            outline = Color(0xFF9D8E80),
+            error = Color(0xFFF2B8B5),
+            onError = Color(0xFF601410),
+        )
+
+        GOLD -> darkColorScheme(
+            primary = Color(0xFFF5C13B),
+            onPrimary = Color(0xFF3F2E00),
+            primaryContainer = Color(0xFF5C4200),
+            onPrimaryContainer = Color(0xFFFFDF9B),
+            secondary = Color(0xFFDDC5A0),
+            onSecondary = Color(0xFF3F2E12),
+            secondaryContainer = Color(0xFF574529),
+            onSecondaryContainer = Color(0xFFF9E0BB),
+            tertiary = Color(0xFFA7CEA4),
+            onTertiary = Color(0xFF12351F),
+            tertiaryContainer = Color(0xFF2C4C37),
+            onTertiaryContainer = Color(0xFFC2EBBE),
+            background = Color(0xFF16130B),
+            onBackground = Color(0xFFE9E1CF),
+            surface = Color(0xFF16130B),
+            onSurface = Color(0xFFE9E1CF),
+            surfaceVariant = Color(0xFF4B4638),
+            onSurfaceVariant = Color(0xFFCCC5B4),
+            outline = Color(0xFF969080),
+            error = Color(0xFFF2B8B5),
+            onError = Color(0xFF601410),
+        )
+
+        BROWNIE -> darkColorScheme(
+            primary = Color(0xFFE9B183),
+            onPrimary = Color(0xFF462200),
+            primaryContainer = Color(0xFF5F3307),
+            onPrimaryContainer = Color(0xFFFFDCC0),
+            secondary = Color(0xFFD9C2B2),
+            onSecondary = Color(0xFF3D2E23),
+            secondaryContainer = Color(0xFF55443A),
+            onSecondaryContainer = Color(0xFFF7DDC8),
+            tertiary = Color(0xFFB5CEA7),
+            onTertiary = Color(0xFF21361F),
+            tertiaryContainer = Color(0xFF374D35),
+            onTertiaryContainer = Color(0xFFD1EBC3),
+            background = Color(0xFF16110D),
+            onBackground = Color(0xFFEBDED3),
+            surface = Color(0xFF16110D),
+            onSurface = Color(0xFFEBDED3),
+            surfaceVariant = Color(0xFF50443A),
+            onSurfaceVariant = Color(0xFFD5C3B5),
+            outline = Color(0xFF9D8E80),
+            error = Color(0xFFF2B8B5),
+            onError = Color(0xFF601410),
+        )
+
+        DARK_CHOCOLATE -> darkColorScheme(
+            primary = Color(0xFFE7B78C),
+            onPrimary = Color(0xFF452500),
+            primaryContainer = Color(0xFF603A18),
+            onPrimaryContainer = Color(0xFFFFDCC0),
+            secondary = Color(0xFFD8C3B5),
+            onSecondary = Color(0xFF3B2D24),
+            secondaryContainer = Color(0xFF534239),
+            onSecondaryContainer = Color(0xFFF5DACA),
+            tertiary = Color(0xFFB0CBA4),
+            onTertiary = Color(0xFF1E341C),
+            tertiaryContainer = Color(0xFF344B32),
+            onTertiaryContainer = Color(0xFFCCE7C0),
+            background = Color(0xFF120D0A),
+            onBackground = Color(0xFFE7DDD5),
+            surface = Color(0xFF120D0A),
+            onSurface = Color(0xFFE7DDD5),
+            surfaceVariant = Color(0xFF4B403A),
+            onSurfaceVariant = Color(0xFFCFBCB0),
+            outline = Color(0xFF97877D),
+            error = Color(0xFFF2B8B5),
+            onError = Color(0xFF601410),
+        )
+    }
+}

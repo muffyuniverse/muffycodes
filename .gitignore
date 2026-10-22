@@ -1,0 +1,26 @@
+# Build output
+build/
+*/build/
+.gradle/
+.kotlin/
+captures/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
+# Signing material — never commit a keystore or a password
+*.jks
+*.keystore
+keystore.properties
+local.properties
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+.DS_Store
+
+# Logs and temporary files
+*.log
+tmp/
