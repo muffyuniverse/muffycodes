@@ -122,6 +122,38 @@ those versions onto Node 24 where they work — our releases have been succeedin
 on them. Jumping six major versions for a deprecation warning would trade a
 working pipeline for an untested one.
 
+
+## Running only what a change can have broken
+
+A pull request runs the test classes its change touches; main runs all of them.
+The mapping is plain text in `tools/test-map.txt`, one line per test class
+naming the sources it exercises.
+
+The safety rule is the fallback, and it is the whole point of the design. The
+full suite runs when:
+
+- a changed file is on no line of the table (so a file added tomorrow cannot
+  slip through a gap),
+- the build itself changed,
+- the change is empty, or nothing under `app/src` changed at all,
+- the table is missing.
+
+Unknown means full, never nothing. That is the opposite of the usual way test
+selection fails, which is to read "I could not match this" as "this affects
+nothing" — the same mistake the picture checks made in a different form: a gate
+that looks like a gate but is not one.
+
+Verified end to end rather than assumed: a change to `FolderTree.kt` alone made
+the workflow report `tests: FolderTreeTest`, and the run passed with only that
+class executed.
+
+**Lint is deliberately not selective.** Android Lint analyses the whole project
+by design; run over a handful of files it loses exactly the checks that need
+more than one file to be right, such as a resource that nothing refers to any
+more. It also already costs no wall clock, because it has a job of its own
+running beside the others. Making it selective would buy nothing and lose
+something.
+
 ## The floor
 
 Roughly **17 seconds of unavoidable per-job setup** (machine, checkout, Java, and
