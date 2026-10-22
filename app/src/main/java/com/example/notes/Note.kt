@@ -19,3 +19,5 @@ data class Note(
         return if (line.length > 120) line.take(120) + "…" else line
     }
 }
+
+// A comment, to check the configuration cache is reused, not merely tolerated.
