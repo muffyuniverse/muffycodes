@@ -42,7 +42,7 @@ jobs:
 
     steps:
       - name: Check out the code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           # Only the commit that is being built is needed, so no more of the
           # history is fetched than that.
@@ -52,7 +52,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           distribution: temurin
           java-version: '17'
@@ -72,13 +72,24 @@ jobs:
       # over a hundred megabytes) the first time it needs it, and would
       # otherwise do that again on every run. It keeps them in the local Maven
       # repository, so that directory is what is kept between runs.
+      #
+      # The key is a fixed name and not a hash of the build file. Hashing the
+      # build file looked careful and was worse than useless: every edit to it
+      # produced a new key, which means a cache that is never found and a
+      # runtime that is downloaded again. What actually decides which runtime is
+      # needed is the version of Robolectric, which changes rarely, so the key
+      # is a version that is raised by hand when that line in build.gradle.kts
+      # changes. Caches cannot be overwritten, so a stale key would keep serving
+      # the old runtime: raising this number is what retires it.
+      #
+      # A cache made on a branch is not visible from another branch, but the
+      # main branch's caches are visible from pull requests, which is the
+      # direction that matters.
       - name: Remember the runtime the tests need
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.m2/repository
-          key: robolectric-${{ runner.os }}-${{ hashFiles('app/build.gradle.kts') }}
-          restore-keys: |
-            robolectric-${{ runner.os }}-
+          key: robolectric-runtime-v1-${{ runner.os }}
 
       - name: Run the tests
         run: |
@@ -89,7 +100,7 @@ jobs:
 
       - name: Keep the test report when something failed
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: test-report
           path: |
@@ -190,7 +201,7 @@ jobs:
 
       - name: Keep the APK
         if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: MuffyCodes-${{ steps.version.outputs.name }}
           path: app/build/outputs/apk/release/app-release.apk
