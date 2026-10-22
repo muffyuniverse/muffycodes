@@ -108,6 +108,13 @@ SHOT_FILE=""
 
 take_shot() {
     local name="$1"
+    # A step named "none" only moves the app along: no picture is taken, and
+    # no number is used up. That keeps a set of pictures that are meant to be
+    # compared with each other free of the steps that only navigate.
+    if [ "$name" = "none" ]; then
+        echo "  (no picture for this step)"
+        return 0
+    fi
     step_number=$((step_number + 1))
     SHOT_FILE="$SHOT_DIR/$(printf '%02d-%s' "$step_number" "$name").png"
     # A moment of waiting, so the screen has finished moving.
@@ -120,6 +127,13 @@ take_shot() {
         trace "picture: $SHOT_FILE"
         if capture_picture; then
             echo "  picture: $SHOT_FILE"
+            # The names that were on the screen are written next to the picture
+            # when they are asked for, so that the parts of the picture can be
+            # checked one by one later (a name with nothing drawn in its box is
+            # an icon or a label that failed to render).
+            if [ "${SHOT_DUMPS:-0}" = "1" ]; then
+                dump_screen > "${SHOT_FILE%.png}.txt" 2>/dev/null || true
+            fi
             return 0
         fi
         echo "  .. the picture failed, trying again ($attempt of 3)" >&2

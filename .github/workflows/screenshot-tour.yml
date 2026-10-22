@@ -74,8 +74,14 @@ jobs:
           ADB: adb
           SKIP_LAUNCH: "1"
           SHOT_DIR: ${{ github.workspace }}/screenshots
+          THEME_SHOT_DIR: ${{ github.workspace }}/screenshots-themes
           TOUR_FILE: ${{ github.workspace }}/tools/${{ inputs.tour_file || 'default-tour.txt' }}
+          THEME_TOUR_FILE: ${{ github.workspace }}/tools/theme-tour.txt
           TRACE_FILE: ${{ github.workspace }}/tour-trace.log
+          THEME_TRACE_FILE: ${{ github.workspace }}/theme-trace.log
+          # The names on the screen are written next to every picture, so the
+          # parts of a picture can be checked one by one afterwards.
+          SHOT_DUMPS: "1"
         with:
           api-level: ${{ inputs.api_level || '34' }}
           target: default
@@ -100,7 +106,35 @@ jobs:
             # looking at. But a run that made nothing at all is a failure.
             # Every line of this script is run in a shell of its own, so the
             # check is done by a small script of its own.
-            bash tools/check-pictures.sh "${{ github.workspace }}/screenshots"
+            bash tools/check-pictures.sh "$SHOT_DIR"
+
+            # The tour of the themes runs in the same session, because it needs
+            # the app that is already running. It takes a picture of the same
+            # screen in every theme, into a folder of its own: those pictures
+            # are compared with each other, which would make no sense mixed in
+            # with the pictures of the other screens.
+            mkdir -p "$THEME_SHOT_DIR"
+            SHOT_DIR="$THEME_SHOT_DIR" \
+              TOUR_FILE="$THEME_TOUR_FILE" \
+              TRACE_FILE="$THEME_TRACE_FILE" \
+              bash tools/screenshot-tour.sh
+            bash tools/check-pictures.sh "$THEME_SHOT_DIR"
+
+      - name: Check the pictures are right
+        if: always()
+        run: |
+          # The names and the places of the things on the screen are checked by
+          # the tour itself. What the names cannot say is whether anything was
+          # actually drawn: the accessibility tree has no colour in it, so a
+          # theme that never applied, an icon that failed to draw and text the
+          # same colour as its background all look perfectly fine to it.
+          # These checks read the pixels and ask only about properties.
+          status=0
+          python3 tools/check-pixels.py screenshots || status=1
+          # The theme pictures are compared with each other, because every one
+          # of them is the same screen in a different theme.
+          python3 tools/check-pixels.py --themes screenshots-themes || status=1
+          exit $status
 
       - name: Put the pictures in the run
         if: always()
@@ -109,7 +143,11 @@ jobs:
           name: screenshots
           path: |
             screenshots/*.png
+            screenshots/*.txt
+            screenshots-themes/*.png
+            screenshots-themes/*.txt
             tour-trace.log
+            theme-trace.log
           if-no-files-found: warn
           retention-days: 30
 
