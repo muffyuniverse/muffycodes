@@ -1,0 +1,123 @@
+name: Build and release
+
+# Every push and every pull request is built and tested. When the tests pass,
+# a signed release is published as a GitHub release with the APK attached.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: "The version of the release (for example 1.4)"
+        required: true
+        type: string
+
+# Only one build at a time, so a release is never published twice.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Give the build more memory
+        run: echo "org.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=1g" >> "$GITHUB_ENV"
+
+      - name: Run the tests
+        run: ./gradlew --no-daemon testDebugUnitTest --stacktrace
+
+      - name: Put the signing key in place
+        env:
+          MUFFY_KEYSTORE_BASE64: ${{ secrets.MUFFY_KEYSTORE_BASE64 }}
+          MUFFY_KEYSTORE_PASSWORD: ${{ secrets.MUFFY_KEYSTORE_PASSWORD }}
+          MUFFY_KEY_ALIAS: ${{ secrets.MUFFY_KEY_ALIAS }}
+          MUFFY_KEY_PASSWORD: ${{ secrets.MUFFY_KEY_PASSWORD }}
+        run: |
+          # The build reads the key from the environment, so nothing has to be
+          # written to disk that is not needed.
+          if [ -z "$MUFFY_KEYSTORE_BASE64" ]; then
+            echo "::warning::No signing key found, the release will be unsigned."
+          fi
+
+      - name: Work out the version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version_name="${{ inputs.version_name }}"
+          else
+            # The version comes from the number of the commits: the first build
+            # after the first commit is version 1.
+            version_name="$(git rev-list --count HEAD)"
+          fi
+          echo "name=${version_name}" >> "$GITHUB_OUTPUT"
+          echo "The version is ${version_name}."
+
+      - name: Build the release
+        env:
+          MUFFY_KEYSTORE_BASE64: ${{ secrets.MUFFY_KEYSTORE_BASE64 }}
+          MUFFY_KEYSTORE_PASSWORD: ${{ secrets.MUFFY_KEYSTORE_PASSWORD }}
+          MUFFY_KEY_ALIAS: ${{ secrets.MUFFY_KEY_ALIAS }}
+          MUFFY_KEY_PASSWORD: ${{ secrets.MUFFY_KEY_PASSWORD }}
+        run: |
+          ./gradlew --no-daemon assembleRelease \
+            -Pmuffy.versionName="${{ steps.version.outputs.name }}" \
+            -Pmuffy.versionCode="${{ steps.version.outputs.name }}"
+
+      - name: Check the signature of the APK
+        run: |
+          APK=app/build/outputs/apk/release/app-release.apk
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK"
+          # A release that is not signed cannot be installed, so the build has
+          # to stop here rather than publish it.
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c 4 "$APK"
+
+      - name: Keep the APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MuffyCodes-${{ steps.version.outputs.name }}
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
+      - name: Publish the release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${{ steps.version.outputs.name }}"
+          tag="v${version}"
+          apk="app/build/outputs/apk/release/app-release.apk"
+
+          # The tag is the version, so it can be checked out again later.
+          if git ls-remote --tags origin "refs/tags/${tag}" | grep -q .; then
+            echo "The tag ${tag} already exists, the release is not made again."
+            exit 0
+          fi
+
+          gh release create "${tag}" "${apk}" \
+            --title "Muffy Codes ${version}" \
+            --notes "The release ${version} of Muffy Codes.
+
+          Built from commit ${GITHUB_SHA}." \
+            --target "${GITHUB_SHA}"
