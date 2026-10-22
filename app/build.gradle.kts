@@ -117,6 +117,20 @@ android {
 }
 
 /**
+ * How many test classes run at the same time. One process is the default,
+ * because that is what the small container can manage; the continuous
+ * integration asks for more, because the machine it runs on has several
+ * processors and nothing else to do. This changes only the speed, never what
+ * is tested: every test runs either way, and a failure is reported the same.
+ */
+val testForks = (providers.gradleProperty("muffy.testForks").orNull ?: "1")
+    .toIntOrNull()?.coerceAtLeast(1) ?: 1
+
+tasks.withType<Test>().configureEach {
+    maxParallelForks = testForks
+}
+
+/**
  * The screen tests run on Robolectric, which starts Android's TLS stack. The
  * library that does it (conscrypt) is published for Windows, macOS and x86_64
  * Linux only, so on any other processor the tests cannot even start: they die
