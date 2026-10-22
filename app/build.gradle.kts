@@ -127,6 +127,22 @@ android {
  * This changes only how fast the work is done, never what is tested: every
  * test runs either way, and a failure is reported the same.
  */
+/**
+ * Android Lint's analysis is a whole-program pass that keeps a UAST environment
+ * alive. It caches without complaint and then dies when the entry is read back,
+ * which cost a release check to discover.
+ *
+ * Declaring it is what makes the difference: a declared incompatibility means the
+ * configuration state is discarded at the end of the build rather than remembered,
+ * so nothing is ever read back that could not survive being read back. The tasks
+ * that do cache still do.
+ */
+tasks.matching { it.name.startsWith("lint") }.configureEach {
+    notCompatibleWithConfigurationCache(
+        "Lint's UAST environment does not survive being read back from the cache",
+    )
+}
+
 val testForks = (providers.gradleProperty("muffy.testForks").orNull
     ?: Runtime.getRuntime().availableProcessors().toString())
     .toIntOrNull()?.coerceAtLeast(1) ?: 1

@@ -1,0 +1,34 @@
+# Keeping the build's own dependencies current.
+#
+# This is not about the app's libraries only: the pipeline itself is software,
+# and the actions it runs are dependencies too. An action pinned to a commit is
+# safe from somebody moving a tag under it, but it does not get fixes on its own
+# — which is what happened here twice: the runners moved to Node 24 and the
+# pinned actions began warning about it, and a Gradle release went unnoticed
+# while the build kept building.
+#
+# Dependabot opens a small pull request for each. Those pull requests run the
+# same tests as any other change, so a bump that breaks something is caught
+# before it is merged rather than on the next release.
+version: 2
+
+updates:
+  # Gradle dependencies and the plugin versions in the build files.
+  - package-ecosystem: gradle
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    # Wait a little before chasing a brand new release, so that a version
+    # published in the evening is not on the build before its first fix.
+    cooldown:
+      default-days: 3
+
+  # The workflow actions themselves, which is the ecosystem people forget.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 3
