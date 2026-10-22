@@ -156,7 +156,11 @@ jobs:
 
           echo "tests: $selection"
 
+          echo "verdict=$selection" >> "$GITHUB_OUTPUT"
+
           if [ "$selection" = "ALL" ]; then
+            echo "filters=" >> "$GITHUB_OUTPUT"
+          elif [ "$selection" = "NONE" ]; then
             echo "filters=" >> "$GITHUB_OUTPUT"
           else
             filters=""
@@ -167,6 +171,10 @@ jobs:
           fi
 
       - name: Run the tests
+        # Nothing that could change the app was touched, so the app being tested
+        # is byte for byte the one that already passed. Running a suite to
+        # confirm that is a minute spent to learn nothing.
+        if: steps.which.outputs.verdict != 'NONE'
         env:
           FILTERS: ${{ steps.which.outputs.filters }}
         run: |
@@ -238,7 +246,29 @@ jobs:
           cache-cleanup: never
           cache-read-only: true
 
+      # Lint reads Android sources and resources, so it is asked the same
+      # question the tests are. The job decides for itself rather than waiting
+      # for the test job, because waiting would turn two jobs running side by
+      # side into one long chain.
+      - name: Is there anything to check
+        id: which
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          TOOLS_DIR: ${{ github.workspace }}/tools
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            verdict="ALL"
+          else
+            git fetch --quiet --no-tags --depth=50 origin "$BASE_REF" || true
+            verdict="$(bash "$TOOLS_DIR/changed-tests.sh" --base "origin/$BASE_REF")"
+          fi
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+
       - name: Check the release
+        # nothing that could change the app was touched, so there is nothing for
+        # lint to look at that it did not already look at
+        if: steps.which.outputs.verdict != 'NONE'
         run: ./gradlew --no-daemon lintVitalRelease
 
   # -------------------------------------------------------------------------

@@ -18,6 +18,8 @@
 #
 # Prints one of:
 #   ALL                      run the whole suite
+#   NONE                     there is nothing to run: nothing that could change
+#                            the app was touched (words, pictures and tooling)
 #   <Class> <Class> ...      run only these, in that order
 #
 # Exit code: 0 when it worked out an answer, 2 on a bad use.
@@ -63,6 +65,31 @@ if [ -z "$CHANGED" ]; then
     # Nothing changed is not a reason to skip the tests: a branch can be empty
     # of source changes and still be the first run of a new workflow.
     echo "ALL"
+    exit 0
+fi
+
+# A change that touches nothing the app is built from cannot change the app.
+# That is the one case where no test and no lint has anything to say: the
+# compiled result is byte for byte the same as before. Words, pictures, and the
+# tooling that makes pictures are all in this class.
+#
+# The workflows are deliberately NOT in this class: a change to a workflow is
+# validated by running it, so it must run.
+only_words=1
+while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    case "$file" in
+        *.md|docs/*|LICENSE*|.gitignore|.gitattributes) ;;
+        tools/*) ;;
+        *) only_words=0; break ;;
+    esac
+done <<< "$CHANGED"
+case "$CHANGED" in
+    *".github/"*) only_words=0 ;;
+esac
+
+if [ "$only_words" = "1" ]; then
+    echo "NONE"
     exit 0
 fi
 
