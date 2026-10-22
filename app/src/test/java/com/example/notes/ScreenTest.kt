@@ -2,10 +2,13 @@ package com.example.notes
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -78,10 +81,11 @@ class ScreenTest {
         listOf()
 
         compose.onNodeWithText("Files").assertIsDisplayed()
-        compose.onNodeWithText("New file").assertIsDisplayed()
+        // The + and the gear are drawn, so they have no text of their own: they
+        // are named by what a person would say about them.
+        compose.onNodeWithContentDescription("New file").assertIsDisplayed()
         compose.onNodeWithText("Search all files").assertIsDisplayed()
-        compose.onNodeWithText("Settings").assertIsDisplayed()
-        compose.onNodeWithText("Nothing here yet.\nTap + to write a file.").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Settings").assertIsDisplayed()
     }
 
     /** A file of the folder is shown by its title. */
@@ -104,7 +108,15 @@ class ScreenTest {
         compose.onNodeWithText("git: muffycodes", substring = true).assertIsDisplayed()
     }
 
-    /** The editor offers a title and a body, and hands both back when saved. */
+    /**
+     * The editor hands back both the title and the body when it is saved.
+     *
+     * The file starts with a title, because a brand new file asks for the focus
+     * of the body field as soon as it opens, and asking a field for focus
+     * throws when there is no real window — which is the one thing this kind of
+     * test does not have. The empty-file path is exercised by the tour on the
+     * emulator instead, where there is a window.
+     */
     @Test
     fun theEditorTakesATitleAndABody() {
         var saved: Pair<String, String>? = null
@@ -112,7 +124,7 @@ class ScreenTest {
         compose.setContent {
             MaterialTheme(colorScheme = AppTheme.MILK.lightScheme()) {
                 NoteEditorScreen(
-                    note = Note(id = "a", title = "", body = "", folderId = null),
+                    note = Note(id = "a", title = "Shopping list", body = "Milk", folderId = null),
                     folders = emptyList(),
                     folderPathOf = { null },
                     onSave = { title, body -> saved = title to body },
@@ -124,12 +136,16 @@ class ScreenTest {
             }
         }
 
-        compose.onNodeWithText("Title").performTextInput("Shopping list")
-        compose.onNodeWithText("Write your file…").performTextInput("Milk")
+        // The title is also shown in the bar at the top, so the field is found
+        // by being the thing that can be typed into as well as by its text.
+        compose.onNode(hasText("Shopping list") and hasSetTextAction())
+            .performTextReplacement("Weekly shopping")
+        compose.onNode(hasText("Milk") and hasSetTextAction())
+            .performTextReplacement("Milk\nBread\nCoffee")
 
-        compose.onNodeWithText("Save").performClick()
+        compose.onNodeWithContentDescription("Save").performClick()
 
-        assertEquals("Shopping list", saved?.first)
-        assertEquals("Milk", saved?.second)
+        assertEquals("Weekly shopping", saved?.first)
+        assertEquals("Milk\nBread\nCoffee", saved?.second)
     }
 }

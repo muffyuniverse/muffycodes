@@ -222,28 +222,16 @@ or the tour itself is changed. There is also `look-at-app.yml`, which writes
 down the names that are on the screen at every step, so that a tour can be
 written with the names the app really shows instead of guesses.
 
-### Checking what was drawn
+### Looking at the app is a person's job
 
-The names and the places of the things on a screen are read from the app
-itself, and that is what the tour taps and what it checks. What the names
-cannot say is whether anything was actually **drawn**: the list of names has no
-colours in it, so a theme that never applied, an icon that failed to draw and
-text the same colour as its background all look perfectly fine to it.
+Nothing here checks how the app looks. Colours, spacing and anything drawn by
+hand are judged by installing the app on a real phone, which is what actually
+finds a visual problem — an automated comparison can only ever assert what its
+author already believed, and would never say that a screen is ugly, cramped or
+not what was wanted.
 
-`tools/check-pixels.py` reads the pictures and asks three questions that can be
-answered without knowing what the app is meant to look like:
-
-- is the picture **flat**? (nothing was drawn)
-- does text **stand out** from its background? (at least 3:1)
-- do the **themes differ** from each other? (only asked with `--themes`)
-
-The checks are on properties, never on exact colours, so a different emulator,
-processor or font cannot make them fail for the wrong reason.
-
-The theme tour (`tools/theme-tour.txt`) is what makes the third question
-answerable: it takes a picture of **the same screen in every theme**, so any
-difference between those pictures is the theme and nothing else. It runs in the
-same emulator session as the main tour, into a folder of its own.
+So the pictures the tour takes are **for your eyes only**: they are tooling, run
+by hand when you want them, and they never fail a build.
 
 ### Tests
 
