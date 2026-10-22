@@ -63,6 +63,8 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
 
     # How many runners share the suite, set by the repository variable
     # TEST_SHARDS, which holds a list of shard indexes. Unset means `[0]`: one
@@ -282,6 +284,8 @@ jobs:
   # -------------------------------------------------------------------------
   lint:
     name: Deep checks
+    permissions:
+      contents: read
     # Main only. Lint reads the whole project and costs sixty seconds doing it,
     # and a pull request cannot afford that as its longest job: it would be the
     # critical path, and the answer a pull request needs is about the tests.
@@ -340,6 +344,10 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    # It only reads the repository and writes the key from a secret. It does not
+    # publish, so it never needs to write anything to GitHub.
+    permissions:
+      contents: read
 
     outputs:
       version_name: ${{ steps.version.outputs.name }}
