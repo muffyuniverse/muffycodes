@@ -169,6 +169,7 @@ find_text_bounds() {
     box="${box//,/ }"
     read -r l t r b <<<"$box"
     [ -z "$l" ] || [ -z "$t" ] || [ -z "$r" ] || [ -z "$b" ] && return 0
+    trace "found '$wanted' at [$l,$t][$r,$b]"
     printf '%d,%d\n' $(( (l + r) / 2 )) $(( (t + b) / 2 ))
 }
 
@@ -178,7 +179,22 @@ dump_screen() {
     adb shell uiautomator dump /sdcard/window.xml >/dev/null 2>&1
     adb shell cat /sdcard/window.xml 2>/dev/null | tr -d '\r' \
         | sed 's/></>\n</g' \
-        | grep -oE '(text|content-desc|hint)="[^"]*"' \
+        | while IFS= read -r node; do
+            local name box
+            # The name that is shown. A button that has no text of its own
+            # is named by its label.
+            name="$(printf '%s' "$node" | sed -n 's/.*content-desc="\([^"]*\)".*/\1/p' | head -1)"
+            if [ -z "$name" ]; then
+                name="$(printf '%s' "$node" | sed -n 's/.*text="\([^"]*\)".*/\1/p' | head -1)"
+            fi
+            if [ -z "$name" ]; then
+                name="$(printf '%s' "$node" | sed -n 's/.*hint="\([^"]*\)".*/\1/p' | head -1)"
+            fi
+            box="$(printf '%s' "$node" | sed -n 's/.*bounds="\([^"]*\)".*/\1/p')"
+            [ -n "$name" ] || [ -n "$box" ] || continue
+            echo "\"$name\" $box"
+        done \
+        | grep -v '^""' \
         | sort -u
 }
 
