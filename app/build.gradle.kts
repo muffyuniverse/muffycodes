@@ -117,13 +117,18 @@ android {
 }
 
 /**
- * How many test classes run at the same time. One process is the default,
- * because that is what the small container can manage; the continuous
- * integration asks for more, because the machine it runs on has several
- * processors and nothing else to do. This changes only the speed, never what
- * is tested: every test runs either way, and a failure is reported the same.
+ * How many test classes run at the same time.
+ *
+ * The default is every processor the machine has, because that is what the
+ * machine is for: a runner with four of them should use four. A host that
+ * cannot spare them says so through the property `muffy.testForks` in its own
+ * Gradle home, which is not part of this repository.
+ *
+ * This changes only how fast the work is done, never what is tested: every
+ * test runs either way, and a failure is reported the same.
  */
-val testForks = (providers.gradleProperty("muffy.testForks").orNull ?: "1")
+val testForks = (providers.gradleProperty("muffy.testForks").orNull
+    ?: Runtime.getRuntime().availableProcessors().toString())
     .toIntOrNull()?.coerceAtLeast(1) ?: 1
 
 tasks.withType<Test>().configureEach {

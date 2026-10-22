@@ -55,6 +55,14 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # One line, so that what the run had to work with is on the record: a
+      # guess about how big a runner is is no way to judge whether a build is
+      # using it.
+      - name: Say what this machine has
+        run: |
+          echo "processors: $(nproc)"
+          awk '/MemTotal/ {printf "memory: %.1f GB\n", $2/1024/1024}' /proc/meminfo
+
       # Robolectric downloads the Android runtime it runs against (a jar of
       # well over a hundred megabytes) the first time it needs it, and would
       # otherwise do that again on every run. It keeps them in the local Maven
@@ -69,20 +77,11 @@ jobs:
 
       - name: Run the tests
         run: |
-          # The settings that suit this project's own container (one worker, a
-          # small heap, no parallel work) are wrong for a machine with several
-          # processors. They are given on the command line, where Gradle always
-          # reads them, and they change only how fast the work is done, never
-          # what is tested: every test runs either way.
-          #
-          # A build made by hand in the container is left alone by this: the
-          # file it reads there still says one worker.
-          ./gradlew --no-daemon \
-            --parallel --max-workers=4 \
-            -Dorg.gradle.jvmargs="-Xmx3g -XX:MaxMetaspaceSize=1g" \
-            -Dorg.gradle.caching=true \
-            -Pmuffy.testForks=2 \
-            testDebugUnitTest
+          # The project's own gradle.properties has no per-host limits, so this
+          # machine uses everything it was given: all its processors, all the
+          # memory the run allows, and the incremental compilation and caches
+          # that make a second run cheaper than the first.
+          ./gradlew --no-daemon testDebugUnitTest
 
       - name: Keep the test report when something failed
         if: failure()
