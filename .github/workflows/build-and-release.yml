@@ -220,9 +220,14 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: .gradle/configuration-cache
-          key: config-cache-v1-tests-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle.properties', 'gradle/wrapper/gradle-wrapper.properties') }}
+          # The shard is part of the key, and has to be: a matrix is one job
+          # definition, so every shard would otherwise write to the same key and
+          # only one entry would survive. The others would restore a cache
+          # holding somebody else's entry, miss, and recompute — which measured
+          # as both shards reporting a miss on two consecutive runs.
+          key: config-cache-v1-tests-${{ matrix.shard }}-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle.properties', 'gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
-            config-cache-v1-tests-${{ runner.os }}-
+            config-cache-v1-tests-${{ matrix.shard }}-${{ runner.os }}-
       - name: Run the tests
         # Nothing that could change the app was touched, so the app being tested
         # is byte for byte the one that already passed. Running a suite to

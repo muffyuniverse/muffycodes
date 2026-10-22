@@ -171,7 +171,6 @@ that had already passed. Now it is 24s, and the 24s is the floor: two jobs
 starting, deciding there is nothing to do, and reporting.
 
 
-
 ## Growing without getting slower
 
 The suite takes six seconds and the configuration phase is what a run really
@@ -203,6 +202,20 @@ the tests, and the shard count is not baked into any test.
 `--parallel` is passed as well. It does nothing with one module and costs
 nothing, and it means the runners will use modules as soon as they exist rather
 than after somebody remembers to add the flag.
+
+**Each shard needs its own cache key, and this was found the hard way.** A
+matrix is a single job definition, so every shard writes to the same key and
+only one entry survives; the others restore a cache holding somebody else's
+entry, miss, and recompute. Two consecutive runs both reported a miss in both
+shards until the shard index was added to the key. With it, both shards report
+`Reusing configuration cache.` from the second run onwards.
+
+**And sharding is a loss at this size, which is why it is off.** Measured on the
+same nine test classes: one runner takes 21s of Gradle work, while two runners
+took 38s and 32s, because each shard pays the setup, the Gradle start-up and the
+compilation again. The work is too small to divide and the fixed cost is paid
+twice. Sharding pays when the work dwarfs the setup, which it does not yet. The
+machinery is in place and tested for the day that changes.
 
 ### What is worth doing first when it does get slow
 
@@ -346,99 +359,6 @@ What *can* be skipped is a change that cannot reach the app at all — which is
 what the words-only rule above does, and it is a statement about the files, not
 about their size.
 
-
-
-## Growing without getting slower
-
-The suite takes six seconds and the configuration phase is what a run really
-costs, so today the whole suite runs on one runner. That is a statement about
-today, not a design, and the design is what matters once there are dozens of
-modules and hundreds of tests.
-
-Three things are in place so that growth is paid for with runners rather than
-with time.
-
-**A shard is an index, never a diff.** `tools/test-shard.sh --shard i --of n`
-prints the gradle arguments for runner `i`. It is deliberately not driven by
-what changed: a set chosen per change changes the command line, a changed
-command line is a different configuration-cache entry, and the run would trade a
-cache hit for a moment of narrowness. Each shard's command line is identical from
-run to run, so the cache holds one entry per shard and reuses them all.
-
-**The split is balanced and complete.** Classes are ordered by a POSIX hash and
-dealt out in turn, which measured at 3/2/2/2 for four shards where hashing each
-class into a bucket measured at 2/0/6/1 — a runner waiting with nothing to do.
-`--verify` checks that every class lands in exactly one shard, so the split can
-never quietly leave tests unrun.
-
-**Scaling is a repository setting.** The test job reads the variable
-`TEST_SHARDS`, which holds a list of shard indexes and defaults to `[0]`. Setting
-it to `[0,1,2,3]` turns one runner into four. No workflow edit, no reshaping of
-the tests, and the shard count is not baked into any test.
-
-`--parallel` is passed as well. It does nothing with one module and costs
-nothing, and it means the runners will use modules as soon as they exist rather
-than after somebody remembers to add the flag.
-
-### What is worth doing first when it does get slow
-
-In order, because each is worth more than the next:
-
-1. **Split the module.** The app is one module; the tests for the folder tree,
-   the file format and git sit beside the screens. Separate modules get separate
-   `testDebugUnitTest` tasks, Gradle runs them in parallel, and a change to one
-   does not recompile the others. This is worth more than sharding because it
-   also shortens compilation.
-2. **Then shard.** `TEST_SHARDS=[0,1]`, measured with `--verify` first.
-3. **Only then** think about narrowing by what changed. It is the weakest of the
-   three: it saves test execution, which is the smallest part of a run, and it
-   gives up the cache to do it.
-
-## One cost per branch, measured
-
-| branch | what runs | measured |
-|---|---|---|
-| pull request, words only | the decision, and nothing else | **10s** |
-| pull request, one source file | that file's tests | **53s** |
-| pull request, unclassifiable or build change | every test | **49–53s** |
-| development | every test, and the release APK as an artifact | **2m 09s** |
-| main | every test, the deep checks, the release, the publish | 1m 45s–3m |
-
-Development builds an APK and keeps it as an artifact but publishes nothing;
-main is the only branch that publishes. Both were run to confirm it, and a
-development push left `Publish` and `Deep checks` skipped with `release-apk`
-(7,462,352 bytes) attached to the run.
-
-## The floor, taken apart
-
-The floor used to be described as seventeen seconds. Measured step by step on a
-run that does real work:
-
-| step | time |
-|---|---|
-| Set up job | 2–4s |
-| Check out | 1–3s |
-| Work out which tests are needed | 1s |
-| Set up Java | 0–1s |
-| Set up Gradle (restores the cache) | 6–9s |
-| Robolectric runtime cache | 0 or 4s |
-| Gradle's own start-up inside the test step | ~7s |
-
-Roughly ten to fifteen seconds of unavoidable provisioning, of which the Gradle
-cache restore is the largest single item.
-
-**The way to lower it was not to make it cheaper but to stop paying it.** The
-decision now runs first, and when there is nothing to run, Java, Gradle, the
-Robolectric cache and the tests are all skipped — which is why a
-words-only pull request takes ten seconds instead of seventy-four. Nothing is
-installed to do no work.
-
-## Nothing above this directory
-
-A development branch is pushed on every glance at a build, so it is worth
-knowing what it does *not* do: it does not publish, it does not run the deep
-checks, and it does not make a version. It builds the APK, tests it, and keeps
-the artifact.
 
 ## The floor
 
