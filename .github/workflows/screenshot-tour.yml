@@ -103,7 +103,7 @@ jobs:
             # looking at. But a run that made nothing at all is a failure.
             # Every line of this script is run in a shell of its own, so the
             # check is done by a small script of its own.
-            bash tools/check-pictures.sh "${{ github.workspace }}/screenshots"
+            bash tools/check-pictures.sh "$SHOT_DIR"
 
       - name: Put the pictures in the run
         if: always()

@@ -171,6 +171,53 @@ that had already passed. Now it is 24s, and the 24s is the floor: two jobs
 starting, deciding there is nothing to do, and reporting.
 
 
+
+## Growing without getting slower
+
+The suite takes six seconds and the configuration phase is what a run really
+costs, so today the whole suite runs on one runner. That is a statement about
+today, not a design, and the design is what matters once there are dozens of
+modules and hundreds of tests.
+
+Three things are in place so that growth is paid for with runners rather than
+with time.
+
+**A shard is an index, never a diff.** `tools/test-shard.sh --shard i --of n`
+prints the gradle arguments for runner `i`. It is deliberately not driven by
+what changed: a set chosen per change changes the command line, a changed
+command line is a different configuration-cache entry, and the run would trade a
+cache hit for a moment of narrowness. Each shard's command line is identical from
+run to run, so the cache holds one entry per shard and reuses them all.
+
+**The split is balanced and complete.** Classes are ordered by a POSIX hash and
+dealt out in turn, which measured at 3/2/2/2 for four shards where hashing each
+class into a bucket measured at 2/0/6/1 — a runner waiting with nothing to do.
+`--verify` checks that every class lands in exactly one shard, so the split can
+never quietly leave tests unrun.
+
+**Scaling is a repository setting.** The test job reads the variable
+`TEST_SHARDS`, which holds a list of shard indexes and defaults to `[0]`. Setting
+it to `[0,1,2,3]` turns one runner into four. No workflow edit, no reshaping of
+the tests, and the shard count is not baked into any test.
+
+`--parallel` is passed as well. It does nothing with one module and costs
+nothing, and it means the runners will use modules as soon as they exist rather
+than after somebody remembers to add the flag.
+
+### What is worth doing first when it does get slow
+
+In order, because each is worth more than the next:
+
+1. **Split the module.** The app is one module; the tests for the folder tree,
+   the file format and git sit beside the screens. Separate modules get separate
+   `testDebugUnitTest` tasks, Gradle runs them in parallel, and a change to one
+   does not recompile the others. This is worth more than sharding because it
+   also shortens compilation.
+2. **Then shard.** `TEST_SHARDS=[0,1]`, measured with `--verify` first.
+3. **Only then** think about narrowing by what changed. It is the weakest of the
+   three: it saves test execution, which is the smallest part of a run, and it
+   gives up the cache to do it.
+
 ## One cost per branch, measured
 
 | branch | what runs | measured |
@@ -299,6 +346,53 @@ What *can* be skipped is a change that cannot reach the app at all — which is
 what the words-only rule above does, and it is a statement about the files, not
 about their size.
 
+
+
+## Growing without getting slower
+
+The suite takes six seconds and the configuration phase is what a run really
+costs, so today the whole suite runs on one runner. That is a statement about
+today, not a design, and the design is what matters once there are dozens of
+modules and hundreds of tests.
+
+Three things are in place so that growth is paid for with runners rather than
+with time.
+
+**A shard is an index, never a diff.** `tools/test-shard.sh --shard i --of n`
+prints the gradle arguments for runner `i`. It is deliberately not driven by
+what changed: a set chosen per change changes the command line, a changed
+command line is a different configuration-cache entry, and the run would trade a
+cache hit for a moment of narrowness. Each shard's command line is identical from
+run to run, so the cache holds one entry per shard and reuses them all.
+
+**The split is balanced and complete.** Classes are ordered by a POSIX hash and
+dealt out in turn, which measured at 3/2/2/2 for four shards where hashing each
+class into a bucket measured at 2/0/6/1 — a runner waiting with nothing to do.
+`--verify` checks that every class lands in exactly one shard, so the split can
+never quietly leave tests unrun.
+
+**Scaling is a repository setting.** The test job reads the variable
+`TEST_SHARDS`, which holds a list of shard indexes and defaults to `[0]`. Setting
+it to `[0,1,2,3]` turns one runner into four. No workflow edit, no reshaping of
+the tests, and the shard count is not baked into any test.
+
+`--parallel` is passed as well. It does nothing with one module and costs
+nothing, and it means the runners will use modules as soon as they exist rather
+than after somebody remembers to add the flag.
+
+### What is worth doing first when it does get slow
+
+In order, because each is worth more than the next:
+
+1. **Split the module.** The app is one module; the tests for the folder tree,
+   the file format and git sit beside the screens. Separate modules get separate
+   `testDebugUnitTest` tasks, Gradle runs them in parallel, and a change to one
+   does not recompile the others. This is worth more than sharding because it
+   also shortens compilation.
+2. **Then shard.** `TEST_SHARDS=[0,1]`, measured with `--verify` first.
+3. **Only then** think about narrowing by what changed. It is the weakest of the
+   three: it saves test execution, which is the smallest part of a run, and it
+   gives up the cache to do it.
 
 ## One cost per branch, measured
 

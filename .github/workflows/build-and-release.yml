@@ -64,6 +64,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
+    # How many runners share the suite, set by the repository variable
+    # TEST_SHARDS, which holds a list of shard indexes. Unset means `[0]`: one
+    # runner, the whole suite, which is right while the suite takes six seconds.
+    #
+    # When it stops being right, the variable becomes `[0,1]` and then `[0,1,2,3]`
+    # and nothing else changes: no workflow edit, no rearrangement of tests. The
+    # split is by shard index and never by what changed, so each shard keeps the
+    # same command line from run to run and its configuration-cache entry stays
+    # useful.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(vars.TEST_SHARDS || '[0]') }}
+
     steps:
       - name: Check out the code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -171,7 +185,7 @@ jobs:
       #
       # This one cache was worth about a minute per run on its own.
       - name: Remember the runtime the tests need
-        if: steps.which.outputs.verdict != 'NONE' && steps.which.outputs.needs_robolectric == 'yes'
+        if: steps.which.outputs.verdict != 'NONE'
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.m2/repository
@@ -206,15 +220,29 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: .gradle/configuration-cache
-          key: config-cache-v1-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle.properties', 'gradle/wrapper/gradle-wrapper.properties') }}
+          key: config-cache-v1-tests-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle.properties', 'gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
-            config-cache-v1-${{ runner.os }}-
+            config-cache-v1-tests-${{ runner.os }}-
       - name: Run the tests
         # Nothing that could change the app was touched, so the app being tested
         # is byte for byte the one that already passed. Running a suite to
         # confirm that is a minute spent to learn nothing.
         if: steps.which.outputs.verdict != 'NONE'
-        run: ./gradlew --no-daemon --configuration-cache testDebugUnitTest
+        env:
+          SHARD: ${{ matrix.shard }}
+          SHARD_OF: ${{ strategy.job-total }}
+        run: |
+          # `--parallel` does nothing with one module and costs nothing; it is
+          # here so that the day the app is split into modules, the runners use
+          # them without anybody remembering to add it.
+          #
+          # The shard arguments are word-split on purpose, and are empty when
+          # there is one shard, so that the command line stays identical to an
+          # unsharded run and keeps its cache.
+          # shellcheck disable=SC2086
+          ./gradlew --parallel --no-daemon --configuration-cache \
+            testDebugUnitTest \
+            $(bash tools/test-shard.sh --shard "$SHARD" --of "$SHARD_OF")
 
       # Kept only when something failed, because it is the only thing that
       # explains a failure: the report carries the per-class timings and the
@@ -300,12 +328,12 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: .gradle/configuration-cache
-          key: config-cache-v1-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle.properties', 'gradle/wrapper/gradle-wrapper.properties') }}
+          key: config-cache-v1-lint-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle.properties', 'gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
-            config-cache-v1-${{ runner.os }}-
+            config-cache-v1-lint-${{ runner.os }}-
 
       - name: Check the release
-        run: ./gradlew --no-daemon --configuration-cache lintVitalRelease
+        run: ./gradlew --parallel --no-daemon --configuration-cache lintVitalRelease
 
   # -------------------------------------------------------------------------
   # The release, built while the tests are still running. Only ever on main.
@@ -389,19 +417,9 @@ jobs:
 
       # `-x lintVitalRelease` is not a check being dropped: Android attaches it
       # to `assembleRelease`, and it is the same analysis the test job already
-      # ran. Running it twice would add seventeen seconds here and change
-      # nothing, because the release is not published unless that job passed.
-      # Gradle's configuration cache lives in the project's own `.gradle`
-      # directory, which a fresh checkout does not have, so it would be paid for
-      # and thrown away on every run. Keeping it turns the configuration phase —
-      # measured at fifteen seconds, the largest fixed cost in a run — into a
-      # restore.
-      #
-      # The key is the build files and nothing else: the cache describes how the
-      # project is put together, not what the sources say, so a change to a
-      # Kotlin file reuses it. When the key does miss, Gradle recomputes and
-      # stores a new entry; a miss costs what it costs today and never a wrong
-      # build.
+      # runs on its own runner. Running it twice would add a minute here and
+      # change nothing, because the release is not published unless that job
+      # passed first.
       - name: Build the release
         env:
           MUFFY_KEYSTORE_BASE64: ${{ secrets.MUFFY_KEYSTORE_BASE64 }}
@@ -414,7 +432,7 @@ jobs:
           # No --configuration-cache here, deliberately: this invocation carries
           # a version code and name that differ on every release, so the entry
           # could never be reused and storing it would be a cost with no payoff.
-          ./gradlew --no-daemon assembleRelease \
+          ./gradlew --parallel --no-daemon assembleRelease \
             -x lintVitalRelease \
             -Pmuffy.versionCode="$VERSION_CODE" \
             -Pmuffy.versionName="$VERSION_NAME"
@@ -501,9 +519,17 @@ jobs:
           # The release is the last thing that happens, so a failure earlier
           # leaves nothing half-published. If it still cannot be made, the build
           # itself was good and only the publishing failed, which is said plainly.
+          # A release that already exists is not a failure: a re-run of the same
+          # commit must be allowed to do nothing. Anything else is a failure and
+          # is reported as one, because a green run that published nothing is the
+          # one outcome that must never happen quietly.
+          if gh release view "v${VERSION_NAME}" --repo "$REPOSITORY" > /dev/null 2>&1; then
+            echo "Version ${VERSION_NAME} is already released; nothing to publish."
+            exit 0
+          fi
+
           gh release create "v${VERSION_NAME}" \
             --repo "$REPOSITORY" \
             --title "Muffy Codes ${VERSION_NAME}" \
             --notes "Version ${VERSION_NAME} of Muffy Codes, built and tested by the workflow." \
-            app-release.apk \
-            || echo "The release could not be made, but the build itself was good."
+            app-release.apk

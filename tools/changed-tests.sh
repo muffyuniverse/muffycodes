@@ -80,6 +80,12 @@ while IFS= read -r file; do
     [ -n "$file" ] || continue
     case "$file" in
         *.md|docs/*|LICENSE*|.gitignore|.gitattributes) ;;
+        # The selector and its table are the tooling that decides this very
+        # question, so a change to either must be run rather than skipped.
+        # Classifying them as "nothing to do" would mean the one part of the
+        # pipeline that can silently choose too little is the one part nothing
+        # ever checks.
+        tools/changed-tests.sh|tools/test-map.txt) only_words=0; break ;;
         tools/*) ;;
         *) only_words=0; break ;;
     esac
