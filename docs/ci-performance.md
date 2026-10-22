@@ -8,28 +8,30 @@ estimated.
 
 | | wall clock |
 |---|---|
-| One job, container-limited settings, Robolectric downloading its runtime on every run | **~5m 24s** (with the emulator tour) / **1m 55s** (tests + release) |
-| + runtime cache keyed by a version instead of a file hash | 1m 24s |
-| + release built beside the tests instead of after them; cache cleanup disabled | 1m 05s |
-| + release lint moved to the job that has time for it; stale runs cancelled | **~1m 16s** |
+| One job, this container's settings, Robolectric downloading its runtime every run | **1m 55s** (tests + release) · ~5m 24s with the emulator tour |
+| + the runtime cache keyed by a version instead of a file hash | 1m 24s |
+| + the release built beside the tests; cache cleanup disabled | 1m 05s |
+| + tests forced to really run; lint on a runner of its own | **1m 14s** |
 
-The last two are not comparable by themselves: the number went *up* from 65s to
-76s because that run had less warm cache. The stable figure is the critical
-path, below.
+The last row is *slower than the one before it*, and that is the honest
+answer: two runs before it had warmer caches, and the row before it was not
+running the tests at all (see below). The number that matters is the one
+measured on the same warm cache.
 
 ## What is left, measured
 
-Per job, on a warm cache:
+Three jobs run at the same time on main, and the run is as long as the slowest
+of them plus publishing:
 
-| | Test job | Release job |
-|---|---|---|
-| machine setup, checkout, Java | 7s | 7s |
-| set up Gradle (restores caches) | 9s | 12s |
-| the work | 36s (lint) | 36s (build) |
-| hand-over / publish | — | 8s |
+| job | time |
+|---|---|
+| Release checks (`lintVitalRelease`) | 50s |
+| Build the release | 38s |
+| **Test** — the critical path | **58s** (25s setup + 29s work) |
+| Publish | 13s |
+| **total, wall clock** | **74s** |
 
-The two jobs run at the same time, so the wall clock is the slower of them plus
-publishing: **about 55–65 seconds**.
+On a pull request only the Test job runs, so it is about 58s.
 
 ## The four things that actually mattered
 
@@ -60,6 +62,21 @@ held to the limits of a small phone container. They now live in this
 container's own Gradle home, outside the repository. The project says only what
 is true of the project.
 
+## The tests were not running at all
+
+Worth its own section, because it was the worst problem found and it was not a
+performance problem.
+
+Gradle was reporting `:app:testDebugUnitTest FROM-CACHE`: instead of running
+anything, it handed back the results of an earlier run. The verification gate
+was therefore answering "did this commit pass?" with a question about a cache
+entry. It is sound in principle — the cache key covers what the tests read — but
+it hides everything the cache does not know it depends on, which is exactly what
+the screen tests depend on (the machine's own state).
+
+The tests are now always really run, at a measured cost of about 16s. That is
+the price of the answer being about the code.
+
 ## What was checked and found not to help
 
 Each of these was tried or measured, not guessed about:
@@ -71,6 +88,7 @@ Each of these was tried or measured, not guessed about:
 | **`maxParallelForks` above the core count** | no effect here. The tests are `FROM-CACHE` whenever the app did not change, and when they do run they are 16s of a 55s path. The bottleneck is lint, not test parallelism |
 | **The configuration cache across runs** | never hits. It needs the project's `.gradle` directory to survive between runs, which means caching build state tied to an absolute path — the kind of cache that goes stale and lies. It is left on because it costs nothing within a job |
 | **Remote build cache** | not worth it at this size. It needs somewhere to run, and a whole run is now about a minute |
+| **Forcing the tests to run** | done, and it is not an optimisation but a correction: they were being replaced by cached results |
 | **Dedicated larger runners** | available for public repositories, and they would cut compile and lint time. Against that: queue times are less predictable on them, and the current cost is already near the floor of *setup*, not of work |
 
 ## The floor
