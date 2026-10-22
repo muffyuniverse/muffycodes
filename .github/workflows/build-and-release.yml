@@ -1,8 +1,17 @@
 name: Build and release
 
-# Every push and every pull request is tested. A pull request stops there: the
-# tests are what answer whether a change is good, and a signed release is only
-# ever made from main.
+# Three levels of cost, one for each thing a branch is for.
+#
+# A pull request runs the tests and nothing else: the tests are what answer
+# whether a change is good, and that answer is the only one needed before a
+# merge. No lint, no release build.
+#
+# A push to development adds the release build and keeps the APK as an artifact,
+# so there is something to install and look at. It does not publish a release
+# and it does not run the deep checks.
+#
+# A push to main is the only thing that publishes: it runs everything, including
+# the deep checks, and a release that fails them is never published.
 #
 # On main the release is built *at the same time* as the tests rather than after
 # them. It cannot be published until the tests pass, so the ordering is kept
@@ -10,7 +19,7 @@ name: Build and release
 # finish before starting the other.
 on:
   push:
-    branches: [main]
+    branches: [main, development]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -65,70 +74,12 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Set up Java
-        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      # The action keeps Gradle's home, the downloaded dependencies and the
-      # build cache between runs. Everything below is about not paying twice for
-      # the same thing.
+      # This is deliberately the first thing that happens, before Java and
+      # Gradle are set up. Deciding costs a second and needs nothing but git and
+      # a shell; provisioning costs fifteen. Asking the cheap question first is
+      # what lets a change that cannot affect the app finish in seconds instead
+      # of paying for a toolchain it will not use.
       #
-      # `cache-cleanup: never` is the single largest saving in this file: the
-      # action's post step otherwise starts a second Gradle (the runner's own,
-      # a different version from ours) in a fresh daemon just to tidy the cache,
-      # which measured twenty-eight seconds — more than the tests themselves.
-      # The price is that entries are never pruned; this project is small, and
-      # the enhanced provider the action uses by default deduplicates them.
-      #
-      # A pull request only reads the cache. It has nothing worth saving that
-      # main will not save a moment later, and a write-only run is a run whose
-      # post step is wasted work.
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
-        with:
-          cache-cleanup: never
-          cache-read-only: ${{ github.event_name == 'pull_request' }}
-
-      - name: Say what this machine has
-        run: |
-          echo "processors: $(nproc)"
-          awk '/MemTotal/ {printf "memory: %.1f GB\n", $2/1024/1024}' /proc/meminfo
-
-      # Robolectric downloads the Android runtime it runs against (a jar of well
-      # over a hundred megabytes) the first time it needs it, and would
-      # otherwise do that again on every run. It keeps them in the local Maven
-      # repository, so that directory is what is kept between runs.
-      #
-      # The key is a fixed name and not a hash of the build file. Hashing the
-      # build file looked careful and was worse than useless: every edit to it
-      # produced a new key, which means a cache that is never found and a
-      # runtime that is downloaded again. What decides which runtime is needed
-      # is the version of Robolectric, which changes rarely, so the key is a
-      # version raised by hand when that line in build.gradle.kts changes.
-      # Caches cannot be overwritten, so raising this number retires a stale one.
-      #
-      # This one cache was worth about a minute per run on its own.
-      - name: Remember the runtime the tests need
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: ~/.m2/repository
-          key: robolectric-runtime-v1-${{ runner.os }}
-
-      # Deliberately NOT split into shards. Measured on a 58-test suite: the
-      # tests take 16s while setting a job up costs 17s, so two shards would each
-      # pay the setup in full to halve a little work — slower in wall clock and
-      # twice the runners. Sharding pays when the work dwarfs the setup; worth
-      # revisiting if the suite ever passes about two minutes.
-      #
-      # The release lint runs here rather than in the release build, and that is
-      # the single biggest remaining saving. Measured, it is seventeen seconds of
-      # the release build's forty, and it is needed by `assembleRelease` only
-      # because Android says so. This job finishes well before the release job
-      # does, so the same check costs nothing here, and the release job skips it
-      # (see there). It still gates the release, because publishing waits for
-      # this job to pass.
       # A pull request runs only the tests its own change can have broken; main
       # runs all of them, because main is what ships. That is the difference
       # between a quick answer on a change and a real answer on a release.
@@ -155,12 +106,17 @@ jobs:
           fi
 
           echo "tests: $selection"
-
           echo "verdict=$selection" >> "$GITHUB_OUTPUT"
 
-          if [ "$selection" = "ALL" ]; then
-            echo "filters=" >> "$GITHUB_OUTPUT"
-          elif [ "$selection" = "NONE" ]; then
+          # Robolectric is only needed when a screen test is in the selection.
+          # Fetching a hundred megabytes of Android runtime to run a parser test
+          # is the kind of cost that hides inside a cache step.
+          case "$selection" in
+            ALL|*ScreenTest*) echo "needs_robolectric=yes" >> "$GITHUB_OUTPUT" ;;
+            *) echo "needs_robolectric=no" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+          if [ "$selection" = "ALL" ] || [ "$selection" = "NONE" ]; then
             echo "filters=" >> "$GITHUB_OUTPUT"
           else
             filters=""
@@ -170,6 +126,77 @@ jobs:
             echo "filters=$filters" >> "$GITHUB_OUTPUT"
           fi
 
+      # Everything below is provisioning, and all of it is skipped when there is
+      # nothing to run: a job that installs a toolchain to do no work is a job
+      # that spends a minute to say nothing.
+      - name: Set up Java
+        if: steps.which.outputs.verdict != 'NONE'
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # The action keeps Gradle's home, the downloaded dependencies and the
+      # build cache between runs. Everything below is about not paying twice for
+      # the same thing.
+      #
+      # `cache-cleanup: never` is the single largest saving in this file: the
+      # action's post step otherwise starts a second Gradle (the runner's own,
+      # a different version from ours) in a fresh daemon just to tidy the cache,
+      # which measured twenty-eight seconds — more than the tests themselves.
+      # The price is that entries are never pruned; this project is small, and
+      # the enhanced provider the action uses by default deduplicates them.
+      #
+      # A pull request only reads the cache. It has nothing worth saving that
+      # main will not save a moment later, and a write-only run is a run whose
+      # post step is wasted work.
+      - name: Set up Gradle
+        if: steps.which.outputs.verdict != 'NONE'
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-cleanup: never
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+      - name: Say what this machine has
+        if: steps.which.outputs.verdict != 'NONE'
+        run: |
+          echo "processors: $(nproc)"
+          awk '/MemTotal/ {printf "memory: %.1f GB\n", $2/1024/1024}' /proc/meminfo
+
+      # Robolectric downloads the Android runtime it runs against (a jar of well
+      # over a hundred megabytes) the first time it needs it, and would
+      # otherwise do that again on every run. It keeps them in the local Maven
+      # repository, so that directory is what is kept between runs.
+      #
+      # The key is a fixed name and not a hash of the build file. Hashing the
+      # build file looked careful and was worse than useless: every edit to it
+      # produced a new key, which means a cache that is never found and a
+      # runtime that is downloaded again. What decides which runtime is needed
+      # is the version of Robolectric, which changes rarely, so the key is a
+      # version raised by hand when that line in build.gradle.kts changes.
+      # Caches cannot be overwritten, so raising this number retires a stale one.
+      #
+      # This one cache was worth about a minute per run on its own.
+      - name: Remember the runtime the tests need
+        if: steps.which.outputs.verdict != 'NONE' && steps.which.outputs.needs_robolectric == 'yes'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.m2/repository
+          key: robolectric-runtime-v1-${{ runner.os }}
+
+      # Deliberately NOT split into shards. Measured on a 58-test suite: the
+      # tests take 16s while setting a job up costs 17s, so two shards would each
+      # pay the setup in full to halve a little work — slower in wall clock and
+      # twice the runners. Sharding pays when the work dwarfs the setup; worth
+      # revisiting if the suite ever passes about two minutes.
+      #
+      # The release lint runs here rather than in the release build, and that is
+      # the single biggest remaining saving. Measured, it is seventeen seconds of
+      # the release build's forty, and it is needed by `assembleRelease` only
+      # because Android says so. This job finishes well before the release job
+      # does, so the same check costs nothing here, and the release job skips it
+      # (see there). It still gates the release, because publishing waits for
+      # this job to pass.
       - name: Run the tests
         # Nothing that could change the app was touched, so the app being tested
         # is byte for byte the one that already passed. Running a suite to
@@ -218,12 +245,21 @@ jobs:
   # would fail the check is never published.
   # -------------------------------------------------------------------------
   lint:
-    name: Release checks
-    # Deliberately NOT limited to main. Lint used to run only after a merge,
-    # which meant a lint failure was discovered once the change was already in
-    # main and blocking the release — the gate was on the wrong side of the
-    # merge. It runs on a pull request as well, and because it is a job of its
-    # own it costs no wall clock there.
+    name: Deep checks
+    # Main only. Lint reads the whole project and costs sixty seconds doing it,
+    # and a pull request cannot afford that as its longest job: it would be the
+    # critical path, and the answer a pull request needs is about the tests.
+    #
+    # The price of moving it here is honest and worth stating: a lint failure is
+    # now found after the merge, on the commit that reached main, rather than on
+    # the pull request that caused it. It still cannot ship — publishing waits
+    # for this job — so the failure is contained to main being red until it is
+    # fixed, instead of a bad APK going out.
+    #
+    # It does not run on a development branch either: that branch exists to hand
+    # a build to the person who will look at it, and the checks worth paying for
+    # there are the tests.
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -246,29 +282,7 @@ jobs:
           cache-cleanup: never
           cache-read-only: true
 
-      # Lint reads Android sources and resources, so it is asked the same
-      # question the tests are. The job decides for itself rather than waiting
-      # for the test job, because waiting would turn two jobs running side by
-      # side into one long chain.
-      - name: Is there anything to check
-        id: which
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_REF: ${{ github.base_ref }}
-          TOOLS_DIR: ${{ github.workspace }}/tools
-        run: |
-          if [ "$EVENT_NAME" != "pull_request" ]; then
-            verdict="ALL"
-          else
-            git fetch --quiet --no-tags --depth=50 origin "$BASE_REF" || true
-            verdict="$(bash "$TOOLS_DIR/changed-tests.sh" --base "origin/$BASE_REF")"
-          fi
-          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
-
       - name: Check the release
-        # nothing that could change the app was touched, so there is nothing for
-        # lint to look at that it did not already look at
-        if: steps.which.outputs.verdict != 'NONE'
         run: ./gradlew --no-daemon lintVitalRelease
 
   # -------------------------------------------------------------------------
@@ -411,7 +425,10 @@ jobs:
   # -------------------------------------------------------------------------
   publish:
     name: Publish
-    if: github.event_name != 'pull_request'
+    # Only main releases, and only by hand or by a push to main. A development
+    # push keeps its APK as an artifact of the run instead: something to install
+    # and look at, not something to hand to anybody as a version.
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     needs: [test, build-release, lint]
     runs-on: ubuntu-latest
     timeout-minutes: 10
