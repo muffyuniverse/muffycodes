@@ -86,7 +86,7 @@ jobs:
       # main will not save a moment later, and a write-only run is a run whose
       # post step is wasted work.
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
         with:
           cache-cleanup: never
           cache-read-only: ${{ github.event_name == 'pull_request' }}
@@ -169,7 +169,11 @@ jobs:
   # -------------------------------------------------------------------------
   lint:
     name: Release checks
-    if: github.event_name != 'pull_request'
+    # Deliberately NOT limited to main. Lint used to run only after a merge,
+    # which meant a lint failure was discovered once the change was already in
+    # main and blocking the release — the gate was on the wrong side of the
+    # merge. It runs on a pull request as well, and because it is a job of its
+    # own it costs no wall clock there.
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -187,7 +191,7 @@ jobs:
           java-version: '17'
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
         with:
           cache-cleanup: never
           cache-read-only: true
@@ -225,7 +229,7 @@ jobs:
       # remembering about the build has already been remembered by the test job,
       # so there is nothing to add and no reason to spend time writing.
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6
         with:
           cache-cleanup: never
           cache-read-only: true
@@ -296,11 +300,25 @@ jobs:
       - name: Check the signature of the APK
         run: |
           APK=app/build/outputs/apk/release/app-release.apk
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK"
+
+          # The version of the build tools is not written down here. It was, and
+          # that is the kind of thing that breaks a year later without warning:
+          # the runner image decides which versions exist, and it changes. The
+          # newest one present is used instead, which is safe because these two
+          # tools read anything they are given, however old.
+          BUILD_TOOLS="$(ls -d "$ANDROID_HOME"/build-tools/*/ 2>/dev/null | sort -V | tail -1)"
+          BUILD_TOOLS="${BUILD_TOOLS%/}"
+          if [ -z "$BUILD_TOOLS" ] || [ ! -x "$BUILD_TOOLS/apksigner" ]; then
+            echo "::error::No Android build tools found under $ANDROID_HOME"
+            exit 1
+          fi
+          echo "checking with $(basename "$BUILD_TOOLS")"
+
+          "$BUILD_TOOLS/apksigner" verify --print-certs "$APK"
           # A release that is not signed cannot be installed, so the build stops
           # here rather than publish something unusable.
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify "$APK"
-          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c 4 "$APK"
+          "$BUILD_TOOLS/apksigner" verify "$APK"
+          "$BUILD_TOOLS/zipalign" -c 4 "$APK"
 
       # The APK is a single artefact of about eight megabytes, so this is a
       # hand-over between jobs and not a bottleneck: it is stored once and
