@@ -163,9 +163,12 @@ find_text_bounds() {
     done)"
     [ -z "$node" ] && return 0
 
-    # The bounds look like [left,top][right,bottom].
+    # The bounds look like [left,top][right,bottom]. The two pairs are
+    # separated by a bracket, so the brackets are turned into spaces first,
+    # and the numbers are then told apart by the spaces.
     box="$(printf '%s' "$node" | sed -n 's/.*bounds="\([^"]*\)".*/\1/p')"
-    box="${box//[\[\]]/}"
+    box="${box//]/ }"
+    box="${box//[/ }"
     box="${box//,/ }"
     read -r l t r b <<<"$box"
     [ -z "$l" ] || [ -z "$t" ] || [ -z "$r" ] || [ -z "$b" ] && return 0
