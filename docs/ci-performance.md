@@ -217,6 +217,61 @@ knowing what it does *not* do: it does not publish, it does not run the deep
 checks, and it does not make a version. It builds the APK, tests it, and keeps
 the artifact.
 
+
+## What a fifty second pull request is made of
+
+Measured from the log of a run that changed one Kotlin file, with timestamps
+taken between task completions rather than guessed:
+
+| | time |
+|---|---|
+| Set up job, check out, decide | 3s |
+| Set up Gradle (restores its cache) | 6s |
+| Remember the runtime, remember the project | 1s |
+| **Run the tests: 43s** | |
+| — Gradle start, and reading the configuration cache | **4.4s** |
+| — the small and cached tasks | 4s |
+| — **compileDebugKotlin** | **17.3s** |
+| — compileDebugUnitTestKotlin | 2.5s |
+| — **testDebugUnitTest, the whole suite** | **13.2s** |
+| after the job (caches are saved) | 5s |
+
+The tests are not what a pull request costs. Compiling the module is, and
+starting Gradle is the second most expensive thing in the run.
+
+### The configuration cache, and what it was worth
+
+It was not working, and the cause was in this repository: a `doFirst` block that
+touched `logger` captures the build script itself, which the cache cannot store.
+With the message moved to configuration time the cache stores and reuses,
+measured across two runs, and the configuration phase fell from **14.8s to
+4.4s**.
+
+The cache lives in the project's `.gradle` directory, which a fresh checkout does
+not have, so it is carried between runs explicitly. Its key is the build files
+alone: the cache says how the project is put together, not what the sources say,
+so a change to a Kotlin file still reuses it.
+
+It is deliberately absent from the release build. That invocation carries a
+version code and name that differ every time, so its entry could never be reused
+and storing it would be a cost with no payoff.
+
+### Why the whole suite now runs, and not a chosen subset
+
+These two improvements cancel, and it is worth saying so plainly.
+
+Asking Gradle for a subset means passing `--tests`, and a changed command line
+is a different configuration-cache entry. Measured, a run with `--tests`
+reports "Calculating task graph as no cached configuration is available", which
+is a miss costing about fifteen seconds. The narrow run it buys back saves
+twelve. The trade is a wash, and a wash is not worth a weaker gate, so every
+test runs and the command line stays identical.
+
+The selector still decides the one thing that matters and costs nothing: whether
+there is anything to do at all. `tools/changed-tests.sh` still reports which
+classes a change touches, and says so in the log, but the continuous
+integration runs them all.
+
 ## The floor, and what is above it
 
 For a pull request that really changes the app, the wall clock is no longer the
