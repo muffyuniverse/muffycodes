@@ -123,11 +123,15 @@ jobs:
       - name: Run the tests
         run: ./gradlew --no-daemon testDebugUnitTest
 
-      # Kept every time, not only on failure: the report carries how long each
-      # test class took, which is the only honest basis for deciding whether
-      # sharding would ever help.
-      - name: Keep the test report
-        if: always()
+      # Kept only when something failed, because it is the only thing that
+      # explains a failure: the report carries the per-class timings and the
+      # stack traces. On a passing run the same lines are in the log, and the
+      # upload costs six seconds to store twenty kilobytes.
+      #
+      # It also carries how long each test class took, which is the honest basis
+      # for deciding whether splitting the suite would ever be worth its cost.
+      - name: Keep the test report when something failed
+        if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: test-report
