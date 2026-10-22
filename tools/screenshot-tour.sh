@@ -31,8 +31,10 @@ ACTIVITY="${ACTIVITY:-com.example.notes.MainActivity}"
 ADB="${ADB:-adb}"
 
 # --- the size the points in the tour are written for ------------------------
+# The size of the screen of the emulator that the pictures are made on. A
+# tour that is written for another screen is scaled to it.
 BASE_W=1080
-BASE_H=2400
+BASE_H=1920
 
 adb() { "$ADB" "$@"; }
 

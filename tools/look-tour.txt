@@ -2,32 +2,44 @@
 #
 # The names are written to a file, so that the steps of the real tour can be
 # written with the names the app really shows.
+#
+# The taps are done by name and not by point, so that the look is not thrown
+# off by a screen of another size.
 
 shot 01-list
 dumpfile 01-list
-wait 1
-
-# The + button, bottom right.
-tap 960 1750 02-new-file
 wait 2
+
+# The + button in the corner.
+taptext "New file" 02-new-file
+wait 3
 shot 03-editor
 dumpfile 03-editor
-wait 1
+wait 2
 
-# Back to the list.
-key BACK
+# The arrow back in the top bar of the editor.
+taptext "Back" 04-back-from-the-editor
+wait 3
+shot 05-list-again
+dumpfile 05-list-again
 wait 2
 
 # The gear in the top bar.
-taptext Settings 04-settings
+taptext "Settings" 06-settings
+wait 3
+shot 07-settings
+dumpfile 07-settings
 wait 2
-shot 05-settings
-dumpfile 05-settings
-wait 1
 
-# The themes are further down.
-swipe 540 1400 540 500 400 06-scrolled
-wait 1
-shot 07-settings-scrolled
-dumpfile 07-settings-scrolled
-wait 1
+# The themes are further down, so scroll.
+swipe 540 1400 540 600 400 08-scrolled
+wait 2
+shot 09-settings-scrolled
+dumpfile 09-settings-scrolled
+wait 2
+
+# The arrow back in the top bar of the settings.
+taptext "Back" 10-back-from-the-settings
+wait 3
+shot 11-list-at-the-end
+dumpfile 11-list-at-the-end
