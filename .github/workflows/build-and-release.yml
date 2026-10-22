@@ -318,27 +318,19 @@ jobs:
           cache-cleanup: never
           cache-read-only: true
 
-      # Gradle's configuration cache lives in the project's own `.gradle`
-      # directory, which a fresh checkout does not have, so it would be paid for
-      # and thrown away on every run. Keeping it turns the configuration phase —
-      # measured at fifteen seconds, the largest fixed cost in a run — into a
-      # restore.
-      #
-      # The key is the build files and nothing else: the cache describes how the
-      # project is put together, not what the sources say, so a change to a
-      # Kotlin file reuses it. When the key does miss, Gradle recomputes and
-      # stores a new entry; a miss costs what it costs today and never a wrong
-      # build.
-      - name: Remember how the project is put together
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: .gradle/configuration-cache
-          key: config-cache-v1-lint-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle.properties', 'gradle/wrapper/gradle-wrapper.properties') }}
-          restore-keys: |
-            config-cache-v1-lint-${{ runner.os }}-
 
       - name: Check the release
-        run: ./gradlew --parallel --no-daemon --configuration-cache lintVitalRelease
+        # No --configuration-cache, deliberately, and this was measured the hard
+        # way: the first run stores an entry and passes, and the next one reports
+        # "Reusing configuration cache." and then dies inside
+        # com.android.tools.lint.Main with UastEnvironment and a
+        # LintClassLoaderBuildService that cannot be stopped. Lint's UAST
+        # machinery does not survive being restored.
+        #
+        # It costs nothing to give up here: this job runs only on main, where the
+        # release build is the longer of the two, so the fifteen seconds the cache
+        # would save were never on the critical path.
+        run: ./gradlew --parallel --no-daemon lintVitalRelease
 
   # -------------------------------------------------------------------------
   # The release, built while the tests are still running. Only ever on main.
