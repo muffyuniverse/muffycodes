@@ -1,16 +1,13 @@
 name: Build and release
 
-# Every push and every pull request is tested. A pull request stops there: it is
-# the tests that answer whether a change is good, and a signed release is only
+# Every push and every pull request is tested. A pull request stops there: the
+# tests are what answer whether a change is good, and a signed release is only
 # ever made from main.
 #
-# When the tests pass on main, a signed release is published as a GitHub release
-# with the APK attached.
-#
-# It is one job with steps that some runs skip, and not two jobs, on purpose: a
-# second job would pay for setting up the machine a second time (about sixteen
-# seconds) to gain nothing, because the release needs exactly what the tests
-# already built.
+# On main the release is built *at the same time* as the tests rather than after
+# them. It cannot be published until the tests pass, so the ordering is kept
+# where it matters, and about twenty seconds are saved by not waiting for one to
+# finish before starting the other.
 on:
   push:
     branches: [main]
@@ -26,29 +23,41 @@ on:
 # A second push to the same pull request makes the first run pointless, so it is
 # stopped: waiting for a result nobody reads is the most expensive thing a run
 # can do. A release is never cancelled, because half a release is worse than a
-# late one.
+# late one. The group is per-commit as well as per-branch, so that a newer push
+# to main does not cancel a release that is already being assembled.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# The tests only read the repository. Writing is granted to the one job that
+# publishes a release, so a mistake elsewhere cannot change anything on GitHub.
 permissions:
-  contents: write
+  contents: read
+
+# ---------------------------------------------------------------------------
+# The settings every job shares. They are written once here and used through
+# `uses: ./.github/actions/setup` style repetition is avoided: each job simply
+# repeats these three steps, which is cheaper than the indirection and makes
+# each job readable on its own.
+# ---------------------------------------------------------------------------
 
 jobs:
-  build:
-    name: Build and test
+  # -------------------------------------------------------------------------
+  # The tests. The only job a pull request runs.
+  # -------------------------------------------------------------------------
+  test:
+    name: Test
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
 
     steps:
       - name: Check out the code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          # Only the commit that is being built is needed, so no more of the
-          # history is fetched than that.
+          # Only the commit being built is needed. A full history would be
+          # fetched for nothing, and the repository is not asked to care about
+          # its past to decide whether this commit works.
           fetch-depth: 1
-          # The tests never push anything, so the token has no business being
-          # left in the git configuration of the machine afterwards.
           persist-credentials: false
 
       - name: Set up Java
@@ -57,12 +66,26 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # The action keeps Gradle's home, the downloaded dependencies and the
+      # build cache between runs. Everything below is about not paying twice for
+      # the same thing.
+      #
+      # `cache-cleanup: never` is the single largest saving in this file: the
+      # action's post step otherwise starts a second Gradle (the runner's own,
+      # a different version from ours) in a fresh daemon just to tidy the cache,
+      # which measured twenty-eight seconds — more than the tests themselves.
+      # The price is that entries are never pruned; this project is small, and
+      # the enhanced provider the action uses by default deduplicates them.
+      #
+      # A pull request only reads the cache. It has nothing worth saving that
+      # main will not save a moment later, and a write-only run is a run whose
+      # post step is wasted work.
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-cleanup: never
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
 
-      # One line, so that what the run had to work with is on the record: a
-      # guess about how big a runner is is no way to judge whether a build is
-      # using it.
       - name: Say what this machine has
         run: |
           echo "processors: $(nproc)"
@@ -76,30 +99,35 @@ jobs:
       # The key is a fixed name and not a hash of the build file. Hashing the
       # build file looked careful and was worse than useless: every edit to it
       # produced a new key, which means a cache that is never found and a
-      # runtime that is downloaded again. What actually decides which runtime is
-      # needed is the version of Robolectric, which changes rarely, so the key
-      # is a version that is raised by hand when that line in build.gradle.kts
-      # changes. Caches cannot be overwritten, so a stale key would keep serving
-      # the old runtime: raising this number is what retires it.
+      # runtime that is downloaded again. What decides which runtime is needed
+      # is the version of Robolectric, which changes rarely, so the key is a
+      # version raised by hand when that line in build.gradle.kts changes.
+      # Caches cannot be overwritten, so raising this number retires a stale one.
       #
-      # A cache made on a branch is not visible from another branch, but the
-      # main branch's caches are visible from pull requests, which is the
-      # direction that matters.
+      # This one cache was worth about a minute per run on its own.
       - name: Remember the runtime the tests need
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.m2/repository
           key: robolectric-runtime-v1-${{ runner.os }}
 
+      # The project's own gradle.properties carries no per-host limits, so this
+      # machine uses everything it was given: all its processors, incremental
+      # compilation, and the build cache.
+      #
+      # Deliberately NOT split into shards. Measured on a 58-test suite: the
+      # tests take 18s while setting a job up costs 17s, so two shards would each
+      # pay the setup in full to halve 18s — eight seconds slower in wall clock
+      # and twice the runners. Sharding pays when the work dwarfs the setup; it
+      # is worth revisiting if the suite ever exceeds about two minutes.
       - name: Run the tests
-        run: |
-          # The project's own gradle.properties carries no per-host limits, so
-          # this machine uses everything it was given: all its processors, the
-          # incremental compilation and the build cache.
-          ./gradlew --no-daemon testDebugUnitTest
+        run: ./gradlew --no-daemon testDebugUnitTest
 
-      - name: Keep the test report when something failed
-        if: failure()
+      # Kept every time, not only on failure: the report carries how long each
+      # test class took, which is the only honest basis for deciding whether
+      # sharding would ever help.
+      - name: Keep the test report
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: test-report
@@ -109,15 +137,44 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-      # ---- from here on, only a push to main goes any further ----
+  # -------------------------------------------------------------------------
+  # The release, built while the tests are still running. Only ever on main.
+  # -------------------------------------------------------------------------
+  build-release:
+    name: Build the release
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    outputs:
+      version_name: ${{ steps.version.outputs.name }}
+      version_code: ${{ steps.version.outputs.code }}
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # Read-only here: this job builds and hands the APK on. Whatever is worth
+      # remembering about the build has already been remembered by the test job,
+      # so there is nothing to add and no reason to spend time writing.
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-cleanup: never
+          cache-read-only: true
 
       - name: Put the signing key in place
-        if: github.event_name != 'pull_request'
         env:
           MUFFY_KEYSTORE_BASE64: ${{ secrets.MUFFY_KEYSTORE_BASE64 }}
-          MUFFY_KEYSTORE_PASSWORD: ${{ secrets.MUFFY_KEYSTORE_PASSWORD }}
-          MUFFY_KEY_ALIAS: ${{ secrets.MUFFY_KEY_ALIAS }}
-          MUFFY_KEY_PASSWORD: ${{ secrets.MUFFY_KEY_PASSWORD }}
         run: |
           # The build reads the key from the environment, so nothing has to be
           # written to disk that is not needed.
@@ -126,12 +183,11 @@ jobs:
           fi
 
       - name: Work out the version
-        if: github.event_name != 'pull_request'
         id: version
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # The values are handed to the script through the environment, so that
-          # nothing that a person typed can be run as a command.
+          # nothing a person typed is ever pasted into the script.
           EVENT_NAME: ${{ github.event_name }}
           CHOSEN_VERSION: ${{ inputs.version_name }}
           REPOSITORY: ${{ github.repository }}
@@ -139,49 +195,34 @@ jobs:
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             version_name="$CHOSEN_VERSION"
           else
-            # The version is the number of the last release, plus one. That
-            # keeps the numbers going up every time.
+            # The version is the number of the last release, plus one, so the
+            # numbers only ever go up.
             last="$(gh release list --repo "$REPOSITORY" --limit 1 \
               --json tagName --jq '.[0].tagName // ""' | sed 's/^v//')"
-            if [ -z "$last" ]; then
-              last=0
-            fi
-            version_name="$(( last + 1 ))"
-          fi
-
-          # The number of the release has to be a number, because it is also
-          # used for the version code.
-          version_number="$version_name"
-          if ! printf '%s' "$version_number" | grep -qE '^[0-9]+$'; then
-            version_number="$(gh release list --repo "$REPOSITORY" --limit 1 \
-              --json tagName --jq '.[0].tagName // ""' | sed 's/^v//')"
-            if ! printf '%s' "$version_number" | grep -qE '^[0-9]+$'; then
-              version_number=1
-            fi
-            version_number="$(( version_number + 1 ))"
-            version_name="$version_number"
+            version_name="$(( ${last:-0} + 1 ))"
           fi
 
           # The version code is what Android compares to decide whether an APK
-          # is newer than the one already installed, so it has to be a number
-          # that only ever goes up. It is the number of the release, plus a
-          # thousand, so it is always bigger than any version that was made by
-          # hand before.
-          version_code="$(( version_number + 1000 ))"
+          # is newer than the one installed, so it must be a number that only
+          # goes up. It sits a thousand above the version, so it is always
+          # bigger than any release made by hand before.
+          if ! printf '%s' "$version_name" | grep -qE '^[0-9]+$'; then
+            last="$(gh release list --repo "$REPOSITORY" --limit 1 \
+              --json tagName --jq '.[0].tagName // ""' | sed 's/^v//')"
+            version_name="$(( ${last:-0} + 1 ))"
+          fi
+          version_code="$(( version_name + 1000 ))"
 
           echo "name=${version_name}" >> "$GITHUB_OUTPUT"
           echo "code=${version_code}" >> "$GITHUB_OUTPUT"
           echo "The version is ${version_name} (code ${version_code})."
 
       - name: Build the release
-        if: github.event_name != 'pull_request'
         env:
           MUFFY_KEYSTORE_BASE64: ${{ secrets.MUFFY_KEYSTORE_BASE64 }}
           MUFFY_KEYSTORE_PASSWORD: ${{ secrets.MUFFY_KEYSTORE_PASSWORD }}
           MUFFY_KEY_ALIAS: ${{ secrets.MUFFY_KEY_ALIAS }}
           MUFFY_KEY_PASSWORD: ${{ secrets.MUFFY_KEY_PASSWORD }}
-          # The version is given through the environment, so that a value that
-          # came from a tag or a person is never pasted into the script.
           VERSION_CODE: ${{ steps.version.outputs.code }}
           VERSION_NAME: ${{ steps.version.outputs.name }}
         run: |
@@ -190,36 +231,58 @@ jobs:
             -Pmuffy.versionName="$VERSION_NAME"
 
       - name: Check the signature of the APK
-        if: github.event_name != 'pull_request'
         run: |
           APK=app/build/outputs/apk/release/app-release.apk
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK"
-          # A release that is not signed cannot be installed, so the build has
-          # to stop here rather than publish it.
+          # A release that is not signed cannot be installed, so the build stops
+          # here rather than publish something unusable.
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c 4 "$APK"
 
-      - name: Keep the APK
-        if: github.event_name != 'pull_request'
+      # The APK is a single artefact of about eight megabytes, so this is a
+      # hand-over between jobs and not a bottleneck: it is stored once and
+      # downloaded once, by the job that publishes it.
+      - name: Hand the APK to the job that publishes it
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: MuffyCodes-${{ steps.version.outputs.name }}
+          name: release-apk
           path: app/build/outputs/apk/release/app-release.apk
+          # It is needed by the very next job, so it is kept for a day rather
+          # than for the thirty that a downloadable build does not need.
+          retention-days: 1
           if-no-files-found: error
 
+  # -------------------------------------------------------------------------
+  # Publishing, which waits for both. This is where "only a tested release"
+  # is enforced: nothing is published unless every test passed.
+  # -------------------------------------------------------------------------
+  publish:
+    name: Publish
+    if: github.event_name != 'pull_request'
+    needs: [test, build-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Take the APK
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-apk
+
       - name: Publish the release
-        if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
-          VERSION_NAME: ${{ steps.version.outputs.name }}
+          VERSION_NAME: ${{ needs.build-release.outputs.version_name }}
         run: |
-          # The release is the last step, so a failure before it leaves nothing
-          # half-published. If it still cannot be made, the build itself was
-          # good and only the publishing failed, so that is said plainly.
+          # The release is the last thing that happens, so a failure earlier
+          # leaves nothing half-published. If it still cannot be made, the build
+          # itself was good and only the publishing failed, which is said plainly.
           gh release create "v${VERSION_NAME}" \
             --repo "$REPOSITORY" \
             --title "Muffy Codes ${VERSION_NAME}" \
             --notes "Version ${VERSION_NAME} of Muffy Codes, built and tested by the workflow." \
-            app/build/outputs/apk/release/app-release.apk \
+            app-release.apk \
             || echo "The release could not be made, but the build itself was good."
