@@ -170,6 +170,53 @@ The words-only case was 74s before, for an app that was byte for byte the one
 that had already passed. Now it is 24s, and the 24s is the floor: two jobs
 starting, deciding there is nothing to do, and reporting.
 
+
+## One cost per branch, measured
+
+| branch | what runs | measured |
+|---|---|---|
+| pull request, words only | the decision, and nothing else | **10s** |
+| pull request, one source file | that file's tests | **53s** |
+| pull request, unclassifiable or build change | every test | **49–53s** |
+| development | every test, and the release APK as an artifact | **2m 09s** |
+| main | every test, the deep checks, the release, the publish | 1m 45s–3m |
+
+Development builds an APK and keeps it as an artifact but publishes nothing;
+main is the only branch that publishes. Both were run to confirm it, and a
+development push left `Publish` and `Deep checks` skipped with `release-apk`
+(7,462,352 bytes) attached to the run.
+
+## The floor, taken apart
+
+The floor used to be described as seventeen seconds. Measured step by step on a
+run that does real work:
+
+| step | time |
+|---|---|
+| Set up job | 2–4s |
+| Check out | 1–3s |
+| Work out which tests are needed | 1s |
+| Set up Java | 0–1s |
+| Set up Gradle (restores the cache) | 6–9s |
+| Robolectric runtime cache | 0 or 4s |
+| Gradle's own start-up inside the test step | ~7s |
+
+Roughly ten to fifteen seconds of unavoidable provisioning, of which the Gradle
+cache restore is the largest single item.
+
+**The way to lower it was not to make it cheaper but to stop paying it.** The
+decision now runs first, and when there is nothing to run, Java, Gradle, the
+Robolectric cache and the tests are all skipped — which is why a
+words-only pull request takes ten seconds instead of seventy-four. Nothing is
+installed to do no work.
+
+## Nothing above this directory
+
+A development branch is pushed on every glance at a build, so it is worth
+knowing what it does *not* do: it does not publish, it does not run the deep
+checks, and it does not make a version. It builds the APK, tests it, and keeps
+the artifact.
+
 ## The floor, and what is above it
 
 For a pull request that really changes the app, the wall clock is no longer the
@@ -196,6 +243,53 @@ break something quietly.
 What *can* be skipped is a change that cannot reach the app at all — which is
 what the words-only rule above does, and it is a statement about the files, not
 about their size.
+
+
+## One cost per branch, measured
+
+| branch | what runs | measured |
+|---|---|---|
+| pull request, words only | the decision, and nothing else | **10s** |
+| pull request, one source file | that file's tests | **53s** |
+| pull request, unclassifiable or build change | every test | **49–53s** |
+| development | every test, and the release APK as an artifact | **2m 09s** |
+| main | every test, the deep checks, the release, the publish | 1m 45s–3m |
+
+Development builds an APK and keeps it as an artifact but publishes nothing;
+main is the only branch that publishes. Both were run to confirm it, and a
+development push left `Publish` and `Deep checks` skipped with `release-apk`
+(7,462,352 bytes) attached to the run.
+
+## The floor, taken apart
+
+The floor used to be described as seventeen seconds. Measured step by step on a
+run that does real work:
+
+| step | time |
+|---|---|
+| Set up job | 2–4s |
+| Check out | 1–3s |
+| Work out which tests are needed | 1s |
+| Set up Java | 0–1s |
+| Set up Gradle (restores the cache) | 6–9s |
+| Robolectric runtime cache | 0 or 4s |
+| Gradle's own start-up inside the test step | ~7s |
+
+Roughly ten to fifteen seconds of unavoidable provisioning, of which the Gradle
+cache restore is the largest single item.
+
+**The way to lower it was not to make it cheaper but to stop paying it.** The
+decision now runs first, and when there is nothing to run, Java, Gradle, the
+Robolectric cache and the tests are all skipped — which is why a
+words-only pull request takes ten seconds instead of seventy-four. Nothing is
+installed to do no work.
+
+## Nothing above this directory
+
+A development branch is pushed on every glance at a build, so it is worth
+knowing what it does *not* do: it does not publish, it does not run the deep
+checks, and it does not make a version. It builds the APK, tests it, and keeps
+the artifact.
 
 ## The floor
 
