@@ -21,3 +21,5 @@ data class Note(
 }
 
 // A comment, to check the configuration cache is reused, not merely tolerated.
+
+// A comment, so the cache must be reused rather than recomputed.
