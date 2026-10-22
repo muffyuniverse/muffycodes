@@ -27,3 +27,5 @@ data class Note(
 // A third comment, to see each shard reuse its own cache entry.
 
 // A fourth comment, to store a per-shard entry.
+
+// A fifth comment, to see both shards reuse.
