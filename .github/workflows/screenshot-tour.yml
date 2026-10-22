@@ -82,15 +82,27 @@ jobs:
             # The app is put on the emulator and started.
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb shell am start -n com.example.notes/com.example.notes.MainActivity
-            sleep 5
+            sleep 8
 
             # The tour walks through the app and takes the pictures. The
             # values are handed over through the environment, so that the
-            # line stays one line.
+            # line stays one line. The app is already started, so the tour
+            # does not start it again.
             export ADB=adb
+            export SKIP_LAUNCH=1
             export SHOT_DIR="${{ github.workspace }}/screenshots"
             export TOUR_FILE="${{ github.workspace }}/tools/${{ inputs.tour_file || 'default-tour.txt' }}"
             bash tools/screenshot-tour.sh
+
+            # The pictures are the point of the run, so a step that did not
+            # work does not fail the run: what was made is still worth
+            # looking at. But a run that made nothing at all is a failure.
+            count="$(find "${{ github.workspace }}/screenshots" -name '*.png' -size +0 2>/dev/null | wc -l | tr -d ' ')"
+            echo "The tour made ${count} pictures."
+            if [ "$count" -lt 1 ]; then
+              echo "::error::The tour made no pictures at all."
+              exit 1
+            fi
 
       - name: Put the pictures in the run
         if: always()

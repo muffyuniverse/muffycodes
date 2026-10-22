@@ -36,6 +36,34 @@ BASE_H=2400
 
 adb() { "$ADB" "$@"; }
 
+# Runs a command that talks to the device, and tries again when it does not
+# work. The emulator is sometimes not ready yet, even after it says it has
+# booted.
+retry() {
+    local tries=3 i
+    for i in $(seq 1 "$tries"); do
+        if "$@"; then
+            return 0
+        fi
+        echo "  .. trying again ($i of $tries)" >&2
+        sleep 3
+    done
+    return 1
+}
+
+# Waits until the device answers.
+wait_for_device() {
+    local i
+    for i in $(seq 1 30); do
+        if adb shell true >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 2
+    done
+    echo "!! the device did not answer" >&2
+    return 1
+}
+
 # The size of the screen of the device, and the factor to scale the points by.
 read_screen_size() {
     local size w h
@@ -65,11 +93,20 @@ take_shot() {
     SHOT_FILE="$SHOT_DIR/$(printf '%02d-%s' "$step_number" "$name").png"
     # A moment of waiting, so the screen has finished moving.
     sleep 1
-    if adb exec-out screencap -p > "$SHOT_FILE" 2>/dev/null && [ -s "$SHOT_FILE" ]; then
-        echo "  picture: $SHOT_FILE"
-    else
-        echo "  !! the picture failed: $SHOT_FILE" >&2
-    fi
+
+    # Sometimes the connection to the emulator is lost for a moment, so the
+    # picture is taken again when it fails.
+    local attempt
+    for attempt in 1 2 3; do
+        if adb exec-out screencap -p > "$SHOT_FILE" 2>/dev/null && [ -s "$SHOT_FILE" ]; then
+            echo "  picture: $SHOT_FILE"
+            return 0
+        fi
+        echo "  .. the picture failed, trying again ($attempt of 3)" >&2
+        sleep 2
+    done
+    echo "  !! the picture failed: $SHOT_FILE" >&2
+    return 1
 }
 
 # Asks the app where a piece of text is on the screen, and answers with the
@@ -130,7 +167,7 @@ run_tour() {
                 read -r x y name <<<"$rest"
                 [ -z "$name" ] && name="tap"
                 echo "tap at ${x},${y}"
-                adb shell input tap "$(sx "$x")" "$(sy "$y")"
+                adb shell input tap "$(sx "$x")" "$(sy "$y")" || true
                 take_shot "$name"
                 ;;
             taptext)
@@ -157,7 +194,7 @@ run_tour() {
                 x="$(printf '%s' "$bounds" | cut -d, -f1)"
                 y="$(printf '%s' "$bounds" | cut -d, -f2)"
                 echo "tap on the text \"$wanted\" at ${x},${y}"
-                adb shell input tap "$x" "$y"
+                adb shell input tap "$x" "$y" || true
                 take_shot "$name"
                 ;;
             swipe)
@@ -166,16 +203,16 @@ run_tour() {
                 [ -z "$ms" ] && ms=300
                 [ -z "$name" ] && name="swipe"
                 echo "swipe ${x1},${y1} -> ${x2},${y2}"
-                adb shell input swipe "$(sx "$x1")" "$(sy "$y1")" "$(sx "$x2")" "$(sy "$y2")" "$ms"
+                adb shell input swipe "$(sx "$x1")" "$(sy "$y1")" "$(sx "$x2")" "$(sy "$y2")" "$ms" || true
                 take_shot "$name"
                 ;;
             text)
                 echo "typing: $rest"
-                adb shell input text "${rest// /%s}"
+                adb shell input text "${rest// /%s}" || true
                 ;;
             key)
                 echo "key: $rest"
-                adb shell input keyevent "$rest"
+                adb shell input keyevent "$rest" || true
                 ;;
             shot)
                 take_shot "$rest"
@@ -197,11 +234,19 @@ read_screen_size
 
 if [ -z "${SKIP_LAUNCH:-}" ]; then
     echo "Starting the app..."
-    adb shell am force-stop "$PACKAGE" >/dev/null 2>&1
-    adb shell am start -n "$PACKAGE/$ACTIVITY" >/dev/null 2>&1
+    wait_for_device
+    # The app is stopped first, so that the tour always starts at the same
+    # place. A failure here is not fatal: the app may already be running.
+    adb shell am force-stop "$PACKAGE" >/dev/null 2>&1 || true
+    sleep 1
+    retry adb shell am start -n "$PACKAGE/$ACTIVITY" >/dev/null 2>&1 || true
     sleep 4
 fi
 
 run_tour < <(tour_text)
 
 echo "The tour is done. The pictures are in $SHOT_DIR."
+
+# The count of the pictures is written out, so that the run can tell whether
+# the tour made anything.
+find "$SHOT_DIR" -name '*.png' -size +0 2>/dev/null | wc -l | tr -d ' ' > "$SHOT_DIR/count.txt"
