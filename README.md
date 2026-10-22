@@ -194,6 +194,34 @@ The version code goes up with every build, so each release installs over the one
 before it. The build **refuses** to make a release when there is no signing key,
 rather than quietly producing an APK that cannot be installed.
 
+### Pictures of the app
+
+There is a second workflow, `screenshot-tour.yml`, that walks through the app
+on an emulator and takes a picture of every step. The pictures are put in the
+run, so they can be looked at and downloaded.
+
+The tour is a list of steps in a plain text file, so it can be changed without
+touching any code (`tools/default-tour.txt`):
+
+```
+tap    X Y   [name]        a tap on a point of the screen
+taptext  words [name]      a tap on the text that is shown
+swipe  X1 Y1 X2 Y2 [ms] [name]
+text   words              typing into the field that is open
+key    KEYCODE            a key, e.g. BACK, ENTER
+shot   name               a picture without touching the screen
+wait   seconds            a pause
+```
+A tap on a point is simple but breaks when the layout moves. A tap on a text
+keeps working, because the app is asked where that text is, so both kinds are
+allowed in the same tour. The points are written for a screen of 1080 by 1920
+and are scaled to the screen that is really used.
+
+The tour runs when it is asked for by hand, once a week, and whenever the app
+or the tour itself is changed. There is also `look-at-app.yml`, which writes
+down the names that are on the screen at every step, so that a tour can be
+written with the names the app really shows instead of guesses.
+
 ### Tests
 
 ```bash

@@ -323,7 +323,3 @@ fi
 run_tour
 
 echo "The tour is done. The pictures are in $SHOT_DIR."
-
-# The count of the pictures is written out, so that the run can tell whether
-# the tour made anything.
-find "$SHOT_DIR" -name '*.png' -size +0c 2>/dev/null | wc -l | tr -d ' ' > "$SHOT_DIR/count.txt" 2>/dev/null || echo "0" > "$SHOT_DIR/count.txt"
