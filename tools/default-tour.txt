@@ -1,0 +1,71 @@
+# The tour of the app.
+#
+# The points are for a screen of 1080 wide and 2400 high. They are scaled to
+# the screen of the device that is used, so the same tour works on any phone.
+#
+# A step is one of:
+#
+#   tap    X Y   [name]        a tap on a point of the screen
+#   taptext  words [name]      a tap on the text that is shown
+#   swipe  X1 Y1 X2 Y2 [ms] [name]   a swipe from one point to another
+#   text   words              typing into the field that is open
+#   key    KEYCODE            a key, e.g. BACK, ENTER
+#   shot   name               a picture without touching the screen
+#   wait   seconds            a pause
+#
+# The tour goes through the whole app: the list, a new file, the editor, the
+# settings and the themes.
+
+# --- the list, with nothing in it yet ---
+shot 01-list-empty
+
+# --- a new file ---
+# The + button in the corner, bottom right.
+tap 960 2200 02-tap-new-file
+wait 2
+shot 03-editor-empty
+
+# Type a title and a body.
+taptext Title 04-title-field
+text Shopping list
+key TAB
+text Milk
+text Bread
+text Coffee
+shot 05-editor-typed
+
+# Save it with the check mark, top right.
+tap 1020 150 06-save
+wait 2
+shot 07-list-with-one-file
+
+# --- the settings and the themes ---
+# The gear in the top bar.
+taptext Settings 08-open-settings
+wait 2
+shot 09-settings
+
+# The themes are further down the settings, so scroll to them.
+swipe 540 2000 540 900 400 10-scroll-to-themes
+swipe 540 2000 540 1200 400 11-more-themes
+shot 12-themes
+
+# --- back to the list ---
+key BACK
+wait 2
+shot 13-back-at-the-list
+
+# --- the search ---
+tap 540 340 14-tap-search
+text shopping
+wait 2
+shot 15-search
+key BACK
+wait 1
+
+# --- the file again, through its row ---
+taptext "Shopping list" 16-open-the-file
+wait 2
+shot 17-file-open
+key BACK
+wait 1
