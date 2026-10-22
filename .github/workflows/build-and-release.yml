@@ -366,15 +366,53 @@ jobs:
     outputs:
       version_name: ${{ steps.version.outputs.name }}
       version_code: ${{ steps.version.outputs.code }}
+      changed: ${{ steps.decision.outputs.changed }}
 
     steps:
       - name: Check out the code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          fetch-depth: 1
+          # Two commits: this one and the one before it, because the question
+          # below is "what did this change" and that needs something to compare
+          # against. Everywhere else one commit is enough.
+          fetch-depth: 2
           persist-credentials: false
 
+      # Asked first, before Java and Gradle are set up, for the same reason the
+      # test job asks it first: deciding costs a second and provisioning costs
+      # fifteen.
+      #
+      # A change that cannot reach the app cannot change the APK, so building one
+      # would publish a release that is byte for byte the last release with a new
+      # number on it — a version spent to say nothing.
+      - name: Did the app change
+        id: decision
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          TOOLS_DIR: ${{ github.workspace }}/tools
+        run: |
+          # A release is built for what changed, so this is answered against the
+          # commit before this one. A run started by hand is an explicit request
+          # for a release and is never skipped.
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "changed=yes" >> "$GITHUB_OUTPUT"
+            echo "Started by hand, so a release is made."
+            exit 0
+          fi
+
+          verdict="$(bash "$TOOLS_DIR/changed-tests.sh" --base HEAD~1)"
+          if [ "$verdict" = "NONE" ]; then
+            echo "changed=no" >> "$GITHUB_OUTPUT"
+            echo "Nothing in the app changed, so no APK is built and no version is spent."
+          else
+            echo "changed=yes" >> "$GITHUB_OUTPUT"
+            echo "The app changed, so a release is built."
+          fi
+
+
       - name: Set up Java
+        if: steps.decision.outputs.changed == 'yes'
         uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           distribution: temurin
@@ -384,12 +422,14 @@ jobs:
       # remembering about the build has already been remembered by the test job,
       # so there is nothing to add and no reason to spend time writing.
       - name: Set up Gradle
+        if: steps.decision.outputs.changed == 'yes'
         uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
         with:
           cache-cleanup: never
           cache-read-only: true
 
       - name: Put the signing key in place
+        if: steps.decision.outputs.changed == 'yes'
         env:
           MUFFY_KEYSTORE_BASE64: ${{ secrets.MUFFY_KEYSTORE_BASE64 }}
         run: |
@@ -400,6 +440,7 @@ jobs:
           fi
 
       - name: Work out the version
+        if: steps.decision.outputs.changed == 'yes'
         id: version
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -459,6 +500,7 @@ jobs:
       # change nothing, because the release is not published unless that job
       # passed first.
       - name: Build the release
+        if: steps.decision.outputs.changed == 'yes'
         env:
           MUFFY_KEYSTORE_BASE64: ${{ secrets.MUFFY_KEYSTORE_BASE64 }}
           MUFFY_KEYSTORE_PASSWORD: ${{ secrets.MUFFY_KEYSTORE_PASSWORD }}
@@ -478,6 +520,7 @@ jobs:
             -Pmuffy.versionName="$VERSION_NAME"
 
       - name: Check the signature of the APK
+        if: steps.decision.outputs.changed == 'yes'
         run: |
           APK=app/build/outputs/apk/release/app-release.apk
 
@@ -504,6 +547,7 @@ jobs:
       # hand-over between jobs and not a bottleneck: it is stored once and
       # downloaded once, by the job that publishes it.
       - name: Hand the APK to the job that publishes it
+        if: steps.decision.outputs.changed == 'yes'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-apk
@@ -522,7 +566,12 @@ jobs:
     # Only main releases, and only by hand or by a push to main. A development
     # push keeps its APK as an artifact of the run instead: something to install
     # and look at, not something to hand to anybody as a version.
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    # Only main releases, and only when the app itself changed. A build that
+    # skipped because nothing in the app changed has nothing to publish, and a
+    # release is not a thing to make for a typo in a document.
+    if: |
+      (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+      && needs.build-release.outputs.changed != 'no'
     needs: [test, build-release, lint]
     runs-on: ubuntu-latest
     timeout-minutes: 10
