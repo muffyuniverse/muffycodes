@@ -105,26 +105,19 @@ jobs:
             selection="$(bash "$TOOLS_DIR/changed-tests.sh" --base "origin/$BASE_REF")"
           fi
 
-          echo "tests: $selection"
-          echo "verdict=$selection" >> "$GITHUB_OUTPUT"
+          echo "the tests this change touches: $selection"
 
-          # Robolectric is only needed when a screen test is in the selection.
-          # Fetching a hundred megabytes of Android runtime to run a parser test
-          # is the kind of cost that hides inside a cache step.
+          # A list of classes is reported but not used to narrow the run, and the
+          # reason is measured. The whole suite takes 6.3 seconds on the
+          # integration machine, while asking Gradle for a subset changes the
+          # command line, and a changed command line is a different
+          # configuration-cache entry: the run would trade a six second saving
+          # for a fifteen second miss. Every test runs instead, which is also
+          # the stronger answer.
           case "$selection" in
-            ALL|*ScreenTest*) echo "needs_robolectric=yes" >> "$GITHUB_OUTPUT" ;;
-            *) echo "needs_robolectric=no" >> "$GITHUB_OUTPUT" ;;
+            NONE) echo "verdict=NONE" >> "$GITHUB_OUTPUT" ;;
+            *)    echo "verdict=ALL"  >> "$GITHUB_OUTPUT" ;;
           esac
-
-          if [ "$selection" = "ALL" ] || [ "$selection" = "NONE" ]; then
-            echo "filters=" >> "$GITHUB_OUTPUT"
-          else
-            filters=""
-            for name in $selection; do
-              filters="$filters --tests com.example.notes.$name"
-            done
-            echo "filters=$filters" >> "$GITHUB_OUTPUT"
-          fi
 
       # Everything below is provisioning, and all of it is skipped when there is
       # nothing to run: a job that installs a toolchain to do no work is a job
@@ -197,21 +190,31 @@ jobs:
       # does, so the same check costs nothing here, and the release job skips it
       # (see there). It still gates the release, because publishing waits for
       # this job to pass.
+      # Gradle's configuration cache lives in the project's own `.gradle`
+      # directory, which a fresh checkout does not have, so it would be paid for
+      # and thrown away on every run. Keeping it turns the configuration phase —
+      # measured at fifteen seconds, the largest fixed cost in a run — into a
+      # restore.
+      #
+      # The key is the build files and nothing else: the cache describes how the
+      # project is put together, not what the sources say, so a change to a
+      # Kotlin file reuses it. When the key does miss, Gradle recomputes and
+      # stores a new entry; a miss costs what it costs today and never a wrong
+      # build.
+      - name: Remember how the project is put together
+        if: steps.which.outputs.verdict != 'NONE'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .gradle/configuration-cache
+          key: config-cache-v1-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle.properties', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            config-cache-v1-${{ runner.os }}-
       - name: Run the tests
         # Nothing that could change the app was touched, so the app being tested
         # is byte for byte the one that already passed. Running a suite to
         # confirm that is a minute spent to learn nothing.
         if: steps.which.outputs.verdict != 'NONE'
-        env:
-          FILTERS: ${{ steps.which.outputs.filters }}
-        run: |
-          # The project's own gradle.properties carries no per-host limits, so
-          # this machine uses everything it was given.
-          #
-          # The list of tests is handed over in an environment variable and
-          # word-split on purpose, so that it can be empty for the whole suite.
-          # shellcheck disable=SC2086
-          ./gradlew --no-daemon testDebugUnitTest $FILTERS
+        run: ./gradlew --no-daemon --configuration-cache testDebugUnitTest
 
       # Kept only when something failed, because it is the only thing that
       # explains a failure: the report carries the per-class timings and the
@@ -282,8 +285,27 @@ jobs:
           cache-cleanup: never
           cache-read-only: true
 
+      # Gradle's configuration cache lives in the project's own `.gradle`
+      # directory, which a fresh checkout does not have, so it would be paid for
+      # and thrown away on every run. Keeping it turns the configuration phase —
+      # measured at fifteen seconds, the largest fixed cost in a run — into a
+      # restore.
+      #
+      # The key is the build files and nothing else: the cache describes how the
+      # project is put together, not what the sources say, so a change to a
+      # Kotlin file reuses it. When the key does miss, Gradle recomputes and
+      # stores a new entry; a miss costs what it costs today and never a wrong
+      # build.
+      - name: Remember how the project is put together
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .gradle/configuration-cache
+          key: config-cache-v1-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle.properties', 'gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            config-cache-v1-${{ runner.os }}-
+
       - name: Check the release
-        run: ./gradlew --no-daemon lintVitalRelease
+        run: ./gradlew --no-daemon --configuration-cache lintVitalRelease
 
   # -------------------------------------------------------------------------
   # The release, built while the tests are still running. Only ever on main.
@@ -369,6 +391,17 @@ jobs:
       # to `assembleRelease`, and it is the same analysis the test job already
       # ran. Running it twice would add seventeen seconds here and change
       # nothing, because the release is not published unless that job passed.
+      # Gradle's configuration cache lives in the project's own `.gradle`
+      # directory, which a fresh checkout does not have, so it would be paid for
+      # and thrown away on every run. Keeping it turns the configuration phase —
+      # measured at fifteen seconds, the largest fixed cost in a run — into a
+      # restore.
+      #
+      # The key is the build files and nothing else: the cache describes how the
+      # project is put together, not what the sources say, so a change to a
+      # Kotlin file reuses it. When the key does miss, Gradle recomputes and
+      # stores a new entry; a miss costs what it costs today and never a wrong
+      # build.
       - name: Build the release
         env:
           MUFFY_KEYSTORE_BASE64: ${{ secrets.MUFFY_KEYSTORE_BASE64 }}
@@ -378,6 +411,9 @@ jobs:
           VERSION_CODE: ${{ steps.version.outputs.code }}
           VERSION_NAME: ${{ steps.version.outputs.name }}
         run: |
+          # No --configuration-cache here, deliberately: this invocation carries
+          # a version code and name that differ on every release, so the entry
+          # could never be reused and storing it would be a cost with no payoff.
           ./gradlew --no-daemon assembleRelease \
             -x lintVitalRelease \
             -Pmuffy.versionCode="$VERSION_CODE" \

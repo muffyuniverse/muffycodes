@@ -164,17 +164,21 @@ tasks.withType<Test>().configureEach {
 val processor = System.getProperty("os.arch").orEmpty()
 val canRunScreenTests = processor == "amd64" || processor == "x86_64"
 
+val screenTestNotice =
+    "The screen tests are skipped on $processor: the TLS library they " +
+        "need is not published for it. They run on x86_64."
+
 tasks.withType<Test>().configureEach {
     if (!canRunScreenTests) {
         filter {
             excludeTestsMatching("com.example.notes.ScreenTest")
         }
-        doFirst {
-            logger.lifecycle(
-                "The screen tests are skipped on $processor: the TLS library they " +
-                    "need is not published for it. They run on x86_64."
-            )
-        }
+        // Said while the build is being configured rather than inside a
+        // `doFirst`, and that is not a style choice: a `doFirst` block that
+        // touches `logger` captures this build script itself, which the
+        // configuration cache cannot store. It is what stopped the cache from
+        // working at all, and the cache is worth about twelve seconds a run.
+        println(screenTestNotice)
     }
 }
 
