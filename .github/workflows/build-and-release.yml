@@ -188,7 +188,7 @@ jobs:
       # This one cache was worth about a minute per run on its own.
       - name: Remember the runtime the tests need
         if: steps.which.outputs.verdict != 'NONE'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.m2/repository
           key: robolectric-runtime-v1-${{ runner.os }}
@@ -219,7 +219,7 @@ jobs:
       # build.
       - name: Remember how the project is put together
         if: steps.which.outputs.verdict != 'NONE'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .gradle/configuration-cache
           # The shard is part of the key, and has to be: a matrix is one job
