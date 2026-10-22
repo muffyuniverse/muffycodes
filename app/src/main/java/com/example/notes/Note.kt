@@ -23,3 +23,5 @@ data class Note(
 // A comment, so the suite runs again without touching configuration.
 
 // A second comment, to run the suite across two runners.
+
+// A third comment, to see each shard reuse its own cache entry.
