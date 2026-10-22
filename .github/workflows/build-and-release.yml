@@ -116,10 +116,6 @@ jobs:
           path: ~/.m2/repository
           key: robolectric-runtime-v1-${{ runner.os }}
 
-      # The project's own gradle.properties carries no per-host limits, so this
-      # machine uses everything it was given: all its processors, incremental
-      # compilation, and the build cache.
-      #
       # Deliberately NOT split into shards. Measured on a 58-test suite: the
       # tests take 16s while setting a job up costs 17s, so two shards would each
       # pay the setup in full to halve a little work — slower in wall clock and
@@ -133,8 +129,54 @@ jobs:
       # does, so the same check costs nothing here, and the release job skips it
       # (see there). It still gates the release, because publishing waits for
       # this job to pass.
+      # A pull request runs only the tests its own change can have broken; main
+      # runs all of them, because main is what ships. That is the difference
+      # between a quick answer on a change and a real answer on a release.
+      #
+      # The selector falls back to everything whenever it cannot tell: a changed
+      # file that is on no line of tools/test-map.txt, a change to the build
+      # itself, or an empty change. Unknown means full, never nothing.
+      - name: Work out which tests this change needs
+        id: which
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          TOOLS_DIR: ${{ github.workspace }}/tools
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "This is not a pull request, so every test runs."
+            selection="$(bash "$TOOLS_DIR/changed-tests.sh" --all)"
+          else
+            # The changes are measured against the branch the pull request is
+            # for, which is fetched because a shallow checkout has only one
+            # commit of it and no merge base to compare with.
+            git fetch --quiet --no-tags --depth=50 origin "$BASE_REF" || true
+            selection="$(bash "$TOOLS_DIR/changed-tests.sh" --base "origin/$BASE_REF")"
+          fi
+
+          echo "tests: $selection"
+
+          if [ "$selection" = "ALL" ]; then
+            echo "filters=" >> "$GITHUB_OUTPUT"
+          else
+            filters=""
+            for name in $selection; do
+              filters="$filters --tests com.example.notes.$name"
+            done
+            echo "filters=$filters" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run the tests
-        run: ./gradlew --no-daemon testDebugUnitTest
+        env:
+          FILTERS: ${{ steps.which.outputs.filters }}
+        run: |
+          # The project's own gradle.properties carries no per-host limits, so
+          # this machine uses everything it was given.
+          #
+          # The list of tests is handed over in an environment variable and
+          # word-split on purpose, so that it can be empty for the whole suite.
+          # shellcheck disable=SC2086
+          ./gradlew --no-daemon testDebugUnitTest $FILTERS
 
       # Kept only when something failed, because it is the only thing that
       # explains a failure: the report carries the per-class timings and the
