@@ -99,6 +99,10 @@ android {
 
     buildFeatures {
         compose = true
+        // `BuildConfig.DEBUG` is what decides whether this build may make a test
+        // account: the features that need one can then be walked through by a
+        // machine that has no key.
+        buildConfig = true
     }
 
     testOptions {

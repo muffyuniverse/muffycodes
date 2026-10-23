@@ -1,0 +1,414 @@
+package com.example.notes
+
+import org.eclipse.jgit.api.Git
+import org.eclipse.jgit.lib.CommitBuilder
+import org.eclipse.jgit.lib.Constants
+import org.eclipse.jgit.lib.FileMode
+import org.eclipse.jgit.lib.PersonIdent
+import org.eclipse.jgit.lib.TreeFormatter
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
+
+/** The outcome of a call to a GitHub, whichever one is behind it. */
+data class GitHubResult<T>(
+    val value: T? = null,
+    val error: String? = null,
+) {
+    val isSuccess: Boolean get() = error == null && value != null
+}
+
+/** A repository of the signed-in account. */
+data class Repo(
+    val name: String,
+    val fullName: String,
+    val private: Boolean,
+    val cloneUrl: String,
+    val updatedAt: String = "",
+)
+
+/** A licence a new repository can be seeded with. */
+data class Licence(val key: String, val name: String)
+
+/**
+ * The part of GitHub the app uses: who the key belongs to, the account's
+ * repositories, and making, renaming and deleting one.
+ *
+ * It is an interface for one reason: the advanced features of this app — making
+ * a project, syncing it, pulling one in — are only reachable once somebody is
+ * signed in, and a test run must never be given a real key. [HttpGitHub] talks to
+ * GitHub; [DiskGitHub] talks to a folder that behaves like one. Everything above
+ * this line is the same code either way, which is what makes the tests worth
+ * anything.
+ */
+interface GitHub {
+
+    /** The name the key belongs to. */
+    fun whoami(token: String): GitHubResult<String>
+
+    /** The account's repositories, most recently changed first. */
+    fun listRepos(token: String): GitHubResult<List<Repo>>
+
+    /** The licences a repository can be created with. */
+    fun licences(token: String): GitHubResult<List<Licence>>
+
+    /** Creates a public repository seeded with a README and, when asked, a licence. */
+    fun createRepo(
+        token: String,
+        name: String,
+        licence: String = "",
+        description: String = "",
+    ): GitHubResult<Repo>
+
+    /** Renames a repository, so the project and its repository keep one name. */
+    fun renameRepo(token: String, owner: String, name: String, newName: String): GitHubResult<Repo>
+
+    /** Deletes a repository. Used only by "delete everywhere". */
+    fun deleteRepo(token: String, owner: String, name: String): GitHubResult<Unit>
+
+    /** The address a repository is cloned from, from its owner and name. */
+    fun cloneUrlFor(owner: String, name: String): String
+
+    /** The URL used to open a repository in the browser. */
+    fun webUrl(cloneUrl: String): String
+
+    /** True when a clone address belongs to this GitHub. */
+    fun owns(remoteUrl: String): Boolean
+}
+
+/**
+ * GitHub itself, over HTTPS.
+ *
+ * The `gh` command-line tool cannot run inside an Android app (it is a native
+ * binary for desktop operating systems), so the app talks to the same API
+ * directly.
+ *
+ * Every method takes a personal access token; nothing is stored or sent without
+ * one, and the token is only ever attached to GitHub itself.
+ */
+class HttpGitHub(private val api: String = DEFAULT_API) : GitHub {
+
+    override fun whoami(token: String): GitHubResult<String> {
+        val response = get("GET", "/user", token)
+        if (response.error != null) return GitHubResult(error = response.error)
+        val login = response.value?.optString("login").orEmpty()
+        if (login.isEmpty()) {
+            return GitHubResult(error = "GitHub did not return an account name")
+        }
+        return GitHubResult(value = login)
+    }
+
+    override fun listRepos(token: String): GitHubResult<List<Repo>> {
+        val response = get("GET", "/user/repos?per_page=100&sort=updated", token)
+        if (response.error != null) return GitHubResult(error = response.error)
+        val array = response.array ?: return GitHubResult(error = "GitHub did not return a list")
+        val repos = mutableListOf<Repo>()
+        for (i in 0 until array.length()) {
+            val obj = array.optJSONObject(i) ?: continue
+            repos.add(repo(obj))
+        }
+        return GitHubResult(value = repos)
+    }
+
+    override fun licences(token: String): GitHubResult<List<Licence>> {
+        val response = get("GET", "/licenses", token)
+        if (response.error != null) return GitHubResult(error = response.error)
+        val array = response.array ?: return GitHubResult(error = "GitHub did not return a list")
+        val licences = mutableListOf<Licence>()
+        for (i in 0 until array.length()) {
+            val obj = array.optJSONObject(i) ?: continue
+            val key = obj.optString("key")
+            if (key.isNotEmpty()) licences.add(Licence(key, obj.optString("name")))
+        }
+        return GitHubResult(value = licences.sortedBy { it.name.lowercase() })
+    }
+
+    override fun createRepo(
+        token: String,
+        name: String,
+        licence: String,
+        description: String,
+    ): GitHubResult<Repo> {
+        val body = JSONObject().apply {
+            put("name", name)
+            put("private", false)
+            put("auto_init", true)
+            if (licence.isNotBlank()) put("license_template", licence)
+            if (description.isNotBlank()) put("description", description)
+        }
+        val response = get("POST", "/user/repos", token, body)
+        if (response.error != null) return GitHubResult(error = response.error)
+        val obj = response.value
+            ?: return GitHubResult(error = "GitHub did not return the new repository")
+        return GitHubResult(value = repo(obj))
+    }
+
+    override fun renameRepo(
+        token: String,
+        owner: String,
+        name: String,
+        newName: String,
+    ): GitHubResult<Repo> {
+        val body = JSONObject().put("name", newName)
+        val response = get("PATCH", "/repos/$owner/$name", token, body)
+        if (response.error != null) return GitHubResult(error = response.error)
+        val obj = response.value ?: return GitHubResult(error = "GitHub did not return the repository")
+        return GitHubResult(value = repo(obj))
+    }
+
+    override fun deleteRepo(token: String, owner: String, name: String): GitHubResult<Unit> {
+        val response = get("DELETE", "/repos/$owner/$name", token)
+        if (response.error != null) return GitHubResult(error = response.error)
+        return GitHubResult(value = Unit)
+    }
+
+    override fun cloneUrlFor(owner: String, name: String): String =
+        "https://github.com/$owner/${urlPart(name)}.git"
+
+    override fun webUrl(cloneUrl: String): String = cloneUrl.removeSuffix(".git")
+
+    override fun owns(remoteUrl: String): Boolean = remoteUrl.startsWith(API)
+
+    private fun repo(obj: JSONObject) = Repo(
+        name = obj.optString("name"),
+        fullName = obj.optString("full_name"),
+        private = obj.optBoolean("private"),
+        cloneUrl = obj.optString("clone_url"),
+        updatedAt = obj.optString("updated_at"),
+    )
+
+    /** A response that may be an object or an array, as the API returns both. */
+    private class Response(
+        val value: JSONObject? = null,
+        val array: JSONArray? = null,
+        val error: String? = null,
+    )
+
+    private fun get(
+        method: String,
+        path: String,
+        token: String,
+        body: JSONObject? = null,
+    ): Response {
+        var connection: HttpURLConnection? = null
+        return try {
+            connection = (URL(API + path).openConnection() as HttpURLConnection).apply {
+                requestMethod = method
+                connectTimeout = 20_000
+                readTimeout = 30_000
+                setRequestProperty("Accept", "application/vnd.github+json")
+                setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
+                setRequestProperty("User-Agent", "MuffyCodes")
+                // The key is only ever attached to GitHub itself. A request
+                // that would go anywhere else is sent without it.
+                if (token.isNotBlank() && Secrets.isGitHubHost(API)) {
+                    setRequestProperty("Authorization", "Bearer $token")
+                }
+                if (body != null) {
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json")
+                }
+            }
+            if (body != null) {
+                connection.outputStream.use { it.write(body.toString().toByteArray()) }
+            }
+
+            val code = connection.responseCode
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            val text = stream?.bufferedReader()?.use(BufferedReader::readText).orEmpty()
+
+            if (code !in 200..299) {
+                val message = try {
+                    val obj = JSONObject(text)
+                    obj.optString("message").ifBlank { "GitHub returned error $code" }
+                } catch (e: Exception) {
+                    "GitHub returned error $code"
+                }
+                return Response(error = Secrets.scrub(message))
+            }
+
+            val trimmed = text.trim()
+            when {
+                trimmed.isEmpty() -> Response(value = JSONObject())
+                trimmed.startsWith("[") -> Response(array = JSONArray(trimmed))
+                else -> Response(value = JSONObject(trimmed))
+            }
+        } catch (e: Exception) {
+            Response(error = Secrets.scrub(e.message ?: "Could not reach GitHub"))
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
+    companion object {
+        const val API = "https://api.github.com"
+
+        /** GitHub's default, for when no base is given. */
+        const val DEFAULT_API = API
+
+        /** Escapes a repository name for use in a path or an address. */
+        fun urlPart(value: String): String =
+            URLEncoder.encode(value, "UTF-8").replace("+", "%20")
+    }
+}
+
+/**
+ * A GitHub that is a folder.
+ *
+ * Each repository is a real, bare git repository on disk, addressed by a
+ * `file://` URL, so cloning, committing, force-pushing and resetting all happen
+ * for real — the same JGit code runs, the same refs move, the same statuses come
+ * back. What is missing is the network and the key, and that is the point: the
+ * parts of the app that need an account can be exercised by a test run, on a
+ * machine that must never hold one.
+ *
+ * This is only ever reached through the test account of a debug build. A release
+ * build has no way to name it.
+ */
+class DiskGitHub(
+    private val root: File,
+    private val owner: String = "dev",
+) : GitHub {
+
+    private val ownerDir: File get() = File(root, owner)
+
+    /** Where one repository lives on disk. */
+    fun repoDir(name: String): File = File(ownerDir, "$name.git")
+
+    override fun whoami(token: String): GitHubResult<String> = GitHubResult(value = owner)
+
+    override fun listRepos(token: String): GitHubResult<List<Repo>> {
+        val dirs = ownerDir.listFiles()
+            ?.filter { it.isDirectory && it.name.endsWith(".git") }
+            ?.sortedByDescending { it.lastModified() }
+            .orEmpty()
+        return GitHubResult(
+            value = dirs.map { dir ->
+                val name = dir.name.removeSuffix(".git")
+                Repo(
+                    name = name,
+                    fullName = "$owner/$name",
+                    private = false,
+                    cloneUrl = cloneUrlFor(owner, name),
+                    updatedAt = "",
+                )
+            }
+        )
+    }
+
+    override fun licences(token: String): GitHubResult<List<Licence>> = GitHubResult(
+        value = listOf(
+            Licence("mit", "MIT License"),
+            Licence("apache-2.0", "Apache License 2.0"),
+            Licence("gpl-3.0", "GNU General Public License v3.0"),
+        )
+    )
+
+    override fun createRepo(
+        token: String,
+        name: String,
+        licence: String,
+        description: String,
+    ): GitHubResult<Repo> {
+        if (name.isBlank()) return GitHubResult(error = "A repository needs a name")
+        val dir = repoDir(name)
+        if (dir.exists()) {
+            return GitHubResult(error = "There is already a repository called \"$name\"")
+        }
+        return try {
+            seed(dir, name, licence)
+            GitHubResult(
+                value = Repo(
+                    name = name,
+                    fullName = "$owner/$name",
+                    private = false,
+                    cloneUrl = cloneUrlFor(owner, name),
+                )
+            )
+        } catch (e: Exception) {
+            dir.deleteRecursively()
+            GitHubResult(error = "Could not make the repository: ${e.message}")
+        }
+    }
+
+    override fun renameRepo(
+        token: String,
+        owner: String,
+        name: String,
+        newName: String,
+    ): GitHubResult<Repo> {
+        val from = repoDir(name)
+        val to = repoDir(newName)
+        if (!from.exists()) return GitHubResult(error = "There is no repository called \"$name\"")
+        if (to.exists()) return GitHubResult(error = "There is already a repository called \"$newName\"")
+        return if (from.renameTo(to)) {
+            GitHubResult(
+                value = Repo(newName, "$owner/$newName", false, cloneUrlFor(owner, newName))
+            )
+        } else {
+            GitHubResult(error = "Could not rename the repository")
+        }
+    }
+
+    override fun deleteRepo(token: String, owner: String, name: String): GitHubResult<Unit> {
+        val dir = repoDir(name)
+        if (!dir.exists()) return GitHubResult(error = "There is no repository called \"$name\"")
+        return if (dir.deleteRecursively()) {
+            GitHubResult(value = Unit)
+        } else {
+            GitHubResult(error = "Could not delete the repository")
+        }
+    }
+
+    override fun cloneUrlFor(owner: String, name: String): String =
+        repoDir(name).toURI().toString()
+
+    override fun webUrl(cloneUrl: String): String = cloneUrl
+
+    override fun owns(remoteUrl: String): Boolean = remoteUrl.startsWith(root.toURI().toString()) ||
+        remoteUrl.startsWith("file:")
+
+    /**
+     * Makes one repository the way GitHub does when it is asked to initialise:
+     * a `main` branch and one commit holding the README and, when asked for, the
+     * licence.
+     */
+    private fun seed(dir: File, name: String, licence: String) {
+        dir.parentFile?.mkdirs()
+        Git.init().setBare(true).setInitialBranch("main").setDirectory(dir).call().use { git ->
+            val repo = git.repository
+            val inserter = repo.objectDatabase.newObjectInserter()
+            val tree = TreeFormatter()
+
+            fun add(fileName: String, text: String) {
+                val blob = inserter.insert(Constants.OBJ_BLOB, text.toByteArray())
+                tree.append(fileName, FileMode.REGULAR_FILE, blob)
+            }
+
+            add("README.md", "# $name\n\nA test repository, made by the app on this phone.\n")
+            if (licence.isNotBlank()) {
+                add("LICENSE", "The $licence licence applies to this repository.\n")
+            }
+            val treeId = inserter.insert(tree)
+
+            val who = PersonIdent(owner, "$owner@example.com")
+            val builder = CommitBuilder().apply {
+                setTreeId(treeId)
+                setAuthor(who)
+                setCommitter(who)
+                setMessage("Initial commit")
+            }
+            val commitId = inserter.insert(builder)
+            inserter.flush()
+
+            repo.updateRef(Constants.R_HEADS + "main").apply {
+                newObjectId = commitId
+                forceUpdate()
+            }
+        }
+    }
+}

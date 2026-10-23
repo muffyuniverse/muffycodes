@@ -11,6 +11,12 @@ data class Account(
     val commitName: String,
     /** The address written into commits made while this account is active. */
     val commitEmail: String,
+    /**
+     * True when this account is the test account of a debug build: it has no key
+     * and talks to a GitHub that is a folder on this phone. A release build can
+     * never make one, and no account stored by a release build ever has this set.
+     */
+    val dev: Boolean = false,
 ) {
     fun author(): GitAuthor = GitAuthor(
         name = commitName.ifBlank { login },
@@ -61,6 +67,7 @@ class AccountStore(private val filesDir: File) {
             login = json.optString("login").ifBlank { dir.name },
             commitName = json.optString("commitName"),
             commitEmail = json.optString("commitEmail"),
+            dev = json.optBoolean("dev"),
         )
     } catch (e: Exception) {
         Account(login = dir.name, commitName = "", commitEmail = "")
@@ -74,6 +81,7 @@ class AccountStore(private val filesDir: File) {
             put("login", account.login)
             put("commitName", account.commitName)
             put("commitEmail", account.commitEmail)
+            if (account.dev) put("dev", true)
         }
         File(dir, DETAILS).writeText(json.toString())
         return account
@@ -87,8 +95,12 @@ class AccountStore(private val filesDir: File) {
     /** True when the phone holds any trace of [login]. */
     fun exists(login: String): Boolean = dirOf(login).isDirectory
 
+    /** Where the test account's pretend GitHub keeps its repositories. */
+    fun devGitHubDir(login: String): File = File(dirOf(login), DEV_GITHUB)
+
     private companion object {
         const val ACCOUNTS = "accounts"
         const val DETAILS = "account.json"
+        const val DEV_GITHUB = "test-github"
     }
 }

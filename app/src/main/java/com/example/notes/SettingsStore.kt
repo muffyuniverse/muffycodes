@@ -18,9 +18,9 @@ import androidx.compose.runtime.setValue
  * is typed, so shortening the history of a large tree is a decision whose cost
  * arrives with the next save rather than in the middle of a setting.
  */
-class SettingsStore(context: Context) {
+class SettingsStore(context: Context, name: String = "settings") {
 
-    private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+    private val prefs = context.getSharedPreferences(name, Context.MODE_PRIVATE)
 
     var theme: AppTheme by mutableStateOf(
         AppTheme.entries.firstOrNull { it.name == prefs.getString(KEY_THEME, null) }

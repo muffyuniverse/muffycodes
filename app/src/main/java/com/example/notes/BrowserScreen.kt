@@ -503,6 +503,7 @@ fun AccountSheet(
     onSwitch: (String) -> Unit,
     onRemove: () -> Unit,
     onEditIdentity: () -> Unit,
+    onTestAccount: (() -> Unit)? = null,
 ) {
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,

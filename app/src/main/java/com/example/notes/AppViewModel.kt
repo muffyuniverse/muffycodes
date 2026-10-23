@@ -23,11 +23,16 @@ import java.util.concurrent.Executors
  * tree ([AppHistory]). Both run behind the UI on a single worker, so a save never
  * waits for a commit and a sync never freezes a list.
  */
-class AppViewModel(app: Application) : AndroidViewModel(app) {
+class AppViewModel @JvmOverloads constructor(
+    app: Application,
+    /** Where accounts live; `files/` on a phone, a temporary folder in a test. */
+    rootDir: File = app.filesDir,
+    private val credentials: Credentials = CredentialStore(app),
+    val settings: SettingsStore = SettingsStore(app),
+) : AndroidViewModel(app) {
 
-    private val accounts = AccountStore(app.filesDir)
-    private val credentials = CredentialStore(app)
-    val settings = SettingsStore(app)
+    /** The accounts on this phone. */
+    val accounts = AccountStore(rootDir)
 
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
@@ -84,6 +89,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val accountList: List<Account> get() = accounts.accounts()
 
     val account: Account? get() = accounts.account(activeLogin)
+
+    /**
+     * The GitHub the active account talks to.
+     *
+     * A signed-in account talks to GitHub. The test account of a debug build talks
+     * to a folder on this phone that behaves like one, so every feature that needs
+     * an account can be walked through without a key ever existing.
+     */
+    fun githubFor(login: String?): GitHub? {
+        val stored = accounts.account(login) ?: return null
+        return if (stored.dev) DiskGitHub(accounts.devGitHubDir(stored.login), stored.login)
+        else HttpGitHub()
+    }
+
+    /** The GitHub of the active account, or null when nobody is signed in. */
+    val github: GitHub? get() = githubFor(activeLogin)
 
     val signedIn: Boolean get() = account != null
 
@@ -392,9 +413,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun createProject(name: String, licence: String, onDone: (Boolean) -> Unit = {}) {
         val ws = workspace ?: return
-        val token = activeLogin?.let { credentials.token(it) }
         val login = activeLogin
-        if (token.isNullOrBlank() || login.isNullOrBlank()) {
+        val api = githubFor(login)
+        val token = login?.let { credentials.token(it) }.orEmpty()
+        if (login.isNullOrBlank() || api == null) {
             message = "Sign in to GitHub first"
             onDone(false)
             return
@@ -414,7 +436,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
         busy = true
         worker.execute {
-            val created = GitHubClient.createRepo(token, clean, licence)
+            val created = api.createRepo(token, clean, licence)
             if (created.error != null) {
                 main.post {
                     busy = false
@@ -424,7 +446,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 return@execute
             }
             val url = created.value?.cloneUrl?.takeIf { it.isNotBlank() }
-                ?: GitHubClient.cloneUrlFor(login, clean)
+                ?: api.cloneUrlFor(login, clean)
             val folders = ws.createProjectFolders(clean)
             if (folders.isFailure) {
                 main.post {
@@ -454,7 +476,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Renames a project and its repository together (§3). */
     fun renameProject(project: String, newName: String) {
         val ws = workspace ?: return
-        val token = activeLogin?.let { credentials.token(it) }
+        val api = github
+        val token = activeLogin?.let { credentials.token(it) }.orEmpty()
         val login = activeLogin
         val clean = newName.trim()
         val problem = ws.nameProblem(clean)
@@ -470,8 +493,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         busy = true
         worker.execute {
             var note = ""
-            if (token != null && login != null) {
-                val renamed = GitHubClient.renameRepo(token, login, project, clean)
+            if (api != null && login != null) {
+                val renamed = api.renameRepo(token, login, project, clean)
                 if (renamed.error != null) note = renamed.error
             }
             val moved = ws.rename(File(ws.projectsDir, project), clean)
@@ -491,7 +514,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     { settings.projectHistoryLength },
                 )
                 g.open(clean)?.use { repo ->
-                    GitService.setRemoteUrl(repo, GitHubClient.cloneUrlFor(login, clean))
+                    GitService.setRemoteUrl(repo, api.cloneUrlFor(login, clean))
                 }
             }
             main.post {
@@ -512,13 +535,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun deleteProject(project: String, everywhere: Boolean) {
         val ws = workspace ?: return
-        val token = activeLogin?.let { credentials.token(it) }
+        val api = github
+        val token = activeLogin?.let { credentials.token(it) }.orEmpty()
         val login = activeLogin
         busy = true
         worker.execute {
             var note = ""
-            if (everywhere && token != null && login != null) {
-                val deleted = GitHubClient.deleteRepo(token, login, project)
+            if (everywhere && api != null && login != null) {
+                val deleted = api.deleteRepo(token, login, project)
                 // A repository already gone is not a failure: the local side goes.
                 if (deleted.error != null && !deleted.error.contains("404")) {
                     note = deleted.error
@@ -538,33 +562,35 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** The account's public repositories, for the add window (§6). */
-    fun listRepositories(onDone: (List<GitHubClient.Repo>, String?) -> Unit) {
-        val token = activeLogin?.let { credentials.token(it) }
-        if (token.isNullOrBlank()) {
+    fun listRepositories(onDone: (List<Repo>, String?) -> Unit) {
+        val api = github
+        val token = activeLogin?.let { credentials.token(it) }.orEmpty()
+        if (api == null) {
             onDone(emptyList(), "Sign in to GitHub first")
             return
         }
         worker.execute {
-            val result = GitHubClient.listRepos(token)
+            val result = api.listRepos(token)
             main.post { onDone(result.value ?: emptyList(), result.error) }
         }
     }
 
     /** The licences a new project can be created with. */
-    fun listLicences(onDone: (List<GitHubClient.Licence>) -> Unit) {
-        val token = activeLogin?.let { credentials.token(it) }
-        if (token.isNullOrBlank()) {
+    fun listLicences(onDone: (List<Licence>) -> Unit) {
+        val api = github
+        val token = activeLogin?.let { credentials.token(it) }.orEmpty()
+        if (api == null) {
             onDone(emptyList())
             return
         }
         worker.execute {
-            val result = GitHubClient.licences(token)
+            val result = api.licences(token)
             main.post { onDone(result.value ?: emptyList()) }
         }
     }
 
     /** Pulls a repository in from GitHub, cloning it as a new project (§5.2). */
-    fun pullRepository(repo: GitHubClient.Repo) {
+    fun pullRepository(repo: Repo) {
         val ws = workspace ?: return
         val token = activeLogin?.let { credentials.token(it) }
         val login = activeLogin ?: return
@@ -605,7 +631,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun signInWithToken(token: String, name: String, email: String, onDone: (Boolean) -> Unit) {
         worker.execute {
-            val result = GitHubClient.whoami(token)
+            val result = HttpGitHub().whoami(token)
             val login = result.value
             main.post {
                 if (login == null) {
@@ -616,6 +642,56 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     message = "Signed in as $login"
                     onDone(true)
                 }
+            }
+        }
+    }
+
+    /**
+     * Whether this build may make a test account.
+     *
+     * Only a debug build may. The account has no key and talks to a folder on this
+     * phone, so it lets a test run walk the features that need an account without
+     * a key ever existing. A release build has no way to ask for it: not a setting,
+     * not an intent extra, nothing.
+     */
+    val canMakeTestAccount: Boolean get() = BuildConfig.DEBUG
+
+    /**
+     * Makes the test account of a debug build and signs it in.
+     *
+     * It is a real account in every way that matters — its own folder, its own
+     * identity, its own projects — and its GitHub is a folder of bare repositories
+     * ([DiskGitHub]), so a project is invented, cloned, committed to and pushed
+     * for real. One repository is put there first, so Pull has something to pull.
+     */
+    fun signInAsTestAccount(onDone: (Boolean) -> Unit = {}) {
+        if (!canMakeTestAccount) {
+            message = "Only a test build can do that"
+            onDone(false)
+            return
+        }
+        worker.execute {
+            val login = TEST_ACCOUNT
+            val github = DiskGitHub(accounts.devGitHubDir(login), login)
+            if (github.listRepos("").value?.isEmpty() != false) {
+                github.createRepo("", "welcome", "mit", "A repository that is not here yet")
+            }
+            main.post {
+                credentials.setToken(login, "")
+                accounts.save(
+                    Account(
+                        login = login,
+                        commitName = "Test Account",
+                        commitEmail = "$login@example.com",
+                        dev = true,
+                    )
+                )
+                credentials.activeLogin = login
+                activeLogin = login
+                path = emptyList()
+                refresh()
+                message = "Signed in as the test account"
+                onDone(true)
             }
         }
     }
@@ -746,6 +822,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     companion object {
+        /** The login of the test account a debug build can make. */
+        const val TEST_ACCOUNT = "test-account"
+
         val DEFAULT_AUTHOR = GitAuthor("Muffy World", "muffyworld365@gmail.com")
         private const val SEARCH_LIMIT = 4000
         private const val SEARCH_RESULTS = 200

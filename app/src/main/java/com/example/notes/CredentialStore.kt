@@ -9,6 +9,34 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /**
+ * The keys of the stored accounts, as the rest of the app sees them.
+ *
+ * It is an interface so a test can put an account on a phone without a keystore:
+ * the real one is [CredentialStore], which encrypts every key with a key from the
+ * Android keystore.
+ */
+interface Credentials {
+
+    /** The login of the active account, or null when nobody is signed in. */
+    var activeLogin: String?
+
+    /** The logins of the accounts stored on this phone. */
+    fun logins(): List<String>
+
+    /** The key of [login], or null when this phone has none. */
+    fun token(login: String): String?
+
+    /** Keeps [token] for [login]. */
+    fun setToken(login: String, token: String)
+
+    /** Forgets the key of [login]. */
+    fun forget(login: String)
+
+    /** True when a key is stored for [login]. */
+    fun hasToken(login: String): Boolean
+}
+
+/**
  * Where the keys of the stored accounts are kept.
  *
  * Every account has its own token, stored encrypted with a key from the Android
@@ -16,12 +44,12 @@ import javax.crypto.spec.GCMParameterSpec
  * the phone, and only while it is unlocked. The login names are not secret and
  * are stored in plain text — they name the account, they do not open it.
  */
-class CredentialStore(context: Context) {
+class CredentialStore(context: Context) : Credentials {
 
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     /** The login of the active account, or null when nobody is signed in. */
-    var activeLogin: String?
+    override var activeLogin: String?
         get() = prefs.getString(KEY_ACTIVE, null)
         set(value) {
             prefs.edit().apply {
@@ -30,14 +58,14 @@ class CredentialStore(context: Context) {
         }
 
     /** The logins of the accounts stored on this phone, in the order added. */
-    fun logins(): List<String> =
+    override fun logins(): List<String> =
         prefs.getString(KEY_LOGINS, null)
             ?.split('\n')
             ?.filter { it.isNotBlank() }
             ?: emptyList()
 
     /** The token of [login], or null when there is none or it cannot be read. */
-    fun token(login: String): String? {
+    override fun token(login: String): String? {
         val stored = prefs.getString(tokenKey(login), null) ?: return null
         return try {
             decrypt(stored)
@@ -50,7 +78,7 @@ class CredentialStore(context: Context) {
     }
 
     /** Stores the token of [login], replacing any earlier one. */
-    fun setToken(login: String, token: String) {
+    override fun setToken(login: String, token: String) {
         prefs.edit().putString(tokenKey(login), encrypt(token)).apply()
         val known = logins()
         if (login !in known) {
@@ -59,7 +87,7 @@ class CredentialStore(context: Context) {
     }
 
     /** Removes [login] and its token from this phone. */
-    fun forget(login: String) {
+    override fun forget(login: String) {
         prefs.edit()
             .remove(tokenKey(login))
             .putString(KEY_LOGINS, logins().filter { it != login }.joinToString("\n"))
@@ -68,7 +96,7 @@ class CredentialStore(context: Context) {
     }
 
     /** True when [login] has a token stored. */
-    fun hasToken(login: String): Boolean = token(login) != null
+    override fun hasToken(login: String): Boolean = token(login) != null
 
     private fun tokenKey(login: String): String = "token_$login"
 

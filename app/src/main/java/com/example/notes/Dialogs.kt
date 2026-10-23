@@ -260,13 +260,13 @@ private fun RadioLine(
  */
 @Composable
 fun AddProjectDialog(
-    repositories: List<GitHubClient.Repo>,
+    repositories: List<Repo>,
     alreadyHere: Set<String>,
     loading: Boolean,
     error: String?,
     onDismiss: () -> Unit,
     onNewProject: () -> Unit,
-    onPick: (GitHubClient.Repo) -> Unit,
+    onPick: (Repo) -> Unit,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -331,7 +331,7 @@ fun AddProjectDialog(
 /** The create dialog: a name and a licence (§4.1). */
 @Composable
 fun NewProjectDialog(
-    licences: List<GitHubClient.Licence>,
+    licences: List<Licence>,
     onDismiss: () -> Unit,
     onCreate: (name: String, licence: String) -> Unit,
 ) {

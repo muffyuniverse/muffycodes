@@ -201,8 +201,16 @@ private fun AppRoot(viewModel: AppViewModel) {
                 showAccount = false
                 pending = Pending.RemoveAccount
             },
-            onEditIdentity = {
-                showAccount = false
+              onTestAccount = if (viewModel.canMakeTestAccount) {
+                  {
+                      showAccount = false
+                      viewModel.signInAsTestAccount()
+                  }
+              } else {
+                  null
+              },
+              onEditIdentity = {
+                  showAccount = false
                 pending = Pending.EditIdentity
             },
         )
@@ -282,7 +290,7 @@ private fun Dialogs(
         }
 
         Pending.AddProject -> {
-            var repos by remember { mutableStateOf<List<GitHubClient.Repo>>(emptyList()) }
+            var repos by remember { mutableStateOf<List<Repo>>(emptyList()) }
             var loading by remember { mutableStateOf(true) }
             var error by remember { mutableStateOf<String?>(null) }
             LaunchedEffect(Unit) {
@@ -402,7 +410,7 @@ private fun moveTargets(viewModel: AppViewModel, entry: Entry): List<Pair<String
 /** Creates a project: the licence list first, then the name. */
 @Composable
 private fun NewProjectUI(viewModel: AppViewModel, dismiss: () -> Unit) {
-    var licences by remember { mutableStateOf<List<GitHubClient.Licence>>(emptyList()) }
+    var licences by remember { mutableStateOf<List<Licence>>(emptyList()) }
     LaunchedEffect(Unit) {
         viewModel.listLicences { licences = it }
     }
