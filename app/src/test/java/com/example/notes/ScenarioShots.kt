@@ -1,6 +1,7 @@
 package com.example.notes
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.onRoot
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -33,6 +34,17 @@ class ScenarioShots(
     private val title: String,
     /** One line under the title, which is what the report's index shows. */
     private val about: String,
+    /**
+     * Shows the screen that belongs to the second half, when a scenario has one.
+     *
+     * Most scenarios stay on one screen: the thing that changes is a row, a
+     * count, a list. Some do not — deleting a folder and then looking at its
+     * history is two screens, and pretending otherwise made the second picture a
+     * copy of the first with different words under it. A report that shows the
+     * same screen twice and calls it a before and an after is worse than one that
+     * shows a single picture and says why.
+     */
+    private val switchToAfter: () -> Unit = {},
 ) {
 
     private var happened: String? = null
@@ -64,8 +76,12 @@ class ScenarioShots(
         action()
     }
 
-    /** The screen after it was done. */
-    fun after() = capture("after.png")
+    /** The screen after it was done, which may be a different screen. */
+    fun after() {
+        switchToAfter()
+        compose.waitForIdle()
+        capture("after.png")
+    }
 
     /** What came of it, in one sentence. */
     fun result(result: String) {
@@ -128,10 +144,22 @@ fun scenario(
     title: String,
     about: String,
     screen: @Composable () -> Unit,
+    /** The screen the second half is taken on, when it is not the same one. */
+    afterScreen: (@Composable () -> Unit)? = null,
     body: ScenarioShots.() -> Unit,
 ): String {
-    compose.setContent { screen() }
-    val shots = ScenarioShots(compose, folder, title, about)
+    // One `setContent` for the whole scenario, because a Compose test rule allows
+    // exactly one. The switch is a piece of state read inside the composition, so
+    // changing it recomposes into the other screen — the same way the app itself
+    // moves from a list to a history view.
+    val showingAfter = mutableStateOf(false)
+    compose.setContent {
+        if (showingAfter.value && afterScreen != null) afterScreen() else screen()
+    }
+    val shots = ScenarioShots(
+        compose, folder, title, about,
+        switchToAfter = { showingAfter.value = true },
+    )
     shots.body()
     return shots.write()
 }

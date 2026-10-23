@@ -115,7 +115,7 @@ class ScenariosTest {
             screen = { settingsScreen() },
         ) {
             before()
-            then("The settings screen is opened from the corner menu.") {}
+            then("Nothing is done here: this is the settings screen as it is, with nothing changed.") {}
             after()
             result(
                 "Themes are a row of swatches with one light/dark switch, and both history " +
@@ -126,15 +126,15 @@ class ScenariosTest {
 
     @Test
     fun aPhoneThatHasJustBeenSignedIn() {
-        scene.signedIn()
-
         record(
             "03-account-root",
             "The first thing after signing in.",
             "an account with nothing in it yet, and the one folder the app made for it.",
         ) {
             before()
-            then("The test account is signed in; this is the root of what it can see.") {}
+            then("The test account is signed in; this is the root of what it can see.") {
+                scene.signedIn()
+            }
             after()
             result(
                 "The root holds the projects folder and nothing else. Everything the app " +
@@ -175,11 +175,6 @@ class ScenariosTest {
         scene.signedIn()
         scene.project("groceries")
         scene.open(Workspace.PROJECTS, "groceries")
-        scene.worktreeFile("milk.txt", "two litres")
-        scene.worktreeFile("bread.txt", "one loaf")
-        scene.open(Workspace.PROJECTS)
-        viewModel.refreshChanges()
-        scene.await("the row to count the changes", 20_000) { viewModel.changesOf("groceries") > 0 }
 
         record(
             "05-changes-waiting",
@@ -187,7 +182,15 @@ class ScenariosTest {
             "two files written into a project, and the row that counts them.",
         ) {
             before()
-            then("Two files are written into the project's worktree and the list is reopened.") {}
+            then("Two files are written into the project's worktree and the list is reopened.") {
+                scene.worktreeFile("milk.txt", "two litres")
+                scene.worktreeFile("bread.txt", "one loaf")
+                scene.open(Workspace.PROJECTS)
+                viewModel.refreshChanges()
+                scene.await("the row to count the changes", 20_000) {
+                    viewModel.changesOf("groceries") > 0
+                }
+            }
             after()
             result(
                 "The row counts the two changes, so a person can see at a glance that this " +
@@ -201,7 +204,6 @@ class ScenariosTest {
         scene.signedIn()
         scene.project("groceries")
         scene.open(Workspace.PROJECTS, "groceries")
-        scene.file("shopping-list.txt", "milk, bread")
 
         record(
             "06-a-local-note-beside-the-code",
@@ -209,7 +211,9 @@ class ScenariosTest {
             "a project holding its code repository and a private file next to it.",
         ) {
             before()
-            then("A file is written in the project's own folder, not inside the repository.") {}
+            then("A file is written in the project's own folder, not inside the repository.") {
+                scene.file("shopping-list.txt", "milk, bread")
+            }
             after()
             result(
                 "The folder holds both: the repository that goes to GitHub, and the note " +
@@ -223,8 +227,6 @@ class ScenariosTest {
         scene.signedIn()
         scene.project("groceries")
         scene.open(Workspace.PROJECTS, "groceries")
-        scene.worktreeFile("milk.txt", "two litres")
-        scene.sync("groceries")
 
         record(
             "07-after-a-sync",
@@ -232,7 +234,10 @@ class ScenariosTest {
             "a file written inside the code, and the same project once it has been sent.",
         ) {
             before()
-            then("A file is written inside the repository and the project is synced.") {}
+            then("A file is written inside the repository and the project is synced.") {
+                scene.worktreeFile("milk.txt", "two litres")
+                scene.sync("groceries")
+            }
             after()
             result(
                 "The file is on GitHub and nothing is waiting any more. The sync is one " +
@@ -250,18 +255,20 @@ class ScenariosTest {
         scene.saveAsVersion("two litres")
         scene.saveAsVersion("three litres")
         scene.closeEditor()
-        scene.versionsOf(file)
 
         scenario(
             compose, "08-the-history-of-a-file",
             "The history of a file.",
             "a note that was written three times, and the versions it kept.",
-            screen = {
+            screen = { browser() },
+            afterScreen = {
                 Screen { HistoryScreen(viewModel = viewModel, title = "milk.txt", onBack = {}) }
             },
         ) {
             before()
-            then("The history of milk.txt is opened, a moment after its third save.") {}
+            then("The history of milk.txt is opened, a moment after its third save.") {
+                scene.versionsOf(file)
+            }
             after()
             result(
                 "Every save is a version that can be put back, including the first. " +
@@ -278,21 +285,23 @@ class ScenariosTest {
         scene.file("one.txt", "the first")
         scene.open()
         val folder = File(scene.workspace!!.accountDir, "letters")
-        scene.versionsOfFolder("letters")
-        viewModel.delete(folder)
 
         scenario(
             compose, "09-a-deleted-folder-that-can-come-back",
             "A folder that was deleted, and the history that still has it.",
             "a folder removed from the phone, with every file of it still recoverable.",
-            screen = {
+            screen = { browser() },
+            afterScreen = {
                 Screen { HistoryScreen(viewModel = viewModel, title = "letters", onBack = {}) }
             },
         ) {
             before()
             then(
                 "The folder letters is deleted, and its history is opened afterwards."
-            ) {}
+            ) {
+                viewModel.delete(folder)
+                scene.versionsOfFolder("letters")
+            }
             after()
             result(
                 "The folder and the files that were in it can be brought back, because " +
@@ -308,21 +317,23 @@ class ScenariosTest {
         scene.open(Workspace.PROJECTS, "groceries", Workspace.REPO)
         scene.worktreeFile("milk.txt", "two litres")
         scene.sync("groceries")
-        scene.worktreeFile("milk.txt", "three litres")
-        scene.sync("groceries")
         val file = File(scene.workspace!!.repoOf("groceries"), "milk.txt")
-        scene.versionsOf(file)
 
         scenario(
             compose, "10-the-history-of-a-synced-file",
             "The history of a file that lives on GitHub.",
             "a file inside a project, changed and synced twice, and the versions GitHub holds.",
-            screen = {
+            screen = { browser() },
+            afterScreen = {
                 Screen { HistoryScreen(viewModel = viewModel, title = "milk.txt", onBack = {}) }
             },
         ) {
             before()
-            then("The file is changed and the project synced a second time.") {}
+            then("The file is changed and the project synced a second time.") {
+                scene.worktreeFile("milk.txt", "three litres")
+                scene.sync("groceries")
+                scene.versionsOf(file)
+            }
             after()
             result(
                 "The history of a file inside a project comes from that project's repository, " +
