@@ -17,10 +17,10 @@ stopped testing is worse than a slow one, and looks identical from the outside.
 
 | tier | how often | measured |
 |---|---|---|
-| pull request, one test class | most often | **59s** |
+| pull request, one test class | most often | **58s** |
 | pull request, seven classes | often | **91s** |
-| development push | occasionally | **141s** |
-| main, full release | rare, by hand | **157s** |
+| development push | occasionally | ~50s |
+| main, full release | rare, by hand | **146s** |
 | main, nothing in the app changed | — | **59s** |
 
 For comparison: 226s and five jobs at the start of this pass.
@@ -140,27 +140,45 @@ Ranked by measured or well-estimated gain, with the honest note on each.
 
 | idea | gain | verdict |
 |---|---|---|
-| Configuration cache on narrowed runs | ~6s per pull request | **worth it**; the last real win |
-| Drop lint from development | ~66s on a dev push | **a choice, not a win** — see below |
-| Merge delivery into the build job | ~8s on dev and main | marginal |
+| Configuration cache on narrowed runs | ~6s of Gradle | **done**; see below |
+| Drop lint from development | ~66s on a dev push | **done**, on the operator's call |
+| Merge delivery into the build job | ~8s | **rejected** — it would serialise the build behind the tests |
 | Faster Gradle start-up | up to 13s | not available: no daemon survives one job |
 | Fewer artifacts for a pull request | 2–4s | noise; skip it |
 
-**The configuration cache** is the one worth doing. Passing `--tests` changes the
-command line, and a changed command line is a different configuration-cache
-entry, so every narrowed run reports "no cached configuration is available" and
-pays for the whole configuration phase — about six seconds of the thirteen. The
-fix is to keep the command line identical and pass the selection by a mechanism
-the cache does not key on: an environment variable read at *execution* time,
-where the filter is applied. It is fiddly, it is worth doing, and it does not
-change the safety property because the fallback stays where it is.
+**The configuration cache on narrowed runs.** Passing `--tests` changed the
+command line, and the command line is an input the cache is keyed on, so every
+narrowed run recomputed the build. The selection now travels in
+`MUFFY_ONLY_TESTS` and is applied in a `doFirst` block at execution time, where
+an environment variable is not a cache input.
 
-**Dropping lint from development** trades a signal for a minute. Lint has never
-failed a build in this repository's history, and on development the thing being
-produced is a build to look at, not a release. But "it has never fired" is also
-what a working gate looks like, so this is the operator's call rather than a
-technical one. The measured alternative — a cheap lint for development — does not
-exist, which is what the 111s figure established.
+Measured on one branch, three consecutive runs of the same one-class change:
+
+| | total | Gradle |
+|---|---|---|
+| first run, cold | 68s | 39s |
+| second, warm | 63s | **33s** |
+| third, warm | **58s** | — |
+
+"Reusing configuration cache" now appears in the log. The honest reading: the
+six seconds are real in Gradle's clock but the run total is inside the ±6s of
+run-to-run variance at this size. The value is that it **stops getting worse** —
+before this, *every* narrowed pull request missed, permanently, because the key
+was shared with builds that pass a different recording flag.
+
+That sharing was a second defect, found only because the change was probed
+rather than trusted: main runs with `-Pmuffy.shots` and a pull request does not,
+so the two want different cache entries under the same key — and an entry, once
+written, can never be replaced. The event is now part of the key.
+
+**Merging delivery into the build job was rejected.** It looks like two jobs
+collapsing into one, but delivery must wait for the tests and lint, so folding it
+into the build would put the build behind both — turning a 3-second start into a
+70-second one. Removing a job is worth 45 seconds; this would add 60.
+
+**Lint no longer runs on development**, on the operator's call. It had never
+failed there, the branch exists to hand somebody a build to look at, and the
+cheap variant measured *slower* than the deep one.
 
 ## The floor
 
