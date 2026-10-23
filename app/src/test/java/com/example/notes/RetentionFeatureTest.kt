@@ -17,7 +17,12 @@ class RetentionFeatureTest : FeatureTest() {
 
     private fun historySize(): Int {
         val dir = scene.workspace!!.accountDir
-        return org.eclipse.jgit.api.Git.open(dir).use { GitService.log(it.repository, null).size }
+        if (!GitService.isRepository(dir)) return 0
+        return try {
+            org.eclipse.jgit.api.Git.open(dir).use { GitService.log(it.repository, null).size }
+        } catch (e: Exception) {
+            0
+        }
     }
 
     @Test

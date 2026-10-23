@@ -41,6 +41,14 @@ class Workspace(val accountDir: File) {
 
     private val pinFile: File get() = File(stateDir, PINS_FILE)
 
+    /**
+     * Makes the folders the app itself owns, so that the shape of an account is
+     * the same the moment it is signed in as it is after the first project.
+     */
+    fun ensure() {
+        projectsDir.mkdirs()
+    }
+
     // ---- reading -----------------------------------------------------------
 
     /** The folder's contents, hidden things left out: folders first, then names. */

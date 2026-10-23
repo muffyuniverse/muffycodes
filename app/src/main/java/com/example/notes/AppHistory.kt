@@ -56,6 +56,10 @@ class AppHistory(
      * null when nothing had changed.
      */
     fun commit(message: String, keep: Int = 0): String? {
+        // An account can be removed while a commit is still on its way to this
+        // method. Opening the history would then make the folder again, and the
+        // account would come back from the dead.
+        if (!accountDir.isDirectory) return null
         val repo = open()
         return repo.use {
             val id = try {

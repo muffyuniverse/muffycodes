@@ -99,7 +99,18 @@ class AppViewModel @JvmOverloads constructor(
 
     // ---- the account in use -------------------------------------------------
 
-    val accountList: List<Account> get() = accounts.accounts()
+    /**
+     * The accounts that can be switched to: the ones with a key, and the test
+     * account of a build that may keep one.
+     *
+     * An account that was removed with its copies kept still has a folder on this
+     * phone, but no key, so it is not something to switch to — signing in again is
+     * what brings it back.
+     */
+    val accountList: List<Account>
+        get() = accounts.accounts().filter {
+            credentials.hasToken(it.login) || (it.dev && testAccountsAllowed)
+        }
 
     val account: Account? get() = accounts.account(activeLogin)
 
@@ -180,6 +191,9 @@ class AppViewModel @JvmOverloads constructor(
             pins = emptySet()
             return
         }
+        // The folders the app owns exist from the moment the account is shown, so
+        // that an empty account and a new one look the same.
+        ws.ensure()
         entries = currentDir?.let { ws.list(it) } ?: emptyList()
         pins = ws.pins()
         refreshChanges()
@@ -698,7 +712,6 @@ class AppViewModel @JvmOverloads constructor(
                 github.createRepo("", "welcome", "mit", "A repository that is not here yet")
             }
             main.post {
-                credentials.setToken(login, "")
                 accounts.save(
                     Account(
                         login = login,

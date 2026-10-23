@@ -65,7 +65,9 @@ class FilesFeatureTest : FeatureTest() {
     @Test
     fun `a file can be moved into a folder and the folder can be moved into another`() {
         scene.folder("letters")
-        scene.folder("letters/2026")
+        scene.open("letters")
+        scene.folder("2026")
+        scene.open()
         val file = scene.file("milk.txt", "two litres")
 
         assertTrue(scene.viewModel.move(file, File(scene.viewModel.currentDir!!, "letters")))
@@ -77,7 +79,8 @@ class FilesFeatureTest : FeatureTest() {
     @Test
     fun `a folder cannot be moved inside itself`() {
         val outer = scene.folder("outer")
-        val inner = scene.folder("outer/inner")
+        scene.open("outer")
+        val inner = scene.folder("inner")
 
         assertFalse("the move is refused", scene.viewModel.move(outer, inner))
         assertTrue("the outer folder is still where it was", outer.isDirectory)

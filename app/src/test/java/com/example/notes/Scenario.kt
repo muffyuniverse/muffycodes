@@ -111,20 +111,22 @@ class Scenario(
 
     /** Makes a file in the folder that is open and waits for it to be there. */
     fun file(name: String, text: String = ""): File {
+        val made = Workspace.withDefaultExtension(name)
         viewModel.createFile(name)
-        await("\"$name\" to be made") { viewModel.entries.any { it.name == name } }
-        val made = File(viewModel.currentDir!!, name)
+        await("\"$made\" to be made") { viewModel.entries.any { it.name == made } }
+        val file = File(viewModel.currentDir!!, made)
         if (text.isNotEmpty()) {
-            viewModel.openEditor(made)
+            viewModel.openEditor(file)
             viewModel.saveEditor(text)
-            await("\"$name\" to hold $text") { viewModel.textOf(made) == text }
+            await("\"$made\" to hold $text") { viewModel.textOf(file) == text }
             viewModel.closeEditor()
         }
-        return made
+        return file
     }
 
     /** Makes a folder in the folder that is open. */
     fun folder(name: String): File {
+        require(!name.contains("/")) { "a folder is made in the folder that is open, not at a path" }
         viewModel.createFolder(name)
         await("\"$name\" to be made") { viewModel.entries.any { it.name == name } }
         return File(viewModel.currentDir!!, name)
@@ -139,6 +141,7 @@ class Scenario(
         await("project \"$name\" to exist") {
             viewModel.projectNames.any { it.equals(name, ignoreCase = true) }
         }
+        await("the making of $name to finish") { !viewModel.busy }
         return this
     }
 
@@ -177,21 +180,33 @@ class Scenario(
         viewModel.closeEditor()
     }
 
-    /** The versions of a file, newest first, as the history screen would list them. */
+    /**
+     * The versions of a file, newest first, as the history screen would list them.
+     *
+     * The history is left **open**, because restoring is an act on the history
+     * that is being shown: closing it first would make the restore a no-op, and a
+     * test that did that would prove nothing.
+     */
     fun versionsOf(file: File): List<Pair<GitService.CommitInfo, String?>> {
         viewModel.openHistory(file)
-        val versions = viewModel.versions()
-        viewModel.closeHistory()
-        return versions
+        return viewModel.versions()
     }
 
     /** The versions of a folder, newest first, each with what was inside it. */
     fun versionsOfFolder(name: String): List<Pair<GitService.CommitInfo, String?>> {
         val folder = File(workspace!!.accountDir, name)
         viewModel.openHistory(folder)
-        val versions = viewModel.versions()
+        return viewModel.versions()
+    }
+
+    /** Puts a version back, from the history that is open. */
+    fun restore(revisionId: String) {
+        viewModel.restoreVersion(revisionId)
+    }
+
+    /** Closes the history screen. */
+    fun closeHistory() {
         viewModel.closeHistory()
-        return versions
     }
 
     /** Every path the account's own history tracks, read from its newest commit. */

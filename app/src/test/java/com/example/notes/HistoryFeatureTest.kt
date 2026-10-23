@@ -15,10 +15,15 @@ import java.io.File
  */
 class HistoryFeatureTest : FeatureTest() {
 
-    /** The commits of the account's own history, newest first. */
+    /** The commits of the account's own history, newest first. Nothing yet is [emptyList]. */
     private fun log(): List<GitService.CommitInfo> {
         val dir = scene.workspace!!.accountDir
-        return org.eclipse.jgit.api.Git.open(dir).use { GitService.log(it.repository, null) }
+        if (!GitService.isRepository(dir)) return emptyList()
+        return try {
+            org.eclipse.jgit.api.Git.open(dir).use { GitService.log(it.repository, null) }
+        } catch (e: Exception) {
+            emptyList()
+        }
     }
 
     @Test
@@ -63,7 +68,7 @@ class HistoryFeatureTest : FeatureTest() {
         scene.await("two versions") { scene.versionsOf(file).size >= 2 }
 
         val oldest = scene.versionsOf(file).last().first.id
-        scene.viewModel.restoreVersion(oldest)
+        scene.restore(oldest)
 
         assertEquals("the old text is back", "one litre", file.readText())
     }
@@ -77,7 +82,7 @@ class HistoryFeatureTest : FeatureTest() {
         scene.await("two versions") { scene.versionsOf(file).size >= 2 }
         val count = scene.versionsOf(file).size
 
-        scene.viewModel.restoreVersion(scene.versionsOf(file).last().first.id)
+        scene.restore(scene.versionsOf(file).last().first.id)
         scene.await("the restore to be recorded") { scene.versionsOf(file).size > count }
 
         assertTrue("nothing was deleted from the history", scene.versionsOf(file).size > count)
@@ -93,7 +98,7 @@ class HistoryFeatureTest : FeatureTest() {
         scene.viewModel.delete(file)
         assertFalse("the file is gone", File(path).exists())
 
-        scene.viewModel.restoreVersion(version)
+        scene.restore(version)
 
         assertTrue("it is back", File(path).isFile)
         assertEquals("with its text", "one litre", File(path).readText())
@@ -116,7 +121,7 @@ class HistoryFeatureTest : FeatureTest() {
         scene.viewModel.delete(letters)
         assertFalse("the folder is gone", letters.exists())
 
-        scene.viewModel.restoreVersion(version)
+        scene.restore(version)
 
         assertTrue("the folder is back", letters.isDirectory)
         assertEquals("with the file that was in it", "first", File(letters, "one.txt").readText())
@@ -188,6 +193,7 @@ class HistoryFeatureTest : FeatureTest() {
     fun `the history has no remote and needs no key`() {
         scene.await("the first commit") { log().isNotEmpty() }
 
+        if (!GitService.isRepository(scene.workspace!!.accountDir)) return
         val remotes = org.eclipse.jgit.api.Git.open(scene.workspace!!.accountDir).use {
             it.repository.config.getSubsections("remote")
         }

@@ -3,6 +3,7 @@ package com.example.notes
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.lib.PersonIdent
 import org.eclipse.jgit.transport.RefSpec
+import org.eclipse.jgit.transport.RemoteRefUpdate
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -399,10 +400,23 @@ class DiskGitHub(
                     .setAuthor(who)
                     .setCommitter(who)
                     .call()
-                git.push()
-                    .setRemote(dir.absolutePath)
+                val pushed = git.push()
+                    .setRemote(dir.toURI().toString())
                     .setRefSpecs(RefSpec("refs/heads/main:refs/heads/main"))
                     .call()
+                // A push that was refused answers with a status, not an exception,
+                // and a repository seeded with nothing would clone into an empty
+                // project that looks broken for no visible reason.
+                val landed = pushed.flatMap { it.remoteUpdates }.any {
+                    it.status == RemoteRefUpdate.Status.OK ||
+                        it.status == RemoteRefUpdate.Status.UP_TO_DATE
+                }
+                if (!landed) {
+                    val said = pushed.flatMap { it.remoteUpdates }
+                        .mapNotNull { it.message ?: it.status?.name }
+                        .joinToString("; ")
+                    error("The first commit did not reach the repository: $said")
+                }
             }
         } finally {
             work.deleteRecursively()
