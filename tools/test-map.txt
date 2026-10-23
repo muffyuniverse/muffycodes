@@ -26,3 +26,4 @@ NotePreviewTest     app/src/main/java/com/example/notes/Note.kt
 FolderStorageTest   app/src/main/java/com/example/notes/FolderStorage.kt app/src/main/java/com/example/notes/NoteFile.kt
 ProjectStoreTest    app/src/main/java/com/example/notes/NoteStore.kt
 GitProjectsTest     app/src/main/java/com/example/notes/GitProjects.kt app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/GitHubClient.kt
+KeySafetyTest      app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/Secrets.kt app/src/main/java/com/example/notes/GitHubClient.kt app/src/main/java/com/example/notes/GitProjects.kt

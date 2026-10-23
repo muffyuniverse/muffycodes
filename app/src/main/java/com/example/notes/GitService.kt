@@ -112,15 +112,31 @@ object GitService {
         return repo
     }
 
-    /** Clones [remoteUrl] into [dir]. */
-    fun clone(remoteUrl: String, dir: File, author: GitAuthor): RemoteResult {
+    /**
+     * Clones [remoteUrl] into [dir].
+     *
+     * The key is handed to git as credentials and **never** as part of the
+     * address: an address is written into `.git/config`, repeated in messages
+     * and kept in logs, and every one of those is a place a key escapes from.
+     * Credentials are only attached for GitHub; anything else is cloned without
+     * them.
+     */
+    fun clone(
+        remoteUrl: String,
+        dir: File,
+        author: GitAuthor,
+        token: String? = null,
+    ): RemoteResult {
         return try {
             dir.parentFile?.mkdirs()
-            val git = Git.cloneRepository()
+            val command = Git.cloneRepository()
                 .setURI(remoteUrl)
                 .setDirectory(dir)
                 .setCloneAllBranches(true)
-                .call()
+            if (Secrets.isGitHubHost(remoteUrl)) {
+                credentials(token)?.let { command.setCredentialsProvider(it) }
+            }
+            val git = command.call()
             git.use {
                 // The clone inherits the remote's author; make the local identity ours.
                 it.repository.config.apply {
@@ -129,9 +145,9 @@ object GitService {
                     save()
                 }
             }
-            RemoteResult("Cloned $remoteUrl", true)
+            RemoteResult("Cloned ${Secrets.scrub(remoteUrl)}", true)
         } catch (e: Exception) {
-            RemoteResult(e.message ?: "Could not clone $remoteUrl", false)
+            RemoteResult(Secrets.scrub(e.message ?: "Could not clone"), false)
         }
     }
 
@@ -350,6 +366,29 @@ object GitService {
         config.save()
     }
 
+    /**
+     * Rewrites every remote address that carries a key back to the plain
+     * address.
+     *
+     * A repository written by an older version of the app can still hold a
+     * token inside its remote URL — on disk, readable by anything that reads
+     * the repository. Opening a repository scrubs this, so a leak that already
+     * happened stops happening.
+     */
+    fun scrubRemoteUrls(repo: Repository) {
+        val config = repo.config
+        var changed = false
+        for (remote in config.getSubsections("remote")) {
+            val url = config.getString("remote", remote, "url") ?: continue
+            val clean = Secrets.stripCredentials(url)
+            if (clean != url && clean.isNotBlank()) {
+                config.setString("remote", remote, "url", clean)
+                changed = true
+            }
+        }
+        if (changed) config.save()
+    }
+
     /** Pushes the current branch to the remote. */
     fun push(repo: Repository, token: String?): RemoteResult {
         return try {
@@ -365,12 +404,12 @@ object GitService {
                     .filter { it.isNotBlank() }
                     .joinToString("; ")
                 RemoteResult(
-                    message = messages.ifBlank { "Nothing to push" },
+                    message = Secrets.scrub(messages.ifBlank { "Nothing to push" }),
                     success = messages.contains("successfully") || messages.contains("up to date"),
                 )
             }
         } catch (e: Exception) {
-            RemoteResult(e.message ?: "Push failed", false)
+            RemoteResult(Secrets.scrub(e.message ?: "Push failed"), false)
         }
     }
 
@@ -388,7 +427,7 @@ object GitService {
                 )
             }
         } catch (e: Exception) {
-            RemoteResult(e.message ?: "Pull failed", false)
+            RemoteResult(Secrets.scrub(e.message ?: "Pull failed"), false)
         }
     }
 
