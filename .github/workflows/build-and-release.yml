@@ -199,6 +199,19 @@ jobs:
         if: matrix.shard == 0
         run: bash tools/pick-tests.sh --self-test
 
+      # The map's own drift, which the selector's self-test cannot see. That test
+      # proves the arithmetic — a name reaches exactly one shard — but it reads the
+      # same universe the map does, so a class the map forgot is invisible to it.
+      # This compares the map against the files: every test class named, every
+      # source accounted for, nothing stale.
+      #
+      # It proves inventory, not coverage. Nothing here can tell whether
+      # SyncFeatureTest really exercises ProjectGit.kt — only that neither side has
+      # quietly stopped mentioning the other.
+      - name: Check that the test map and the tests agree
+        if: matrix.shard == 0
+        run: python3 tools/check-test-map.py
+
       - name: Set up Java
         if: steps.shard.outputs.nothing == 'no'
         uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
@@ -819,6 +832,8 @@ jobs:
 
       - name: Check the signature of the APK
         if: steps.decision.outputs.changed == 'yes'
+        env:
+          EXPECTED_CERT: ${{ vars.EXPECTED_CERT }}
         run: |
           APK=app/build/outputs/apk/release/app-release.apk
 
@@ -835,11 +850,50 @@ jobs:
           fi
           echo "checking with $(basename "$BUILD_TOOLS")"
 
-          "$BUILD_TOOLS/apksigner" verify --print-certs "$APK"
+          "$BUILD_TOOLS/apksigner" print-certs "$APK" > certs.txt 2>&1 || true
+          grep -i "SHA-256" certs.txt | sed 's/^/  /'
+
           # A release that is not signed cannot be installed, so the build stops
           # here rather than publish something unusable.
           "$BUILD_TOOLS/apksigner" verify "$APK"
           "$BUILD_TOOLS/zipalign" -c 4 "$APK"
+
+          # A valid signature is not the same as *our* signature.
+          #
+          # `apksigner verify` answers "is this signed and intact", which a brand
+          # new keystore answers just as well as the real one. Android identifies
+          # an app by its signing certificate, so an APK signed with a different
+          # key installs beside the old one instead of over it, or refuses to
+          # install at all — and by then the version number has been spent and the
+          # release is published. The fingerprint lives in a repository variable
+          # rather than a secret because a certificate is public: it proves who
+          # signed this, which is exactly what it is for.
+          #
+          # Rotating the key means changing this variable in the same breath,
+          # which is the deliberate step rotation is supposed to be.
+          if [ -z "${EXPECTED_CERT:-}" ]; then
+            echo "::error::EXPECTED_CERT is not set, so the APK's signer cannot be checked."
+            echo "Set the repository variable EXPECTED_CERT to the certificate's SHA-256 fingerprint."
+            exit 1
+          fi
+          # The line reads `Signer #1 certificate SHA-256 digest: ab:cd:...` — the
+          # digest carries its own colons, so it cannot be split on one. Stripping
+          # every space and colon leaves the 64 hex characters of the digest at the
+          # end of the line, which is unambiguous.
+          signer="$(grep -i "SHA-256" certs.txt | head -1 | tr -d ' :' \
+            | tr 'A-F' 'a-f' | grep -oE '[0-9a-f]{64}$')"
+          expected="$(printf '%s' "$EXPECTED_CERT" | tr -d ' :' | tr 'A-F' 'a-f')"
+          if ! printf '%s' "$signer" | grep -Eq '^[0-9a-f]{64}$'; then
+            echo "::error::Could not read the signer's fingerprint from apksigner (got '$signer')."
+            cat certs.txt
+            exit 1
+          fi
+          if [ "$signer" != "$expected" ]; then
+            echo "::error::The APK is signed by $signer, not by $expected."
+            echo "Either the key changed, or this is not our build. Neither ships."
+            exit 1
+          fi
+          echo "signed by the expected certificate"
 
       # The bundle the run exists to make: the APK, the list of what changed,
       # and the tour pictures that show the features work. Together they answer
@@ -996,9 +1050,24 @@ jobs:
           # Anything else is a failure and is reported as one, because a green run
           # that published nothing is the one outcome that must never happen
           # quietly.
-          if gh release view "v${VERSION_NAME}" --repo "$REPOSITORY" > /dev/null 2>&1; then
-            echo "Version ${VERSION_NAME} is already released; nothing to publish."
-            exit 0
+          # A release that already exists is only "nothing to do" if it is this
+          # release. Asking whether the tag exists answers the wrong question: a
+          # tag created by hand, a partial upload, or a previous run that died
+          # mid-upload all leave a release behind, and exiting quietly would report
+          # success for a version that is not the one this commit built.
+          if existing="$(gh release view "v${VERSION_NAME}" --repo "$REPOSITORY" \
+              --json targetCommitish,assets 2>/dev/null)"; then
+            target="$(printf '%s' "$existing" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("targetCommitish") or "")')"
+            has_apk="$(printf '%s' "$existing" | python3 -c 'import json,sys;print("yes" if any(a["name"]=="app-release.apk" for a in json.load(sys.stdin)["assets"]) else "no")')"
+            if [ "$target" = "$GITHUB_SHA" ] && [ "$has_apk" = "yes" ]; then
+              echo "Version ${VERSION_NAME} is already published from this commit; nothing to do."
+              exit 0
+            fi
+            echo "::error::v${VERSION_NAME} already exists but is not this release:"
+            echo "  tag points at '${target:-unknown}', this run built $GITHUB_SHA, APK present: $has_apk"
+            echo "A half-published release cannot be repaired by re-running, and it must not be"
+            echo "reported as success. Delete the release and tag, then run again."
+            exit 1
           fi
 
           # The report points at the pictures beside it, and a release cannot hold
@@ -1028,14 +1097,16 @@ jobs:
           # The report is rewritten to point at those assets, then appended to the
           # body: a release page that lists the changes and then shows the app
           # working, in the words of somebody describing it to a person.
+          sed -E \
+            -e "s#\]\(([^/)]+)/(before|after)\.png\)#](${BASE_URL}/scenario-\1-\2.png)#g" \
+            -e "s#\*\*\[([^]]+)\]\([0-9][^)]*/README\.md\)\*\*#\1#g" \
+            -e "s#\[([^]]+)\]\([0-9][^)]*/README\.md\)#**\1**#g" \
+            bundle/scenarios/README.md > report/scenarios.md
+
           cp bundle/changes.md release-notes.md
           {
             printf '\n\n---\n\n'
-            sed -E \
-              -e "s#\]\(([^/)]+)/(before|after)\.png\)#](${BASE_URL}/scenario-\1-\2.png)#g" \
-              -e "s#\*\*\[([^]]+)\]\([0-9][^)]*/README\.md\)\*\*#\1#g" \
-              -e "s#\[([^]]+)\]\([0-9][^)]*/README\.md\)#**\1**#g" \
-              bundle/scenarios/README.md
+            cat report/scenarios.md
           } >> release-notes.md
 
           # `--target` is not decoration. Without it the tag is created from
@@ -1052,3 +1123,28 @@ jobs:
             bundle/app-release.apk \
             "${assets[@]}" \
             report/scenarios.md
+
+          # Publishing is several operations against something that cannot be
+          # undone, and a failure halfway leaves a release that looks published
+          # and is not. So the result is read back rather than assumed: the tag
+          # must point at this commit, the APK must be there with the digest of
+          # the file that was attested, and every scenario picture the report
+          # links to must exist as an asset.
+          #
+          # This is the check that would have caught a cancelled run leaving a
+          # partial release — and the reason the check above refuses to call an
+          # existing release "already done" on the strength of its name.
+          # Proving it is what it claims is a script rather than a heredoc here:
+          # a heredoc inside a `run: |` block cannot be indented, and the YAML
+          # parser reads unindented lines as structure. The script is also the
+          # part worth reading on its own, and it can be run by hand against a
+          # release that looks wrong.
+          python3 tools/check-release.py \
+            --version "$VERSION_NAME" \
+            --repo "$REPOSITORY" \
+            --sha "$GITHUB_SHA" \
+            --apk bundle/app-release.apk \
+            --report bundle/scenarios/README.md
+
+          echo "### Published v${VERSION_NAME} from ${GITHUB_SHA:0:8}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Verified: tag on this commit, APK digest matches, every linked picture attached." >> "$GITHUB_STEP_SUMMARY"

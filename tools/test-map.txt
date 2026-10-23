@@ -31,3 +31,12 @@ HistoryFeatureTest app/src/main/java/com/example/notes/AppHistory.kt app/src/mai
 RetentionFeatureTest  app/src/main/java/com/example/notes/SettingsStore.kt app/src/main/java/com/example/notes/HistoryPrune.kt app/src/main/java/com/example/notes/AppHistory.kt app/src/main/java/com/example/notes/ProjectGit.kt
 ScenariosTest      app/src/main/java/com/example/notes/BrowserScreen.kt app/src/main/java/com/example/notes/HistoryScreen.kt app/src/main/java/com/example/notes/SettingsScreen.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/AppTheme.kt app/src/main/java/com/example/notes/Workspace.kt
 KeySafetyFeatureTest  app/src/main/java/com/example/notes/GitHub.kt app/src/main/java/com/example/notes/Secrets.kt app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/AccountStore.kt
+
+# Sources that no test exercises, so any change to them runs the whole suite.
+# These are UI the scenario suite does not open and the feature tests do not
+# reach: a dialog, the editor, and the activity that wires them together. Naming
+# them here is honest — the alternative would be a map line claiming a test
+# covers them, which would run too few tests rather than too many.
+# always-full app/src/main/java/com/example/notes/Dialogs.kt
+# always-full app/src/main/java/com/example/notes/EditorScreen.kt
+# always-full app/src/main/java/com/example/notes/MainActivity.kt
