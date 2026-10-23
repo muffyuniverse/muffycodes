@@ -90,20 +90,37 @@ if [ "$OF" = "1" ]; then
 fi
 
 # Several shards: the shard's own list, narrowed to the selection.
+#
+# The two sides spell a class differently, and it cost every targeted pull
+# request its tests. The selector names a class the way tools/test-map.txt does
+# — `HistoryFeatureTest` — and the shard script names it the way a file path
+# becomes a class — `com.example.notes.HistoryFeatureTest`. Compared literally
+# they never match, so every shard decided it had no share of the change, and
+# the run went green having executed nothing at all.
+#
+# So both sides are reduced to the name without its package before comparing.
 all_classes() {
     printf '%s\n' "$shard_args" | grep -v '^--tests$' | grep -v '^$'
 }
 
+short_name() {
+    printf '%s' "${1##*.}"
+}
+
+# True when the selection names this class, under either spelling.
 selected_has() {
-    # A selection of ALL means every class; NONE means none.
     case "$SELECTION" in
         ALL) return 0 ;;
         ''|NONE) return 1 ;;
     esac
-    case " $SELECTION " in
-        *" $1 "*) return 0 ;;
-        *) return 1 ;;
-    esac
+    local wanted got
+    wanted="$(short_name "$1")"
+    for got in $SELECTION; do
+        if [ "$(short_name "$got")" = "$wanted" ]; then
+            return 0
+        fi
+    done
+    return 1
 }
 
 found=0
@@ -116,5 +133,27 @@ while IFS= read -r name; do
 done <<< "$(all_classes)"
 
 if [ "$found" -eq 0 ]; then
+    # Before answering "nothing to do", check the selection can be placed at all.
+    # A class the shard split has never heard of means the test map and the tests
+    # have drifted apart, and the honest answer to that is to stop: every shard
+    # would say NONE, no test would run, and the run would go green.
+    if [ -n "$SELECTION" ] && [ "$SELECTION" != "NONE" ] && [ "$SELECTION" != "ALL" ]; then
+        universe="$(bash "$HERE/test-shard.sh" --list)"
+        for want in $SELECTION; do
+            placed=0
+            while IFS= read -r name; do
+                [ -n "$name" ] || continue
+                if [ "$(short_name "$name")" = "$(short_name "$want")" ]; then
+                    placed=1
+                    break
+                fi
+            done <<< "$universe"
+            if [ "$placed" = "0" ]; then
+                echo "the selection names $want, but no test class has that name;" >&2
+                echo "the test map and the tests have drifted apart, so nothing would run." >&2
+                exit 3
+            fi
+        done
+    fi
     echo "NONE"
 fi
