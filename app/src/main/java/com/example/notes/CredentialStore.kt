@@ -9,64 +9,68 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /**
- * Where the GitHub account details are kept.
+ * Where the keys of the stored accounts are kept.
  *
- * The personal access token is the sensitive part, so it is encrypted with a
- * key held in the Android keystore before it is written to disk. The account
- * name and email are not secret and are stored in plain text.
+ * Every account has its own token, stored encrypted with a key from the Android
+ * keystore: the key never leaves the keystore, so a token cannot be read without
+ * the phone, and only while it is unlocked. The login names are not secret and
+ * are stored in plain text — they name the account, they do not open it.
  */
 class CredentialStore(context: Context) {
 
-    private val prefs = context.getSharedPreferences("muffy_git", Context.MODE_PRIVATE)
+    private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    /** The name of the signed-in GitHub account, or null. */
-    var accountName: String?
-        get() = prefs.getString(KEY_ACCOUNT, null)
-        set(value) = prefs.edit().putString(KEY_ACCOUNT, value).apply()
-
-    /** The email used for commits, or null. */
-    var accountEmail: String?
-        get() = prefs.getString(KEY_EMAIL, null)
-        set(value) = prefs.edit().putString(KEY_EMAIL, value).apply()
-
-    /** The personal access token, or null when the account is not set up. */
-    var token: String?
-        get() {
-            val stored = prefs.getString(KEY_TOKEN, null) ?: return null
-            return try {
-                decrypt(stored)
-            } catch (e: Exception) {
-                // The keystore key is gone (for example after a factory reset):
-                // drop the unreadable token rather than keeping a broken one.
-                prefs.edit().remove(KEY_TOKEN).apply()
-                null
-            }
-        }
+    /** The login of the active account, or null when nobody is signed in. */
+    var activeLogin: String?
+        get() = prefs.getString(KEY_ACTIVE, null)
         set(value) {
-            if (value.isNullOrBlank()) {
-                prefs.edit().remove(KEY_TOKEN).apply()
-            } else {
-                prefs.edit().putString(KEY_TOKEN, encrypt(value)).apply()
-            }
+            prefs.edit().apply {
+                if (value.isNullOrBlank()) remove(KEY_ACTIVE) else putString(KEY_ACTIVE, value)
+            }.apply()
         }
 
-    /** True when an account has been set up. */
-    val isSignedIn: Boolean get() = !accountName.isNullOrBlank()
+    /** The logins of the accounts stored on this phone, in the order added. */
+    fun logins(): List<String> =
+        prefs.getString(KEY_LOGINS, null)
+            ?.split('\n')
+            ?.filter { it.isNotBlank() }
+            ?: emptyList()
 
-    /** The identity used for the commits the app makes. */
-    fun author(): GitAuthor = GitAuthor(
-        name = accountName?.takeIf { it.isNotBlank() } ?: "Muffy World",
-        email = accountEmail?.takeIf { it.isNotBlank() } ?: "muffyworld365@gmail.com",
-    )
-
-    /** Forgets the account and its token. */
-    fun signOut() {
-        prefs.edit()
-            .remove(KEY_ACCOUNT)
-            .remove(KEY_EMAIL)
-            .remove(KEY_TOKEN)
-            .apply()
+    /** The token of [login], or null when there is none or it cannot be read. */
+    fun token(login: String): String? {
+        val stored = prefs.getString(tokenKey(login), null) ?: return null
+        return try {
+            decrypt(stored)
+        } catch (e: Exception) {
+            // The keystore key is gone (a factory reset, for instance): drop the
+            // unreadable token rather than keeping a broken one.
+            prefs.edit().remove(tokenKey(login)).apply()
+            null
+        }
     }
+
+    /** Stores the token of [login], replacing any earlier one. */
+    fun setToken(login: String, token: String) {
+        prefs.edit().putString(tokenKey(login), encrypt(token)).apply()
+        val known = logins()
+        if (login !in known) {
+            prefs.edit().putString(KEY_LOGINS, (known + login).joinToString("\n")).apply()
+        }
+    }
+
+    /** Removes [login] and its token from this phone. */
+    fun forget(login: String) {
+        prefs.edit()
+            .remove(tokenKey(login))
+            .putString(KEY_LOGINS, logins().filter { it != login }.joinToString("\n"))
+            .apply()
+        if (activeLogin == login) activeLogin = null
+    }
+
+    /** True when [login] has a token stored. */
+    fun hasToken(login: String): Boolean = token(login) != null
+
+    private fun tokenKey(login: String): String = "token_$login"
 
     // ---- encryption --------------------------------------------------------
 
@@ -122,9 +126,8 @@ class CredentialStore(context: Context) {
 
     private companion object {
         const val PREFS = "muffy_git"
-        const val KEY_ACCOUNT = "account"
-        const val KEY_EMAIL = "email"
-        const val KEY_TOKEN = "token"
+        const val KEY_ACTIVE = "active"
+        const val KEY_LOGINS = "logins"
         const val KEYSTORE = "AndroidKeyStore"
         const val KEY_ALIAS = "muffy_codes_git_token"
         const val ALGORITHM = "AES"
