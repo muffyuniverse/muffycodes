@@ -147,7 +147,7 @@ class AppHistory(
      * there is one.
      */
     fun tracked(): List<String> {
-        val head = head() ?: return emptyList()
+        if (head() == null) return emptyList()
         if (!GitService.isRepository(accountDir)) return emptyList()
         val repo = try {
             open()
@@ -157,7 +157,10 @@ class AppHistory(
         }
         return repo.use {
             try {
-                GitService.filesUnder(it, null, head).map { file -> file.first }
+                // HEAD rather than an id read a moment earlier: a commit's objects
+                // and the reference that points at them do not appear at the same
+                // instant, so an id can briefly name something not yet on disk.
+                GitService.filesUnder(it, null, null).map { file -> file.first }
             } catch (e: Exception) {
                 lastError = Secrets.scrub(e.message ?: "Could not read the newest version")
                 emptyList()

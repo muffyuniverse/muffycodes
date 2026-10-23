@@ -225,10 +225,12 @@ class Scenario(
     fun saveAsVersion(text: String) {
         val file = viewModel.editingFile ?: error("the editor is not open")
         val key = viewModel.workspace!!.pathString(viewModel.workspace!!.relative(file).orEmpty())
-        val before = accountHistory().log(key).size
         viewModel.saveEditor(text)
-        await("one more version of ${file.name}", 30_000) {
-            accountHistory().log(key).size > before
+        await("a version of ${file.name} holding \"$text\"", 30_000) {
+            val versions = accountHistory().log(key)
+            versions.isNotEmpty() && versions.first().let { newest ->
+                accountHistory().fileAt(key, newest.id) == text
+            }
         }
     }
 
