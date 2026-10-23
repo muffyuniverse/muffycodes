@@ -734,61 +734,62 @@ jobs:
           path: app/build/outputs/apk/release/app-release.apk
           retention-days: 7
           if-no-files-found: error
-
   # -------------------------------------------------------------------------
-  # The bundle: the APK, the list of changes, and the pictures.
+  # Delivery: what the run has to hand over, made once.
   #
-  # It waits for the tests and the build, because it carries both their results.
-  # Nothing is published from here — publishing waits for the checks as well —
-  # but on a development push this artifact is the whole point: something to
-  # install, with the pictures and the list of changes beside it.
+  # This used to be two jobs — one assembling a bundle and putting it on the run
+  # as an artifact, then another taking that artifact back down and publishing it.
+  # The second job's first act was to download what the first had just uploaded,
+  # which cost a nine megabyte round trip on every run to move a file between two
+  # machines that never needed to be two machines. Measured, that was 8-10s.
+  #
+  # It is one job now. It waits for the tests and the build, so a red suite still
+  # delivers nothing, and it publishes only on main.
   # -------------------------------------------------------------------------
-  bundle:
-    name: Make the bundle
-    needs: [test, build-release]
-    if: github.event_name != 'pull_request'
+  deliver:
+    name: Deliver
+    needs: [test, build-release, lint]
+    if: |
+      github.event_name != 'pull_request'
+      && needs.build-release.outputs.changed != 'no'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Write is granted even on a development push, where nothing is published,
+    # because permissions cannot be conditional. What keeps a development push
+    # from releasing is the `if:` on the publish steps below, and the fact that
+    # they are the only thing here that writes.
     permissions:
-      contents: read
+      contents: write
+      # The attestation signs the provenance of the APK, and signing is what needs
+      # to be able to prove who this job is.
+      id-token: write
+      attestations: write
+      # Reading the branch head is what the publish guard needs to know whether
+      # this run has been overtaken.
+      actions: read
 
     steps:
       - name: Check out the code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Two commits, because "what changed" is asked of this commit against
+          # the one before it.
           fetch-depth: 2
           persist-credentials: false
 
-      - name: Was there anything to put in it
-        id: decision
-        env:
-          BUILT: ${{ needs.build-release.outputs.changed }}
-        run: |
-          # A build that skipped because nothing in the app changed has nothing
-          # to hand over. Making an empty bundle would be worse than making none.
-          if [ "$BUILT" = "no" ]; then
-            echo "changed=no" >> "$GITHUB_OUTPUT"
-            echo "The app did not change, so there is no bundle to make."
-          else
-            echo "changed=yes" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Take the APK
-        if: steps.decision.outputs.changed == 'yes'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-apk
           path: apk
 
       - name: Take the scenarios
-        if: steps.decision.outputs.changed == 'yes'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: scenarios
           path: scenarios
 
       - name: Write down what changed
-        if: steps.decision.outputs.changed == 'yes'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
@@ -797,7 +798,6 @@ jobs:
           cat changes.md
 
       - name: Put the bundle together
-        if: steps.decision.outputs.changed == 'yes'
         run: |
           mkdir -p bundle
           cp apk/app-release.apk bundle/
@@ -811,8 +811,11 @@ jobs:
             --out bundle/scenarios/README.md
           ls -la bundle/
 
-      - name: Hand the bundle to the job that publishes it
-        if: steps.decision.outputs.changed == 'yes'
+      # Only a development push needs this artifact: main publishes a release,
+      # and the release is the delivery. Uploading it there as well would be nine
+      # megabytes of storage and a couple of seconds spent on a copy nobody opens.
+      - name: Hand the bundle to the run, for a build with no release
+        if: github.ref != 'refs/heads/main'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: build-bundle
@@ -820,47 +823,10 @@ jobs:
             bundle/app-release.apk
             bundle/changes.md
             bundle/scenarios/**
-          # Seven days: this is the thing a development push is for, and a
-          # week is long enough to install and look at it.
+          # Seven days: this is the thing a development push is for, and a week
+          # is long enough to install and look at it.
           retention-days: 7
           if-no-files-found: error
-
-
-  # -------------------------------------------------------------------------
-  # Publishing, which waits for both. This is where "only a tested release"
-  # is enforced: nothing is published unless every test passed.
-  # -------------------------------------------------------------------------
-  publish:
-    name: Publish
-    # Only main releases, and only by hand or by a push to main. A development
-    # push keeps its APK as an artifact of the run instead: something to install
-    # and look at, not something to hand to anybody as a version.
-    # Only main releases, and only when the app itself changed. A build that
-    # skipped because nothing in the app changed has nothing to publish, and a
-    # release is not a thing to make for a typo in a document.
-    if: |
-      (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
-      && needs.build-release.outputs.changed != 'no'
-    needs: [test, build-release, lint, bundle]
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: write
-      # The attestation below signs the provenance of the APK, and signing is
-      # what needs to be able to prove who this job is. Both are granted only
-      # here; every other job reads.
-      id-token: write
-      attestations: write
-      # Reading the branch head is what the guard above needs to know whether
-      # this run has been overtaken. Nothing here starts another workflow.
-      actions: read
-
-    steps:
-      - name: Take the bundle
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: build-bundle
-          path: bundle
 
       # Before anything is published, say where the file came from. The
       # attestation binds the APK to this commit and this workflow run in a way
@@ -868,11 +834,13 @@ jobs:
       # called app-release.apk" and "the APK built from this commit". It is free
       # for a public repository.
       - name: Attest that this APK came from this commit
+        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
         with:
           subject-path: bundle/app-release.apk
 
       - name: Publish the release
+        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
@@ -891,86 +859,57 @@ jobs:
           fi
 
           # The release is the last thing that happens, so a failure earlier
-          # leaves nothing half-published. If it still cannot be made, the build
-          # itself was good and only the publishing failed, which is said plainly.
-          # A release that already exists is not a failure: a re-run of the same
-          # commit must be allowed to do nothing. Anything else is a failure and
-          # is reported as one, because a green run that published nothing is the
-          # one outcome that must never happen quietly.
+          # leaves nothing half-published. A release that already exists is not a
+          # failure: a re-run of the same commit must be allowed to do nothing.
+          # Anything else is a failure and is reported as one, because a green run
+          # that published nothing is the one outcome that must never happen
+          # quietly.
           if gh release view "v${VERSION_NAME}" --repo "$REPOSITORY" > /dev/null 2>&1; then
             echo "Version ${VERSION_NAME} is already released; nothing to publish."
             exit 0
           fi
 
-          # The document points at the pictures beside it; on a release page
-          # they are files of the release instead, so the links are aimed at
-          # the release's own download addresses before the document becomes
-          # the body of the release.
-          # The scenario pictures become release assets, which cannot have folders, so
-            # each one is flattened to a name that still says which scenario and which
-            # half of it. The report's links are aimed at those names.
-            BASE_URL="https://github.com/${REPOSITORY}/releases/download/v${VERSION_NAME}"
-            assets=()
-            mkdir -p report
-            # The report itself goes on the release as a file, under a name of its
-            # own: `gh release create` takes an asset's name from the file, so the
-            # file is given the name it should have. It is not the same as the
-            # body's copy — this one links to folders, which is what the phone
-            # needs, and the body's cannot.
-            cp bundle/scenarios/README.md report/scenarios.md
-            if [ -d bundle/scenarios ]; then
-              for picture in bundle/scenarios/*/*.png; do
-                [ -e "$picture" ] || continue
-                scenario="$(basename "$(dirname "$picture")")"
-                half="$(basename "$picture")"
-                name="scenario-${scenario}-${half}"
-                cp "$picture" "$name"
-                assets+=("$name")
-              done
-              # A scenario's own page travels too, named so that the report's
-              # links to it can be aimed at a flat file. Without it the index
-              # points at folders, which a release does not have.
-              for page in bundle/scenarios/*/README.md; do
-                [ -e "$page" ] || continue
-                scenario="$(basename "$(dirname "$page")")"
-                name="scenario-${scenario}-page.md"
-                cp "$page" "report/$name"
-                assets+=("report/$name")
-              done
-            fi
+          # The report points at the pictures beside it, and a release cannot hold
+          # folders, so each picture becomes a flat asset whose name still says
+          # which scenario and which half of it. The report's links are aimed at
+          # those names, and each scenario's own page travels the same way.
+          BASE_URL="https://github.com/${REPOSITORY}/releases/download/v${VERSION_NAME}"
+          assets=()
+          mkdir -p report
+          cp bundle/scenarios/README.md report/scenarios.md
+          for picture in bundle/scenarios/*/*.png; do
+            [ -e "$picture" ] || continue
+            scenario="$(basename "$(dirname "$picture")")"
+            half="$(basename "$picture")"
+            name="scenario-${scenario}-${half}"
+            cp "$picture" "$name"
+            assets+=("$name")
+          done
+          for page in bundle/scenarios/*/README.md; do
+            [ -e "$page" ] || continue
+            scenario="$(basename "$(dirname "$page")")"
+            name="scenario-${scenario}-page.md"
+            cp "$page" "report/$name"
+            assets+=("report/$name")
+          done
 
-            # The report is rewritten to point at those assets, then appended to the
-            # body: a release page that lists the changes and then shows the app
-            # working, in the words of somebody describing it to a person.
-            cp bundle/changes.md release-notes.md
-            if [ -f bundle/scenarios/README.md ]; then
-              {
-                printf '\n\n---\n\n'
-                # Two rewrites. The pictures become release assets, which cannot
-                # live in folders, so their links are aimed at the flattened
-                # names. And the index links point at the scenario folders inside
-                # the bundle, which a release page does not have — so there they
-                # become bold text, because the same page holds the scenario a
-                # little further down.
-                sed -E \
-                  -e "s#\]\(([^/)]+)/(before|after)\.png\)#](${BASE_URL}/scenario-\1-\2.png)#g" \
-                  -e "s#\*\*\[([^]]+)\]\([0-9][^)]*/README\.md\)\*\*#\1#g" \
-                  -e "s#\[([^]]+)\]\([0-9][^)]*/README\.md\)#**\1**#g" \
-                  bundle/scenarios/README.md
-              } >> release-notes.md
-            fi
+          # The report is rewritten to point at those assets, then appended to the
+          # body: a release page that lists the changes and then shows the app
+          # working, in the words of somebody describing it to a person.
+          cp bundle/changes.md release-notes.md
+          {
+            printf '\n\n---\n\n'
+            sed -E \
+              -e "s#\]\(([^/)]+)/(before|after)\.png\)#](${BASE_URL}/scenario-\1-\2.png)#g" \
+              -e "s#\*\*\[([^]]+)\]\([0-9][^)]*/README\.md\)\*\*#\1#g" \
+              -e "s#\[([^]]+)\]\([0-9][^)]*/README\.md\)#**\1**#g" \
+              bundle/scenarios/README.md
+          } >> release-notes.md
 
-            # The report itself goes on the release as a file, under a name of
-            # its own: `gh release create` takes an asset's name from the file, so
-            # the file is given the name it should have. It is not the same as the
-            # body's copy — this one links to folders, which is what the phone
-            # needs, and the body's cannot.
-
-            gh release create "v${VERSION_NAME}" \
-              --repo "$REPOSITORY" \
-              --title "Muffy Codes ${VERSION_NAME}" \
-              --notes-file release-notes.md \
-              bundle/app-release.apk \
-              "${assets[@]}" \
-              report/scenarios.md
-
+          gh release create "v${VERSION_NAME}" \
+            --repo "$REPOSITORY" \
+            --title "Muffy Codes ${VERSION_NAME}" \
+            --notes-file release-notes.md \
+            bundle/app-release.apk \
+            "${assets[@]}" \
+            report/scenarios.md
