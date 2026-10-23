@@ -1,158 +1,383 @@
-# The settled design — projects, accounts, and a key that cannot leak
+# The design — projects, accounts, files, and history everywhere
 
-This is the agreed form of `PROPOSAL-projects-and-key-v2.md`, with every
-question answered inline by the operator on 2026-10-23. It replaces the
-proposal as the reference for implementation. Where this document and the
-proposals disagree, this one is right.
+Status: **settled and being built**. This is the reference the code answers to.
+Where an earlier proposal disagrees, this document is right.
 
-Status: **settled · implementation in progress**.
+## 1. What the answers settled
+
+| the call | what the app does |
+|---|---|
+| "ok app's own files should be invisible" | a single rule, §3: **everything you made is visible; everything the app made is not.** The project folder shows your files; `project.json` and the app's other bookkeeping go back to being hidden. |
+| "we have move functionality for files and folders that are user generated" | moving is an ordinary action on **any user-made file or folder**, and app-made things cannot be moved, renamed or deleted at all |
+| "app-wide git that autocommits every change outside project repos … any file or folder state can be rolled back, not just inside a repo (← and →)" | **§4 is new**: the account's whole tree is a local git repository, committed automatically, so your local files and even a deleted folder have history and the arrows work everywhere |
 
 ---
 
-## 1. The shape of the thing
-
-The app is a **filesystem rooted at the active account**, and a project is a
-folder in it that contains a git worktree.
+## 2. The shape — three levels on disk, and the screen shows the ones you made
 
 ```text
-<active account>/                      ← the root of the displayed filesystem
-  Shopping/                            ← a PROJECT: a wrapper, not part of any repo
-    repo/                              ← the git worktree — the only thing GitHub sees
-      LICENSE                          seeded by GitHub at creation
-      README.md                        seeded by GitHub at creation
-      Milk.txt
-      Photo.png                        any extension
-    .muffy/                            ← project-local state, never committed
-      index.json                       pinned flags and friends
-  (future kinds of folders live here too)
+files/
+  accounts/
+    muffyuniverse/                 the ACTIVE account — the root, and a git repository
+      .git/                        the app-wide history (invisible, §4)
+      .gitignore                   invisible; keeps project repos out of it
+      .muffy/                      invisible; the app's own bookkeeping
+        pins.json                  the pinned flags
+      projects/
+        Shopping/                  a PROJECT — a folder you open and browse
+          .muffy/                  invisible; this project's bookkeeping
+          repo/                    the git worktree: everything GitHub sees
+            .git/
+            LICENSE                seeded by GitHub
+            README.md              seeded by GitHub
+            Milk.txt
+            Photos/
+              Shop.png
+          ideas.txt                local only — never committed to GitHub
+          Drafts/                  local only — a folder beside the repo
+            Shopping-list.txt
+    someoneelse/                   invisible while another account is active
 ```
 
-- **The account is the root**, not a hidden parent. The main screen shows the
-  active account's folder with projects under it. Other kinds of folders can
-  appear under the account later.
-- **A project is a wrapper** — an intermediate folder that composes the git
-  worktree with project-related files and folders that stay local and never go
-  into the repository. Only the codebase goes into the repo. Everything the app
-  needs but the repository must not carry (pinned flags and the like) lives in
-  the wrapper.
-- **File titles are file names.** `Shopping/Milk.txt`, not an opaque id. The
-  file on disk is exactly what you typed — no headers, no front matter. A
-  file's identity is its path; renaming renames the file and git tracks the
-  rename.
-- **The extension is the part of the name after the dot, ordinary and nothing
-  more.** Default for new files: **`.txt`**.
-- **There is no preview of anything** — not markdown, not code. Everything is
-  the editing screen. Images show as the picture and are not edited; other
-  binaries say what they are and offer rename/delete.
+- **`projects/` is a folder in the account's tree** — a second kind of folder can
+  sit beside it later.
+- **A project is a folder you open and browse.** You see `repo/` and everything
+  you keep beside it. Nothing is stepped through on your behalf.
+- **A project's name is its repository's name.** Renaming renames the repository
+  on GitHub too.
+- **Files are pristine** — nothing is added to what you type. A file's identity
+  is its path; renaming renames the file and git sees a rename.
+- **The extension is just the part of the name after the dot.** Default `.txt`.
 
-## 2. Accounts
+---
 
-Several accounts can be stored; **one is active** and its folder is the root.
+## 3. The rule that decides what is visible
 
-| control | what it does |
+> **Everything you made is visible. Everything the app made is not.**
+
+| | visible on screen | can be renamed / moved / deleted |
+|---|---|---|
+| your files and folders | **yes** | **yes** |
+| `repo/`, and everything inside it | yes — it is yours | yes, as a tree |
+| a project folder and `projects/` | yes | yes |
+| `.muffy/` (bookkeeping), `.git/`, `.gitignore` | **no** | **no** |
+| `LICENSE`, `README.md` | yes — GitHub created them, but they are files of yours to handle | yes |
+
+- Hidden things are hidden by **name and by rule**: the app's own files live
+  inside `.muffy/` and `.git/`, and the app never draws them.
+- Nothing the app owns appears in a file list, a search result or a move
+  picker, and no command can target one. That is a guarantee, not a convention.
+
+### Moving
+
+Moving is an ordinary action on any file or folder **you** made — and only on
+those:
+
+- inside `repo/`, a move is a git rename, and the next sync carries it to GitHub;
+- beside `repo/`, a move is an ordinary move, and the app-wide history of §4
+  records it;
+- **into or out of `repo/`** — the two crosses, which are also just moves:
+
+| action (in a file's or folder's menu) | what it does |
 |---|---|
-| **Sign in** | adds an account; it becomes active |
-| **Switch** | makes another stored account active; the root follows |
-| **Sign out** | stops using the account and hides its side of the phone; signing in again brings it back |
-| **Forget** | deliberately removes **all local files associated with the account** — the destructive one |
-| **Pull** | lists the active account's public repositories and pulls one in, **overwriting the local copy if it exists** |
-| **Delete** | lists the account's projects; deleting one removes the local wrapper **and** the GitHub repository |
+| **Move into the repository** | the item moves inside `repo/`; the next sync carries it to GitHub |
+| **Keep only on this phone** | the item moves out of `repo/`; the next sync removes it from GitHub |
 
-Each account stores its own **commit identity** — a name and an email,
-editable, defaulting to the GitHub login and its address. Commits made while an
-account is active are written as that account's identity.
+Both are recorded in **both** histories — the project's repository sees a
+rename or a removal, and the app-wide history sees the move as it happened on
+this phone.
 
-Hiding an account's side of the phone is **Switch**'s and **Sign out**'s job.
-**Forget** is the button that destroys local files; it is named and confirmed
-as such.
-@ wouldnt it be better if on sign out we just ask if app needs to forget all info associated with the account you sign out of? this way we wouldnt need it as a separate button. And pull should open a window with availiable projects to pull. Same with delete - it lists locally pulled projects to select which one to delete - and explains that it removes it both locally and remotely fully, and that if only local remove needed then how to do that.
+---
 
-## 3. Projects
+## 4. The app-wide history
 
-- One project = one **public** GitHub repository + its local wrapper. Always
-  connected: created with its repository, or pulled from one.
-- **The project name is the repository name.** Renaming a project renamesits
-  repository on GitHub as well. One name everywhere.
-- Project names are unique inside an account. A collision is a plain error —
-  no `(2)` suffixes.
-- Creation: name + licence (13 from `GET /licenses`, default `gpl-3.0`),
-  `POST /user/repos` with `auto_init` + `license_template`, then clone the
-  seeded repository in. GitHub writes `LICENSE` and `README.md`; the app never
-  writes a README.
+**The account's entire tree is a git repository of its own, and every change you
+make outside a project's `repo/` is committed to it automatically.**
 
-## 4. Sync, Pull, Delete
+It never leaves the phone. It has no remote, no sync button and no GitHub
+account — it is purely how this phone remembers what it used to hold.
 
-- **Sync** — the one button, in the slim row. Commits **everything that
-  changed in the worktree**, with a message the app writes from **the names
-  that changed** (`Milk.txt, Photo.png`, `+3 more` past a few), then
-  **force-pushes**. Local always wins. There is no commit dialog and no sync
-  states: every commit is a sync.
-- **Online required.** Sync with no network does nothing and says so plainly —
-  uniformity gives simplicity. Nothing lands half-done. A repository deleted
-  behind your back gets the same plain message with a hint that it is gone.
-- **Pull** — remote is authoritative: fetch, `reset --hard`, clean. It asks
-  once before overwriting a project with unsynced changes — a yes/no, not a
-  merge screen.
-- **Delete from the row menu** — removes the local wrapper; the repository
-  stays on GitHub and Pull brings it back.
-- **Delete from Settings** — removes the local wrapper **and** the GitHub
-  repository. Confirmed by naming the repository.
+### What it covers
 
-## 5. Screens
+| | which history keeps it |
+|---|---|
+| files inside a project's `repo/` | that project's repository — the existing one, with its sync and its arrows |
+| **everything else you made** — local files, local folders, folder creation, renames, moves, deletions, and a project's own name | **the app-wide history** |
 
-- **The root** — the active account's folder: projects as subfolders, and room
-  for other kinds of folders later.
-- **Inside a project** — every screen inside a project carries a **slim row**
-  under the top bar: **account name, project name, the number of unsynced
-  changes (from `git status`), and the sync button.** The old commit button,
-  its badge and the `git:` subtitle are gone. Folders, files, search, pinning,
-  the version history with its back/forward arrows and restore all stay.
-- **Search** spans all projects of the active account, showing the project name
-  on each result.
-- **Settings** — the account cockpit of §2. The old "Git projects" box with
-  Attach / New repo / Clone / Detach is gone.
-  @ we can just keep projects in projects/ folder and dont need search - or is there a usecase?
+Project repositories are excluded from it (`.gitignore`), so nothing is stored
+twice and the two histories never fight.
 
-## 6. The key
+### When it commits
 
-Unchanged from the proposal, and order-of-work item 1:
+- **when the editor saves** — an edit becomes a commit; consecutive saves within
+  a few seconds fold into one
+- **when the tree changes** — creating, renaming, moving or deleting a file or a
+  folder
 
-1. The key is never in an address. JGit takes it separately
-   (`setCredentialsProvider`).
-2. Every message and every exception is scrubbed before it is shown or stored.
-3. Encrypted with an Android KeyStore key, `setUnlockedDeviceRequired`, out of
-   auto-backup, decrypted per operation, never held in a field.
-4. Never on screen and never logged. Masked field, `FLAG_SECURE` on the
-   connect screen, a `Secret` whose `toString()` is `***`.
-5. The app only ever talks to `github.com` and `api.github.com` — the host is
-   checked before the key is attached to any request or clone.
-6. A regression test greps the project directory and the app data directory
-   for the key after a clone and a push, and fails if it finds it.
+Each commit message is written from what happened, in the same plain style as
+sync's: `Edited ideas.txt`, `Created Drafts/`, `Moved Shopping-list.txt into
+Drafts/`, `Deleted Drafts/`. Empty commits are never made.
 
-Two scopes: `repo` and `delete_repo`. A token with more is refused advice:
-rotate it.
+### What it buys you
 
-## 7. What is deliberately not here
+- **The arrows work everywhere.** The ← and → buttons and restore stop being a
+  privilege of tracked files: a local file's versions, and the tree at any past
+  moment, are browsable and restorable the same way.
+- **A deleted folder is no longer gone.** Deleting `Drafts/` commits the
+  deletion, so the folder and everything in it can be brought back.
+- **Folder organisation is versioned.** Renames and moves of local things are
+  reversible, which is exactly where people regret things most.
+- **It is invisible until wanted.** No status, no count, no badge. The Project
+  row's `3 changed` still means "unsynced to GitHub" and nothing else, because
+  local changes are never *pending* — they are committed the moment they happen.
 
-- **No migration.** The app is rapidly developed, not maintained; no backward
-  compatibility with earlier storage formats is needed. The new storage starts
-  empty and the old files are not carried over.
-- No sync states, no conflict screens, no commit dialog, no front matter in
-  files, no previews, no private repositories.
+### What it costs, stated plainly
 
-## 8. Order of work
+- **Disk.** Each commit stores only what changed, but an image edited ten times
+  is stored ten times. For notes this is small; it is not free.
+- **No pruning, ever, for now.** History is never trimmed. If it ever becomes a
+  problem, that is a separate decision with its own design.
+- **One repository per account, not one for the whole app** — my call, stated so
+  you can overrule it. Accounts are independent roots, and a single repository
+  spanning all of them would put a switch between accounts into one shared
+  history and keep a removed account's content alive inside it. Per account, the
+  history belongs to the account and disappears when its copies do.
 
-1. **Key safety** — independent, ships alone, closes the live leak.
-2. **Accounts** — per-account folders, sign in / switch / sign out / forget,
-   the encrypted key and commit identity per account.
-3. **Storage 2.0** — the account-rooted tree, project wrappers, the worktree
-   inside, titles as file names, pristine files, paths as identity, local-only
-   companion state.
-4. **The root screen and the slim row** — projects as subfolders, changed
-   counts from `git status`, sync button placement.
-5. **Sync** — auto messages from changed names, force push, online-required
-   failures.
-6. **Pull and the two Deletes.**
-7. **Settings** — the account cockpit.
+---
 
-Steps 2 and 3 are the load-bearing pair; everything else lands on top of them.
+## 5. Accounts — Add, Switch, Remove
+
+The active account is shown **above** the controls:
+
+```text
+  Signed in as
+  muffyuniverse
+  muffyworld365@gmail.com          ← the commit identity, editable
+
+  [ Add ]    [ Switch ]    [ Remove ]
+```
+
+- **Add** — sign in with a key; that account becomes active.
+- **Switch** — a short list of the accounts stored on this phone; picking one
+  makes it active and the whole screen follows.
+- **Remove** — one command, whose dialog carries the choice:
+
+  > **Remove muffyuniverse from this phone?**
+  > ( • ) **Keep its projects here** — signing in again brings them back
+  > (   ) **Delete its projects from this phone too** — the repositories stay on
+  >       GitHub, and Add brings them back
+  >
+  > `[ Cancel ]` `[ Remove ]`
+
+  Either way the account's key is gone from this phone. The difference is whether
+  the local tree — and with it the app-wide history — is deleted or merely left
+  unreachable until the same account signs in again.
+
+An account stores its own **commit identity** (name and email, editable,
+defaulting to the GitHub login and its address).
+
+---
+
+## 6. The Projects screen
+
+One row per project of the active account:
+
+```text
+┌──────────────────────────────────────────┐
+│  muffyuniverse                       (⌄) │   account — tap to Add / Switch / Remove
+├──────────────────────────────────────────┤
+│  Shopping                             ⋮  │
+│  3 changed                               │
+│  ─────────────────────────────────────   │
+│  Recipes                              ⋮  │
+│  up to date                              │
+└──────────────────────────────────────────┘
+                                            (＋)
+```
+
+- The second line is **`N changed`**, read from `git status` inside `repo/`, or
+  **`up to date`**.
+- **Tapping a row enters the project** — the folder view of §3, with the slim row
+  on top.
+- **No separate Pull or Delete screens exist.** They live here.
+
+### The 3-dots menu on a row
+
+| item | what it does |
+|---|---|
+| **Sync** | commits and force-pushes — the same action as the button inside, so you never have to enter a project just to push it |
+| **Rename…** | renames the project **and its repository on GitHub** (and commits the rename to the app-wide history) |
+| **Delete…** | one command; the dialog carries the choice, below |
+
+> **Delete `muffyuniverse/shopping`?**
+> ( • ) **From this phone only** — the repository stays on GitHub, and the add
+>       button brings it back
+> (   ) **Everywhere** — the copy here and the repository on GitHub. Cannot be
+>       undone
+>
+> `[ Cancel ]` `[ Delete ]`
+
+A repository already deleted on GitHub is not an error — the local side goes.
+
+### The add button
+
+`＋` opens **one window with a list**, not a dialog of choices:
+
+```text
+┌──────────────────────────────────────────┐
+│  ＋ New project…                          │   ← always first
+├──────────────────────────────────────────┤
+│  recipes            last changed 3 days  │
+│  shopping           last changed today   │  ← on this phone
+│  thesis             last changed 2 weeks │
+└──────────────────────────────────────────┘
+```
+
+- **`＋ New project…`** asks for a name and a licence (13 from `GET /licenses`,
+  default `gpl-3.0`), creates the repository with `auto_init` +
+  `license_template`, and clones it in. GitHub writes `LICENSE` and `README.md`;
+  the app never writes a README.
+- **Everything below it** is the account's public repositories, newest-changed
+  first, with the ones already here marked. Picking one pulls it in: not here →
+  cloned; already here → asks once, *"Replace the copy on this phone?"*, then
+  fetches, resets to the remote branch and cleans untracked files. **Local files
+  beside `repo/` survive**, because the reset happens inside the worktree only.
+
+---
+
+## 7. Inside a project
+
+Every screen carries a **slim row** under the top bar:
+
+```text
+muffyuniverse · Shopping              3 changed   [ Sync ]
+```
+
+- The old commit button, its badge and the `git:` subtitle are gone.
+- Folders nest freely; the editor, pinning and the version history stay — and
+  history now covers local files too (§4).
+- **Search is scoped to this project** — one button in the top bar, covering both
+  the tracked and the local parts of the project. There is no search across
+  projects: the Projects list is that index already.
+
+---
+
+## 8. Sync
+
+1. Commit everything that changed inside `repo/`, with a message the app writes
+   from **the names that changed** — `Milk.txt, Shop.png`, `+3 more` past a few.
+2. **Force push.** Local always wins; it cannot fail on a conflict.
+
+No commit dialog and no sync states: every commit is a sync, and a sync always
+ends with the phone and GitHub holding the same thing. Local files beside `repo/`
+are not part of it — they are already versioned by §4, on this phone.
+
+**Online is required.** With no network, sync does nothing and says so plainly —
+nothing lands half-done, and the changed count stays as it was. A repository
+deleted on GitHub gets the same plain message, with a hint that it is gone.
+
+---
+
+## 9. Files
+
+- Default extension `.txt`; the extension is just the part of the name after the
+  dot, and **an extension is also how the app decides what a file is**:
+  - **text** (`.txt`, `.md`, code, anything not listed below) → opens in the
+    editor, no preview of any kind
+  - **images** (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.bmp`) → shown as the
+    picture, not editable; rename, move and delete only
+  - **anything else** → named as unknown; rename, move and delete only
+- A file on disk is exactly what you typed — no headers, no front matter.
+
+---
+
+## 10. Settings — accounts, themes, and how much history is kept
+
+```text
+  Signed in as
+  muffyuniverse
+  muffyworld365@gmail.com
+
+  [ Add ]   [ Switch ]   [ Remove ]
+
+  ──────────────────────────────────────────
+
+  Theme                                Light ▸ Dark
+  ┌────┐ ┌────┐ ┌────┐ ┌────┐ ┌────┐
+  │Milk│ │Cara│ │Gold│ │Brow│ │ …  │     ← a scrollable row
+  └────┘ └────┘ └────┘ └────┘ └────┘
+       ↑ tap a swatch to select it
+```
+
+- **Themes are a scrollable row of swatches** — tap one to select it; the
+  selected swatch is the framed one. Beside the row, one **light/dark switch**.
+- The old "Git projects" box is gone, and so is Pull, Delete and Sync — they live
+  where the projects are.
+
+---
+
+## 11. The key — already built and released
+
+Order-of-work item 1 is done, green and shipped as **v47**: the key travels as
+credentials and never inside an address · messages and exceptions are scrubbed
+before they can be shown or stored · only `github.com` is ever given the key · a
+repository already holding a leaking address is healed when opened · the screen
+where a key is typed refuses screenshots · the encryption key needs an unlocked
+phone · backups cannot carry the tokens · a test runs a clone and a push with a
+fake key and fails if git wrote it down in any file.
+
+The app-wide history of §4 is **local and keyless**: it has no remote, so it adds
+no way for anything to leave the phone.
+
+---
+
+## 12. Not here, on purpose
+
+No migration — the app is rapidly developed, so the new storage starts empty and
+nothing old is carried over. No sync states, no conflict screens, no commit
+dialog, no front matter in files, no previews of text, no private repositories,
+no search across projects, no history pruning.
+
+---
+
+## 13. Order of work
+
+1. **Accounts** — `accounts/` folders, Add / Switch / Remove with its two
+   outcomes, the key and commit identity per account.
+2. **Storage** — the account root, `projects/`, the project folder with `repo/`
+   inside it, local files beside it, hidden `.muffy/`, titles as file names,
+   `.txt` default, extensions deciding how a file opens, paths as identity, and
+   the visibility rule of §3 enforced in one place.
+3. **The app-wide history** — the account tree as a repository that commits on
+   every save and every tree change, with project repos excluded, and the arrows
+   and restore reading through it for local files and folders.
+4. **Screens** — the root, the Projects screen with rows, `⋮` and `＋`, the
+   project folder view with the slim row, the local/tracked distinction and the
+   crosses of §3.
+5. **Sync** — messages from changed names, force push, online-required failures,
+   reachable from both the slim row and the row's `⋮`.
+6. **Settings** — Add / Switch / Remove with the active account above them, the
+   theme swatch row, and the two history lengths.
+
+Steps 1–3 are the load-bearing ones; 4–6 land on top of them.
+
+---
+
+## 14. The history lengths (added at build time)
+
+Two settings, one for each history, both applied **at the next change** rather
+than when the number is typed:
+
+| setting | what it bounds |
+|---|---|
+| **This phone's history** | the account's own history: every save, every rename, every move, every deletion |
+| **Each project's history** | a project's commits, shortened after the next sync |
+
+An empty field means **keep everything**, which is the default. When a length is
+set, the oldest commits are dropped by rebuilding the chain from the newest ones
+— each rebuilt commit carries the identical tree, so not one byte of the working
+copy changes, and only how far back the history goes.
+
+Pruning happens on the same background worker as the commit that triggered it,
+so a save never waits for it. It is the one place where history is destroyed on
+purpose, and it destroys only the oldest end of it.

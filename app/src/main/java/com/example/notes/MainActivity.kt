@@ -301,7 +301,7 @@ private fun Dialogs(
                     dismiss()
                     if (repo.name in viewModel.projectNames) {
                         // Already here: replacing the copy is a question (§5.2).
-                        viewModel.message = "${repo.name} is already on this phone"
+                        pending = Pending.ReplaceProject(repo.name)
                     } else {
                         viewModel.pullRepository(repo)
                     }

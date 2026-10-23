@@ -145,7 +145,10 @@ fun BrowserScreen(
             )
         },
         floatingActionButton = {
-            if (projects) {
+            if (viewModel.workspace == null) {
+                // Nothing can be made until there is an account to make it in.
+                Spacer(Modifier.size(0.dp))
+            } else if (projects) {
                 FloatingActionButton(onClick = onAddProject) {
                     Icon(Icons.Filled.Add, contentDescription = "New project or pull one in")
                 }
@@ -200,7 +203,13 @@ fun BrowserScreen(
                 )
             }
 
-            if (projects) {
+            if (viewModel.workspace == null) {
+                EmptyState(
+                    title = "Sign in to begin",
+                    text = "Your account is the root of everything here: its projects, " +
+                        "their repositories, and the files you keep beside them.",
+                )
+            } else if (projects) {
                 ProjectList(viewModel, onRowSync, onRowRename, onRowDelete)
             } else {
                 EntryList(viewModel, actions)
