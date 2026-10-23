@@ -312,7 +312,7 @@ jobs:
 
           # shellcheck disable=SC2086
           ./gradlew --parallel --no-daemon --configuration-cache \
-            testDebugUnitTest \
+              --profile testDebugUnitTest \
             $PICKED $recording
 
       # The pictures are drawn by one class, so exactly one shard writes them.
@@ -339,6 +339,14 @@ jobs:
       # The scenarios are drawn by one class, so exactly one shard writes them —
       # and only a build draws them at all. A shard that drew nothing says so
       # quietly rather than failing for being the wrong half of a split.
+      # The other half of the same question. The scaling report says whether the
+      # tests scale; this says where the job's minutes actually went, and puts
+      # compilation next to test execution so that "the suite takes fifty
+      # seconds" becomes two numbers that can be argued with separately.
+      - name: Say where the test job's time went
+        if: always() && steps.shard.outputs.nothing == 'no'
+        run: python3 tools/build-times.py --results . --top 8 --budget tools/build-budget.txt
+
       - name: Put the scenarios in the run
         if: hashFiles('app/build/outputs/scenarios/**/README.md') != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
