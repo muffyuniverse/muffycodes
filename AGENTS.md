@@ -15,15 +15,39 @@ This container exists to research and to write code. That is all.
 
 **Everything is built and tested by GitHub workflows.** Testing here is not
 merely discouraged, it is unnecessary: the whole workflow leans on the remote
-tests. The local machine keeps only the smallest unit tests, and even those are
-not the reason anything is trusted.
+tests. The local machine runs nothing — the Android toolchain is not installed
+here at all. There is no `gradlew` to reach for, no SDK, no JDK for it. This is
+not a compromise; it is the design. A build on this machine would be slower
+than GitHub's, would prove nothing about the app, and would contend with
+everything else the container is doing.
+
+## `ci` is how you test
+
+Because nothing builds here, "does it work?" is answered by one command:
+
+```sh
+ci                 # push if there is anything to push, then watch and report
+ci --watch-only    # just watch the run already going
+```
+
+`ci` hands the branch to GitHub, waits, and — when a run fails — goes into the
+failing job's log and prints the block that says what went wrong, not merely
+which step failed. Its last line starts with `RESULT:`, so a script can act on
+it. Run it in the background and read the answer later:
+
+```sh
+nohup ci > /tmp/ci.log 2>&1 &
+```
+
+It is the only test runner there is. `tools/watch-run.sh` remains the
+detached, fire-and-forget variant of the same idea.
 
 ## The loop
 
 1. Write the code.
 2. Push a branch and open a pull request. The workflows run the tests; a pull
    request never publishes a release.
-3. Read the CI result. Fix, push again.
+3. Read the CI result with `ci`. Fix, push again.
 4. Merge to `main` only when the tests pass. `main` publishes the signed APK.
 
 A pull request is the unit of verification. Nothing else is.

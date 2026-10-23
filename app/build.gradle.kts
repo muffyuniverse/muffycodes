@@ -256,7 +256,7 @@ dependencies {
     // screens can be driven by the names of their parts without an emulator:
     // no device, no graphics processor, and no picture to look at. It is what
     // makes testing the user interface take seconds instead of minutes.
-    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("org.robolectric:robolectric:4.17")
     testImplementation("androidx.test.ext:junit:1.2.1")
     testImplementation(composeBom)
     testImplementation("androidx.compose.ui:ui-test-junit4")
