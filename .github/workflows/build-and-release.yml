@@ -391,70 +391,104 @@ jobs:
   # It is a gate all the same: publishing waits for this job, so a release that
   # would fail the check is never published.
   # -------------------------------------------------------------------------
+  # -------------------------------------------------------------------------
+  # Lint, in two depths.
+  #
+  # It was main-only, and on main it ran `lintVitalRelease` — the *fatal* subset
+  # that Android attaches to a release build, not the whole analysis. So the two
+  # halves of "cheap on development, deep on main" were both missing: development
+  # had no lint at all, and main was not running the deep one.
+  #
+  # Now every push that is not a pull request lints, and which analysis runs
+  # depends on where it is:
+  #
+  #   main          `lintRelease`  — every check, on the variant that ships
+  #   everywhere else `lintDebug`  — the same analyzer on the debug variant
+  #
+  # The debug variant is the cheap one for a reason worth stating: the test job
+  # has already compiled debug on this commit and put it in the Gradle cache, so
+  # this job pays for the analysis and not for the compile. On release there is
+  # nothing to reuse, and the compile is twenty seconds of the seventy.
+  #
+  # A pull request still runs neither. That tier is the workhorse and its answer
+  # is about the tests; making it carry lint would double it.
+  # -------------------------------------------------------------------------
   lint:
     name: Deep checks
-      # It starts at once, beside the tests rather than after them.
-      #
-      # Measured: the tests take about 55s and lint about 62s, and running one
-      # after the other put both on the clock for nothing — a lint pass says
-      # nothing about whether the tests will pass. What must be serial is the
-      # *handing on*, not the checking.
-      #
-      # The cost is that a red suite pays for a lint run it did not need. That is
-      # a runner's minute, against a minute of everybody's time on every green run.
-    permissions:
-      contents: read
-    # Main only. Lint reads the whole project and costs sixty seconds doing it,
-    # and a pull request cannot afford that as its longest job: it would be the
-    # critical path, and the answer a pull request needs is about the tests.
-    #
-    # The price of moving it here is honest and worth stating: a lint failure is
-    # now found after the merge, on the commit that reached main, rather than on
-    # the pull request that caused it. It still cannot ship — publishing waits
-    # for this job — so the failure is contained to main being red until it is
-    # fixed, instead of a bad APK going out.
-    #
-    # It does not run on a development branch either: that branch exists to hand
-    # a build to the person who will look at it, and the checks worth paying for
-    # there are the tests.
+    # Beside the tests rather than after them: a lint pass says nothing about
+    # whether the tests will pass, so serialising them put both on the clock for
+    # nothing.
     if: |
       github.event_name == 'workflow_dispatch'
-      || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+      || github.event_name == 'push' 
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
 
     steps:
       - name: Check out the code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 1
+          # Two commits, because the question below is what changed.
+          fetch-depth: 2
           persist-credentials: false
 
+      # Asked before the toolchain is set up, for the same reason the test job
+      # asks it first: a change that cannot reach the app cannot introduce a
+      # finding, and answering costs a second where provisioning costs fifteen.
+      #
+      # This was missing, and it was costing a full lint on every documentation
+      # push to main — ninety seconds to analyse a Kotlin tree that had not moved.
+      - name: Did the app change
+        id: decision
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          TOOLS_DIR: ${{ github.workspace }}/tools
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "changed=yes" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          verdict="$(bash "$TOOLS_DIR/changed-tests.sh" --base HEAD~1)"
+          if [ "$verdict" = "NONE" ]; then
+            echo "changed=no" >> "$GITHUB_OUTPUT"
+            echo "Nothing in the app changed, so there is nothing to analyse."
+          else
+            echo "changed=yes" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Java
+        if: steps.decision.outputs.changed == 'yes'
         uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Set up Gradle
+        if: steps.decision.outputs.changed == 'yes'
         uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
         with:
           cache-cleanup: never
           cache-read-only: true
 
-
-      - name: Check the release
-        # No --configuration-cache, deliberately, and this was measured the hard
-        # way: the first run stores an entry and passes, and the next one reports
-        # "Reusing configuration cache." and then dies inside
-        # com.android.tools.lint.Main with UastEnvironment and a
-        # LintClassLoaderBuildService that cannot be stopped. Lint's UAST
-        # machinery does not survive being restored.
-        #
-        # It costs nothing to give up here: this job runs only on main, where the
-        # release build is the longer of the two, so the fifteen seconds the cache
-        # would save were never on the critical path.
-        run: ./gradlew --parallel --no-daemon --no-configuration-cache lintVitalRelease
+      # No --configuration-cache, deliberately, and this was measured the hard
+      # way: the first run stores an entry and passes, and the next reports
+      # "Reusing configuration cache." and then dies inside
+      # com.android.tools.lint.Main with UastEnvironment and a
+      # LintClassLoaderBuilderService that cannot be stopped. Lint's UAST
+      # machinery does not survive being restored.
+      - name: Run the analysis
+        if: steps.decision.outputs.changed == 'yes'
+        run: |
+          # GITHUB_REF_NAME is the branch already; there is nothing to work out.
+          if [ "${GITHUB_REF_NAME:-}" = "main" ]; then
+            echo "On main: every check, on the variant that ships."
+            ./gradlew --parallel --no-daemon --no-configuration-cache lintRelease
+          else
+            echo "Not main: the same analyzer on debug, which the tests already compiled."
+            ./gradlew --parallel --no-daemon --no-configuration-cache lintDebug
+          fi
 
   # -------------------------------------------------------------------------
   # The release, built while the tests are still running. Only ever on main.
