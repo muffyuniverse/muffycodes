@@ -39,7 +39,7 @@ class WorkspaceTest {
         File(dir, ".gitignore").writeText("x")
         File(dir, ".muffy").mkdirs()
         val names = workspace.list(dir).map { it.name }
-        assertEquals(listOf("visible.txt"), names)
+        assertEquals(listOf("projects", "visible.txt"), names)
     }
 
     @Test
@@ -48,7 +48,7 @@ class WorkspaceTest {
         File(dir, "zebra.txt").writeText("")
         File(dir, "Alpha").mkdirs()
         val names = workspace.list(dir).map { it.name }
-        assertEquals(listOf("Alpha", "zebra.txt"), names)
+        assertEquals(listOf("Alpha", "projects", "zebra.txt"), names)
     }
 
     @Test

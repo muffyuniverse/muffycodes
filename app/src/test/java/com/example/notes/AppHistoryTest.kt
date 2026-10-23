@@ -104,7 +104,8 @@ class AppHistoryTest {
         workspace.write(file, "value last")
         history.commit("Edited count.txt", keep = 5)
 
-        assertEquals("the oldest versions are gone", 5, history.log().size)
+        val after = history.log()
+        assertEquals("the oldest versions are gone; left ${after.size}", 5, after.size)
         assertEquals("the file's content is untouched", "value last", file.readText())
     }
 

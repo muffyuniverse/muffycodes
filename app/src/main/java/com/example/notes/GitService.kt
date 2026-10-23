@@ -14,6 +14,7 @@ import org.eclipse.jgit.revwalk.RevWalk
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder
 import org.eclipse.jgit.transport.CredentialsProvider
 import org.eclipse.jgit.transport.RefSpec
+import org.eclipse.jgit.transport.RemoteRefUpdate
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider
 import org.eclipse.jgit.treewalk.TreeWalk
 import java.io.File
@@ -450,14 +451,20 @@ object GitService {
                     .setRefSpecs(RefSpec("refs/heads/$branch:refs/heads/$branch"))
                 credentials(token)?.let { command.setCredentialsProvider(it) }
                 val results = command.call()
-                val messages = results.flatMap { it.remoteUpdates }
+                val updates = results.flatMap { it.remoteUpdates }
+                val messages = updates
                     .mapNotNull { it.message }
                     .filter { it.isNotBlank() }
                     .joinToString("; ")
-                RemoteResult(
-                    message = Secrets.scrub(messages.ifBlank { "Nothing to push" }),
-                    success = messages.contains("successfully") || messages.contains("up to date"),
-                )
+                // What the remote said is not a reliable verdict — a local push
+                // often says nothing at all. The update's status is.
+                val ok = updates.isNotEmpty() && updates.all {
+                    it.status == RemoteRefUpdate.Status.OK ||
+                        it.status == RemoteRefUpdate.Status.UP_TO_DATE
+                }
+                RemoteResult(Secrets.scrub(messages.ifBlank {
+                    if (ok) "Pushed" else "Nothing was pushed"
+                }), ok)
             }
         } catch (e: Exception) {
             RemoteResult(Secrets.scrub(e.message ?: "Push failed"), false)
