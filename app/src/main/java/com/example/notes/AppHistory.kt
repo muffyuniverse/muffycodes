@@ -29,6 +29,13 @@ class AppHistory(
             appendLine("# The app's own bookkeeping.")
             appendLine(".muffy/")
             appendLine("# A project's repository is its own history; it is not repeated here.")
+            // Both forms are needed. `repo/` matches what is inside the folder,
+            // but the folder itself is a working tree with its own `.git`, and git
+            // would otherwise record that folder as a *submodule* — a pointer to a
+            // commit that lives in the other repository. Reading the account's
+            // history then reaches for an object it does not have, and the whole
+            // history becomes unreadable.
+            appendLine("${Workspace.PROJECTS}/*/${Workspace.REPO}")
             appendLine("${Workspace.PROJECTS}/*/${Workspace.REPO}/")
             appendLine("# A half-written file, if the app stops mid-save.")
             appendLine(".*.tmp")
@@ -38,9 +45,17 @@ class AppHistory(
         }
     }
 
+    /** What went wrong the last time the history tried to record something. */
+    var lastError: String? = null
+        private set
+
     /** Opens the history, creating it the first time the account is used. */
     fun open(): Repository {
-        accountDir.mkdirs()
+        // The folder belongs to the account, and the account made it. A history
+        // that arrives after its account was removed must not bring it back.
+        if (!accountDir.isDirectory) {
+            throw IllegalStateException("The account is no longer on this phone")
+        }
         if (!GitService.isRepository(accountDir)) {
             Git.init().setDirectory(accountDir).setInitialBranch("main").call().close()
         }
@@ -56,11 +71,21 @@ class AppHistory(
      * null when nothing had changed.
      */
     fun commit(message: String, keep: Int = 0): String? {
-        val repo = open()
+        // An account can be removed while a commit is still on its way to this
+        // method. Opening the history would then make the folder again, and the
+        // account would come back from the dead.
+        if (!accountDir.isDirectory) return null
+        val repo = try {
+            open()
+        } catch (e: Exception) {
+            lastError = e.message
+            return null
+        }
         return repo.use {
             val id = try {
                 GitService.commitAll(it, message, authorProvider())
             } catch (e: Exception) {
+                lastError = Secrets.scrub(e.message ?: "Could not record the change")
                 null
             } ?: return@use null
             pruneIfNeeded(it, keep)
@@ -114,6 +139,38 @@ class AppHistory(
                 true
             } catch (e: Exception) {
                 false
+            }
+        }
+    }
+
+    /** The id of the newest commit, or null when nothing has been recorded. */
+    fun head(): String? = log(null, 1).firstOrNull()?.id
+
+    /**
+     * Every path the newest version holds.
+     *
+     * Asked through the history rather than through JGit directly, so that a test
+     * asking the question gets the app's own answer — and the app's own error when
+     * there is one.
+     */
+    fun tracked(): List<String> {
+        if (head() == null) return emptyList()
+        if (!GitService.isRepository(accountDir)) return emptyList()
+        val repo = try {
+            open()
+        } catch (e: Exception) {
+            lastError = Secrets.scrub(e.message ?: "Could not open the history")
+            return emptyList()
+        }
+        return repo.use {
+            try {
+                // HEAD rather than an id read a moment earlier: a commit's objects
+                // and the reference that points at them do not appear at the same
+                // instant, so an id can briefly name something not yet on disk.
+                GitService.filesUnder(it, null, null).map { file -> file.first }
+            } catch (e: Exception) {
+                lastError = Secrets.scrub(e.message ?: "Could not read the newest version")
+                emptyList()
             }
         }
     }

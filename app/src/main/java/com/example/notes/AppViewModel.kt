@@ -29,6 +29,19 @@ class AppViewModel @JvmOverloads constructor(
     rootDir: File = app.filesDir,
     private val credentials: Credentials = CredentialStore(app),
     val settings: SettingsStore = SettingsStore(app),
+    /**
+     * How long a save waits before it is committed into the account's history.
+     *
+     * A person types; a test does not, so the wait is given rather than assumed.
+     * Zero commits at once, which is what a walking skeleton of a test wants.
+     */
+    private val saveDebounceMs: Long = 1500L,
+    /**
+     * Whether this build may keep a test account. A release build may not, and the
+     * answer is given rather than read from the build type so that the refusal can
+     * be tested: a rule that cannot be asked about is a rule nobody has checked.
+     */
+    private val testAccountsAllowed: Boolean = BuildConfig.DEBUG,
 ) : AndroidViewModel(app) {
 
     /** The accounts on this phone. */
@@ -86,7 +99,18 @@ class AppViewModel @JvmOverloads constructor(
 
     // ---- the account in use -------------------------------------------------
 
-    val accountList: List<Account> get() = accounts.accounts()
+    /**
+     * The accounts that can be switched to: the ones with a key, and the test
+     * account of a build that may keep one.
+     *
+     * An account that was removed with its copies kept still has a folder on this
+     * phone, but no key, so it is not something to switch to — signing in again is
+     * what brings it back.
+     */
+    val accountList: List<Account>
+        get() = accounts.accounts().filter {
+            credentials.hasToken(it.login) || (it.dev && testAccountsAllowed)
+        }
 
     val account: Account? get() = accounts.account(activeLogin)
 
@@ -99,8 +123,14 @@ class AppViewModel @JvmOverloads constructor(
      */
     fun githubFor(login: String?): GitHub? {
         val stored = accounts.account(login) ?: return null
-        return if (stored.dev) DiskGitHub(accounts.devGitHubDir(stored.login), stored.login)
-        else HttpGitHub()
+        // A test account is a folder pretending to be GitHub. A build that may not
+        // keep one refuses to act as one even if a stored account claims to be —
+        // the account is then an ordinary account, and talks to GitHub.
+        return if (stored.dev && testAccountsAllowed) {
+            DiskGitHub(accounts.devGitHubDir(stored.login), stored.login)
+        } else {
+            HttpGitHub()
+        }
     }
 
     /** The GitHub of the active account, or null when nobody is signed in. */
@@ -161,6 +191,9 @@ class AppViewModel @JvmOverloads constructor(
             pins = emptySet()
             return
         }
+        // The folders the app owns exist from the moment the account is shown, so
+        // that an empty account and a new one look the same.
+        ws.ensure()
         entries = currentDir?.let { ws.list(it) } ?: emptyList()
         pins = ws.pins()
         refreshChanges()
@@ -328,10 +361,13 @@ class AppViewModel @JvmOverloads constructor(
 
     /** Commits a change into the account's own history, behind the UI. */
     private fun record(what: String) {
+        val login = activeLogin ?: return
         val h = history ?: return
         val keep = settings.appHistoryLength
+        // The account can be removed while this is still on its way to the worker.
+        // Writing then would make its folder again, and it would come back.
         worker.execute {
-            h.commit(what, keep)
+            if (accounts.exists(login)) h.commit(what, keep)
         }
     }
 
@@ -365,9 +401,10 @@ class AppViewModel @JvmOverloads constructor(
         val h = history
         val name = file.name
         if (h != null) {
+            val login = activeLogin
             worker.execute {
-                Thread.sleep(SAVE_DEBOUNCE_MS)
-                h.commit("Edited $name", keep)
+                if (saveDebounceMs > 0) Thread.sleep(saveDebounceMs)
+                if (login != null && accounts.exists(login)) h.commit("Edited $name", keep)
             }
         }
         refresh()
@@ -656,7 +693,7 @@ class AppViewModel @JvmOverloads constructor(
      * a key ever existing. A release build has no way to ask for it: not a setting,
      * not an intent extra, nothing.
      */
-    val canMakeTestAccount: Boolean get() = BuildConfig.DEBUG
+    val canMakeTestAccount: Boolean get() = testAccountsAllowed
 
     /**
      * Makes the test account of a debug build and signs it in.
@@ -679,7 +716,6 @@ class AppViewModel @JvmOverloads constructor(
                 github.createRepo("", "welcome", "mit", "A repository that is not here yet")
             }
             main.post {
-                credentials.setToken(login, "")
                 accounts.save(
                     Account(
                         login = login,
@@ -736,11 +772,14 @@ class AppViewModel @JvmOverloads constructor(
      * without it the folders stay and signing in again returns to them (§5).
      */
     fun removeAccount(login: String, deleteCopies: Boolean) {
-        if (deleteCopies) accounts.remove(login)
+        if (deleteCopies) accounts.remove(login) else accounts.forget(login)
         credentials.forget(login)
         // Another stored account takes over, so the screen is never left pointing
         // at an account that is no longer here.
-        val next = credentials.logins().firstOrNull { accounts.exists(it) }
+        // The disk is what says which accounts this phone has; the keys only say
+        // which of them can still open GitHub.
+        val next = accounts.accounts().map { it.login }.firstOrNull { it != login }
+            ?: credentials.logins().firstOrNull { accounts.exists(it) }
         credentials.activeLogin = next
         activeLogin = next
         path = emptyList()
@@ -752,8 +791,17 @@ class AppViewModel @JvmOverloads constructor(
     /** The token of the active account, for the sign-in check. */
     fun tokenOf(login: String): String? = credentials.token(login)
 
-    /** True when [login] already has a token on this phone. */
-    fun known(login: String): Boolean = credentials.hasToken(login)
+    /**
+     * True when this phone can act as [login]: it holds a key for it, or it is the
+     * test account of a build that may keep one.
+     *
+     * Removing an account forgets its key, so a removed account is no longer
+     * something to switch to — even when its folder was kept.
+     */
+    fun known(login: String): Boolean {
+        if (credentials.hasToken(login)) return true
+        return testAccountsAllowed && accounts.account(login)?.dev == true
+    }
 
     // ---- history ------------------------------------------------------------
 
@@ -820,7 +868,13 @@ class AppViewModel @JvmOverloads constructor(
             history?.restore(text, revisionId) == true
         }
         message = if (ok) "Restored that version" else "Could not restore it"
-        if (ok) refresh()
+        if (ok) {
+            refresh()
+            // A restore changes what is on disk, so it is itself a version: the
+            // history must be able to undo it, and an undo that cannot be undone
+            // is not what "any state can be rolled back" means.
+            record("Restored an older version")
+        }
     }
 
     companion object {
@@ -830,6 +884,5 @@ class AppViewModel @JvmOverloads constructor(
         val DEFAULT_AUTHOR = GitAuthor("Muffy World", "muffyworld365@gmail.com")
         private const val SEARCH_LIMIT = 4000
         private const val SEARCH_RESULTS = 200
-        private const val SAVE_DEBOUNCE_MS = 1500L
     }
 }

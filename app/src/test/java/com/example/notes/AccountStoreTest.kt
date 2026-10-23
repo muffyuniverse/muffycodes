@@ -34,7 +34,10 @@ class AccountStoreTest {
     fun anAccountLivesInItsOwnFolderWithItsDetails() {
         store.save(Account("muffyuniverse", "Muffy World", "muffyworld365@gmail.com"))
 
-        assertTrue(File(store.dirOf("muffyuniverse"), "account.json").isFile)
+        assertTrue(
+            "the details are inside the app's own hidden folder",
+            File(store.dirOf("muffyuniverse"), ".muffy/account.json").isFile,
+        )
         val read = store.account("muffyuniverse")
         assertEquals("Muffy World", read?.commitName)
         assertEquals("muffyworld365@gmail.com", read?.commitEmail)

@@ -50,6 +50,10 @@ class ProjectGit(
         Result.failure(e)
     }
 
+    /** What went wrong the last time this class looked at a project. */
+    var lastError: String? = null
+        private set
+
     /** How many changes are waiting in the project, for the row's count. */
     fun changes(project: String): GitService.Changes {
         val repo = open(project) ?: return GitService.Changes(0, 0, 0)
@@ -57,6 +61,7 @@ class ProjectGit(
             try {
                 GitService.status(it)
             } catch (e: Exception) {
+                lastError = Secrets.scrub(e.message ?: "Could not read the project")
                 GitService.Changes(0, 0, 0)
             }
         }
@@ -79,9 +84,12 @@ class ProjectGit(
                 if (changed.isNotEmpty()) {
                     GitService.commitAll(it, CommitMessage.sync(changed), authorProvider())
                 }
-                val result = GitService.pushForce(it, tokenProvider())
-                if (result.success) prune(it)
-                result
+                // Shorten before pushing, not after. The push is what carries the
+                // history to GitHub, so a prune that ran afterwards would shorten
+                // this phone's copy and leave the repository as long as it was —
+                // the length would only appear to take effect on the next sync.
+                prune(it)
+                GitService.pushForce(it, tokenProvider())
             } catch (e: Exception) {
                 GitService.RemoteResult(Secrets.scrub(e.message ?: "Sync failed"), false)
             }

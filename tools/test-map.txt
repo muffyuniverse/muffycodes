@@ -17,8 +17,16 @@
 # dependencies honestly.
 
 AppThemeTest        app/src/main/java/com/example/notes/AppTheme.kt
-KeySafetyTest      app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/Secrets.kt app/src/main/java/com/example/notes/GitHubClient.kt app/src/main/java/com/example/notes/ProjectGit.kt
+KeySafetyTest      app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/Secrets.kt app/src/main/java/com/example/notes/GitHub.kt app/src/main/java/com/example/notes/ProjectGit.kt
 WorkspaceTest       app/src/main/java/com/example/notes/Workspace.kt
 AppHistoryTest      app/src/main/java/com/example/notes/AppHistory.kt app/src/main/java/com/example/notes/HistoryPrune.kt
 ProjectGitTest      app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitService.kt
 AccountStoreTest    app/src/main/java/com/example/notes/AccountStore.kt
+VisibilityFeatureTest  app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AppViewModel.kt
+FilesFeatureTest   app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AppViewModel.kt
+AccountsFeatureTest  app/src/main/java/com/example/notes/AccountStore.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/CredentialStore.kt app/src/main/java/com/example/notes/GitHub.kt
+ProjectsFeatureTest  app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitHub.kt app/src/main/java/com/example/notes/Workspace.kt
+SyncFeatureTest    app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/GitHub.kt
+HistoryFeatureTest app/src/main/java/com/example/notes/AppHistory.kt app/src/main/java/com/example/notes/HistoryPrune.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/GitService.kt
+RetentionFeatureTest  app/src/main/java/com/example/notes/SettingsStore.kt app/src/main/java/com/example/notes/HistoryPrune.kt app/src/main/java/com/example/notes/AppHistory.kt app/src/main/java/com/example/notes/ProjectGit.kt
+KeySafetyFeatureTest  app/src/main/java/com/example/notes/GitHub.kt app/src/main/java/com/example/notes/Secrets.kt app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/AccountStore.kt
