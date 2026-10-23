@@ -381,3 +381,35 @@ copy changes, and only how far back the history goes.
 Pruning happens on the same background worker as the commit that triggered it,
 so a save never waits for it. It is the one place where history is destroyed on
 purpose, and it destroys only the oldest end of it.
+
+## 15. The test account (how the second half is tested at all)
+
+Most of this design only happens to somebody who has signed in. A test run must
+never hold a GitHub key, so for a long time none of it was tested — and on a real
+install it could only be reached by hand.
+
+The app now asks a **`GitHub`** for what it needs: who the key belongs to, the
+account's repositories, and making, renaming and deleting one. There are two of
+them.
+
+| | talks to |
+|---|---|
+| **`HttpGitHub`** | GitHub itself, over HTTPS |
+| **`DiskGitHub`** | a folder of **real bare git repositories** on the phone |
+
+The second one is not a stand-in for git. Every clone, commit, force-push and
+reset is a real one, through the same JGit code, against a real repository; the
+refs that move are real refs. What it leaves out is the network and the key.
+
+A **debug build** can sign in as the test account, whose GitHub is that folder.
+A **release build cannot**: the gate is read from the build type, and a build that
+may not keep a test account also refuses to *act as* one — a stored account that
+claims to be one is treated as an ordinary account and talks to GitHub.
+
+With it, the promises above are walked by 8 feature files that drive the real
+ViewModel — visibility, files, accounts, projects, sync, history, retention and
+key safety — and by an emulator walk that signs in, invents a project, writes into
+its worktree, syncs it and opens the history, on a real install.
+
+Every one of those steps goes through the code the release ships. One switch is
+different, and the switch cannot be reached from a release.

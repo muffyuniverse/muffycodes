@@ -73,7 +73,26 @@ A pull request is the unit of verification. Nothing else is.
 |---|---|---|
 | pure logic: parsing, file names, paths, tree maths, sync, migration | tests | in the workflow, as fast JVM unit tests |
 | whether a screen offers what it should | Robolectric tests | in the workflow, on the CI's x86_64 |
+| **everything that needs a signed-in account** | **feature tests + an emulator walk** | **the test account (below) and a debug build of the same tag** |
 | **whether it looks right** | **the operator** | **a real install on a real phone** |
+
+Most of the app only happens to somebody who has signed in, and a test run must
+never hold a GitHub key. So the app asks a `GitHub` for what it needs, and there
+are two: `HttpGitHub` (GitHub over HTTPS) and `DiskGitHub` — a folder of **real
+bare repositories** on the phone. The second one is not a stand-in for git: every
+clone, commit and force-push is real, through the same JGit code. What is left
+out is the network and the key.
+
+A **debug build** can sign in as `test-account`; a release build cannot, and a
+build that may not keep one also refuses to act as one. So:
+
+- the feature tests (`*FeatureTest`) drive the **real ViewModel** with the test
+  account, and are written as the promise they check, not as the class they touch;
+- the emulator job builds the debug APK **of the same tag as the release** and
+  walks the account features for real, arriving as `render-walk-*`.
+
+If a change makes a feature test fail, the app is wrong — not the test. That is
+the whole point of the seam: it is the same code the release ships.
 
 ## What the pictures are for
 
