@@ -885,4 +885,7 @@ class AppViewModel @JvmOverloads constructor(
         private const val SEARCH_LIMIT = 4000
         private const val SEARCH_RESULTS = 200
     }
+
+// Probe: this file is on the test map for seven classes, so a change here
+// selects most of the suite. Used to measure what a wide pull request costs.
 }
