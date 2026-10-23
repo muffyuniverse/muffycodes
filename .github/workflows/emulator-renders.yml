@@ -161,24 +161,11 @@ jobs:
       # The renders go onto the release itself, where the bundle already is, so
       # the whole review happens in one place: the changes, the JVM pictures
       # that show the features work, and last these — the real thing.
-      - name: Drop the renders that are already there
-        # A release is rendered from the APK that is on it, so the pictures on it
-        # must all describe that APK. Uploading without removing would leave the
-        # pictures of an earlier tour beside the new ones, and nobody could tell
-        # which app they were looking at.
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag || github.event.release.tag_name }}
-          REPOSITORY: ${{ github.repository }}
-        run: |
-          gh release view "$TAG" --repo "$REPOSITORY" --json assets \
-            --jq '.assets[].name' | grep -E '^render-' || true
-          for asset in $(gh release view "$TAG" --repo "$REPOSITORY" --json assets \
-              --jq '.assets[].name | select(startswith("render-"))'); do
-            gh release delete-asset "$TAG" "$asset" --repo "$REPOSITORY" --yes
-          done
-
       - name: Put the renders on the release
+        # The new pictures go up first and the leftovers are cleared afterwards.
+        # Deleting first would leave a release with no pictures for the several
+        # minutes a run takes — and if that run is cancelled, or overtaken by a
+        # second one, it leaves them gone.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
@@ -189,11 +176,11 @@ jobs:
             [ -e "$f" ] || continue
             cp "$f" "renders/render-$(basename "$f")"
           done
-            # The walked features, from the debug build of the same tag.
-            for f in walks/*.png; do
-              [ -e "$f" ] || continue
-              cp "$f" "renders/render-walk-$(basename "$f")"
-            done
+          # The walked features, from the debug build of the same tag.
+          for f in walks/*.png; do
+            [ -e "$f" ] || continue
+            cp "$f" "renders/render-walk-$(basename "$f")"
+          done
 
           walked="$(ls walks 2>/dev/null | grep -c . || true)"
           echo "walked pictures: $walked"
@@ -202,15 +189,25 @@ jobs:
           fi
 
           count="$(ls renders 2>/dev/null | grep -c . || true)"
-          echo "renders made: $count"
+          echo "pictures made: $count"
           if [ "$count" -eq 0 ]; then
-            echo "::error::The tour made no renders at all."
+            echo "::error::The tour made no pictures at all."
             exit 1
           fi
 
-          # --clobber so that a re-run of this workflow finishes with one set of
-          # renders on the release rather than failing over an old one.
           gh release upload "$TAG" renders/*.png --repo "$REPOSITORY" --clobber
+
+          # Whatever is still on the release and was not just made belongs to an
+          # earlier tour of a different APK, and goes now — after the replacements
+          # are safely there.
+          echo "$(ls renders)" > /tmp/just-made.txt
+          for asset in $(gh release view "$TAG" --repo "$REPOSITORY" --json assets \
+              --jq '.assets[].name | select(startswith("render-"))'); do
+            if ! grep -qx "$asset" /tmp/just-made.txt; then
+              echo "removing an old render: $asset"
+              gh release delete-asset "$TAG" "$asset" --repo "$REPOSITORY" --yes
+            fi
+          done
 
       - name: Keep the renders in the run as well
         if: always()
