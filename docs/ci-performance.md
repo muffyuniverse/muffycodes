@@ -431,3 +431,51 @@ script into the log in cyan, where it contains every word the excerpt greps for 
 "error:", "Could not", the message the step would print on failure. The excerpt
 drops those lines before matching, or it quotes the script back as if it were the
 outcome.
+
+## The tail, and what the pipeline is actually limited by
+
+After the head was parallelised, the tail was two jobs — one assembling the
+bundle and handing it to the run as an artifact, then one taking that artifact
+back down and publishing it. The second job's first act was to download what the
+first had just uploaded: a nine-megabyte round trip between two machines that
+never needed to be two machines. That became one job, `Deliver`.
+
+| | before | after |
+|---|---|---|
+| bundle + publish | 24s + 13s + a scheduling gap = **~39s** | **16–20s** |
+
+The APK download inside it measured **1s**, not the 11s it had taken as a
+separate job — an artifact fetched moments after it was written is served from
+the run's own runner rather than from cold storage. That is most of the saving.
+
+### Where the pipeline's clock actually is
+
+Measured on one green run after the merge:
+
+| job | starts | ends | |
+|---|---|---|---|
+| tests (2 shards) | 3s | 57s | |
+| build the release | 2s | 64s | |
+| **deep checks (lint)** | 3s | **90s** | ← the critical path |
+| deliver | 92s | 112s | |
+
+The build is **62s**, which is below the test floor — the question this was
+asked to answer. What replaced it is lint: `lintVitalRelease` is 76s of work in
+its own job, and it now sets the floor for the whole pipeline. Removing it would
+put the run at about 82s instead of 112s, which is what it costs.
+
+It is worth saying why lint cannot simply be moved somewhere cheap. It needs the
+release variant compiled, so it pays the same 21s Kotlin compile the build pays —
+and merging the two jobs does not help, because the build's Gradle cache restore
+(13s) would then sit on lint's clock as well. Measured, the merged job comes out
+at about 94s against lint's 87s alone. Two runners are the cheaper arrangement.
+
+### One correction: writing a cache the next run cannot use
+
+A run of this log's earlier advice turned the release job's Gradle cache
+read-write, on the reasoning that the test job only writes debug entries. The
+diagnosis was right and the conclusion was wrong. Two runs later the count is
+identical either way — 14 tasks from cache, 31 executed, the same 14 — and the
+build is the same 50 seconds. Writing cost seven seconds at the end of every run
+to save a 144MB entry nothing restores, because every expensive release task is
+keyed on the sources or the classes built from them.
