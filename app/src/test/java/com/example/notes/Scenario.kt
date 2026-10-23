@@ -330,7 +330,7 @@ class Scenario(
             }
         }
         try {
-            val hist = AppHistory(dir) { viewModel.DEFAULT_AUTHOR }
+            val hist = AppHistory(dir) { AppViewModel.DEFAULT_AUTHOR }
             appendLine("    history: ${hist.log(null, 6).joinToString { it.message.take(30) }}")
             appendLine("    history error: ${hist.lastError}")
         } catch (e: Exception) {
