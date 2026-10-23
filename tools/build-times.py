@@ -120,7 +120,10 @@ def main() -> int:
     lines.append("| task | time | share |")
     lines.append("|---|---|---|")
     for length, name in tasks[: args.top]:
-        share = f"{length / total * 100:.0f}%" if total else "—"
+        # When the report did not name a total, the share is of the task time that
+        # could be read. Saying "—" would leave a column that means nothing.
+        base = total or measured
+        share = f"{length / base * 100:.0f}%" if base else "—"
         lines.append(f"| `{name}` | {length:.1f}s | {share} |")
     lines.append("")
 
