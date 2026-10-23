@@ -18,7 +18,7 @@ class HistoryFeatureTest : FeatureTest() {
     /** The commits of the account's own history, newest first. */
     private fun log(): List<GitService.CommitInfo> {
         val dir = scene.workspace!!.accountDir
-        return org.eclipse.jgit.api.Git.open(dir).use { GitService.log(it.repository) }
+        return org.eclipse.jgit.api.Git.open(dir).use { GitService.log(it.repository, null) }
     }
 
     @Test

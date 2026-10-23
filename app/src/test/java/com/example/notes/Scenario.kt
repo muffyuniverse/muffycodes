@@ -72,7 +72,7 @@ class Scenario(
         saveDebounceMs = 0,
     )
 
-    val login: String get() = viewModel.TEST_ACCOUNT
+    val login: String get() = AppViewModel.TEST_ACCOUNT
 
     init {
         if (signIn) signedIn()
@@ -103,7 +103,7 @@ class Scenario(
     fun names(): List<String> = viewModel.entries.map { it.name }
 
     /** Finds an entry in the folder that is open, by name. */
-    fun entry(name: String): Workspace.Entry {
+    fun entry(name: String): Entry {
         val found = viewModel.entries.firstOrNull { it.name == name }
         assertTrue("there is no \"$name\" in ${viewModel.path}", found != null)
         return found!!

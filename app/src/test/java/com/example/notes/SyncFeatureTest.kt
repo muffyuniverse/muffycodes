@@ -38,7 +38,8 @@ class SyncFeatureTest : FeatureTest() {
         scene.sync("Shopping")
 
         val message = GitService.log(
-            org.eclipse.jgit.api.Git.open(scene.workspace!!.repoOf("Shopping")).use { it.repository }
+            org.eclipse.jgit.api.Git.open(scene.workspace!!.repoOf("Shopping")).use { it.repository },
+            null,
         ).first().message
         assertTrue("milk is named", message.contains("milk.txt"))
         assertTrue("bread is named", message.contains("bread.txt"))
@@ -53,7 +54,8 @@ class SyncFeatureTest : FeatureTest() {
         scene.sync("Shopping")
 
         val message = GitService.log(
-            org.eclipse.jgit.api.Git.open(scene.workspace!!.repoOf("Shopping")).use { it.repository }
+            org.eclipse.jgit.api.Git.open(scene.workspace!!.repoOf("Shopping")).use { it.repository },
+            null,
         ).first().message
         assertTrue("the message still names files", message.contains(".txt"))
         assertTrue("and counts the rest", message.contains("more"))

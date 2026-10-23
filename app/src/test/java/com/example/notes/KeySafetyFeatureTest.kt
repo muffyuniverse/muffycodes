@@ -94,7 +94,7 @@ class KeySafetyFeatureTest : FeatureTest() {
     fun `a key written into an address by hand is scrubbed out of what is shown`() {
         val noisy = "https://ghp_secret_value@github.com/owner/name.git"
 
-        val shown = Secrets.scrub(GitService.stripCredentials(noisy))
+        val shown = Secrets.scrub(Secrets.stripCredentials(noisy))
 
         assertFalse("the key is gone", shown.contains("ghp_secret_value"))
         assertTrue("the address is still readable", shown.contains("github.com"))
