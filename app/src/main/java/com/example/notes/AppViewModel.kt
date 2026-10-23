@@ -513,8 +513,10 @@ class AppViewModel @JvmOverloads constructor(
                     { accounts.account(login)?.author() ?: DEFAULT_AUTHOR },
                     { settings.projectHistoryLength },
                 )
-                g.open(clean)?.use { repo ->
-                    GitService.setRemoteUrl(repo, api.cloneUrlFor(login, clean))
+                // A null here is not a failure: the folder was renamed, and only
+                // the address of the repository could not follow.
+                api?.cloneUrlFor(login, clean)?.let { remote ->
+                    g.open(clean)?.use { repo -> GitService.setRemoteUrl(repo, remote) }
                 }
             }
             main.post {
