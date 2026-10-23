@@ -148,10 +148,10 @@ jobs:
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb shell am start -n com.example.notes/com.example.notes.MainActivity
             sleep 8
-            SHOT_DIR="${{ github.workspace }}/walks" \
-              TOUR_FILE="${{ github.workspace }}/tools/dev-tour.txt" \
-              TRACE_FILE="${{ github.workspace }}/walk-trace.log" \
-              bash tools/screenshot-tour.sh
+            # One line on purpose: the emulator action runs every line of this script
+            # in a shell of its own, so a backslash continuation would be a line of its
+            # own — and a backslash is not a command.
+            SHOT_DIR="${{ github.workspace }}/walks" TOUR_FILE="${{ github.workspace }}/tools/dev-tour.txt" TRACE_FILE="${{ github.workspace }}/walk-trace.log" bash tools/screenshot-tour.sh
 
             # A step that did not work does not fail the run: what was made is
             # still worth looking at. But a run that made nothing at all is a
