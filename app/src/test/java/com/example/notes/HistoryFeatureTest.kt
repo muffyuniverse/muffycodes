@@ -224,4 +224,11 @@ class HistoryFeatureTest : FeatureTest() {
         }
         assertTrue("no remote is configured", remotes.isEmpty())
     }
+
+    @Test
+    fun probeOnlyThisClassRuns() {
+        // Deliberately trivial: this probe exists to measure what a pull request
+        // costs when the change touches one test class and nothing else.
+        assertTrue(true)
+    }
 }
