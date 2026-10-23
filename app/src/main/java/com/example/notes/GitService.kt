@@ -5,6 +5,7 @@ import org.eclipse.jgit.api.ListBranchCommand
 import org.eclipse.jgit.api.ResetCommand
 import org.eclipse.jgit.api.Status
 import org.eclipse.jgit.lib.AnyObjectId
+import org.eclipse.jgit.lib.FileMode
 import org.eclipse.jgit.lib.PersonIdent
 import org.eclipse.jgit.lib.Ref
 import org.eclipse.jgit.lib.Repository
@@ -379,7 +380,15 @@ object GitService {
                 while (treeWalk.next()) {
                     val name = treeWalk.getPathString()
                     val full = if (base.isEmpty()) name else "$base/$name"
-                    val loader = repo.open(treeWalk.getObjectId(0))
+                    // A submodule is a pointer to a commit in another repository.
+                    // It is not a file, it has no text, and reading it would fail
+                    // for the whole version rather than for the one entry.
+                    if (treeWalk.getFileMode(0) == FileMode.GITLINK) continue
+                    val loader = try {
+                        repo.open(treeWalk.getObjectId(0))
+                    } catch (e: Exception) {
+                        continue
+                    }
                     found.add(full to String(loader.bytes, Charsets.UTF_8))
                 }
             }

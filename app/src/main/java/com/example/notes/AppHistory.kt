@@ -29,6 +29,13 @@ class AppHistory(
             appendLine("# The app's own bookkeeping.")
             appendLine(".muffy/")
             appendLine("# A project's repository is its own history; it is not repeated here.")
+            // Both forms are needed. `repo/` matches what is inside the folder,
+            // but the folder itself is a working tree with its own `.git`, and git
+            // would otherwise record that folder as a *submodule* — a pointer to a
+            // commit that lives in the other repository. Reading the account's
+            // history then reaches for an object it does not have, and the whole
+            // history becomes unreadable.
+            appendLine("${Workspace.PROJECTS}/*/${Workspace.REPO}")
             appendLine("${Workspace.PROJECTS}/*/${Workspace.REPO}/")
             appendLine("# A half-written file, if the app stops mid-save.")
             appendLine(".*.tmp")
