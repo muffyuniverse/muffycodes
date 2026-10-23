@@ -360,6 +360,36 @@ object GitService {
     }
 
     /**
+     * Every file under [path] at [revisionId], with its text, as paths from the
+     * repository root. A blank path means the whole repository.
+     */
+    fun filesUnder(
+        repo: Repository,
+        path: String?,
+        revisionId: String? = null,
+    ): List<Pair<String, String>> {
+        val walk = RevWalk(repo)
+        try {
+            val tree = treeFor(repo, walk, path, revisionId)
+            val base = path?.trim('/').orEmpty()
+            val found = mutableListOf<Pair<String, String>>()
+            TreeWalk(repo).use { treeWalk ->
+                treeWalk.addTree(tree)
+                treeWalk.setRecursive(true)
+                while (treeWalk.next()) {
+                    val name = treeWalk.getPathString()
+                    val full = if (base.isEmpty()) name else "$base/$name"
+                    val loader = repo.open(treeWalk.getObjectId(0))
+                    found.add(full to String(loader.bytes, Charsets.UTF_8))
+                }
+            }
+            return found
+        } finally {
+            walk.close()
+        }
+    }
+
+    /**
      * The commits that changed the file [path], newest first, each with the
      * contents of the file at that commit. This is what the version browser
      * shows.

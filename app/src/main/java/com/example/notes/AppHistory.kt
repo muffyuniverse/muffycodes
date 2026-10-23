@@ -118,6 +118,19 @@ class AppHistory(
         }
     }
 
+    /** Every file under a folder at a past commit, with its text. */
+    fun filesUnder(path: String?, revisionId: String): List<Pair<String, String>> {
+        if (!GitService.isRepository(accountDir)) return emptyList()
+        val repo = open()
+        return repo.use {
+            try {
+                GitService.filesUnder(it, path, revisionId)
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+    }
+
     /** The contents of a folder at a past commit; a blank path means the root. */
     fun treeAt(path: String?, revisionId: String): List<GitService.TreeEntry> {
         if (!GitService.isRepository(accountDir)) return emptyList()

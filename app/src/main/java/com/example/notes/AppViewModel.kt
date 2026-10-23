@@ -71,8 +71,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var editingPath: List<String>? by mutableStateOf(null)
         private set
 
-    /** The file whose history is open, as a path from the account root. */
+    /** The file or folder whose history is open, as a path from the account root. */
     var historyPath: List<String>? by mutableStateOf(null)
+        private set
+
+    /** True when the open history belongs to a folder rather than a file. */
+    var historyIsFolder: Boolean by mutableStateOf(false)
         private set
 
     // ---- the account in use -------------------------------------------------
@@ -675,13 +679,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- history ------------------------------------------------------------
 
-    /** Opens the history of a file. */
+    /** Opens the history of a file, or of a folder and everything in it. */
     fun openHistory(file: File) {
         historyPath = workspace?.relative(file)
+        historyIsFolder = file.isDirectory
     }
 
     fun closeHistory() {
         historyPath = null
+        historyIsFolder = false
     }
 
     /**
@@ -703,6 +709,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         val h = history ?: return emptyList()
         val text = ws.pathString(target)
+        if (historyIsFolder) {
+            // A folder has no text of its own: its version is the list of what
+            // was inside it at that moment.
+            return h.log(text).map { commit ->
+                val inside = h.filesUnder(text, commit.id)
+                commit to inside.joinToString("\n") { it.first.substringAfterLast('/') }
+            }
+        }
         return h.log(text).map { commit -> commit to h.fileAt(text, commit.id) }
     }
 
@@ -712,10 +726,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val target = historyPath ?: return
         val project = ws.projectAt(target)
         val insideWorktree = target.size >= 3 && target[2] == Workspace.REPO
+        val text = ws.pathString(target)
         val ok = if (project != null && insideWorktree) {
             git?.restore(project, target.drop(3).joinToString("/"), revisionId)?.isSuccess == true
+        } else if (historyIsFolder) {
+            // Bringing a folder back means putting every file of that version
+            // where it was. Nothing is removed: a restore only ever adds back.
+            val files = history?.filesUnder(text, revisionId).orEmpty()
+            files.forEach { (path, body) ->
+                val restored = ws.fileAt(path.split("/"))
+                ws.write(restored, body)
+            }
+            files.isNotEmpty()
         } else {
-            history?.restore(ws.pathString(target), revisionId) == true
+            history?.restore(text, revisionId) == true
         }
         message = if (ok) "Restored that version" else "Could not restore it"
         if (ok) refresh()

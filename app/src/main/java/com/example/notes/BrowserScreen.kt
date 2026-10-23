@@ -456,15 +456,13 @@ private fun EntryRow(
                         },
                     )
                 }
-                if (!entry.isFolder) {
-                    DropdownMenuItem(
-                        text = { Text("History") },
-                        onClick = {
-                            menu = false
-                            actions.onHistory(entry)
-                        },
-                    )
-                }
+                DropdownMenuItem(
+                    text = { Text("History") },
+                    onClick = {
+                        menu = false
+                        actions.onHistory(entry)
+                    },
+                )
                 DropdownMenuItem(
                     text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
                     onClick = {
