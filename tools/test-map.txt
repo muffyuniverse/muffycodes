@@ -17,13 +17,8 @@
 # dependencies honestly.
 
 AppThemeTest        app/src/main/java/com/example/notes/AppTheme.kt
-ScreenTest          app/src/main/java/com/example/notes/NotesListScreen.kt app/src/main/java/com/example/notes/NoteEditorScreen.kt app/src/main/java/com/example/notes/AppTheme.kt
-ScreenshotTourTest  app/src/main/java/com/example/notes/NotesListScreen.kt app/src/main/java/com/example/notes/NoteEditorScreen.kt app/src/main/java/com/example/notes/AppTheme.kt
-FolderTreeTest      app/src/main/java/com/example/notes/FolderTree.kt
-NoteFileTest        app/src/main/java/com/example/notes/NoteFile.kt
-NoteCodecTest       app/src/main/java/com/example/notes/NoteCodec.kt
-NotePreviewTest     app/src/main/java/com/example/notes/Note.kt
-FolderStorageTest   app/src/main/java/com/example/notes/FolderStorage.kt app/src/main/java/com/example/notes/NoteFile.kt
-ProjectStoreTest    app/src/main/java/com/example/notes/NoteStore.kt
-GitProjectsTest     app/src/main/java/com/example/notes/GitProjects.kt app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/GitHubClient.kt
-KeySafetyTest      app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/Secrets.kt app/src/main/java/com/example/notes/GitHubClient.kt app/src/main/java/com/example/notes/GitProjects.kt
+KeySafetyTest      app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/Secrets.kt app/src/main/java/com/example/notes/GitHubClient.kt app/src/main/java/com/example/notes/ProjectGit.kt
+WorkspaceTest       app/src/main/java/com/example/notes/Workspace.kt
+AppHistoryTest      app/src/main/java/com/example/notes/AppHistory.kt app/src/main/java/com/example/notes/HistoryPrune.kt
+ProjectGitTest      app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitService.kt
+AccountStoreTest    app/src/main/java/com/example/notes/AccountStore.kt

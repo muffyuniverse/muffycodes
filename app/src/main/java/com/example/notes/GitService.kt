@@ -2,6 +2,7 @@ package com.example.notes
 
 import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.api.ListBranchCommand
+import org.eclipse.jgit.api.ResetCommand
 import org.eclipse.jgit.api.Status
 import org.eclipse.jgit.lib.AnyObjectId
 import org.eclipse.jgit.lib.PersonIdent
@@ -189,6 +190,55 @@ object GitService {
                     .call()
                 commit.name
             }
+        }
+    }
+
+    /**
+     * The paths that changed in the working tree, as the repository names them.
+     * This is what a commit message is written from: the names, not a count.
+     */
+    fun changedPaths(repo: Repository): List<String> {
+        val status: Status = Git(repo).use { it.status().call() }
+        return (status.added + status.changed + status.modified +
+            status.removed + status.missing + status.untracked)
+            .filter { !it.startsWith(".") }
+            .sorted()
+    }
+
+    /**
+     * Pushes the current branch, replacing what the remote holds.
+     *
+     * Local wins every conflict, which is the point: it cannot fail on one, and
+     * the phone and GitHub end up holding the same thing.
+     */
+    fun pushForce(repo: Repository, token: String?): RemoteResult = push(repo, token, force = true)
+
+    /**
+     * Makes the working tree match the remote branch exactly: fetch, reset hard
+     * onto it, then remove everything the remote does not have.
+     */
+    fun resetToRemote(repo: Repository, token: String?): RemoteResult {
+        return try {
+            val branch = currentBranch(repo)
+            Git(repo).use { git ->
+                val fetch = git.fetch().setRemote("origin")
+                credentials(token)?.let { fetch.setCredentialsProvider(it) }
+                fetch.call()
+
+                git.reset()
+                    .setMode(ResetCommand.ResetType.HARD)
+                    .setRef("origin/$branch")
+                    .call()
+
+                // Anything the remote does not have goes, so the folder really
+                // matches what GitHub holds.
+                val status = git.status().call()
+                (status.untracked + status.untrackedFolders + status.missing)
+                    .forEach { path -> File(repo.workTree, path).deleteRecursively() }
+            }
+            RemoteResult("Replaced with what GitHub has", true)
+        } catch (e: Exception) {
+            RemoteResult(Secrets.scrub(e.message ?: "Pull failed"), false)
         }
     }
 
@@ -390,12 +440,13 @@ object GitService {
     }
 
     /** Pushes the current branch to the remote. */
-    fun push(repo: Repository, token: String?): RemoteResult {
+    fun push(repo: Repository, token: String?, force: Boolean = false): RemoteResult {
         return try {
             val branch = currentBranch(repo)
             Git(repo).use { git ->
                 val command = git.push()
                     .setRemote("origin")
+                    .setForce(force)
                     .setRefSpecs(RefSpec("refs/heads/$branch:refs/heads/$branch"))
                 credentials(token)?.let { command.setCredentialsProvider(it) }
                 val results = command.call()

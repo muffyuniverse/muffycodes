@@ -65,6 +65,7 @@ account is active are written as that account's identity.
 Hiding an account's side of the phone is **Switch**'s and **Sign out**'s job.
 **Forget** is the button that destroys local files; it is named and confirmed
 as such.
+@ wouldnt it be better if on sign out we just ask if app needs to forget all info associated with the account you sign out of? this way we wouldnt need it as a separate button. And pull should open a window with availiable projects to pull. Same with delete - it lists locally pulled projects to select which one to delete - and explains that it removes it both locally and remotely fully, and that if only local remove needed then how to do that.
 
 ## 3. Projects
 
@@ -110,6 +111,7 @@ as such.
   on each result.
 - **Settings** — the account cockpit of §2. The old "Git projects" box with
   Attach / New repo / Clone / Detach is gone.
+  @ we can just keep projects in projects/ folder and dont need search - or is there a usecase?
 
 ## 6. The key
 
