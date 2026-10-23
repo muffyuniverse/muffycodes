@@ -86,7 +86,13 @@ class EditorScreenTest {
     fun `an unknown file says it is not text, and offers no field to type in`() {
         // The destructive case. A `.zip` must not be editable, and the screen must
         // say why rather than show an empty editor that invites a mistake.
-        val file = scene.file("archive.zip", "not really a zip")
+        // Written straight to disk, not through the scenario helper: the helper
+        // writes text through `saveEditor`, and the app now rightly refuses to write
+        // text into a .zip. A test that could still do it would be testing a door
+        // that has been closed.
+        val file = File(scene.viewModel.currentDir!!, "archive.zip")
+        file.writeBytes(byteArrayOf(0x50, 0x4B, 0x03, 0x04, 0x00))
+        scene.viewModel.refresh()
 
         editorFor(file)
 
@@ -103,7 +109,10 @@ class EditorScreenTest {
     fun `a picture that cannot be read says so instead of showing an empty frame`() {
         // A truncated download, or a format the phone has no decoder for. Silence
         // would be indistinguishable from the app being broken.
-        val file = scene.file("broken.png", "this is not a png")
+        // Same reason: bytes, not text.
+        val file = File(scene.viewModel.currentDir!!, "broken.png")
+        file.writeBytes("this is not a png".toByteArray())
+        scene.viewModel.refresh()
 
         editorFor(file)
 
