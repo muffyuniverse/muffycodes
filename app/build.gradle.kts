@@ -158,6 +158,14 @@ val testForks = (providers.gradleProperty("muffy.testForks").orNull
 tasks.withType<Test>().configureEach {
     maxParallelForks = testForks
 
+    // Roborazzi's captureRoboImage writes a picture only while it is recording,
+    // and does nothing otherwise. Recording is switched on only for the
+    // screenshot tour (`-Pmuffy.shots`), so the ordinary test runs stay fast
+    // and leave no pictures behind.
+    if (project.hasProperty("muffy.shots")) {
+        systemProperty("roborazzi.test.record", "true")
+    }
+
     // The tests are always really run, never taken from the build cache.
     //
     // Gradle can hand back the results of a previous run instead of running
@@ -171,9 +179,8 @@ tasks.withType<Test>().configureEach {
     // The tests are the only evidence there is, so they are run. The cost was
     // measured at sixteen seconds on a warm cache, which is a cheap price for
     // knowing that the answer is about the code and not about a cache entry.
-    // The tests are always really run, never taken from the build cache.
     //
-    // `doNotTrackState` rather than `outputs.upToDateWhen { false }`, and the
+    // The rule is kept with `doNotTrackState` rather than `outputs.upToDateWhen { false }`, and the
     // difference matters more than it looks. The rule is the same — this task is
     // never up to date — but `upToDateWhen` takes a lambda, and the configuration
     // cache keeps a reference to the class behind that lambda. Written to a cache
@@ -206,6 +213,7 @@ tasks.withType<Test>().configureEach {
     if (!canRunScreenTests) {
         filter {
             excludeTestsMatching("com.example.notes.ScreenTest")
+            excludeTestsMatching("com.example.notes.ScreenshotTourTest")
         }
         // Said while the build is being configured rather than inside a
         // `doFirst`, and that is not a style choice: a `doFirst` block that
@@ -265,6 +273,8 @@ dependencies {
     // no device, no graphics processor, and no picture to look at. It is what
     // makes testing the user interface take seconds instead of minutes.
     testImplementation("org.robolectric:robolectric:4.17")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.77.0")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.77.0")
     testImplementation("androidx.test.ext:junit:1.2.1")
     testImplementation(composeBom)
     testImplementation("androidx.compose.ui:ui-test-junit4")
