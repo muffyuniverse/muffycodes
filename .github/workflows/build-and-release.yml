@@ -535,24 +535,23 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # Read-write, a correction rather than a preference.
+      # Back to read-only, and this time it is measured rather than assumed.
       #
-      # This job was read-only on the reasoning that whatever is worth remembering
-      # had already been remembered by the test job. But the test job runs the
-      # debug variant, and this is the only job in the pipeline that runs release
-      # tasks at all — so for external dexing (21s), release resource packaging and
-      # everything else that exists only for release, nobody ever wrote an entry and
-      # the read could never hit. Reading a cache that is never written for the
-      # variant being built is a saving on paper only.
-      #
-      # Gradle's cache is immutable per key: a second save of the same key is
-      # refused and the first entry stands, so two jobs writing cannot corrupt it.
+      # The earlier version of this comment claimed that writing release entries
+      # would let the next run restore them. Two runs later the count is identical
+      # either way — 14 tasks from cache, 31 executed, the same 14 — and the build
+      # itself is the same 50 seconds. Writing bought nothing and cost seven
+      # seconds at the end of the job, which is what saving a 144MB cache entry
+      # takes. The reason is plain in the profile: every expensive release task
+      # (compileReleaseKotlin, mergeDexRelease, dexBuilderRelease) is keyed on the
+      # sources or the classes built from them, so it can never hit. Only the cheap
+      # ones around them can, and those are already in the shared cache.
       - name: Set up Gradle
         if: steps.decision.outputs.changed == 'yes'
         uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
         with:
           cache-cleanup: never
-          cache-read-only: false
+          cache-read-only: true
 
       - name: Put the signing key in place
         if: steps.decision.outputs.changed == 'yes'
