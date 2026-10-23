@@ -29,6 +29,19 @@ class AppViewModel @JvmOverloads constructor(
     rootDir: File = app.filesDir,
     private val credentials: Credentials = CredentialStore(app),
     val settings: SettingsStore = SettingsStore(app),
+    /**
+     * How long a save waits before it is committed into the account's history.
+     *
+     * A person types; a test does not, so the wait is given rather than assumed.
+     * Zero commits at once, which is what a walking skeleton of a test wants.
+     */
+    private val saveDebounceMs: Long = 1500L,
+    /**
+     * Whether this build may keep a test account. A release build may not, and the
+     * answer is given rather than read from the build type so that the refusal can
+     * be tested: a rule that cannot be asked about is a rule nobody has checked.
+     */
+    private val testAccountsAllowed: Boolean = BuildConfig.DEBUG,
 ) : AndroidViewModel(app) {
 
     /** The accounts on this phone. */
@@ -99,8 +112,14 @@ class AppViewModel @JvmOverloads constructor(
      */
     fun githubFor(login: String?): GitHub? {
         val stored = accounts.account(login) ?: return null
-        return if (stored.dev) DiskGitHub(accounts.devGitHubDir(stored.login), stored.login)
-        else HttpGitHub()
+        // A test account is a folder pretending to be GitHub. A build that may not
+        // keep one refuses to act as one even if a stored account claims to be —
+        // the account is then an ordinary account, and talks to GitHub.
+        return if (stored.dev && testAccountsAllowed) {
+            DiskGitHub(accounts.devGitHubDir(stored.login), stored.login)
+        } else {
+            HttpGitHub()
+        }
     }
 
     /** The GitHub of the active account, or null when nobody is signed in. */
@@ -366,7 +385,7 @@ class AppViewModel @JvmOverloads constructor(
         val name = file.name
         if (h != null) {
             worker.execute {
-                Thread.sleep(SAVE_DEBOUNCE_MS)
+                if (saveDebounceMs > 0) Thread.sleep(saveDebounceMs)
                 h.commit("Edited $name", keep)
             }
         }
@@ -656,7 +675,7 @@ class AppViewModel @JvmOverloads constructor(
      * a key ever existing. A release build has no way to ask for it: not a setting,
      * not an intent extra, nothing.
      */
-    val canMakeTestAccount: Boolean get() = BuildConfig.DEBUG
+    val canMakeTestAccount: Boolean get() = testAccountsAllowed
 
     /**
      * Makes the test account of a debug build and signs it in.
@@ -830,6 +849,5 @@ class AppViewModel @JvmOverloads constructor(
         val DEFAULT_AUTHOR = GitAuthor("Muffy World", "muffyworld365@gmail.com")
         private const val SEARCH_LIMIT = 4000
         private const val SEARCH_RESULTS = 200
-        private const val SAVE_DEBOUNCE_MS = 1500L
     }
 }
