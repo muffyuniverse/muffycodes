@@ -161,6 +161,11 @@ class ScenariosTest {
                 }
                 scene.await("the making of it to finish", 60_000) { !viewModel.busy }
                 scene.open(Workspace.PROJECTS)
+                // The rows are read when the screen composes, so the count has to
+                // be asked for again after the project exists — otherwise the
+                // picture is of the list before the row arrived, and the report
+                // shows the same frame twice while claiming otherwise.
+                viewModel.refreshChanges()
             }
             after()
             result(
@@ -237,6 +242,9 @@ class ScenariosTest {
             then("A file is written inside the repository and the project is synced.") {
                 scene.worktreeFile("milk.txt", "two litres")
                 scene.sync("groceries")
+                // Same reason as above: what changed is the row's count, and the
+                // screen only redraws when it is asked to look again.
+                viewModel.refreshChanges()
             }
             after()
             result(
