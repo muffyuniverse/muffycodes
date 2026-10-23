@@ -67,18 +67,20 @@ jobs:
       contents: read
 
     # How many runners share the suite, set by the repository variable
-    # TEST_SHARDS, which holds a list of shard indexes. Unset means `[0]`: one
-    # runner, the whole suite, which is right while the suite takes six seconds.
+    # TEST_SHARDS, which holds a list of shard indexes. `[0,1]` by default: the
+    # suite is past the point where one runner is the right shape and well past
+    # the point where a second one pays for itself.
     #
-    # When it stops being right, the variable becomes `[0,1]` and then `[0,1,2,3]`
-    # and nothing else changes: no workflow edit, no rearrangement of tests. The
-    # split is by shard index and never by what changed, so each shard keeps the
-    # same command line from run to run and its configuration-cache entry stays
-    # useful.
+    # A shard keeps the same tests from run to run, because the split is by a
+    # fixed position in a fixed order and never by what changed. That is what
+    # lets each shard keep its own configuration-cache entry.
     strategy:
-      fail-fast: false
+      # The shards are one gate: a wrong answer from any of them is the same
+      # answer. Failing fast stops the others instead of letting them run to the
+      # end to learn what the first one already knew.
+      fail-fast: true
       matrix:
-        shard: ${{ fromJSON(vars.TEST_SHARDS || '[0]') }}
+        shard: ${{ fromJSON(vars.TEST_SHARDS || '[0,1]') }}
 
     steps:
       - name: Check out the code
@@ -111,7 +113,9 @@ jobs:
           TOOLS_DIR: ${{ github.workspace }}/tools
         run: |
           if [ "$EVENT_NAME" != "pull_request" ]; then
-            echo "This is not a pull request, so every test runs."
+            # `development` and `main` are the tiers that hand something to a
+            # person, so they run everything.
+            echo "This is a build, so every test runs."
             selection="$(bash "$TOOLS_DIR/changed-tests.sh" --all)"
           else
             # The changes are measured against the branch the pull request is
@@ -121,25 +125,50 @@ jobs:
             selection="$(bash "$TOOLS_DIR/changed-tests.sh" --base "origin/$BASE_REF")"
           fi
 
-          echo "the tests this change touches: $selection"
+          echo "this change concerns: $selection"
+          echo "selection=$selection" >> "$GITHUB_OUTPUT"
 
-          # A list of classes is reported but not used to narrow the run, and the
-          # reason is measured. The whole suite takes 6.3 seconds on the
-          # integration machine, while asking Gradle for a subset changes the
-          # command line, and a changed command line is a different
-          # configuration-cache entry: the run would trade a six second saving
-          # for a fifteen second miss. Every test runs instead, which is also
-          # the stronger answer.
           case "$selection" in
-            NONE) echo "verdict=NONE" >> "$GITHUB_OUTPUT" ;;
-            *)    echo "verdict=ALL"  >> "$GITHUB_OUTPUT" ;;
+            NONE)
+              echo "verdict=NONE" >> "$GITHUB_OUTPUT"
+              echo "::notice::Nothing that could change the app was touched."
+              ;;
+            *)
+              echo "verdict=RUN" >> "$GITHUB_OUTPUT"
+              ;;
           esac
+
+      # What this shard has to do, given the two decisions above: the affected
+      # classes narrowed to this shard, and nothing at all when the shard has no
+      # share of them. The narrowing is what makes an idle runner cost the floor
+      # instead of a build.
+      - name: Work out what this shard has to do
+        id: shard
+        if: steps.which.outputs.verdict == 'RUN'
+        env:
+          SELECTION: ${{ steps.which.outputs.selection }}
+          SHARD: ${{ matrix.shard }}
+          SHARD_OF: ${{ strategy.job-total }}
+        run: |
+          picked="$(bash tools/pick-tests.sh \
+            --selection "$SELECTION" --shard "$SHARD" --of "$SHARD_OF")"
+          if [ "$picked" = "NONE" ]; then
+            echo "nothing=yes" >> "$GITHUB_OUTPUT"
+            echo "This shard has no share of what changed, so it stops here."
+            exit 0
+          fi
+          {
+            echo "nothing=no"
+            echo "args<<PICKED"
+            printf '%s\n' "$picked"
+            echo "PICKED"
+          } >> "$GITHUB_OUTPUT"
 
       # Everything below is provisioning, and all of it is skipped when there is
       # nothing to run: a job that installs a toolchain to do no work is a job
       # that spends a minute to say nothing.
       - name: Set up Java
-        if: steps.which.outputs.verdict != 'NONE'
+        if: steps.shard.outputs.nothing == 'no'
         uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
@@ -160,14 +189,14 @@ jobs:
       # main will not save a moment later, and a write-only run is a run whose
       # post step is wasted work.
       - name: Set up Gradle
-        if: steps.which.outputs.verdict != 'NONE'
+        if: steps.shard.outputs.nothing == 'no'
         uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
         with:
           cache-cleanup: never
           cache-read-only: ${{ github.event_name == 'pull_request' }}
 
       - name: Say what this machine has
-        if: steps.which.outputs.verdict != 'NONE'
+        if: steps.shard.outputs.nothing == 'no'
         run: |
           echo "processors: $(nproc)"
           awk '/MemTotal/ {printf "memory: %.1f GB\n", $2/1024/1024}' /proc/meminfo
@@ -187,7 +216,7 @@ jobs:
       #
       # This one cache was worth about a minute per run on its own.
       - name: Remember the runtime the tests need
-        if: steps.which.outputs.verdict != 'NONE'
+        if: steps.shard.outputs.nothing == 'no'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.m2/repository
@@ -218,7 +247,7 @@ jobs:
       # stores a new entry; a miss costs what it costs today and never a wrong
       # build.
       - name: Remember how the project is put together
-        if: steps.which.outputs.verdict != 'NONE'
+        if: steps.shard.outputs.nothing == 'no'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .gradle/configuration-cache
@@ -245,30 +274,33 @@ jobs:
           # cache is cleared when it is wrong.
           key: config-cache-v2-tests-${{ matrix.shard }}-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle.properties', 'gradle/wrapper/gradle-wrapper.properties') }}
       - name: Run the tests
-        # Nothing that could change the app was touched, so the app being tested
-        # is byte for byte the one that already passed. Running a suite to
-        # confirm that is a minute spent to learn nothing.
-        if: steps.which.outputs.verdict != 'NONE'
+        if: steps.shard.outputs.nothing == 'no'
         env:
-          SHARD: ${{ matrix.shard }}
-          SHARD_OF: ${{ strategy.job-total }}
+          EVENT_NAME: ${{ github.event_name }}
+          PICKED: ${{ steps.shard.outputs.args }}
         run: |
           # `--parallel` does nothing with one module and costs nothing; it is
           # here so that the day the app is split into modules, the runners use
           # them without anybody remembering to add it.
           #
-          # The shard arguments are word-split on purpose, and are empty when
-          # there is one shard, so that the command line stays identical to an
-          # unsharded run and keeps its cache.
+          # `$PICKED` is the affected classes narrowed to this shard, as gradle
+          # arguments — or empty when the whole suite runs on one shard, which
+          # keeps the command line identical to an unfiltered run and its
+          # configuration cache valid.
           #
-          # Recording is always on. The suite draws every screen it builds, so the
-          # pictures come from the one execution that already runs — not from a
-          # second job running the same tests again just to write ten files.
+          # Recording is on for a build and off for a pull request. The scenarios
+          # run either way: they are tests, and a broken flow must fail the
+          # request that broke it. The flag decides only whether the pictures
+          # that make the report get written.
+          recording=""
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            recording="-Pmuffy.shots"
+          fi
+
           # shellcheck disable=SC2086
           ./gradlew --parallel --no-daemon --configuration-cache \
             testDebugUnitTest \
-            $(bash tools/test-shard.sh --shard "$SHARD" --of "$SHARD_OF") \
-            -Pmuffy.shots
+            $PICKED $recording
 
       # The pictures are drawn by one class, so exactly one shard writes them.
       # The others have nothing to upload, and say so quietly rather than
@@ -285,18 +317,21 @@ jobs:
       # that blocks on speed only teaches people to skip tests. `always()` so a
       # red run is measured too: being red is exactly when the shape matters.
       - name: Say whether the suite still scales
-        if: always() && steps.which.outputs.verdict != 'NONE'
+        if: always() && steps.shard.outputs.nothing == 'no'
         env:
           SHARD_OF_TOTAL: ${{ strategy.job-total }}
         run: |
           python3 tools/scaling-report.py --shards "$SHARD_OF_TOTAL"
 
-      - name: Put the pictures in the run
-        if: hashFiles('app/build/outputs/roborazzi/*.png') != ''
+      # The scenarios are drawn by one class, so exactly one shard writes them —
+      # and only a build draws them at all. A shard that drew nothing says so
+      # quietly rather than failing for being the wrong half of a split.
+      - name: Put the scenarios in the run
+        if: hashFiles('app/build/outputs/scenarios/**/README.md') != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: tour-pictures
-          path: app/build/outputs/roborazzi/*.png
+          name: scenarios
+          path: app/build/outputs/scenarios/**
           if-no-files-found: error
           retention-days: 7
 
@@ -334,6 +369,10 @@ jobs:
   # -------------------------------------------------------------------------
   lint:
     name: Deep checks
+    # Behind the gate: there is no point linting a build whose tests failed, and
+    # the runner is better spent not doing it. The extra waiting is paid once, by
+    # a change that was going to be stopped anyway.
+    needs: test
     permissions:
       contents: read
     # Main only. Lint reads the whole project and costs sixty seconds doing it,
@@ -349,7 +388,10 @@ jobs:
     # It does not run on a development branch either: that branch exists to hand
     # a build to the person who will look at it, and the checks worth paying for
     # there are the tests.
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    if: |
+      needs.test.result == 'success'
+      && (github.event_name == 'workflow_dispatch'
+          || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -391,18 +433,14 @@ jobs:
   # -------------------------------------------------------------------------
   build-release:
     name: Build the release
-    # It starts with everything else rather than waiting for the tests.
-    #
-    # Building and testing are independent: an APK does not need a test
-    # result to exist, and the tests do not need an APK. Serialising them made
-    # the pipeline the sum of its jobs instead of the longest of them — and the
-    # build is the longest.
-    #
-    # Nothing is published on this: `publish` still waits for the tests, the
-    # build and the checks together, so a build that raced ahead of a red suite
-    # is an artifact and never a release.
-    needs: []
-    if: github.event_name != 'pull_request'
+    # Behind the gate, and this is the whole point of the gate: a build whose
+    # tests failed is not handed to anybody, not even for development. The
+    # waiting costs the length of the tests and buys never shipping something
+    # broken — which is the same reason the gate is the tier that must be fast.
+    needs: test
+    if: |
+      needs.test.result == 'success'
+      && github.event_name != 'pull_request' 
     runs-on: ubuntu-latest
     timeout-minutes: 25
     # It only reads the repository and writes the key from a secret. It does not
@@ -650,12 +688,12 @@ jobs:
           name: release-apk
           path: apk
 
-      - name: Take the pictures
+      - name: Take the scenarios
         if: steps.decision.outputs.changed == 'yes'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: tour-pictures
-          path: tour
+          name: scenarios
+          path: scenarios
 
       - name: Write down what changed
         if: steps.decision.outputs.changed == 'yes'
@@ -663,7 +701,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
         run: |
-          bash tools/changes.sh --pictures tour > changes.md
+          bash tools/changes.sh > changes.md
           cat changes.md
 
       - name: Put the bundle together
@@ -672,7 +710,13 @@ jobs:
           mkdir -p bundle
           cp apk/app-release.apk bundle/
           cp changes.md bundle/
-          cp tour/*.png bundle/
+          # The scenarios keep their folders: the report refers to the pictures
+          # beside it, so flattening them would break every link.
+          cp -r scenarios bundle/scenarios
+          # One report, assembled from the scenarios that were actually drawn.
+          # It is written for a person: no classes, no timings, no stack traces.
+          bash tools/scenario-report.sh bundle/scenarios \
+            --out bundle/scenarios/README.md
           ls -la bundle/
 
       - name: Hand the bundle to the job that publishes it
@@ -683,7 +727,7 @@ jobs:
           path: |
             bundle/app-release.apk
             bundle/changes.md
-            bundle/tour-*.png
+            bundle/scenarios/**
           # Seven days: this is the thing a development push is for, and a
           # week is long enough to install and look at it.
           retention-days: 7
@@ -770,13 +814,38 @@ jobs:
           # they are files of the release instead, so the links are aimed at
           # the release's own download addresses before the document becomes
           # the body of the release.
-          BASE_URL="https://github.com/${REPOSITORY}/releases/download/v${VERSION_NAME}"
-          sed "s#](tour-#](${BASE_URL}/tour-#g" bundle/changes.md > release-notes.md
+          # The scenario pictures become release assets, which cannot have folders, so
+            # each one is flattened to a name that still says which scenario and which
+            # half of it. The report's links are aimed at those names.
+            BASE_URL="https://github.com/${REPOSITORY}/releases/download/v${VERSION_NAME}"
+            assets=()
+            if [ -d bundle/scenarios ]; then
+              for picture in bundle/scenarios/*/*.png; do
+                [ -e "$picture" ] || continue
+                scenario="$(basename "$(dirname "$picture")")"
+                half="$(basename "$picture")"
+                name="scenario-${scenario}-${half}"
+                cp "$picture" "$name"
+                assets+=("$name")
+              done
+            fi
 
-          gh release create "v${VERSION_NAME}" \
-            --repo "$REPOSITORY" \
-            --title "Muffy Codes ${VERSION_NAME}" \
-            --notes-file release-notes.md \
-            bundle/app-release.apk \
-            bundle/tour-*.png
+            # The report is rewritten to point at those assets, then appended to the
+            # body: a release page that lists the changes and then shows the app
+            # working, in the words of somebody describing it to a person.
+            cp bundle/changes.md release-notes.md
+            if [ -f bundle/scenarios/README.md ]; then
+              {
+                printf '\n\n---\n\n'
+                sed -E "s#\]\(([^/)]+)/(before|after)\.png\)#](${BASE_URL}/scenario-\1-\2.png)#g" \
+                  bundle/scenarios/README.md
+              } >> release-notes.md
+            fi
+
+            gh release create "v${VERSION_NAME}" \
+              --repo "$REPOSITORY" \
+              --title "Muffy Codes ${VERSION_NAME}" \
+              --notes-file release-notes.md \
+              bundle/app-release.apk \
+              "${assets[@]}"
 

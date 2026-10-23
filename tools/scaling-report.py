@@ -107,6 +107,12 @@ def main():
     failed = sum(case[2] for case in cases if case[3])
     failures = sum(1 for case in cases if case[3])
 
+    # With more than one shard, a job only ever sees its own share of the suite.
+    # The per-test budgets below still mean something; the whole-suite advice
+    # does not, because the job cannot see the whole suite. Saying so is better
+    # than guessing a total.
+    whole_suite = args.shards <= 1
+
     by_class = {}
     for name, _, seconds, _ in cases:
         by_class[name] = by_class.get(name, 0.0) + seconds
@@ -129,10 +135,16 @@ def main():
         f"| largest class | {largest_name} — {largest_seconds:.1f}s, "
         f"{largest_share * 100:.0f}% of the suite (budget {budget.get('max_class_share', 0) * 100:.0f}%) |"
     )
-    lines.append(
-        f"| sharding | {args.shards} shard(s); "
-        f"break-even at {budget.get('shard_break_even_s', 0):.0f}s of tests |"
-    )
+    if whole_suite:
+        lines.append(
+            f"| sharding | {args.shards} shard; "
+            f"break-even at {budget.get('shard_break_even_s', 0):.0f}s of tests |"
+        )
+    else:
+        lines.append(
+            f"| sharding | this is one of {args.shards} shards, so the times below are "
+            f"this shard's share |"
+        )
     lines.append("")
 
     # ---- one class has become the suite --------------------------------------
@@ -169,7 +181,13 @@ def main():
     # ---- sharding, in both directions ---------------------------------------
     break_even = budget.get("shard_break_even_s", 17)
     recommend = budget.get("shard_recommended_s", 60)
-    if args.shards <= 1:
+    if not whole_suite:
+        note(
+            f"Sharding is on ({args.shards} shards). This job ran its share in "
+            f"{total:.1f}s; the whole suite is roughly a multiple of that, and the "
+            f"run's own job list is where the real figure is."
+        )
+    elif args.shards <= 1:
         if total >= recommend:
             warn(
                 f"The tests take {total:.1f}s on one shard (recommended split at "
@@ -189,7 +207,7 @@ def main():
                 f"One shard is correct: the tests cost {total:.1f}s and a second "
                 f"runner would cost {break_even:.0f}s of setup to save half of it."
             )
-    else:
+    elif whole_suite:
         if total < break_even:
             warn(
                 f"Sharding is on ({args.shards} shards) but the tests cost only "
