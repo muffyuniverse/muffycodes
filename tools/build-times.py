@@ -25,7 +25,11 @@ import re
 import sys
 from pathlib import Path
 
-TASK = re.compile(r"^:[A-Za-z0-9_.:-]+$")
+# A real task is `:project:task`, or deeper. `:app` alone is the *project's*
+# aggregate row, which already contains every task under it — counting it would
+# add the children's time to itself, and did: one run reported 50 seconds of
+# work inside a 24-second build.
+TASK = re.compile(r"^:([A-Za-z0-9_.-]+):([A-Za-z0-9_.:-]+)$")
 DURATION = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(ms|s|m)\s*$")
 ROW = re.compile(r"<tr\b[^>]*>(.*?)</tr>", re.S | re.I)
 CELL = re.compile(r"<td\b[^>]*>(.*?)</td>", re.S | re.I)
@@ -79,6 +83,10 @@ def main() -> int:
     parser.add_argument("--results", default=".", help="where to look for profile reports")
     parser.add_argument("--top", type=int, default=10)
     parser.add_argument("--budget", default="tools/build-budget.txt")
+    parser.add_argument("--label", default="release build",
+                        help="what is being measured, for the heading")
+    parser.add_argument("--no-budget", action="store_true",
+                        help="print the table without judging it against a budget")
     args = parser.parse_args()
 
     reports = sorted(
@@ -98,9 +106,14 @@ def main() -> int:
         return 0
 
     measured = sum(s for s, _ in tasks)
+    # Tasks can overlap when Gradle builds in parallel, so the parts may add up to
+    # more than the whole. The whole is the truth, and it is what the shares use.
+    base = max(total or 0, measured)
     budget = {}
     path = Path(args.budget)
-    if path.exists():
+    if args.no_budget:
+        budget = {}
+    elif path.exists():
         for line in path.read_text().splitlines():
             line = line.split("#", 1)[0].strip()
             if "=" in line:
@@ -110,8 +123,13 @@ def main() -> int:
                 except ValueError:
                     pass
 
-    lines: list[str] = ["### Where the release build spent its time", ""]
-    if total:
+    lines: list[str] = [f"### Where the {args.label} spent its time", ""]
+    if total and measured > total:
+        lines.append(
+            f"The whole build took **{total:.1f}s**. The tasks below overlap — they ran "
+            f"in parallel — so they add up to more ({measured:.1f}s) than the build did."
+        )
+    elif total:
         lines.append(f"The whole build took **{total:.1f}s**, and the tasks below are "
                      f"{measured:.1f}s of it.")
     else:
@@ -122,7 +140,6 @@ def main() -> int:
     for length, name in tasks[: args.top]:
         # When the report did not name a total, the share is of the task time that
         # could be read. Saying "—" would leave a column that means nothing.
-        base = total or measured
         share = f"{length / base * 100:.0f}%" if base else "—"
         lines.append(f"| `{name}` | {length:.1f}s | {share} |")
     lines.append("")

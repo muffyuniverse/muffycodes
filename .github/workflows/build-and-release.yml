@@ -345,7 +345,10 @@ jobs:
       # seconds" becomes two numbers that can be argued with separately.
       - name: Say where the test job's time went
         if: always() && steps.shard.outputs.nothing == 'no'
-        run: python3 tools/build-times.py --results . --top 8 --budget tools/build-budget.txt
+        # No budget here on purpose: what a test costs is the suite's business, and
+        # tools/scaling-report.py already holds those thresholds. Two places
+        # deciding the same budget would disagree, and the quieter one would win.
+        run: python3 tools/build-times.py --results . --top 8 --label test --no-budget
 
       - name: Put the scenarios in the run
         if: hashFiles('app/build/outputs/scenarios/**/README.md') != ''
