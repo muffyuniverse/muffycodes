@@ -150,19 +150,23 @@ jobs:
           SHARD: ${{ matrix.shard }}
           SHARD_OF: ${{ strategy.job-total }}
         run: |
-          picked="$(bash tools/pick-tests.sh \
-            --selection "$SELECTION" --shard "$SHARD" --of "$SHARD_OF")"
-          if [ "$picked" = "NONE" ]; then
-            echo "nothing=yes" >> "$GITHUB_OUTPUT"
-            echo "This shard has no share of what changed, so it stops here."
-            exit 0
-          fi
-          {
-            echo "nothing=no"
-            echo "args<<PICKED"
-            printf '%s\n' "$picked"
-            echo "PICKED"
-          } >> "$GITHUB_OUTPUT"
+            # The class names, not gradle arguments. The command line is an input
+            # the configuration cache is keyed on, so a selection that changed it
+            # made every narrowed run miss the cache and work out the build again
+            # — about six seconds of the thirty a narrowed run spends in Gradle.
+            # The build reads MUFFY_ONLY_TESTS at execution time instead, where it
+            # is not a cache input, and the command line is identical every run.
+            classes="$(bash tools/pick-tests.sh \
+              --selection "$SELECTION" --shard "$SHARD" --of "$SHARD_OF" --format names)"
+            if [ "$classes" = "NONE" ]; then
+              echo "nothing=yes" >> "$GITHUB_OUTPUT"
+              echo "This shard has no share of what changed, so it stops here."
+              exit 0
+            fi
+            {
+              echo "nothing=no"
+              echo "classes=$classes"
+            } >> "$GITHUB_OUTPUT"
 
       # Everything below is provisioning, and all of it is skipped when there is
       # nothing to run: a job that installs a toolchain to do no work is a job
@@ -301,30 +305,26 @@ jobs:
         if: steps.shard.outputs.nothing == 'no'
         env:
           EVENT_NAME: ${{ github.event_name }}
-          PICKED: ${{ steps.shard.outputs.args }}
+          MUFFY_ONLY_TESTS: ${{ steps.shard.outputs.classes }}
         run: |
           # `--parallel` does nothing with one module and costs nothing; it is
           # here so that the day the app is split into modules, the runners use
           # them without anybody remembering to add it.
           #
-          # `$PICKED` is the affected classes narrowed to this shard, as gradle
-          # arguments — or empty when the whole suite runs on one shard, which
-          # keeps the command line identical to an unfiltered run and its
-          # configuration cache valid.
-          #
-          # Recording is on for a build and off for a pull request. The scenarios
-          # run either way: they are tests, and a broken flow must fail the
-          # request that broke it. The flag decides only whether the pictures
-          # that make the report get written.
-          recording=""
-          if [ "$EVENT_NAME" != "pull_request" ]; then
-            recording="-Pmuffy.shots"
-          fi
-
-          # shellcheck disable=SC2086
-          ./gradlew --parallel --no-daemon --configuration-cache \
-              --profile testDebugUnitTest \
-            $PICKED $recording
+            # The selection arrives in MUFFY_ONLY_TESTS and is applied by the
+            # build while it runs, not by the command line — see above.
+            #
+            # Recording is on for a build and off for a pull request. The scenarios
+            # run either way: they are tests, and a broken flow must fail the
+            # request that broke it. The flag decides only whether the pictures
+            # that make the report get written.
+            if [ "$EVENT_NAME" != "pull_request" ]; then
+              ./gradlew --parallel --no-daemon --configuration-cache \
+                  --profile testDebugUnitTest -Pmuffy.shots
+            else
+              ./gradlew --parallel --no-daemon --configuration-cache \
+                  --profile testDebugUnitTest
+            fi
 
       # The pictures are drawn by one class, so exactly one shard writes them.
       # The others have nothing to upload, and say so quietly rather than
@@ -413,16 +413,20 @@ jobs:
   # Now every push that is not a pull request lints, and which analysis runs
   # depends on where it is:
   #
-  #   main          `lintRelease`  — every check, on the variant that ships
-  #   everywhere else `lintDebug`  — the same analyzer on the debug variant
+  #   main             `lintRelease` — every check, on the variant that ships
+  #   development      nothing
+  #   a pull request   nothing
   #
-  # The debug variant is the cheap one for a reason worth stating: the test job
-  # has already compiled debug on this commit and put it in the Gradle cache, so
-  # this job pays for the analysis and not for the compile. On release there is
-  # nothing to reuse, and the compile is twenty seconds of the seventy.
+  # Development was given `lintDebug` on the theory that the test job's debug
+  # compile would be reused and the analysis would be nearly free. Measured:
+  # **111s**, longer than `lintRelease` on main at 98s. Gradle's cache entries
+  # are keyed per job here, so a job cannot restore another job's compile — it
+  # compiled debug itself and then analysed it. The theory was wrong and the
+  # branch that hands out builds to look at is the wrong place to spend two
+  # minutes proving something has never once failed.
   #
-  # A pull request still runs neither. That tier is the workhorse and its answer
-  # is about the tests; making it carry lint would double it.
+  # Lint analyses the whole tree by design, so it is a release gate: main, where
+  # the thing being produced is a version rather than something to glance at.
   # -------------------------------------------------------------------------
   lint:
     name: Deep checks
@@ -431,7 +435,7 @@ jobs:
     # nothing.
     if: |
       github.event_name == 'workflow_dispatch'
-      || github.event_name == 'push' 
+      || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

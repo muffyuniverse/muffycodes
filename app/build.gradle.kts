@@ -213,6 +213,39 @@ val screenTestNotice =
     "The screen tests are skipped on $processor: the TLS library they " +
         "need is not published for it. They run on x86_64."
 
+/**
+ * Narrow the run to particular classes, named by the machine that started it.
+ *
+ * The selection arrives in an environment variable rather than on the command
+ * line, and it is read here — inside `doFirst`, which runs at execution time —
+ * rather than while the build is being configured. Both halves matter.
+ *
+ * Passing `--tests A --tests B` changes the command line, and the command line
+ * is one of the inputs the configuration cache is keyed on. So every narrowed
+ * run reported "no cached configuration is available" and paid for the whole
+ * configuration phase again: measured, about six seconds of the thirty a
+ * narrowed run spends in Gradle. An environment variable read at execution time
+ * is not a configuration input, so the command line is the same from one pull
+ * request to the next and the cached configuration is reused.
+ *
+ * Empty or absent means run everything, which is what a build of main or
+ * development asks for. A name that matches no class is left to Gradle's own
+ * reporting, because a filter that silently matches nothing is the exact failure
+ * this pipeline spent a day learning to see: measured once as a green pull
+ * request that had executed no tests at all.
+ */
+tasks.withType<Test>().configureEach {
+    doFirst {
+        val only = System.getenv("MUFFY_ONLY_TESTS").orEmpty().trim()
+        if (only.isNotEmpty()) {
+            filter.isFailOnNoMatchingTests = true
+            only.split(',', ' ').filter { it.isNotBlank() }.forEach {
+                filter.includeTestsMatching(it.trim())
+            }
+        }
+    }
+}
+
 tasks.withType<Test>().configureEach {
     if (!canRunScreenTests) {
         filter {

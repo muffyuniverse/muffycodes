@@ -22,12 +22,13 @@
 # nothing to do says so and stops, rather than paying for a build.
 #
 # Usage:
-#   pick-tests.sh --selection <ALL|NONE|"A B C"> --shard <i> --of <n>
+#   pick-tests.sh --selection <ALL|NONE|"A B C"> --shard <i> --of <n> [--format gradle|names]
 #   pick-tests.sh --self-test
 #
 # Prints one of:
 #   NONE                     this shard has nothing to run
-#   --tests\nA\n--tests\nB   the gradle arguments for this shard
+#   --tests\nA\n--tests\nB   the gradle arguments for this shard (--format gradle)
+#   A B                      the class names, space separated (--format names)
 #
 # Exit code: 0 fine, 2 bad use.
 
@@ -43,6 +44,10 @@ SELECTION=""
 SHARD=""
 OF="1"
 SELF_TEST=0
+# `gradle` emits --tests arguments for the command line. `names` emits the class
+# names alone, for the environment variable the build reads — the command line is
+# a configuration-cache input, so the selection must not travel on it.
+FORMAT="gradle"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -50,6 +55,7 @@ while [ $# -gt 0 ]; do
         --shard)     SHARD="${2:-}"; shift 2 ;;
         --of)        OF="${2:-}"; shift 2 ;;
         --self-test) SELF_TEST=1; shift ;;
+        --format)    FORMAT="${2:-}"; shift 2 ;;
         -h|--help)   usage; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
@@ -112,7 +118,17 @@ if [ "$SELF_TEST" = "1" ]; then
         [ "$got" = "NONE" ] || complain "NONE on shard $i gave '$got'"
     done
 
-    # 4. A name that exists nowhere is an error, not silence. Silence here is
+    # 4. The two output shapes name the same thing. They feed two different
+    #    consumers — a command line and an environment variable — so a divergence
+    #    between them would narrow one and not the other, silently.
+    by_gradle="$(bash "$HERE/pick-tests.sh" --selection "$short_one" --shard 0 --of 1 \
+        | grep -v '^--tests$' | grep -v '^$' | tr '\n' ' ' | sed 's/ *$//')"
+    by_names="$(bash "$HERE/pick-tests.sh" --selection "$short_one" --shard 0 --of 1 \
+        --format names)"
+    [ "$by_gradle" = "$by_names" ] \
+        || complain "the two formats disagree: '$by_gradle' against '$by_names'"
+
+    # 5. A name that exists nowhere is an error, not silence. Silence here is
     #    exactly how a whole run comes to execute nothing and pass.
     if bash "$HERE/pick-tests.sh" --selection NoSuchTestAnywhere --shard 0 --of 2 \
             >/dev/null 2>&1; then
@@ -126,6 +142,11 @@ if [ "$SELF_TEST" = "1" ]; then
     echo "  the selector agrees with itself: $total classes, one shard each"
     exit 0
 fi
+
+case "$FORMAT" in
+    gradle|names) ;;
+    *) echo "--format is gradle or names" >&2; exit 2 ;;
+esac
 
 if [ -z "$SHARD" ]; then
     echo "--shard is required" >&2
@@ -141,6 +162,15 @@ if [ "$SHARD" -ge "$OF" ]; then
     echo "--shard must be below --of" >&2
     exit 2
 fi
+
+# Print one class in whichever shape was asked for: a gradle argument, or a bare
+# name. Everything else in this script decides *what*; this decides *how*.
+emit() {
+    names="$names $1"
+    if [ "$FORMAT" = "gradle" ]; then
+        printf -- '--tests\n%s\n' "$1"
+    fi
+}
 
 # The whole answer, as the shard script would give it: nothing when there is one
 # shard, and the class list otherwise.
@@ -158,9 +188,11 @@ if [ "$OF" = "1" ]; then
         # unfiltered run has and its configuration cache remains valid.
         exit 0
     fi
+    names=""
     for name in $SELECTION; do
-        printf -- '--tests\n%s\n' "$name"
+        emit "$name"
     done
+    [ "$FORMAT" = "names" ] && printf '%s\n' "$names" | sed 's/^ //'
     exit 0
 fi
 
@@ -199,10 +231,11 @@ selected_has() {
 }
 
 found=0
+names=""
 while IFS= read -r name; do
     [ -n "$name" ] || continue
     if selected_has "$name"; then
-        printf -- '--tests\n%s\n' "$name"
+        emit "$name"
         found=$((found + 1))
     fi
 done <<< "$(all_classes)"
@@ -231,4 +264,9 @@ if [ "$found" -eq 0 ]; then
         done
     fi
     echo "NONE"
+    exit 0
+fi
+
+if [ "$FORMAT" = "names" ]; then
+    printf '%s\n' "$names" | sed 's/^ //'
 fi
