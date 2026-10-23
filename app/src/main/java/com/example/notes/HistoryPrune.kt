@@ -26,8 +26,11 @@ object HistoryPrune {
      */
     fun prune(repo: Repository, keep: Int): Int {
         if (keep <= 0) return 0
-        val branch = repo.branch ?: return 0
-        val ref = repo.exactRef(branch) ?: return 0
+        // The full name is needed: the short one resolves through a lookup that
+        // differs between the two forms, and a miss here would silently do
+        // nothing at all.
+        val branch = repo.fullBranch ?: repo.branch ?: return 0
+        val ref = repo.findRef(branch) ?: return 0
 
         // Walk back only as far as needed: one commit past the limit tells us
         // there is something to drop, and no further work is required.
@@ -58,7 +61,7 @@ object HistoryPrune {
             inserter.flush()
 
             val tip = parent ?: return 0
-            val update = repo.updateRef(branch)
+            val update = repo.updateRef(ref.name)
             update.setNewObjectId(tip)
             update.setForceUpdate(true)
             update.update()
