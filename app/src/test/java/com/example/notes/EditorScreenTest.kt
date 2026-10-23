@@ -93,8 +93,10 @@ class EditorScreenTest {
         compose.onNodeWithText(
             "This file is not text, so it is not opened here.",
         ).assertIsDisplayed()
-        // And the name is quoted back, so a person knows which file they are on.
-        compose.onNodeWithText("..zip", substring = true).assertIsDisplayed()
+        // And the extension is named back, so a person can see what the app thinks
+        // it is looking at — which is the difference between "this app is broken"
+        // and "this app does not edit zips".
+        compose.onNodeWithText("ends in .zip", substring = true).assertIsDisplayed()
     }
 
     @Test
