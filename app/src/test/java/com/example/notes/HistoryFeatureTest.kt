@@ -224,4 +224,9 @@ class HistoryFeatureTest : FeatureTest() {
         }
         assertTrue("no remote is configured", remotes.isEmpty())
     }
+
+    @Test
+    fun probeNarrowedRunRunsSomething() {
+        assertTrue(true)
+    }
 }
