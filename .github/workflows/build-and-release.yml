@@ -167,6 +167,19 @@ jobs:
       # Everything below is provisioning, and all of it is skipped when there is
       # nothing to run: a job that installs a toolchain to do no work is a job
       # that spends a minute to say nothing.
+      # The workflow checks itself first, because a mistake here is the most
+      # expensive kind: it does not fail, it makes something never run. A step
+      # whose `if:` reads a misspelled step id is skipped, and the job reports
+      # success — so the gate that was supposed to guard the release simply is not
+      # there, and nothing says so.
+      #
+      # It runs only on the first shard, since the answer does not depend on which
+      # shard asks, and before Java and Gradle are set up: a broken workflow is a
+      # two-second answer instead of a ninety-second one.
+      - name: Check the workflow itself
+        if: matrix.shard == 0
+        run: python3 tools/check-workflow.py
+
       - name: Set up Java
         if: steps.shard.outputs.nothing == 'no'
         uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
@@ -503,15 +516,24 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # Read-only here: this job builds and hands the APK on. Whatever is worth
-      # remembering about the build has already been remembered by the test job,
-      # so there is nothing to add and no reason to spend time writing.
+      # Read-write, a correction rather than a preference.
+      #
+      # This job was read-only on the reasoning that whatever is worth remembering
+      # had already been remembered by the test job. But the test job runs the
+      # debug variant, and this is the only job in the pipeline that runs release
+      # tasks at all — so for external dexing (21s), release resource packaging and
+      # everything else that exists only for release, nobody ever wrote an entry and
+      # the read could never hit. Reading a cache that is never written for the
+      # variant being built is a saving on paper only.
+      #
+      # Gradle's cache is immutable per key: a second save of the same key is
+      # refused and the first entry stands, so two jobs writing cannot corrupt it.
       - name: Set up Gradle
         if: steps.decision.outputs.changed == 'yes'
         uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
         with:
           cache-cleanup: never
-          cache-read-only: true
+          cache-read-only: false
 
       - name: Put the signing key in place
         if: steps.decision.outputs.changed == 'yes'
@@ -595,14 +617,20 @@ jobs:
           VERSION_NAME: ${{ steps.version.outputs.name }}
         run: |
           # --no-configuration-cache, deliberately: this invocation carries a
-          # version code and name that differ on every release, so the entry could
-          # never be reused and storing it would be a cost with no payoff. Saying
-          # it in the command matters, because the project turns the cache on by
-          # default and a comment does not turn it off.
-          ./gradlew --parallel --no-daemon --no-configuration-cache assembleRelease \
+          # --profile writes a report of what each task took. It costs a moment and
+          # it is the difference between knowing where a minute and a half goes and
+          # guessing at it — which is how this job spent thirty seconds caching
+          # things it could never read back.
+          ./gradlew --parallel --no-daemon --no-configuration-cache --profile assembleRelease \
             -x lintVitalRelease \
             -Pmuffy.versionCode="$VERSION_CODE" \
             -Pmuffy.versionName="$VERSION_NAME"
+
+      # Always, including after a failure: a build that broke is the one whose
+      # timing is worth seeing. Advisory, and it cannot fail the job.
+      - name: Say where the build's time went
+        if: always() && steps.decision.outputs.changed == 'yes'
+        run: python3 tools/build-times.py --results . --top 10
 
       - name: Check the signature of the APK
         if: steps.decision.outputs.changed == 'yes'

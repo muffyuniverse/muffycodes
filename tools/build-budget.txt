@@ -1,0 +1,17 @@
+# What a release build is allowed to spend.
+#
+# This is the build's counterpart to tools/scaling-budget.txt: the build measures
+# itself on every run and says when a figure is past its budget. Nothing here
+# fails a run. A budget that can fail a build gets raised the first time it is
+# inconvenient; one that is only ever said out loud gets looked at.
+#
+# The pipeline cannot be shorter than its longest task, so the figure worth
+# watching is the single biggest one, not the total.
+
+# No single task should take longer than this. A task past it is the thing to
+# split, cache, or stop doing.
+single_task_s = 12
+
+# The whole release build. This is the pipeline's critical path until the tests
+# are longer than it, so it is the number that decides the wall clock.
+total_s = 90

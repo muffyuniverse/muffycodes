@@ -63,6 +63,16 @@ fi
 # A push is what starts a run, so --push makes this the one command after an
 # edit. Uncommitted work is the user's to commit: naming a change is not this
 # script's job, and doing it silently would be a surprise.
+# The workflow is checked here, before a push can start a run on it, because
+# this is the only moment where finding out costs almost nothing. The same
+# check also runs inside the run — not instead of this, as well as it: here it
+# saves two minutes, there it catches what did not come through this command.
+if [ -f tools/check-workflow.py ] && ! python3 tools/check-workflow.py >/dev/null 2>&1; then
+    python3 tools/check-workflow.py 2>&1 | sed 's/^/  /'
+    echo "RESULT: failure (the workflow would not have run as intended)"
+    exit 1
+fi
+
 if [ "$PUSH" = 1 ]; then
     if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
         echo "note: uncommitted changes are present — commit them first if they should be tested."
