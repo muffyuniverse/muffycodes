@@ -61,7 +61,11 @@ jobs:
   # -------------------------------------------------------------------------
   test:
     name: Test
-    runs-on: ubuntu-latest
+    # The image is named, not floated. `ubuntu-latest` has already moved under
+    # this pipeline once, and a run that fails because a runner's toolchain
+    # changed is a mystery with no commit behind it. Naming it turns that into a
+    # reviewed edit, made when there is time to make it.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -318,20 +322,49 @@ jobs:
           # here so that the day the app is split into modules, the runners use
           # them without anybody remembering to add it.
           #
-            # The selection arrives in MUFFY_ONLY_TESTS and is applied by the
-            # build while it runs, not by the command line — see above.
-            #
-            # Recording is on for a build and off for a pull request. The scenarios
-            # run either way: they are tests, and a broken flow must fail the
-            # request that broke it. The flag decides only whether the pictures
-            # that make the report get written.
-            if [ "$EVENT_NAME" != "pull_request" ]; then
-              ./gradlew --parallel --no-daemon --configuration-cache \
-                  --profile testDebugUnitTest -Pmuffy.shots
-            else
-              ./gradlew --parallel --no-daemon --configuration-cache \
-                  --profile testDebugUnitTest
-            fi
+          # The selection arrives in MUFFY_ONLY_TESTS and is applied by the
+          # build while it runs, not by the command line — see above.
+          #
+          # Recording is on for a build and off for a pull request. The scenarios
+          # run either way: they are tests, and a broken flow must fail the
+          # request that broke it. The flag decides only whether the pictures
+          # that make the report get written.
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            ./gradlew --parallel --no-daemon --configuration-cache \
+                --profile testDebugUnitTest -Pmuffy.shots
+          else
+            ./gradlew --parallel --no-daemon --configuration-cache \
+                --profile testDebugUnitTest
+          fi
+
+      # The other half of the asking.
+      #
+      # Every guard before this one is about deciding *what* to run: the selector
+      # reads the change, the shard script says whose turn it is, the build applies
+      # the list. Nothing looked at what came back. The evidence that tests ran has
+      # been Gradle's exit status, which is precisely the thing that was green on
+      # the day the selector matched nothing and every shard concluded it was idle.
+      #
+      # So the result files are read and compared against the classes this shard
+      # was asked for. A selected class that produced no test case is a failure, not
+      # a quiet line in a report, because that class is the only reason the run
+      # exists. Costs well under a second — it is a directory of XML.
+      #
+      # `if: always()` is deliberate: on a red run this is the step that says which
+      # classes did run, and that is the first question anybody asks.
+      - name: Check that the tests that ran are the tests that were asked for
+        if: always() && steps.shard.outputs.nothing == 'no'
+        env:
+          MUFFY_ONLY_TESTS: ${{ steps.shard.outputs.classes }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          # A run that failed has already failed; read the results to explain it,
+          # but do not turn a compilation error into "zero tests ran" as well.
+          if [ "$JOB_STATUS" = "failure" ]; then
+            python3 tools/check-results.py --expect "" || true
+            exit 0
+          fi
+          python3 tools/check-results.py --expect "$MUFFY_ONLY_TESTS"
 
       # The pictures are drawn by one class, so exactly one shard writes them.
       # The others have nothing to upload, and say so quietly rather than
@@ -443,7 +476,7 @@ jobs:
     if: |
       github.event_name == 'workflow_dispatch'
       || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -466,13 +499,15 @@ jobs:
         id: decision
         env:
           EVENT_NAME: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
           TOOLS_DIR: ${{ github.workspace }}/tools
         run: |
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             echo "changed=yes" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          verdict="$(bash "$TOOLS_DIR/changed-tests.sh" --base HEAD~1)"
+          base="$(bash "$TOOLS_DIR/push-base.sh" "$BEFORE")"
+          verdict="$(bash "$TOOLS_DIR/changed-tests.sh" --base "$base")"
           if [ "$verdict" = "NONE" ]; then
             echo "changed=no" >> "$GITHUB_OUTPUT"
             echo "Nothing in the app changed, so there is nothing to analyse."
@@ -529,7 +564,7 @@ jobs:
     # been asked about — see the check before the APK leaves this job.
     if: |
       github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     # It only reads the repository and writes the key from a secret. It does not
     # publish, so it never needs to write anything to GitHub.
@@ -562,19 +597,23 @@ jobs:
         id: decision
         env:
           EVENT_NAME: ${{ github.event_name }}
-          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
           TOOLS_DIR: ${{ github.workspace }}/tools
         run: |
           # A release is built for what changed, so this is answered against the
-          # commit before this one. A run started by hand is an explicit request
-          # for a release and is never skipped.
+          # commit the branch was at before this push — not against the commit
+          # before the tip, which is a different question. Asking the wrong one
+          # once skipped a release because the last commit of the push happened to
+          # be a document. A run started by hand is an explicit request for a
+          # release and is never skipped.
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             echo "changed=yes" >> "$GITHUB_OUTPUT"
             echo "Started by hand, so a release is made."
             exit 0
           fi
 
-          verdict="$(bash "$TOOLS_DIR/changed-tests.sh" --base HEAD~1)"
+          base="$(bash "$TOOLS_DIR/push-base.sh" "$BEFORE")"
+          verdict="$(bash "$TOOLS_DIR/changed-tests.sh" --base "$base")"
           if [ "$verdict" = "NONE" ]; then
             echo "changed=no" >> "$GITHUB_OUTPUT"
             echo "Nothing in the app changed, so no APK is built and no version is spent."
@@ -715,41 +754,68 @@ jobs:
       # (a broken app is never handed to anybody) and drops the rule that cost a
       # minute per run (the build may not start until the tests are done).
       #
-      # If the tests have not finished yet, the answer is 'not yet' and the APK is
-      # handed on: the bundle waits for the suite as it always did, so a run with a
-      # red suite still delivers nothing.
-      - name: Ask the suite before anything leaves this job
+      # The asking has to be a *wait*, and it has to fail closed. See below.
+      - name: Wait for the suite before anything leaves this job
         id: verdict
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
         run: |
-          # A name that has not finished has no conclusion, so it is filtered out
-          # rather than counted as red.
-          verdict="$(gh api "repos/$REPOSITORY/actions/runs/$RUN_ID/jobs" \
-            --jq '[.jobs[] | select(.name | startswith("Test")) | select(.conclusion != null)
-                  | .conclusion] | if length == 0 then "running"
-                    elif any(. != "success") then "red" else "green" end' \
-            2>/dev/null || echo unknown)"
-          echo "hand=${verdict}" >> "$GITHUB_OUTPUT"
-          case "$verdict" in
-            red)
-              echo "::error::The suite failed, so this build is not handed on."
+          # The APK is signed, aligned and installable, so it must not exist until
+          # the suite has finished and passed.
+          #
+          # This step used to ask once and treat "still running" as permission, on
+          # the argument that delivery waits anyway — but the artifact is
+          # downloadable the moment it is uploaded, and a run that goes red a
+          # minute later does not delete it. Worse, the query threw away the jobs
+          # that had no conclusion and then asked whether all the *remaining* ones
+          # passed: shard 0 finishing first made the answer "green" while shard 1
+          # was still running. With two shards that is the ordinary case.
+          #
+          # Waiting costs nothing that was not already being paid, because
+          # delivery cannot begin until the suite is done. An unreadable answer is
+          # now a failure rather than a shrug.
+          deadline=$((SECONDS + 1800))
+          while :; do
+            rows="$(gh api "repos/$REPOSITORY/actions/runs/$RUN_ID/jobs" --paginate \
+              --jq '.jobs[] | select(.name | startswith("Test"))
+                    | "\(.status)\t\(.conclusion // "-")\t\(.name)"' 2>/dev/null)"
+            if [ -z "$rows" ]; then
+              echo "::error::Could not read the suite's state, so the APK is not handed on."
               exit 1
-              ;;
-            green)
-              echo "The suite passed, so the APK is handed on."
-              ;;
-            running)
-              echo "The suite has not finished; handing the APK on and letting the bundle wait for it."
-              ;;
-            *)
-              # Could not ask. Handing on is the safe answer: the bundle is what
-              # delivers, and it waits for the suite either way.
-              echo "Could not read the suite's state, if the API wobbles; handing on."
-              ;;
-          esac
+            fi
+
+            running=0
+            failed=""
+            total=0
+            while IFS=$'\t' read -r status conclusion name; do
+              [ -n "$status" ] || continue
+              total=$((total + 1))
+              if [ "$status" != "completed" ]; then
+                running=$((running + 1))
+              elif [ "$conclusion" != "success" ]; then
+                failed="$failed $name"
+              fi
+            done <<< "$rows"
+
+            if [ "$total" -eq 0 ]; then
+              echo "::error::No test job exists in this run, so there is nothing to trust."
+              exit 1
+            fi
+            if [ -n "$failed" ]; then
+              echo "::error::The suite did not pass:${failed}. The APK is not handed on."
+              exit 1
+            fi
+            [ "$running" -eq 0 ] && break
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::The suite did not finish in time, so the APK is not handed on."
+              exit 1
+            fi
+            echo "$running of $total test jobs are still running; waiting."
+            sleep 10
+          done
+          echo "All $total test jobs passed, so the APK is handed on."
 
       - name: Check the signature of the APK
         if: steps.decision.outputs.changed == 'yes'
@@ -818,7 +884,7 @@ jobs:
       && needs.test.result == 'success'
       && needs.build-release.result == 'success'
       && (needs.lint.result == 'success' || needs.lint.result == 'skipped')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     # Write is granted even on a development push, where nothing is published,
     # because permissions cannot be conditional. What keeps a development push
@@ -900,13 +966,13 @@ jobs:
       # called app-release.apk" and "the APK built from this commit". It is free
       # for a public repository.
       - name: Attest that this APK came from this commit
-        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+        if: github.ref == 'refs/heads/main'
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
         with:
           subject-path: bundle/app-release.apk
 
       - name: Publish the release
-        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
@@ -972,8 +1038,15 @@ jobs:
               bundle/scenarios/README.md
           } >> release-notes.md
 
+          # `--target` is not decoration. Without it the tag is created from
+          # whatever the branch points at when the command runs, which is not
+          # necessarily the commit this APK was built from — the head check above
+          # narrows that window but cannot close it, because the check and the
+          # create are two operations and a push can land between them. Naming the
+          # commit makes the tag, the APK and the attestation the same source.
           gh release create "v${VERSION_NAME}" \
             --repo "$REPOSITORY" \
+            --target "$GITHUB_SHA" \
             --title "Muffy Codes ${VERSION_NAME}" \
             --notes-file release-notes.md \
             bundle/app-release.apk \

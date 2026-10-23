@@ -129,7 +129,10 @@ def main():
     lines.append("| | |")
     lines.append("|---|---|")
     lines.append(f"| tests | {len(cases)} ({failures} failing) |")
-    lines.append(f"| test time | {total:.1f}s |")
+    lines.append(
+        f"| test time | {total:.1f}s across all forks — summed, not wall clock, so "
+        f"compare it with other runs and not with a job's duration |"
+    )
     lines.append(f"| average test | {average_ms:.0f} ms (budget {budget.get('max_average_ms', 0):.0f} ms) |")
     lines.append(
         f"| largest class | {largest_name} — {largest_seconds:.1f}s, "
@@ -207,20 +210,12 @@ def main():
                 f"One shard is correct: the tests cost {total:.1f}s and a second "
                 f"runner would cost {break_even:.0f}s of setup to save half of it."
             )
-    elif whole_suite:
-        if total < break_even:
-            warn(
-                f"Sharding is on ({args.shards} shards) but the tests cost only "
-                f"{total:.1f}s — less than the {break_even:.0f}s a second runner "
-                f"costs to start. Each shard pays more than it saves: set "
-                f"TEST_SHARDS back to [0]."
-            )
-        else:
-            saved = total - (total / args.shards) - break_even
-            note(
-                f"Sharding is on: {args.shards} shards over {total:.1f}s of tests, "
-                f"about {saved:.0f}s saved per run against one runner."
-            )
+    # A branch used to sit here warning that sharding was on but the suite was
+    # below break-even. It could never run: `whole_suite` *is* `shards <= 1`, and
+    # the branch above had already answered every such case — so the warning was
+    # unreachable, and the saving it computed divided a shard's summed test time
+    # by a wall-clock threshold. A figure that is neither is worse than none. The
+    # sharded case says what it actually knows, which is this job's share, above.
 
     # ---- the panic floor ----------------------------------------------------
     panic = budget.get("panic_total_s", 300)

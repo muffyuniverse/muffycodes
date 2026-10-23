@@ -94,21 +94,49 @@ if [ -z "$WORKFLOW_NAME" ]; then
     exit 1
 fi
 
+# Which run belongs to which commit.
+#
+# This asked the API for headSha, never used it, and took the newest run on the
+# branch. Right after a push that is still the *previous* commit's run, because
+# GitHub has not created the new one yet — so the command could watch the last
+# green run and print RESULT: success for code it never saw. A false green from
+# the only sanctioned test command is worse than no answer at all.
+#
+# So the commit is part of the question. It is the local HEAD when watching the
+# branch that is checked out, because that is the commit about to be pushed, or
+# just pushed. Watching another branch from here cannot know its head, and says
+# so rather than pretending to.
+TARGET_SHA="${SHA:-}"
+if [ -z "$TARGET_SHA" ]; then
+    current="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    if [ "$current" = "$BRANCH" ]; then
+        TARGET_SHA="$(git rev-parse HEAD 2>/dev/null || true)"
+    fi
+fi
+
 pick_run() {
-    local args=(--repo "$REPO" --limit 20 --json databaseId,headSha,status,conclusion,workflowName
-        --jq ".[] | select(.workflowName == \"$WORKFLOW_NAME\") | \"\(.databaseId) \(.status) \(.conclusion // \"-\")\"")
-    if [ -n "$SHA" ]; then args+=(--commit "$SHA"); else args+=(--branch "$BRANCH"); fi
+    local args=(--repo "$REPO" --limit 30 --json databaseId,headSha,status,conclusion,workflowName
+        --jq ".[] | select(.workflowName == \"$WORKFLOW_NAME\") | \"\(.databaseId) \(.status) \(.conclusion // \"-\") \(.headSha[0:8])\"")
+    if [ -n "$TARGET_SHA" ]; then args+=(--commit "$TARGET_SHA"); else args+=(--branch "$BRANCH"); fi
     gh run list "${args[@]}" 2>/dev/null | head -1
 }
 
-echo "watching $REPO ${SHA:-on $BRANCH} ($WORKFLOW_NAME)"
+if [ -n "$TARGET_SHA" ]; then
+    echo "watching $REPO $BRANCH at ${TARGET_SHA:0:8} ($WORKFLOW_NAME)"
+else
+    echo "watching $REPO on $BRANCH — head unknown from here, so the newest run is taken ($WORKFLOW_NAME)"
+fi
 
 RUN=""
 while [ -z "$RUN" ]; do
     RUN="$(pick_run)"
     if [ -z "$RUN" ]; then
         if [ "$(date +%s)" -gt "$deadline" ]; then
-            echo "RESULT: timeout (no run appeared)"
+            if [ -n "$TARGET_SHA" ]; then
+                echo "RESULT: timeout (no run for ${TARGET_SHA:0:8} appeared; another commit's run is not an answer)"
+            else
+                echo "RESULT: timeout (no run appeared)"
+            fi
             exit 1
         fi
         sleep "$INTERVAL"

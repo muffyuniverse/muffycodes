@@ -129,10 +129,32 @@ if [ "$SELF_TEST" = "1" ]; then
         || complain "the two formats disagree: '$by_gradle' against '$by_names'"
 
     # 5. A name that exists nowhere is an error, not silence. Silence here is
-    #    exactly how a whole run comes to execute nothing and pass.
-    if bash "$HERE/pick-tests.sh" --selection NoSuchTestAnywhere --shard 0 --of 2 \
-            >/dev/null 2>&1; then
-        complain "a selection that cannot be placed was allowed"
+    #    exactly how a whole run comes to execute nothing and pass. Both shapes of
+    #    invocation are checked: one shard used to emit whatever it was handed.
+    for of in 1 2; do
+        if bash "$HERE/pick-tests.sh" --selection NoSuchTestAnywhere --shard 0 --of "$of" \
+                >/dev/null 2>&1; then
+            complain "a selection that cannot be placed was allowed (of $of)"
+        fi
+    done
+
+    # 6. An empty or blank selection is a broken caller, not a reason to skip.
+    #    This is the exact shape of the original incident: nothing to run, so
+    #    every shard stopped early, and the run was green.
+    for blank in "" "   "; do
+        for of in 1 2; do
+            if bash "$HERE/pick-tests.sh" --selection "$blank" --shard 0 --of "$of" \
+                    >/dev/null 2>&1; then
+                complain "an empty selection was accepted (of $of)"
+            fi
+        done
+    done
+
+    # 7. A selection that is part valid and part not is refused whole, rather than
+    #    running the part that matched.
+    if bash "$HERE/pick-tests.sh" --selection "$short_one NoSuchTestAnywhere" \
+            --shard 0 --of 1 >/dev/null 2>&1; then
+        complain "a half-valid selection was accepted"
     fi
 
     if [ "$fails" -gt 0 ]; then
@@ -163,6 +185,42 @@ if [ "$SHARD" -ge "$OF" ]; then
     exit 2
 fi
 
+# No selection at all is not "nothing to do" — it is a broken caller.
+#
+# The selector always answers ALL or NONE explicitly, so a blank one means
+# something upstream produced nothing. Treated as "nothing to run", it stops every
+# shard before the toolchain is installed and the run goes green having executed
+# no tests, which is the failure this file exists to prevent. Refusing is the only
+# safe reading of it.
+if [ -z "$(printf '%s' "$SELECTION" | tr -d '[:space:]')" ]; then
+    echo "the selection is empty; a run asked for nothing is a bug upstream" >&2
+    exit 3
+fi
+
+# Every named class must exist. A selection naming a class the tests have never
+# heard of means the map and the tests have drifted apart; every shard would then
+# match nobody, answer NONE, and the run would be green having run nothing. Checked
+# once here, for every shape of invocation — including the single-shard path, which
+# used to emit whatever it was handed.
+if [ "$SELECTION" != "ALL" ] && [ "$SELECTION" != "NONE" ]; then
+    universe="$(bash "$HERE/test-shard.sh" --list)"
+    for want in $SELECTION; do
+        placed=0
+        while IFS= read -r known; do
+            [ -n "$known" ] || continue
+            if [ "${known##*.}" = "${want##*.}" ]; then
+                placed=1
+                break
+            fi
+        done <<< "$universe"
+        if [ "$placed" = "0" ]; then
+            echo "the selection names $want, but no test class has that name;" >&2
+            echo "the test map and the tests have drifted apart, so nothing would run." >&2
+            exit 3
+        fi
+    done
+fi
+
 # Print one class in whichever shape was asked for: a gradle argument, or a bare
 # name. Everything else in this script decides *what*; this decides *how*.
 emit() {
@@ -179,7 +237,7 @@ shard_args="$(bash "$HERE/test-shard.sh" --shard "$SHARD" --of "$OF")"
 if [ "$OF" = "1" ]; then
     # One shard: the names come from the selection instead of the shard script,
     # because with one shard there is no split to intersect with.
-    if [ -z "$SELECTION" ] || [ "$SELECTION" = "NONE" ]; then
+    if [ "$SELECTION" = "NONE" ]; then
         echo "NONE"
         exit 0
     fi
@@ -241,28 +299,8 @@ while IFS= read -r name; do
 done <<< "$(all_classes)"
 
 if [ "$found" -eq 0 ]; then
-    # Before answering "nothing to do", check the selection can be placed at all.
-    # A class the shard split has never heard of means the test map and the tests
-    # have drifted apart, and the honest answer to that is to stop: every shard
-    # would say NONE, no test would run, and the run would go green.
-    if [ -n "$SELECTION" ] && [ "$SELECTION" != "NONE" ] && [ "$SELECTION" != "ALL" ]; then
-        universe="$(bash "$HERE/test-shard.sh" --list)"
-        for want in $SELECTION; do
-            placed=0
-            while IFS= read -r name; do
-                [ -n "$name" ] || continue
-                if [ "$(short_name "$name")" = "$(short_name "$want")" ]; then
-                    placed=1
-                    break
-                fi
-            done <<< "$universe"
-            if [ "$placed" = "0" ]; then
-                echo "the selection names $want, but no test class has that name;" >&2
-                echo "the test map and the tests have drifted apart, so nothing would run." >&2
-                exit 3
-            fi
-        done
-    fi
+    # Every named class was checked above, so reaching here means the selection is
+    # real but this shard owns none of it. That is "nothing to do", not a bug.
     echo "NONE"
     exit 0
 fi
