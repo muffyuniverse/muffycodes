@@ -479,3 +479,70 @@ identical either way — 14 tasks from cache, 31 executed, the same 14 — and t
 build is the same 50 seconds. Writing cost seven seconds at the end of every run
 to save a 144MB entry nothing restores, because every expensive release task is
 keyed on the sources or the classes built from them.
+
+## What the workhorse tier actually costs, and the bug that measuring it found
+
+The pull request tier is the one that runs most often, so it is the one worth
+measuring rather than reasoning about. Two probes, each a real pull request,
+deleted afterwards.
+
+| probe | what changed | selected | cost |
+|---|---|---|---|
+| narrow | one test file | 1 class | **59s** |
+| wide | `AppViewModel.kt` | 7 classes | **91s** |
+
+So the selection is worth about **32 seconds** on a typical change, and a
+change to one test class is a minute.
+
+### The bug: a green pull request that ran no tests
+
+The narrow probe ran in **13 seconds** and went green. Both shards had run
+nothing: "Run the tests" was 0s in each.
+
+The selector names a class the way `tools/test-map.txt` does —
+`HistoryFeatureTest` — and `test-shard.sh` names it the way a file path becomes
+a class — `com.example.notes.HistoryFeatureTest`. `pick-tests.sh` compared the
+two spellings literally. Nothing ever matched, so every shard concluded it had
+no share of the change, stopped before Gradle, and reported success.
+
+That is the worst failure this pipeline can produce, and it is invisible by
+construction: a green pull request that tested nothing looks exactly like a
+green pull request that tested everything, and nothing downstream asks again.
+It was live for every narrowed run.
+
+Both sides now compare the name without its package. And the failure is made
+loud rather than silent: a selection naming a class that does not exist exits 3,
+because the alternative is every shard politely finding nothing to do.
+`test-shard.sh` grew `--list` to answer it, since that script owns the question
+of which classes exist.
+
+The lesson is not "check your comparisons". It is that the only way to know a
+targeting system works is to watch it run a change you know the answer to.
+Reading the code would never have found this: both halves were correct, and the
+bug lived in the seam between two files that each did their own job properly.
+
+### Where the minute goes
+
+The narrow run, broken down:
+
+| | |
+|---|---|
+| job set-up and checkout | 7s |
+| Gradle set-up and cache restore | 6s |
+| Robolectric runtime restore | 3s |
+| Gradle configuration and startup | ~6s |
+| compiling the test classes | 10s |
+| **running the tests** | **8s** |
+| the rest (artifacts, reports, teardown) | ~19s |
+
+**The tests are the smallest item.** Editing a test file forces the test
+classes to recompile, and that compile costs more than running the one class
+did. Targeting cannot help below this floor: at one class there is nothing left
+to narrow. Going faster would mean attacking job set-up, Gradle start-up, or the
+compile — not the selector.
+
+One further cost worth naming: passing `--tests` changes the command line, and a
+changed command line is a configuration-cache miss. Every narrowed run pays it
+again — measured, about six seconds of the thirty. It is the same trade that was
+rejected when the suite was six seconds long and is worth taking now that it is
+fifty, but it is a real part of why the floor is where it is.
