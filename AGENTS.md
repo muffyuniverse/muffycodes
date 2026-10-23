@@ -42,6 +42,21 @@ nohup ci > /tmp/ci.log 2>&1 &
 It is the only test runner there is. `tools/watch-run.sh` remains the
 detached, fire-and-forget variant of the same idea.
 
+## `bundle` is how the phone gets the build
+
+A build only exists on GitHub until it is delivered. `bundle` brings it to
+the phone's Downloads folder — the APK, the list of changes and the pictures:
+
+```sh
+bundle             # the latest release, with everything on it now
+bundle --dev       # the newest development build
+```
+
+`ci` runs it on its own when a build passes on `main` or `development`, so a
+successful run means the phone already has it. The renders of a real install
+land on a release minutes later, in a run of their own; running `bundle`
+afterwards grows the folder with them.
+
 ## The loop
 
 1. Write the code.
