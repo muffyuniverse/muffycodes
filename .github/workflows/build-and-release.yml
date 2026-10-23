@@ -887,7 +887,11 @@ jobs:
 
           # Not `|| true`: if the certificates cannot be read, that is the answer,
           # and hiding it makes the step fail later with no explanation.
-          if ! "$BUILD_TOOLS/apksigner" print-certs "$APK" > certs.txt 2>&1; then
+          # `--print-certs` is a flag on `verify`, not a command of its own: the
+          # first version of this called `apksigner print-certs` and the tool
+          # answered "Unsupported command", which is what a message that names what
+          # it saw is for.
+          if ! "$BUILD_TOOLS/apksigner" verify --print-certs "$APK" > certs.txt 2>&1; then
             echo "::error::apksigner could not read the APK's certificates:"
             cat certs.txt
             exit 1
