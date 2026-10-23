@@ -63,10 +63,11 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `each save with a pause is a version of the file`() {
-        val file = scene.file("milk.txt", "one litre")
+        val file = scene.file("milk.txt")
         scene.openEditor(file)
-        scene.saveAsVersion("two litres", 2)
-        scene.saveAsVersion("three litres", 3)
+        scene.saveAsVersion("one litre", 2)
+        scene.saveAsVersion("two litres", 3)
+        scene.saveAsVersion("three litres", 4)
         scene.closeEditor()
 
         assertTrue(
@@ -77,9 +78,10 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `a local file's older version can be brought back`() {
-        val file = scene.file("milk.txt", "one litre")
+        val file = scene.file("milk.txt")
         scene.openEditor(file)
-        scene.saveAsVersion("two litres", 2)
+        scene.saveAsVersion("one litre", 2)
+        scene.saveAsVersion("two litres", 3)
         scene.closeEditor()
 
         val oldest = scene.versionsOf(file).last().first.id
@@ -90,9 +92,10 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `restoring a version adds it back and leaves the newer ones alone`() {
-        val file = scene.file("milk.txt", "one litre")
+        val file = scene.file("milk.txt")
         scene.openEditor(file)
-        scene.saveAsVersion("two litres", 2)
+        scene.saveAsVersion("one litre", 2)
+        scene.saveAsVersion("two litres", 3)
         scene.closeEditor()
         val count = scene.versionsOf(file).size
 
@@ -104,7 +107,7 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `a deleted file's version brings it back`() {
-        val file = scene.file("milk.txt", "one litre")
+        val file = scene.file("milk.txt")
         scene.await("a version") { scene.versionsOf(file).isNotEmpty() }
         val version = scene.versionsOf(file).first().first.id
         val path = file.absolutePath
@@ -199,7 +202,9 @@ class HistoryFeatureTest : FeatureTest() {
         scene.project("Shopping")
         scene.open(Workspace.PROJECTS, "Shopping")
         scene.file("diary.txt", "private")
-        scene.await("a commit") { log().isNotEmpty() }
+        scene.await("the local file to be recorded", 20_000) {
+            scene.appHistoryFiles().contains("projects/Shopping/diary.txt")
+        }
 
         assertTrue(
             "the local file is tracked",

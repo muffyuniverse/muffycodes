@@ -51,6 +51,9 @@ class ProjectsFeatureTest : FeatureTest() {
         scene.open(Workspace.PROJECTS, "Shopping")
         scene.worktreeFile("milk.txt", "two litres")
         scene.viewModel.refreshChanges()
+        scene.await("the row to count the change", 20_000) {
+            scene.viewModel.changesOf("Shopping") == 1
+        }
 
         assertEquals("one file waiting", 1, scene.viewModel.changesOf("Shopping"))
     }
@@ -162,6 +165,9 @@ class ProjectsFeatureTest : FeatureTest() {
 
         scene.viewModel.pullRepository(Repo("Shopping", "$scene.login/Shopping", false, ""))
         scene.await("the pull to finish") { !scene.viewModel.busy }
+        scene.await("the repository's files to be here", 30_000) {
+            File(scene.workspace!!.repoOf("Shopping"), "README.md").isFile
+        }
 
         assertTrue("the project came back", scene.viewModel.projectNames.contains("Shopping"))
         assertTrue(

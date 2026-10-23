@@ -109,16 +109,42 @@ class Scenario(
         return found!!
     }
 
+    /**
+     * Waits until the account's history has recorded one more thing.
+     *
+     * commits are queued, and a queue coalesces: six folders made in the same
+     * millisecond are one version, because the first queued commit sees all six.
+     * That is the app doing what it should — a burst of changes is one version —
+     * so a test that wants three versions has to let each one land first, exactly
+     * as a person's pauses would.
+     */
+    private fun awaitRecorded(atLeast: Int, what: String) {
+        await("the history to record $what", 20_000) { historySize() >= atLeast }
+    }
+
+    /** How many versions the account's own history holds. */
+    fun historySize(): Int = try {
+        val dir = workspace?.accountDir ?: return 0
+        if (!GitService.isRepository(dir)) 0
+        else Git.open(dir).use { GitService.log(it.repository, null).size }
+    } catch (e: Exception) {
+        0
+    }
+
     /** Makes a file in the folder that is open and waits for it to be there. */
     fun file(name: String, text: String = ""): File {
         val made = Workspace.withDefaultExtension(name)
+        val before = historySize()
         viewModel.createFile(name)
         await("\"$made\" to be made") { viewModel.entries.any { it.name == made } }
         val file = File(viewModel.currentDir!!, made)
+        awaitRecorded(before + 1, "\"$made\" being made")
         if (text.isNotEmpty()) {
+            val textBefore = historySize()
             viewModel.openEditor(file)
             viewModel.saveEditor(text)
             await("\"$made\" to hold $text") { viewModel.textOf(file) == text }
+            awaitRecorded(textBefore + 1, "\"$made\" being written")
             viewModel.closeEditor()
         }
         return file
@@ -127,8 +153,10 @@ class Scenario(
     /** Makes a folder in the folder that is open. */
     fun folder(name: String): File {
         require(!name.contains("/")) { "a folder is made in the folder that is open, not at a path" }
+        val before = historySize()
         viewModel.createFolder(name)
         await("\"$name\" to be made") { viewModel.entries.any { it.name == name } }
+        awaitRecorded(before + 1, "\"$name\" being made")
         return File(viewModel.currentDir!!, name)
     }
 
@@ -192,7 +220,13 @@ class Scenario(
     fun saveAsVersion(text: String, atLeast: Int) {
         val file = viewModel.editingFile ?: error("the editor is not open")
         viewModel.saveEditor(text)
-        await("$atLeast versions of ${file.name}", 60_000) { versionsOf(file).size >= atLeast }
+        val key = viewModel.workspace!!.pathString(viewModel.workspace!!.relative(file).orEmpty())
+        await("$atLeast versions of ${file.name}", 30_000) {
+            viewModel.workspace!!.let { ws ->
+                AppHistory(ws.accountDir) { AppViewModel.DEFAULT_AUTHOR }
+                    .log(key).size >= atLeast
+            }
+        }
     }
 
     /** Closes the editor, which is what the back arrow does. */

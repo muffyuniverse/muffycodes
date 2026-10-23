@@ -114,7 +114,7 @@ class RetentionFeatureTest : FeatureTest() {
         scene.sync("Shopping")
 
         assertTrue(
-            "the project keeps the length it was given, found ${scene.remoteCommits("Shopping")}",
+            "the project keeps the length it was given\n${scene.diagnose()}",
             scene.remoteCommits("Shopping") <= 2,
         )
     }

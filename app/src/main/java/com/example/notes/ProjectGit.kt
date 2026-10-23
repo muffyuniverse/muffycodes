@@ -84,9 +84,12 @@ class ProjectGit(
                 if (changed.isNotEmpty()) {
                     GitService.commitAll(it, CommitMessage.sync(changed), authorProvider())
                 }
-                val result = GitService.pushForce(it, tokenProvider())
-                if (result.success) prune(it)
-                result
+                // Shorten before pushing, not after. The push is what carries the
+                // history to GitHub, so a prune that ran afterwards would shorten
+                // this phone's copy and leave the repository as long as it was —
+                // the length would only appear to take effect on the next sync.
+                prune(it)
+                GitService.pushForce(it, tokenProvider())
             } catch (e: Exception) {
                 GitService.RemoteResult(Secrets.scrub(e.message ?: "Sync failed"), false)
             }
