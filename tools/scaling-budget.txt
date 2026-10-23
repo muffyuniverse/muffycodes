@@ -1,0 +1,50 @@
+# The budgets the suite is held to.
+#
+# The scaling law this project runs on: **adding tests must not add wall time
+# in proportion.** Compilation is shared, the tests are small, and a runner is
+# paid for once — so a suite twice the size should cost almost what it did.
+# Every number below is a place where that stops being true, and a run that
+# crosses one says so, with the thing to do about it.
+#
+# These are advisory. They never fail a build: a suite that is merely slow is
+# still a suite that passed, and blocking on speed teaches people to skip tests.
+# They are printed as a warning annotation and in the run's own summary, so the
+# drift is impossible to miss and impossible to ignore for long.
+#
+# Format:  key = value        (comments and blank lines are ignored)
+# Time units are seconds unless the key says ms.
+
+# --- when sharding starts to pay -------------------------------------------------
+# A second shard costs a whole job setup: checkout, Java, Gradle, the restored
+# caches. Measured on this repository at 17s. While the tests cost less than
+# that, two runners spend more time starting than they save, so the advice is
+# to stay on one shard. Past it, the advice flips.
+shard_break_even_s = 17
+
+# --- the size of the suite at which a single runner is the wrong shape ----------
+# The point where test execution, not setup, dominates the job. Measured: the
+# test job costs ~26s of setup plus the tests. Above this the whole job is
+# mostly waiting for one runner to walk a list.
+shard_recommended_s = 60
+
+# --- a single test's share of the suite ------------------------------------------
+# One class holding half the suite's time is one class that cannot be split and
+# cannot be parallelised: every future slowdown lands on it.
+max_class_share = 0.5
+
+# --- the average test ------------------------------------------------------------
+# The suite is built on Robolectric and JGit, both of which are fast when the
+# work is small. An average creeping into seconds means tests are doing whole
+# scenarios instead of one thing.
+max_average_ms = 1500
+
+# --- the cost of being red -------------------------------------------------------
+# A failing run must fail fast. Waiting out a timeout is the difference between
+# a run you read and a run you wait for; it is also what made a red suite look
+# like a broken pipeline for half an hour while the suite itself was fine.
+max_failure_share = 0.30
+
+# --- the panic floor -------------------------------------------------------------
+# Past this, something is wrong with the shape of the suite rather than with a
+# test: it is reported as an error annotation (still without failing the build).
+panic_total_s = 300

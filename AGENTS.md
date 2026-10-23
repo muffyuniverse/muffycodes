@@ -73,8 +73,8 @@ A pull request is the unit of verification. Nothing else is.
 |---|---|---|
 | pure logic: parsing, file names, paths, tree maths, sync, migration | tests | in the workflow, as fast JVM unit tests |
 | whether a screen offers what it should | Robolectric tests | in the workflow, on the CI's x86_64 |
-| **everything that needs a signed-in account** | **feature tests + an emulator walk** | **the test account (below) and a debug build of the same tag** |
-| **whether it looks right** | **the operator** | **a real install on a real phone** |
+| **everything that needs a signed-in account** | **feature tests** | **the test account, on the JVM** |
+| **whether it looks right** | **the operator** | **a real install on a real phone, from `bundle`** |
 
 Most of the app only happens to somebody who has signed in, and a test run must
 never hold a GitHub key. So the app asks a `GitHub` for what it needs, and there
@@ -88,32 +88,50 @@ build that may not keep one also refuses to act as one. So:
 
 - the feature tests (`*FeatureTest`) drive the **real ViewModel** with the test
   account, and are written as the promise they check, not as the class they touch;
-- the emulator job builds the debug APK **of the same tag as the release** and
-  walks the account features for real, arriving as `render-walk-*`.
+- the tour draws those same screens on the JVM, so the pictures that ship with a
+  bundle cover the features the redesign is about.
 
 If a change makes a feature test fail, the app is wrong — not the test. That is
 the whole point of the seam: it is the same code the release ships.
 
+## There is no emulator
+
+There was one, and it was removed. It cost six minutes per release to boot an
+Android machine, build a second APK and tap through the app; it ran after the
+release was already published, gated nothing, and its only uniquely-valuable
+output was "does Compose lay this out on a real device" — which the JVM tour
+already answers well enough for feature proof. Appearance is judged by a person
+on a real install. Do not add it back without a measurement that says what it
+buys and what it costs.
+
+## Flat scaling is a budget, not a hope
+
+Adding tests must not add wall time in proportion. Every run measures it and
+prints the result; the thresholds live in `tools/scaling-budget.txt` with the
+reason for each. The report never fails a build — a slow suite still passed —
+but a warning that repeats is a warning to act on: split the class that has
+become the suite, narrow a test that grew into a scenario, fix a wait that is
+generous enough to hide a hang, or turn sharding on (`TEST_SHARDS`).
+
 ## What the pictures are for
 
-Two kinds of picture are made, and neither of them decides anything:
+One kind of picture is made, and it decides nothing:
 
 - **The tour on the JVM** runs with every change and ships with every build,
   beside the APK and the list of changes. Its pictures are drawn by the tests,
-  on the plain JVM, and they say one thing only: **the feature works — the
-  screen is there and it renders.** They say nothing about beauty, spacing or
-  colour, because a JVM draws none of those the way a phone does.
-- **The renders of a real install** are made by an emulator, from the APK that
-  was actually published, and they arrive on the release afterwards —
-  asynchronously, and for the operator's eyes last. This is where appearance
-  lives, and only a person can judge it.
+  on the plain JVM — the signed-out screens and the account ones — and they say
+  one thing only: **the feature works — the screen is there and it renders.**
+  They say nothing about beauty, spacing or colour, because a JVM draws none of
+  those the way a phone does.
+
+Appearance lives on the real install the operator opens from `bundle`, and only
+a person can judge it.
 
 So there is **no visual gating in CI**:
 
 - no picture comparison, no pixel thresholds, no contrast checks
 - no "the themes must differ" assertions
-- nothing that fails a build because a colour changed, and no build that waits
-  for the renders
+- nothing that fails a build because a colour changed
 
 An automated check of appearance can only ever assert what the author already
 believed. If it is written to catch a theme that failed to apply, it will not

@@ -192,31 +192,34 @@ rather than quietly producing an APK that cannot be installed.
 
 ### Pictures of the app
 
-There is a second workflow, `screenshot-tour.yml`, that walks through the app
-on an emulator and takes a picture of every step. The pictures are put in the
-run, so they can be looked at and downloaded.
+The test run draws the screens it builds and keeps the pictures. There is no
+device and no emulator: a screen is built on the JVM, drawn to a bitmap and
+written to a file, which costs milliseconds instead of the six minutes a real
+Android machine costs to boot.
 
-The tour is a list of steps in a plain text file, so it can be changed without
-touching any code (`tools/default-tour.txt`):
+The tour walks **the whole app**, including the half that needs an account. It
+signs in as the test account — a debug-only account whose GitHub is a folder of
+real git repositories — makes a project, writes into its worktree, syncs it and
+opens the history. The pictures arrive with every bundle, beside the APK and the
+list of changes.
 
-```
-tap    X Y   [name]        a tap on a point of the screen
-taptext  words [name]      a tap on the text that is shown
-swipe  X1 Y1 X2 Y2 [ms] [name]
-text   words              typing into the field that is open
-key    KEYCODE            a key, e.g. BACK, ENTER
-shot   name               a picture without touching the screen
-wait   seconds            a pause
-```
-A tap on a point is simple but breaks when the layout moves. A tap on a text
-keeps working, because the app is asked where that text is, so both kinds are
-allowed in the same tour. The points are written for a screen of 1080 by 1920
-and are scaled to the screen that is really used.
+They answer one question: **is the feature there and does the screen render.**
+They do not answer "does it look right" — a JVM draws its own fonts and spacing,
+and that question belongs to your eyes on a real install, which `bundle` puts in
+the Downloads folder for you.
 
-The tour runs when it is asked for by hand, once a week, and whenever the app
-or the tour itself is changed. There is also `look-at-app.yml`, which writes
-down the names that are on the screen at every step, so that a tour can be
-written with the names the app really shows instead of guesses.
+### The suite has a budget
+
+Adding tests must not add wall time in proportion: compilation is shared, a
+runner is paid for once, and a small test costs a fraction of a second. Every run
+checks that this is still true and prints a table — the suite's total, the average
+test, the largest class's share, and whether sharding would pay. The numbers it is
+held to live in `tools/scaling-budget.txt`, next to the reason for each one.
+
+It never fails a build. A slow suite is still a suite that passed, and a check
+that blocks on speed only teaches people to skip tests. It says what drifted and
+what to do: split the class that has become the suite, narrow a test that grew
+into a scenario, fix a wait generous enough to hide a hang, or turn sharding on.
 
 ### Looking at the app is a person's job
 

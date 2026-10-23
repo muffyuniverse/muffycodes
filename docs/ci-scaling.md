@@ -108,7 +108,7 @@ In use now:
 | actions pinned to commits | every action in all three workflows |
 | build provenance attestation | the published APK is signed to its commit |
 | Dependabot for Gradle and for Actions | `.github/dependabot.yml` |
-| structured dispatch inputs | the emulator workflows take choices, not typed strings |
+| structured dispatch inputs | a workflow takes choices, not typed strings |
 | artifacts with retention | test reports on failure, APKs, screenshots |
 
 ## What not to do

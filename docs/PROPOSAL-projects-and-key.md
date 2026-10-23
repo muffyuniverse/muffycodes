@@ -408,8 +408,9 @@ claims to be one is treated as an ordinary account and talks to GitHub.
 
 With it, the promises above are walked by 8 feature files that drive the real
 ViewModel — visibility, files, accounts, projects, sync, history, retention and
-key safety — and by an emulator walk that signs in, invents a project, writes into
-its worktree, syncs it and opens the history, on a real install.
+key safety — and by the screenshot tour, which signs in as the test account, makes
+a project, writes into its worktree, syncs it and opens the history, drawing every
+screen on the way.
 
 Every one of those steps goes through the code the release ships. One switch is
 different, and the switch cannot be reached from a release.
