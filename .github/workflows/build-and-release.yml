@@ -885,8 +885,14 @@ jobs:
           fi
           echo "checking with $(basename "$BUILD_TOOLS")"
 
-          "$BUILD_TOOLS/apksigner" print-certs "$APK" > certs.txt 2>&1 || true
-          grep -i "SHA-256" certs.txt | sed 's/^/  /'
+          # Not `|| true`: if the certificates cannot be read, that is the answer,
+          # and hiding it makes the step fail later with no explanation.
+          if ! "$BUILD_TOOLS/apksigner" print-certs "$APK" > certs.txt 2>&1; then
+            echo "::error::apksigner could not read the APK's certificates:"
+            cat certs.txt
+            exit 1
+          fi
+          cat certs.txt | sed 's/^/  /'
 
           # A release that is not signed cannot be installed, so the build stops
           # here rather than publish something unusable.
@@ -911,16 +917,18 @@ jobs:
             echo "Set the repository variable EXPECTED_CERT to the certificate's SHA-256 fingerprint."
             exit 1
           fi
-          # The line reads `Signer #1 certificate SHA-256 digest: ab:cd:...` — the
-          # digest carries its own colons, so it cannot be split on one. Stripping
-          # every space and colon leaves the 64 hex characters of the digest at the
-          # end of the line, which is unambiguous.
-          signer="$(grep -i "SHA-256" certs.txt | head -1 | tr -d ' :' \
-            | tr 'A-F' 'a-f' | grep -oE '[0-9a-f]{64}$')"
+          # The line reads `Signer #1 certificate SHA-256 digest: ab:cd:...`, and the
+          # digest carries its own colons, so it cannot be split on one. Extract it
+          # with `sed -n s///p`, which prints nothing and succeeds when there is no
+          # match — a `grep` here returns 1 and, under the `-e` these steps run
+          # with, killed the step before the message below could say why.
+          signer="$(sed -n 's/.*SHA-256 digest:[[:space:]]*//p' certs.txt \
+            | head -1 | tr -d ' :' | tr 'A-F' 'a-f')"
           expected="$(printf '%s' "$EXPECTED_CERT" | tr -d ' :' | tr 'A-F' 'a-f')"
+          echo "  signer:   ${signer:-<none found>}"
+          echo "  expected: ${expected}"
           if ! printf '%s' "$signer" | grep -Eq '^[0-9a-f]{64}$'; then
-            echo "::error::Could not read the signer's fingerprint from apksigner (got '$signer')."
-            cat certs.txt
+            echo "::error::Could not read the certificate's SHA-256 fingerprint from apksigner."
             exit 1
           fi
           if [ "$signer" != "$expected" ]; then
