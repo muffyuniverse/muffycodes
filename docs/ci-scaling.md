@@ -19,7 +19,7 @@ stopped testing is worse than a slow one, and looks identical from the outside.
 |---|---|---|
 | pull request, one test class | most often | **58s** |
 | pull request, seven classes | often | **91s** |
-| development push | occasionally | ~50s |
+| development push | occasionally | **66s** (no lint; ~75s when the app changed) |
 | main, full release | rare, by hand | **146s** |
 | main, nothing in the app changed | — | **59s** |
 
