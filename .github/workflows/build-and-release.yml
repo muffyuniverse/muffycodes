@@ -713,8 +713,9 @@ jobs:
       id-token: write
       attestations: write
       # Reading the branch head is what the guard above needs to know whether
-      # this run has been overtaken.
-      actions: read
+      # this run has been overtaken. Writing is only to start the workflow
+      # that renders the released APK on an emulator, which is a dispatch.
+      actions: write
 
     steps:
       - name: Take the bundle
@@ -776,3 +777,14 @@ jobs:
             --notes-file release-notes.md \
             bundle/app-release.apk \
             bundle/tour-*.png
+
+          # The renders of a real install are made by a workflow of their own
+          # and put on the release when they are done. It is started here,
+          # rather than left to the release event, because a release made with
+          # this workflow's own token wakes nothing: GitHub lets a workflow's
+          # own token raise no event except a dispatch. So a dispatch is what
+          # this is, and the renders arrive on the release afterwards —
+          # never in front of the review, and never blocking it.
+          gh workflow run emulator-renders.yml \
+            --repo "$REPOSITORY" \
+            -f tag="v${VERSION_NAME}"
