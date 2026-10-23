@@ -212,6 +212,15 @@ jobs:
         if: matrix.shard == 0
         run: python3 tools/check-test-map.py
 
+      # The version code decides whether Android will install a build over the one
+      # already on the phone, so the one thing it must do is never go down. Its
+      # boundary is a dated switch rather than a date, and a date is hard to test,
+      # which is why the arithmetic lives in a script with a self-test instead of
+      # in an inline expression here.
+      - name: Check that the version code only ever goes up
+        if: matrix.shard == 0
+        run: bash tools/version-code.sh --self-test
+
       - name: Set up Java
         if: steps.shard.outputs.nothing == 'no'
         uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
@@ -251,21 +260,45 @@ jobs:
       # otherwise do that again on every run. It keeps them in the local Maven
       # repository, so that directory is what is kept between runs.
       #
-      # The key is a fixed name and not a hash of the build file. Hashing the
-      # build file looked careful and was worse than useless: every edit to it
-      # produced a new key, which means a cache that is never found and a
-      # runtime that is downloaded again. What decides which runtime is needed
-      # is the version of Robolectric, which changes rarely, so the key is a
-      # version raised by hand when that line in build.gradle.kts changes.
-      # Caches cannot be overwritten, so raising this number retires a stale one.
+      # The key follows the Robolectric version, and nothing else.
+      #
+      # Hashing the whole build file was tried first and was worse than useless:
+      # that file changes on most working days, so every change produced a new key
+      # and the cache was never found — the runtime downloaded again each time.
+      #
+      # The version was then a number raised by hand, which fails the other way
+      # and fails silently: after an upgrade the key does not change, so the *old*
+      # runtime is restored forever and every run pays for a download it can never
+      # cache. That reads as a slow runner, not as a stale key, which is why it
+      # would have survived a long time.
+      #
+      # So the version is read out of the build file at run time. The key changes
+      # exactly when the version does, and the step fails loudly if it cannot find
+      # it — an empty version would otherwise produce one key shared by every
+      # Robolectric version, which is the hand-raised problem with extra steps.
       #
       # This one cache was worth about a minute per run on its own.
+      - name: Work out which Android runtime the tests need
+        id: robolectric
+        if: steps.shard.outputs.nothing == 'no'
+        run: |
+          version="$(grep -oE 'org\.robolectric:robolectric:[0-9][^"\x27 ]*' \
+            app/build.gradle.kts | head -1 | sed 's/.*://')"
+          if [ -z "$version" ]; then
+            echo "::error::Could not find the Robolectric version in app/build.gradle.kts."
+            echo "The runtime cache key depends on it, and an empty key would be shared"
+            echo "by every version."
+            exit 1
+          fi
+          echo "robolectric $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - name: Remember the runtime the tests need
         if: steps.shard.outputs.nothing == 'no'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.m2/repository
-          key: robolectric-runtime-v1-${{ runner.os }}
+          key: robolectric-runtime-${{ steps.robolectric.outputs.version }}-${{ runner.os }}
 
       # Deliberately NOT split into shards. Measured on a 58-test suite: the
       # tests take 16s while setting a job up costs 17s, so two shards would each
@@ -718,10 +751,12 @@ jobs:
           # 32-bit integer, so the epoch seconds run out in 2038. If the build
           # ever runs past that, fall back to the run number, which is the
           # other integer GitHub guarantees to increase.
-          version_code="$(date +%s)"
-          if [ "$version_code" -gt 2147483647 ]; then
-            version_code="$(( RUN_NUMBER + 1500000000 ))"
-          fi
+          version_code="$(bash tools/version-code.sh)"
+          # The boundary lives in tools/version-code.sh, which has a self-test,
+          # because the inline fallback it replaced was not monotonic: it produced
+          # a number below the last one the clock had produced, so the first build
+          # after the switch would have been treated as older than the build before
+          # it and would not have installed — in 2038, with nobody watching.
 
           echo "name=${version_name}" >> "$GITHUB_OUTPUT"
           echo "code=${version_code}" >> "$GITHUB_OUTPUT"

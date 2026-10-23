@@ -136,11 +136,26 @@ case "$MODE" in
 
     dev|run)
         if [ "$MODE" = "dev" ]; then
-            RUN_ID="$(gh run list --repo "$REPO" --branch development \
-                --workflow build-and-release.yml --status success --limit 1 \
-                --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)"
+            # "The newest successful run" and "the newest run that has a bundle"
+            # are different questions, and they part company after any push that
+            # touched no code: that run is green, delivers nothing, and used to be
+            # the one chosen here — so `bundle --dev` said "this run made no
+            # bundle" while an installable build sat one run further back. The
+            # command exists to put a build on the phone, so it looks for the
+            # newest run that has one and only reports nothing when there is
+            # genuinely nothing.
+            RUN_ID=""
+            for candidate in $(gh run list --repo "$REPO" --branch development \
+                    --workflow build-and-release.yml --status success --limit 10 \
+                    --json databaseId --jq '.[].databaseId' 2>/dev/null || true); do
+                if gh api "repos/$REPO/actions/runs/$candidate/artifacts" \
+                        --jq '.artifacts[].name' 2>/dev/null | grep -qx "build-bundle"; then
+                    RUN_ID="$candidate"
+                    break
+                fi
+            done
             if [ -z "$RUN_ID" ]; then
-                echo "no development run was found to deliver" >&2
+                echo "no development run has produced a bundle yet" >&2
                 exit 1
             fi
         fi
@@ -159,6 +174,26 @@ esac
 if [ ! -f "$TMP/app-release.apk" ]; then
     echo "the bundle has no APK in it" >&2
     exit 1
+fi
+
+# The attestation is produced on every published release and was never read.
+# It proves that this APK came from this repository's release workflow on the
+# commit it names — the one question a downloaded binary cannot answer about
+# itself. A replaced release asset would otherwise be delivered to the phone
+# exactly as smoothly as the real one.
+#
+# Only `main` publishes, so a development build has no provenance to check.
+# Saying that plainly is better than implying it was either verified or broken.
+if [ "$MODE" = "release" ]; then
+    if ! command -v gh >/dev/null 2>&1; then
+        echo "  (no gh here, so the APK's provenance is unchecked)" >&2
+    elif gh attestation verify "$TMP/app-release.apk" --repo "$REPO" >/dev/null 2>&1; then
+        echo "  provenance verified: this APK came from $REPO's release workflow"
+    else
+        echo "the APK's provenance could not be verified against $REPO." >&2
+        echo "Refusing to hand the phone a binary whose origin cannot be shown." >&2
+        exit 1
+    fi
 fi
 
 # Everything is in place before anything is delivered, so the phone never
