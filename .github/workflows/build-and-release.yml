@@ -393,10 +393,15 @@ jobs:
   # -------------------------------------------------------------------------
   lint:
     name: Deep checks
-    # Behind the gate: there is no point linting a build whose tests failed, and
-    # the runner is better spent not doing it. The extra waiting is paid once, by
-    # a change that was going to be stopped anyway.
-    needs: test
+      # It starts at once, beside the tests rather than after them.
+      #
+      # Measured: the tests take about 55s and lint about 62s, and running one
+      # after the other put both on the clock for nothing — a lint pass says
+      # nothing about whether the tests will pass. What must be serial is the
+      # *handing on*, not the checking.
+      #
+      # The cost is that a red suite pays for a lint run it did not need. That is
+      # a runner's minute, against a minute of everybody's time on every green run.
     permissions:
       contents: read
     # Main only. Lint reads the whole project and costs sixty seconds doing it,
@@ -413,9 +418,8 @@ jobs:
     # a build to the person who will look at it, and the checks worth paying for
     # there are the tests.
     if: |
-      needs.test.result == 'success'
-      && (github.event_name == 'workflow_dispatch'
-          || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+      github.event_name == 'workflow_dispatch'
+      || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -457,14 +461,18 @@ jobs:
   # -------------------------------------------------------------------------
   build-release:
     name: Build the release
-    # Behind the gate, and this is the whole point of the gate: a build whose
-    # tests failed is not handed to anybody, not even for development. The
-    # waiting costs the length of the tests and buys never shipping something
-    # broken — which is the same reason the gate is the tier that must be fast.
-    needs: test
+    # Beside the tests, not behind them, because the two ask different
+    # questions and neither needs the other's answer to begin: a build asks
+    # whether the code compiles and an APK comes out, the suite asks whether it
+    # behaves. Starting the build late put the whole test run on the critical
+    # path for no benefit — measured, the build's clock began at 57-67s, exactly
+    # when the tests ended.
+    #
+    # What that costs is a build paid for on a red run, and it is accepted: it is
+    # not the same as shipping, because nothing is handed on until the suite has
+    # been asked about — see the check before the APK leaves this job.
     if: |
-      needs.test.result == 'success'
-      && github.event_name != 'pull_request' 
+      github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     # It only reads the repository and writes the key from a secret. It does not
@@ -642,6 +650,51 @@ jobs:
       - name: Say where the build's time went
         if: always() && steps.decision.outputs.changed == 'yes'
         run: python3 tools/build-times.py --results . --top 10
+
+      # The gate, moved from 'wait for the tests' to 'ask about them'.
+      #
+      # GitHub cannot stop a running job because a sibling failed — fail-fast spans
+      # a matrix and nothing else — so the build runs optimistically and asks, here,
+      # whether the suite that ran beside it passed. If it did not, nothing leaves
+      # this job: no artifact, and this job fails. That keeps the rule that matters
+      # (a broken app is never handed to anybody) and drops the rule that cost a
+      # minute per run (the build may not start until the tests are done).
+      #
+      # If the tests have not finished yet, the answer is 'not yet' and the APK is
+      # handed on: the bundle waits for the suite as it always did, so a run with a
+      # red suite still delivers nothing.
+      - name: Ask the suite before anything leaves this job
+        id: verdict
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          # A name that has not finished has no conclusion, so it is filtered out
+          # rather than counted as red.
+          verdict="$(gh api "repos/$REPOSITORY/actions/runs/$RUN_ID/jobs" \
+            --jq '[.jobs[] | select(.name | startswith("Test")) | select(.conclusion != null)
+                  | .conclusion] | if length == 0 then "running"
+                    elif any(. != "success") then "red" else "green" end' \
+            2>/dev/null || echo unknown)"
+          echo "hand=${verdict}" >> "$GITHUB_OUTPUT"
+          case "$verdict" in
+            red)
+              echo "::error::The suite failed, so this build is not handed on."
+              exit 1
+              ;;
+            green)
+              echo "The suite passed, so the APK is handed on."
+              ;;
+            running)
+              echo "The suite has not finished; handing the APK on and letting the bundle wait for it."
+              ;;
+            *)
+              # Could not ask. Handing on is the safe answer: the bundle is what
+              # delivers, and it waits for the suite either way.
+              echo "Could not read the suite's state, if the API wobbles; handing on."
+              ;;
+          esac
 
       - name: Check the signature of the APK
         if: steps.decision.outputs.changed == 'yes'

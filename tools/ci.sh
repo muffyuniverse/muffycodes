@@ -125,6 +125,20 @@ while :; do
         2>/dev/null | head -1)"
     echo "$(date +%H:%M:%S) $state"
     case "$state" in completed/*) break ;; esac
+
+    # Jobs run beside each other now, so the run is not over when the answer
+    # is. A red suite is known about fifty seconds before the run finishes —
+    # the build beside it is still going — and waiting for the run to close
+    # would charge that minute to every failure. The verdict is worth nothing
+    # more for having arrived later.
+    failed="$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" \
+        --jq '[.jobs[] | select(.conclusion == "failure") | .name] | join(", ")' \
+        2>/dev/null || true)"
+    if [ -n "$failed" ]; then
+        echo "failed early: $failed"
+        state="completed/failure"
+        break
+    fi
     if [ "$(date +%s)" -gt "$deadline" ]; then
         echo "RESULT: timeout (still $state)"
         exit 1
