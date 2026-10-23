@@ -172,26 +172,14 @@ fun BrowserScreen(
         },
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            // The slim row (§7): account, project, changes, and one button that
-            // is always in the same place.
-            val project = viewModel.currentProject
-            if (project != null) {
-                SlimRow(
-                    account = username ?: "",
-                    project = project,
-                    changes = viewModel.changesOf(project),
-                    busy = viewModel.busy,
-                    onSync = { onRowSync(project) },
-                )
-                HorizontalDivider()
-            }
+            ProjectSlimRow(viewModel, onRowSync)
 
             if (viewModel.showSearch) {
                 OutlinedTextField(
                     value = viewModel.query,
                     onValueChange = { viewModel.query = it },
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-                    placeholder = { Text("Search in $project") },
+                    placeholder = { Text("Search in ${viewModel.currentProject.orEmpty()}") },
                     singleLine = true,
                     trailingIcon = {
                         if (viewModel.isSearching) {
@@ -218,9 +206,16 @@ fun BrowserScreen(
     }
 }
 
-/** Account, project, the unsynced count and the sync button, in one slim row. */
+/**
+ * Account, project, the unsynced count and the sync button, in one slim row.
+ *
+ * Public because §7 says **every** screen while a project is open carries it. It is
+ * one function rather than one per screen so the row cannot drift apart — the
+ * changed count on the editor and the count in the browser are the same number
+ * from the same call.
+ */
 @Composable
-private fun SlimRow(
+fun SlimRow(
     account: String,
     project: String,
     changes: Int,
@@ -408,6 +403,8 @@ private fun EntryRow(
                     EntryKind.FOLDER -> "folder"
                     EntryKind.IMAGE -> "image"
                     EntryKind.TEXT -> "text"
+                    // §9's third class, named as the design names it.
+                    EntryKind.UNKNOWN -> "unknown"
                 } + if (local) "  ·  local" else "",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -537,4 +534,25 @@ fun AccountSheet(
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
     )
+}
+
+/**
+ * The slim row for a screen that is inside a project (§7).
+ *
+ * Reads the account, the project and the count from the ViewModel rather than
+ * taking them as arguments, so the editor and the history screen show the same
+ * numbers as the browser without passing three values through every call — and so
+ * there is exactly one place that can be wrong.
+ */
+@Composable
+fun ProjectSlimRow(viewModel: AppViewModel, onSync: (String) -> Unit) {
+    val project = viewModel.currentProject ?: return
+    SlimRow(
+        account = viewModel.account?.login ?: "",
+        project = project,
+        changes = viewModel.changesOf(project),
+        busy = viewModel.busy,
+        onSync = { onSync(project) },
+    )
+    HorizontalDivider()
 }

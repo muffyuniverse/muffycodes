@@ -583,9 +583,9 @@ class AppViewModel @JvmOverloads constructor(
             if (everywhere && api != null && login != null) {
                 val deleted = api.deleteRepo(token, login, project)
                 // A repository already gone is not a failure: the local side goes.
-                if (deleted.error != null && !deleted.error.contains("404")) {
-                    note = deleted.error
-                }
+                // Asked by status, not by whether the message happens to contain
+                // "404" — see GitHubResult.isGone.
+                if (deleted.error != null && !deleted.isGone) note = deleted.error
             }
             ws.delete(File(ws.projectsDir, project))
             main.post {

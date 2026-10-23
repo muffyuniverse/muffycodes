@@ -2,6 +2,7 @@ package com.example.notes
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -45,6 +46,7 @@ import java.util.Date
 fun HistoryScreen(
     viewModel: AppViewModel,
     title: String,
+    onSync: (String) -> Unit,
     onBack: () -> Unit,
 ) {
     val versions = remember(viewModel.historyPath, viewModel.message) { viewModel.versions() }
@@ -71,73 +73,80 @@ fun HistoryScreen(
             )
         },
     ) { padding ->
-        if (versions.isEmpty()) {
-            Column(
-                modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Text("No earlier versions", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "A version appears here as soon as something changes.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+            // §7: the slim row is on every screen while a project is open — including
+            // this one, because "show me what changed" and "send it to GitHub" are the
+            // two halves of the same thought.
+            ProjectSlimRow(viewModel, onSync)
+
+            val content = PaddingValues(top = 0.dp)
+            if (versions.isEmpty()) {
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(content).padding(24.dp),
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Text("No earlier versions", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "A version appears here as soon as something changes.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                return@Scaffold
             }
-            return@Scaffold
-        }
-        LazyColumn(modifier = Modifier.fillMaxSize().padding(padding)) {
-            items(versions) { (commit, content) ->
-                Column {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                commit.message.lineSequence().first()
-                                    .ifBlank { "Changed" },
-                                style = MaterialTheme.typography.bodyLarge,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                text = DateFormat.getDateTimeInstance(
-                                    DateFormat.MEDIUM,
-                                    DateFormat.SHORT,
-                                ).format(Date(commit.timestamp)) + "  ·  ${commit.shortId}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            if (content != null) {
+            LazyColumn(modifier = Modifier.fillMaxSize().padding(content)) {
+                items(versions) { (commit, content) ->
+                    Column {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = content.lineSequence().firstOrNull()
-                                        ?.take(80).orEmpty(),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    commit.message.lineSequence().first()
+                                        .ifBlank { "Changed" },
+                                    style = MaterialTheme.typography.bodyLarge,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
+                                Text(
+                                    text = DateFormat.getDateTimeInstance(
+                                        DateFormat.MEDIUM,
+                                        DateFormat.SHORT,
+                                    ).format(Date(commit.timestamp)) + "  ·  ${commit.shortId}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                if (content != null) {
+                                    Text(
+                                        text = content.lineSequence().firstOrNull()
+                                            ?.take(80).orEmpty(),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
                             }
+                            TextButton(onClick = { pending = commit }) { Text("Restore") }
                         }
-                        TextButton(onClick = { pending = commit }) { Text("Restore") }
+                        HorizontalDivider()
                     }
-                    HorizontalDivider()
                 }
             }
+            val chosen = pending
+            if (chosen != null) {
+                ConfirmDialog(
+                    title = "Restore that version?",
+                    text = "The file is put back as it was at ${chosen.shortId}. " +
+                        "You can restore another version afterwards.",
+                    confirm = "Restore",
+                    onDismiss = { pending = null },
+                    onConfirm = { viewModel.restoreVersion(chosen.id) },
+                )
+            }
         }
-    }
-
-    val chosen = pending
-    if (chosen != null) {
-        ConfirmDialog(
-            title = "Restore that version?",
-            text = "The file is put back as it was at ${chosen.shortId}. " +
-                "You can restore another version afterwards.",
-            confirm = "Restore",
-            onDismiss = { pending = null },
-            onConfirm = { viewModel.restoreVersion(chosen.id) },
-        )
     }
 }

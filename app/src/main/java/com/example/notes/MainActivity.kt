@@ -151,6 +151,7 @@ private fun AppRoot(viewModel: AppViewModel) {
         editing != null -> EditorScreen(
             viewModel = viewModel,
             file = editing,
+            onSync = { project -> viewModel.sync(project) },
             onBack = { viewModel.closeEditor() },
             onDelete = {
                 val entry = Entry(editing.name, editing, viewModel.workspace?.kindOf(editing)
@@ -163,6 +164,7 @@ private fun AppRoot(viewModel: AppViewModel) {
         historyPath != null -> HistoryScreen(
             viewModel = viewModel,
             title = historyPath.last(),
+            onSync = { project -> viewModel.sync(project) },
             onBack = { viewModel.closeHistory() },
         )
 
@@ -398,11 +400,28 @@ private fun Dialogs(
     }
 }
 
-/** The folders a thing can be moved into: those on its own level. */
+/**
+ * The folders a thing can be moved into: those on its own level (§3).
+ *
+ * The visibility rule is asked for, not restated. This used to write
+ * `!it.name.startsWith(".")` itself, which matched the rule for hidden things but
+ * not for the app's structural folders — so `projects/` and `repo/` appeared as
+ * ordinary destinations even though §3 promises that nothing the app owns can
+ * appear in a move picker or be targeted by a command.
+ *
+ * `Workspace` is the only place that decides; asking it is how "a guarantee, not
+ * a convention" stays true when the rule changes.
+ */
 private fun moveTargets(viewModel: AppViewModel, entry: Entry): List<Pair<String, File>> {
     val parent = entry.file.parentFile ?: return emptyList()
+    val ws = viewModel.workspace ?: return emptyList()
     return (parent.listFiles() ?: emptyArray())
-        .filter { it.isDirectory && !it.name.startsWith(".") && it.name != entry.name }
+        .filter { target ->
+            target.isDirectory &&
+                target.name != entry.name &&
+                !ws.isHidden(target.name) &&
+                !ws.isStructural(target)
+        }
         .map { it.name to it }
         .sortedBy { it.first.lowercase() }
 }

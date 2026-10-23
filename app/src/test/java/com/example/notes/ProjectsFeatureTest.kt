@@ -141,6 +141,38 @@ class ProjectsFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `deleting a project whose repository is already gone is not an error`() {
+        // §6: "A repository already deleted on GitHub is not an error — the local
+        // side goes." Deleting it on GitHub by hand is a normal thing to do, and the
+        // phone must agree with what is true rather than refuse to tidy up.
+        scene.project("Shopping")
+        scene.remote("Shopping").deleteRecursively()
+
+        scene.viewModel.deleteProject("Shopping", everywhere = true)
+        scene.await("the delete to finish") { !scene.viewModel.busy }
+
+        assertFalse("the folder is gone", File(scene.workspace!!.projectsDir, "Shopping").exists())
+        assertFalse(
+            "and nothing complained about the missing repository",
+            scene.viewModel.message.orEmpty().contains("no repository", ignoreCase = true),
+        )
+    }
+
+    @Test
+    fun `a real failure to delete on GitHub still stops the local delete`() {
+        // The other half of the same rule, and the one that would be lost if the
+        // status check were loosened: a genuine error must keep the local copy and
+        // say so, because otherwise the phone and GitHub silently disagree.
+        val gone = scene.viewModel.accounts.devGitHubDir(scene.login)
+            .let { DiskGitHub(it, scene.login) }
+            .deleteRepo("", scene.login, "no-such-repository")
+
+        assertTrue("the fake answers 404 for a repository that is not there", gone.isGone)
+        assertEquals("with the status a real GitHub uses", 404, gone.status)
+        assertFalse("and that is not a failure to reach the server", gone.isOffline)
+    }
+
+    @Test
     fun `the add window offers the account's repositories`() {
         scene.project("Shopping")
         var offered: List<String> = emptyList()

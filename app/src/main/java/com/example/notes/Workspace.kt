@@ -3,8 +3,17 @@ package com.example.notes
 import org.json.JSONArray
 import java.io.File
 
-/** What a thing in the tree is. Decided by its extension, as §9 of the design says. */
-enum class EntryKind { FOLDER, TEXT, IMAGE }
+/**
+ * What a thing in the tree is. Decided by its extension, as §9 of the design says.
+ *
+ * Three kinds of file, and the third one matters more than it looks. The design
+ * says "anything else → named as unknown; rename, move and delete only", and
+ * that list is not a tidiness rule: a `.zip`, a `.pdf` and an `.apk` are not
+ * text, so opening one in the editor and saving it back would rewrite real bytes
+ * as UTF-8 and destroy the file. `TEXT` is the fallback for anything that looks
+ * like text, not for everything.
+ */
+enum class EntryKind { FOLDER, TEXT, IMAGE, UNKNOWN }
 
 /** One row of a folder: a file or a folder. */
 data class Entry(
@@ -60,11 +69,19 @@ class Workspace(val accountDir: File) {
             .sortedWith(compareBy({ !it.isFolder }, { it.name.lowercase() }))
     }
 
-    /** How a file is handled, from the part of its name after the last dot. */
+    /**
+     * How a file is handled, from the part of its name after the last dot.
+     *
+     * A file with no extension is text, because that is what a person typing a
+     * name gets — `notes` is a note. A file with an extension this app does not
+     * recognise is unknown, and is never opened as text.
+     */
     fun kindOf(file: File): EntryKind = when {
         file.isDirectory -> EntryKind.FOLDER
         file.extension.lowercase() in IMAGE_EXTENSIONS -> EntryKind.IMAGE
-        else -> EntryKind.TEXT
+        file.extension.isEmpty() -> EntryKind.TEXT
+        file.extension.lowercase() in TEXT_EXTENSIONS -> EntryKind.TEXT
+        else -> EntryKind.UNKNOWN
     }
 
     /** True for a name the app made: never shown, never touched. */
@@ -221,6 +238,22 @@ class Workspace(val accountDir: File) {
         if (!into.isDirectory) {
             return Result.failure(IllegalArgumentException("That is not a folder"))
         }
+        // The destination is guarded as well as the source, because §3 says no
+        // command can target anything the app owns — and a move *into* `projects/`
+        // or `.muffy/` targets one just as surely as renaming it. Only the source
+        // was checked, so a file could be moved into the app's own bookkeeping and
+        // then be hidden from every screen at once: still on disk, unreachable.
+        //
+        // `repo/` is the exception, and it is the whole point of §3's two crosses:
+        // "Move into the repository" is a move into a structural folder, on purpose.
+        // So the rule is about the folder this app files things under, not about
+        // every folder it made.
+        if (isHidden(into.name)) {
+            return Result.failure(IllegalArgumentException("That folder belongs to the app"))
+        }
+        if (isStructural(into) && into.name != REPO) {
+            return Result.failure(IllegalArgumentException("That folder belongs to the app"))
+        }
         if (file.isDirectory && (into.canonicalPath == file.canonicalPath ||
                 into.canonicalPath.startsWith(file.canonicalPath + File.separator))
         ) {
@@ -329,6 +362,35 @@ class Workspace(val accountDir: File) {
 
         /** The extensions treated as pictures rather than text (§9). */
         val IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp")
+
+        /**
+         * The extensions the app will open in the editor (§9: "code, anything not
+         * listed below").
+         *
+         * This is a list rather than "everything that is not an image" precisely
+         * because the other way is destructive: a file type nobody thought of would
+         * default to being editable text, and saving it would corrupt it. A type
+         * nobody thought of now lands on `UNKNOWN`, which is safe — it can still be
+         * renamed, moved and deleted. Adding a language here is how a new kind of
+         * text becomes editable.
+         */
+        val TEXT_EXTENSIONS = setOf(
+            // Writing and documents
+            "txt", "md", "markdown", "text", "rst", "adoc", "org", "log",
+            // Configuration and data
+            "json", "yaml", "yml", "toml", "ini", "cfg", "conf", "properties",
+            "xml", "csv", "tsv", "env", "gitignore", "license",
+            // Code
+            "kt", "kts", "java", "py", "rb", "js", "mjs", "cjs", "ts", "tsx",
+            "jsx", "c", "h", "cpp", "hpp", "cc", "cs", "go", "rs", "swift",
+            "sh", "bash", "zsh", "fish", "ps1", "bat", "sql", "php", "pl",
+            "lua", "dart", "scala", "clj", "ex", "exs", "erl", "hs", "r",
+            // Markup and web
+            "html", "htm", "css", "scss", "sass", "less", "vue", "svelte",
+            "svg",
+            // Build and scripts
+            "gradle", "cmake", "make", "mk", "dockerfile", "containerfile",
+        )
 
         /** The default extension for a new file (§2: "Default `.txt`"). */
         const val DEFAULT_EXTENSION = "txt"

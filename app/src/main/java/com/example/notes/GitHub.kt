@@ -12,12 +12,31 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
-/** The outcome of a call to a GitHub, whichever one is behind it. */
+/**
+ * The outcome of a call to a GitHub, whichever one is behind it.
+ *
+ * [status] is the HTTP status when there was one, and 0 when the call never got
+ * that far — an offline phone, a deleted `DiskGitHub` repository. It is carried
+ * structurally because callers kept deciding things from [error] as text: the
+ * "repository already deleted on GitHub is not an error" rule was a
+ * `contains("404")`, which would also swallow a message that mentioned 404 for
+ * some other reason and would treat "the repository is gone" as a failure if it
+ * were ever phrased without the number.
+ *
+ * [isGone] is that rule, said once, where the status is known.
+ */
 data class GitHubResult<T>(
     val value: T? = null,
     val error: String? = null,
+    val status: Int = 0,
 ) {
     val isSuccess: Boolean get() = error == null && value != null
+
+    /** True when GitHub says the thing is not there any more. */
+    val isGone: Boolean get() = status == 404
+
+    /** True when the request never reached a server at all. */
+    val isOffline: Boolean get() = status == 0 && error != null
 }
 
 /** A repository of the signed-in account. */
@@ -92,7 +111,9 @@ class HttpGitHub(private val api: String = DEFAULT_API) : GitHub {
 
     override fun whoami(token: String): GitHubResult<String> {
         val response = get("GET", "/user", token)
-        if (response.error != null) return GitHubResult(error = response.error)
+        if (response.error != null) {
+            return GitHubResult(error = response.error, status = response.status)
+        }
         val login = response.value?.optString("login").orEmpty()
         if (login.isEmpty()) {
             return GitHubResult(error = "GitHub did not return an account name")
@@ -102,7 +123,9 @@ class HttpGitHub(private val api: String = DEFAULT_API) : GitHub {
 
     override fun listRepos(token: String): GitHubResult<List<Repo>> {
         val response = get("GET", "/user/repos?per_page=100&sort=updated", token)
-        if (response.error != null) return GitHubResult(error = response.error)
+        if (response.error != null) {
+            return GitHubResult(error = response.error, status = response.status)
+        }
         val array = response.array ?: return GitHubResult(error = "GitHub did not return a list")
         val repos = mutableListOf<Repo>()
         for (i in 0 until array.length()) {
@@ -114,7 +137,9 @@ class HttpGitHub(private val api: String = DEFAULT_API) : GitHub {
 
     override fun licences(token: String): GitHubResult<List<Licence>> {
         val response = get("GET", "/licenses", token)
-        if (response.error != null) return GitHubResult(error = response.error)
+        if (response.error != null) {
+            return GitHubResult(error = response.error, status = response.status)
+        }
         val array = response.array ?: return GitHubResult(error = "GitHub did not return a list")
         val licences = mutableListOf<Licence>()
         for (i in 0 until array.length()) {
@@ -139,7 +164,9 @@ class HttpGitHub(private val api: String = DEFAULT_API) : GitHub {
             if (description.isNotBlank()) put("description", description)
         }
         val response = get("POST", "/user/repos", token, body)
-        if (response.error != null) return GitHubResult(error = response.error)
+        if (response.error != null) {
+            return GitHubResult(error = response.error, status = response.status)
+        }
         val obj = response.value
             ?: return GitHubResult(error = "GitHub did not return the new repository")
         return GitHubResult(value = repo(obj))
@@ -153,14 +180,18 @@ class HttpGitHub(private val api: String = DEFAULT_API) : GitHub {
     ): GitHubResult<Repo> {
         val body = JSONObject().put("name", newName)
         val response = get("PATCH", "/repos/$owner/$name", token, body)
-        if (response.error != null) return GitHubResult(error = response.error)
+        if (response.error != null) {
+            return GitHubResult(error = response.error, status = response.status)
+        }
         val obj = response.value ?: return GitHubResult(error = "GitHub did not return the repository")
         return GitHubResult(value = repo(obj))
     }
 
     override fun deleteRepo(token: String, owner: String, name: String): GitHubResult<Unit> {
         val response = get("DELETE", "/repos/$owner/$name", token)
-        if (response.error != null) return GitHubResult(error = response.error)
+        if (response.error != null) {
+            return GitHubResult(error = response.error, status = response.status)
+        }
         return GitHubResult(value = Unit)
     }
 
@@ -184,6 +215,7 @@ class HttpGitHub(private val api: String = DEFAULT_API) : GitHub {
         val value: JSONObject? = null,
         val array: JSONArray? = null,
         val error: String? = null,
+        val status: Int = 0,
     )
 
     private fun get(
@@ -341,7 +373,9 @@ class DiskGitHub(
     ): GitHubResult<Repo> {
         val from = repoDir(name)
         val to = repoDir(newName)
-        if (!from.exists()) return GitHubResult(error = "There is no repository called \"$name\"")
+        if (!from.exists()) {
+            return GitHubResult(error = "There is no repository called \"$name\"", status = 404)
+        }
         if (to.exists()) return GitHubResult(error = "There is already a repository called \"$newName\"")
         return if (from.renameTo(to)) {
             GitHubResult(
@@ -354,7 +388,13 @@ class DiskGitHub(
 
     override fun deleteRepo(token: String, owner: String, name: String): GitHubResult<Unit> {
         val dir = repoDir(name)
-        if (!dir.exists()) return GitHubResult(error = "There is no repository called \"$name\"")
+        // 404, because that is what the real GitHub answers for a repository that is
+        // not there — and the caller's "already gone is not an error" rule reads the
+        // status. A fake that answered differently would make the tests pass while
+        // the phone behaved another way.
+        if (!dir.exists()) {
+            return GitHubResult(error = "There is no repository called \"$name\"", status = 404)
+        }
         return if (dir.deleteRecursively()) {
             GitHubResult(value = Unit)
         } else {

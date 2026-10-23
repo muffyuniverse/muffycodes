@@ -143,4 +143,42 @@ class VisibilityFeatureTest : FeatureTest() {
             scene.viewModel.visibleEntries.any { it.name == "note.txt" },
         )
     }
+
+    @Test
+    fun `the app's own folders are not offered as a place to move something`() {
+        // §3: "Nothing the app owns appears in a file list, a search result or a
+        // move picker, and no command can target one. That is a guarantee, not a
+        // convention."
+        //
+        // The picker used to re-implement the rule as `!name.startsWith(".")`, which
+        // hid the dot-names but still offered `projects/` — so the guarantee held
+        // for one of the two ways the app owns a folder. It now asks Workspace.
+        val ws = scene.workspace!!
+        val target = scene.file("move-me.txt")
+
+        assertTrue("projects is structural", ws.isStructural(File(ws.accountDir, "projects")))
+        assertFalse("an ordinary file is not", ws.isStructural(target))
+
+        val offered = (target.parentFile!!.listFiles() ?: emptyArray())
+            .filter { it.isDirectory && it.name != target.name }
+            .filterNot { ws.isHidden(it.name) || ws.isStructural(it) }
+            .map { it.name }
+
+        assertFalse("projects/ is not a destination", offered.contains("projects"))
+        assertFalse(".muffy is not a destination", offered.contains(".muffy"))
+    }
+
+    @Test
+    fun `a move into a folder the app owns is refused by the command, not only hidden`() {
+        // The picker is one guard; the command is the other. §3 promises both.
+        val ws = scene.workspace!!
+        val target = scene.file("move-me.txt")
+        val projects = File(ws.accountDir, "projects")
+
+        val refused = scene.viewModel.move(target, projects)
+
+        assertFalse("the command refused", refused)
+        assertTrue("and the file is where it was", target.exists())
+        assertTrue("with a message saying why", !scene.viewModel.message.isNullOrBlank())
+    }
 }

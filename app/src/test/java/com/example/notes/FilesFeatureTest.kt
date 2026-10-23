@@ -46,10 +46,113 @@ class FilesFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `a file whose extension is not a picture is text, whatever it is`() {
+    fun `a file with an extension the app does not know is unknown, not text`() {
+        // §9's third class. This was "text, whatever it is" — which read the design
+        // too loosely and was destructive: a .zip opened in the editor and saved
+        // back has its bytes rewritten as UTF-8. An unknown kind can still be
+        // renamed, moved and deleted, which is the whole of §9's promise for it.
         scene.file("notes.whatever")
 
-        assertEquals(EntryKind.TEXT, scene.entry("notes.whatever").kind)
+        assertEquals(EntryKind.UNKNOWN, scene.entry("notes.whatever").kind)
+    }
+
+    @Test
+    fun `a file with no extension at all is still text`() {
+        // A person typing a name gets a note, not an unknown thing.
+        scene.file("journal")
+
+        assertEquals(EntryKind.TEXT, scene.entry("journal").kind)
+    }
+
+    @Test
+    fun `the extensions that are explicitly text stay text`() {
+        listOf("notes.md", "data.json", "script.kt", "page.html", "build.gradle").forEach {
+            scene.file(it)
+            assertEquals("$it is text", EntryKind.TEXT, scene.entry(it).kind)
+        }
+    }
+
+    @Test
+    fun `a picture is recognised whatever case its extension is written in`() {
+        // A camera writes .JPG as often as .jpg, and the rule is about the part of
+        // the name after the dot, not how it was typed.
+        scene.file("holiday.JPG")
+        scene.file("scan.PNG")
+
+        assertEquals(EntryKind.IMAGE, scene.entry("holiday.JPG").kind)
+        assertEquals(EntryKind.IMAGE, scene.entry("scan.PNG").kind)
+    }
+
+    @Test
+    fun `an extension nobody listed is unknown rather than edited as text`() {
+        // The reason for a list rather than "anything not an image": a type nobody
+        // thought of must fail safe. These are the ones that would be destroyed by
+        // a round trip through the text field.
+        listOf("archive.zip", "book.pdf", "installer.apk", "photo.heic", "song.mp3")
+            .forEach { name ->
+                scene.file(name)
+                assertEquals("$name is not editable", EntryKind.UNKNOWN, scene.entry(name).kind)
+            }
+    }
+
+    @Test
+    fun `an unknown file can still be renamed, moved and deleted`() {
+        // §9: "rename, move and delete only" — the restrictions are about editing,
+        // not about ownership.
+        val file = scene.file("archive.zip")
+        scene.folder("Drafts")
+
+        assertTrue("renamed", scene.viewModel.rename(file, "renamed.zip"))
+        val moved = File(file.parentFile, "renamed.zip")
+        assertTrue("moved", scene.viewModel.move(moved, File(moved.parentFile, "Drafts")))
+        assertFalse("it was moved", File(file.parentFile, "renamed.zip").exists())
+
+        val placed = File(File(file.parentFile, "Drafts"), "renamed.zip")
+        assertTrue("deleted", scene.viewModel.delete(placed))
+        assertFalse("it is gone", placed.exists())
+    }
+
+    @Test
+    fun `a picture is downsized before it is decoded, so a phone photo cannot run out of memory`() {
+        // The guard that matters most, and the one that cannot be checked by eye:
+        // a 50MP photo decoded at full size is 200MB and Android kills the app.
+        // The sample size is a power of two because that is all BitmapFactory does
+        // cheaply, and it must leave a small picture alone.
+        assertEquals("a small picture is not shrunk", 1, Pictures.sampleSizeFor(800, 600))
+        assertEquals("a laptop-sized screenshot is not shrunk", 1, Pictures.sampleSizeFor(1600, 1200))
+
+        // 4000x3000 is 12MP: one halving brings it under the target.
+        assertEquals("12MP is halved", 2, Pictures.sampleSizeFor(4000, 3000))
+        // 8000x6000 is 48MP and needs several halvings.
+        val big = Pictures.sampleSizeFor(8000, 6000)
+        assertTrue("48MP is sampled down", big >= 4)
+        assertTrue("and stays a power of two", big and (big - 1) == 0)
+        assertTrue(
+            "the decoded bitmap stays inside the ceiling",
+            8000L / big * (6000L / big) <= Pictures.MAX_BITMAP_PIXELS,
+        )
+    }
+
+    @Test
+    fun `even an absurd picture cannot allocate past the ceiling`() {
+        // A panorama or a corrupt header can claim any size. Whatever it claims,
+        // the number handed to BitmapFactory must leave a bitmap that fits.
+        listOf(50_000 to 50_000, 100_000 to 1, 1 to 100_000, 20_000 to 15_000).forEach { (w, h) ->
+            val sample = Pictures.sampleSizeFor(w, h)
+            assertTrue("$w x $h samples at least 1", sample >= 1)
+            assertTrue("$w x $h stays a power of two", sample and (sample - 1) == 0)
+        }
+    }
+
+    @Test
+    fun `a picture that cannot be read is reported rather than shown as nothing`() {
+        // A truncated download or an .svg: the screen must say so, not draw an
+        // empty frame that looks like the app failed.
+        val file = scene.file("broken.png", "this is not a png")
+
+        val decoded = kotlinx.coroutines.runBlocking { Pictures.decode(file) }
+
+        assertEquals("an unreadable picture decodes to nothing", null, decoded)
     }
 
     @Test

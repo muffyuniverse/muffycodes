@@ -24,6 +24,7 @@ ProjectGitTest      app/src/main/java/com/example/notes/ProjectGit.kt app/src/ma
 AccountStoreTest    app/src/main/java/com/example/notes/AccountStore.kt
 VisibilityFeatureTest  app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AppViewModel.kt
 FilesFeatureTest   app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AppViewModel.kt
+EditorScreenTest   app/src/main/java/com/example/notes/EditorScreen.kt app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/BrowserScreen.kt
 AccountsFeatureTest  app/src/main/java/com/example/notes/AccountStore.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/CredentialStore.kt app/src/main/java/com/example/notes/GitHub.kt
 ProjectsFeatureTest  app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitHub.kt app/src/main/java/com/example/notes/Workspace.kt
 SyncFeatureTest    app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/GitHub.kt
@@ -38,5 +39,4 @@ KeySafetyFeatureTest  app/src/main/java/com/example/notes/GitHub.kt app/src/main
 # them here is honest — the alternative would be a map line claiming a test
 # covers them, which would run too few tests rather than too many.
 # always-full app/src/main/java/com/example/notes/Dialogs.kt
-# always-full app/src/main/java/com/example/notes/EditorScreen.kt
 # always-full app/src/main/java/com/example/notes/MainActivity.kt
