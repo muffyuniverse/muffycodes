@@ -116,7 +116,7 @@ fun BrowserScreen(
                         val small = when {
                             here.isEmpty() -> ""
                             here.size == 1 -> "the account's folders"
-                            here.getOrNull(1)?.takeIf { here.size == 2 }?.let { "project" } ?: ""
+                            here.size == 2 -> "project"
                             else -> here.drop(1).dropLast(1).joinToString(" › ")
                         }
                         if (small.isNotEmpty()) {
