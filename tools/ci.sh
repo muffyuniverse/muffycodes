@@ -155,22 +155,41 @@ conclusion="${state#completed/}"
 if [ "$conclusion" != "success" ]; then
     echo ""
     echo "— what broke —"
-    gh run view "$RUN_ID" --repo "$REPO" --json jobs \
-        --jq '.jobs[] | select(.conclusion == "failure") | .id as $id | "\($id)  \(.name)"' \
-        2>/dev/null | while read -r jid jname; do
-            [ -z "${jid:-}" ] && continue
-            echo ""
-            echo "job: $jname"
-            echo "failed steps:"
-            gh run view "$RUN_ID" --repo "$REPO" --json jobs \
-                --jq ".jobs[] | select(.id == $jid) | .steps[] | select(.conclusion == \"failure\") | \"  · \(.name)\"" 2>/dev/null
-            echo "log excerpt:"
-            gh api "repos/$REPO/actions/jobs/$jid/logs" 2>/dev/null \
-                | sed 's/^[0-9T:.Z-]* //' \
-                | grep -iE "what went wrong|error:|FAILED|Could not|> Task .*FAILED|tests? (failed|completed)|Caused by|^\* What" \
-                | grep -viE "DEP[0-9]|DeprecationWarning|warning:|actionable tasks" \
-                | head -25 | sed 's/^/    /'
+
+    # The verdict can arrive before the run closes: a job that failed may still be
+    # finishing, and GitHub only serves a job's log once it has finished. So this
+    # waits for the job that failed, not for the run. The reason is worth a few
+    # seconds; the verdict is not worth holding back at all.
+    failed_jobs="$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" \
+        --jq '.jobs[] | select(.conclusion == "failure") | "\(.id)\t\(.name)"' \
+        2>/dev/null || true)"
+
+    while IFS=$'\t' read -r jid jname; do
+        [ -z "${jid:-}" ] && continue
+        echo ""
+        echo "job: $jname"
+
+        for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            [ "$(gh api "repos/$REPO/actions/jobs/$jid" --jq '.status' 2>/dev/null)" = "completed" ] && break
+            sleep 5
         done
+
+        echo "failed steps:"
+        gh api "repos/$REPO/actions/jobs/$jid" \
+            --jq '.steps[] | select(.conclusion == "failure") | "  · \(.name)"' 2>/dev/null
+
+        echo "log excerpt:"
+        # The runner prints the step's own script into the log, in cyan, and that
+        # text is full of the words being looked for — "error:", "Could not", the
+        # message this command would print if things went wrong. It is the script,
+        # not what happened, so it is dropped before anything is matched.
+        gh api "repos/$REPO/actions/jobs/$jid/logs" 2>/dev/null \
+            | grep -v $'\033\[36;1m' \
+            | sed 's/^[0-9T:.Z-]* //' \
+            | grep -iE "what went wrong|error:|FAILED|Could not|tests? (failed|completed)|Caused by|^\* What" \
+            | grep -viE "DEP[0-9]|DeprecationWarning|warning:|actionable tasks" \
+            | head -20 | sed 's/^/    /'
+    done <<< "$failed_jobs"
 fi
 
 # A build that passed on main or development leaves its bundle on GitHub,
