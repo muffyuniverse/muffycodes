@@ -1,0 +1,105 @@
+# The walk through the features that need an account.
+#
+# The other tour (default-tour.txt) walks what the app shows to somebody who has
+# not signed in, because a tour is run by a machine and a machine must never be
+# given a key. That leaves the half of the app that needs an account — projects,
+# sync, pulling a repository in, the history of everything — untested on a real
+# install.
+#
+# This tour closes that gap without a key. It signs in as the **test account**,
+# which only a debug build can make, and whose GitHub is a folder of real git
+# repositories on the phone. Every step below is the app's real code: a repository
+# is created, a project is cloned, a file is written, a sync commits and pushes,
+# and the history screen reads what was written. Nothing is faked except the
+# network, which there is none of.
+#
+# The tour runs against a debug build made from the same tag as the release, so
+# what it shows is the code that was shipped, with one switch turned on.
+#
+# Points are for a 1080 wide screen and are scaled to the device.
+#
+# A step is one of:
+#
+#   tap    X Y   [name]        a tap on a point of the screen
+#   taptext  words [name]      a tap on the text that is shown
+#   swipe  X1 Y1 X2 Y2 [ms] [name]   a swipe from one point to another
+#   text   words              typing into the field that is open
+#   key    KEYCODE            a key, e.g. BACK, ENTER
+#   shot   name               a picture without touching the screen
+#   wait   seconds            a pause
+
+# --- the first screen, with nobody signed in ---
+shot 01-nobody-signed-in
+wait 2
+
+# --- the account sheet, then the test account ---
+tap 60 110 02-open-the-account-sheet
+wait 3
+taptext "Use the test account" 03-pick-the-test-account
+wait 4
+
+# --- the root of the account: projects, and nothing else yet ---
+shot 04-the-account-root
+wait 2
+
+# --- into projects ---
+taptext "projects" 05-open-projects
+wait 3
+shot 06-projects-empty
+
+# --- a new project, invented from the pretend GitHub ---
+tap 1010 1800 07-press-add
+wait 3
+taptext "New project" 08-choose-new-project
+wait 3
+text "groceries"
+wait 2
+shot 09-name-the-project
+wait 1
+taptext "Make" 10-make-it
+wait 8
+
+# --- the project, with its worktree inside ---
+shot 11-the-new-project
+wait 2
+taptext "repo" 12-open-the-worktree
+wait 3
+shot 13-the-worktree
+wait 1
+
+# --- a file written into the worktree, then synced to the repository ---
+tap 1010 1800 14-press-add-in-the-worktree
+wait 3
+taptext "New file" 15-choose-new-file
+wait 3
+text "milk"
+wait 2
+key ENTER
+wait 4
+taptext "milk.txt" 16-open-the-file
+wait 3
+text "two litres"
+wait 2
+key BACK
+wait 3
+shot 17-the-worktree-with-a-file
+
+# The row's sync button is the project's one button; back at the project first.
+key BACK
+wait 3
+shot 18-the-project-with-changes
+wait 2
+taptext "Sync" 19-press-sync
+wait 8
+shot 20-after-the-sync
+wait 2
+
+# --- the history of the file that was just written ---
+taptext "repo" 21-open-the-worktree-again
+wait 3
+tap 990 240 22-open-the-file-menu
+wait 2
+taptext "History" 23-open-the-history
+wait 5
+shot 24-the-history
+wait 2
