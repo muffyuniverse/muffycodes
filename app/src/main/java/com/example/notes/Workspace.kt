@@ -314,7 +314,16 @@ class Workspace(val accountDir: File) {
         const val PROJECTS = "projects"
         const val REPO = "repo"
         const val STATE_DIR = ".muffy"
-        /** The hidden marker that gives an empty folder a version. */
+        /**
+         * The hidden marker that gives an empty folder a version.
+         *
+         * A folder with nothing in it does not exist as far as git is concerned:
+         * git records files and the paths that hold them, never a directory on its
+         * own. So an empty folder would vanish from history, and the app promises
+         * that any change can be taken back — including making a folder. The marker
+         * is written when a folder is made and left alone afterwards, and it is
+         * hidden by the same rule that hides everything else the app owns.
+         */
         const val KEEPER = ".gitkeep"
         const val PINS_FILE = "pins.json"
 
