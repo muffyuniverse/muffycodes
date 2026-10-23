@@ -819,6 +819,13 @@ jobs:
             # half of it. The report's links are aimed at those names.
             BASE_URL="https://github.com/${REPOSITORY}/releases/download/v${VERSION_NAME}"
             assets=()
+            mkdir -p report
+            # The report itself goes on the release as a file, under a name of its
+            # own: `gh release create` takes an asset's name from the file, so the
+            # file is given the name it should have. It is not the same as the
+            # body's copy — this one links to folders, which is what the phone
+            # needs, and the body's cannot.
+            cp bundle/scenarios/README.md report/scenarios.md
             if [ -d bundle/scenarios ]; then
               for picture in bundle/scenarios/*/*.png; do
                 [ -e "$picture" ] || continue
@@ -866,8 +873,6 @@ jobs:
             # the file is given the name it should have. It is not the same as the
             # body's copy — this one links to folders, which is what the phone
             # needs, and the body's cannot.
-            mkdir -p report
-            cp bundle/scenarios/README.md report/scenarios.md
 
             gh release create "v${VERSION_NAME}" \
               --repo "$REPOSITORY" \
