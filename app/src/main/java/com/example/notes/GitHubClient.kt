@@ -100,17 +100,9 @@ object GitHubClient {
         )
     }
 
-    /** The URL to clone a repository over HTTPS with the token embedded. */
-    fun authenticatedCloneUrl(cloneUrl: String, token: String): String {
-        if (token.isBlank()) return cloneUrl
-        // https://github.com/owner/repo.git -> https://TOKEN@github.com/owner/repo.git
-        return cloneUrl.replaceFirst("https://", "https://$token@")
-    }
-
     /** The URL used to open a repository in the browser. */
     fun webUrl(cloneUrl: String): String =
-        cloneUrl.replaceFirst("https://", "https://")
-            .removeSuffix(".git")
+        cloneUrl.removeSuffix(".git")
 
     /** The raw response from the API. */
     private fun request(
@@ -128,7 +120,9 @@ object GitHubClient {
                 setRequestProperty("Accept", "application/vnd.github+json")
                 setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
                 setRequestProperty("User-Agent", "MuffyCodes-Notes")
-                if (token.isNotBlank()) {
+                // The key is only ever attached to GitHub itself. A request
+                // that would go anywhere else is sent without it.
+                if (token.isNotBlank() && Secrets.isGitHubHost(API)) {
                     setRequestProperty("Authorization", "Bearer $token")
                 }
                 if (body != null) {

@@ -179,17 +179,12 @@ class GitProjects(
         if (GitService.isRepository(dir)) {
             return GitService.RemoteResult("This folder is already a git project", false)
         }
-        val token = tokenProvider()
-        val url = if (token.isNullOrBlank()) {
-            remoteUrl
-        } else {
-            GitHubClient.authenticatedCloneUrl(remoteUrl, token)
-        }
-        val result = GitService.clone(url, dir, authorProvider())
-        // The token must never be left in the remote URL on disk.
+        // The token travels as credentials inside the clone, never inside the
+        // address: the address is written to .git/config and must stay clean.
+        val result = GitService.clone(remoteUrl, dir, authorProvider(), tokenProvider())
         if (result.success) {
             openRepository(folderId)?.use { repo ->
-                GitService.setRemoteUrl(repo, remoteUrl)
+                GitService.scrubRemoteUrls(repo)
             }
         }
         return result

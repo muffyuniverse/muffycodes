@@ -1,6 +1,10 @@
 package com.example.notes
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -9,11 +13,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 
 class MainActivity : ComponentActivity() {
@@ -63,6 +69,13 @@ private sealed interface HistoryTarget {
     data class File(val note: Note) : HistoryTarget
 }
 
+/** The activity behind a compose context, however it is wrapped. */
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
+
 /**
  * The app: a list screen, an editor, a settings screen and a version browser.
  */
@@ -75,8 +88,21 @@ fun NotesApp(
     credentials: CredentialStore,
     viewModel: NotesViewModel = viewModel(),
 ) {
-    var editingId by remember { mutableStateOf<String?>(null) }
-    var showSettings by remember { mutableStateOf(false) }
+      var editingId by remember { mutableStateOf<String?>(null) }
+      var showSettings by remember { mutableStateOf(false) }
+
+      // The settings screen holds the field where a key is typed. While it is
+      // up, the window refuses to be screenshotted or appear in the app
+      // switcher — the one place a key is on screen deserves it.
+      val context = LocalContext.current
+      LaunchedEffect(showSettings) {
+          val window = context.findActivity()?.window ?: return@LaunchedEffect
+          if (showSettings) {
+              window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+          } else {
+              window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+          }
+      }
     var historyTarget by remember { mutableStateOf<HistoryTarget?>(null) }
     var pending by remember { mutableStateOf<PendingDialog>(PendingDialog.None) }
     var pendingNoteDelete by remember { mutableStateOf<Note?>(null) }
