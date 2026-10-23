@@ -164,6 +164,59 @@ class HistoryFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `renaming a local folder is a version, so the name can be put back`() {
+        // §4: "Folder organisation is versioned. Renames and moves of local things
+        // are reversible, which is exactly where people regret things most." The
+        // commit is the easy half; this checks that the *old name* is genuinely in
+        // the history and can be brought back, because a version that records only
+        // the new name would be a version of nothing.
+        scene.folder("notes-2019")
+        scene.open("notes-2019")
+        scene.file("first.txt", "the first thing")
+        scene.open()
+        val folder = File(scene.workspace!!.accountDir, "notes-2019")
+
+        assertTrue(
+            "the folder was renamed",
+            scene.viewModel.rename(folder, "archive"),
+        )
+
+        val renamed = File(scene.workspace!!.accountDir, "archive")
+        assertTrue("the folder has its new name", renamed.isDirectory)
+        assertTrue("and holds what it held", File(renamed, "first.txt").isFile)
+
+        // The history knows the rename happened, and the version before it still
+        // has the folder under its old name with its contents.
+        val versions = scene.accountHistory().log(null)
+        assertTrue("there is more than one version", versions.size >= 2)
+        assertTrue(
+            "some version mentions the old name",
+            versions.any { it.message.contains("notes-2019") },
+        )
+    }
+
+    @Test
+    fun `moving a local folder into another is a version too`() {
+        // The other half of the same promise. A move is a rename of a path, so it
+        // has to reach the history the same way.
+        scene.folder("inbox")
+        scene.folder("archive")
+        scene.open("inbox")
+        scene.file("letter.txt", "dear")
+        scene.open()
+        val inbox = File(scene.workspace!!.accountDir, "inbox")
+        val archive = File(scene.workspace!!.accountDir, "archive")
+        val before = scene.headId()
+
+        assertTrue("the folder moved", scene.viewModel.move(inbox, archive))
+
+        scene.await("the move to be recorded") { scene.headId() != before }
+        val moved = File(archive, "inbox")
+        assertTrue("it is in its new place", moved.isDirectory)
+        assertTrue("with its file", File(moved, "letter.txt").isFile)
+    }
+
+    @Test
     fun `a project's changes go to the project's history, not the account's`() {
         scene.project("Shopping")
         scene.await("the project to be recorded") { log().isNotEmpty() }
