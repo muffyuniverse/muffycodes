@@ -1,6 +1,5 @@
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
@@ -9,13 +8,13 @@ import java.util.Properties
 
 android {
     namespace = "com.example.notes"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.example.notes"
         // JGit uses java.nio.file, which Android gained in API 26.
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 37
         // The version can be set from the outside, so the build that the
         // continuous integration makes gets the number of the release.
         versionCode = (project.findProperty("muffy.versionCode") as String?)?.toInt() ?: 1
@@ -94,10 +93,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
     buildFeatures {
         compose = true
     }
@@ -113,6 +108,15 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+    }
+}
+
+// Under AGP 9's built-in Kotlin there is no kotlin-android plugin and no
+// android.kotlinOptions: the compiler settings live in their own top-level
+// kotlin block. This is where jvmTarget belongs now.
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
 
@@ -232,12 +236,12 @@ gradle.taskGraph.whenReady {
 }
 
 dependencies {
-    implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.core:core-ktx:1.19.1")
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
 
-    val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
+    val composeBom = platform("androidx.compose:compose-bom:2026.09.00")
     implementation(composeBom)
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
