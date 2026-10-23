@@ -174,8 +174,9 @@ def main():
             warn(
                 f"The tests take {total:.1f}s on one shard (recommended split at "
                 f"{recommend:.0f}s). Set the repository variable TEST_SHARDS to "
-                f"[0,1] to engage the flat-scaling law: each shard keeps its own "
-                f"configuration cache, so the split costs nothing but a runner."
+                f"[0,1] — but only if this job is the pipeline's longest: "
+                f"sharding shortens the suite, not the pipeline, so a build that "
+                f"outlasts the tests is the thing to look at first."
             )
         elif total >= break_even:
             note(
@@ -193,7 +194,7 @@ def main():
             warn(
                 f"Sharding is on ({args.shards} shards) but the tests cost only "
                 f"{total:.1f}s — less than the {break_even:.0f}s a second runner "
-                f"costs to start. Each shard is paying more than it saves: set "
+                f"costs to start. Each shard pays more than it saves: set "
                 f"TEST_SHARDS back to [0]."
             )
         else:
