@@ -845,6 +845,7 @@ jobs:
                 # little further down.
                 sed -E \
                   -e "s#\]\(([^/)]+)/(before|after)\.png\)#](${BASE_URL}/scenario-\1-\2.png)#g" \
+                  -e "s#\*\*\[([^]]+)\]\([0-9][^)]*/README\.md\)\*\*#\1#g" \
                   -e "s#\[([^]]+)\]\([0-9][^)]*/README\.md\)#**\1**#g" \
                   bundle/scenarios/README.md
               } >> release-notes.md
@@ -855,5 +856,6 @@ jobs:
               --title "Muffy Codes ${VERSION_NAME}" \
               --notes-file release-notes.md \
               bundle/app-release.apk \
-              "${assets[@]}"
+              "${assets[@]}" \
+              bundle/scenarios/README.md#scenarios.md
 

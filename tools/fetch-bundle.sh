@@ -69,20 +69,28 @@ restore_scenarios() {
 
     [ "$found" -eq 0 ] && return 0
 
-    if [ -f "$dir/changes.md" ] && grep -q '^# What the app does' "$dir/changes.md"; then
+    # The report travels as an asset of its own, with links relative to the
+    # scenario folders — which is exactly the shape this function just restored.
+    # That is why it is preferred over the release's body: the body cannot link to
+    # folders a release does not have, so there its index is plain text.
+    if [ -f "$dir/scenarios.md" ]; then
+        cp "$dir/scenarios.md" "$scenarios/README.md"
+        rm -f "$dir/scenarios.md"
+    elif [ -f "$dir/changes.md" ] && grep -q '^# What the app does' "$dir/changes.md"; then
         sed -n '/^# What the app does$/,$p' "$dir/changes.md" > "$scenarios/README.md"
-        # The body carries the report as well as the changes, and on the phone the
-        # report has its own folder now. Leaving both would show a person the same
-        # scenarios twice, once with links that only work on GitHub.
-        sed -n '1,/^# What the app does$/p' "$dir/changes.md" \
-            | sed '$d' > "$dir/changes.trimmed" && mv "$dir/changes.trimmed" "$dir/changes.md"
-        # The published links point at the release's download addresses; here the
-        # pictures are beside the page, so the links are aimed back at them.
         sed -E -i "s#https://github[^ )]*/scenario-([^ )]+)-(before|after)\.png#\1/\2.png#g" \
             "$scenarios/README.md"
     else
         bash "$(dirname "$0")/scenario-report.sh" "$scenarios" \
             --out "$scenarios/README.md" 2>/dev/null || true
+    fi
+
+    # The body also carries the report, and on the phone the report has its own
+    # folder. Leaving both would show the scenarios twice, once with links that
+    # only work on GitHub.
+    if [ -f "$dir/changes.md" ] && grep -q '^# What the app does' "$dir/changes.md"; then
+        sed -n '1,/^# What the app does$/p' "$dir/changes.md" \
+            | sed '$d' > "$dir/changes.trimmed" && mv "$dir/changes.trimmed" "$dir/changes.md"
     fi
 }
 
