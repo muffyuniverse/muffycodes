@@ -70,6 +70,10 @@ android {
                 keyStorePassword != null && keyName != null && keyPass != null
             ) {
                 storeFile = keyFile
+                // The guard below only wants to know whether a real key
+                // was found. Record it here rather than reach back into
+                // the extension later, which AGP 9 no longer allows.
+                project.extensions.extraProperties.set("muffyReleaseSigned", true)
                 storePassword = keyStorePassword
                 keyAlias = keyName
                 keyPassword = keyPass
@@ -220,10 +224,10 @@ tasks.withType<Test>().configureEach {
 gradle.taskGraph.whenReady {
     val hasRelease = allTasks.any { it.name == "assembleRelease" }
     if (hasRelease) {
-        val releaseSigning = extensions.getByName("android")
-            .let { it as com.android.build.gradle.AppExtension }
-            .signingConfigs.getByName("release")
-        val signed = releaseSigning.storeFile != null
+        // AGP 9 holds its extension in its own class, so the old AppExtension
+        // cast no longer holds. The signing block recorded whether a real key
+        // was found; that is all this guard needs to know.
+        val signed = project.extensions.extraProperties.has("muffyReleaseSigned")
         if (!signed) {
             throw GradleException(
                 "The release build has no signing key. Put one in keystore.properties " +
