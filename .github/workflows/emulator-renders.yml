@@ -71,6 +71,38 @@ jobs:
           gh release download "$TAG" --repo "$REPOSITORY" --pattern app-release.apk --dir . --clobber
           ls -la app-release.apk
 
+      # The half of the app that needs an account cannot be reached without one,
+      # and a machine must never hold a key. So the job also builds the *debug* APK
+      # of the same tag, where a test account can be made: the walk below signs in
+      # as an account whose GitHub is a folder of real repositories on the phone.
+      - name: Take the tag the release was built from
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          # The app under test is the code of the tag. The tooling — this tour, the
+          # script that walks it — is whatever the workflow was run from, so a
+          # better tour can walk an older release without republishing it. It is
+          # kept aside before the checkout moves the tree.
+          cp -r tools /tmp/tour-tools
+          git fetch --depth=1 origin "refs/tags/$TAG:refs/tags/$TAG"
+          git checkout --detach "refs/tags/$TAG"
+          cp -r /tmp/tour-tools/. tools/
+
+      - name: Set up Java
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
+        with:
+          cache-cleanup: never
+          cache-read-only: true
+
+      - name: Build the debug APK of that tag
+        run: ./gradlew --no-daemon assembleDebug
+
       # The emulator needs to be able to use the processor of the machine.
       # Without this the emulator runs so slowly that it never finishes starting.
       - name: Let the emulator use the processor
@@ -109,6 +141,18 @@ jobs:
             # The tour walks through the app and takes the pictures.
             bash tools/screenshot-tour.sh
 
+            # Then the same walk with a debug build, which can sign in as the test
+            # account: the projects, the worktree, a sync and the history. Its
+            # pictures are named walk-* so the two sets never mix.
+            adb uninstall com.example.notes || true
+            adb install -r app/build/outputs/apk/debug/app-debug.apk
+            adb shell am start -n com.example.notes/com.example.notes.MainActivity
+            sleep 8
+            SHOT_DIR="${{ github.workspace }}/walks" \
+              TOUR_FILE="${{ github.workspace }}/tools/dev-tour.txt" \
+              TRACE_FILE="${{ github.workspace }}/walk-trace.log" \
+              bash tools/screenshot-tour.sh
+
             # A step that did not work does not fail the run: what was made is
             # still worth looking at. But a run that made nothing at all is a
             # failure, and this says so.
@@ -145,6 +189,17 @@ jobs:
             [ -e "$f" ] || continue
             cp "$f" "renders/render-$(basename "$f")"
           done
+            # The walked features, from the debug build of the same tag.
+            for f in walks/*.png; do
+              [ -e "$f" ] || continue
+              cp "$f" "renders/render-walk-$(basename "$f")"
+            done
+
+          walked="$(ls walks 2>/dev/null | grep -c . || true)"
+          echo "walked pictures: $walked"
+          if [ "$walked" -eq 0 ]; then
+            echo "::warning::The walk of the account features made no pictures."
+          fi
 
           count="$(ls renders 2>/dev/null | grep -c . || true)"
           echo "renders made: $count"
