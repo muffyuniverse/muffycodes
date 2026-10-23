@@ -35,26 +35,29 @@ usage() {
 SHARD=""
 OF=""
 VERIFY=0
+LIST=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --shard) SHARD="${2:-}"; shift 2 ;;
         --of)    OF="${2:-}"; shift 2 ;;
         --verify) VERIFY=1; shift ;;
+        --list)   LIST=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
 
 case "$OF" in
-    ''|*[!0-9]*) echo "--of needs a whole number" >&2; exit 2 ;;
+    '') [ "$LIST" = "1" ] && OF=1 || { echo "--of needs a whole number" >&2; exit 2; } ;;
+    *[!0-9]*) echo "--of needs a whole number" >&2; exit 2 ;;
 esac
 if [ "$OF" -lt 1 ]; then
     echo "--of must be at least 1" >&2
     exit 2
 fi
 
-if [ "$VERIFY" = "0" ]; then
+if [ "$VERIFY" = "0" ] && [ "$LIST" = "0" ]; then
     case "$SHARD" in
         ''|*[!0-9]*) echo "--shard needs a whole number" >&2; exit 2 ;;
     esac
@@ -101,6 +104,14 @@ ordered_class_names() {
 shard_at() {
     echo $(( ($1 - 1) % OF ))
 }
+
+# Every class, in the order the split uses. Asked for by the selector, which has
+# to know whether a name it was given exists at all — a name that matches nothing
+# would otherwise be answered with "nothing to do" by every shard at once.
+if [ "$LIST" = "1" ]; then
+    ordered_class_names
+    exit 0
+fi
 
 if [ "$VERIFY" = "1" ]; then
     all="$(ordered_class_names)"
