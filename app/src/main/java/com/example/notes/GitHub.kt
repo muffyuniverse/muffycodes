@@ -1,11 +1,8 @@
 package com.example.notes
 
 import org.eclipse.jgit.api.Git
-import org.eclipse.jgit.lib.CommitBuilder
-import org.eclipse.jgit.lib.Constants
-import org.eclipse.jgit.lib.FileMode
 import org.eclipse.jgit.lib.PersonIdent
-import org.eclipse.jgit.lib.TreeFormatter
+import org.eclipse.jgit.transport.RefSpec
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -376,39 +373,40 @@ class DiskGitHub(
      * Makes one repository the way GitHub does when it is asked to initialise:
      * a `main` branch and one commit holding the README and, when asked for, the
      * licence.
+     *
+     * The commit is made in a throwaway working folder and pushed into the bare
+     * repository, which is how a person would do it and how every other write in
+     * this app is done. The folder is removed either way.
      */
     private fun seed(dir: File, name: String, licence: String) {
         dir.parentFile?.mkdirs()
-        Git.init().setBare(true).setInitialBranch("main").setDirectory(dir).call().use { git ->
-            val repo = git.repository
-            val inserter = repo.objectDatabase.newObjectInserter()
-            val tree = TreeFormatter()
-
-            fun add(fileName: String, text: String) {
-                val blob = inserter.insert(Constants.OBJ_BLOB, text.toByteArray())
-                tree.append(fileName, FileMode.REGULAR_FILE, blob)
+        val work = File(dir.parentFile, "${dir.name}.seed")
+        work.deleteRecursively()
+        try {
+            Git.init().setBare(true).setInitialBranch("main").setDirectory(dir).call().close()
+            work.mkdirs()
+            Git.init().setInitialBranch("main").setDirectory(work).call().use { git ->
+                File(work, "README.md").writeText(
+                    "# $name\n\nA test repository, made by the app on this phone.\n"
+                )
+                if (licence.isNotBlank()) {
+                    File(work, "LICENSE").writeText("The $licence licence applies here.\n")
+                }
+                val who = PersonIdent(owner, "$owner@example.com")
+                git.add().addFilepattern(".").call()
+                git.commit()
+                    .setMessage("Initial commit")
+                    .setAuthor(who)
+                    .setCommitter(who)
+                    .call()
+                git.push()
+                    .setRemote(dir.absolutePath)
+                    .setRefSpecs(RefSpec("refs/heads/main:refs/heads/main"))
+                    .call()
             }
-
-            add("README.md", "# $name\n\nA test repository, made by the app on this phone.\n")
-            if (licence.isNotBlank()) {
-                add("LICENSE", "The $licence licence applies to this repository.\n")
-            }
-            val treeId = inserter.insert(tree)
-
-            val who = PersonIdent(owner, "$owner@example.com")
-            val builder = CommitBuilder().apply {
-                setTreeId(treeId)
-                setAuthor(who)
-                setCommitter(who)
-                setMessage("Initial commit")
-            }
-            val commitId = inserter.insert(builder)
-            inserter.flush()
-
-            repo.updateRef(Constants.R_HEADS + "main").apply {
-                newObjectId = commitId
-                forceUpdate()
-            }
+        } finally {
+            work.deleteRecursively()
         }
     }
+
 }
