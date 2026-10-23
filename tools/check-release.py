@@ -89,8 +89,17 @@ def main() -> int:
     linked: set[str] = set()
     if report.is_file():
         text = report.read_text()
+        # Two shapes, because there are two reports and they are the same report.
+        #
+        # The bundle's copy points at folders — `01-first-open/before.png` — because
+        # that is what the phone's `bundle` command reconstructs. The published copy
+        # points at flat assets — `scenario-01-first-open-before.png` — because a
+        # release cannot hold folders. Checking only the second shape made this fail
+        # on the first, which is a check disagreeing with a correct release.
         for match in re.finditer(r"scenario-[^)\s]+\.png", text):
             linked.add(match.group(0))
+        for match in re.finditer(r"([0-9][^/)\s]*)/(before|after)\.png", text):
+            linked.add(f"scenario-{match.group(1)}-{match.group(2)}.png")
         if not linked:
             problems.append(f"{report} links to no pictures at all")
         missing = sorted(linked - assets)
