@@ -1,15 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    The key store is deliberately excluded from every backup: a backup of this
-    app must never carry the tokens, whatever device it lands on.
+    Only the notes file is ever backed up. The credential store (the
+    muffy_git preferences) sits in no included path, so a backup of this app
+    can never carry a token. That is deliberate, and lint keeps it honest.
 -->
 <data-extraction-rules>
     <cloud-backup>
         <include domain="file" path="notes.json" />
-        <exclude domain="sharedpref" path="muffy_git.xml" />
     </cloud-backup>
     <device-transfer>
         <include domain="file" path="notes.json" />
-        <exclude domain="sharedpref" path="muffy_git.xml" />
     </device-transfer>
 </data-extraction-rules>
