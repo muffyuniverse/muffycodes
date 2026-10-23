@@ -48,6 +48,44 @@ done
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
+# Puts the flattened scenario pictures back into folders, and takes the report
+# from the release's own body.
+restore_scenarios() {
+    local dir="$1"
+    local scenarios="$dir/scenarios"
+    local found=0
+    local picture name half scenario
+
+    for picture in "$dir"/scenario-*-before.png "$dir"/scenario-*-after.png; do
+        [ -e "$picture" ] || continue
+        name="$(basename "$picture" .png)"
+        half="${name##*-}"
+        scenario="${name#scenario-}"
+        scenario="${scenario%-$half}"
+        mkdir -p "$scenarios/$scenario"
+        mv "$picture" "$scenarios/$scenario/$half.png"
+        found=$((found + 1))
+    done
+
+    [ "$found" -eq 0 ] && return 0
+
+    if [ -f "$dir/changes.md" ] && grep -q '^# What the app does' "$dir/changes.md"; then
+        sed -n '/^# What the app does$/,$p' "$dir/changes.md" > "$scenarios/README.md"
+        # The body carries the report as well as the changes, and on the phone the
+        # report has its own folder now. Leaving both would show a person the same
+        # scenarios twice, once with links that only work on GitHub.
+        sed -n '1,/^# What the app does$/p' "$dir/changes.md" \
+            | sed '$d' > "$dir/changes.trimmed" && mv "$dir/changes.trimmed" "$dir/changes.md"
+        # The published links point at the release's download addresses; here the
+        # pictures are beside the page, so the links are aimed back at them.
+        sed -E -i "s#https://github[^ )]*/scenario-([^ )]+)-(before|after)\.png#\1/\2.png#g" \
+            "$scenarios/README.md"
+    else
+        bash "$(dirname "$0")/scenario-report.sh" "$scenarios" \
+            --out "$scenarios/README.md" 2>/dev/null || true
+    fi
+}
+
 case "$MODE" in
     release)
         if [ -z "$TAG" ]; then
@@ -65,6 +103,13 @@ case "$MODE" in
         # it, so it is written here to travel with the rest.
         gh release view "$TAG" --repo "$REPO" --json body \
             --jq '.body' > "$TMP/changes.md" 2>/dev/null || true
+
+        # A release cannot hold folders, so the scenarios arrive flattened as
+        # `scenario-<name>-before.png`. They are put back into the shape a reader
+        # needs: a folder per scenario holding its two pictures and the page that
+        # explains them, with the report on top. Without this the phone would get a
+        # bag of pictures and no words, which is the thing this exists to stop.
+        restore_scenarios "$TMP"
 
         FOLDER="$TAG"
         LABEL="${TAG#v}"

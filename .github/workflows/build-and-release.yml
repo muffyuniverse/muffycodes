@@ -837,7 +837,15 @@ jobs:
             if [ -f bundle/scenarios/README.md ]; then
               {
                 printf '\n\n---\n\n'
-                sed -E "s#\]\(([^/)]+)/(before|after)\.png\)#](${BASE_URL}/scenario-\1-\2.png)#g" \
+                # Two rewrites. The pictures become release assets, which cannot
+                # live in folders, so their links are aimed at the flattened
+                # names. And the index links point at the scenario folders inside
+                # the bundle, which a release page does not have — so there they
+                # become bold text, because the same page holds the scenario a
+                # little further down.
+                sed -E \
+                  -e "s#\]\(([^/)]+)/(before|after)\.png\)#](${BASE_URL}/scenario-\1-\2.png)#g" \
+                  -e "s#\[([^]]+)\]\([0-9][^)]*/README\.md\)#**\1**#g" \
                   bundle/scenarios/README.md
               } >> release-notes.md
             fi
