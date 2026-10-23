@@ -38,9 +38,17 @@ class AppHistory(
         }
     }
 
+    /** What went wrong the last time the history tried to record something. */
+    var lastError: String? = null
+        private set
+
     /** Opens the history, creating it the first time the account is used. */
     fun open(): Repository {
-        accountDir.mkdirs()
+        // The folder belongs to the account, and the account made it. A history
+        // that arrives after its account was removed must not bring it back.
+        if (!accountDir.isDirectory) {
+            throw IllegalStateException("The account is no longer on this phone")
+        }
         if (!GitService.isRepository(accountDir)) {
             Git.init().setDirectory(accountDir).setInitialBranch("main").call().close()
         }
@@ -60,11 +68,17 @@ class AppHistory(
         // method. Opening the history would then make the folder again, and the
         // account would come back from the dead.
         if (!accountDir.isDirectory) return null
-        val repo = open()
+        val repo = try {
+            open()
+        } catch (e: Exception) {
+            lastError = e.message
+            return null
+        }
         return repo.use {
             val id = try {
                 GitService.commitAll(it, message, authorProvider())
             } catch (e: Exception) {
+                lastError = Secrets.scrub(e.message ?: "Could not record the change")
                 null
             } ?: return@use null
             pruneIfNeeded(it, keep)

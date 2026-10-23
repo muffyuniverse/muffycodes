@@ -776,7 +776,10 @@ class AppViewModel @JvmOverloads constructor(
         credentials.forget(login)
         // Another stored account takes over, so the screen is never left pointing
         // at an account that is no longer here.
-        val next = credentials.logins().firstOrNull { accounts.exists(it) }
+        // The disk is what says which accounts this phone has; the keys only say
+        // which of them can still open GitHub.
+        val next = accounts.accounts().map { it.login }.firstOrNull { it != login }
+            ?: credentials.logins().firstOrNull { accounts.exists(it) }
         credentials.activeLogin = next
         activeLogin = next
         path = emptyList()
@@ -788,15 +791,8 @@ class AppViewModel @JvmOverloads constructor(
     /** The token of the active account, for the sign-in check. */
     fun tokenOf(login: String): String? = credentials.token(login)
 
-    /**
-     * True when this phone can act as [login]: it holds a key for it, or it is the
-     * test account of a build that may keep one. Removing an account forgets its
-     * key, so a removed account is not something to switch to.
-     */
-    fun known(login: String): Boolean {
-        if (credentials.hasToken(login)) return true
-        return testAccountsAllowed && accounts.account(login)?.dev == true
-    }
+    /** True when this phone holds a key for [login]. Removing an account forgets it. */
+    fun known(login: String): Boolean = credentials.hasToken(login)
 
     // ---- history ------------------------------------------------------------
 

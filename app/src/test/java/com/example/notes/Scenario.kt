@@ -290,7 +290,52 @@ class Scenario(
             Thread.sleep(4)
         }
         shadowOf(Looper.getMainLooper()).idle()
-        assertTrue("waited $timeoutMs ms for $what", condition())
+        assertTrue(
+            "waited $timeoutMs ms for $what\n${diagnose()}",
+            condition(),
+        )
+    }
+
+    /**
+     * What the app was saying while it waited.
+     *
+     * A red run is expensive to produce, so it must arrive carrying the answer:
+     * the app's own message, whether its history is recording at all, and what the
+     * projects think is waiting. Without this a failed assumption costs another
+     * whole run to explain.
+     */
+    fun diagnose(): String = buildString {
+        appendLine("    the app said: ${viewModel.message}")
+        val ws = workspace
+        if (ws == null) {
+            appendLine("    no account is signed in")
+            return@buildString
+        }
+        val dir = ws.accountDir
+        appendLine("    account folder: ${if (dir.isDirectory) "there" else "MISSING"} $dir")
+        appendLine("    projects: ${ws.projectNames()}")
+        viewModel.projectNames.forEach { name ->
+            val repo = ws.repoOf(name)
+            appendLine("    $name: repo ${if (repo.isDirectory) "there" else "MISSING"}, " +
+                "changes ${viewModel.changesOf(name)}")
+            try {
+                Git.open(repo).use { git ->
+                    val log = GitService.log(git.repository, null, 5)
+                    appendLine("      commits: ${log.joinToString { it.message.take(40) }}")
+                    appendLine("      branch: ${git.repository.branch}, " +
+                        "remote: ${git.repository.config.getString("remote", "origin", "url")}")
+                }
+            } catch (e: Exception) {
+                appendLine("      the repository could not be read: ${e.message}")
+            }
+        }
+        try {
+            val hist = AppHistory(dir) { viewModel.DEFAULT_AUTHOR }
+            appendLine("    history: ${hist.log(null, 6).joinToString { it.message.take(30) }}")
+            appendLine("    history error: ${hist.lastError}")
+        } catch (e: Exception) {
+            appendLine("    history could not be read: ${e.message}")
+        }
     }
 
     @After

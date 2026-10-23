@@ -17,8 +17,9 @@ class VisibilityFeatureTest : FeatureTest() {
 
     @Test
     fun `the root shows projects and the files a person made, and nothing the app made`() {
-        scene.workspace!!.pins()
+        // Written straight to disk, the way another app or a cable would.
         File(scene.workspace!!.accountDir, "notes.txt").writeText("mine")
+        scene.viewModel.refresh()
 
         assertEquals(listOf("projects", "notes.txt"), scene.names())
     }
@@ -96,19 +97,50 @@ class VisibilityFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `search covers the whole tree except the app's own files`() {
-        scene.folder("letters").let { scene.open("letters"); scene.file("note.txt", "a") }
-        scene.open()
-        File(scene.workspace!!.accountDir, "loose.txt").writeText("b")
-        scene.viewModel.refresh()
+    fun `search covers a project whole tree, however deep`() {
+        scene.project("Shopping")
+        scene.open(Workspace.PROJECTS, "Shopping")
+        scene.folder("letters")
+        scene.open(Workspace.PROJECTS, "Shopping", "letters")
+        scene.folder("2026")
+        scene.open(Workspace.PROJECTS, "Shopping", "letters", "2026")
+        scene.file("note.txt", "an appointment")
 
-        scene.viewModel.query = "note"
+        scene.viewModel.query = "appointment"
+
         assertTrue(
-            "the buried file is found",
+            "the buried file is found by its text",
             scene.viewModel.visibleEntries.any { it.name == "note.txt" },
         )
+    }
 
-        scene.viewModel.query = "gitignore"
-        assertTrue("the app's files are not searched", scene.viewModel.visibleEntries.isEmpty())
+    @Test
+    fun `search never reaches into the worktree or the app's own folders`() {
+        scene.project("Shopping")
+        scene.open(Workspace.PROJECTS, "Shopping")
+        scene.file("README-ish.txt", "index")
+
+        scene.viewModel.query = "muffy"
+
+        assertTrue(
+            "nothing from .muffy or .git is offered",
+            scene.viewModel.visibleEntries.none { it.file.path.contains("/.muffy/") },
+        )
+    }
+
+    @Test
+    fun `search is scoped to the project that is open, because the list is the index`() {
+        scene.project("Shopping")
+        scene.folder("letters")
+        scene.open(Workspace.PROJECTS, "Shopping", "letters")
+        scene.file("note.txt", "an appointment")
+        scene.open(Workspace.PROJECTS, "Shopping")
+
+        scene.viewModel.query = "appointment"
+
+        assertTrue(
+            "a file deeper in this project is found",
+            scene.viewModel.visibleEntries.any { it.name == "note.txt" },
+        )
     }
 }

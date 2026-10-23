@@ -50,6 +50,10 @@ class ProjectGit(
         Result.failure(e)
     }
 
+    /** What went wrong the last time this class looked at a project. */
+    var lastError: String? = null
+        private set
+
     /** How many changes are waiting in the project, for the row's count. */
     fun changes(project: String): GitService.Changes {
         val repo = open(project) ?: return GitService.Changes(0, 0, 0)
@@ -57,6 +61,7 @@ class ProjectGit(
             try {
                 GitService.status(it)
             } catch (e: Exception) {
+                lastError = Secrets.scrub(e.message ?: "Could not read the project")
                 GitService.Changes(0, 0, 0)
             }
         }
