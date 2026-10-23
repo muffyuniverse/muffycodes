@@ -2,148 +2,281 @@
 
 `docs/ci-performance.md` records what a run costs today and why. This file is
 about tomorrow: the shape of a pipeline whose test time does not grow with the
-codebase.
+codebase, and an honest account of what has already been tried.
 
 ## The property we want
 
 Test time should grow with **what changed**, not with **how much exists**. A
 thousand tests in a module you did not touch should cost nothing to run.
 
-That is not what happens by default. Gradle compiles the whole module before
-running one test, so a one-line change costs a whole-module compile. Sharding
-splits the tests but not the compile. Neither makes the pipeline flat.
+There is a second property that turns out to matter just as much and is easier to
+forget: **the answer must be true.** A pipeline that is fast because it silently
+stopped testing is worse than a slow one, and looks identical from the outside.
 
-## What makes it flat, in order of how much it buys
+## Where it stands, measured
 
-### 1. Split the module (the only lever that shortens compilation)
+| tier | how often | measured |
+|---|---|---|
+| pull request, one test class | most often | **59s** |
+| pull request, seven classes | often | **91s** |
+| development push | occasionally | **141s** |
+| main, full release | rare, by hand | **157s** |
+| main, nothing in the app changed | — | **59s** |
 
-The app is one Gradle module, `:app`. Every change recompiles all of it.
+For comparison: 226s and five jobs at the start of this pass.
 
-Split it and each part compiles on its own. A change to the git layer no longer
-recompiles the screens:
+Of the 59 seconds of a one-class pull request:
 
-```
-:app                  (the Android application, thin)
-:core:model           Folder, Note, BackTarget — plain data
-:core:logic           FolderTree, NoteCodec — pure functions, the bulk of the tests
-:core:storage         FolderStorage, NoteFile, NoteStore
-:core:git             GitService, GitProjects, GitHubClient
-:core:ui              themes, dialogs, shared composables
-:feature:notes        the list and editor screens
-:feature:settings
-```
-
-Three things get flatter at once:
-
-- **Compile time** is proportional to the changed module and what depends on it,
-  not to the whole app. `:core:logic` compiles in about a second; `:app` does not.
-- **Test selection becomes exact by construction.** `:core:logic`'s tests live
-  beside `:core:logic`, so "which tests did this change touch" stops being a
-  hand-maintained table (`tools/test-map.txt`) and becomes the module graph. The
-  table exists because the code is not structured; once it is, the table can go.
-- **`--parallel` starts paying.** With several modules, Gradle builds them at the
-  same time within one job. It is passed today and does nothing, because there is
-  one module.
-
-The cost is real: build files multiply, and a module needs its own dependencies
-declared. The right moment is when a change routinely touches unrelated code —
-which is the moment the compile stops feeling like it belongs to the change.
-
-**Rule of thumb: split when a one-line change's compile is more than about three
-times the tests.** Today the compile is about 20s and the tests 6s, so the ratio
-is already 3:1 and the split is worth doing soon.
-
-### 2. Sharding (splits the tests, not the compile)
-
-Already built and verified — `tools/test-shard.sh`, driven by the repository
-variable `TEST_SHARDS`. It is deliberately **off** today, because at nine test
-classes it measured as a loss: one runner took 21s of Gradle work where two took
-38s and 32s, since each runner pays setup and compilation again.
-
-Turn it on when a single shard's work exceeds the setup, which is roughly:
-
-> when the whole suite's execution passes **about 40 seconds** of real test time
-> — measured today at 6 seconds for 55 tests, so somewhere past 300 tests.
-
-Set `TEST_SHARDS=[0,1]` and measure with `tools/test-shard.sh --of 2 --verify`
-first. Keep `--verify` in the habit: it is what proves the split is complete and
-disjoint, so a split can never quietly leave tests unrun.
-
-Two constraints found the hard way, both now encoded:
-
-- **A shard is an index, never a diff.** A set chosen per change changes the
-  command line, a changed command line is a different configuration-cache entry,
-  and the run trades a cache hit for a moment of narrowness.
-- **Each shard needs its own cache key.** A matrix is one job definition, so all
-  shards write to the same key and only one entry survives.
-
-### 3. Test impact analysis at module granularity
-
-`tools/changed-tests.sh` already decides *whether* there is anything to do, and
-it is worth keeping — a document-only change takes 10 seconds instead of 43.
-
-What it does not do well is decide *which* tests, because with one module the
-answer is almost always "most of them". After the module split, it becomes
-useful: a change to `:core:git` runs `:core:git`'s tests and the integration
-tests that name it, and nothing else. That is where selective testing actually
-saves time — at scale, where "only the affected module's tests" is a real
-fraction rather than a rounding error.
-
-## What is already native, and free
-
-The repository is public, and for a public repository GitHub Actions charges
-nothing for standard runners, artifact storage or cache storage. Larger runners
-are billed even for public repositories, so the shape to aim for is **more small
-standard jobs, not fewer big ones** — which is exactly what sharding is.
-
-In use now:
-
-| capability | where |
+| | |
 |---|---|
-| concurrency cancellation | a second push stops the first run |
-| matrix sharding, ready to switch on | `TEST_SHARDS` |
-| build + dependency + Kotlin-DSL caching | `gradle/actions/setup-gradle` enhanced provider, free for public repos |
-| configuration cache, exact-key | per shard, and it now survives being read back |
-| least-privilege permissions | stated on the workflow and on every job |
-| actions pinned to commits | every action in all three workflows |
-| build provenance attestation | the published APK is signed to its commit |
-| Dependabot for Gradle and for Actions | `.github/dependabot.yml` |
-| structured dispatch inputs | a workflow takes choices, not typed strings |
-| artifacts with retention | test reports on failure, APKs, screenshots |
+| job setup, checkout, the two gates | 8s |
+| Gradle setup and cache restore | 6s |
+| Robolectric runtime restore | 3s |
+| Gradle configuration and start-up | ~13s |
+| compiling the test classes | 10s |
+| **running the tests** | **8s** |
+| teardown | ~5s |
 
-## What not to do
+**Running the tests is the smallest item on the list.** That single line
+determines most of what is and is not worth doing, and it is why the rest of this
+document is mostly about fixed costs.
 
-Worth writing down because each is the obvious next move and each is wrong here.
+## What works
 
-- **Do not shard before the suite is slow.** Measured loss at this size, and the
-  setup cost is paid once per runner.
-- **Do not narrow tests by what changed *and* keep the configuration cache.**
-  They fight: the narrow run changes the command line and misses the cache.
-- **Do not make lint partial.** It analyses the whole project by design; run over
-  a few files it loses the checks that need more than one file to be right.
-- **Do not put the cache behind a fallback key.** A fallback hands over an entry
-  made by a different build script, and the configuration cache keeps references
-  to classes compiled from that script. It loads, and then dies looking like a
-  broken build.
-- **Do not use larger runners.** They are billed even for public repositories,
-  and horizontal sharding on standard runners is free.
+**Targeting, with a fallback that cannot be wrong.** `tools/changed-tests.sh`
+maps a changed file to the classes that exercise it and falls back to *everything*
+whenever it cannot place a file: an unknown path, a change to the build itself, an
+empty change. Unknown means full, never nothing. Measured, it is worth about
+32 seconds between a narrow and a wide change.
 
-## When this stops being enough
+**Sharding, with a split that is verified.** `tools/test-shard.sh` deals classes
+across runners by a stable hash of the name — so sibling classes do not land
+together — and `--verify` proves the split is complete and disjoint before it is
+trusted. It is on by default at two shards; a shard with no share of the change
+stops before installing a toolchain.
 
-The next real wall is **Robolectric**. It is the only test framework here that
-loads an Android runtime, and it is the part that will get slow first as screens
-multiply. The answers, in order:
+**Running the checks beside each other.** The build, the tests and lint all start
+within three seconds of the push. The jobs ask different questions and none of
+them needs another's answer to begin. This was worth 100 seconds on its own,
+because the build used to start at exactly the moment the tests ended.
 
-1. Keep pure-logic tests as plain JVM tests — they are 100 times faster and they
-   are already the majority. `:core:logic` and `:core:model` need no Android at
-   all.
-2. Give Robolectric tests their own module and their own shard, so they never
-   make the fast tests wait.
-3. Only then look at test distribution across machines, which is a paid product
-   and should be the last resort rather than the first.
+**The gate moved rather than removed.** GitHub cannot cancel a running job because
+a sibling failed, so delivery waits on `needs:` (nothing ships on a red suite) and
+the build, immediately before handing anything on, asks the API whether the suite
+passed and fails without producing an artifact if it did not. Verified with a
+deliberately broken test.
 
-The end state is a pipeline where adding a module adds a runner and adds no
-time: the change compiles its module, runs its tests, and the rest of the
-codebase is not involved at all.
+**Measuring every run.** The tests report whether they still scale, the build
+reports where its time went, and both are compared against budgets in
+`tools/scaling-budget.txt` and `tools/build-budget.txt`. Advisory, never failing.
+Every real improvement in this document was found by reading one of those tables
+rather than by reasoning about the build.
 
-A single sentence, added only to a document.
+## What does not work, and was removed
+
+Worth recording, because each was plausible and each is the obvious next idea.
+
+**The emulator tier.** Six minutes a release, gating nothing, proving almost
+nothing the feature tests did not. Removed. Appearance is a person's job, on a
+real install.
+
+**Sharding before the suite is slow.** At nine classes and six seconds, two
+runners cost 38s and 32s where one cost 21s: each runner pays setup and
+compilation again. The lesson is not "sharding is bad" but "sharding divides
+execution and duplicates everything else".
+
+**Writing a Gradle cache entry the next run cannot use.** A release job that was
+read-only was reading entries nothing wrote, so release-only tasks could never
+hit — that half was a real defect. Writing them was the wrong fix: two runs later
+the count was identical (14 restored, 31 executed, same 50s build) and the write
+cost seven seconds a run. Every expensive release task is keyed on the sources or
+on the classes built from them, so on a commit that changes sources it can never
+hit.
+
+**Cheap lint on development.** `lintDebug` was expected to be nearly free because
+the test job had already compiled the debug variant. It measured **111s** — more
+than `lintRelease` on main at 98s. Gradle's cache entries here are keyed per job
+(`gradle-home-v2|…|lint[…]`), so the lint job cannot restore the test job's
+compile; it compiles debug itself. The hypothesis was wrong for a reason that is
+invisible in the workflow file and obvious in one log line.
+
+**Merging lint into the build.** Two jobs that both need the release variant
+look like one job waiting to happen. Measured against the alternative: merged
+comes to about 94s, lint alone to 87s, because the build's 13s cache restore
+would then sit on lint's clock as well. Two runners is the cheaper arrangement.
+
+**Comparing class names without normalising them.** This one was a defect rather
+than an idea, and it is the most serious thing found in this pass. See below.
+
+## The bug that matters most
+
+The selector names a class as `tools/test-map.txt` does — `HistoryFeatureTest` —
+and the shard script names it as a file path becomes a class —
+`com.example.notes.HistoryFeatureTest`. `pick-tests.sh` compared them literally.
+Nothing ever matched, so every shard concluded it had no share of the change,
+stopped before Gradle, and reported success. **Every narrowed pull request had
+been running zero tests and going green.**
+
+It was found by running a real one-class pull request and noticing that
+`Run the tests` took 0s inside a 13-second run. Reading the code would not have
+found it: both halves were individually correct, and the defect lived in the seam
+between two files that each did their own job properly.
+
+Two things came out of it, and both are now permanent:
+
+- `pick-tests.sh` compares names without their package, and a selection that
+  cannot be placed **exits 3** rather than being answered with "nothing to do" by
+  every shard at once.
+- `pick-tests.sh --self-test` checks the selector against answers that are not in
+  doubt, and runs on the first shard of every run. It found a second, smaller bug
+  in its own first version within a minute of being written.
+
+The general rule: **the only way to know a targeting system works is to watch it
+run a change whose answer you already know.** A green run is not evidence.
+
+## What is left to push, and what it is worth
+
+Ranked by measured or well-estimated gain, with the honest note on each.
+
+| idea | gain | verdict |
+|---|---|---|
+| Configuration cache on narrowed runs | ~6s per pull request | **worth it**; the last real win |
+| Drop lint from development | ~66s on a dev push | **a choice, not a win** — see below |
+| Merge delivery into the build job | ~8s on dev and main | marginal |
+| Faster Gradle start-up | up to 13s | not available: no daemon survives one job |
+| Fewer artifacts for a pull request | 2–4s | noise; skip it |
+
+**The configuration cache** is the one worth doing. Passing `--tests` changes the
+command line, and a changed command line is a different configuration-cache
+entry, so every narrowed run reports "no cached configuration is available" and
+pays for the whole configuration phase — about six seconds of the thirteen. The
+fix is to keep the command line identical and pass the selection by a mechanism
+the cache does not key on: an environment variable read at *execution* time,
+where the filter is applied. It is fiddly, it is worth doing, and it does not
+change the safety property because the fallback stays where it is.
+
+**Dropping lint from development** trades a signal for a minute. Lint has never
+failed a build in this repository's history, and on development the thing being
+produced is a build to look at, not a release. But "it has never fired" is also
+what a working gate looks like, so this is the operator's call rather than a
+technical one. The measured alternative — a cheap lint for development — does not
+exist, which is what the 111s figure established.
+
+## The floor
+
+Add up what a one-class pull request cannot avoid:
+
+| | |
+|---|---|
+| job setup, checkout, gates | 8s |
+| Gradle setup and cache restore | 6s |
+| Robolectric runtime | 3s |
+| Gradle configuration and start-up | 13s |
+| test compilation | 10s |
+| test execution | 8s |
+| teardown | 5s |
+| **total** | **~53s** |
+
+The pipeline is at 59s. **It is about six seconds from its floor**, and that six
+is the configuration cache. Everything else on the list is either GitHub's own
+cost per job or work that has to happen.
+
+This is the most useful conclusion in the document: for a codebase this size,
+**there is nothing large left to win.** Further effort should go into the
+property below, which does not show up until the code gets bigger, or into not
+spending anything at all.
+
+## What happens at 10x and 100x
+
+The model. Let:
+
+- **F** — fixed cost per job: setup, checkout, cache restore, Gradle start-up,
+  teardown. Measured at about **45s** and does not depend on the codebase.
+- **C** — compilation: app code plus test sources.
+- **T** — test execution.
+- **S** — shards.
+
+One shard costs `F + C + T`. With `S` shards each shard pays `F` and `C` again,
+because every shard compiles the same sources, so a run costs:
+
+```
+F + C + T/S
+```
+
+Today F ≈ 45s, C ≈ 10s, T ≈ 8s, which is the 59s measured. Sharding gains nothing
+yet because T is one eighth of the total — halving it saves four seconds and
+spends a runner.
+
+**At 10x the tests** (T ≈ 80s, C ≈ 40s), two shards go from 165s to 125s and four
+shards to 105s. Sharding starts paying. This is the regime where the existing
+machinery earns its place.
+
+**At 100x the tests** (T ≈ 800s, C ≈ 300s), the arithmetic turns against it:
+
+| shards | one shard each | |
+|---|---|---|
+| 4 | 45 + 300 + 200 | 545s |
+| 8 | 45 + 300 + 100 | 445s |
+| 16 | 45 + 300 + 50 | **395s** |
+
+Sixteen runners buy 150 seconds, and the floor is `F + C ≈ 345s`. **Sharding has
+run out.** It divides execution, and execution has stopped being the problem.
+
+The answer is to make `C` divisible too, which means the test sources have to be
+more than one module: each shard compiles only its share, so `C` becomes `C/S`.
+
+| shards | with test sources split | |
+|---|---|---|
+| 8 | 45 + 38 + 100 | 183s |
+| 16 | 45 + 19 + 50 | **114s** |
+
+That is the difference between 395s and 114s, and it is the single most important
+structural fact about this pipeline at scale. Splitting the application module has
+been the standing recommendation for other reasons — shorter compiles, a module
+graph that replaces the hand-maintained test map — but this is the reason that
+does not go away.
+
+### The other axes
+
+**Application code at 10x.** The release build's Kotlin compile is 21–38s today
+for one module. Split into modules it compiles in parallel within one job and, on
+a change, only the affected part. Same lever, second payoff.
+
+**Lint at 10x.** Already 98s and whole-program by design, so it grows faster than
+the code. It is on main only, which is the right place for an expensive whole-tree
+check, and main is rare. At 10x it becomes the release latency rather than the
+pipeline's, which is acceptable; at 100x it needs to run per module, or the change
+has to be to stop running it on every release and run it on a schedule instead.
+
+**Robolectric.** The genuine scaling risk, because it is the only framework here
+that loads an Android runtime, and the scenario tests draw real screens. The order
+of answers: keep the majority of tests as plain JVM tests; give Robolectric tests
+their own module and their own shard so they never make the fast tests wait; only
+then consider distributing tests across machines, which is a paid product and
+should be last.
+
+**Scenarios.** Ten today, drawn from real screens. They are written to be an
+explanation for a person, not a test, and their cost is the cost of the app's own
+screens. If they ever become the slowest thing, the right move is to draw them
+from a scheduled run rather than from every push — they prove the app looks
+right, which does not change as often as the app does.
+
+## The strategy, in five rules
+
+1. **Measure the run, not the build file.** Every real win here came from a
+   profile or a job timeline. Two confident hypotheses (`lintDebug` is cheap,
+   writing the cache pays) were both wrong and both would have shipped.
+2. **Divide the work before adding machines.** Execution is the only thing
+   sharding divides; compilation and setup come back per runner. When shards stop
+   paying, the answer is a smaller unit of compilation, not a bigger matrix.
+3. **Keep the fixed cost fixed.** `F` is 45 of the 59 seconds. Anything that adds
+   a job adds 45 seconds of somebody's clock; anything that removes one removes
+   that much. This is why merging delivery was worth 23 seconds and why a fifth
+   job is a serious proposition.
+4. **Never let "nothing ran" look like "everything passed".** Unknown falls back
+   to full; a selection that cannot be placed is an error; the selector tests
+   itself on every run. Speed that quietly stops testing is not speed.
+5. **Spend on the frequency you have.** A pull request happens many times a day
+   and must be a minute. Main happens when a release is wanted and can be three.
+   Optimising the rare tier to the detriment of the common one is backwards —
+   which is exactly what the main-only deep lint does deliberately.

@@ -74,27 +74,50 @@ fi
 # com.example.notes.FolderTreeTest. Only classes ending in `Test` are taken,
 # which is the same rule Gradle's own test detection uses.
 class_names() {
-    find "$ROOT" -path '*/src/test/*' -name '*Test.kt' -not -path '*/build/*' 2>/dev/null \
-        | while IFS= read -r path; do
-            rel="${path#"$ROOT"/}"
-            # everything after src/test/java/ or src/test/kotlin/
-            case "$rel" in
-                */src/test/java/*) rel="${rel#*/src/test/java/}" ;;
-                */src/test/kotlin/*) rel="${rel#*/src/test/kotlin/}" ;;
-                *) continue ;;
-            esac
-            printf '%s\n' "${rel%.kt}" | tr '/' '.'
-        done | sort
+    # One awk pass rather than a shell loop.
+    #
+    # The loop this replaces spawned `tr` once per file and `cksum` once per
+    # class; in a container where a fork is expensive that came to a second and a
+    # half for fifteen classes, on every shard, inside the step that decides what
+    # to run. awk does the same work without leaving the process.
+    find "$ROOT" \
+        \( -name .git -o -name build -o -name .gradle \) -prune -o \
+        -path '*/src/test/*' -name '*Test.kt' -print 2>/dev/null \
+        | awk -v root="$ROOT/" '
+            {
+                path = $0
+                sub("^" root, "", path)
+                if (path !~ /\/src\/test\/(java|kotlin)\//) next
+                sub(/.*\/src\/test\/(java|kotlin)\//, "", path)
+                sub(/\.kt$/, "", path)
+                gsub(/\//, ".", path)
+                print path
+            }
+        ' | sort
 }
+
 
 # The classes in a fixed order, which is what makes the split the same on every
 # runner: cksum is POSIX and gives the same number everywhere, where `$RANDOM`
 # or a Python hash would not.
 ordered_class_names() {
-    class_names | while IFS= read -r name; do
-        [ -n "$name" ] || continue
-        printf '%s\t%s\n' "$(printf '%s' "$name" | cksum | cut -d' ' -f1)" "$name"
-    done | sort -k1,1n -k2,2 | cut -f2-
+    # Sorted by a hash of the name, then by the name itself.
+    #
+    # The hash is what keeps sibling classes apart: `FilesFeatureTest` and
+    # `HistoryFeatureTest` are adjacent in any alphabetical order, and a shard
+    # split by position would then be a split by alphabet, which puts whichever
+    # feature happens to sort late all on one runner. The hash is computed in awk
+    # rather than by spawning cksum per class, and it only has to be stable
+    # across runs and machines, not cryptographic.
+    class_names | awk '
+        {
+            h = 0
+            for (i = 1; i <= length($0); i++) {
+                h = (h * 31 + index("\x01\x02\x03\x04\x05\x06\x07\x08\t\n\v\f\r\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f !\"#$%&\047()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~", substr($0, i, 1))) % 2147483647
+            }
+            printf "%d\t%s\n", h, $0
+        }
+    ' | sort -k1,1n -k2,2 | cut -f2-
 }
 
 # Which shard the class at a given position belongs to. Dealing them out in turn

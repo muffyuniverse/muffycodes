@@ -180,6 +180,17 @@ jobs:
         if: matrix.shard == 0
         run: python3 tools/check-workflow.py
 
+      # The selector is tested against answers that are already known.
+      #
+      # It once compared two spellings of a class name, matched neither, and let
+      # every shard decide it had nothing to do — so the run went green having
+      # executed no tests, and nothing anywhere said so. This is the guard: a
+      # handful of selections whose correct answers are not in doubt, checked in
+      # a few seconds, before anything is built.
+      - name: Check that the test selector agrees with itself
+        if: matrix.shard == 0
+        run: bash tools/pick-tests.sh --self-test
+
       - name: Set up Java
         if: steps.shard.outputs.nothing == 'no'
         uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0

@@ -23,6 +23,7 @@
 #
 # Usage:
 #   pick-tests.sh --selection <ALL|NONE|"A B C"> --shard <i> --of <n>
+#   pick-tests.sh --self-test
 #
 # Prints one of:
 #   NONE                     this shard has nothing to run
@@ -41,16 +42,90 @@ usage() {
 SELECTION=""
 SHARD=""
 OF="1"
+SELF_TEST=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --selection) SELECTION="${2:-}"; shift 2 ;;
         --shard)     SHARD="${2:-}"; shift 2 ;;
         --of)        OF="${2:-}"; shift 2 ;;
+        --self-test) SELF_TEST=1; shift ;;
         -h|--help)   usage; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
+
+# A test of this script, because the failure it guards against is silent.
+#
+# It once compared two spellings of the same class name and matched neither, so
+# every shard decided it had no share of the change and the run went green having
+# executed no tests. Nothing failed, nothing was logged, and the only reason it
+# was ever found is that somebody ran a change whose answer was already known.
+# That is what this is: the answers are known, so a wrong one is loud.
+if [ "$SELF_TEST" = "1" ]; then
+    fails=0
+    complain() { echo "  not right: $*" >&2; fails=$((fails + 1)); }
+
+    universe="$(bash "$HERE/test-shard.sh" --list)"
+    total="$(printf '%s\n' "$universe" | grep -c .)"
+    if [ "$total" -eq 0 ]; then
+        complain "no test classes were found at all"
+        exit 1
+    fi
+
+    # 1. Everything, dealt across two shards, is every class exactly once.
+    seen=""
+    for i in 0 1; do
+        got="$(bash "$HERE/pick-tests.sh" --selection ALL --shard "$i" --of 2 \
+            | grep -v '^--tests$' | grep -v '^$')"
+        seen="$seen$got
+"
+    done
+    placed="$(printf '%s' "$seen" | grep -c .)"
+    unique="$(printf '%s' "$seen" | grep . | sort -u | wc -l)"
+    [ "$placed" -eq "$total" ] || complain "ALL on 2 shards ran $placed classes of $total"
+    [ "$unique" -eq "$total" ] || complain "ALL on 2 shards ran $unique distinct classes of $total"
+
+    # 2. One class, named the way the test map names it, reaches exactly one
+    #    shard — and it is the class that was named, under either spelling.
+    #    This is the check that would have caught the bug.
+    one="$(printf '%s\n' "$universe" | head -1)"
+    short_one="${one##*.}"
+    hits=0
+    for i in 0 1; do
+        got="$(bash "$HERE/pick-tests.sh" --selection "$short_one" --shard "$i" --of 2 \
+            | grep -v '^--tests$' | grep -v '^$')"
+        # "NONE" is the right answer from the shard that does not own the class,
+        # so it is not a hit. Counting it was the first version's mistake: it made
+        # this check report that one class had reached both shards.
+        if [ -n "$got" ] && [ "$got" != "NONE" ]; then
+            hits=$((hits + 1))
+            [ "${got##*.}" = "$short_one" ] \
+                || complain "asking for $short_one gave $got"
+        fi
+    done
+    [ "$hits" -eq 1 ] || complain "asking for one class reached $hits shards, not 1"
+
+    # 3. Nothing selected is nothing to do, and it is not an error.
+    for i in 0 1; do
+        got="$(bash "$HERE/pick-tests.sh" --selection NONE --shard "$i" --of 2)"
+        [ "$got" = "NONE" ] || complain "NONE on shard $i gave '$got'"
+    done
+
+    # 4. A name that exists nowhere is an error, not silence. Silence here is
+    #    exactly how a whole run comes to execute nothing and pass.
+    if bash "$HERE/pick-tests.sh" --selection NoSuchTestAnywhere --shard 0 --of 2 \
+            >/dev/null 2>&1; then
+        complain "a selection that cannot be placed was allowed"
+    fi
+
+    if [ "$fails" -gt 0 ]; then
+        echo "$fails check(s) failed in the test selector" >&2
+        exit 1
+    fi
+    echo "  the selector agrees with itself: $total classes, one shard each"
+    exit 0
+fi
 
 if [ -z "$SHARD" ]; then
     echo "--shard is required" >&2
