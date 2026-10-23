@@ -1,0 +1,150 @@
+# ----------------------------------------------------------------------------
+# The renders of a real install, for the operator's final look.
+#
+# A release carries the APK, the list of changes and the pictures the test run
+# drew on the JVM. Together they say the features work. Whether the app looks
+# right is a different question, and it is answered here: the released APK goes
+# onto an emulator, the tour walks through it, and the pictures of what a real
+# install draws are put on the release when they are done.
+#
+# This runs alongside the review and never in front of it. The bundle is ready
+# the moment the release is published; the renders arrive afterwards, and they
+# are for checking last — by the operator, whose eyes are the only ones that
+# can judge how the app looks.
+#
+# Nothing is ever decided by these pictures. They fail no build and gate no
+# release: the release is already published when they arrive. They are evidence
+# for a person, and nothing else.
+# ----------------------------------------------------------------------------
+name: Emulator renders
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release to render, such as v43
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+# A render set is worth finishing once it has started, so a second release does
+# not cancel the renders of the first.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  render:
+    name: Real renders of the release
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # The renders are put onto the release, and that is a write. It is the only
+    # write in this workflow and the only reason it has any at all.
+    permissions:
+      contents: write
+
+    steps:
+      # Only the tooling is taken from the repository — the tour script and the
+      # tour itself. The app under test is the APK of the release, because the
+      # question is "how does what was published look", not "how does a fresh
+      # build look".
+      - name: Check out the code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Take the APK of the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          if [ -z "$TAG" ]; then
+            echo "::error::No release was named to render."
+            exit 1
+          fi
+          echo "rendering $TAG"
+          gh release download "$TAG" --repo "$REPOSITORY" --pattern app-release.apk --dir . --clobber
+          ls -la app-release.apk
+
+      # The emulator needs to be able to use the processor of the machine.
+      # Without this the emulator runs so slowly that it never finishes starting.
+      - name: Let the emulator use the processor
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Walk through the app and take the renders
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        env:
+          # The action runs every line of the script in its own shell, so the
+          # values for the tour are given through the environment.
+          ADB: adb
+          SKIP_LAUNCH: "1"
+          SHOT_DIR: ${{ github.workspace }}/screenshots
+          TOUR_FILE: ${{ github.workspace }}/tools/default-tour.txt
+          TRACE_FILE: ${{ github.workspace }}/tour-trace.log
+        with:
+          api-level: "34"
+          target: default
+          arch: x86_64
+          profile: pixel_2
+          cores: 2
+          ram-size: 2048M
+          emulator-options: -no-window -no-snapshot -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          emulator-boot-timeout: 600
+          script: |
+            # The released APK is put on the emulator and started.
+            adb install -r app-release.apk
+            adb shell am start -n com.example.notes/com.example.notes.MainActivity
+            sleep 8
+
+            # The tour walks through the app and takes the pictures.
+            bash tools/screenshot-tour.sh
+
+            # A step that did not work does not fail the run: what was made is
+            # still worth looking at. But a run that made nothing at all is a
+            # failure, and this says so.
+            bash tools/check-pictures.sh "$SHOT_DIR"
+
+      # The renders go onto the release itself, where the bundle already is, so
+      # the whole review happens in one place: the changes, the JVM pictures
+      # that show the features work, and last these — the real thing.
+      - name: Put the renders on the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          mkdir -p renders
+          for f in screenshots/*.png; do
+            [ -e "$f" ] || continue
+            cp "$f" "renders/render-$(basename "$f")"
+          done
+
+          count="$(ls renders 2>/dev/null | grep -c . || true)"
+          echo "renders made: $count"
+          if [ "$count" -eq 0 ]; then
+            echo "::error::The tour made no renders at all."
+            exit 1
+          fi
+
+          # --clobber so that a re-run of this workflow finishes with one set of
+          # renders on the release rather than failing over an old one.
+          gh release upload "$TAG" renders/*.png --repo "$REPOSITORY" --clobber
+
+      - name: Keep the renders in the run as well
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: renders
+          path: renders/*.png
+          if-no-files-found: warn
+          retention-days: 30

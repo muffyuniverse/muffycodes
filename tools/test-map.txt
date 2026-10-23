@@ -18,6 +18,7 @@
 
 AppThemeTest        app/src/main/java/com/example/notes/AppTheme.kt
 ScreenTest          app/src/main/java/com/example/notes/NotesListScreen.kt app/src/main/java/com/example/notes/NoteEditorScreen.kt app/src/main/java/com/example/notes/AppTheme.kt
+ScreenshotTourTest  app/src/main/java/com/example/notes/NotesListScreen.kt app/src/main/java/com/example/notes/NoteEditorScreen.kt app/src/main/java/com/example/notes/AppTheme.kt
 FolderTreeTest      app/src/main/java/com/example/notes/FolderTree.kt
 NoteFileTest        app/src/main/java/com/example/notes/NoteFile.kt
 NoteCodecTest       app/src/main/java/com/example/notes/NoteCodec.kt
