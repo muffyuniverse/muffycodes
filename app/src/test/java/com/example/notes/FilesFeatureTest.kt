@@ -149,24 +149,6 @@ class FilesFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `a picture that is not there decodes to nothing rather than throwing`() {
-        // The decode must never throw its way into the screen: a file deleted
-        // between the list being drawn and the picture being opened is ordinary, and
-        // the answer is "cannot read it", not a crash.
-        //
-        // Garbage bytes are a different case and cannot be checked here: without
-        // `@GraphicsMode(NATIVE)` Robolectric's shadows hand back a bitmap for any
-        // input at all, so this test would assert the shadow's behaviour rather than
-        // the phone's. `EditorScreenTest` runs in NATIVE mode and does check that a
-        // file that is not really a PNG is reported as unreadable.
-        val missing = File(scene.viewModel.currentDir!!, "gone.png")
-
-        val decoded = kotlinx.coroutines.runBlocking { Pictures.decode(missing) }
-
-        assertEquals("a missing picture decodes to nothing", null, decoded)
-    }
-
-    @Test
     fun `renaming keeps the file's text`() {
         val file = scene.file("draft.txt", "the words")
 

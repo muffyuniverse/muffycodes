@@ -113,6 +113,21 @@ class EditorScreenTest {
     }
 
     @Test
+    fun `a picture deleted before it opens says so rather than throwing`() {
+        // Ordinary in use: the list is drawn, the file goes away, the screen opens.
+        // The answer is "cannot read it", not a crash — and NATIVE graphics mode is
+        // what makes this a real decode rather than a shadow's opinion.
+        val file = scene.file("gone.png")
+        file.delete()
+
+        editorFor(file)
+
+        compose.onNodeWithText(
+            "This picture could not be read on this phone.",
+        ).assertIsDisplayed()
+    }
+
+    @Test
     fun `a real picture is drawn as a picture`() {
         // A one-pixel PNG, which is the smallest thing that is genuinely a picture.
         val file = scene.file("dot.png")
