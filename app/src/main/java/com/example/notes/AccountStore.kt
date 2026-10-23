@@ -91,6 +91,20 @@ class AccountStore(private val filesDir: File) {
         dirOf(login).deleteRecursively()
     }
 
+    /**
+     * Forgets [login] and leaves everything the person made.
+     *
+     * Removing an account offers two outcomes: "from this phone only" keeps the
+     * files, and deleting the copies takes them too. Keeping them cannot mean
+     * keeping the account — the account is what was removed — so what goes is the
+     * app's own folder inside it: the identity, the history, the pretend GitHub.
+     */
+    fun forget(login: String) {
+        stateDir(login).deleteRecursively()
+        val dir = dirOf(login)
+        if (dir.isDirectory && dir.listFiles().isNullOrEmpty()) dir.delete()
+    }
+
     /** True when the phone holds any trace of [login]. */
     fun exists(login: String): Boolean = dirOf(login).isDirectory
 

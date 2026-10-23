@@ -90,8 +90,12 @@ class AccountsFeatureTest : FeatureTest() {
 
         assertNull("nobody is signed in", scene.viewModel.activeLogin)
         assertFalse("the account is no longer known", scene.viewModel.known(scene.login))
+        assertFalse(
+            "and it is not something to switch to",
+            scene.viewModel.accountList.any { it.login == scene.login },
+        )
         assertTrue("the files stayed", kept.isDirectory)
-        assertTrue("and so did the account's folder", scene.viewModel.accounts.dirOf(scene.login).isDirectory)
+        assertTrue("and so did the folder that held them", kept.parentFile!!.isDirectory)
     }
 
     @Test

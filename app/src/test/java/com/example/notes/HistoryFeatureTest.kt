@@ -65,9 +65,9 @@ class HistoryFeatureTest : FeatureTest() {
     fun `each save with a pause is a version of the file`() {
         val file = scene.file("milk.txt")
         scene.openEditor(file)
-        scene.saveAsVersion("one litre", 2)
-        scene.saveAsVersion("two litres", 3)
-        scene.saveAsVersion("three litres", 4)
+        scene.saveAsVersion("one litre")
+        scene.saveAsVersion("two litres")
+        scene.saveAsVersion("three litres")
         scene.closeEditor()
 
         assertTrue(
@@ -80,8 +80,8 @@ class HistoryFeatureTest : FeatureTest() {
     fun `a local file's older version can be brought back`() {
         val file = scene.file("milk.txt", "one litre")
         scene.openEditor(file)
-        scene.saveAsVersion("two litres", 2)
-        scene.saveAsVersion("two litres", 3)
+        scene.saveAsVersion("two litres")
+        scene.saveAsVersion("two litres")
         scene.closeEditor()
 
         val oldest = scene.versionsOf(file).last().first.id
@@ -94,8 +94,8 @@ class HistoryFeatureTest : FeatureTest() {
     fun `restoring a version adds it back and leaves the newer ones alone`() {
         val file = scene.file("milk.txt")
         scene.openEditor(file)
-        scene.saveAsVersion("one litre", 2)
-        scene.saveAsVersion("two litres", 3)
+        scene.saveAsVersion("one litre")
+        scene.saveAsVersion("two litres")
         scene.closeEditor()
         val count = scene.versionsOf(file).size
 

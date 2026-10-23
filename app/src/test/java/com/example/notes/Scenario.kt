@@ -118,15 +118,20 @@ class Scenario(
      * so a test that wants three versions has to let each one land first, exactly
      * as a person's pauses would.
      */
-    private fun awaitRecorded(atLeast: Int, what: String) {
-        await("the history to record $what", 20_000) { historySize() >= atLeast }
+    private fun awaitRecorded(before: String?, what: String) {
+        await("the history to record $what", 20_000) { headId() != before }
     }
+
+    /** The newest commit of the account's own history, or null when there is none. */
+    fun headId(): String? = accountHistory().head()
+
+    /** The account's own history, as the app sees it. */
+    fun accountHistory(): AppHistory =
+        AppHistory(workspace!!.accountDir) { AppViewModel.DEFAULT_AUTHOR }
 
     /** How many versions the account's own history holds. */
     fun historySize(): Int = try {
-        val dir = workspace?.accountDir ?: return 0
-        if (!GitService.isRepository(dir)) 0
-        else Git.open(dir).use { GitService.log(it.repository, null).size }
+        accountHistory().log(null).size
     } catch (e: Exception) {
         0
     }
@@ -134,17 +139,17 @@ class Scenario(
     /** Makes a file in the folder that is open and waits for it to be there. */
     fun file(name: String, text: String = ""): File {
         val made = Workspace.withDefaultExtension(name)
-        val before = historySize()
+        val before = headId()
         viewModel.createFile(name)
         await("\"$made\" to be made") { viewModel.entries.any { it.name == made } }
         val file = File(viewModel.currentDir!!, made)
-        awaitRecorded(before + 1, "\"$made\" being made")
+        awaitRecorded(before, "\"$made\" being made")
         if (text.isNotEmpty()) {
-            val textBefore = historySize()
+            val textBefore = headId()
             viewModel.openEditor(file)
             viewModel.saveEditor(text)
             await("\"$made\" to hold $text") { viewModel.textOf(file) == text }
-            awaitRecorded(textBefore + 1, "\"$made\" being written")
+            awaitRecorded(textBefore, "\"$made\" being written")
             viewModel.closeEditor()
         }
         return file
@@ -153,10 +158,10 @@ class Scenario(
     /** Makes a folder in the folder that is open. */
     fun folder(name: String): File {
         require(!name.contains("/")) { "a folder is made in the folder that is open, not at a path" }
-        val before = historySize()
+        val before = headId()
         viewModel.createFolder(name)
         await("\"$name\" to be made") { viewModel.entries.any { it.name == name } }
-        awaitRecorded(before + 1, "\"$name\" being made")
+        awaitRecorded(before, "\"$name\" being made")
         return File(viewModel.currentDir!!, name)
     }
 
@@ -217,15 +222,13 @@ class Scenario(
      * times as fast as it could would get fewer versions than saves and would be
      * measuring the debounce rather than the history.
      */
-    fun saveAsVersion(text: String, atLeast: Int) {
+    fun saveAsVersion(text: String) {
         val file = viewModel.editingFile ?: error("the editor is not open")
-        viewModel.saveEditor(text)
         val key = viewModel.workspace!!.pathString(viewModel.workspace!!.relative(file).orEmpty())
-        await("$atLeast versions of ${file.name}", 30_000) {
-            viewModel.workspace!!.let { ws ->
-                AppHistory(ws.accountDir) { AppViewModel.DEFAULT_AUTHOR }
-                    .log(key).size >= atLeast
-            }
+        val before = accountHistory().log(key).size
+        viewModel.saveEditor(text)
+        await("one more version of ${file.name}", 30_000) {
+            accountHistory().log(key).size > before
         }
     }
 
@@ -263,16 +266,8 @@ class Scenario(
         viewModel.closeHistory()
     }
 
-    /** Every path the account's own history tracks, read from its newest commit. */
-    fun appHistoryFiles(): List<String> = try {
-        Git.open(workspace!!.accountDir).use { git ->
-            val head = git.repository.resolve("HEAD")
-            if (head == null) emptyList()
-            else GitService.filesUnder(git.repository, null, head.name).map { it.first }
-        }
-    } catch (e: Exception) {
-        emptyList()
-    }
+    /** Every path the account's own history tracks, read from its newest version. */
+    fun appHistoryFiles(): List<String> = accountHistory().tracked()
 
     /** The account's workspace, which every scenario has once it is signed in. */
     val workspace: Workspace? get() = viewModel.workspace
@@ -364,10 +359,11 @@ class Scenario(
             }
         }
         try {
-            val hist = AppHistory(dir) { AppViewModel.DEFAULT_AUTHOR }
+            val hist = accountHistory()
             appendLine("    history: ${hist.log(null, 6).joinToString { it.message.take(30) }}")
             appendLine("    history error: ${hist.lastError}")
-            appendLine("    history holds: ${appHistoryFiles().take(12)}")
+            appendLine("    history holds: ${hist.tracked().take(12)}")
+            appendLine("    history error after reading: ${hist.lastError}")
         } catch (e: Exception) {
             appendLine("    history could not be read: ${e.message}")
         }

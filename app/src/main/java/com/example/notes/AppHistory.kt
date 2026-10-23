@@ -136,6 +136,35 @@ class AppHistory(
         }
     }
 
+    /** The id of the newest commit, or null when nothing has been recorded. */
+    fun head(): String? = log(null, 1).firstOrNull()?.id
+
+    /**
+     * Every path the newest version holds.
+     *
+     * Asked through the history rather than through JGit directly, so that a test
+     * asking the question gets the app's own answer — and the app's own error when
+     * there is one.
+     */
+    fun tracked(): List<String> {
+        val head = head() ?: return emptyList()
+        if (!GitService.isRepository(accountDir)) return emptyList()
+        val repo = try {
+            open()
+        } catch (e: Exception) {
+            lastError = Secrets.scrub(e.message ?: "Could not open the history")
+            return emptyList()
+        }
+        return repo.use {
+            try {
+                GitService.filesUnder(it, null, head).map { file -> file.first }
+            } catch (e: Exception) {
+                lastError = Secrets.scrub(e.message ?: "Could not read the newest version")
+                emptyList()
+            }
+        }
+    }
+
     /** Every file under a folder at a past commit, with its text. */
     fun filesUnder(path: String?, revisionId: String): List<Pair<String, String>> {
         if (!GitService.isRepository(accountDir)) return emptyList()

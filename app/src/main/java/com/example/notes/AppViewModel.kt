@@ -772,7 +772,7 @@ class AppViewModel @JvmOverloads constructor(
      * without it the folders stay and signing in again returns to them (§5).
      */
     fun removeAccount(login: String, deleteCopies: Boolean) {
-        if (deleteCopies) accounts.remove(login)
+        if (deleteCopies) accounts.remove(login) else accounts.forget(login)
         credentials.forget(login)
         // Another stored account takes over, so the screen is never left pointing
         // at an account that is no longer here.
