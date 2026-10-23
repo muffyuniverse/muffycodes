@@ -14,9 +14,9 @@
 #   bundle --run 123   the bundle one run made (ci uses this after a build)
 #
 # Where things land:
-#   Downloads/notes-app/<name>/            the whole bundle, as it was made
-#   Downloads/Notes-<name>.apk             the APK, at the convenience paths
-#   Downloads/notes-app/Notes-<name>.apk   the phone has always been given
+#   Downloads/muffycodes/<name>/            the whole bundle, as it was made
+#   Downloads/muffycodes-<name>.apk         the APK, at the convenience path
+#   Downloads/muffycodes/muffycodes-<name>.apk  the phone is given
 #
 # The renders of a real install are put on a release a few minutes after it is
 # published, in their own run. Whenever they are there, they are picked up too
@@ -99,13 +99,13 @@ fi
 
 # Everything is in place before anything is delivered, so the phone never
 # opens a folder that is still being filled.
-DEST="$DOWNLOADS/notes-app/$FOLDER"
+DEST="$DOWNLOADS/muffycodes/$FOLDER"
 rm -rf "$DEST"
-mkdir -p "$DEST" "$DOWNLOADS/notes-app"
+mkdir -p "$DEST" "$DOWNLOADS/muffycodes"
 cp "$TMP"/* "$DEST/"
-cp "$TMP/app-release.apk" "$DOWNLOADS/Notes-$LABEL.apk"
-cp "$TMP/app-release.apk" "$DOWNLOADS/notes-app/Notes-$LABEL.apk"
+cp "$TMP/app-release.apk" "$DOWNLOADS/muffycodes-$LABEL.apk"
+cp "$TMP/app-release.apk" "$DOWNLOADS/muffycodes/muffycodes-$LABEL.apk"
 
 echo "delivered $FOLDER to $DEST"
 ls "$DEST" | sed 's/^/  /'
-echo "  + $DOWNLOADS/Notes-$LABEL.apk"
+echo "  + $DOWNLOADS/muffycodes-$LABEL.apk"
