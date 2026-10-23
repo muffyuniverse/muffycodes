@@ -58,10 +58,14 @@ class FilesFeatureTest : FeatureTest() {
 
     @Test
     fun `a file with no extension at all is still text`() {
-        // A person typing a name gets a note, not an unknown thing.
-        scene.file("journal")
+        // A person typing a name gets a note, not an unknown thing. Written straight
+        // to disk: `createFile` would add `.txt` for them (§2's default), which is
+        // the app's own kindness and not the rule being tested here.
+        val file = File(scene.viewModel.currentDir!!, "journal")
+        file.writeText("an entry")
+        scene.viewModel.refresh()
 
-        assertEquals(EntryKind.TEXT, scene.entry("journal").kind)
+        assertEquals("no extension is text", EntryKind.TEXT, scene.entry("journal").kind)
     }
 
     @Test
@@ -145,14 +149,21 @@ class FilesFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `a picture that cannot be read is reported rather than shown as nothing`() {
-        // A truncated download or an .svg: the screen must say so, not draw an
-        // empty frame that looks like the app failed.
-        val file = scene.file("broken.png", "this is not a png")
+    fun `a picture that is not there decodes to nothing rather than throwing`() {
+        // The decode must never throw its way into the screen: a file deleted
+        // between the list being drawn and the picture being opened is ordinary, and
+        // the answer is "cannot read it", not a crash.
+        //
+        // Garbage bytes are a different case and cannot be checked here: without
+        // `@GraphicsMode(NATIVE)` Robolectric's shadows hand back a bitmap for any
+        // input at all, so this test would assert the shadow's behaviour rather than
+        // the phone's. `EditorScreenTest` runs in NATIVE mode and does check that a
+        // file that is not really a PNG is reported as unreadable.
+        val missing = File(scene.viewModel.currentDir!!, "gone.png")
 
-        val decoded = kotlinx.coroutines.runBlocking { Pictures.decode(file) }
+        val decoded = kotlinx.coroutines.runBlocking { Pictures.decode(missing) }
 
-        assertEquals("an unreadable picture decodes to nothing", null, decoded)
+        assertEquals("a missing picture decodes to nothing", null, decoded)
     }
 
     @Test
