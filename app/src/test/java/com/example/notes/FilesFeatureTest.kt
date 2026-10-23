@@ -1,5 +1,6 @@
 package com.example.notes
 
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -146,6 +147,27 @@ class FilesFeatureTest : FeatureTest() {
             assertTrue("$w x $h samples at least 1", sample >= 1)
             assertTrue("$w x $h stays a power of two", sample and (sample - 1) == 0)
         }
+    }
+
+    @Test
+    fun `opening a file that is not text does not damage it`() {
+        // The whole reason §9 has a third class. The editor holds the file's text in
+        // state and saves it back on a pause in typing; if a `.zip` were read as
+        // UTF-8 for that state, the first save would write the mangled reading over
+        // the original. Somebody who opened a file to look at it would lose it.
+        val bytes = byteArrayOf(0x50, 0x4B, 0x03, 0x04, 0x00, 0x00, 0xFF.toByte(), 0xC3.toByte())
+        val file = File(scene.viewModel.currentDir!!, "archive.zip")
+        file.writeBytes(bytes)
+
+        scene.viewModel.openEditor(file)
+        // What the editor would put in its text state.
+        assertEquals("nothing is read as text", "", scene.viewModel.textOf(file))
+
+        // And a save of that empty string must not truncate the file.
+        scene.viewModel.saveEditor("")
+        scene.await("the save to settle") { !scene.viewModel.busy }
+
+        assertArrayEquals("the bytes are untouched", bytes, file.readBytes())
     }
 
     @Test

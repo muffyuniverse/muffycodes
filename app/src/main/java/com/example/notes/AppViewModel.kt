@@ -264,7 +264,9 @@ class AppViewModel @JvmOverloads constructor(
         while (stack.isNotEmpty() && guard++ < SEARCH_LIMIT) {
             val here = stack.removeFirst()
             (here.listFiles() ?: emptyArray()).forEach { child ->
-                if (child.name.startsWith(".")) return@forEach
+                // The rule, asked for rather than restated (§3): a search result
+                // must never carry something the app owns.
+                if (ws.isHidden(child.name)) return@forEach
                 val matched = child.name.contains(q, ignoreCase = true) ||
                     (child.isFile && ws.kindOf(child) == EntryKind.TEXT &&
                         ws.read(child).contains(q, ignoreCase = true))
@@ -374,7 +376,19 @@ class AppViewModel @JvmOverloads constructor(
     // ---- the editor ---------------------------------------------------------
 
     /** The text of the file being edited. */
-    fun textOf(file: File): String = workspace?.read(file) ?: ""
+    /**
+     * A file's text, for the editor.
+     *
+     * Empty for anything that is not text, because reading it would already be the
+     * destructive act: the editor keeps this string in state and saves it back on a
+     * pause in typing, so handing back a UTF-8 reading of a `.zip` invites the file
+     * to be overwritten with it. The screen decides what to show by [kindOf], which
+     * is the same rule that made the file not-text in the first place.
+     */
+    fun textOf(file: File): String {
+        val ws = workspace ?: return ""
+        return if (ws.kindOf(file) == EntryKind.TEXT) ws.read(file) else ""
+    }
 
     /** Opens a file in the editor. */
     fun openEditor(file: File) {
@@ -396,6 +410,12 @@ class AppViewModel @JvmOverloads constructor(
     fun saveEditor(text: String) {
         val ws = workspace ?: return
         val file = editingFile ?: return
+        // Refused here as well as on the screen. The screen only ever saves text, so
+        // this cannot fire in normal use — which is the point: the guarantee is that
+        // no save can ever overwrite something that is not text, and a guarantee
+        // held only by the caller is a convention. A `.zip` opened by mistake must
+        // survive even a bug in the screen.
+        if (ws.kindOf(file) != EntryKind.TEXT) return
         ws.write(file, text)
         val keep = settings.appHistoryLength
         val h = history

@@ -68,8 +68,14 @@ fun EditorScreen(
     var menu by remember { mutableStateOf(false) }
 
     // Every pause in typing becomes a save, and every save becomes a version.
-    LaunchedEffect(text) {
-        if (text != viewModel.textOf(file)) {
+    //
+    // Only for text. The state starts at `textOf(file)`, which reads the file as
+    // UTF-8 — and for a picture or an unknown file that is already a lossy
+    // interpretation. Saving compared against it would have written the mangled
+    // reading straight back over the file, destroying exactly the file this screen
+    // exists to protect. So the effect does nothing at all unless the file is text.
+    LaunchedEffect(text, kind) {
+        if (kind == EntryKind.TEXT && text != viewModel.textOf(file)) {
             delay(400)
             viewModel.saveEditor(text)
         }
