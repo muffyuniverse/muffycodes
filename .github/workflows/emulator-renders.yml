@@ -117,6 +117,23 @@ jobs:
       # The renders go onto the release itself, where the bundle already is, so
       # the whole review happens in one place: the changes, the JVM pictures
       # that show the features work, and last these — the real thing.
+      - name: Drop the renders that are already there
+        # A release is rendered from the APK that is on it, so the pictures on it
+        # must all describe that APK. Uploading without removing would leave the
+        # pictures of an earlier tour beside the new ones, and nobody could tell
+        # which app they were looking at.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.event.release.tag_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          gh release view "$TAG" --repo "$REPOSITORY" --json assets \
+            --jq '.assets[].name' | grep -E '^render-' || true
+          for asset in $(gh release view "$TAG" --repo "$REPOSITORY" --json assets \
+              --jq '.assets[].name | select(startswith("render-"))'); do
+            gh release delete-asset "$TAG" "$asset" --repo "$REPOSITORY" --yes
+          done
+
       - name: Put the renders on the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

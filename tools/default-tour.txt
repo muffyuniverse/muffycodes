@@ -32,6 +32,8 @@ tap 60 110 02-account-sheet
 wait 3
 
 # --- adding an account asks for a key ---
+# No picture of this step is possible, and that is the point: the window that
+# holds the key refuses to be screenshotted, so a capture of it comes out black.
 taptext "Add" 03-sign-in-dialog
 wait 3
 key BACK
