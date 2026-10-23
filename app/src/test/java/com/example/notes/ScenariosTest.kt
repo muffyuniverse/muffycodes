@@ -58,6 +58,7 @@ class ScenariosTest {
         }
     }
 
+    @Composable
     private fun browser() = Screen {
         BrowserScreen(
             viewModel = viewModel,
@@ -74,6 +75,7 @@ class ScenariosTest {
         )
     }
 
+    @Composable
     private fun settingsScreen() = Screen {
         SettingsScreen(
             viewModel = viewModel,
