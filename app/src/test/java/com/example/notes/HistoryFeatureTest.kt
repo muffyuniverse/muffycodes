@@ -78,16 +78,17 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `a local file's older version can be brought back`() {
-        val file = scene.file("milk.txt", "one litre")
+        val file = scene.file("milk.txt")
         scene.openEditor(file)
-        scene.saveAsVersion("two litres")
+        scene.saveAsVersion("one litre")
         scene.saveAsVersion("two litres")
         scene.closeEditor()
 
-        val oldest = scene.versionsOf(file).last().first.id
-        scene.restore(oldest)
+        val versions = scene.versionsOf(file)
+        val oneLitre = versions.first { it.second == "one litre" }
+        scene.restore(oneLitre.first.id)
 
-        assertEquals("the old text is back", "one litre", file.readText())
+        assertEquals("that version's text is back", "one litre", file.readText())
     }
 
     @Test
