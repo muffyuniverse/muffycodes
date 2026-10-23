@@ -60,21 +60,32 @@ A pull request is the unit of verification. Nothing else is.
 | whether a screen offers what it should | Robolectric tests | in the workflow, on the CI's x86_64 |
 | **whether it looks right** | **the operator** | **a real install on a real phone** |
 
-## Visual testing belongs to the operator
+## What the pictures are for
 
-The emulator is for how things *look*, and how things look is judged by a
-person, not by a script. The operator installs the APK and finds visual
-inconsistencies far more reliably than any automated comparison could.
+Two kinds of picture are made, and neither of them decides anything:
+
+- **The tour on the JVM** runs with every change and ships with every build,
+  beside the APK and the list of changes. Its pictures are drawn by the tests,
+  on the plain JVM, and they say one thing only: **the feature works — the
+  screen is there and it renders.** They say nothing about beauty, spacing or
+  colour, because a JVM draws none of those the way a phone does.
+- **The renders of a real install** are made by an emulator, from the APK that
+  was actually published, and they arrive on the release afterwards —
+  asynchronously, and for the operator's eyes last. This is where appearance
+  lives, and only a person can judge it.
 
 So there is **no visual gating in CI**:
 
 - no picture comparison, no pixel thresholds, no contrast checks
 - no "the themes must differ" assertions
-- nothing that fails a build because a colour changed
+- nothing that fails a build because a colour changed, and no build that waits
+  for the renders
 
-The screenshot tour may still be run **by hand** when the operator asks for
-pictures of the app, and its pictures are for their eyes only. It is tooling,
-never a gate, and it does not run on every push.
+An automated check of appearance can only ever assert what the author already
+believed. If it is written to catch a theme that failed to apply, it will not
+notice that the theme is ugly, that the spacing is cramped, or that the result
+is not what was wanted. That is a job for a person pressing buttons on the
+thing itself — and it is the operator's job here, deliberately.
 
 ## Why this is the right split
 

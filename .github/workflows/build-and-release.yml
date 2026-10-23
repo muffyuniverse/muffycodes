@@ -449,6 +449,10 @@ jobs:
   # -------------------------------------------------------------------------
   build-release:
     name: Build the release
+    # The bundle carries the tour pictures, so this waits for the tour. A tour
+    # that failed has no pictures to carry, and a bundle without them is not
+    # the bundle this workflow promises.
+    needs: tour
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -637,18 +641,50 @@ jobs:
           "$BUILD_TOOLS/apksigner" verify "$APK"
           "$BUILD_TOOLS/zipalign" -c 4 "$APK"
 
-      # The APK is a single artefact of about eight megabytes, so this is a
-      # hand-over between jobs and not a bottleneck: it is stored once and
-      # downloaded once, by the job that publishes it.
-      - name: Hand the APK to the job that publishes it
+      # The bundle the run exists to make: the APK, the list of what changed,
+      # and the tour pictures that show the features work. Together they answer
+      # "what am I looking at, and does it do what was promised" without
+      # anybody reading a log.
+      - name: Take the pictures
+        if: steps.decision.outputs.changed == 'yes'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: tour-pictures
+          path: tour
+
+      - name: Write down what changed
+        if: steps.decision.outputs.changed == 'yes'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          bash tools/changes.sh --pictures tour > changes.md
+          cat changes.md
+
+      - name: Put the bundle together
+        if: steps.decision.outputs.changed == 'yes'
+        run: |
+          mkdir -p bundle
+          cp app/build/outputs/apk/release/app-release.apk bundle/
+          cp changes.md bundle/
+          cp tour/*.png bundle/
+          ls -la bundle/
+
+      # The bundle is handed to the job that publishes it, and it is also what
+      # a development push leaves behind: something to install and to look at,
+      # with the pictures and the list of changes beside it.
+      - name: Hand the bundle to the job that publishes it
         if: steps.decision.outputs.changed == 'yes'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: release-apk
-          path: app/build/outputs/apk/release/app-release.apk
-          # It is needed by the very next job, so it is kept for a day rather
-          # than for the thirty that a downloadable build does not need.
-          retention-days: 1
+          name: build-bundle
+          path: |
+            bundle/app-release.apk
+            bundle/changes.md
+            bundle/tour-*.png
+          # Seven days: this is the thing a development push is for, and a
+          # week is long enough to install and look at it.
+          retention-days: 7
           if-no-files-found: error
 
   # -------------------------------------------------------------------------
@@ -681,10 +717,11 @@ jobs:
       actions: read
 
     steps:
-      - name: Take the APK
+      - name: Take the bundle
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: release-apk
+          name: build-bundle
+          path: bundle
 
       # Before anything is published, say where the file came from. The
       # attestation binds the APK to this commit and this workflow run in a way
@@ -694,7 +731,7 @@ jobs:
       - name: Attest that this APK came from this commit
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
         with:
-          subject-path: app-release.apk
+          subject-path: bundle/app-release.apk
 
       - name: Publish the release
         env:
@@ -726,8 +763,16 @@ jobs:
             exit 0
           fi
 
+          # The document points at the pictures beside it; on a release page
+          # they are files of the release instead, so the links are aimed at
+          # the release's own download addresses before the document becomes
+          # the body of the release.
+          BASE_URL="https://github.com/${REPOSITORY}/releases/download/v${VERSION_NAME}"
+          sed "s#](tour-#](${BASE_URL}/tour-#g" bundle/changes.md > release-notes.md
+
           gh release create "v${VERSION_NAME}" \
             --repo "$REPOSITORY" \
             --title "Muffy Codes ${VERSION_NAME}" \
-            --notes "Version ${VERSION_NAME} of Muffy Codes, built and tested by the workflow." \
-            app-release.apk
+            --notes-file release-notes.md \
+            bundle/app-release.apk \
+            bundle/tour-*.png

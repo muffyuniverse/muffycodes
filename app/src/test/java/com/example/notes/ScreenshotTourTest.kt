@@ -104,7 +104,7 @@ class ScreenshotTourTest {
     @Test
     fun theEmptyScreen() {
         showList()
-        shot("01-list-empty.png")
+        shot("tour-01-list-empty.png")
     }
 
     /**
@@ -122,7 +122,7 @@ class ScreenshotTourTest {
             projectName = "muffycodes",
             pendingChanges = 3,
         )
-        shot("02-list-project.png")
+        shot("tour-02-list-project.png")
     }
 
     /** An open file, with its title and body. */
@@ -142,6 +142,6 @@ class ScreenshotTourTest {
                 )
             }
         }
-        shot("03-editor.png")
+        shot("tour-03-editor.png")
     }
 }
