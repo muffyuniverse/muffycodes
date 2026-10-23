@@ -13,84 +13,38 @@
 #   shot   name               a picture without touching the screen
 #   wait   seconds            a pause
 #
-# The tour goes through the whole app: the list, a new file, the editor, the
-# settings and the themes.
+# The tour walks what the app shows without an account, because a tour is run
+# by a machine that has no key and must never be given one: the first screen,
+# the account sheet, the sign-in dialog, settings and the themes. The parts that
+# need a GitHub account — projects, sync, history — are the operator's to walk
+# on a real install.
 #
-# The taps are done by name wherever the app gives a name, because a name
-# keeps working when the layout moves. The points are only used where the
-# app shows nothing that can be named.
+# The taps are done by name wherever the app gives a name, because a name keeps
+# working when the layout moves. The two icons have no name on screen, so their
+# points are used.
 
-# --- the list, with nothing in it yet ---
-shot 01-list-empty
+# --- the first screen, with nobody signed in ---
+shot 01-sign-in
 wait 2
 
-# --- a new file ---
-# The + button in the corner, bottom right.
-taptext "New file" 02-tap-new-file
+# --- the account sheet, from the menu beside the title ---
+tap 60 110 02-account-sheet
 wait 3
-shot 03-editor-empty
-wait 1
 
-# The title of the file. The field says "Title" when it is empty.
-taptext "Title" 04-title-field
-wait 2
-text Shopping list
-wait 2
-shot 05-title-typed
-wait 1
-
-# The body of the file. The field says "Write your file…" when it is empty.
-taptext "Write your file…" 06-body-field
-wait 2
-text Milk
-text Bread
-text Coffee
-wait 2
-shot 07-body-typed
-wait 1
-
-# Save it with the check mark, top right.
-taptext "Save" 08-save
+# --- adding an account asks for a key ---
+taptext "Add" 03-sign-in-dialog
 wait 3
-shot 09-list-with-one-file
-wait 1
-
-# --- the settings and the themes ---
-# The gear in the top bar.
-taptext "Settings" 10-open-settings
-wait 3
-shot 11-settings
-wait 1
-
-# The themes are further down the settings, so scroll to them.
-swipe 540 1500 540 700 400 12-scroll-to-themes
+key BACK
 wait 2
-shot 13-themes
-wait 1
-
-# --- back to the list ---
-taptext "Back" 14-back-from-the-settings
-wait 3
-shot 15-back-at-the-list
-wait 1
-
-# --- the search ---
-taptext "Search all files" 16-tap-search
+key BACK
 wait 2
-text shopping
-wait 3
-shot 17-search
-wait 1
-taptext "Clear search" 18-clear-search
-wait 2
-shot 19-search-cleared
-wait 1
 
-# --- the file again, through its row ---
-taptext "Shopping list" 20-open-the-file
+# --- settings, from the gear in the corner ---
+tap 1010 110 04-settings
 wait 3
-shot 21-file-open
-wait 1
-taptext "Back" 22-back-from-the-file
+shot 05-settings-top
+
+# --- the theme swatches are a row below the account ---
+swipe 540 1500 540 600 500 06-scroll-to-themes
 wait 2
-shot 23-at-the-end
+shot 07-themes
