@@ -147,7 +147,10 @@ fi
 DEST="$DOWNLOADS/muffycodes/$FOLDER"
 rm -rf "$DEST"
 mkdir -p "$DEST" "$DOWNLOADS/muffycodes"
-cp "$TMP"/* "$DEST/"
+# `-R` because the bundle holds folders now: the scenarios keep their shape so
+# that the report's links resolve. Without it cp drops them, says so quietly
+# enough that a green run looks fine, and the phone gets no report.
+cp -R "$TMP"/* "$DEST/"
 cp "$TMP/app-release.apk" "$DOWNLOADS/muffycodes-$LABEL.apk"
 cp "$TMP/app-release.apk" "$DOWNLOADS/muffycodes/muffycodes-$LABEL.apk"
 
