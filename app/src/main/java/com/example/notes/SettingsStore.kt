@@ -50,14 +50,14 @@ class SettingsStore(context: Context) {
     }
 
     /** Sets the account history length; a negative number means no limit. */
-    fun setAppHistoryLength(value: Int) {
+    fun keepAppHistory(value: Int) {
         val clean = value.coerceAtLeast(0)
         appHistoryLength = clean
         prefs.edit().putInt(KEY_APP_HISTORY, clean).apply()
     }
 
     /** Sets the project history length; a negative number means no limit. */
-    fun setProjectHistoryLength(value: Int) {
+    fun keepProjectHistory(value: Int) {
         val clean = value.coerceAtLeast(0)
         projectHistoryLength = clean
         prefs.edit().putInt(KEY_PROJECT_HISTORY, clean).apply()

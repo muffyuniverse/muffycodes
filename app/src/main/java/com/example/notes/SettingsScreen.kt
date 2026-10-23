@@ -154,12 +154,12 @@ fun SettingsScreen(
             LengthField(
                 label = "This phone's history",
                 value = settings.appHistoryLength,
-                onValueChange = { settings.setAppHistoryLength(it) },
+                onValueChange = { settings.keepAppHistory(it) },
             )
             LengthField(
                 label = "Each project's history",
                 value = settings.projectHistoryLength,
-                onValueChange = { settings.setProjectHistoryLength(it) },
+                onValueChange = { settings.keepProjectHistory(it) },
             )
             Spacer(Modifier.height(24.dp))
         }
