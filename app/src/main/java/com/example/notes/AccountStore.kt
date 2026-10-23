@@ -49,7 +49,7 @@ class AccountStore(private val filesDir: File) {
     /** Every account with an `account.json` on disk. */
     fun accounts(): List<Account> =
         (accountsDir.listFiles() ?: emptyArray())
-            .filter { it.isDirectory && File(it, DETAILS).isFile }
+            .filter { it.isDirectory && detailsOf(it.name).isFile }
             .map { read(it) }
             .filter { it.login.isNotBlank() }
             .sortedBy { it.login.lowercase() }

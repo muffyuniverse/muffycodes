@@ -859,7 +859,13 @@ class AppViewModel @JvmOverloads constructor(
             history?.restore(text, revisionId) == true
         }
         message = if (ok) "Restored that version" else "Could not restore it"
-        if (ok) refresh()
+        if (ok) {
+            refresh()
+            // A restore changes what is on disk, so it is itself a version: the
+            // history must be able to undo it, and an undo that cannot be undone
+            // is not what "any state can be rolled back" means.
+            record("Restored an older version")
+        }
     }
 
     companion object {

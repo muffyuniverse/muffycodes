@@ -105,10 +105,11 @@ class FilesFeatureTest : FeatureTest() {
     @Test
     fun `two things cannot share a name in one folder`() {
         scene.file("milk.txt", "1")
-        scene.file("milk.txt", "2")
+        val again = scene.viewModel.createFile("milk.txt")
 
-        val milk = scene.names().filter { it == "milk.txt" }
-        assertEquals("only one is there", listOf("milk.txt"), milk)
+        assertFalse("the second is refused", again)
+        assertEquals("only one is there", 1, scene.names().count { it == "milk.txt" })
+        assertEquals("and it is untouched", "1", scene.viewModel.textOf(scene.entry("milk.txt").file))
     }
 
     @Test

@@ -107,7 +107,7 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `a deleted file's version brings it back`() {
-        val file = scene.file("milk.txt")
+        val file = scene.file("milk.txt", "one litre")
         scene.await("a version") { scene.versionsOf(file).isNotEmpty() }
         val version = scene.versionsOf(file).first().first.id
         val path = file.absolutePath
