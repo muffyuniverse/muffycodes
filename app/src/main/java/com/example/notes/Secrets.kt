@@ -14,9 +14,10 @@ object Secrets {
 
     /**
      * Masks anything in [text] that could be a credential: the user info of a
-     * URL (`https://token@host/…` becomes `https://***@host/…`) and the shapes
-     * GitHub issues tokens in. Ordinary text — including a commit hash, which
-     * only looks like a secret — is left alone.
+     * URL is replaced by `***` (`https://token@host/…` comes out with `***` in
+     * place of the token), and the shapes GitHub issues tokens in are replaced
+     * outright. Ordinary text — including a commit hash, which only looks like
+     * a secret — is left alone.
      */
     fun scrub(text: String): String =
         URL_USER_INFO.replace(text) { "${it.groupValues[1]}***@" }
