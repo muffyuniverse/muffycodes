@@ -57,7 +57,7 @@ class AccountStore(private val filesDir: File) {
     /** The account [login], or null when this phone has no such account. */
     fun account(login: String?): Account? {
         if (login.isNullOrBlank()) return null
-        if (detailsOf(login).isFile) read(dirOf(login)) else null
+        return if (detailsOf(login).isFile) read(dirOf(login)) else null
     }
 
     private fun read(dir: File): Account = try {
