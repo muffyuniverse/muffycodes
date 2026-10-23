@@ -291,6 +291,45 @@ screens. If they ever become the slowest thing, the right move is to draw them
 from a scheduled run rather than from every push — they prove the app looks
 right, which does not change as often as the app does.
 
+## The selector is for pull requests, and only for pull requests
+
+`tools/test-map.txt` narrows a run. It is used on **pull requests only**;
+`main` and `development` run `changed-tests.sh --all`, which does not read the map
+at all. That is a decision about the shape of the risk, not a convenience.
+
+The map has one failure that cannot be checked away: a line that is *valid but
+incomplete* — the source is named, so there is no full-suite fallback, but the
+test that would have caught the breakage is missing. `tools/check-test-map.py`
+proves inventory (every class named, every source accounted for, nothing stale);
+it cannot prove that a class really exercises the files its line claims.
+
+Where that risk is allowed to land is the whole point. On a pull request it can
+only cause an incomplete run *before* a merge. On `main` the full suite always
+runs, so a merged defect is caught before any version is spent. On a branch that
+hands out builds, the full suite means the build someone is about to install was
+tested by everything.
+
+The alternative — running the full suite on every pull request — was measured at
+**+32s** (58s → 90s) and declined. If the map ever causes a defect that reaches
+`main` undetected, this is the decision to revisit, and the map's narrowing is
+what to delete first.
+
+## Caches are scoped to the ref that made them
+
+Worth knowing before reading too much into a "warm" number. GitHub scopes an
+action cache to the ref that wrote it, and a pull request's cache belongs to that
+pull request's merge ref.
+
+So the configuration-cache saving is real but narrower than it looks: **the first
+run of a new pull request starts cold**, and the reuse is between runs of the same
+request. The measured 39s → 33s of Gradle was run 1 → run 3 of one branch, which is
+exactly the case that does hit. A push to `main` and a pull request also cannot
+share an entry, because a build records pictures (`-Pmuffy.shots`) and a request
+does not, so they are different configuration inputs — that is why the event is in
+the key, and why sharing it would have locked one of them out permanently.
+
+None of this makes the cache wrong. It makes "warm" a word that needs a subject.
+
 ## The strategy, in five rules
 
 1. **Measure the run, not the build file.** Every real win here came from a
@@ -305,7 +344,10 @@ right, which does not change as often as the app does.
    job is a serious proposition.
 4. **Never let "nothing ran" look like "everything passed".** Unknown falls back
    to full; a selection that cannot be placed is an error; the selector tests
-   itself on every run. Speed that quietly stops testing is not speed.
+   itself on every run; and the JUnit results are compared against the classes that
+   were asked for, because every guard before that one was about *deciding* what to
+   run and none of them looked at what came back. Speed that quietly stops testing
+   is not speed.
 5. **Spend on the frequency you have.** A pull request happens many times a day
    and must be a minute. Main happens when a release is wanted and can be three.
    Optimising the rare tier to the detriment of the common one is backwards —
