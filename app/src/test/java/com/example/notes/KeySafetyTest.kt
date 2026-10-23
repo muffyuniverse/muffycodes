@@ -1,5 +1,6 @@
 package com.example.notes
 
+import org.eclipse.jgit.storage.file.FileRepositoryBuilder
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -38,6 +39,10 @@ class KeySafetyTest {
     /** Every file below [dir], including everything git keeps hidden. */
     private fun allFiles(dir: File): List<File> =
         dir.walkTopDown().filter { it.isFile }.toList()
+
+    /** True when a file holds the key — searched byte-wise, so binary objects count. */
+    private fun File.containsToken(): Boolean =
+        readBytes().toString(Charsets.ISO_8859_1).contains(token)
 
     @Test
     fun scrubMasksCredentialsInsideUrls() {
@@ -91,15 +96,20 @@ class KeySafetyTest {
 
         assertTrue(result.message, result.success)
         assertFalse("the message must not carry the key", result.message.contains(token))
-        val leaky = allFiles(target).filter { it.readText().contains(token) }
+        val leaky = allFiles(target).filter { it.containsToken() }
         assertTrue("the key was written into: ${leaky.map { it.relativeTo(target) }}", leaky.isEmpty())
     }
 
     @Test
     fun pushPutsTheKeyNowhere() {
+        // A bare repository — the way a push target really is.
         val remote = File(root, "remote")
-        val bare = GitService.initOrOpen(remote, author)
-        bare.close()
+        org.eclipse.jgit.api.Git.init()
+            .setDirectory(remote)
+            .setBare(true)
+            .setInitialBranch("main")
+            .call()
+            .close()
 
         val work = File(root, "work")
         val repo = GitService.initOrOpen(work, author)
@@ -109,10 +119,13 @@ class KeySafetyTest {
 
         val result = GitService.push(repo, token)
 
-        assertTrue(result.message, result.success)
         assertFalse("the message must not carry the key", result.message.contains(token))
+        // The push really moved the commit.
+        FileRepositoryBuilder().setGitDir(remote).build().use { remoteRepo ->
+            assertTrue("the push left nothing behind", remoteRepo.resolve("refs/heads/main") != null)
+        }
         val leaky = (allFiles(work) + allFiles(remote))
-            .filter { it.readText().contains(token) }
+            .filter { it.containsToken() }
         assertTrue("the key was written into: ${leaky.map { it.relativeTo(root) }}", leaky.isEmpty())
     }
 
