@@ -316,21 +316,25 @@ It is deliberately absent from the release build. That invocation carries a
 version code and name that differ every time, so its entry could never be reused
 and storing it would be a cost with no payoff.
 
-### Why the whole suite now runs, and not a chosen subset
+### Why the whole suite no longer runs
 
-These two improvements cancel, and it is worth saying so plainly.
+This section used to say the opposite, and the reason it changed is the suite.
 
-Asking Gradle for a subset means passing `--tests`, and a changed command line
-is a different configuration-cache entry. Measured, a run with `--tests`
-reports "Calculating task graph as no cached configuration is available", which
-is a miss costing about fifteen seconds. The narrow run it buys back saves
-twelve. The trade is a wash, and a wash is not worth a weaker gate, so every
-test runs and the command line stays identical.
+When it was written the whole suite took six seconds and asking for a subset cost
+a fresh configuration-cache entry worth about fifteen. Narrowing lost nine
+seconds, so every test ran and the command line stayed identical.
 
-The selector still decides the one thing that matters and costs nothing: whether
-there is anything to do at all. `tools/changed-tests.sh` still reports which
-classes a change touches, and says so in the log, but the continuous
-integration runs them all.
+Both figures have moved. The suite is now around fifty seconds, because it
+covers the accounts, the projects, the sync, the history and the retention rules
+rather than a list of notes. The configuration cache still misses on a changed
+`--tests` argument, and it is still worth about fifteen seconds — against a
+selection that routinely comes back with five classes out of sixteen.
+
+So the selector decides again, and `tools/pick-tests.sh` intersects what it chose
+with the shard each runner is given. The safety property is unchanged and is the
+whole design: the selector **falls back to everything** whenever it cannot be
+certain — a changed file that is on no line of `tools/test-map.txt`, a change to
+the build itself, an empty change. Unknown means full, never nothing.
 
 ## The floor, and what is above it
 
@@ -371,3 +375,59 @@ is worth.
 Further gains from here are seconds, not minutes. If they are wanted, the honest
 options are: accept the lint cost less often (only on main), or stop caching
 test results so the tests always really execute.
+
+## Checking in parallel, and what replaced the gate
+
+The jobs used to run in a line: tests, then the release build, then the bundle,
+then the publish. The measurement that ended that is in the job timings of any
+run from before this change: the build's clock began at 57–67s — not when its
+runner was free, but exactly when the tests finished.
+
+| run | tests end | build starts | whole run |
+|---|---|---|---|
+| 39992226128 | 62s | 65s | 201s |
+| 39991167742 | 55s | 58s | 164s |
+| 39990381077 | 55s | 57s | 226s |
+
+The two jobs ask different questions and neither needs the other's answer to
+begin. A build asks whether the code compiles and an APK comes out; the suite
+asks whether it behaves. So they start together, and so does lint, which is the
+same shape of expense: sixty seconds of checking that says nothing about whether
+the tests will pass.
+
+| | before | after |
+|---|---|---|
+| whole run | 164–226s | **118–125s** |
+| build starts | 57–67s | 3s |
+| lint starts | 58s | 3s |
+
+### "Start early and stop them if it fails" — what is actually possible
+
+GitHub Actions **cannot cancel a running job because a sibling failed**. There is
+no such input; `fail-fast` spans the legs of one matrix job and nothing else.
+Cancelling the run from inside it would cancel the job reporting the failure too,
+and turn a failure into a cancellation, which is a worse answer.
+
+So the gate moved house rather than disappearing. It used to be *wait for the
+tests*; it is now *ask about them*:
+
+- `bundle` and `publish` still list the tests in `needs`, so they never start on
+  a red suite. That is where delivery happens, so nothing ships either way.
+- the build, before anything leaves it, asks the API whether the suite passed and
+  **fails and hands nothing on** if it did not. Verified with a deliberately
+  broken test: the job stopped at that step, `app-release` was not uploaded (the
+  run's only artifact was the test report), `bundle` and `publish` were skipped,
+  and no release was cut.
+
+What that costs is a build paid for on a red run. What it saves is the whole
+test duration on every green run. And the red answer stays fast, because `ci`
+stops waiting the moment a job fails instead of waiting for the run to close —
+59 seconds in the probe above, against the ~105 the run needed.
+
+Two traps found while making that work. GitHub serves a job's log only once the
+job has finished, so a verdict that arrives early arrives without its reason; `ci`
+waits for the failing job, not for the run. And the runner echoes each step's
+script into the log in cyan, where it contains every word the excerpt greps for —
+"error:", "Could not", the message the step would print on failure. The excerpt
+drops those lines before matching, or it quotes the script back as if it were the
+outcome.
