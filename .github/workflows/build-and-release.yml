@@ -828,6 +828,16 @@ jobs:
                 cp "$picture" "$name"
                 assets+=("$name")
               done
+              # A scenario's own page travels too, named so that the report's
+              # links to it can be aimed at a flat file. Without it the index
+              # points at folders, which a release does not have.
+              for page in bundle/scenarios/*/README.md; do
+                [ -e "$page" ] || continue
+                scenario="$(basename "$(dirname "$page")")"
+                name="scenario-${scenario}-page.md"
+                cp "$page" "report/$name"
+                assets+=("report/$name")
+              done
             fi
 
             # The report is rewritten to point at those assets, then appended to the

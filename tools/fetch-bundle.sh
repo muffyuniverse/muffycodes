@@ -67,6 +67,17 @@ restore_scenarios() {
         found=$((found + 1))
     done
 
+    # Each scenario's own page, which the report links to.
+    for page in "$dir"/scenario-*-page.md; do
+        [ -e "$page" ] || continue
+        scenario="$(basename "$page" .md)"
+        scenario="${scenario#scenario-}"
+        scenario="${scenario%-page}"
+        mkdir -p "$scenarios/$scenario"
+        mv "$page" "$scenarios/$scenario/README.md"
+        found=$((found + 1))
+    done
+
     [ "$found" -eq 0 ] && return 0
 
     # The report travels as an asset of its own, with links relative to the
