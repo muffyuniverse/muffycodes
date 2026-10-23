@@ -851,11 +851,19 @@ jobs:
               } >> release-notes.md
             fi
 
+            # The report itself goes on the release as a file, under a name of
+            # its own: `gh release create` takes an asset's name from the file, so
+            # the file is given the name it should have. It is not the same as the
+            # body's copy — this one links to folders, which is what the phone
+            # needs, and the body's cannot.
+            mkdir -p report
+            cp bundle/scenarios/README.md report/scenarios.md
+
             gh release create "v${VERSION_NAME}" \
               --repo "$REPOSITORY" \
               --title "Muffy Codes ${VERSION_NAME}" \
               --notes-file release-notes.md \
               bundle/app-release.apk \
               "${assets[@]}" \
-              bundle/scenarios/README.md#scenarios.md
+              report/scenarios.md
 
