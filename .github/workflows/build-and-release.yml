@@ -804,9 +804,20 @@ jobs:
   deliver:
     name: Deliver
     needs: [test, build-release, lint]
+    # The condition has to say everything now, because `!cancelled()` replaces the
+    # implicit rule. A job whose `needs` include a *skipped* job is skipped too,
+    # and lint is skipped on development — so writing only "is this a build and
+    # did the app change" silently stopped development from ever handing over an
+    # APK the moment lint stopped running there. Every answer the implicit rule
+    # used to give is now written out: the suite passed, the build succeeded, and
+    # lint either passed or did not run.
     if: |
-      github.event_name != 'pull_request'
+      !cancelled()
+      && github.event_name != 'pull_request'
       && needs.build-release.outputs.changed != 'no'
+      && needs.test.result == 'success'
+      && needs.build-release.result == 'success'
+      && (needs.lint.result == 'success' || needs.lint.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # Write is granted even on a development push, where nothing is published,
