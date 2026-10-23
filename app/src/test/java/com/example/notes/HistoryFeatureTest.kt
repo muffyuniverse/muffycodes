@@ -224,4 +224,12 @@ class HistoryFeatureTest : FeatureTest() {
         }
         assertTrue("no remote is configured", remotes.isEmpty())
     }
+
+    @Test
+    fun probeTheNarrowedRunActuallyRuns() {
+        // Temporary. If a narrowed run executed nothing, this test would not be
+        // the one that noticed — it is here so the run has one obvious class to
+        // select and the log shows what actually ran.
+        assertTrue(true)
+    }
 }
