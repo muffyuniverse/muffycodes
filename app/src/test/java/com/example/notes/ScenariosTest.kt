@@ -87,7 +87,7 @@ class ScenariosTest {
     }
 
     private fun record(folder: String, title: String, about: String, body: ScenarioShots.() -> Unit) {
-        scenario(compose, folder, title, about, screen = browser(), body = body)
+        scenario(compose, folder, title, about, screen = { browser() }, body = body)
     }
 
     @Test
@@ -112,7 +112,7 @@ class ScenariosTest {
         scenario(
             compose, "02-settings", "Settings, before anything has been kept.",
             "the themes and the two history lengths, all at their defaults.",
-            screen = settingsScreen(),
+            screen = { settingsScreen() },
         ) {
             before()
             then("The settings screen is opened from the corner menu.") {}
@@ -256,8 +256,8 @@ class ScenariosTest {
             compose, "08-the-history-of-a-file",
             "The history of a file.",
             "a note that was written three times, and the versions it kept.",
-            screen = Screen {
-                HistoryScreen(viewModel = viewModel, title = "milk.txt", onBack = {})
+            screen = {
+                Screen { HistoryScreen(viewModel = viewModel, title = "milk.txt", onBack = {}) }
             },
         ) {
             before()
@@ -285,8 +285,8 @@ class ScenariosTest {
             compose, "09-a-deleted-folder-that-can-come-back",
             "A folder that was deleted, and the history that still has it.",
             "a folder removed from the phone, with every file of it still recoverable.",
-            screen = Screen {
-                HistoryScreen(viewModel = viewModel, title = "letters", onBack = {})
+            screen = {
+                Screen { HistoryScreen(viewModel = viewModel, title = "letters", onBack = {}) }
             },
         ) {
             before()
@@ -317,8 +317,8 @@ class ScenariosTest {
             compose, "10-the-history-of-a-synced-file",
             "The history of a file that lives on GitHub.",
             "a file inside a project, changed and synced twice, and the versions GitHub holds.",
-            screen = Screen {
-                HistoryScreen(viewModel = viewModel, title = "milk.txt", onBack = {})
+            screen = {
+                Screen { HistoryScreen(viewModel = viewModel, title = "milk.txt", onBack = {}) }
             },
         ) {
             before()
