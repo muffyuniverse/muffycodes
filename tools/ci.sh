@@ -149,6 +149,25 @@ if [ "$conclusion" != "success" ]; then
         done
 fi
 
+# A build that passed on main or development leaves its bundle on GitHub,
+# but a bundle nobody can hold is not a delivery. Bring it to the phone here,
+# so that waiting on the run is the only thing a person does: when this says
+# success, the APK is already in the Downloads folder.
+#
+# The renders of a real install arrive on a release minutes later, in a run
+# of their own; running `bundle` again afterwards grows the folder with them.
+if [ "$conclusion" = "success" ] && [ "$WORKFLOW" = "build-and-release.yml" ]; then
+HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+echo ""
+if [ "$BRANCH" = "main" ]; then
+bash "$HERE/fetch-bundle.sh" 2>&1 | sed 's/^/  /' \
+|| echo "  (nothing was delivered)"
+else
+bash "$HERE/fetch-bundle.sh" --run "$RUN_ID" 2>&1 | sed 's/^/  /' \
+|| echo "  (this run made no bundle — nothing in the app changed)"
+fi
+fi
+
 echo ""
 echo "RESULT: $conclusion   https://github.com/$REPO/actions/runs/$RUN_ID"
 case "$conclusion" in
