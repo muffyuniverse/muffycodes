@@ -361,10 +361,13 @@ class AppViewModel @JvmOverloads constructor(
 
     /** Commits a change into the account's own history, behind the UI. */
     private fun record(what: String) {
+        val login = activeLogin ?: return
         val h = history ?: return
         val keep = settings.appHistoryLength
+        // The account can be removed while this is still on its way to the worker.
+        // Writing then would make its folder again, and it would come back.
         worker.execute {
-            h.commit(what, keep)
+            if (accounts.exists(login)) h.commit(what, keep)
         }
     }
 
@@ -398,9 +401,10 @@ class AppViewModel @JvmOverloads constructor(
         val h = history
         val name = file.name
         if (h != null) {
+            val login = activeLogin
             worker.execute {
                 if (saveDebounceMs > 0) Thread.sleep(saveDebounceMs)
-                h.commit("Edited $name", keep)
+                if (login != null && accounts.exists(login)) h.commit("Edited $name", keep)
             }
         }
         refresh()
@@ -784,8 +788,15 @@ class AppViewModel @JvmOverloads constructor(
     /** The token of the active account, for the sign-in check. */
     fun tokenOf(login: String): String? = credentials.token(login)
 
-    /** True when [login] already has a token on this phone. */
-    fun known(login: String): Boolean = credentials.hasToken(login)
+    /**
+     * True when this phone can act as [login]: it holds a key for it, or it is the
+     * test account of a build that may keep one. Removing an account forgets its
+     * key, so a removed account is not something to switch to.
+     */
+    fun known(login: String): Boolean {
+        if (credentials.hasToken(login)) return true
+        return testAccountsAllowed && accounts.account(login)?.dev == true
+    }
 
     // ---- history ------------------------------------------------------------
 

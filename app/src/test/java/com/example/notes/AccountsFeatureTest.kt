@@ -99,8 +99,13 @@ class AccountsFeatureTest : FeatureTest() {
         scene.signedIn()
         scene.folder("go-away")
         val gone = File(scene.workspace!!.accountDir, "go-away")
+        // A save is still on its way to the worker when the account is removed.
+        scene.viewModel.saveEditor("anything")
 
         scene.viewModel.removeAccount(scene.login, deleteCopies = true)
+        scene.await("the account's folder to be gone") {
+            !scene.viewModel.accounts.dirOf(scene.login).exists()
+        }
 
         assertFalse("the folder is gone", gone.exists())
         assertFalse(
@@ -112,6 +117,7 @@ class AccountsFeatureTest : FeatureTest() {
     @Test
     fun `removing one account leaves the others exactly as they were`() {
         scene.signedIn()
+        scene.viewModel.refresh()
         scene.viewModel.signIn("second", "a-key", "Second", "second@example.com")
         scene.folder("second-folder")
         val second = File(scene.viewModel.workspace!!.accountDir, "second-folder")

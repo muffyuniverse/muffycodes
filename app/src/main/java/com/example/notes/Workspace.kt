@@ -152,6 +152,21 @@ class Workspace(val accountDir: File) {
     // ---- changing the tree -------------------------------------------------
 
     /** Makes a folder. Fails when the name is taken or is not a legal name. */
+    /**
+     * Puts a hidden marker in an empty folder.
+     *
+     * Git cannot record an empty folder, so without one an empty folder would have
+     * no version to come back to — and §4 promises that any folder state can be
+     * rolled back. The marker is the app's (a dot name, never shown, never
+     * searched), and it is the only way to keep that promise for a folder that
+     * holds nothing yet.
+     */
+    fun markTrackable(folder: File) {
+        if (!folder.isDirectory) return
+        val filled = folder.listFiles()?.any { !isHidden(it.name) || it.name == KEEPER } == true
+        if (!filled) File(folder, KEEPER).writeText("")
+    }
+
     fun createFolder(dir: File, name: String): Result<File> {
         val safe = name.trim()
         nameProblem(safe)?.let { return Result.failure(IllegalArgumentException(it)) }
@@ -159,8 +174,12 @@ class Workspace(val accountDir: File) {
         if (target.exists()) {
             return Result.failure(IllegalArgumentException("There is already a \"$safe\" here"))
         }
-        return if (target.mkdirs()) Result.success(target)
-        else Result.failure(IllegalStateException("Could not make the folder"))
+        return if (target.mkdirs()) {
+            markTrackable(target)
+            Result.success(target)
+        } else {
+            Result.failure(IllegalStateException("Could not make the folder"))
+        }
     }
 
     /** Makes a file with some text in it. */
@@ -295,6 +314,8 @@ class Workspace(val accountDir: File) {
         const val PROJECTS = "projects"
         const val REPO = "repo"
         const val STATE_DIR = ".muffy"
+        /** The hidden marker that gives an empty folder a version. */
+        const val KEEPER = ".gitkeep"
         const val PINS_FILE = "pins.json"
 
         /** The extensions treated as pictures rather than text (§9). */

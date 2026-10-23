@@ -27,10 +27,28 @@ class HistoryFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `signing in starts the history`() {
+    fun `an account with nothing in it has no history yet, and its first change starts one`() {
+        assertTrue("nothing has happened", log().isEmpty())
+
+        scene.folder("letters")
         scene.await("the first commit") { log().isNotEmpty() }
 
-        assertTrue("the account's history is a repository of its own", log().isNotEmpty())
+        assertTrue("the first change is the first version", log().isNotEmpty())
+    }
+
+    @Test
+    fun `an empty folder still has a version, so it can come back`() {
+        scene.folder("empty")
+        scene.await("a version") { scene.versionsOfFolder("empty").isNotEmpty() }
+
+        val version = scene.versionsOfFolder("empty").first().first.id
+        val folder = File(scene.workspace!!.accountDir, "empty")
+        scene.viewModel.delete(folder)
+        assertFalse("the empty folder is gone", folder.exists())
+
+        scene.restore(version)
+
+        assertTrue("and an empty folder is still a folder", folder.isDirectory)
     }
 
     @Test
@@ -44,14 +62,12 @@ class HistoryFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `every save of a local file is a version of it`() {
+    fun `each save with a pause is a version of the file`() {
         val file = scene.file("milk.txt", "one litre")
         scene.openEditor(file)
-        scene.saveEditor("two litres")
-        scene.saveEditor("three litres")
+        scene.saveAsVersion("two litres", 2)
+        scene.saveAsVersion("three litres", 3)
         scene.closeEditor()
-
-        scene.await("three versions") { scene.versionsOf(file).size >= 3 }
 
         assertTrue(
             "each version has its own text",
@@ -63,9 +79,8 @@ class HistoryFeatureTest : FeatureTest() {
     fun `a local file's older version can be brought back`() {
         val file = scene.file("milk.txt", "one litre")
         scene.openEditor(file)
-        scene.saveEditor("two litres")
+        scene.saveAsVersion("two litres", 2)
         scene.closeEditor()
-        scene.await("two versions") { scene.versionsOf(file).size >= 2 }
 
         val oldest = scene.versionsOf(file).last().first.id
         scene.restore(oldest)
@@ -77,9 +92,8 @@ class HistoryFeatureTest : FeatureTest() {
     fun `restoring a version adds it back and leaves the newer ones alone`() {
         val file = scene.file("milk.txt", "one litre")
         scene.openEditor(file)
-        scene.saveEditor("two litres")
+        scene.saveAsVersion("two litres", 2)
         scene.closeEditor()
-        scene.await("two versions") { scene.versionsOf(file).size >= 2 }
         val count = scene.versionsOf(file).size
 
         scene.restore(scene.versionsOf(file).last().first.id)
@@ -173,7 +187,11 @@ class HistoryFeatureTest : FeatureTest() {
             "the worktree is not part of the account's history",
             tracked.any { it.startsWith("projects/Shopping/repo/") },
         )
-        assertTrue("the project folder is", tracked.contains("projects/Shopping"))
+        assertEquals(
+            "and nothing of the repository leaked in beside it",
+            emptyList<String>(),
+            tracked.filter { it.contains("repo/") },
+        )
     }
 
     @Test
@@ -191,6 +209,7 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `the history has no remote and needs no key`() {
+        scene.folder("something")
         scene.await("the first commit") { log().isNotEmpty() }
 
         if (!GitService.isRepository(scene.workspace!!.accountDir)) return

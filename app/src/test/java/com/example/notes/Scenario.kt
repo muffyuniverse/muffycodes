@@ -141,15 +141,21 @@ class Scenario(
         await("project \"$name\" to exist") {
             viewModel.projectNames.any { it.equals(name, ignoreCase = true) }
         }
-        await("the making of $name to finish") { !viewModel.busy }
+        await("the making of $name to finish", 60_000) { !viewModel.busy }
         return this
     }
 
-    /** Writes a file inside an open project's worktree. */
+    /**
+     * Writes a file **inside the project's worktree**, which is what goes to GitHub.
+     *
+     * A file written beside the worktree — in the project's own folder — is the
+     * local kind, and stays on the phone. The two are the whole point of the
+     * project shape, so the harness writes the one the caller asked for.
+     */
     fun worktreeFile(name: String, text: String): File {
         val ws = viewModel.workspace!!
-        val dir = ws.fileAt(viewModel.path)
-        val file = File(dir, name)
+        val project = ws.projectAt(viewModel.path) ?: error("not inside a project")
+        val file = File(ws.repoOf(project), name)
         ws.write(file, text)
         return file
     }
@@ -157,8 +163,8 @@ class Scenario(
     /** Syncs a project and waits until nothing is waiting to be committed. */
     fun sync(project: String): Scenario {
         viewModel.sync(project)
-        await("the sync of $project to finish") { !viewModel.busy }
-        await("$project to have nothing left to sync") { viewModel.changesOf(project) == 0 }
+        await("the sync of $project to finish", 60_000) { !viewModel.busy }
+        await("$project to have nothing left to sync", 60_000) { viewModel.changesOf(project) == 0 }
         return this
     }
 
@@ -173,6 +179,20 @@ class Scenario(
         val file = viewModel.editingFile ?: error("the editor is not open")
         viewModel.saveEditor(text)
         await("${file.name} to hold the new text") { viewModel.textOf(file) == text }
+    }
+
+    /**
+     * Saves, and waits for the version to exist.
+     *
+     * The app waits a moment before committing a save, so that a burst of typing
+     * becomes one version rather than one per keystroke. A test that saved three
+     * times as fast as it could would get fewer versions than saves and would be
+     * measuring the debounce rather than the history.
+     */
+    fun saveAsVersion(text: String, atLeast: Int) {
+        val file = viewModel.editingFile ?: error("the editor is not open")
+        viewModel.saveEditor(text)
+        await("$atLeast versions of ${file.name}", 60_000) { versionsOf(file).size >= atLeast }
     }
 
     /** Closes the editor, which is what the back arrow does. */
@@ -262,7 +282,7 @@ class Scenario(
      * between looks: a check that never lets the answer through would wait
      * forever for something that had already happened.
      */
-    fun await(what: String, timeoutMs: Long = 30_000, condition: () -> Boolean) {
+    fun await(what: String, timeoutMs: Long = 10_000, condition: () -> Boolean) {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
             shadowOf(Looper.getMainLooper()).idle()
