@@ -300,7 +300,14 @@ jobs:
           # never be overwritten once it exists. A bad entry under a key would
           # then be restored forever after, so raising the version is how the
           # cache is cleared when it is wrong.
-          key: config-cache-v2-tests-${{ matrix.shard }}-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', 'gradle.properties', 'gradle/wrapper/gradle-wrapper.properties') }}
+          # The event is part of the key, and it has to be. A build of main or
+          # development runs with `-Pmuffy.shots` and a pull request does not, so
+          # the two make different configuration-cache entries for the same build
+          # files. One key shared between them means whichever ran first owns the
+          # entry, the other never restores a matching one, and — because cache
+          # entries are immutable — it can never save its own either. It would miss
+          # forever while the workflow looked entirely correct.
+          key: config-cache-v3-tests-${{ matrix.shard }}-${{ runner.os }}-${{ github.event_name }}-${{ hashFiles('**/*.gradle.kts', 'gradle.properties', 'gradle/wrapper/gradle-wrapper.properties') }}
       - name: Run the tests
         if: steps.shard.outputs.nothing == 'no'
         env:
