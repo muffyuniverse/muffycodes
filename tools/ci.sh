@@ -156,17 +156,17 @@ fi
 #
 # The renders of a real install arrive on a release minutes later, in a run
 # of their own; running `bundle` again afterwards grows the folder with them.
-if [ "$conclusion" = "success" ] && [ "$WORKFLOW" = "build-and-release.yml" ]; then
-HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
-echo ""
-if [ "$BRANCH" = "main" ]; then
-bash "$HERE/fetch-bundle.sh" 2>&1 | sed 's/^/  /' \
-|| echo "  (nothing was delivered)"
-else
-bash "$HERE/fetch-bundle.sh" --run "$RUN_ID" 2>&1 | sed 's/^/  /' \
-|| echo "  (this run made no bundle — nothing in the app changed)"
-fi
-fi
+  if [ "$conclusion" = "success" ] && [ "$WORKFLOW" = "build-and-release.yml" ]; then
+      HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+      echo ""
+      # The script says its own piece — what was delivered, or why there was
+      # nothing to deliver — so nothing is added to it here.
+      if [ "$BRANCH" = "main" ]; then
+          bash "$HERE/fetch-bundle.sh" 2>&1 | sed 's/^/  /' || true
+      else
+          bash "$HERE/fetch-bundle.sh" --run "$RUN_ID" 2>&1 | sed 's/^/  /' || true
+      fi
+  fi
 
 echo ""
 echo "RESULT: $conclusion   https://github.com/$REPO/actions/runs/$RUN_ID"
