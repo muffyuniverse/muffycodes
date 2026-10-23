@@ -19,7 +19,7 @@ stopped testing is worse than a slow one, and looks identical from the outside.
 |---|---|---|
 | pull request, one test class | most often | **58s** |
 | pull request, seven classes | often | **91s** |
-| development push | occasionally | **66s** (no lint; ~75s when the app changed) |
+| development push | occasionally | **66s** documents only · **136s** with an app change |
 | main, full release | rare, by hand | **146s** |
 | main, nothing in the app changed | — | **59s** |
 
@@ -179,6 +179,18 @@ into the build would put the build behind both — turning a 3-second start into
 **Lint no longer runs on development**, on the operator's call. It had never
 failed there, the branch exists to hand somebody a build to look at, and the
 cheap variant measured *slower* than the deep one.
+
+What removing it is actually worth depends on the run, and the first measurement
+was misleading. Development went 141s → **66s** on a documents-only push, but
+that run built nothing. Measured again with a real change to the app: **136s**
+against 141s before. Lint was running *beside* the tests, so it never sat on the
+critical path — the minute it looked like it was saving was the build, which had
+only been skipped because no code had changed.
+
+The honest accounting: lint on development cost about five seconds of wall clock
+and bought a second opinion nobody ever acted on. Removing it is justified by
+"the branch exists to hand out a build", not by a minute. Two measurements were
+needed to learn that, and the first one was quoted before the second existed.
 
 ## The floor
 
