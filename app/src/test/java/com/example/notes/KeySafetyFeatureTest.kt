@@ -113,8 +113,14 @@ class KeySafetyFeatureTest : FeatureTest() {
     fun `a test account holds no key at all`() {
         scene.signedIn()
 
-        assertFalse("there is nothing to hold", scene.viewModel.known(scene.login))
-        assertNull("and nothing stored", scene.viewModel.tokenOf(scene.login)?.takeIf { it.isNotEmpty() })
+        assertFalse(
+            "no key is stored for it",
+            scene.credentials.hasToken(scene.login),
+        )
+        assertNull(
+            "and nothing is stored under its name",
+            scene.viewModel.tokenOf(scene.login)?.takeIf { it.isNotEmpty() },
+        )
     }
 
     @Test

@@ -367,6 +367,7 @@ class Scenario(
             val hist = AppHistory(dir) { AppViewModel.DEFAULT_AUTHOR }
             appendLine("    history: ${hist.log(null, 6).joinToString { it.message.take(30) }}")
             appendLine("    history error: ${hist.lastError}")
+            appendLine("    history holds: ${appHistoryFiles().take(12)}")
         } catch (e: Exception) {
             appendLine("    history could not be read: ${e.message}")
         }

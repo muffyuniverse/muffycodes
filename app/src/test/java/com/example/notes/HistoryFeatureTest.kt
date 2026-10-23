@@ -78,9 +78,9 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `a local file's older version can be brought back`() {
-        val file = scene.file("milk.txt")
+        val file = scene.file("milk.txt", "one litre")
         scene.openEditor(file)
-        scene.saveAsVersion("one litre", 2)
+        scene.saveAsVersion("two litres", 2)
         scene.saveAsVersion("two litres", 3)
         scene.closeEditor()
 

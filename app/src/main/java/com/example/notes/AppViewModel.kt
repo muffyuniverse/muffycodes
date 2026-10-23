@@ -791,8 +791,17 @@ class AppViewModel @JvmOverloads constructor(
     /** The token of the active account, for the sign-in check. */
     fun tokenOf(login: String): String? = credentials.token(login)
 
-    /** True when this phone holds a key for [login]. Removing an account forgets it. */
-    fun known(login: String): Boolean = credentials.hasToken(login)
+    /**
+     * True when this phone can act as [login]: it holds a key for it, or it is the
+     * test account of a build that may keep one.
+     *
+     * Removing an account forgets its key, so a removed account is no longer
+     * something to switch to — even when its folder was kept.
+     */
+    fun known(login: String): Boolean {
+        if (credentials.hasToken(login)) return true
+        return testAccountsAllowed && accounts.account(login)?.dev == true
+    }
 
     // ---- history ------------------------------------------------------------
 

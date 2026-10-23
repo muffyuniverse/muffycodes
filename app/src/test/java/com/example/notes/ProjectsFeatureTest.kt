@@ -163,7 +163,8 @@ class ProjectsFeatureTest : FeatureTest() {
         scene.await("the delete to finish") { !scene.viewModel.busy }
         assertTrue("nothing is here", scene.viewModel.projectNames.isEmpty())
 
-        scene.viewModel.pullRepository(Repo("Shopping", "$scene.login/Shopping", false, ""))
+        val url = scene.github.cloneUrlFor(scene.login, "Shopping")
+        scene.viewModel.pullRepository(Repo("Shopping", "${scene.login}/Shopping", false, url))
         scene.await("the pull to finish") { !scene.viewModel.busy }
         scene.await("the repository's files to be here", 30_000) {
             File(scene.workspace!!.repoOf("Shopping"), "README.md").isFile
