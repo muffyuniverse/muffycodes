@@ -208,9 +208,13 @@ private fun AppRoot(viewModel: AppViewModel) {
         )
     }
 
-    Dialogs(viewModel, pending, dismiss = { pending = Pending.None }) {
-        pending = Pending.NewProject
-    }
+    Dialogs(
+        viewModel = viewModel,
+        pending = pending,
+        dismiss = { pending = Pending.None },
+        newProject = { pending = Pending.NewProject },
+        askReplace = { project -> pending = Pending.ReplaceProject(project) },
+    )
 }
 
 /** Every dialog, in one place, so the screens stay free of state. */
@@ -220,6 +224,7 @@ private fun Dialogs(
     pending: Pending,
     dismiss: () -> Unit,
     newProject: () -> Unit,
+    askReplace: (String) -> Unit,
 ) {
     when (pending) {
         Pending.None -> Unit
@@ -301,7 +306,7 @@ private fun Dialogs(
                     dismiss()
                     if (repo.name in viewModel.projectNames) {
                         // Already here: replacing the copy is a question (§5.2).
-                        pending = Pending.ReplaceProject(repo.name)
+                        askReplace(repo.name)
                     } else {
                         viewModel.pullRepository(repo)
                     }
