@@ -3,7 +3,7 @@ package com.example.notes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
-import io.github.takahirom.roborazzi.captureRoboImage
+import com.github.takahirom.roborazzi.captureRoboImage
 import java.io.File
 import org.junit.Assume
 import org.junit.Before
@@ -102,7 +102,7 @@ class ScreenshotTourTest {
 
     /** A brand new app: every way to start is offered. */
     @Test
-    fun emptyList() {
+    fun theEmptyScreen() {
         showList()
         shot("01-list-empty.png")
     }
