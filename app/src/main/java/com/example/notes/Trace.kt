@@ -168,14 +168,17 @@ object Trace {
     private var taps = 0
 
     /**
-     * When the app last answered anything.
+     * The id of the last tap that was answered.
      *
-     * A tap older than this cannot be what a new answer is about: something has already
-     * been said since the press, so the press was served. This is the difference the
-     * clock alone could not make — creating a folder produces a redraw *and* a sentence,
-     * and the sentence was landing on a tap from ten seconds earlier.
+     * **An id, not a time, and that is the whole point.** A tap already answered cannot be
+     * waiting for a second reply, so no answer may claim a tap at or below this. The first
+     * version compared timestamps, which fails on the events that matter most: the app
+     * records a tap, an answer and a second answer within the same millisecond, and
+     * `>=` then let the second answer claim the tap before it. Ids are handed out one at a
+     * time and never repeat, so they order the events exactly where a millisecond clock
+     * cannot.
      */
-    private var lastAnswerAt = 0L
+    private var lastAnsweredId = 0
 
     @Volatile
     private var sink: Sink? = null
@@ -363,20 +366,20 @@ object Trace {
             val line: String
             synchronized(guard) {
                 // **Two conditions, and both are needed.** Recent enough that it could be
-                // what this answers, and made *after* the last answer — because a press
-                // that has already been answered is not waiting for a second reply, and
-                // the app sometimes speaks twice for one press (a redraw and a sentence).
+                // what this answers, and newer than the last tap answered — because a press
+                // that has already been answered is not waiting for a second reply, and the
+                // app sometimes speaks twice for one press (a redraw and a sentence).
                 val act = if (to != null) {
                     unanswered[to]
                 } else {
                     unanswered.values.lastOrNull()
-                        ?.takeIf { at - it.at <= withinMs && it.at >= lastAnswerAt }
+                        ?.takeIf { at - it.at <= withinMs && it.id > lastAnsweredId }
                 }
                 val id = act?.id ?: 0
                 // Only a line that answered a tap moves the boundary. An answer that
                 // claimed nothing is the app talking on its own account, and letting it
                 // push the boundary forward would orphan a tap that is still waiting.
-                if (act != null) lastAnswerAt = at
+                if (act != null) lastAnsweredId = act.id
                 if (act != null) {
                     unanswered.remove(act.id)
                     answered++
@@ -476,6 +479,7 @@ object Trace {
             answered = 0
             taps = 0
             next = 1
+            lastAnsweredId = 0
         }
     }
 
