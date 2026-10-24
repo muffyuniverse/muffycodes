@@ -19,6 +19,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import java.io.File
 
 /**
  * What the browser offers, and where — the chrome around the files.
@@ -164,9 +165,12 @@ class BrowserChromeTest {
         // is the *first row's* menu — which was the unlocked README, so the test was
         // reading a menu for a file it had not locked and concluding the lock leaked.
         scene.open(Workspace.PROJECTS, "groceries", Workspace.REPO)
-        scene.folder("only")
+        val only = scene.folder("only")
+        // Written through the model, because `worktreeFile` puts a file at the root of the
+        // worktree and the folder that is open is one level below it.
+        val file = File(only, "milk.txt")
+        scene.workspace!!.write(file, "two litres")
         scene.open(Workspace.PROJECTS, "groceries", Workspace.REPO, "only")
-        val file = scene.worktreeFile("milk.txt", "two litres")
         scene.viewModel.toggleLocked(file)
         scene.viewModel.refresh()
         // **The premise, asserted.** Without this the test can only say "the menu offered
