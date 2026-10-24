@@ -29,13 +29,13 @@ class AccountsFeatureTest : FeatureTest() {
         val phone = Scenario(
             RuntimeEnvironment.getApplication(),
             signIn = false,
-            signInGitHub = { DiskGitHub(File(scene.root, "refusing"), "dev") },
+            signInGitHub = { RefusingGitHub() },
         )
         try {
             var answered: Boolean? = null
             var sawMessage: String? = null
 
-            phone.viewModel.signInWithToken("", "not-a-real-key", "", "") { ok ->
+            phone.viewModel.signInWithToken("a-key-github-does-not-like", "", "") { ok ->
                 answered = ok
                 sawMessage = phone.viewModel.message
             }
@@ -201,4 +201,38 @@ class AccountsFeatureTest : FeatureTest() {
         assertEquals("A Writer", reopened.account?.commitName)
         assertTrue("it is still the test account", reopened.account!!.dev)
     }
+}
+
+/**
+ * A GitHub that refuses every key.
+ *
+ * The other GitHub in these tests, [DiskGitHub], is a folder that accepts whatever
+ * it is given — which made the refusal path unreachable and therefore unrun. This
+ * one exists only to say no, the way GitHub does to an expired or mistyped key.
+ */
+private class RefusingGitHub : GitHub {
+    override fun whoami(token: String): GitHubResult<String> =
+        GitHubResult(error = "Bad credentials", status = 401)
+
+    override fun listRepos(token: String): GitHubResult<List<Repo>> =
+        GitHubResult(error = "Bad credentials", status = 401)
+
+    override fun licences(token: String): GitHubResult<List<Licence>> =
+        GitHubResult(error = "Bad credentials", status = 401)
+
+    override fun createRepo(token: String, name: String, licence: String, description: String):
+        GitHubResult<Repo> = GitHubResult(error = "Bad credentials", status = 401)
+
+    override fun renameRepo(token: String, owner: String, name: String, newName: String):
+        GitHubResult<Repo> = GitHubResult(error = "Bad credentials", status = 401)
+
+    override fun deleteRepo(token: String, owner: String, name: String): GitHubResult<Unit> =
+        GitHubResult(error = "Bad credentials", status = 401)
+
+    override fun cloneUrlFor(owner: String, name: String): String =
+        "https://github.com/$owner/$name.git"
+
+    override fun webUrl(cloneUrl: String): String = cloneUrl
+
+    override fun owns(remoteUrl: String): Boolean = true
 }
