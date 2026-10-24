@@ -159,7 +159,13 @@ class BrowserChromeTest {
         // Given a locked file
         scene.signedIn()
         scene.project("groceries")
+        // **A folder of its own, with one file in it.** The worktree already holds the
+        // clone's README and LICENSE, and `onAllNodesWithContentDescription("More")[0]`
+        // is the *first row's* menu — which was the unlocked README, so the test was
+        // reading a menu for a file it had not locked and concluding the lock leaked.
         scene.open(Workspace.PROJECTS, "groceries", Workspace.REPO)
+        scene.folder("only")
+        scene.open(Workspace.PROJECTS, "groceries", Workspace.REPO, "only")
         val file = scene.worktreeFile("milk.txt", "two litres")
         scene.viewModel.toggleLocked(file)
         scene.viewModel.refresh()
@@ -171,6 +177,7 @@ class BrowserChromeTest {
 
         // When its menu is opened
         compose.waitUntil(20_000) { there("milk.txt") }
+        // The only row, so "the first More" is the right one — see above.
         compose.onAllNodesWithContentDescription("More")[0].performClick()
         compose.waitForIdle()
 
