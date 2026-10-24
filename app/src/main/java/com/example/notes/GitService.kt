@@ -428,17 +428,67 @@ object GitService {
     }
 
     /**
-     * Puts the contents of [path] at [revisionId] back into the working tree.
-     * The change is left unstaged, so the user can review it and commit.
+     * The bytes of [path] at [revisionId], or null when it is not there.
+     *
+     * A version is not always text. A picture keeps its bytes exactly as they were
+     * committed, and putting one back by writing a UTF-8 reading of it would replace
+     * the picture with a row of replacement characters. Everything that restores a
+     * file goes through here for that reason.
+     */
+    fun bytesAt(repo: Repository, path: String, revisionId: String? = null): ByteArray? {
+        val walk = RevWalk(repo)
+        try {
+            val tree = treeFor(repo, walk, null, revisionId)
+            val found = TreeWalk.forPath(repo, path.trim('/'), *arrayOf<AnyObjectId>(tree))
+                ?: return null
+            found.use {
+                if (it.getFileMode(0) == FileMode.GITLINK) return null
+                return repo.open(it.getObjectId(0)).bytes
+            }
+        } finally {
+            walk.close()
+        }
+    }
+
+    /**
+     * Every path under [path] at [revisionId] — names only, no contents.
+     *
+     * Used to answer "what used to be in this folder". Reading every file to find
+     * out its name would make a small question cost a whole tree.
+     */
+    fun pathsUnder(repo: Repository, path: String?, revisionId: String? = null): List<String> {
+        val walk = RevWalk(repo)
+        try {
+            val tree = treeFor(repo, walk, path, revisionId)
+            val base = path?.trim('/').orEmpty()
+            val found = mutableListOf<String>()
+            TreeWalk(repo).use { treeWalk ->
+                treeWalk.addTree(tree)
+                treeWalk.setRecursive(true)
+                while (treeWalk.next()) {
+                    if (treeWalk.getFileMode(0) == FileMode.GITLINK) continue
+                    val name = treeWalk.getPathString()
+                    found.add(if (base.isEmpty()) name else "$base/$name")
+                }
+            }
+            return found
+        } finally {
+            walk.close()
+        }
+    }
+
+    /**
+     * Puts the contents of [path] at [revisionId] back into the working tree, byte
+     * for byte.
      */
     fun restore(repo: Repository, path: String, revisionId: String) {
-        val content = fileAt(repo, path, revisionId)
+        val content = bytesAt(repo, path, revisionId)
         val target = File(repo.workTree, path)
         if (content == null) {
             target.delete()
         } else {
             target.parentFile?.mkdirs()
-            target.writeText(content)
+            target.writeBytes(content)
         }
     }
 

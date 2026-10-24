@@ -8,7 +8,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -44,9 +49,11 @@ import java.util.Date
  * happens ([AppViewModel.saveEditor] and friends), so there is no separate
  * "uncommitted" state to show as an extra step.
  *
- * **Restoring touches this file and nothing else.** The preview is read-only;
- * nothing is written until the button is pressed. That is the promise §4 makes
- * about folder organisation, applied to the commonest case of it.
+ * **Selecting touches this file and nothing else.** The preview is read-only;
+ * nothing is written until Select is pressed — and Select is also the way back to
+ * the editor, because a person who has found the version they want has finished
+ * with the history. That is the promise §4 makes about folder organisation,
+ * applied to the commonest case of it.
  *
  * Which history answers is decided by where the file is, not by the screen: a
  * file inside a project's worktree is versioned by that project's repository, and
@@ -59,6 +66,7 @@ fun HistoryScreen(
     viewModel: AppViewModel,
     title: String,
     onBack: () -> Unit,
+    onSelect: () -> Unit = onBack,
 ) {
     // Recomputed when the file changes or something is restored, not on every frame:
     // `versions()` opens the repository and walks it.
@@ -75,7 +83,15 @@ fun HistoryScreen(
         topBar = {
             TopAppBar(
                 navigationIcon = {
-                    TextButton(onClick = onBack) { Text("Done") }
+                    // Back leaves the version alone. Selecting is the other act, and
+                    // it is on the other side of the name so the two cannot be
+                    // mistaken for each other.
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back without selecting",
+                        )
+                    }
                 },
                 title = {
                     Column {
@@ -87,6 +103,26 @@ fun HistoryScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
+                    }
+                },
+                actions = {
+                    // One button, doing both halves of the same act: the version
+                    // shown becomes the file, and the file is what is on the screen
+                    // afterwards. A "Done" that only left, plus a Restore at the
+                    // bottom, made a person press one and then wonder whether they
+                    // had meant the other.
+                    if (shown != null && index > 0) {
+                        Button(onClick = {
+                            viewModel.restoreVersion(shown.first.id)
+                            onSelect()
+                        }) { Text("Select") }
+                    } else if (versions.isNotEmpty()) {
+                        Text(
+                            "Newest",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(end = 16.dp),
+                        )
                     }
                 },
             )
@@ -179,26 +215,6 @@ fun HistoryScreen(
                 }
             }
 
-            HorizontalDivider()
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(12.dp),
-                horizontalArrangement = Arrangement.Center,
-            ) {
-                if (index == 0) {
-                    Text(
-                        "This is the current version.",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    TextButton(onClick = { viewModel.restoreVersion(commit.id) }) {
-                        Text(
-                            if (isFolder) "Put this version of the folder back"
-                            else "Restore this version",
-                        )
-                    }
-                }
-            }
         }
     }
 }

@@ -12,6 +12,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -26,7 +30,6 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -34,6 +37,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.graphics.Color
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -43,15 +50,22 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 /**
- * The editor: the file's text, and nothing else.
+ * The editor: the file's text, its name, and the two things to do with them.
  *
- * There is no title field and no preview (§8): the file's name **is** its title,
- * and every text file opens here however it is named. What is written is saved
- * as it is typed, and each save becomes a version in the history.
+ * The top row is, left to right: **back**, the **name** (editable where it is,
+ * because renaming a file you are looking at is not a separate act), **history**,
+ * and **Save**.
+ *
+ * **Saving is something a person does.** It used to happen on every pause in
+ * typing, which made the back arrow a lie: it looked like leaving, and the work
+ * was already kept. Now the pause-save is gone, so back really does discard
+ * anything unsaved, and Save really does mean "keep this".
+ *
+ * There is no title field besides the name and no preview (§8): the file's name
+ * **is** its title, and every text file opens here however it is named.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,58 +73,97 @@ fun EditorScreen(
     viewModel: AppViewModel,
     file: java.io.File,
     onBack: () -> Unit,
-    onRename: () -> Unit,
     onDelete: () -> Unit,
     onOpenHistory: () -> Unit,
 ) {
     val kind = viewModel.workspace?.kindOf(file) ?: EntryKind.TEXT
     var text by remember(file) { mutableStateOf(viewModel.textOf(file)) }
+    // What is on disk, so that Save can say whether there is anything to save.
+    var saved by remember(file) { mutableStateOf(text) }
+    var name by remember(file) { mutableStateOf(file.name) }
     var menu by remember { mutableStateOf(false) }
+    val focus = LocalFocusManager.current
 
-    // Every pause in typing becomes a save, and every save becomes a version.
-    //
-    // Only for text. The state starts at `textOf(file)`, which reads the file as
-    // UTF-8 — and for a picture or an unknown file that is already a lossy
-    // interpretation. Saving compared against it would have written the mangled
-    // reading straight back over the file, destroying exactly the file this screen
-    // exists to protect. So the effect does nothing at all unless the file is text.
-    LaunchedEffect(text, kind) {
-        if (kind == EntryKind.TEXT && text != viewModel.textOf(file)) {
-            delay(400)
-            viewModel.saveEditor(text)
+    /**
+     * Renames the file to what is in the field, if that is a different name.
+     *
+     * Only on "done" and on leaving the field, never on a keystroke: the cleaning
+     * rule would otherwise rewrite the name under the person's finger as they typed
+     * a capital letter or a space.
+     */
+    fun commitName() {
+        val wanted = name.trim()
+        if (wanted.isEmpty() || wanted == file.name) {
+            name = file.name
+            return
         }
+        if (!viewModel.rename(file, wanted)) {
+            // The rename was refused; the field must not go on showing a name that
+            // is not the file's.
+            name = file.name
+        }
+    }
+
+    /** Leaves the editor, dropping anything not saved. */
+    fun leave() {
+        val dropped = kind == EntryKind.TEXT && text != saved
+        focus.clearFocus()
+        onBack()
+        if (dropped) viewModel.message = "Left without saving"
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 navigationIcon = {
-                    // "Done", not an arrow. Leaving the editor is not going back:
-                    // the writing is saved, and what a person has finished doing is
-                    // done. An arrow said "undo", which is the one thing it never
-                    // did.
-                    TextButton(onClick = onBack) { Text("Done") }
+                    // Back, and it means back: what was typed and not saved goes.
+                    IconButton(onClick = { leave() }) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back without saving",
+                        )
+                    }
                 },
                 title = {
-                    Text(
-                        file.name,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                    // The name, editable where it stands. "Rename" as a separate
+                    // command made a person open a window to change a word they were
+                    // already looking at.
+                    BasicTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.titleMedium.copy(
+                            color = MaterialTheme.colorScheme.onSurface,
+                        ),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = {
+                            commitName()
+                            focus.clearFocus()
+                        }),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onFocusChanged { state -> if (!state.isFocused) commitName() },
                     )
                 },
                 actions = {
                     TextButton(onClick = onOpenHistory) { Text("History") }
+                    // A button with a background, not a word where a button should
+                    // be: saving is the action of this screen, and it should look
+                    // like one.
+                    Button(
+                        onClick = {
+                            viewModel.saveEditor(text)
+                            saved = text
+                            focus.clearFocus()
+                        },
+                        enabled = kind == EntryKind.TEXT && text != saved,
+                        modifier = Modifier.padding(end = 8.dp),
+                    ) { Text("Save") }
                     IconButton(onClick = { menu = true }) {
                         Icon(Icons.Filled.MoreVert, contentDescription = "More")
                     }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Rename…") },
-                            onClick = {
-                                menu = false
-                                onRename()
-                            },
-                        )
                         DropdownMenuItem(
                             text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
                             leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },

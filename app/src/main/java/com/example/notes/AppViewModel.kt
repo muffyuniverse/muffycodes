@@ -60,6 +60,29 @@ class AppViewModel @JvmOverloads constructor(
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
 
+    /**
+     * Runs [task] on the worker, and refuses to let it take the app down.
+     *
+     * An exception on a background thread is not contained on Android: the thread's
+     * default handler ends the process, and the person sees the app close with no
+     * explanation. Every git call already catches its own failures, so what is left
+     * here is the failure that is an `Error` rather than an `Exception` — running
+     * out of memory while hashing a large file, for instance — which is exactly the
+     * kind that closed the app on a phone and said nothing.
+     *
+     * Catching [Throwable] means the worst a change can do is fail and say so.
+     */
+    private fun onWorker(task: () -> Unit) {
+        onWorker {
+            try {
+                task()
+            } catch (t: Throwable) {
+                val said = Secrets.scrub(t.message ?: "That change could not be finished")
+                main.post { message = said }
+            }
+        }
+    }
+
     // ---- who and where -----------------------------------------------------
 
     /** The login of the active account, or null when nobody is signed in. */
@@ -232,7 +255,7 @@ class AppViewModel @JvmOverloads constructor(
         val ws = workspace ?: return
         val g = git ?: return
         val names = ws.projectNames()
-        worker.execute {
+        onWorker {
             val counts = names.associateWith { g.changes(it).total }
             main.post { changesByProject = counts }
         }
@@ -310,9 +333,10 @@ class AppViewModel @JvmOverloads constructor(
     fun createFile(name: String): Boolean {
         val ws = workspace ?: return false
         val dir = currentDir ?: return false
-        val withExtension = Workspace.withDefaultExtension(name.trim())
-        val result = ws.createFile(dir, withExtension)
-        return afterChange(result, "Created $withExtension", File(dir, withExtension))
+        val asked = Workspace.withDefaultExtension(name.trim())
+        val result = ws.createFile(dir, asked)
+        val made = result.getOrNull()?.name ?: asked
+        return afterChange(result, "Created $made${namedFrom(asked, made)}", File(dir, made))
     }
 
     /**
@@ -322,35 +346,49 @@ class AppViewModel @JvmOverloads constructor(
      * and reading one as text on the way in is how it arrives corrupted.
      */
     fun importFiles(uris: List<android.net.Uri>): Boolean {
-        val ws = workspace ?: return false
         val dir = currentDir ?: return false
-        val result = Imports.filesInto(getApplication(), uris, dir)
-        val ok = afterChange(result, "Imported into ${dir.name}/", dir)
-        if (ok) {
-            val n = result.getOrNull() ?: 0
-            message = if (n == 1) "Imported 1 file" else "Imported $n files"
+        // The copy happens on the worker, not in the picker's answer.
+        //
+        // This used to run on the main thread, and a screenshot, a video or an
+        // installed .apk from Downloads is tens of megabytes: the window stopped
+        // responding for as long as the copy took, and Android killed the app for
+        // it. The file was on disk by then — which is why it looked as though the
+        // import worked and then the app died for no reason.
+        busy = true
+        onWorker {
+            val result = Imports.filesInto(getApplication(), uris, dir)
+            main.post {
+                busy = false
+                if (afterChange(result, "Imported into ${dir.name}/", dir)) {
+                    message = result.getOrNull()?.said() ?: "Imported"
+                }
+            }
         }
-        return ok
+        return true
     }
 
     /** Brings a whole folder in, keeping its shape. */
     fun importFolder(tree: android.net.Uri): Boolean {
-        val ws = workspace ?: return false
         val dir = currentDir ?: return false
-        val result = Imports.folderInto(getApplication(), tree, dir)
-        val ok = afterChange(result, "Imported a folder into ${dir.name}/", dir)
-        if (ok) {
-            val n = result.getOrNull() ?: 0
-            message = if (n == 1) "Imported 1 file" else "Imported $n files"
+        busy = true
+        onWorker {
+            val result = Imports.folderInto(getApplication(), tree, dir)
+            main.post {
+                busy = false
+                if (afterChange(result, "Imported a folder into ${dir.name}/", dir)) {
+                    message = result.getOrNull()?.said() ?: "Imported"
+                }
+            }
         }
-        return ok
+        return true
     }
 
     fun createFolder(name: String): Boolean {
         val ws = workspace ?: return false
         val dir = currentDir ?: return false
         val result = ws.createFolder(dir, name)
-        return afterChange(result, "Created ${name.trim()}/", File(dir, name.trim()))
+        val made = result.getOrNull()?.name?.plus("/") ?: name.trim()
+        return afterChange(result, "Created $made${namedFrom(name, made.trimEnd('/'))}", File(dir, made.trimEnd('/')))
     }
 
     fun rename(file: File, newName: String): Boolean {
@@ -365,13 +403,41 @@ class AppViewModel @JvmOverloads constructor(
             val moved = result.getOrNull() ?: file
             if (wasEditing) editingPath = ws.relative(moved)
         }
-        return afterChange(result, "Renamed ${file.name} to ${newName.trim()}", file.parentFile)
+        val made = result.getOrNull()?.name ?: newName.trim()
+        return afterChange(result, "Renamed ${file.name} to $made${namedFrom(newName, made)}", file.parentFile)
     }
 
+    /**
+     * Moves [file] into the folder [into], wherever that is in the account.
+     *
+     * A move is the one command that can cross the line between the two histories,
+     * and both sides have to be told. A file taken into a project's repository must
+     * be **tracked** by that project; a file taken out of one must have its removal
+     * **recorded** there, or GitHub would go on holding a copy of a file this phone
+     * no longer has. Each history trusts the other to have committed what it can
+     * see, so a move that only commits the destination leaves the source repository
+     * quietly wrong — which is exactly what "keep only on this phone" did.
+     */
     fun move(file: File, into: File): Boolean {
         val ws = workspace ?: return false
+        val was = ws.projectOf(file)?.takeIf { ws.inWorktree(file) }
+        val now = ws.projectOf(into)?.takeIf { ws.inWorktree(into) }
         val result = ws.move(file, into)
-        return afterChange(result, "Moved ${file.name} into ${into.name}/", into)
+        if (result.isFailure) {
+            message = result.exceptionOrNull()?.message ?: "That did not work"
+            return false
+        }
+        val moved = result.getOrNull() ?: file
+        refresh()
+        val what = "Moved ${file.name} into ${into.name}/"
+        record(what)
+        // The destination gains the file, and the source loses it. One commit each
+        // when they are different repositories; one in all when it stayed inside
+        // the same one.
+        if (was != null && was != now) commitProject(was, what)
+        if (now != null) commitProject(now, what)
+        historyGeneration++
+        return true
     }
 
     fun delete(file: File): Boolean {
@@ -389,23 +455,6 @@ class AppViewModel @JvmOverloads constructor(
             }
         }
         return afterChange(result, if (wasFolder) "Deleted $name/" else "Deleted $name", file.parentFile)
-    }
-
-    /** Moves a file or folder into the project's worktree (§3: the crosses). */
-    fun moveIntoRepository(file: File): Boolean {
-        val ws = workspace ?: return false
-        val project = ws.projectOf(file) ?: return false
-        val result = ws.move(file, ws.repoOf(project))
-        return afterChange(result, "Moved ${file.name} into the repository", ws.repoOf(project))
-    }
-
-    /** Moves a tracked file out of the worktree, to stay on this phone only. */
-    fun keepOnlyOnPhone(file: File): Boolean {
-        val ws = workspace ?: return false
-        val project = ws.projectOf(file) ?: return false
-        val projectDir = File(ws.projectsDir, project)
-        val result = ws.move(file, projectDir)
-        return afterChange(result, "Kept ${file.name} on this phone only", projectDir)
     }
 
     /** Pins or unpins a file or folder (§2: the flags live in `.muffy`). */
@@ -452,13 +501,32 @@ class AppViewModel @JvmOverloads constructor(
     private fun commitProjectOf(file: File, what: String) {
         val ws = workspace ?: return
         if (!ws.inWorktree(file)) return
-        val project = ws.projectOf(file) ?: return
+        commitProject(ws.projectOf(file) ?: return, what)
+    }
+
+    /**
+     * Commits [project]'s worktree, whatever changed in it.
+     *
+     * Used for a change that spans two repositories — a move across the boundary —
+     * where the file that changed is no longer in one of them.
+     */
+    private fun commitProject(project: String, what: String) {
         val g = git ?: return
         val login = activeLogin
-        worker.execute {
+        onWorker {
             if (login != null && accounts.exists(login)) g.commit(project, what)
         }
     }
+
+    /**
+     * The note to add to a message when the app used a different name.
+     *
+     * A silent rename is what makes a person think the app lost their file: they
+     * typed "My Note", and there is now a `my_note.txt` they did not ask for.
+     * Naming both is one short clause and answers it.
+     */
+    private fun namedFrom(asked: String, used: String): String =
+        if (asked.trim() == used) "" else " (was \"${asked.trim()}\")
 
     /** Commits a change into the account's own history, behind the UI. */
     private fun record(what: String) {
@@ -467,7 +535,7 @@ class AppViewModel @JvmOverloads constructor(
         val keep = settings.historyLength
         // The account can be removed while this is still on its way to the worker.
         // Writing then would make its folder again, and it would come back.
-        worker.execute {
+        onWorker {
             if (accounts.exists(login)) h.commit(what, keep)
         }
     }
@@ -526,7 +594,7 @@ class AppViewModel @JvmOverloads constructor(
         // what the change history is; sync is then only the push.
         val project = if (ws.inWorktree(file)) ws.projectOf(file) else null
         val login = activeLogin
-        worker.execute {
+        onWorker {
             if (saveDebounceMs > 0) Thread.sleep(saveDebounceMs)
             if (login != null && accounts.exists(login)) {
                 if (project != null) g?.commit(project, "Edited $name")
@@ -542,7 +610,7 @@ class AppViewModel @JvmOverloads constructor(
     fun sync(project: String) {
         val g = git ?: return
         busy = true
-        worker.execute {
+        onWorker {
             val result = g.sync(project)
             main.post {
                 busy = false
@@ -560,7 +628,7 @@ class AppViewModel @JvmOverloads constructor(
     fun replaceWithRemote(project: String) {
         val g = git ?: return
         busy = true
-        worker.execute {
+        onWorker {
             val result = g.replaceWithRemote(project)
             main.post {
                 busy = false
@@ -584,7 +652,10 @@ class AppViewModel @JvmOverloads constructor(
             onDone(false)
             return
         }
-        val clean = name.trim()
+        // One shape for a project's name everywhere: it is a GitHub repository
+        // name, a folder in `projects/`, and the name on every row.
+        val asked = name.trim()
+        val clean = Workspace.cleanName(asked, "project")
         val problem = ws.nameProblem(clean)
         if (problem != null) {
             message = problem
@@ -596,9 +667,10 @@ class AppViewModel @JvmOverloads constructor(
             onDone(false)
             return
         }
+        if (clean != asked) message = "Making \"$clean\" (was \"$asked\")" 
 
         busy = true
-        worker.execute {
+        onWorker {
             val created = api.createRepo(token, clean, licence)
             if (created.error != null) {
                 main.post {
@@ -606,7 +678,7 @@ class AppViewModel @JvmOverloads constructor(
                     message = created.error
                     onDone(false)
                 }
-                return@execute
+                return@onWorker
             }
             val url = created.value?.cloneUrl?.takeIf { it.isNotBlank() }
                 ?: api.cloneUrlFor(login, clean)
@@ -617,7 +689,7 @@ class AppViewModel @JvmOverloads constructor(
                     message = folders.exceptionOrNull()?.message ?: "Could not make the project"
                     onDone(false)
                 }
-                return@execute
+                return@onWorker
             }
             val clone = ProjectGit(
                 ws,
@@ -654,7 +726,7 @@ class AppViewModel @JvmOverloads constructor(
             return
         }
         busy = true
-        worker.execute {
+        onWorker {
             var note = ""
             if (api != null && login != null) {
                 val renamed = api.renameRepo(token, login, project, clean)
@@ -666,7 +738,7 @@ class AppViewModel @JvmOverloads constructor(
                     busy = false
                     message = moved.exceptionOrNull()?.message ?: "Could not rename the folder"
                 }
-                return@execute
+                return@onWorker
             }
             // The repository moved too, so its address changes with it.
             if (token != null && login != null && note.isEmpty()) {
@@ -704,7 +776,7 @@ class AppViewModel @JvmOverloads constructor(
         val token = activeLogin?.let { credentials.token(it) }.orEmpty()
         val login = activeLogin
         busy = true
-        worker.execute {
+        onWorker {
             var note = ""
             if (everywhere && api != null && login != null) {
                 val deleted = api.deleteRepo(token, login, project)
@@ -734,7 +806,7 @@ class AppViewModel @JvmOverloads constructor(
             onDone(emptyList(), "Sign in to GitHub first")
             return
         }
-        worker.execute {
+        onWorker {
             val result = api.listRepos(token)
             main.post { onDone(result.value ?: emptyList(), result.error) }
         }
@@ -748,7 +820,7 @@ class AppViewModel @JvmOverloads constructor(
             onDone(emptyList())
             return
         }
-        worker.execute {
+        onWorker {
             val result = api.licences(token)
             main.post { onDone(result.value ?: emptyList()) }
         }
@@ -765,7 +837,7 @@ class AppViewModel @JvmOverloads constructor(
             return
         }
         busy = true
-        worker.execute {
+        onWorker {
             val folders = ws.createProjectFolders(repo.name)
             val result = if (folders.isFailure) {
                 GitService.RemoteResult(
@@ -801,7 +873,7 @@ class AppViewModel @JvmOverloads constructor(
      * of git work.
      */
     fun signInWithToken(token: String, onDone: (Boolean) -> Unit) {
-        worker.execute {
+        onWorker {
             val result = signInGitHub().identity(token)
             val who = result.value
             main.post {
@@ -841,7 +913,7 @@ class AppViewModel @JvmOverloads constructor(
             onDone(false)
             return
         }
-        worker.execute {
+        onWorker {
             val login = TEST_ACCOUNT
             val github = DiskGitHub(accounts.devGitHubDir(login), login)
             if (github.listRepos("").value?.isEmpty() != false) {
@@ -972,6 +1044,86 @@ class AppViewModel @JvmOverloads constructor(
         return h.log(text).map { commit -> commit to h.fileAt(text, commit.id) }
     }
 
+    /**
+     * The files that used to be in [dir] and are not there now, newest first.
+     *
+     * Deleting a file is the one change with no way back from the folder it was in:
+     * the row is gone, so there is nothing to open a history on, and the version
+     * that holds it is a version of a folder nobody is looking at. Hence this list,
+     * which the add button offers beside the other ways of getting a file in.
+     *
+     * It reads whichever repository owns the folder — the project's, or the
+     * account's — because that is where the file was committed.
+     */
+    fun deletedIn(dir: File): List<Gone> {
+        val ws = workspace ?: return emptyList()
+        val path = ws.relative(dir) ?: return emptyList()
+        val inside = ws.inWorktree(dir)
+        val project = if (inside) ws.projectOf(dir) else null
+        if (inside && project == null) return emptyList()
+        val repo = git
+        val hist = history
+        // The path as the repository that owns the folder names it: from the
+        // worktree root for a project, from the account root otherwise.
+        val base = (if (inside) path.drop(3) else path).joinToString("/")
+
+        val onDisk = mutableSetOf<String>()
+        fun collect(here: File, prefix: String) {
+            for (child in here.listFiles() ?: emptyArray()) {
+                if (ws.isHidden(child.name)) continue
+                val name = if (prefix.isEmpty()) child.name else "$prefix/${child.name}"
+                if (child.isDirectory) collect(child, name) else onDisk += name
+            }
+        }
+        collect(dir, "")
+
+        val commits = if (inside) {
+            repo?.log(project!!, base.ifEmpty { null }, DELETED_LOOKBACK).orEmpty()
+        } else {
+            hist?.log(base.ifEmpty { null }, DELETED_LOOKBACK).orEmpty()
+        }
+        // Newest first, so the first commit that holds a name is the version to
+        // bring back: the file as it last was, not as it was years ago.
+        val found = LinkedHashMap<String, String>()
+        for (commit in commits) {
+            val held = if (inside) {
+                repo?.paths(project!!, base.ifEmpty { null }, commit.id).orEmpty()
+            } else {
+                hist?.pathsIn(base.ifEmpty { null }, commit.id).orEmpty()
+            }
+            for (full in held) {
+                val name = if (base.isEmpty()) full else full.removePrefix("$base/")
+                if (name.isEmpty() || name in onDisk) continue
+                found.putIfAbsent(name, commit.id)
+            }
+        }
+        return found.map { (name, revision) -> Gone(name, revision) }
+            .sortedBy { it.name.lowercase() }
+    }
+
+    /** Brings a deleted file back, byte for byte, from [revisionId]. */
+    fun restoreDeleted(dir: File, gone: Gone): Boolean {
+        val ws = workspace ?: return false
+        val path = ws.relative(dir) ?: return false
+        val inRepo = (if (ws.inWorktree(dir)) path.drop(3) else path) + gone.name.split("/")
+        val into = ws.fileAt(path + gone.name.split("/"))
+        val bytes = if (ws.inWorktree(dir)) {
+            val project = ws.projectOf(dir) ?: return false
+            git?.bytesAt(project, inRepo.joinToString("/"), gone.revision)
+        } else {
+            history?.bytesAt(inRepo.joinToString("/"), gone.revision)
+        } ?: return false
+        into.parentFile?.mkdirs()
+        into.writeBytes(bytes)
+        val what = "Brought ${gone.name} back"
+        message = what
+        refresh()
+        record(what)
+        commitProjectOf(into, what)
+        historyGeneration++
+        return true
+    }
+
     /** Puts an old version back into the file. */
     fun restoreVersion(revisionId: String) {
         val ws = workspace ?: return
@@ -999,7 +1151,15 @@ class AppViewModel @JvmOverloads constructor(
             // A restore changes what is on disk, so it is itself a version: the
             // history must be able to undo it, and an undo that cannot be undone
             // is not what "any state can be rolled back" means.
+            //
+            // Which history is told depends on where the file is, exactly as it does
+            // for an edit. A restore inside a project's repository that only
+            // recorded the account's history would leave the project's worktree
+            // modified and uncommitted — the file would say "1 changed" until the
+            // next sync, and the version it was put back to would not be in the
+            // history it came from.
             record("Restored an older version")
+            if (project != null && insideWorktree) commitProject(project, "Restored an older version")
             // The version the screen was showing is now a new version at the top of
             // the list, so the list the screen is holding is out of date.
             historyGeneration++
@@ -1012,6 +1172,9 @@ class AppViewModel @JvmOverloads constructor(
 
         val DEFAULT_AUTHOR = GitAuthor("Muffy World", "muffyworld365@gmail.com")
         private const val SEARCH_LIMIT = 4000
+
+        /** How many commits back the "what used to be here" list looks. */
+        private const val DELETED_LOOKBACK = 50
         private const val SEARCH_RESULTS = 200
     }
 }

@@ -15,7 +15,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -65,6 +72,7 @@ private sealed interface Pending {
     data class NewFile(val folder: File) : Pending
     data class NewFolder(val folder: File) : Pending
     data class MoveEntry(val entry: Entry) : Pending
+    data class RestoreDeleted(val folder: File) : Pending
     data class DeleteEntry(val entry: Entry) : Pending
     data class ReplaceProject(val project: String) : Pending
 }
@@ -151,12 +159,6 @@ private fun AppRoot(viewModel: AppViewModel) {
         onDelete = { entry -> pending = Pending.DeleteEntry(entry) },
         onTogglePin = { entry -> viewModel.togglePinned(entry.file) },
         onHistory = { entry -> viewModel.openHistory(entry.file) },
-        onMoveIntoRepository = { entry ->
-            if (!viewModel.moveIntoRepository(entry.file)) Unit
-        },
-        onKeepOnlyOnPhone = { entry ->
-            if (!viewModel.keepOnlyOnPhone(entry.file)) Unit
-        },
     )
 
     when {
@@ -176,18 +178,15 @@ private fun AppRoot(viewModel: AppViewModel) {
             viewModel = viewModel,
             title = historyPath.last(),
             onBack = { viewModel.closeHistory() },
+            // Select puts the version back and returns to the file: one act, and
+            // the person is looking at the result of it.
+            onSelect = { viewModel.closeHistory() },
         )
 
         editing != null -> EditorScreen(
             viewModel = viewModel,
             file = editing,
             onBack = { viewModel.closeEditor() },
-            onRename = {
-                pending = Pending.RenameEntry(
-                    Entry(editing.name, editing, viewModel.workspace?.kindOf(editing)
-                        ?: EntryKind.TEXT)
-                )
-            },
             onDelete = {
                 val entry = Entry(editing.name, editing, viewModel.workspace?.kindOf(editing)
                     ?: EntryKind.TEXT)
@@ -210,6 +209,9 @@ private fun AppRoot(viewModel: AppViewModel) {
                 onCreateFolder = { viewModel.currentDir?.let { pending = Pending.NewFolder(it) } },
                 onUploadFiles = { pickFiles.launch(arrayOf("*/*")) },
                 onUploadFolder = { pickFolder.launch(null) },
+                onRestoreDeleted = {
+                    viewModel.currentDir?.let { pending = Pending.RestoreDeleted(it) }
+                },
             )
             // At the bottom, and inset from it. A snackbar at the top of the
             // window sat under the phone's status bar and was cropped by it — the
@@ -367,6 +369,16 @@ private fun Dialogs(
             onPick = { target -> if (!viewModel.move(pending.entry.file, target)) Unit },
         )
 
+        is Pending.RestoreDeleted -> RestoreDeletedDialog(
+            viewModel = viewModel,
+            folder = pending.folder,
+            onDismiss = dismiss,
+            onPick = { gone ->
+                dismiss()
+                if (!viewModel.restoreDeleted(pending.folder, gone)) Unit
+            },
+        )
+
         is Pending.DeleteEntry -> ConfirmDialog(
             title = "Delete ${pending.entry.name}?",
             text = if (pending.entry.isFolder) {
@@ -393,29 +405,90 @@ private fun Dialogs(
 }
 
 /**
- * The folders a thing can be moved into: those on its own level (§3).
+ * Every folder in the account a thing can be moved into.
  *
- * The visibility rule is asked for, not restated. This used to write
- * `!it.name.startsWith(".")` itself, which matched the rule for hidden things but
- * not for the app's structural folders — so `projects/` and `repo/` appeared as
- * ordinary destinations even though §3 promises that nothing the app owns can
- * appear in a move picker or be targeted by a command.
+ * A thing moves freely inside the account root — that is what makes a project's
+ * `repo/` one place among others rather than a mode you enter with a special
+ * command. Moving a file into a worktree is how it becomes tracked; moving it out
+ * is how it stops being tracked, and both sides are committed by [AppViewModel.move].
  *
- * `Workspace` is the only place that decides; asking it is how "a guarantee, not
- * a convention" stays true when the rule changes.
+ * Three folders are left out of the list, and each for its own reason: the app's
+ * own hidden ones (§3), `projects/` itself, where a file would be invisible on the
+ * projects screen, and the file's own subtree, which cannot hold itself.
+ *
+ * The visibility rule is asked for, not restated. A move picker that wrote
+ * `!it.name.startsWith(".")` itself would drift from the rule the moment the rule
+ * changed — that is exactly how `projects/` and `repo/` once ended up offered as
+ * ordinary destinations.
  */
 private fun moveTargets(viewModel: AppViewModel, entry: Entry): List<Pair<String, File>> {
-    val parent = entry.file.parentFile ?: return emptyList()
     val ws = viewModel.workspace ?: return emptyList()
-    return (parent.listFiles() ?: emptyArray())
-        .filter { target ->
-            target.isDirectory &&
-                target.name != entry.name &&
-                !ws.isHidden(target.name) &&
-                !ws.isStructural(target)
+    val from = entry.file.canonicalPath
+    val found = mutableListOf<Pair<String, File>>()
+
+    fun walk(dir: File, shown: String, depth: Int) {
+        if (depth > 8) return
+        for (child in dir.listFiles() ?: emptyArray()) {
+            if (!child.isDirectory || ws.isHidden(child.name)) continue
+            val insideItself = child.canonicalPath == from ||
+                child.canonicalPath.startsWith("$from${File.separator}")
+            if (entry.isFolder && insideItself) continue
+            val label = if (shown.isEmpty()) child.name else "$shown/${child.name}"
+            val isTheAppFolder = depth == 0 && child.name == Workspace.PROJECTS
+            if (!isTheAppFolder && child != entry.file.parentFile) {
+                found += "$label/" to child
+            }
+            walk(child, label, depth + 1)
         }
-        .map { it.name to it }
-        .sortedBy { it.first.lowercase() }
+    }
+    walk(ws.accountDir, "", 0)
+    return found.sortedBy { it.first.lowercase() }
+}
+
+/**
+ * The files that used to be in this folder and are not there any more.
+ *
+ * Reading the history is not instant on a long-lived account, so the list is
+ * fetched once when the window opens rather than on every frame.
+ */
+@Composable
+private fun RestoreDeletedDialog(
+    viewModel: AppViewModel,
+    folder: File,
+    onDismiss: () -> Unit,
+    onPick: (Gone) -> Unit,
+) {
+    var loading by remember { mutableStateOf(true) }
+    var found by remember { mutableStateOf<List<Gone>>(emptyList()) }
+    LaunchedEffect(folder) {
+        found = viewModel.deletedIn(folder)
+        loading = false
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Restore a deleted file") },
+        text = {
+            Column(modifier = Modifier.heightIn(max = 420.dp)) {
+                when {
+                    loading -> Text("Looking through the history…")
+                    found.isEmpty() -> Text("Nothing was deleted from this folder.")
+                    else -> LazyColumn {
+                        items(found) { gone ->
+                            Text(
+                                text = gone.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onPick(gone) }
+                                    .padding(vertical = 10.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 /** Creates a project: the licence list first, then the name. */

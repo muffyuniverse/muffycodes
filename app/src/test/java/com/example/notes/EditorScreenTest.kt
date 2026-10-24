@@ -65,7 +65,6 @@ class EditorScreenTest {
                     viewModel = scene.viewModel,
                     file = file,
                     onBack = {},
-                    onRename = {},
                     onDelete = {},
                     onOpenHistory = {},
                 )

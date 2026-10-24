@@ -74,7 +74,7 @@ class ImportsFeatureTest {
         assertEquals(
             "the second was numbered",
             "the second",
-            File(dir, "note 2.txt").readText(),
+            File(dir, "note_2.txt").readText(),
         )
     }
 
@@ -111,6 +111,40 @@ class ImportsFeatureTest {
 
         assertTrue("it failed", result.isFailure)
         assertFalse("and nothing was made", missing.exists())
+    }
+
+    @Test
+    fun `a name from the picker arrives in the app's one shape`() {
+        // The names a phone's Downloads really holds: spaces, commas, brackets,
+        // capitals, a Cyrillic title. Each of them is a path in two git repositories
+        // and in the folder tree that is the account, so each is cleaned on the way
+        // in — and the report says which ones changed, because a name that changes
+        // silently is why a person reports that their file did not import.
+        val dir = File(context.cacheDir, "shape-${System.nanoTime()}").apply { mkdirs() }
+        val uri = uriWith("Holo and Lawrence, Kraft - Spice and Wolf.jpeg", "x".toByteArray())
+
+        val result = Imports.filesInto(context, listOf(uri), dir)
+        val report = result.getOrThrow()
+
+        val made = dir.listFiles()!!.single().name
+        assertEquals("holo_and_lawrence_kraft_spice_and_wolf.jpeg", made)
+        assertEquals("one file", 1, report.copied)
+        assertEquals(
+            "and it said what it called it",
+            listOf("Holo and Lawrence, Kraft - Spice and Wolf.jpeg" to made),
+            report.renamed,
+        )
+        assertTrue("the message carries the new name", report.said().contains(made))
+    }
+
+    @Test
+    fun `a name with no letters at all still arrives, under a name the app can use`() {
+        val dir = File(context.cacheDir, "shape2-${System.nanoTime()}").apply { mkdirs() }
+        val uri = uriWith("(1).png", "x".toByteArray())
+
+        assertEquals("imported.png", Imports.filesInto(context, listOf(uri), dir).getOrThrow().let {
+            dir.listFiles()!!.single().name
+        })
     }
 
     @Test

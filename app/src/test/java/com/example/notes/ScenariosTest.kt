@@ -351,7 +351,5 @@ class ScenariosTest {
         onDelete = {},
         onTogglePin = {},
         onHistory = {},
-        onMoveIntoRepository = {},
-        onKeepOnlyOnPhone = {},
     )
 }

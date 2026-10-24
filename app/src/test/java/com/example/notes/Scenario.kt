@@ -306,6 +306,42 @@ class Scenario(
         null
     }
 
+    /** How many commits a project's own repository on this phone has. */
+    fun commitCount(project: String): Int = try {
+        Git.open(workspace!!.repoOf(project)).use { it.log().call().count() }
+    } catch (e: Exception) {
+        0
+    }
+
+    /** The paths in a project's newest version, or null when it has none. */
+    fun newestPaths(project: String): List<String>? = try {
+        Git.open(workspace!!.repoOf(project)).use { git ->
+            git.repository.resolve("HEAD")?.let { head ->
+                GitService.pathsUnder(git.repository, null, head.name)
+            }
+        }
+    } catch (e: Exception) {
+        null
+    }
+
+    /**
+     * Waits until a project's newest version holds what [check] asks of it.
+     *
+     * A change is committed on the worker, so the repository has not answered by
+     * the time the call that made the change returns. What is asserted is the
+     * repository's own answer — the paths in its newest commit — not the app's
+     * opinion of what it just did.
+     */
+    fun awaitCommits(project: String, atLeast: Int, check: (List<String>) -> Boolean): Boolean {
+        var answer = false
+        await("$project's history to hold the change", 30_000) {
+            val paths = newestPaths(project)
+            answer = paths != null && commitCount(project) >= atLeast && check(paths)
+            answer
+        }
+        return answer
+    }
+
     /** How many commits the remote has. */
     fun remoteCommits(project: String): Int = try {
         Git.open(remote(project)).use { git ->

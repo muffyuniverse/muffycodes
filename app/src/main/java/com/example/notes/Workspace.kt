@@ -25,6 +25,14 @@ data class Entry(
 }
 
 /**
+ * A file that a folder's history holds and the folder itself no longer does.
+ *
+ * [name] is the path from the folder shown, so a restore puts it back where it
+ * was; [revision] is the version it is read from — the newest one that had it.
+ */
+data class Gone(val name: String, val revision: String)
+
+/**
  * The tree of one account, as it is on disk.
  *
  * The account directory **is** the app's filesystem: `projects/` holds one
@@ -199,7 +207,7 @@ class Workspace(val accountDir: File) {
     }
 
     fun createFolder(dir: File, name: String): Result<File> {
-        val safe = name.trim()
+        val safe = cleanName(name, "folder")
         nameProblem(safe)?.let { return Result.failure(IllegalArgumentException(it)) }
         val target = File(dir, safe)
         if (target.exists()) {
@@ -215,7 +223,7 @@ class Workspace(val accountDir: File) {
 
     /** Makes a file with some text in it. */
     fun createFile(dir: File, name: String, text: String = ""): Result<File> {
-        val safe = name.trim()
+        val safe = cleanName(name, "untitled")
         nameProblem(safe)?.let { return Result.failure(IllegalArgumentException(it)) }
         val target = File(dir, safe)
         if (target.exists()) {
@@ -231,8 +239,17 @@ class Workspace(val accountDir: File) {
 
     /** Renames [file] to [newName] in the same folder. */
     fun rename(file: File, newName: String): Result<File> {
-        val safe = newName.trim()
         touchedProblem(file)?.let { return Result.failure(IllegalArgumentException(it)) }
+        // A new name without an extension keeps the one the file has. The extension
+        // is not decoration here: it is how §9 decides what may be edited and what
+        // must be left alone, so dropping it by accident would turn a picture into
+        // "text" and let the editor rewrite its bytes.
+        val typed = cleanName(newName, file.nameWithoutExtension.ifBlank { "untitled" })
+        val safe = if ('.' !in typed && file.isFile && file.extension.isNotEmpty()) {
+            "$typed.${cleanName(file.extension)}"
+        } else {
+            typed
+        }
         nameProblem(safe)?.let { return Result.failure(IllegalArgumentException(it)) }
         val target = File(file.parentFile, safe)
         if (target.canonicalFile == file.canonicalFile) return Result.success(file)
@@ -345,9 +362,10 @@ class Workspace(val accountDir: File) {
      */
     fun createProjectFolders(name: String): Result<File> {
         projectsDir.mkdirs()
-        val folder = File(projectsDir, name)
+        val safe = cleanName(name, "project")
+        val folder = File(projectsDir, safe)
         if (folder.exists()) {
-            return Result.failure(IllegalArgumentException("There is already a \"$name\" here"))
+            return Result.failure(IllegalArgumentException("There is already a \"$safe\" here"))
         }
         return try {
             File(folder, REPO).mkdirs()
@@ -358,6 +376,44 @@ class Workspace(val accountDir: File) {
     }
 
     companion object {
+        /** Enough for any real name, and well under a filesystem's limit. */
+        const val MAX_STEM = 60
+
+        /** Extensions are short; anything longer is not one. */
+        const val MAX_EXTENSION = 12
+
+        /**
+         * [name] in the one shape the app writes, or [fallback] when nothing of it
+         * survives — a name made only of symbols becomes the fallback rather than
+         * a row of underscores.
+         */
+        fun cleanName(name: String, fallback: String = "untitled"): String {
+            val trimmed = name.trim()
+            // The extension is what follows the last dot, and only when something
+            // is left of it: `.txt` is a name, not an extension.
+            val dot = trimmed.lastIndexOf('.')
+            val rawStem = if (dot > 0) trimmed.substring(0, dot) else trimmed
+            val rawExtension = if (dot > 0) trimmed.substring(dot + 1) else ""
+            val stem = joined(rawStem).take(MAX_STEM).trim('_').ifBlank { fallback }
+            val extension = joined(rawExtension).replace("_", "").take(MAX_EXTENSION)
+            return if (extension.isEmpty()) stem else "$stem.$extension"
+        }
+
+        /** [text] lowercased, with every run of anything else turned into one `_`. */
+        private fun joined(text: String): String {
+            val out = StringBuilder(text.length)
+            var lastWasSeparator = true
+            for (ch in text.lowercase()) {
+                if (ch.isLetterOrDigit()) {
+                    out.append(ch)
+                    lastWasSeparator = false
+                } else if (!lastWasSeparator) {
+                    out.append('_')
+                    lastWasSeparator = true
+                }
+            }
+            return out.toString()
+        }
         const val PROJECTS = "projects"
         const val REPO = "repo"
         const val STATE_DIR = ".muffy"

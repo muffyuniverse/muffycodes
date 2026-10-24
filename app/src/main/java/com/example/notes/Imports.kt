@@ -17,38 +17,82 @@ import java.io.File
  * Everything here copies bytes. A file is never opened as text on the way in,
  * because the commonest thing to import is a picture or a PDF and reading those
  * as UTF-8 is how they arrive corrupted.
+ *
+ * **Names are cleaned on the way in** ([Workspace.cleanName]). A document arrives
+ * with whatever name its sender chose — `Holo and Lawrence, Kraft - Spice and
+ * Wolf.jpeg` — and a name is a path component in two git repositories and in the
+ * folder tree that *is* the account. Cleaning here rather than refusing later
+ * means the import always works, and the report says which names changed so the
+ * person is not left looking for a file called something else.
+ *
+ * **Nothing here runs on the UI thread.** A screenshot, a video or an installed
+ * `.apk` is tens of megabytes, and copying one inside the picker's answer blocks
+ * the window until Android kills the app for not responding — the file lands on
+ * disk, and then the app closes, which looks like the import crashed it.
  */
 object Imports {
 
+    /** How many files one import will copy, so a runaway tree cannot fill the phone. */
+    const val MAX_FILES = 5_000
+
+    /** How deep a picked folder is followed. */
+    private const val MAX_DEPTH = 32
+
     /**
-     * Copies [uris] into [into], keeping their names.
+     * What an import did: how many files arrived, and which names were changed.
      *
-     * Returns how many arrived. A name already in the folder is kept as it is and
-     * the new one is numbered — `photo.png` becomes `photo 2.png` — so importing
-     * twice never destroys the first copy.
+     * The renames are kept because a name that changes silently is the reason a
+     * person reports that their file did not import.
      */
-    fun filesInto(context: Context, uris: List<Uri>, into: File): Result<Int> = try {
+    data class Report(val copied: Int, val renamed: List<Pair<String, String>> = emptyList()) {
+
+        /** One sentence for the screen. */
+        fun said(): String {
+            val count = when (copied) {
+                0 -> "Nothing was imported"
+                1 -> "Imported 1 file"
+                else -> "Imported $copied files"
+            }
+            if (renamed.isEmpty()) return count
+            val shown = renamed.take(2).joinToString("; ") { (from, to) -> "\"$from\" → $to" }
+            val rest = if (renamed.size > 2) " and ${renamed.size - 2} more" else ""
+            return "$count — named to fit: $shown$rest"
+        }
+    }
+
+    /**
+     * Copies [uris] into [into], keeping their names (cleaned).
+     *
+     * A name already in the folder is kept as it is and the new one is numbered —
+     * `photo.png` becomes `photo_2.png` — so importing twice never destroys the
+     * first copy.
+     */
+    fun filesInto(context: Context, uris: List<Uri>, into: File): Result<Report> = try {
         if (!into.isDirectory) throw IllegalStateException("That folder is not there any more")
         var copied = 0
+        val renamed = mutableListOf<Pair<String, String>>()
         val failures = mutableListOf<String>()
         uris.forEach { uri ->
             try {
-                val name = displayName(context, uri) ?: "imported file"
-                val target = freeName(into, name)
+                val asked = displayName(context, uri) ?: "imported file"
+                val target = freeName(into, asked)
+                if (target.name != asked.trim()) renamed += asked.trim() to target.name
                 context.contentResolver.openInputStream(uri)?.use { input ->
                     target.outputStream().use { output -> input.copyTo(output) }
-                } ?: throw IllegalStateException("Could not read \"$name\"")
+                } ?: throw IllegalStateException("Could not read \"$asked\"")
                 copied++
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
+                // A file that cannot be copied is named, not swallowed, and does not
+                // stop the ones after it.
                 failures += e.message ?: "one file could not be read"
             }
         }
         if (copied == 0 && failures.isNotEmpty()) {
             Result.failure(IllegalStateException(failures.first()))
         } else {
-            Result.success(copied)
+            Result.success(Report(copied, renamed))
         }
-    } catch (e: Exception) {
+    } catch (e: Throwable) {
         Result.failure(e)
     }
 
@@ -61,18 +105,28 @@ object Imports {
      * that has no filesystem at all. So this walks the tree rather than listing a
      * directory.
      */
-    fun folderInto(context: Context, tree: Uri, into: File): Result<Int> = try {
-        val root = displayName(context, tree) ?: "imported folder"
-        val target = freeName(into, root)
+    fun folderInto(context: Context, tree: Uri, into: File): Result<Report> = try {
+        val asked = displayName(context, tree) ?: "imported folder"
+        val target = freeName(into, asked)
+        val renamed = mutableListOf<Pair<String, String>>()
+        if (target.name != asked.trim()) renamed += asked.trim() to target.name
         if (!target.mkdirs()) throw IllegalStateException("Could not make \"${target.name}\"")
-        val copied = copyTree(context, tree, DocumentsContract.getTreeDocumentId(tree), target)
-        Result.success(copied)
-    } catch (e: Exception) {
+        val copied = copyTree(context, tree, DocumentsContract.getTreeDocumentId(tree), target, renamed, 0)
+        Result.success(Report(copied, renamed))
+    } catch (e: Throwable) {
         Result.failure(e)
     }
 
     /** Copies the children of one document id into [target], and their children. */
-    private fun copyTree(context: Context, tree: Uri, documentId: String, target: File): Int {
+    private fun copyTree(
+        context: Context,
+        tree: Uri,
+        documentId: String,
+        target: File,
+        renamed: MutableList<Pair<String, String>>,
+        depth: Int,
+    ): Int {
+        if (depth > MAX_DEPTH) return 0
         val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, documentId)
         val columns = arrayOf(
             DocumentsContract.Document.COLUMN_DOCUMENT_ID,
@@ -82,24 +136,24 @@ object Imports {
         var copied = 0
         context.contentResolver.query(children, columns, null, null, null)?.use { cursor ->
             while (cursor.moveToNext()) {
+                if (copied >= MAX_FILES) break
                 val id = cursor.getString(0) ?: continue
-                val name = cursor.getString(1) ?: continue
+                val asked = cursor.getString(1)?.trim().orEmpty().ifBlank { continue }
                 val mime = cursor.getString(2).orEmpty()
-                // A name from outside is not allowed to escape the folder it is
-                // going into: a provider that answered "../accounts" would otherwise
-                // write outside the tree.
-                if (name.contains('/') || name.contains('\\') || name.startsWith(".")) continue
+                // A name from outside is cleaned before it is used, so a provider
+                // answering `../accounts` or `.muffy` cannot write outside this
+                // folder or into the app's own bookkeeping.
+                val child = freeName(target, asked)
+                if (child.name != asked) renamed += asked to child.name
                 if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
-                    val child = File(target, name)
                     if (!child.mkdirs()) continue
-                    copied += copyTree(context, tree, id, child)
+                    if (child.listFiles()?.isEmpty() != false) File(child, Workspace.KEEPER).writeText("")
+                    copied += copyTree(context, tree, id, child, renamed, depth + 1)
                 } else {
                     val source = DocumentsContract.buildDocumentUriUsingTree(tree, id)
                     runCatching {
                         context.contentResolver.openInputStream(source)?.use { input ->
-                            File(target, name).outputStream().use { output ->
-                                input.copyTo(output)
-                            }
+                            child.outputStream().use { output -> input.copyTo(output) }
                         } ?: return@runCatching
                         copied++
                     }
@@ -133,25 +187,25 @@ object Imports {
     }
 
     /**
-     * A name not already taken in [dir].
+     * A name not already taken in [dir], in the app's one name shape.
      *
-     * `photo.png`, then `photo 2.png`, then `photo 3.png`. The point is that
+     * `photo.png`, then `photo_2.png`, then `photo_3.png`. The point is that
      * importing the same thing twice adds a copy instead of replacing what was
      * there — a second import is never a way to lose the first.
      */
     fun freeName(dir: File, name: String): File {
-        val clean = name.trim().ifBlank { "imported" }
+        val clean = Workspace.cleanName(name, "imported")
         val first = File(dir, clean)
         if (!first.exists()) return first
-        val stem = clean.substringBeforeLast('.', clean)
-        val extension = clean.substringAfterLast('.', "")
-        val tail = if (extension.isEmpty()) "" else ".$extension"
+        val stem = clean.substringBeforeLast('.')
+        val extension = clean.substringAfterLast('.')
+        val tail = if (extension == clean) "" else ".$extension"
         var n = 2
-        while (true) {
-            val candidate = File(dir, "$stem $n$tail")
+        while (n <= 999) {
+            val candidate = File(dir, "${stem}_$n$tail")
             if (!candidate.exists()) return candidate
             n++
-            if (n > 999) return File(dir, "$stem ${System.nanoTime()}$tail")
         }
+        return File(dir, "${stem}_${System.nanoTime()}$tail")
     }
 }

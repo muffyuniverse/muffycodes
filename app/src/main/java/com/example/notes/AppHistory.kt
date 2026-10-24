@@ -175,6 +175,32 @@ class AppHistory(
         }
     }
 
+    /** Every path under a folder at a past commit — names only. */
+    fun pathsIn(path: String?, revisionId: String): List<String> {
+        if (!GitService.isRepository(accountDir)) return emptyList()
+        val repo = open()
+        return repo.use {
+            try {
+                GitService.pathsUnder(it, path?.ifBlank { null }, revisionId)
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+    }
+
+    /** The bytes of a file at a past commit, or null when it is not there. */
+    fun bytesAt(path: String, revisionId: String): ByteArray? {
+        if (!GitService.isRepository(accountDir)) return null
+        val repo = open()
+        return repo.use {
+            try {
+                GitService.bytesAt(it, path, revisionId)
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+
     /** Every file under a folder at a past commit, with its text. */
     fun filesUnder(path: String?, revisionId: String): List<Pair<String, String>> {
         if (!GitService.isRepository(accountDir)) return emptyList()

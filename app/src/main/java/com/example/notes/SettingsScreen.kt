@@ -153,16 +153,14 @@ fun SettingsScreen(
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
             // ---- how much change history is kept ----
-            //
-            // Said plainly, because the two histories used to be two fields and the
-            // difference between them was never visible: the phone keeps a change
-            // history, a project keeps a sync history, and one number covers both.
+            // Said in three clauses, because it is one number doing one job:
+            // every change is committed on this phone — into a project's own repo
+            // when the file is in one, and into the local repo behind the account
+            // for everything else — and this is how many of those are kept.
             Text("Change history", style = MaterialTheme.typography.titleMedium)
             Text(
-                "Every change is committed on this phone: that is the phone's change " +
-                    "history, and each project's sync history. This is how many of those " +
-                    "changes are kept — for the phone, and for each project alike. " +
-                    "An empty field keeps all of them. It applies at the next change.",
+                "How many changes are kept in each project's repo, and in the local " +
+                    "one that holds everything else. Empty keeps all of them.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

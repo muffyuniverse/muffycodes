@@ -58,8 +58,6 @@ class BrowserActions(
     val onDelete: (Entry) -> Unit,
     val onTogglePin: (Entry) -> Unit,
     val onHistory: (Entry) -> Unit,
-    val onMoveIntoRepository: (Entry) -> Unit,
-    val onKeepOnlyOnPhone: (Entry) -> Unit,
 )
 
 /**
@@ -86,6 +84,7 @@ fun BrowserScreen(
     onCreateFolder: () -> Unit,
     onUploadFiles: () -> Unit,
     onUploadFolder: () -> Unit,
+    onRestoreDeleted: () -> Unit,
 ) {
     val projects = viewModel.atProjects
     val here = viewModel.path
@@ -172,6 +171,11 @@ fun BrowserScreen(
                         }
                         TextButton(onClick = { adding = false; onCreateFile() }) {
                             Text("New file")
+                        }
+                        // The one way back for a deleted file: its row is gone, so
+                        // there is nothing left to open a history on.
+                        TextButton(onClick = { adding = false; onRestoreDeleted() }) {
+                            Text("Restore deleted…")
                         }
                     }
                     FloatingActionButton(onClick = { adding = !adding }) {
@@ -362,7 +366,6 @@ private fun EntryList(viewModel: AppViewModel, actions: BrowserActions) {
             EntryRow(
                 entry = entry,
                 pinned = pinned,
-                inWorktree = viewModel.inWorktree,
                 local = !viewModel.inWorktree && viewModel.currentProject != null,
                 // `projects/` at the root and `repo/` inside a project are the app's
                 // own folders: they can be opened, and nothing else. Renaming,
@@ -384,7 +387,6 @@ private fun EntryList(viewModel: AppViewModel, actions: BrowserActions) {
 private fun EntryRow(
     entry: Entry,
     pinned: Boolean,
-    inWorktree: Boolean,
     local: Boolean,
     system: Boolean,
     actions: BrowserActions,
@@ -453,23 +455,6 @@ private fun EntryRow(
                         actions.onMove(entry)
                     },
                 )
-                if (inWorktree) {
-                    DropdownMenuItem(
-                        text = { Text("Keep only on this phone") },
-                        onClick = {
-                            menu = false
-                            actions.onKeepOnlyOnPhone(entry)
-                        },
-                    )
-                } else {
-                    DropdownMenuItem(
-                        text = { Text("Move into the repository") },
-                        onClick = {
-                            menu = false
-                            actions.onMoveIntoRepository(entry)
-                        },
-                    )
-                }
                 DropdownMenuItem(
                     text = { Text("History") },
                     onClick = {

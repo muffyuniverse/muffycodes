@@ -162,11 +162,15 @@ class ProjectGit(
     }
 
     /** The commits that touched a path inside the worktree, newest first. */
-    fun log(project: String, path: String? = null): List<GitService.CommitInfo> {
+    fun log(
+        project: String,
+        path: String? = null,
+        limit: Int = 100,
+    ): List<GitService.CommitInfo> {
         val repo = open(project) ?: return emptyList()
         return repo.use {
             try {
-                GitService.log(it, path)
+                GitService.log(it, path, limit)
             } catch (e: Exception) {
                 emptyList()
             }
@@ -181,6 +185,30 @@ class ProjectGit(
                 GitService.versionsOf(it, path)
             } catch (e: Exception) {
                 emptyList()
+            }
+        }
+    }
+
+    /** The paths inside the worktree at [revisionId], under [path] — names only. */
+    fun paths(project: String, path: String?, revisionId: String): List<String> {
+        val repo = open(project) ?: return emptyList()
+        return repo.use {
+            try {
+                GitService.pathsUnder(it, path?.ifBlank { null }, revisionId)
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+    }
+
+    /** The bytes of a file at a past version, or null when it is not there. */
+    fun bytesAt(project: String, path: String, revisionId: String): ByteArray? {
+        val repo = open(project) ?: return null
+        return repo.use {
+            try {
+                GitService.bytesAt(it, path, revisionId)
+            } catch (e: Exception) {
+                null
             }
         }
     }
