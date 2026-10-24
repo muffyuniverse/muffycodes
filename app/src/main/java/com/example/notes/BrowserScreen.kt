@@ -227,6 +227,7 @@ fun BrowserScreen(
                     SelectionBar(
                         count = viewModel.selected.size,
                         onMove = onMoveSelected,
+                        onCopy = onCopySelected,
                         onDelete = onDeleteSelected,
                         onClear = { viewModel.clearSelection() },
                     )
@@ -584,6 +585,17 @@ private fun EntryRow(
                         actions.onMove(entry)
                     },
                 )
+                // **Copy stays on a locked file, and that is what a lock means.** It
+                // says "do not change this"; reading it and making another copy
+                // elsewhere changes nothing here, so refusing it would stretch the lock
+                // over an act it was never about.
+                DropdownMenuItem(
+                    text = { Text("Copy…") },
+                    onClick = {
+                        menu = false
+                        actions.onCopy(entry)
+                    },
+                )
                 if (!locked) {
                     DropdownMenuItem(
                         text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
@@ -609,6 +621,7 @@ private fun EntryRow(
 private fun SelectionBar(
     count: Int,
     onMove: () -> Unit,
+    onCopy: () -> Unit,
     onDelete: () -> Unit,
     onClear: () -> Unit,
 ) {
@@ -625,6 +638,7 @@ private fun SelectionBar(
                 modifier = Modifier.weight(1f),
             )
             TextButton(onClick = onMove) { Text("Move…") }
+            TextButton(onClick = onCopy) { Text("Copy…") }
             TextButton(onClick = onDelete) {
                 Text("Delete", color = MaterialTheme.colorScheme.error)
             }

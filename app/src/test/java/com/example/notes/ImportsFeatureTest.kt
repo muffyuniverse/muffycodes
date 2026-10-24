@@ -74,7 +74,7 @@ class ImportsFeatureTest {
         assertEquals(
             "the second was numbered",
             "the second",
-            File(dir, "note_2.txt").readText(),
+            File(dir, "note 2.txt").readText(),
         )
     }
 
@@ -82,11 +82,11 @@ class ImportsFeatureTest {
     fun `a name that is already taken is numbered rather than overwritten`() {
         val dir = File(context.cacheDir, "names-${System.nanoTime()}").apply { mkdirs() }
         File(dir, "photo.png").writeText("one")
-        File(dir, "photo_2.png").writeText("two")
+        File(dir, "photo 2.png").writeText("two")
 
         val third = Imports.freeName(dir, "photo.png")
 
-        assertEquals("photo_3.png", third.name)
+        assertEquals("photo 3.png", third.name)
         assertFalse("and it is not a name that exists", third.exists())
     }
 
@@ -168,6 +168,6 @@ class ImportsFeatureTest {
         val dir = File(context.cacheDir, "names3-${System.nanoTime()}").apply { mkdirs() }
         File(dir, "archive_tar.gz").writeText("one")
 
-        assertEquals("archive_tar_2.gz", Imports.freeName(dir, "archive.tar.gz").name)
+        assertEquals("archive_tar 2.gz", Imports.freeName(dir, "archive.tar.gz").name)
     }
 }

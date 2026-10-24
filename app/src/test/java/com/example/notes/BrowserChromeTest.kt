@@ -60,6 +60,7 @@ class BrowserChromeTest {
                             onOpen = {},
                             onRename = {},
                             onMove = {},
+                            onCopy = {},
                             onDelete = {},
                             onTogglePin = {},
                             onToggleLock = {},
@@ -76,6 +77,7 @@ class BrowserChromeTest {
                         onUploadFolder = {},
                         onRestoreDeleted = {},
                         onMoveSelected = {},
+                        onCopySelected = {},
                         onDeleteSelected = {},
                         onReport = {},
                     )
@@ -150,6 +152,53 @@ class BrowserChromeTest {
         awaitText("Sync 1")
         compose.onNodeWithText("Sync 1").assertIsEnabled()
         compose.onNodeWithText("Sync 1").performClick()
+    }
+
+    @Test
+    fun `a locked file's menu offers copy and not rename`() {
+        // Given a locked file
+        scene.signedIn()
+        scene.project("groceries")
+        scene.open(Workspace.PROJECTS, "groceries", Workspace.REPO)
+        val file = scene.worktreeFile("milk.txt", "two litres")
+        scene.viewModel.toggleLocked(file)
+        scene.viewModel.refresh()
+        browser()
+
+        // When its menu is opened
+        compose.waitUntil(20_000) { there("milk.txt") }
+        compose.onAllNodesWithContentDescription("More")[0].performClick()
+        compose.waitForIdle()
+
+        // Then copy is there — it changes nothing — and rename, which could only be
+        // refused, is not
+        assertTrue("copy is offered on a locked file", there("Copy…"))
+        assertFalse("rename is not, because it would be refused", there("Rename…"))
+    }
+
+    @Test
+    fun `the copy window calls the act copy, never move`() {
+        // Given the window that picks a place, told the act is a copy
+        val root = scene.workspace!!.accountDir
+        compose.setContent {
+            MaterialTheme {
+                PlaceDialog(
+                    title = "Copy milk.txt",
+                    verb = "Copy",
+                    root = root,
+                    forbidden = emptyList(),
+                    canChoose = { true },
+                    onDismiss = {},
+                    onPick = {},
+                )
+            }
+        }
+
+        // Then every word in it agrees, because one window serves both acts and a
+        // wrong word would tell a person their original had gone
+        compose.waitForIdle()
+        assertTrue("the title says copy", there("Copy milk.txt"))
+        assertFalse("and nothing says move", there("Move"))
     }
 
     @Test

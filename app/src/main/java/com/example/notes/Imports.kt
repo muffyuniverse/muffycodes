@@ -212,23 +212,15 @@ object Imports {
     /**
      * A name not already taken in [dir], in the app's one name shape.
      *
-     * `photo.png`, then `photo_2.png`, then `photo_3.png`. The point is that
-     * importing the same thing twice adds a copy instead of replacing what was
-     * there — a second import is never a way to lose the first.
+     * **The numbering is `Workspace.freeName`'s, not a second copy of the idea.** This
+     * method used to number with an underscore — `photo_2.png` — while a copy numbered
+     * with a space and a count — `photo 2.png`. Two answers to "what is this one called
+     * then?" is how a person ends up with `photo_2.png` and `photo 2.png` and no way to
+     * tell which is which. One rule, in one place, and importing the same thing twice
+     * still adds a copy instead of replacing what was there.
      */
     fun freeName(dir: File, name: String): File {
         val clean = Workspace.cleanName(name, "imported")
-        val first = File(dir, clean)
-        if (!first.exists()) return first
-        val stem = clean.substringBeforeLast('.')
-        val extension = clean.substringAfterLast('.')
-        val tail = if (extension == clean) "" else ".$extension"
-        var n = 2
-        while (n <= 999) {
-            val candidate = File(dir, "${stem}_$n$tail")
-            if (!candidate.exists()) return candidate
-            n++
-        }
-        return File(dir, "${stem}_${System.nanoTime()}$tail")
+        return File(dir, Workspace.freeName(dir, clean))
     }
 }

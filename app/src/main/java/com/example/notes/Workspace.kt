@@ -375,6 +375,64 @@ class Workspace(val accountDir: File) {
         else Result.failure(IllegalStateException("Could not move \"${file.name}\""))
     }
 
+    /**
+     * Copies [file] into the folder [into], leaving the original where it is.
+     *
+     * **A copy is a new thing, so it takes a new name when the old one is taken.** A
+     * move into an occupied name is refused (above), because a move that silently
+     * renamed would mean the file a person asked for is somewhere they did not ask for.
+     * A copy has no such promise to keep: the source is untouched either way, and
+     * `milk.txt` becoming `milk 2.txt` is what a person does by hand. [freeName] is the
+     * same one the import uses, so the app has one idea of a free name rather than two.
+     *
+     * A folder cannot be copied into itself: the copy would contain the folder it was
+     * made from, forever.
+     */
+    fun copy(file: File, into: File): Result<File> {
+        touchedProblem(file)?.let { return Result.failure(IllegalArgumentException(it)) }
+        if (!into.isDirectory) {
+            return Result.failure(IllegalArgumentException("That is not a folder"))
+        }
+        if (isHidden(into.name)) {
+            return Result.failure(IllegalArgumentException("That folder belongs to the app"))
+        }
+        if (isStructural(into) && into.name != REPO) {
+            return Result.failure(IllegalArgumentException("That folder belongs to the app"))
+        }
+        if (file.isDirectory && (into.canonicalPath == file.canonicalPath ||
+                into.canonicalPath.startsWith(file.canonicalPath + File.separator))
+        ) {
+            return Result.failure(
+                IllegalArgumentException("A folder cannot be copied inside itself")
+            )
+        }
+        val target = File(into, freeName(into, file.name))
+        return try {
+            if (file.isDirectory) {
+                copyTree(file, target)
+            } else {
+                file.copyTo(target, overwrite = false)
+            }
+            Result.success(target)
+        } catch (e: Exception) {
+            // Half a folder is worse than none: a tree copy that failed leaves the
+            // destination looking complete from the outside.
+            target.deleteRecursively()
+            Result.failure(IllegalStateException("Could not copy \"${file.name}\""))
+        }
+    }
+
+    /** Every file and folder under [from], into [to], keeping the shape. */
+    private fun copyTree(from: File, to: File) {
+        if (from.isDirectory) {
+            to.mkdirs()
+            from.listFiles()?.forEach { child -> copyTree(child, File(to, child.name)) }
+        } else {
+            to.parentFile?.mkdirs()
+            from.copyTo(to, overwrite = false)
+        }
+    }
+
     /** Deletes a file, or a folder and everything inside it. */
     fun delete(file: File): Result<Unit> {
         touchedProblem(file)?.let { return Result.failure(IllegalArgumentException(it)) }
@@ -529,6 +587,26 @@ class Workspace(val accountDir: File) {
             }
             return out.toString()
         }
+        /**
+         * A name in [dir] that is not taken: the name itself, or "name 2", "name 3"…
+         *
+         * The extension stays on the end, where a person and the app's own reader both
+         * expect it: `milk.txt` becomes `milk 2.txt`, never `milk.txt 2`.
+         *
+         * It is here, beside [cleanName], because it is a **naming rule** rather than
+         * something a particular account does — and because a copy and an import asking
+         * the same question have to get the same answer.
+         */
+        fun freeName(dir: File, name: String): String {
+            if (!File(dir, name).exists()) return name
+            val dot = name.lastIndexOf('.')
+            val stem = if (dot > 0) name.substring(0, dot) else name
+            val tail = if (dot > 0) name.substring(dot) else ""
+            var n = 2
+            while (File(dir, "$stem $n$tail").exists()) n++
+            return "$stem $n$tail"
+        }
+
         const val PROJECTS = "projects"
         /**
          * The folder that syncs, inside a project.

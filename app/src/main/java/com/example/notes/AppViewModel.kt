@@ -622,6 +622,40 @@ class AppViewModel @JvmOverloads constructor(
         return true
     }
 
+    /**
+     * Copies [file] into [into]. The original does not move.
+     *
+     * **Only the destination is committed.** A copy changes one place: the folder that
+     * gains a new file. The source is untouched, so there is nothing to record there —
+     * unlike a move, which has to tell the repository it left as well as the one it
+     * arrived in. Getting that wrong would put a "deleted" commit into a project whose
+     * file is still sitting there.
+     */
+    fun copy(file: File, into: File): Boolean {
+        val ws = workspace ?: return false
+        val now = ws.projectOf(into)?.takeIf { ws.inWorktree(into) }
+        val result = ws.copy(file, into)
+        if (result.isFailure) {
+            message = result.exceptionOrNull()?.message ?: "That did not work"
+            return false
+        }
+        val made = result.getOrNull() ?: file
+        refresh()
+        val what = if (made.name == file.name) {
+            "Copied ${file.name} into ${into.name}/"
+        } else {
+            // The name is said when it changed, because that is the one thing a person
+            // cannot see from the folder they copied out of.
+            "Copied ${file.name} into ${into.name}/ as ${made.name}"
+        }
+        record(what)
+        if (now != null) commitProject(now, what)
+        historyGeneration++
+        message = what
+        return true
+    }
+
+
     fun delete(file: File): Boolean {
         val ws = workspace ?: return false
         // A lock is read-only in every direction: not written, not renamed, not
@@ -776,6 +810,57 @@ class AppViewModel @JvmOverloads constructor(
         message = if (refused.isEmpty()) what else "$what — ${refused.first()}"
         return true
     }
+
+    /**
+     * Copies everything selected into [into].
+     *
+     * The same shape as [moveSelected], for the same reasons: one at a time so a single
+     * refusal does not take the rest with it, one commit at the end because a commit
+     * takes everything that is waiting anyway, and **only the receiving side** — nothing
+     * left any source. A name that was already taken comes back renamed, and that is
+     * said: it is the one effect a person cannot see from where they were standing.
+     */
+    fun copySelected(into: File): Boolean {
+        val ws = workspace ?: return false
+        val files = selectedFiles().filter { it.canonicalFile != into.canonicalFile }
+        if (files.isEmpty()) {
+            message = "Nothing is selected"
+            return false
+        }
+        val refused = mutableListOf<String>()
+        var copiedCount = 0
+        var renamed = 0
+        files.forEach { file ->
+            val result = ws.copy(file, into)
+            if (result.isFailure) {
+                refused += result.exceptionOrNull()?.message ?: "One thing could not be copied"
+            } else {
+                copiedCount++
+                if (result.getOrNull()?.name != file.name) renamed++
+            }
+        }
+        selected = emptySet()
+        refresh()
+        if (copiedCount == 0) {
+            message = refused.firstOrNull() ?: "Nothing was copied"
+            return false
+        }
+        val what = if (copiedCount == 1) {
+            "Copied 1 item into ${into.name}/"
+        } else {
+            "Copied $copiedCount items into ${into.name}/"
+        }
+        record(what)
+        ws.projectOf(into)?.takeIf { ws.inWorktree(into) }?.let { commitProject(it, what) }
+        historyGeneration++
+        message = buildString {
+            append(what)
+            if (renamed > 0) append(" — $renamed renamed, the name was taken")
+            if (refused.isNotEmpty()) append(" — ${refused.first()}")
+        }
+        return true
+    }
+
 
     /** Deletes everything selected, in one recorded change. */
     fun deleteSelected(): Boolean {

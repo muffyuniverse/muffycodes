@@ -56,3 +56,5 @@ KeySafetyFeatureTest  app/src/main/java/com/example/notes/GitHub.kt app/src/main
 # always-full app/src/main/java/com/example/notes/MainActivity.kt
 DownloadsSinkTest  app/src/main/java/com/example/notes/DownloadsSink.kt
 BrowserChromeTest  app/src/main/java/com/example/notes/BrowserScreen.kt
+CopyFeatureTest  app/src/main/java/com/example/notes/Workspace.kt
+CopyFeatureTest  app/src/main/java/com/example/notes/AppViewModel.kt

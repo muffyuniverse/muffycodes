@@ -75,6 +75,7 @@ class ScenariosTest {
             onUploadFolder = {},
             onRestoreDeleted = {},
             onMoveSelected = {},
+            onCopySelected = {},
             onDeleteSelected = {},
         )
     }
@@ -418,6 +419,7 @@ class ScenariosTest {
         onOpen = {},
         onRename = {},
         onMove = {},
+        onCopy = {},
         onDelete = {},
         onTogglePin = {},
         onToggleLock = {},

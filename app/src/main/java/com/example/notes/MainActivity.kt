@@ -73,6 +73,8 @@ private sealed interface Pending {
     data class NewFile(val folder: File) : Pending
     data class NewFolder(val folder: File) : Pending
     data class MoveEntry(val entry: Entry) : Pending
+    data class CopyEntry(val entry: Entry) : Pending
+    data object CopySelected : Pending
     data object MoveSelected : Pending
     data object DeleteSelected : Pending
     data class SyncProject(val project: String) : Pending
@@ -230,6 +232,7 @@ private fun AppRoot(viewModel: AppViewModel) {
         },
         onRename = { entry -> pending = Pending.RenameEntry(entry) },
         onMove = { entry -> pending = Pending.MoveEntry(entry) },
+        onCopy = { entry -> pending = Pending.CopyEntry(entry) },
         onDelete = { entry -> pending = Pending.DeleteEntry(entry) },
         onTogglePin = { entry -> viewModel.togglePinned(entry.file) },
         onToggleLock = { entry -> viewModel.toggleLocked(entry.file) },
@@ -313,6 +316,7 @@ private fun AppRoot(viewModel: AppViewModel) {
                     viewModel.currentDir?.let { pending = Pending.RestoreDeleted(it) }
                 },
                 onMoveSelected = { tap("move selected"); pending = Pending.MoveSelected },
+                onCopySelected = { tap("copy selected"); pending = Pending.CopySelected },
                 onDeleteSelected = { tap("delete selected"); pending = Pending.DeleteSelected },
             )
             // At the bottom, and **clear of the add button**. It used to sit at the
@@ -505,20 +509,20 @@ private fun Dialogs(
                   },
         )
 
-        is Pending.MoveEntry -> MoveDialog(
+        is Pending.MoveEntry -> PlaceDialog(
             title = "Move ${pending.entry.name}",
             root = viewModel.workspace?.accountDir ?: viewModel.currentDir ?: return,
             forbidden = listOf(pending.entry.file),
             canChoose = { viewModel.canHoldFiles(it) },
             onDismiss = dismiss,
-            onMove = { target ->
+            onPick = { target ->
                 Trace.tap("move ${pending.entry.name}", "into ${target.name}/")
                 dismiss()
                 viewModel.move(pending.entry.file, target)
             },
         )
 
-        Pending.MoveSelected -> MoveDialog(
+        Pending.MoveSelected -> PlaceDialog(
             title = if (viewModel.selected.size == 1) "Move 1 chosen item"
             else "Move ${viewModel.selected.size} chosen items",
             root = viewModel.workspace?.accountDir ?: viewModel.currentDir ?: return,
@@ -527,12 +531,56 @@ private fun Dialogs(
             forbidden = viewModel.selected.mapNotNull { viewModel.fileAt(it.split("/")) },
             canChoose = { viewModel.canHoldFiles(it) },
             onDismiss = dismiss,
-            onMove = { target ->
+            onPick = { target ->
                 Trace.tap("move chosen", "into ${target.name}/")
                 dismiss()
                 viewModel.moveSelected(target)
             },
         )
+    is Pending.CopyEntry -> PlaceDialog(
+        title = "Copy ${pending.entry.name}",
+        verb = "Copy",
+        root = viewModel.workspace?.accountDir ?: viewModel.currentDir ?: return,
+        forbidden = listOf(pending.entry.file),
+        canChoose = { viewModel.canHoldFiles(it) },
+        onDismiss = dismiss,
+        onPick = { target ->
+            // The act is recorded where the target is known, once — the same place a
+            // move records it, so one gesture still has one id.
+            Trace.tap("copy ${pending.entry.name}", "into ${target.name}/")
+            dismiss()
+            viewModel.copy(pending.entry.file, target)
+        },
+    )
+
+    Pending.CopySelected -> PlaceDialog(
+        title = if (viewModel.selected.size == 1) "Copy 1 chosen item"
+        else "Copy ${viewModel.selected.size} chosen items",
+        verb = "Copy",
+        root = viewModel.workspace?.accountDir ?: viewModel.currentDir ?: return,
+        forbidden = viewModel.selected.mapNotNull { viewModel.fileAt(it.split("/")) },
+        canChoose = { viewModel.canHoldFiles(it) },
+        onDismiss = dismiss,
+        onPick = { target ->
+            Trace.tap("copy chosen", "into ${target.name}/")
+            dismiss()
+            viewModel.copySelected(target)
+        },
+    )
+
+    Pending.CopySelected -> PlaceDialog(
+        name = if (viewModel.selected.size == 1) "1 chosen item"
+        else "${viewModel.selected.size} chosen items",
+        root = viewModel.workspace?.accountDir ?: viewModel.currentDir ?: return,
+        forbidden = viewModel.selected.mapNotNull { viewModel.fileAt(it.split("/")) },
+        canChoose = { viewModel.canHoldFiles(it) },
+        onDismiss = dismiss,
+        onPick = { target ->
+            dismiss()
+            viewModel.copySelected(target)
+        },
+    )
+
 
         Pending.DeleteSelected -> ConfirmDialog(
             title = if (viewModel.selected.size == 1) "Delete 1 chosen item?"

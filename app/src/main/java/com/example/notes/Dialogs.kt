@@ -488,14 +488,30 @@ fun SignInDialog(
     )
 }
 
-/** Picks the folder a thing should be moved into. */
+/**
+ * Picks the folder a thing should go into — for a move or for a copy.
+ *
+ * One window for both, because they ask the identical question: *where?* The verb is the
+ * only difference, and it is a parameter rather than a second copy of forty lines of
+ * folder-walking. Two windows that asked the same question would drift: the move's would
+ * learn that a folder cannot hold itself and the copy's would not.
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun MoveDialog(
+fun PlaceDialog(
     title: String,
+    /**
+     * What the act is called, in the words the person reads: "Move" or "Copy".
+     *
+     * Every sentence in the window is built from it, so a copy can never be described
+     * with the word "move" — which is the one way a person could be told the wrong thing
+     * about whether their original is still there.
+     */
+    verb: String = "Move",
     /** The account's root, which is where the browser starts. */
     root: java.io.File,
     /** Folders that must not be offered: the things being moved, and their insides. */
+    /** Things that must not be offered, and unchanged by either act. */
     forbidden: List<java.io.File>,
     /** The folder the browser starts in. */
     start: java.io.File = root,
@@ -506,7 +522,7 @@ fun MoveDialog(
      */
     canChoose: (java.io.File) -> Boolean = { true },
     onDismiss: () -> Unit,
-    onMove: (java.io.File) -> Unit,
+    onPick: (java.io.File) -> Unit,
 ) {
     // **One layer at a time, from the root.** A flat list of every folder in the
     // account answered "where can this go" with a wall of paths whose shape was
@@ -561,7 +577,7 @@ fun MoveDialog(
 
                 if (hereChildren.isEmpty()) {
                     Text(
-                        "There is no folder inside this one to move into.",
+                        "There is no folder inside this one to ${verb.lowercase()} into.",
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(vertical = 12.dp),
                     )
@@ -586,7 +602,7 @@ fun MoveDialog(
                                                 // A folder with nothing inside cannot be
                                                 // walked into, so a tap would look like
                                                 // nothing happened. Say what to do instead.
-                                                hint = "Press and hold \"${child.name}\" to move into it."
+                                                hint = "Press and hold \"${child.name}\" to ${verb.lowercase()} into it."
                                             }
                                         },
                                         onLongClick = {
@@ -631,7 +647,7 @@ fun MoveDialog(
                     )
                 }
                 Text(
-                    text = chosen?.let { "Move into ${it.name}/" } ?: "Nothing chosen yet",
+                    text = chosen?.let { "$verb into ${it.name}/" } ?: "Nothing chosen yet",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp),
@@ -644,8 +660,8 @@ fun MoveDialog(
             // into must never be a folder that was moved into.
             TextButton(
                 enabled = chosen != null,
-                onClick = { chosen?.let(onMove) },
-            ) { Text("Move") }
+                onClick = { chosen?.let(onPick) },
+            ) { Text(verb) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
