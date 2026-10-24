@@ -60,6 +60,7 @@ class BrowserActions(
     val onOpen: (Entry) -> Unit,
     val onRename: (Entry) -> Unit,
     val onMove: (Entry) -> Unit,
+    val onCopy: (Entry) -> Unit,
     val onDelete: (Entry) -> Unit,
     val onTogglePin: (Entry) -> Unit,
     val onToggleLock: (Entry) -> Unit,
@@ -93,6 +94,7 @@ fun BrowserScreen(
     onUploadFolder: () -> Unit,
     onRestoreDeleted: () -> Unit,
     onMoveSelected: () -> Unit,
+    onCopySelected: () -> Unit,
     onDeleteSelected: () -> Unit,
     onReport: () -> Unit = {},
 ) {

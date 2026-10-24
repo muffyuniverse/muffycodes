@@ -573,34 +573,20 @@ private fun Dialogs(
         },
     )
 
-    Pending.CopySelected -> PlaceDialog(
-        name = if (viewModel.selected.size == 1) "1 chosen item"
-        else "${viewModel.selected.size} chosen items",
-        root = viewModel.workspace?.accountDir ?: viewModel.currentDir ?: return,
-        forbidden = viewModel.selected.mapNotNull { viewModel.fileAt(it.split("/")) },
-        canChoose = { viewModel.canHoldFiles(it) },
+    Pending.DeleteSelected -> ConfirmDialog(
+        title = if (viewModel.selected.size == 1) "Delete 1 chosen item?"
+        else "Delete ${viewModel.selected.size} chosen items?",
+        text = "Everything chosen goes. It can be brought back from the history of " +
+            "the folder it was in.",
+        confirm = "Delete",
+        destructive = true,
         onDismiss = dismiss,
-        onPick = { target ->
+        onConfirm = {
+            Trace.tap("confirm delete", "${viewModel.selected.size} chosen")
             dismiss()
-            viewModel.copySelected(target)
+            viewModel.deleteSelected()
         },
     )
-
-
-        Pending.DeleteSelected -> ConfirmDialog(
-            title = if (viewModel.selected.size == 1) "Delete 1 chosen item?"
-            else "Delete ${viewModel.selected.size} chosen items?",
-            text = "Everything chosen goes. It can be brought back from the history of " +
-                "the folder it was in.",
-            confirm = "Delete",
-            destructive = true,
-            onDismiss = dismiss,
-            onConfirm = {
-                Trace.tap("confirm delete", "${viewModel.selected.size} chosen")
-                dismiss()
-                viewModel.deleteSelected()
-            },
-        )
 
         is Pending.SyncProject -> SyncDialog(
             project = pending.project,
