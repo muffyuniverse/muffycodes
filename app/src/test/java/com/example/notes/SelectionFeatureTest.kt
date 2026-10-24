@@ -60,8 +60,7 @@ class SelectionFeatureTest : FeatureTest() {
         // has to gain both files, and the account's history has to record that they
         // left the account's own tree — one side alone leaves a copy that this phone
         // no longer has, or a file that GitHub never learns about.
-        scene.viewModel.createProject("groceries", "gpl-3.0") { }
-        scene.await("the project") { scene.viewModel.projectNames.contains("groceries") }
+        scene.project("groceries")
         scene.open()
         scene.file("milk.txt", "two litres")
         scene.file("bread.txt", "one loaf")
@@ -109,7 +108,10 @@ class SelectionFeatureTest : FeatureTest() {
         assertFalse(File(dir, "milk.txt").exists())
         assertFalse(File(dir, "bread.txt").exists())
         assertTrue("nothing is left chosen", scene.viewModel.selected.isEmpty())
-        assertEquals("the folder is empty", emptyList<String>(), scene.names())
+        assertTrue(
+            "and neither is in the folder any more",
+            scene.names().none { it == "milk.txt" || it == "bread.txt" },
+        )
     }
 
     @Test

@@ -193,6 +193,21 @@ object Markdown {
     fun inline(text: String, linkColour: Color = Color.Unspecified): AnnotatedString =
         buildAnnotatedString { appendInline(this, text, linkColour) }
 
+    /**
+     * Whether a delimiter at [at] can *open* emphasis.
+     *
+     * A marker followed by a space is not emphasis in any Markdown — `2 * 3 * 4` is
+     * arithmetic, not italics — and treating it as emphasis silently ate both
+     * asterisks and left `2  3  4`. The rule is CommonMark's: the character after the
+     * opening delimiter is not whitespace, and the one before the closing delimiter
+     * is not either.
+     */
+    private fun opens(text: String, at: Int, width: Int): Boolean =
+        at + width < text.length && !text[at + width].isWhitespace()
+
+    private fun closes(text: String, at: Int): Boolean =
+        at > 0 && !text[at - 1].isWhitespace()
+
     private fun appendInline(out: AnnotatedString.Builder, text: String, linkColour: Color) {
         var i = 0
         val plain = StringBuilder()
@@ -222,7 +237,7 @@ object Markdown {
 
                 (ch == '*' || ch == '_') && text.startsWith("${ch}${ch}", i) -> {
                     val end = text.indexOf("${ch}${ch}", i + 2)
-                    if (end > i + 1) {
+                    if (end > i + 1 && opens(text, i, 2) && closes(text, end)) {
                         flushPlain()
                         out.withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
                             appendInline(this, text.substring(i + 2, end), linkColour)
@@ -235,7 +250,7 @@ object Markdown {
 
                 ch == '~' && text.startsWith("~~", i) -> {
                     val end = text.indexOf("~~", i + 2)
-                    if (end > i + 1) {
+                    if (end > i + 1 && opens(text, i, 2) && closes(text, end)) {
                         flushPlain()
                         out.withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) {
                             append(text.substring(i + 2, end))
@@ -248,7 +263,7 @@ object Markdown {
 
                 ch == '*' || ch == '_' -> {
                     val end = text.indexOf(ch, i + 1)
-                    if (end > i + 1) {
+                    if (end > i + 1 && opens(text, i, 1) && closes(text, end)) {
                         flushPlain()
                         out.withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
                             appendInline(this, text.substring(i + 1, end), linkColour)
