@@ -2,10 +2,10 @@ package com.example.notes
 
 import android.content.ContentValues
 import android.content.Context
-import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import androidx.annotation.RequiresApi
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -96,6 +96,7 @@ object Reports {
         return fromPrivate(context, file, text)
     }
 
+    @RequiresApi(Build.VERSION_CODES.Q)
     private fun intoDownloads(context: Context, name: String, text: String): String? {
         val resolver = context.contentResolver
         val values = ContentValues().apply {
@@ -152,7 +153,4 @@ object Reports {
             ?.take(4)
             ?.joinToString("-")
             .orEmpty()
-
-    /** Kept for tests and for a caller that only wants the address as a `Uri`. */
-    fun folderUri(): Uri = MediaStore.Downloads.EXTERNAL_CONTENT_URI
 }
