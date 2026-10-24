@@ -73,7 +73,7 @@ class AppViewModel @JvmOverloads constructor(
      * Catching [Throwable] means the worst a change can do is fail and say so.
      */
     private fun onWorker(task: () -> Unit) {
-        onWorker {
+        worker.execute {
             try {
                 task()
             } catch (t: Throwable) {
