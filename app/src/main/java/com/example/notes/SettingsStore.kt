@@ -43,6 +43,29 @@ class SettingsStore(context: Context, name: String = "settings") {
     var historyLength: Int by mutableStateOf(prefs.getInt(KEY_HISTORY, legacyLength()))
         private set
 
+    /**
+     * Whether the trace is copied into Downloads while the app is open.
+     *
+     * **A development aid, and only a development aid.** A release build answers no
+     * whatever is stored, because a release build has no business writing a running log
+     * of a person's tapping into a folder other apps can read. In a debug build it
+     * starts on: a session spent describing bugs by hand produces fewer of them per
+     * hour than one where the app describes itself.
+     */
+    var liveTrace: Boolean by mutableStateOf(
+        BuildConfig.DEBUG && prefs.getBoolean(KEY_LIVE, true),
+    )
+        private set
+
+    /** True only where it can work at all. */
+    val liveTraceAvailable: Boolean get() = BuildConfig.DEBUG
+
+    fun keepLiveTrace(on: Boolean) {
+        if (!liveTraceAvailable) return
+        liveTrace = on
+        prefs.edit().putBoolean(KEY_LIVE, on).apply()
+    }
+
     fun selectTheme(theme: AppTheme) {
         this.theme = theme
         prefs.edit().putString(KEY_THEME, theme.name).apply()
@@ -77,6 +100,7 @@ class SettingsStore(context: Context, name: String = "settings") {
     companion object {
         const val KEY_THEME = "theme"
         const val KEY_DARK = "use_dark"
+        const val KEY_LIVE = "live_trace"
         const val KEY_HISTORY = "history_length"
 
         /** The two keys older builds wrote; read once, then ignored. */

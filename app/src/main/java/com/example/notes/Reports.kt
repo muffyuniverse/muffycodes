@@ -145,12 +145,98 @@ object Reports {
         }
     }
 
-    /** The file's own name as a slug: the first few words the person wrote. */
-    fun slugOf(note: String): String =
-        note.lineSequence()
+    /**
+     * The live trace's one file, replaced rather than multiplied.
+     *
+     * A running log written every few seconds as `report-…` files would fill the folder
+     * with hundreds of them in an afternoon and make the one that mattered impossible
+     * to find. So the live trace is a single named file, overwritten in place: whatever
+     * is in it is the most recent state of the app, which is exactly what it is for.
+     */
+    const val LIVE = "live-trace.md"
+
+    /**
+     * Writes the live trace, replacing the previous one if there is one.
+     *
+     * Replacing means finding the entry MediaStore already has and opening it for
+     * truncating write; inserting again under the same name would leave the phone with
+     * `live-trace.md` and `live-trace(1).md` and the loop reading last hour's file.
+     * On anything that goes wrong it falls back to inserting, which at worst leaves one
+     * duplicate rather than no trace at all.
+     */
+    fun saveLive(context: Context, text: String): Saved {
+        val name = LIVE
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                val resolver = context.contentResolver
+                val uri = findLive(context, name)
+                if (uri != null) {
+                    resolver.openOutputStream(uri, "wt")?.use { it.write(text.toByteArray()) }
+                    return Saved("Download/$FOLDER/$name", true)
+                }
+                val added = intoDownloads(context, name, text)
+                if (added != null) return Saved("Download/$FOLDER/$name", true)
+            } catch (t: Throwable) {
+                // Falls through to the app's own folder, which is still readable over a
+                // cable.
+            }
+        }
+        return fromPrivate(context, name, text)
+    }
+
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun findLive(context: Context, name: String): android.net.Uri? {
+        val projection = arrayOf(
+            MediaStore.Downloads._ID,
+            MediaStore.Downloads.DISPLAY_NAME,
+            MediaStore.Downloads.RELATIVE_PATH,
+        )
+        val selection = "${MediaStore.Downloads.DISPLAY_NAME} = ?"
+        val args = arrayOf(name)
+        context.contentResolver.query(
+            MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+            projection,
+            selection,
+            args,
+            null,
+        )?.use { cursor ->
+            while (cursor.moveToNext()) {
+                val id = cursor.getLong(0)
+                val path = cursor.getString(2).orEmpty().trimEnd('/')
+                if (path.endsWith(FOLDER)) {
+                    return android.content.ContentUris.withAppendedId(
+                        MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                        id,
+                    )
+                }
+            }
+        }
+        return null
+    }
+
+    /**
+     * The file's own name as a slug: the first few words the person wrote.
+     *
+     * Trailing filler is dropped — `sync keeps failing on` describes nothing that `sync
+     * keeps failing` does not, and a name ending in "on" reads like a sentence that was
+     * cut off.
+     */
+    fun slugOf(note: String): String {
+        val words = note.lineSequence()
             .firstOrNull { it.isNotBlank() }
-            ?.split(' ')
-            ?.take(4)
-            ?.joinToString("-")
+            ?.trim()
+            ?.split(Regex("\\s+"))
+            ?.filter { it.isNotBlank() }
             .orEmpty()
+            .take(4)
+            .toMutableList()
+        val filler = setOf(
+            "on", "in", "at", "to", "for", "and", "or", "the", "a", "an", "of", "is",
+            "it", "its", "with", "when", "while", "my",
+        )
+        while (words.size > 1 && words.last().lowercase().trim('.', ',', '!', '?') in filler) {
+            words.removeAt(words.lastIndex)
+        }
+        return words.joinToString("-")
+    }
 }

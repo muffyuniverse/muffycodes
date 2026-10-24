@@ -137,6 +137,29 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            // **Only a debug build shows this at all.** A release build has no business
+            // writing a running log of a person's tapping into a folder other apps can
+            // read, so the switch does not exist there — not disabled, absent.
+            if (viewModel.settings.liveTraceAvailable) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Copy the trace to Downloads", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "Rewritten every few seconds while the app is open, so it can be " +
+                                "read without pressing anything.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = viewModel.settings.liveTrace,
+                        onCheckedChange = { viewModel.settings.keepLiveTrace(it) },
+                    )
+                }
+            }
 
             // ---- the appearance (§10) ----
             Row(

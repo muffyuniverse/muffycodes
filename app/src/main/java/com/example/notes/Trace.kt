@@ -427,6 +427,21 @@ object Trace {
         }
     }
 
+    /**
+     * The text written to the live file, with the one difference that matters there.
+     *
+     * The live file is read by a person working out what is wrong *now*, so it carries
+     * the app's name and the version line as well as the record — a trace without a
+     * build number is a report about a version that may no longer exist.
+     */
+    fun liveText(version: String = ""): String = buildString {
+        appendLine("Muffy Codes — live trace")
+        if (version.isNotEmpty()) appendLine(version)
+        appendLine(report().summary)
+        appendLine()
+        report().lines.forEach { appendLine(it) }
+    }
+
     /** Forgets everything, including what was still waiting. */
     fun clear() {
         try {

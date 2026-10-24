@@ -184,6 +184,31 @@ private fun AppRoot(viewModel: AppViewModel) {
         )
     }
 
+    /**
+     * The live trace, while the app is being used.
+     *
+     * A debug build with the switch on copies the record into Downloads every few
+     * seconds, so somebody watching that folder can see what the app is doing without
+     * waiting for a report to be written by hand. It is deliberately unglamorous: one
+     * file, replaced, written only when something has actually changed since last time,
+     * and only while this screen is composed.
+     *
+     * A release build never gets here: [SettingsStore.liveTrace] is false there, and
+     * `liveTraceAvailable` is false, so the switch cannot be turned on either.
+     */
+    LaunchedEffect(viewModel.settings.liveTrace) {
+        if (!viewModel.settings.liveTrace || !viewModel.settings.liveTraceAvailable) return@LaunchedEffect
+        var last = ""
+        while (true) {
+            val text = Trace.liveText(viewModel.versionLine)
+            if (text != last) {
+                last = text
+                Reports.saveLive(context, text)
+            }
+            kotlinx.coroutines.delay(4_000)
+        }
+    }
+
     // **The trace answers taps that never reach the view model.** Cancel, opening a
     // menu, choosing a row: those change what is on the screen without changing the
     // folder, so `refresh()` cannot see them. Watching the two pieces of screen state
