@@ -105,6 +105,29 @@ class AppViewModel @JvmOverloads constructor(
     var entries: List<Entry> by mutableStateOf(emptyList())
         private set
 
+    /**
+     * The names of the projects on this phone, as **observable state**.
+     *
+     * A plain `get()` over the filesystem was invisible to Compose: `refresh()` read the
+     * names, so the trace correctly reported "2 rows" — and nothing the screen observed had
+     * changed, so nothing redrew. Adding or deleting a project then showed up only after
+     * leaving the Projects screen and coming back, because navigation forces the
+     * recomposition the change itself could not. Reported from the live log: "adding and
+     * deleting a project shows the change only after you exit and enter the project menu
+     * again".
+     *
+     * The list is replaced, never mutated: `mutableStateOf` compares by identity, so a
+     * `MutableList` edited in place is also a change Compose cannot see.
+     *
+     * **Declared here, with the other state, and not further down.** It is written by
+     * `refresh()`, and this class has an `init` block that calls `refresh()` for an account
+     * that is already signed in — so a declaration below that block is a null delegate at
+     * the moment it is first written, which crashes on the very path a person takes when
+     * they open the app they already set up.
+     */
+    var projectNames: List<String> by mutableStateOf(emptyList())
+        private set
+
     /** The paths that are pinned, as paths from the account root. */
     var pins: Set<String> by mutableStateOf(emptySet())
         private set
@@ -300,23 +323,6 @@ class AppViewModel @JvmOverloads constructor(
 
     /** True when there is a level above. */
     val canGoUp: Boolean get() = path.isNotEmpty()
-
-    /**
-     * The names of the projects on this phone, as **observable state**.
-     *
-     * A plain `get()` over the filesystem was invisible to Compose: `refresh()` read the
-     * names, so the trace correctly reported "2 rows" — and nothing the screen observed had
-     * changed, so nothing redrew. Adding or deleting a project then showed up only after
-     * leaving the Projects screen and coming back, because navigation forces the
-     * recomposition the change itself could not. Reported from the live log: "adding and
-     * deleting a project shows the change only after you exit and enter the project menu
-     * again".
-     *
-     * The list is replaced, never mutated: `mutableStateOf` compares by identity, so a
-     * `MutableList` edited in place is also a change Compose cannot see.
-     */
-    var projectNames: List<String> by mutableStateOf(emptyList())
-        private set
 
     /**
      * True when a file may be moved into [dir].
