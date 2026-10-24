@@ -567,9 +567,20 @@ class AppViewModel @JvmOverloads constructor(
         return if (ws.kindOf(file) == EntryKind.TEXT) ws.read(file) else ""
     }
 
+    /**
+     * How many editing sessions the editor has had.
+     *
+     * The screen resets its text and its name when this changes, and not when the
+     * file's path does — because renaming the file you are writing renames its path,
+     * and resetting on that would throw away everything typed so far.
+     */
+    var editorSession: Int by mutableStateOf(0)
+        private set
+
     /** Opens a file in the editor. */
     fun openEditor(file: File) {
         editingPath = workspace?.relative(file)
+        editorSession++
     }
 
     fun closeEditor() {

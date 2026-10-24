@@ -104,6 +104,26 @@ class EditorScreenTest {
     }
 
     @Test
+    fun `renaming the file does not throw away what was typed`() {
+        // The trap this exists for: the editor reset its text when the file's path
+        // changed, and renaming changes the path — so typing a paragraph and then
+        // fixing the file's name silently emptied the screen.
+        val file = scene.file("milk.txt", "two litres")
+
+        editorFor(file)
+        compose.onNodeWithText("two litres").performTextReplacement("three litres")
+        compose.onNodeWithText("milk.txt").performTextReplacement("shopping list")
+        compose.onNodeWithText("shopping list").performImeAction()
+
+        compose.onNodeWithText("three litres").assertIsDisplayed()
+        compose.onNodeWithText("Save").performClick()
+
+        val renamed = File(scene.viewModel.currentDir!!, "shopping_list.txt")
+        assertTrue("the file was renamed", renamed.isFile)
+        assertEquals("with the text that was on the screen", "three litres", renamed.readText())
+    }
+
+    @Test
     fun `Save has nothing to do until something is typed`() {
         val file = scene.file("milk.txt", "two litres")
 

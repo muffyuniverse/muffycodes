@@ -189,11 +189,15 @@ private fun AppRoot(viewModel: AppViewModel) {
             file = editing,
             onBack = { viewModel.closeEditor() },
             onDelete = {
-                val entry = Entry(editing.name, editing, viewModel.workspace?.kindOf(editing)
-                    ?: EntryKind.TEXT)
+                val target = viewModel.editingFile ?: editing
+                val entry = Entry(
+                    target.name,
+                    target,
+                    viewModel.workspace?.kindOf(target) ?: EntryKind.TEXT,
+                )
                 pending = Pending.DeleteEntry(entry)
             },
-            onOpenHistory = { viewModel.openHistory(editing) },
+            onOpenHistory = { viewModel.editingFile?.let { viewModel.openHistory(it) } },
         )
 
         else -> androidx.compose.foundation.layout.Box {

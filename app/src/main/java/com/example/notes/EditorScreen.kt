@@ -30,6 +30,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -76,12 +77,27 @@ fun EditorScreen(
     onOpenHistory: () -> Unit,
 ) {
     val kind = viewModel.workspace?.kindOf(file) ?: EntryKind.TEXT
-    var text by remember(file) { mutableStateOf(viewModel.textOf(file)) }
+    // Keyed on the *session*, not on the file: renaming the file you are writing
+    // changes its path, and resetting the text on that would throw away everything
+    // typed so far. Opening another file starts a new session and resets both.
+    val session = viewModel.editorSession
+    var text by remember(session) { mutableStateOf(viewModel.textOf(file)) }
     // What is on disk, so that Save can say whether there is anything to save.
-    var saved by remember(file) { mutableStateOf(text) }
-    var name by remember(file) { mutableStateOf(file.name) }
+    var saved by remember(session) { mutableStateOf(text) }
+    var name by remember(session) { mutableStateOf(file.name) }
     var menu by remember { mutableStateOf(false) }
     val focus = LocalFocusManager.current
+
+    // A version put back from the history changes the file underneath the editor,
+    // which stays open. Pick it up — but only when there is nothing unsaved to
+    // lose, because losing what somebody typed is never the lesser evil.
+    LaunchedEffect(viewModel.historyGeneration, session) {
+        val onDisk = viewModel.textOf(file)
+        if (text == saved && onDisk != text) {
+            text = onDisk
+            saved = onDisk
+        }
+    }
 
     /**
      * Renames the file to what is in the field, if that is a different name.
@@ -96,7 +112,11 @@ fun EditorScreen(
             name = file.name
             return
         }
-        if (!viewModel.rename(file, wanted)) {
+        if (viewModel.rename(file, wanted)) {
+            // The field shows the name the file actually has: the app writes a name
+            // one way, so `Shopping List` comes back as `shopping_list.txt`.
+            name = viewModel.editingFile?.name ?: file.name
+        } else {
             // The rename was refused; the field must not go on showing a name that
             // is not the file's.
             name = file.name
@@ -146,14 +166,24 @@ fun EditorScreen(
                     )
                 },
                 actions = {
-                    TextButton(onClick = onOpenHistory) { Text("History") }
+                    TextButton(onClick = {
+                        // The name is committed first: a version list is a list of
+                        // this file's versions, and the file it belongs to may just
+                        // have been given another name.
+                        commitName()
+                        onOpenHistory()
+                    }) { Text("History") }
                     // A button with a background, not a word where a button should
                     // be: saving is the action of this screen, and it should look
                     // like one.
                     Button(
                         onClick = {
+                            // Saved before the name is committed: the text belongs to
+                            // this file as it is now, and a rename afterwards carries
+                            // the file — with its text — to the new name.
                             viewModel.saveEditor(text)
                             saved = text
+                            commitName()
                             focus.clearFocus()
                         },
                         enabled = kind == EntryKind.TEXT && text != saved,
