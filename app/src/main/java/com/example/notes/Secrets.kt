@@ -54,8 +54,12 @@ object Secrets {
      * does not say what it saw is the thing this app keeps fixing.
      */
     fun explain(error: Throwable, fallback: String): String {
+        // **The class name is part of the chain.** `UnknownHostException("github.com")`
+        // says nothing about being offline in its message — the name is the only
+        // thing that identifies it, and reading messages alone made an offline phone
+        // look like an unexplained failure.
         val chain = generateSequence(error as Throwable?) { it.cause }
-            .mapNotNull { it?.message }
+            .map { "${it?.javaClass?.simpleName.orEmpty()} ${it?.message.orEmpty()}" }
             .joinToString(" ")
             .lowercase()
         val kind = error.javaClass.simpleName
