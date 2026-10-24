@@ -19,13 +19,21 @@ import java.io.File
  */
 class NamingFeatureTest : FeatureTest() {
 
+    /**
+     * The only thing in the folder that a person put there.
+     *
+     * The account's root always holds `projects/`, which the app makes, so asking
+     * for the only entry would count it too.
+     */
+    private fun made(): String = scene.names().filter { it != Workspace.PROJECTS }.single()
+
     @Test
     fun `a name typed with capitals and spaces is written the one way`() {
         assertTrue("made", scene.viewModel.createFile("My Shopping List"))
-        val made = scene.names().single()
+        val written = made()
 
-        assertEquals("my_shopping_list.txt", made)
-        assertTrue("and the file is there", File(scene.viewModel.currentDir!!, made).isFile)
+        assertEquals("my_shopping_list.txt", written)
+        assertTrue("and the file is there", File(scene.viewModel.currentDir!!, written).isFile)
     }
 
     @Test
@@ -43,14 +51,14 @@ class NamingFeatureTest : FeatureTest() {
     fun `a folder obeys the same rule as a file`() {
         assertTrue("made", scene.viewModel.createFolder("Old Letters (2024)"))
 
-        assertEquals("old_letters_2024", scene.names().single())
+        assertEquals("old_letters_2024", made())
     }
 
     @Test
     fun `a name made only of symbols still makes something`() {
         assertTrue("made", scene.viewModel.createFolder("!!!"))
 
-        assertEquals("an empty name falls back rather than a row of underscores", "folder", scene.names().single())
+        assertEquals("a name of only symbols falls back", "folder", made())
     }
 
     @Test
@@ -59,9 +67,9 @@ class NamingFeatureTest : FeatureTest() {
 
         assertTrue("renamed", scene.viewModel.rename(file, "Shopping List"))
 
-        val made = scene.names().single()
-        assertEquals("shopping_list.txt", made)
-        assertTrue("the text came with it", File(file.parentFile, made).readText() == "two litres")
+        val written = made()
+        assertEquals("shopping_list.txt", written)
+        assertTrue("the text came with it", File(file.parentFile, written).readText() == "two litres")
     }
 
     @Test
@@ -99,8 +107,8 @@ class NamingFeatureTest : FeatureTest() {
         // start with one would hide a person's own file from every screen.
         assertTrue("made", scene.viewModel.createFile(".secret"))
 
-        assertEquals("secret.txt", scene.names().single())
-        assertFalse("and it is not hidden", scene.workspace!!.isHidden(scene.names().single()))
+        assertEquals("secret.txt", made())
+        assertFalse("and it is not hidden", scene.workspace!!.isHidden(made()))
     }
 
     @Test
@@ -108,9 +116,9 @@ class NamingFeatureTest : FeatureTest() {
         val long = "a".repeat(200)
         assertTrue("made", scene.viewModel.createFolder(long))
 
-        val made = scene.names().single()
-        assertEquals("cut to the app's limit", Workspace.MAX_STEM, made.length)
-        assertTrue("and it was made", File(scene.viewModel.currentDir!!, made).isDirectory)
+        val written = made()
+        assertEquals("cut to the app's limit", Workspace.MAX_STEM, written.length)
+        assertTrue("and it was made", File(scene.viewModel.currentDir!!, written).isDirectory)
     }
 
     @Test
@@ -119,7 +127,7 @@ class NamingFeatureTest : FeatureTest() {
         // and joined by underscores; turning it into `untitled` would be losing the
         // only part of the name that says what the file is.
         assertTrue("made", scene.viewModel.createFile("Транспортная логистика"))
-        assertEquals("транспортная_логистика.txt", scene.names().single())
+        assertEquals("транспортная_логистика.txt", made())
     }
 
     @Test

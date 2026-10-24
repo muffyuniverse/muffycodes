@@ -489,6 +489,11 @@ class AppViewModel @JvmOverloads constructor(
         refresh()
         record(what)
         touched?.let { commitProjectOf(it, what) }
+        // The change has a name, and the name is what a person needs to see. It was
+        // being passed in and only ever used for the commit message, so a file could
+        // arrive as `my_shopping_list.txt` when `My Shopping List` was typed and
+        // nothing at all would say so — which reads as the file having gone missing.
+        message = what
         return true
     }
 
@@ -652,10 +657,11 @@ class AppViewModel @JvmOverloads constructor(
             onDone(false)
             return
         }
-        // One shape for a project's name everywhere: it is a GitHub repository
-        // name, a folder in `projects/`, and the name on every row.
-        val asked = name.trim()
-        val clean = Workspace.cleanName(asked, "project")
+        // Deliberately not put through `Workspace.cleanName`: this name becomes a
+        // repository on GitHub, and a project that was pulled in already carries the
+        // repository's own name. A name GitHub refuses is reported by GitHub, which
+        // is the only place that knows what it will accept.
+        val clean = name.trim()
         val problem = ws.nameProblem(clean)
         if (problem != null) {
             message = problem
@@ -667,7 +673,6 @@ class AppViewModel @JvmOverloads constructor(
             onDone(false)
             return
         }
-        if (clean != asked) message = "Making \"$clean\" (was \"$asked\")" 
 
         busy = true
         onWorker {

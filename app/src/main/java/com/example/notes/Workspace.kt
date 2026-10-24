@@ -362,8 +362,14 @@ class Workspace(val accountDir: File) {
      */
     fun createProjectFolders(name: String): Result<File> {
         projectsDir.mkdirs()
-        val safe = cleanName(name, "project")
-        val folder = File(projectsDir, safe)
+        // A project's folder is named after its repository, and is **not** put
+        // through [cleanName]. The name of a repository is GitHub's, and one that
+        // was pulled in already has it: renaming `muffyuniverse/muffycodes` to
+        // `muffycodes` on the phone would make the folder and the remote disagree
+        // about what the project is called. The one name shape governs what a person
+        // makes *inside* a folder — files, folders, imports — not the folders that
+        // stand for repositories.
+        val safe = name
         if (folder.exists()) {
             return Result.failure(IllegalArgumentException("There is already a \"$safe\" here"))
         }
