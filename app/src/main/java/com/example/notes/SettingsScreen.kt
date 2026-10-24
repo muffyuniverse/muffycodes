@@ -49,6 +49,24 @@ import androidx.compose.ui.unit.dp
  * nothing else (§10). Pull, Delete and Sync are not here: they live where the
  * projects are.
  */
+/**
+ * Where the log is, said plainly — including when it is not where the switch says.
+ *
+ * Read at composition rather than held in state: the answer changes when a write happens,
+ * and a write is not a Compose event. Opening this screen re-reads it, which is when a
+ * person looks.
+ */
+@Composable
+private fun traceWhere(): String {
+    val where = Trace.where
+    return when {
+        where == null -> "Nothing written yet. One line per thing that happened, appended."
+        !where.contains(DownloadsSink.FOLDER) ->
+            "Writing to $where instead — Downloads refused, so other apps cannot see it."
+        else -> "Appended as it happens, at $where."
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
@@ -147,9 +165,13 @@ fun SettingsScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Write the log to Downloads", style = MaterialTheme.typography.bodyMedium)
+                        // **The path is reported, not promised.** This used to read "at
+                        // Download/MuffyCodes log/trace.log" — a sentence true of the
+                        // intention and false of the phone, because a write can fall back
+                        // to the app's own folder. A line naming where the file really is
+                        // turns "I cannot find the log" into a path.
                         Text(
-                            "One line per thing that happened, appended as it happens, at " +
-                                "Download/${DownloadsSink.FOLDER}/${DownloadsSink.NAME}.",
+                            traceWhere(),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

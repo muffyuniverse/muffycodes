@@ -76,13 +76,7 @@ class DownloadsSink(context: Context) : Trace.Sink {
             val target = uri ?: find()
             if (target != null) {
                 uri = target
-                return try {
-                    app.contentResolver.openInputStream(target)?.use {
-                        it.readBytes().toString(Charsets.UTF_8)
-                    }
-                } catch (t: Throwable) {
-                    null
-                }
+                return read(target)
             }
         }
         return privateFile()?.takeIf { it.isFile }?.let {
@@ -101,6 +95,8 @@ class DownloadsSink(context: Context) : Trace.Sink {
             val target = uri ?: find()
             if (target != null) {
                 try {
+                    // A null stream is a clear that did not happen; the private copy
+                    // below is emptied either way, so the ring still starts clean.
                     app.contentResolver.openOutputStream(target, "wt")?.close()
                 } catch (t: Throwable) {
                     // Falls through to the private copy, which may also be the home.
@@ -126,31 +122,42 @@ class DownloadsSink(context: Context) : Trace.Sink {
      */
     @RequiresApi(Build.VERSION_CODES.Q)
     private fun write(target: Uri, text: String, first: Boolean): Boolean {
-        if (!first) {
-            try {
-                app.contentResolver.openOutputStream(target, "wa")?.use {
-                    it.write(text.toByteArray())
-                }
-                return true
-            } catch (t: Throwable) {
-                // Falls through to read-and-rewrite.
-            }
-        }
-        return try {
-            val before = try {
-                app.contentResolver.openInputStream(target)?.use {
-                    it.readBytes().toString(Charsets.UTF_8)
-                }
-            } catch (t: Throwable) {
-                null
-            }.orEmpty()
-            app.contentResolver.openOutputStream(target, "w")?.use {
-                it.write((before + text).toByteArray())
-            }
-            true
-        } catch (t: Throwable) {
+        if (!first && put(target, text, "wa")) return true
+        // Either the first write, or the append did not happen: put the whole file back,
+        // old text and new. Only reached on a path that has already failed once.
+        return put(target, (read(target) ?: "") + text, "w")
+    }
+
+    /**
+     * Writes [text] to [target] in [mode], and **says no when there is no stream**.
+     *
+     * This is the bug that made a folder appear in Downloads and stay empty. The old
+     * version read `openOutputStream(target, "wa")?.use { it.write(...) }` and then
+     * `return true`: when the resolver answered `null` — which it does for a `MediaStore`
+     * row that has no file behind it yet — the `?.` skipped the write, nothing was thrown,
+     * and the function reported success. The caller then believed the line was safe and
+     * did not fall back to anywhere. A null stream is a failure, and it has to be said
+     * out loud to be handled.
+     */
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun put(target: Uri, text: String, mode: String): Boolean = try {
+        val stream = app.contentResolver.openOutputStream(target, mode)
+        if (stream == null) {
             false
+        } else {
+            stream.use { it.write(text.toByteArray()) }
+            true
         }
+    } catch (t: Throwable) {
+        false
+    }
+
+    /** Whatever is already in the file, or null when it cannot be read. */
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun read(target: Uri): String? = try {
+        app.contentResolver.openInputStream(target)?.use { it.readBytes().toString(Charsets.UTF_8) }
+    } catch (t: Throwable) {
+        null
     }
 
     /**
