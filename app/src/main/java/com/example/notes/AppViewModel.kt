@@ -1067,7 +1067,7 @@ class AppViewModel @JvmOverloads constructor(
         // After the guards, because a tap the screen never allows is not a tap: a locked
         // file has Save greyed out, and recording an intent for it would put a broken
         // sequence in every trace, from a button nobody could press.
-        Trace.tap("Save", file.name)
+        Trace.tap("save", file.name)
         val keep = settings.historyLength
         val h = history
         val g = git
@@ -1550,6 +1550,10 @@ class AppViewModel @JvmOverloads constructor(
 
     /** Opens the history of a file, or of a folder and everything in it. */
     fun openHistory(file: File) {
+        // **One name for one element.** The editor's button and the row's menu item
+        // open the same screen for the same file; giving them two names made a log
+        // where "history" and "history from editor" could not be compared, and the
+        // screen is in the state line anyway.
         Trace.tap("history", file.name)
         historyPath = workspace?.relative(file)
         historyIsFolder = file.isDirectory
@@ -1782,6 +1786,7 @@ class AppViewModel @JvmOverloads constructor(
 
     /** Puts an old version back into the file. */
     fun restoreVersion(revisionId: String) {
+        Trace.tap("restore version", revisionId.take(7))
         val ws = workspace ?: return
         val target = historyPath ?: return
         val project = ws.projectAt(target)

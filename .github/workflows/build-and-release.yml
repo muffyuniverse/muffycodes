@@ -217,6 +217,15 @@ jobs:
         if: matrix.shard == 0
         run: python3 tools/check-test-map.py
 
+      # A log is only readable if every line obeys the same two rules: one name per
+      # element, and `confirm X` for the button of `X`. Both were broken quietly before
+      # this check existed — `Save` was capitalised while everything else was lowercase,
+      # and the button of `move selected` was called `move chosen` — so it is enforced
+      # rather than remembered.
+      - name: Check that the log's vocabulary is the standard one
+        if: matrix.shard == 0
+        run: python3 tools/check-taps.py
+
       # The version code decides whether Android will install a build over the one
       # already on the phone, so the one thing it must do is never go down. Its
       # boundary is a dated switch rather than a date, and a date is hard to test,

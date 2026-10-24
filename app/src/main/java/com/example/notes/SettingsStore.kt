@@ -67,11 +67,17 @@ class SettingsStore(context: Context, name: String = "settings") {
     }
 
     fun selectTheme(theme: AppTheme) {
+        // **A setting is a tap too.** These four went through this store, not the view
+        // model, so they were the one family of presses that left no trace at all — and
+        // "the theme switch did nothing" was unanswerable from a log that showed only
+        // that the Settings screen was open.
+        Trace.tap("theme", theme.name)
         this.theme = theme
         prefs.edit().putString(KEY_THEME, theme.name).apply()
     }
 
     fun selectDarkVariant(useDark: Boolean) {
+        Trace.tap(if (useDark) "dark" else "light")
         this.useDark = useDark
         prefs.edit().putBoolean(KEY_DARK, useDark).apply()
     }
@@ -79,6 +85,9 @@ class SettingsStore(context: Context, name: String = "settings") {
     /** Sets the change history length; a negative number means no limit. */
     fun keepHistory(value: Int) {
         val clean = value.coerceAtLeast(0)
+        // Named with the number, because "0" and "" mean different things and the
+        // difference is exactly what a person reports as "it keeps everything now".
+        Trace.tap("history limit", if (clean == 0) "all" else clean.toString())
         historyLength = clean
         prefs.edit().putInt(KEY_HISTORY, clean).apply()
     }

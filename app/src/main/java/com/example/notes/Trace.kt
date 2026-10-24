@@ -207,9 +207,28 @@ object Trace {
     /**
      * Something a person did, and the id its answer will quote.
      *
-     * [what] is the element's own name — "Save", "sync", "open-file" — so a log reads
-     * like the screen it came from rather than like a stack trace. Spaces become
-     * dashes so that the columns stay columns and `awk '{print $2}'` stays useful.
+     * ## The naming standard, because a log is only readable if every line obeys it
+     *
+     * A tap has two fields and each has one job:
+     *
+     * - **`what` is the element that was pressed.** Lowercase, one or two words, never a
+     *   file name: `save`, `open file`, `lock`, `copy`, `confirm delete`. The name column
+     *   is the thing a shell greps and a person scans, so it must be a small fixed
+     *   vocabulary — `grep " copy "` should find every copy and nothing else.
+     * - **`detail` is what it acted on and where it went**: a file name, a folder, a
+     *   count. Free text, allowed spaces, because it is the tail of the line.
+     *
+     * Two conventions follow from that, and both were broken before they were written
+     * down:
+     *
+     * - **A dialog's button is `confirm <what opened it>`.** `rename project` opens the
+     *   window; `confirm rename project` is the button. Without the prefix, opening and
+     *   confirming are two different acts with one name, and the log cannot tell whether
+     *   a window was dismissed or a rename happened.
+     * - **One gesture, one tap.** The thing that does the work records it, and nothing
+     *   else does: a screen that also records gives one press two ids a millisecond
+     *   apart, so every gesture half-answers itself and "answered twice" stops meaning
+     *   anything.
      */
     fun tap(what: String, detail: String = ""): Int {
         return try {

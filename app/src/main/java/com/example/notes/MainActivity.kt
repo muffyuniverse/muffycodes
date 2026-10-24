@@ -230,10 +230,14 @@ private fun AppRoot(viewModel: AppViewModel) {
                 else -> viewModel.openEditor(entry.file)
             }
         },
-        onRename = { entry -> pending = Pending.RenameEntry(entry) },
-        onMove = { entry -> pending = Pending.MoveEntry(entry) },
-        onCopy = { entry -> pending = Pending.CopyEntry(entry) },
-        onDelete = { entry -> pending = Pending.DeleteEntry(entry) },
+        // **Opening a window is a tap of its own.** Until now only the dialog's button
+        // was recorded, so a menu item whose window never appeared left no trace at all —
+        // which is exactly the failure a trace exists to catch. The pair is
+        // `move` / `confirm move`, and the detail says which file.
+        onMove = { entry -> tap("move", entry.name); pending = Pending.MoveEntry(entry) },
+        onCopy = { entry -> tap("copy", entry.name); pending = Pending.CopyEntry(entry) },
+        onRename = { entry -> tap("rename", entry.name); pending = Pending.RenameEntry(entry) },
+        onDelete = { entry -> tap("delete", entry.name); pending = Pending.DeleteEntry(entry) },
         onTogglePin = { entry -> viewModel.togglePinned(entry.file) },
         onToggleLock = { entry -> viewModel.toggleLocked(entry.file) },
         onHistory = { entry -> viewModel.openHistory(entry.file) },
@@ -244,14 +248,16 @@ private fun AppRoot(viewModel: AppViewModel) {
         showTrace -> ObservabilityScreen(
             report = traceReport,
             onBack = { showTrace = false },
-            onShare = { shareTrace(context) },
+            onShare = {
+                tap("share log")
+                shareTrace(context)
+            },
             onReport = openReport,
             onClear = {
-                // The screen is emptied; the file is not. What has already happened is
-                // evidence, and a Clear that deleted it would be the one control in the
-                // app that destroys the record of what went wrong.
+                // The ring is emptied and the file is kept, and the clearing is a NOTE of
+                // its own — `clearScreen` writes it. Recording the press first would be
+                // the second id for the same gesture, so this is deliberately silent.
                 Trace.clearScreen()
-                traceReport = Trace.report()
             },
         )
 
@@ -272,7 +278,7 @@ private fun AppRoot(viewModel: AppViewModel) {
         historyPath != null -> HistoryScreen(
             viewModel = viewModel,
             title = historyPath.last(),
-            onBack = { tap("history back", historyPath.last()); viewModel.closeHistory() },
+            onBack = { tap("close history", historyPath.last()); viewModel.closeHistory() },
             // Select puts the version back and returns to the file: one act, and
             // the person is looking at the result of it.
             onSelect = { viewModel.closeHistory() },
@@ -289,10 +295,9 @@ private fun AppRoot(viewModel: AppViewModel) {
             // the row and its neighbours are visible and a mistake is one undo away.
             // A three-dot menu inside the editor put the most destructive command in
             // the app beside Save.
-            onOpenHistory = {
-                        tap("history from editor", editing.name)
-                        viewModel.editingFile?.let { viewModel.openHistory(it) }
-                    },
+            // **The same element as the row's menu item, so the log can compare them.**
+            // `openHistory` records it: one gesture, one id, and one name for one button.
+            onOpenHistory = { viewModel.editingFile?.let { viewModel.openHistory(it) } },
                     onReport = openReport,
         )
 
@@ -315,9 +320,9 @@ private fun AppRoot(viewModel: AppViewModel) {
                     tap("restore deleted")
                     viewModel.currentDir?.let { pending = Pending.RestoreDeleted(it) }
                 },
-                onMoveSelected = { tap("move selected"); pending = Pending.MoveSelected },
-                onCopySelected = { tap("copy selected"); pending = Pending.CopySelected },
-                onDeleteSelected = { tap("delete selected"); pending = Pending.DeleteSelected },
+                onMoveSelected = { tap("move", "${viewModel.selected.size} chosen"); pending = Pending.MoveSelected },
+                onCopySelected = { tap("copy", "${viewModel.selected.size} chosen"); pending = Pending.CopySelected },
+                onDeleteSelected = { tap("delete", "${viewModel.selected.size} chosen"); pending = Pending.DeleteSelected },
             )
             // At the bottom, and **clear of the add button**. It used to sit at the
             // bottom centre with 16dp of margin, which is exactly where the button
@@ -411,7 +416,7 @@ private fun Dialogs(
                 login = account.login,
                 onDismiss = dismiss,
                 onRemove = { deleteCopies ->
-                      Trace.tap("remove account", account.login + if (deleteCopies) " with copies" else "")
+                      Trace.tap("confirm remove account", account.login + if (deleteCopies) " with copies" else "")
                       viewModel.removeAccount(account.login, deleteCopies)
                   },
             )
@@ -459,7 +464,7 @@ private fun Dialogs(
             confirm = "Rename",
             onDismiss = dismiss,
             onConfirm = { name ->
-                      Trace.tap("rename project", pending.project)
+                      Trace.tap("confirm rename project", pending.project)
                       viewModel.renameProject(pending.project, name)
                   },
         )
@@ -468,7 +473,7 @@ private fun Dialogs(
             project = pending.project,
             onDismiss = dismiss,
             onDelete = { everywhere ->
-                      Trace.tap("delete project", pending.project + if (everywhere) " everywhere" else " here")
+                      Trace.tap("confirm delete project", pending.project + if (everywhere) " everywhere" else " here")
                       viewModel.deleteProject(pending.project, everywhere)
                   },
         )
@@ -516,7 +521,7 @@ private fun Dialogs(
             canChoose = { viewModel.canHoldFiles(it) },
             onDismiss = dismiss,
             onPick = { target ->
-                Trace.tap("move ${pending.entry.name}", "into ${target.name}/")
+                Trace.tap("confirm move", "${pending.entry.name} into ${target.name}/")
                 dismiss()
                 viewModel.move(pending.entry.file, target)
             },
@@ -532,7 +537,7 @@ private fun Dialogs(
             canChoose = { viewModel.canHoldFiles(it) },
             onDismiss = dismiss,
             onPick = { target ->
-                Trace.tap("move chosen", "into ${target.name}/")
+                Trace.tap("confirm move", "${viewModel.selected.size} chosen into ${target.name}/")
                 dismiss()
                 viewModel.moveSelected(target)
             },
@@ -547,7 +552,7 @@ private fun Dialogs(
         onPick = { target ->
             // The act is recorded where the target is known, once — the same place a
             // move records it, so one gesture still has one id.
-            Trace.tap("copy ${pending.entry.name}", "into ${target.name}/")
+            Trace.tap("confirm copy", "${pending.entry.name} into ${target.name}/")
             dismiss()
             viewModel.copy(pending.entry.file, target)
         },
@@ -562,7 +567,7 @@ private fun Dialogs(
         canChoose = { viewModel.canHoldFiles(it) },
         onDismiss = dismiss,
         onPick = { target ->
-            Trace.tap("copy chosen", "into ${target.name}/")
+            Trace.tap("confirm copy", "${viewModel.selected.size} chosen into ${target.name}/")
             dismiss()
             viewModel.copySelected(target)
         },
@@ -591,7 +596,7 @@ private fun Dialogs(
             destructive = true,
             onDismiss = dismiss,
             onConfirm = {
-                Trace.tap("confirm delete chosen", "${viewModel.selected.size} items")
+                Trace.tap("confirm delete", "${viewModel.selected.size} chosen")
                 dismiss()
                 viewModel.deleteSelected()
             },
@@ -616,7 +621,7 @@ private fun Dialogs(
             // including why nothing did — and the message goes to the snackbar; a
             // tap that closes a window and changes nothing is the worst of both.
             onPick = { gone ->
-                Trace.tap("restore deleted", "${pending.folder.name}/${gone.name}")
+                Trace.tap("confirm restore deleted", "${pending.folder.name}/${gone.name}")
                 dismiss()
                 viewModel.restoreDeleted(pending.folder, gone)
             },
