@@ -206,6 +206,14 @@ mkdir -p "$DEST" "$DOWNLOADS/muffycodes"
 # enough that a green run looks fine, and the phone gets no report.
 cp -R "$TMP"/* "$DEST/"
 cp "$TMP/app-release.apk" "$DOWNLOADS/muffycodes-$LABEL.apk"
+
+# The dev copy, when the run was asked for one. A debug build signed with the release
+# key, so it installs over the release APK on the same phone without uninstalling —
+# which is the whole point: live tracing without losing what is already in the app.
+if [ -f "$TMP/app-debug.apk" ]; then
+  cp "$TMP/app-debug.apk" "$DOWNLOADS/muffycodes-$LABEL-dev.apk"
+  echo "  + $DOWNLOADS/muffycodes-$LABEL-dev.apk (dev: live trace on)"
+fi
 cp "$TMP/app-release.apk" "$DOWNLOADS/muffycodes/muffycodes-$LABEL.apk"
 
 echo "delivered $FOLDER to $DEST"

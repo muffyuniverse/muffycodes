@@ -437,9 +437,24 @@ object Trace {
     fun liveText(version: String = ""): String = buildString {
         appendLine("Muffy Codes — live trace")
         if (version.isNotEmpty()) appendLine(version)
-        appendLine(report().summary)
+        val now = report()
+        appendLine(now.summary)
         appendLine()
-        report().lines.forEach { appendLine(it) }
+        // **The same three findings the screen shows, in the same order.** A watcher, a
+        // person reading the file, and the trace screen should never disagree about
+        // what went wrong — that would be a second thing to debug.
+        val stuck = now.waiting.filter { it.waitedMs > staleMs }
+        if (stuck.isNotEmpty()) {
+            appendLine("Waiting for an answer:")
+            stuck.forEach { appendLine("  · ${it.line}") }
+            appendLine()
+        }
+        if (now.failures.isNotEmpty()) {
+            appendLine("Refused:")
+            now.failures.take(20).forEach { appendLine("  · $it") }
+            appendLine()
+        }
+        now.lines.forEach { appendLine(it) }
     }
 
     /** Forgets everything, including what was still waiting. */
