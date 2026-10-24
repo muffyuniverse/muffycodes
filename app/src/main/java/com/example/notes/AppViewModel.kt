@@ -526,7 +526,7 @@ class AppViewModel @JvmOverloads constructor(
      * Naming both is one short clause and answers it.
      */
     private fun namedFrom(asked: String, used: String): String =
-        if (asked.trim() == used) "" else " (was \"${asked.trim()}\")
+        if (asked.trim() == used) "" else " (was \"${asked.trim()}\")"
 
     /** Commits a change into the account's own history, behind the UI. */
     private fun record(what: String) {
