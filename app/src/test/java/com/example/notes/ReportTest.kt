@@ -1,13 +1,15 @@
 package com.example.notes
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
 import androidx.test.core.app.ApplicationProvider
-import com.example.notes.ui.theme.MuffyCodesTheme
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -31,6 +33,11 @@ import java.io.File
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w411dp-h891dp")
 class ReportTest {
+
+    /** The theme the screens are painted in, as the other screen tests do it. */
+    private fun Frame(content: @Composable () -> Unit) {
+        MaterialTheme { Surface { content() } }
+    }
 
     @get:Rule
     val compose = createComposeRule()
@@ -172,7 +179,7 @@ class ReportTest {
     fun `the button says what it is and opens the report when pressed`() {
         var opened = 0
         compose.setContent {
-            MuffyCodesTheme { ReportButton { opened++ } }
+            Frame { ReportButton { opened++ } }
         }
 
         compose.onNodeWithContentDescription("Report a problem").assertIsDisplayed()
@@ -188,7 +195,7 @@ class ReportTest {
         val frozen = Trace.freeze()
 
         compose.setContent {
-            MuffyCodesTheme {
+            Frame {
                 ReportDialog(frozen = frozen, onDismiss = {}, onSend = {})
             }
         }
@@ -201,7 +208,7 @@ class ReportTest {
     fun `what is typed is what is sent`() {
         var sent: String? = null
         compose.setContent {
-            MuffyCodesTheme {
+            Frame {
                 ReportDialog(frozen = Trace.freeze(), onDismiss = {}, onSend = { sent = it })
             }
         }

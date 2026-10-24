@@ -2,10 +2,13 @@ package com.example.notes
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import com.example.notes.ui.theme.MuffyCodesTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -23,6 +26,11 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w411dp-h891dp")
 class ObservabilityScreenTest {
+
+    /** The theme the screens are painted in, as the other screen tests do it. */
+    private fun Frame(content: @Composable () -> Unit) {
+        MaterialTheme { Surface { content() } }
+    }
 
     @get:Rule
     val compose = createComposeRule()
@@ -50,7 +58,7 @@ class ObservabilityScreenTest {
 
     private fun show(report: Trace.Report, onBack: () -> Unit = {}, onClear: () -> Unit = {}) {
         compose.setContent {
-            MuffyCodesTheme {
+            Frame {
                 Box {
                     ObservabilityScreen(
                         report = report,
