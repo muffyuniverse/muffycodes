@@ -404,6 +404,12 @@ class HistoryFeatureTest : FeatureTest() {
 
         val versions = scene.versionsOf(file)
         val first = versions.last().first.id
+        // **Read before the restore, not after.** The counter was first read below, where it
+        // already included the restore's own commit — so "one more than before" was a
+        // comparison that could never be true, and it cost three red runs to notice an
+        // ordering mistake in a test rather than a bug in the app.
+        val unsentBefore = ws.unsentCount("shopping")
+        assertTrue("the two saves are already waiting to be sent", unsentBefore >= 2)
         scene.viewModel.openHistory(file)
         scene.restore(first)
         scene.viewModel.closeHistory()
@@ -416,18 +422,16 @@ class HistoryFeatureTest : FeatureTest() {
         // And the restore is a change waiting to leave: committed to the project at once
         // (so the history holds it) and not yet pushed, which is what the row counts.
         //
-        // Asserted on the counter itself rather than on the row, because the row's number
-        // arrives through a recount posted to the UI thread and this test has no frame to
-        // run it in. The row is checked where it can be: CopyFeatureTest and
-        // ProjectsFeatureTest both assert the count after a change lands.
-        val unsentBefore = scene.workspace!!.unsentCount("shopping")
-        assertTrue("the two saves are already waiting to be sent", unsentBefore >= 2)
+        // Asserted on the counter rather than on the row, because the row's number arrives
+        // through a recount posted to the UI thread and this test has no frame to run it
+        // in. The row is checked where it can be: CopyFeatureTest and ProjectsFeatureTest
+        // both assert it after a change lands, and ProjectGitTest pins commit-and-push.
         scene.await("the restore to be committed", 20_000) {
-            scene.workspace!!.unsentCount("shopping") > unsentBefore
+            ws.unsentCount("shopping") > unsentBefore
         }
         assertTrue(
-            "the restore is one more thing to send",
-            scene.workspace!!.unsentCount("shopping") > unsentBefore,
+            "the restore is one more thing to send: ${ws.unsentCount("shopping")} after $unsentBefore",
+            ws.unsentCount("shopping") > unsentBefore,
         )
     }
 

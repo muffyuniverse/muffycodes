@@ -52,6 +52,37 @@ class ProjectGitTest {
     }
 
     @Test
+    fun `a commit is work GitHub does not have, and a push clears it`() {
+        // The reported bug, at the level where it can be seen without a screen: "changed a
+        // file, saved but sync is still grey and inactive and new change isnt reported".
+        // Every change is committed the moment it happens, so git's own status is clean —
+        // whatever a row counts has to be the commits GitHub has never been sent.
+        workspace.createProjectFolders("Shopping").getOrThrow()
+        val git = gitFor()
+        git.init("Shopping").getOrThrow()
+        git.open("Shopping")!!.use { GitService.setRemoteUrl(it, bare.absolutePath) }
+        assertEquals("a new project has nothing to send", 0, workspace.unsentCount("Shopping"))
+
+        val worktree = workspace.repoOf("Shopping")
+        File(worktree, "milk.txt").writeText("two litres")
+        git.commit("Shopping", "Edited milk.txt")
+
+        assertEquals("one commit, one thing to send", 1, workspace.unsentCount("Shopping"))
+        assertEquals("and the row says so", 1, git.changes("Shopping").total)
+
+        File(worktree, "milk.txt").writeText("three litres")
+        git.commit("Shopping", "Edited milk.txt again")
+
+        assertEquals("two commits, two things to send", 2, workspace.unsentCount("Shopping"))
+
+        val pushed = git.sync("Shopping")
+
+        assertTrue(pushed.message, pushed.success)
+        assertEquals("after a push there is nothing left", 0, workspace.unsentCount("Shopping"))
+        assertEquals("which the row reports as up to date", 0, git.changes("Shopping").total)
+    }
+
+    @Test
     fun aSyncCanSayWhatItWasFor() {
         // Every other commit in a project is the app narrating a file — "Edited
         // milk.txt" — which is the right message for an undo step and the wrong one
