@@ -900,6 +900,49 @@ jobs:
           done
           echo "All $total test jobs passed, so the APK is handed on."
 
+          # --------------------------------------------------------------------
+          # How evenly the shards were dealt.
+          #
+          # The split is by a hash of the class name, which buys a property worth
+          # more than balance: adding a test puts it in its own shard and leaves
+          # every other class where it was. The price is that the deal is even in
+          # *class count*, not in *time* — measured at 98s against 71s for the same
+          # 141 tests.
+          #
+          # This job is the only place that sees every shard at once, so the
+          # numbers are reported here instead of being inferred from one shard's
+          # log. Advisory: a skewed deal is slow, not wrong, and failing over it
+          # would trade a fact for a nuisance.
+          # --------------------------------------------------------------------
+          gh api "repos/$REPOSITORY/actions/runs/$RUN_ID/jobs" --paginate \
+            --jq '.jobs[] | select(.name | startswith("Test"))
+                  | [.name, .started_at, .completed_at] | @tsv' 2>/dev/null \
+            | awk -F'\t' '
+                function epoch(s,  d, h, mi, se) {
+                    # 2026-10-24T18:26:42Z — POSIX awk has no strftime parsing.
+                    d = substr(s, 9, 2) + 0; h = substr(s, 12, 2) + 0
+                    mi = substr(s, 15, 2) + 0; se = substr(s, 18, 2) + 0
+                    return ((d * 24 + h) * 60 + mi) * 60 + se
+                }
+                NR == 1 { min = 1e9 }
+                {
+                    dur = epoch($3) - epoch($2)
+                    name[NR] = $1; d[NR] = dur; n = NR
+                    if (dur > worst) worst = dur
+                    if (dur < min) min = dur
+                }
+                END {
+                    if (n < 2) exit
+                    line = ""
+                    for (i = 1; i <= n; i++)
+                        line = line (i > 1 ? ", " : "") name[i] " " d[i] "s"
+                    printf "shards: %s\n", line
+                    printf "slowest %ds, fastest %ds, spread %ds (%d%% of the slowest)\n",
+                        worst, min, worst - min, 100 * (worst - min) / worst
+                    if (worst - min > worst * 0.2)
+                        printf "::warning title=Shard balance::the deal is %ds apart. A time-aware split would recover it, and would reshuffle every shard whenever a class is added.\n", worst - min
+                }' || echo "shard timings unavailable; not a failure"
+
       - name: Check the signature of the APK
         if: steps.decision.outputs.changed == 'yes'
         env:

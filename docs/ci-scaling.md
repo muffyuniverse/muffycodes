@@ -192,6 +192,49 @@ and bought a second opinion nobody ever acted on. Removing it is justified by
 "the branch exists to hand out a build", not by a minute. Two measurements were
 needed to learn that, and the first one was quoted before the second existed.
 
+## Measured again after the suite grew: the critical path moved
+
+The table above was written when tests were the slowest thing in the pipeline. They are
+not any more. From one green run of `main` (141 tests):
+
+| job | measured |
+|---|---|
+| **Deep checks** (lint) | **124s** |
+| Build the release | 104s |
+| Test (0) — the slower shard | 98s |
+| Test (1) — the faster shard | 71s |
+| Deliver | 16s |
+| **the run** | **142s** |
+
+Two conclusions, and the second is the one that matters.
+
+**The wall clock is `max(build, lint, slowest shard) + deliver` = `max(104, 124, 98) + 16` =
+140s against 142s measured.** So the pipeline is behaving exactly as modelled — and the
+term that sets it is **lint, not tests**. Anything spent on test execution now buys
+nothing on `main`: the slowest shard could finish in ten seconds and the run would not
+move.
+
+**The shards are dealt by class count, not by time: 98s against 71s.** The split is a hash
+of the class name, which is the right trade — adding a test puts it in its own shard and
+leaves every other class where it was — but the price is visible here. `EditorScreenTest`
+is 20.6s, 27% of the suite, and lands entirely on one side. On a **pull request**, where
+lint and the build do not run, that 27s is the whole difference between 71s and 98s.
+On `main` it costs nothing.
+
+The build job therefore reports the spread on every run and warns when it passes 20% of
+the slowest shard. It is advisory: a skewed deal is slow, not wrong, and the fix —
+assigning by measured duration — would reshuffle every shard whenever a class is added,
+which is the property the hash exists to protect. If the suite's slowest class ever grows
+past about half the total, the balance becomes worth the reshuffling; until then this is
+the price of stability, written down rather than discovered.
+
+**What this changes about the ranking below.** Lint is now the critical path on `main` and
+it is on the release path, so the doc's note that lint "becomes the release latency at
+10x" is already true at 1x. The cheap experiment is running it on a schedule or per
+module rather than on every release — but it is also the only whole-program check the app
+has, and it has never failed. Left as a decision, with the number attached: **124s, and
+the run is 142s.**
+
 ## The floor
 
 Add up what a one-class pull request cannot avoid:
