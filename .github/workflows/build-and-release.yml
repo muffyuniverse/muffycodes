@@ -28,6 +28,11 @@ on:
         description: "The version of the release (for example 1.4)"
         required: true
         type: string
+      dev_build:
+        description: "Also build a dev (debug) copy — live tracing on, same key, installs over the release"
+        required: false
+        type: boolean
+        default: false
 
 # A second push makes the first run pointless, so the first one is stopped
 # immediately, on a branch and on main alike: a run that nobody will read is the
@@ -786,6 +791,27 @@ jobs:
             -x lintVitalRelease \
             -Pmuffy.versionCode="$VERSION_CODE" \
             -Pmuffy.versionName="$VERSION_NAME"
+      # **A dev copy, when asked for.** A debug build carries the live trace; the
+      # release build never does. It is signed with the release key so it installs
+      # *over* the release build on the same phone — no uninstall, so no notes lost —
+      # and it is deliberately kept out of the release: an APK that is published is
+      # the shipping app and is attested, and this is neither. It travels in the run's
+      # own artifact instead.
+      - name: Build a dev copy
+        if: github.event_name == 'workflow_dispatch' && inputs.dev_build
+        env:
+          MUFFY_KEYSTORE_BASE64: ${{ secrets.MUFFY_KEYSTORE_BASE64 }}
+          MUFFY_KEYSTORE_PASSWORD: ${{ secrets.MUFFY_KEYSTORE_PASSWORD }}
+          MUFFY_KEY_ALIAS: ${{ secrets.MUFFY_KEY_ALIAS }}
+          MUFFY_KEY_PASSWORD: ${{ secrets.MUFFY_KEY_PASSWORD }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+        run: |
+          ./gradlew --parallel --no-daemon --no-configuration-cache assembleDebug \
+            -Pmuffy.versionCode="$VERSION_CODE" \
+            -Pmuffy.versionName="$VERSION_NAME"
+          mkdir -p dev
+          cp app/build/outputs/apk/debug/app-debug.apk dev/
 
       # Always, including after a failure: a build that broke is the one whose
       # timing is worth seeing. Advisory, and it cannot fail the job.
@@ -1034,6 +1060,12 @@ jobs:
         run: |
           mkdir -p bundle
           cp apk/app-release.apk bundle/
+          # The dev copy, when one was built. In the artifact, never in the release:
+          # anything published is the shipping app and is attested.
+          if [ -f dev/app-debug.apk ]; then
+            cp dev/app-debug.apk bundle/
+            echo "a dev copy is in this artifact"
+          fi
           cp changes.md bundle/
           # The scenarios keep their folders: the report refers to the pictures
           # beside it, so flattening them would break every link.

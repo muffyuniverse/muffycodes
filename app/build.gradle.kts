@@ -91,6 +91,19 @@ android {
             isMinifyEnabled = false
             signingConfig = signingConfigs.getByName("release")
         }
+        debug {
+            // **Signed with the release key, on purpose.** A debug build normally has
+            // its own throwaway key, which means Android refuses to install it over a
+            // release build — and a person testing on their own phone would have to
+            // uninstall the app (losing every note in it) to try a build that writes a
+            // trace. Same package, same key, higher version code: the dev build lands
+            // on top of the release one like any other update, and uninstalling it
+            // again costs nothing but the reinstall.
+            //
+            // Nothing about a release build changes: `BuildConfig.DEBUG` is still false
+            // there, so every debug-only feature stays off where it matters.
+            signingConfig = signingConfigs.getByName("release")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
