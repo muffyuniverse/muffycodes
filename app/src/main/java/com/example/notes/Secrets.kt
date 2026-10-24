@@ -65,11 +65,22 @@ object Secrets {
         val kind = error.javaClass.simpleName
         val said = scrub(error.message ?: "").trim()
         return when {
+            // **A lock is checked first, and by its own words.** It is a local
+            // condition whose message is a path — and a path is full of digits. Matching
+            // a bare "401" anywhere in the chain read `/tmp/…-1761` as an HTTP status and
+            // told a person their key was wrong when their repository was locked.
+            "cannot lock" in chain || "lock file" in chain ->
+                "This project was locked by another copy of the app, so nothing was " +
+                    "changed. Close the app completely and try again."
+
             // "not authorized", "Authentication is required but no
-            // CredentialsProvider has been registered", a 401, a 403 on push.
+            // CredentialsProvider has been registered", a 401 or a 403 on push. The
+            // numbers are matched as words for the same reason: a status code is only a
+            // status code when something says so.
             listOf(
                 "not authorized", "authentication is required", "authentication failed",
-                "invalid credentials", "401", "403", "permission denied",
+                "invalid credentials", "permission denied", "401 unauthorized",
+                "403 forbidden", "unauthorized (401", "forbidden (403",
             ).any { it in chain } ->
                 "GitHub did not accept this phone's key. Sign in again and try once more."
 
@@ -78,13 +89,6 @@ object Secrets {
                 "network is unreachable", "ssl", "broken pipe", "handshake",
             ).any { it in chain } ->
                 "Could not reach GitHub. The phone may be offline — nothing was changed here."
-
-            // A lock that survived a clear-and-retry: something really is holding the
-            // repository open, and saying "cannot lock /data/user/0/…" to a person is
-            // telling them to fix something they cannot reach.
-            "cannot lock" in chain || "lock file" in chain ->
-                "This project was locked by another copy of the app, so nothing was " +
-                    "changed. Close the app completely and try again."
 
             "non-fast-forward" in chain || "rejected" in chain ->
                 "GitHub refused the push: $said"

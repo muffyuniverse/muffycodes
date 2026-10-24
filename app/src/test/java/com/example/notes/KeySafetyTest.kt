@@ -191,6 +191,22 @@ class KeySafetyTest {
     }
 
     @Test
+    fun aNumberInAPathIsNotAnHttpStatus() {
+        // The bug this lives beside: the classifier matched a bare "401" anywhere in the
+        // chain, and a lock's message is a path — `/tmp/projectgit-1761300401234/...`.
+        // A nanosecond timestamp containing "401" told a person their key was wrong when
+        // their repository was locked. Status codes are matched as words now.
+        val locked = RuntimeException(
+            "Exception caught during execution of add command",
+            RuntimeException("Cannot lock /tmp/projectgit-1761300401234/repo/.git/index.lock"),
+        )
+        assertTrue(
+            "a lock is a lock whatever digits its path holds",
+            Secrets.explain(locked, "Sync failed").startsWith("This project was locked"),
+        )
+    }
+
+    @Test
     fun aLockIsSaidAsSomethingThePersonCanDo() {
         // A lock is the one failure whose own words are useless here: "Ensure that no
         // other process has an open file handle on /data/user/0/..." is an instruction
