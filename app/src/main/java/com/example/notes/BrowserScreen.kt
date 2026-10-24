@@ -187,25 +187,50 @@ fun BrowserScreen(
                 // A folder gets the two things a folder gets (§3).
                 Column(horizontalAlignment = Alignment.End) {
                     if (adding) {
-                        // Putting something in from Downloads sits beside making
-                        // something, because to a person they are the same question:
-                        // "how does a file get here?"
-                        TextButton(onClick = { adding = false; onUploadFolder() }) {
-                            Text("Upload a folder…")
-                        }
-                        TextButton(onClick = { adding = false; onUploadFiles() }) {
-                            Text("Upload files…")
-                        }
-                        TextButton(onClick = { adding = false; onCreateFolder() }) {
-                            Text("New folder")
-                        }
-                        TextButton(onClick = { adding = false; onCreateFile() }) {
-                            Text("New file")
-                        }
-                        // The one way back for a deleted file: its row is gone, so
-                        // there is nothing left to open a history on.
-                        TextButton(onClick = { adding = false; onRestoreDeleted() }) {
-                            Text("Restore deleted…")
+                        // **The menu has a surface, because it is over the list.** These
+                        // were five bare buttons drawn on top of the rows, with nothing
+                        // behind them: file names showed between and under them, and a menu
+                        // that cannot be read apart from the thing it covers is not a menu.
+                        // Reported from the live log: "it will be good if options for +
+                        // button will have their backgrounds — currently they overlap with
+                        // text from file rows".
+                        Surface(
+                            shape = MaterialTheme.shapes.medium,
+                            tonalElevation = 3.dp,
+                            shadowElevation = 6.dp,
+                            color = MaterialTheme.colorScheme.surface,
+                            modifier = Modifier.padding(bottom = 12.dp),
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.Start,
+                                modifier = Modifier.padding(8.dp),
+                            ) {
+                                // Putting something in from Downloads sits beside making
+                                // something, because to a person they are the same
+                                // question: "how does a file get here?"
+                                TextButton(
+                                    onClick = { adding = false; onUploadFolder() },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) { Text("Upload a folder…") }
+                                TextButton(
+                                    onClick = { adding = false; onUploadFiles() },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) { Text("Upload files…") }
+                                TextButton(
+                                    onClick = { adding = false; onCreateFolder() },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) { Text("New folder") }
+                                TextButton(
+                                    onClick = { adding = false; onCreateFile() },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) { Text("New file") }
+                                // The one way back for a deleted file: its row is gone,
+                                // so there is nothing left to open a history on.
+                                TextButton(
+                                    onClick = { adding = false; onRestoreDeleted() },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) { Text("Restore deleted…") }
+                            }
                         }
                     }
                     FloatingActionButton(onClick = { adding = !adding }) {

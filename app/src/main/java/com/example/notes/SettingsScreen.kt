@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -116,26 +117,45 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             // ---- the account (§5) ----
-            Text("Signed in as", style = MaterialTheme.typography.labelMedium)
-            Text(
-                text = account?.login ?: "Nobody yet",
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                text = account?.commitEmail ?: "Sign in to create projects",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            // Add, Switch, Remove — and nothing that reads back at you. The commit
-            // name and email are no longer something to type: they come from the
-            // account GitHub already knows, so the only reason to change them would
-            // be to commit as somebody else, which this app has no use for.
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onSignIn) { Text("Add") }
-                if (account != null) {
-                    TextButton(onClick = { showingSwitch = true }) { Text("Switch") }
-                    TextButton(onClick = onRemoveAccount) {
-                        Text("Remove", color = MaterialTheme.colorScheme.error)
+            //
+            // **One block, with its own tight spacing.** The screen's rhythm is six
+            // density-independent pixels between things that are unrelated; the account's
+            // name, its address and the three buttons that act on it are one thing, and
+            // giving them the outer rhythm — on top of a button's own padding — left a gap
+            // wide enough to look like two screens. Reported from the live log: "between
+            // user account and buttons below it is too much space".
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("Signed in as", style = MaterialTheme.typography.labelMedium)
+                Text(
+                    text = account?.login ?: "Nobody yet",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    text = account?.commitEmail ?: "Sign in to create projects",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                // Add, Switch, Remove — and nothing that reads back at you. The commit
+                // name and email are no longer something to type: they come from the
+                // account GitHub already knows, so the only reason to change them would
+                // be to commit as somebody else, which this app has no use for.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // The padding is the button's own; asking for less keeps the touch
+                    // target (Material enforces forty dips) while removing the empty band
+                    // above the label.
+                    val tight = PaddingValues(
+                        horizontal = 10.dp,
+                        vertical = 4.dp,
+                    )
+                    TextButton(onClick = onSignIn, contentPadding = tight) { Text("Add") }
+                    if (account != null) {
+                        TextButton(
+                            onClick = { showingSwitch = true },
+                            contentPadding = tight,
+                        ) { Text("Switch") }
+                        TextButton(onClick = onRemoveAccount, contentPadding = tight) {
+                            Text("Remove", color = MaterialTheme.colorScheme.error)
+                        }
                     }
                 }
             }
