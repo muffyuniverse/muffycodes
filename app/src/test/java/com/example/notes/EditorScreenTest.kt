@@ -122,6 +122,9 @@ class EditorScreenTest {
 
         val renamed = File(scene.viewModel.currentDir!!, "shopping_list.txt")
         assertTrue("the file was renamed", renamed.isFile)
+        // Saving happens on the app's worker, so the file answers just after the
+        // button does — the same wait a person never notices.
+        compose.waitUntil(10_000) { renamed.readText() == "three litres" }
         assertEquals("with the text that was on the screen", "three litres", renamed.readText())
     }
 
