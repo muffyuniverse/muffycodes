@@ -236,7 +236,6 @@ private fun AppRoot(viewModel: AppViewModel) {
         onHistory = { entry -> viewModel.openHistory(entry.file) },
         onSelect = { entry -> viewModel.toggleSelected(entry.file) },
     )
-    )
 
     when {
         showTrace -> ObservabilityScreen(
@@ -310,7 +309,7 @@ private fun AppRoot(viewModel: AppViewModel) {
                 onUploadFiles = { tap("upload files"); pickFiles.launch(arrayOf("*/*")) },
                 onUploadFolder = { tap("upload folder"); pickFolder.launch(null) },
                 onRestoreDeleted = {
-                        tap("restore deleted")
+                    tap("restore deleted")
                     viewModel.currentDir?.let { pending = Pending.RestoreDeleted(it) }
                 },
                 onMoveSelected = { tap("move selected"); pending = Pending.MoveSelected },
