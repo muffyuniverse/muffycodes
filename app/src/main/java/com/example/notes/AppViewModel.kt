@@ -1394,7 +1394,7 @@ class AppViewModel @JvmOverloads constructor(
         }
         // Newest first, so the first commit that holds a name is the version to
         // bring back: the file as it last was, not as it was years ago.
-        val found = LinkedHashMap<String, String>()
+        val found = LinkedHashMap<String, Gone>()
         for (commit in commits) {
             val held = if (inside) {
                 repo?.paths(project!!, base.ifEmpty { null }, commit.id).orEmpty()

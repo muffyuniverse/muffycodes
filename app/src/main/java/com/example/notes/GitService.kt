@@ -256,6 +256,9 @@ object GitService {
      * onto it, then remove everything the remote does not have.
      */
     fun resetToRemote(repo: Repository, token: String?): RemoteResult {
+        // Named outside the block below so that the answer can say which branch the
+        // phone is on now — the half of a replace that is otherwise invisible.
+        var landedOn: String? = null
         return try {
             val branch = currentBranch(repo)
             Git(repo).use { git ->
@@ -292,6 +295,7 @@ object GitService {
                         .call()
                 }
 
+                landedOn = remote
                 git.reset()
                     .setMode(ResetCommand.ResetType.HARD)
                     .setRef("refs/remotes/origin/$remote")
@@ -303,7 +307,7 @@ object GitService {
                 (status.untracked + status.untrackedFolders + status.missing)
                     .forEach { path -> File(repo.workTree, path).deleteRecursively() }
             }
-            RemoteResult("Replaced with what GitHub has ($remote)", true)
+            RemoteResult("Replaced with what GitHub has (on ${landedOn ?: "its own branch"})", true)
         } catch (e: Throwable) {
             // `Throwable`, not `Exception`: what JGit can throw on a phone includes
             // errors rather than exceptions, and an error that escapes here ends the
@@ -655,7 +659,7 @@ object GitService {
                 }), ok)
             }
         } catch (e: Throwable) {
-            RemoteResult(explain(e, "Push failed"), false)
+            RemoteResult(Secrets.explain(e, "Push failed"), false)
         }
     }
 
