@@ -520,6 +520,10 @@ class AppViewModel @JvmOverloads constructor(
         val login = activeLogin
         onWorker {
             if (login != null && accounts.exists(login)) g.commit(project, what)
+            // The row's count was read *before* this commit, so it still says the
+            // change is waiting after it has been recorded. Ask again, now that the
+            // answer has changed.
+            main.post { refreshChanges() }
         }
     }
 
@@ -542,6 +546,7 @@ class AppViewModel @JvmOverloads constructor(
         // Writing then would make its folder again, and it would come back.
         onWorker {
             if (accounts.exists(login)) h.commit(what, keep)
+            main.post { refreshChanges() }
         }
     }
 
@@ -605,6 +610,7 @@ class AppViewModel @JvmOverloads constructor(
                 if (project != null) g?.commit(project, "Edited $name")
                 else h?.commit("Edited $name", keep)
             }
+            main.post { refreshChanges() }
         }
         refresh()
     }

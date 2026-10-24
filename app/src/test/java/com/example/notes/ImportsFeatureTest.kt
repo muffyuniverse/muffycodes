@@ -86,7 +86,7 @@ class ImportsFeatureTest {
 
         val third = Imports.freeName(dir, "photo.png")
 
-        assertEquals("photo 3.png", third.name)
+        assertEquals("photo_3.png", third.name)
         assertFalse("and it is not a name that exists", third.exists())
     }
 
@@ -140,12 +140,24 @@ class ImportsFeatureTest {
     @Test
     fun `a name with no letters at all still arrives, under a name the app can use`() {
         val dir = File(context.cacheDir, "shape2-${System.nanoTime()}").apply { mkdirs() }
-        val uri = uriWith("(1).png", "x".toByteArray())
+        val uri = uriWith("!!!.png", "x".toByteArray())
 
         val report = Imports.filesInto(context, listOf(uri), dir).getOrThrow()
 
-        assertEquals("imported.png", dir.listFiles()!!.single().name)
-        assertEquals("and it says so", listOf("(1).png" to "imported.png"), report.renamed)
+        assertEquals("untitled.png", dir.listFiles()!!.single().name)
+        assertEquals("and it says so", listOf("!!!.png" to "untitled.png"), report.renamed)
+    }
+
+    @Test
+    fun `a name that is only a symbol and a number keeps the number`() {
+        // Cleaning removes punctuation, not meaning: `(1)` is how a phone writes the
+        // second copy of a picture, and the 1 is the only part that says which one.
+        val dir = File(context.cacheDir, "shape3-${System.nanoTime()}").apply { mkdirs() }
+        val uri = uriWith("(1).png", "x".toByteArray())
+
+        Imports.filesInto(context, listOf(uri), dir)
+
+        assertEquals("1.png", dir.listFiles()!!.single().name)
     }
 
     @Test
@@ -154,7 +166,7 @@ class ImportsFeatureTest {
         // would rename the thing rather than the copy, so the number goes before the
         // final extension only.
         val dir = File(context.cacheDir, "names3-${System.nanoTime()}").apply { mkdirs() }
-        File(dir, "archive.tar.gz").writeText("one")
+        File(dir, "archive_tar.gz").writeText("one")
 
         assertEquals("archive_tar_2.gz", Imports.freeName(dir, "archive.tar.gz").name)
     }

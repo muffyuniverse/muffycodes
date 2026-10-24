@@ -272,7 +272,8 @@ class HistoryFeatureTest : FeatureTest() {
         }
         assertEquals("and the restore is its own version", 3, scene.versionsOf(file).size)
         // And the worktree is clean: the restore was committed to the project, not
-        // left for the next sync to notice.
+        // left for the next sync to notice — which is what the row's count says, and
+        // the app recounts it once the commit lands.
         scene.await("the restore to be committed", 20_000) {
             scene.viewModel.changesOf("shopping") == 0
         }

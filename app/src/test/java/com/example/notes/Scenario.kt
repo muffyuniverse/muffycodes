@@ -429,6 +429,10 @@ class Scenario(
                 Git.open(repo).use { git ->
                     val log = GitService.log(git.repository, null, 5)
                     appendLine("      commits: ${log.joinToString { it.message.take(40) }}")
+                    val status = git.status().call()
+                    val waiting = status.added + status.changed + status.modified +
+                        status.removed + status.missing + status.untracked
+                    appendLine("      waiting: $waiting")
                     appendLine("      branch: ${git.repository.branch}, " +
                         "remote: ${git.repository.config.getString("remote", "origin", "url")}")
                 }
