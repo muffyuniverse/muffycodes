@@ -179,7 +179,7 @@ class CopyFeatureTest : FeatureTest() {
             "and the reason names the problem",
             scene.viewModel.message.orEmpty().contains("cannot be copied inside itself"),
         )
-        assertEquals("nothing was made inside it", 0, File(source, "notes").let { if (it.exists()) 1 else 0 })
+        assertFalse("and nothing was made inside it", File(source, "notes").exists())
     }
 
     @Test
@@ -233,9 +233,20 @@ class CopyFeatureTest : FeatureTest() {
         // When it is copied
         scene.viewModel.copy(original, into)
 
-        // Then the account's history has a version for it
+        // Then the account's history has a version that *contains* the copy. Asserting
+        // only that a commit happened would pass even if the copy were never tracked —
+        // and a file that exists but is never committed is precisely what "no history"
+        // means.
         scene.await("the account to record the copy", 30_000) { scene.headId() != before }
-        assertTrue("the new file is in a version", File(into, "milk.txt").isFile)
+        val tracks = scene.accountHistory().tracked()
+        assertTrue(
+            "the copy is in a version of the account's history: $tracks",
+            tracks.any { it.endsWith("drafts/milk.txt") },
+        )
+        assertTrue(
+            "and so is the file it came from, which was never removed",
+            tracks.any { it.endsWith("milk.txt") && !it.endsWith("drafts/milk.txt") },
+        )
     }
 
     // ---- what a lock means --------------------------------------------------

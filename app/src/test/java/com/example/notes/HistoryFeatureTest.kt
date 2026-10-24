@@ -639,10 +639,18 @@ class HistoryFeatureTest : FeatureTest() {
         scene.folder("something")
         scene.await("the first commit") { log().isNotEmpty() }
 
-        if (!GitService.isRepository(scene.workspace!!.accountDir)) return
+        // **No early return.** This used to read `if (!isRepository(..)) return`, which
+        // made the test pass in exactly the case it was written to catch: a history that
+        // is not a repository at all has no remotes either. The setup is now asserted,
+        // so the test can only pass by the thing under test being true.
+        assertTrue(
+            "the account keeps a history repository at all",
+            GitService.isRepository(scene.workspace!!.accountDir),
+        )
         val remotes = org.eclipse.jgit.api.Git.open(scene.workspace!!.accountDir).use {
             it.repository.config.getSubsections("remote")
         }
         assertTrue("no remote is configured", remotes.isEmpty())
+        assertTrue("and it still has its own commits", remotes.isEmpty() && log().isNotEmpty())
     }
 }

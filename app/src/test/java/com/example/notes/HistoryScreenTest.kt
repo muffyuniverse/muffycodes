@@ -81,6 +81,14 @@ class HistoryScreenTest {
         }
     }
 
+    /**
+     * Waits until the screen shows [text] — **which is an assertion, not a pause.**
+     *
+     * `waitUntil` throws when the condition never becomes true, so a test built only on
+     * `waitFor`/`waitForGone` still fails when the screen is wrong. They are named
+     * "wait" because that is what they look like, and the three tests that use nothing
+     * else say so here rather than each carrying the same paragraph.
+     */
     private fun waitFor(text: String) {
         compose.waitUntil(20_000) {
             compose.onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty()

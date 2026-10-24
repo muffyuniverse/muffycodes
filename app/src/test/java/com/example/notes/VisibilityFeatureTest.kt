@@ -52,7 +52,14 @@ class VisibilityFeatureTest : FeatureTest() {
         scene.project("Shopping")
         val repo = scene.workspace!!.repoOf("Shopping")
 
-        assertTrue("repo is structural", scene.workspace!!.isStructural(repo))
+        assertTrue("the worktree is structural", scene.workspace!!.isStructural(repo))
+
+        // The name of this test says "not a thing to move", so the move is what it has
+        // to try: the flag alone would still pass if delete and move stopped asking.
+        val elsewhere = File(scene.workspace!!.accountDir, "elsewhere").apply { mkdirs() }
+        val refused = scene.workspace!!.move(repo, elsewhere)
+        assertTrue("and moving it is refused", refused.isFailure)
+        assertTrue("with the worktree still where it was", repo.isDirectory)
     }
 
     @Test
@@ -116,16 +123,32 @@ class VisibilityFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `search never reaches into the worktree or the app's own folders`() {
+    fun `search offers nothing the app owns, and does find what it should`() {
         scene.project("Shopping")
         scene.open(Workspace.PROJECTS, "Shopping")
         scene.file("README-ish.txt", "index")
 
+        scene.workspace!!.write(File(scene.workspace!!.repoOf("Shopping"), "muffy.txt"), "muffy")
         scene.viewModel.query = "muffy"
+        scene.viewModel.refresh()
 
+        // **The old name of this test was wrong, and the wrongness hid the bug.** It
+        // said "search never reaches into the worktree", which is the opposite of what
+        // the app does and should do — the worktree is inside the project, so it is
+        // searched. What search must never reach is what the *app* owns: `.muffy/`,
+        // `.git/`, the markers. And the positive half has to come first, because
+        // "nothing from .muffy was offered" passes when the search offers nothing at
+        // all, which is the other way this test could be vacuous.
         assertTrue(
-            "nothing from .muffy or .git is offered",
-            scene.viewModel.visibleEntries.none { it.file.path.contains("/.muffy/") },
+            "the search does find something, so the next assertion means something: " +
+                scene.viewModel.visibleEntries.map { it.name },
+            scene.viewModel.visibleEntries.any { it.name == "muffy.txt" },
+        )
+        assertTrue(
+            "and nothing from .muffy or .git is offered",
+            scene.viewModel.visibleEntries.none {
+                it.file.path.contains("/.muffy/") || it.file.path.contains("/.git/")
+            },
         )
     }
 
@@ -137,11 +160,23 @@ class VisibilityFeatureTest : FeatureTest() {
         scene.file("note.txt", "an appointment")
         scene.open(Workspace.PROJECTS, "Shopping")
 
+        // A second project, with a file that would match the same word. The test's
+        // name is about *scoping*, and half of scoping is what must not be found.
+        scene.project("Work")
+        scene.open(Workspace.PROJECTS, "Work")
+        scene.file("appointment-elsewhere.txt", "appointment")
+
+        scene.open(Workspace.PROJECTS, "Shopping")
         scene.viewModel.query = "appointment"
 
         assertTrue(
             "a file deeper in this project is found",
             scene.viewModel.visibleEntries.any { it.name == "note.txt" },
+        )
+        assertTrue(
+            "and the other project's file is not: " +
+                scene.viewModel.visibleEntries.map { it.name },
+            scene.viewModel.visibleEntries.none { it.name == "appointment-elsewhere.txt" },
         )
     }
 
