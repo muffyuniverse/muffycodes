@@ -118,11 +118,13 @@ class BrowserChromeTest {
         // A save is exactly the thing a person syncs.
         scene.signedIn()
         scene.project("groceries")
+        // Written through the harness, which needs the screen to be *inside* the project
+        // before it can say which worktree to put the file in.
+        scene.open(Workspace.PROJECTS, "groceries", Workspace.REPO)
         val file = scene.worktreeFile("milk.txt", "two litres")
         scene.viewModel.refreshChanges()
         scene.await("the new file to be counted") { scene.viewModel.changesOf("groceries") > 0 }
 
-        scene.open(Workspace.PROJECTS, "groceries", Workspace.REPO)
         scene.viewModel.openEditor(file)
         scene.viewModel.saveEditor("three litres")
         scene.await("the save to be committed", 20_000) { file.readText() == "three litres" }
