@@ -370,6 +370,7 @@ class Workspace(val accountDir: File) {
         // makes *inside* a folder — files, folders, imports — not the folders that
         // stand for repositories.
         val safe = name
+        val folder = File(projectsDir, safe)
         if (folder.exists()) {
             return Result.failure(IllegalArgumentException("There is already a \"$safe\" here"))
         }
