@@ -66,6 +66,10 @@ class EditorScreenTest {
     }
 
     private fun editorFor(file: File) {
+        // The screen is painted on its own, but saving goes through the view model,
+        // which has to know which file is open — exactly as the app tells it when a
+        // row is tapped.
+        scene.viewModel.openEditor(file)
         compose.setContent {
             Frame {
                 EditorScreen(
