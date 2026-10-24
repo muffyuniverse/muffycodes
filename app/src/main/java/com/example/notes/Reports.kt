@@ -237,6 +237,8 @@ object Reports {
         while (words.size > 1 && words.last().lowercase().trim('.', ',', '!', '?') in filler) {
             words.removeAt(words.lastIndex)
         }
-        return words.joinToString("-")
+        // A slug is a name, and names in this folder are lower case: two reports about
+        // the same thing should sort together whatever the sentence's capital was.
+        return words.joinToString("-").lowercase()
     }
 }

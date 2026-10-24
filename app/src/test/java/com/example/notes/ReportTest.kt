@@ -210,9 +210,13 @@ class ReportTest {
     @Test
     fun `what is typed is what is sent`() {
         var sent: String? = null
+        // Frozen once, outside the composition: a `freeze()` called from inside a
+        // composable would take a new snapshot on every recomposition, which is
+        // precisely the thing `Frozen` exists to prevent.
+        val frozen = Trace.freeze()
         compose.setContent {
             Frame {
-                ReportDialog(frozen = Trace.freeze(), onDismiss = {}, onSend = { sent = it })
+                ReportDialog(frozen = frozen, onDismiss = {}, onSend = { sent = it })
             }
         }
 
