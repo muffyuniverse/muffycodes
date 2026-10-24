@@ -173,7 +173,13 @@ class AccountsFeatureTest : FeatureTest() {
         // Name and email are not typed any more: they come back from the key's own
         // account, so a commit is written as the person whose account it is and
         // there is nothing to keep in step with GitHub by hand.
-        val phone = Scenario(RuntimeEnvironment.getApplication(), signIn = false)
+        // A GitHub that answers, rather than the network: this asserts what the app
+        // does with the answer, not that github.com is reachable from a test.
+        val phone = Scenario(
+            RuntimeEnvironment.getApplication(),
+            signIn = false,
+            signInGitHub = { DiskGitHub(File(scene.root, "gh"), "muffy") },
+        )
         try {
             var answered: Boolean? = null
             phone.viewModel.signInWithToken("a-key") { answered = it }
@@ -181,8 +187,8 @@ class AccountsFeatureTest : FeatureTest() {
 
             assertEquals("signed in", true, answered)
             val author = phone.viewModel.account!!.author()
-            assertEquals("Test Account", author.name)
-            assertEquals("${phone.login}@example.com", author.email)
+            assertEquals("the account's own name", "Test Account", author.name)
+            assertEquals("and its own email", "muffy@example.com", author.email)
         } finally {
             phone.close()
         }

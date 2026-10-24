@@ -6,8 +6,11 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import org.robolectric.Shadows.shadowOf
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
 import java.io.ByteArrayInputStream
 import java.io.File
 
@@ -24,6 +27,8 @@ import java.io.File
  *    file twice must add a copy, because a second import is never a way to lose the
  *    first.
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34], qualifiers = "w411dp-h891dp")
 class ImportsFeatureTest {
 
     private val context = RuntimeEnvironment.getApplication()
