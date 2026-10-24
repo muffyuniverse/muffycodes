@@ -112,6 +112,20 @@ class Workspace(val accountDir: File) {
     /** The `repo` folder of a project. */
     fun repoOf(project: String): File = File(File(projectsDir, project), REPO)
 
+    /**
+     * True when [file] is inside a project's repository — the part that is synced.
+     *
+     * This is where the two histories divide, and it is **not** the same as "belongs
+     * to a project": a note kept in the project's folder beside `repo/` is a local
+     * file, versioned by the account's own history. Telling the two apart by
+     * "belongs to a project" loses the change outright, because each history then
+     * trusts the other to have committed it and neither does.
+     */
+    fun inWorktree(file: File): Boolean {
+        val path = relative(file) ?: return false
+        return path.size >= 3 && path[0] == PROJECTS && path[2] == REPO
+    }
+
     /** The project a path belongs to, or null when it is not inside one. */
     fun projectOf(file: File): String? {
         val path = relative(file) ?: return null

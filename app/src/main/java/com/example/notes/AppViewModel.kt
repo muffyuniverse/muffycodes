@@ -451,6 +451,7 @@ class AppViewModel @JvmOverloads constructor(
      */
     private fun commitProjectOf(file: File, what: String) {
         val ws = workspace ?: return
+        if (!ws.inWorktree(file)) return
         val project = ws.projectOf(file) ?: return
         val g = git ?: return
         val login = activeLogin
@@ -519,10 +520,11 @@ class AppViewModel @JvmOverloads constructor(
         val h = history
         val g = git
         val name = file.name
-        // A file inside a project's worktree is versioned by that project, and
-        // everything else by the account. The commit happens on every pause in
-        // typing — that *is* the change history — and sync is then only the push.
-        val project = ws.projectOf(file)
+        // A file inside a project's *repository* is versioned by that project, and
+        // everything else — including a note kept in the project's folder beside it
+        // — by the account. The commit happens on every pause in typing, which is
+        // what the change history is; sync is then only the push.
+        val project = if (ws.inWorktree(file)) ws.projectOf(file) else null
         val login = activeLogin
         worker.execute {
             if (saveDebounceMs > 0) Thread.sleep(saveDebounceMs)
