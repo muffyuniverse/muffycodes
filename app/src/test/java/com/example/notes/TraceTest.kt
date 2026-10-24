@@ -192,17 +192,18 @@ class TraceTest {
         assertTrue("the file is over the limit to begin with", file.length() > Trace.FILE_LIMIT)
 
         Trace.note("after", "the trim")
-        val trimmed = run {
-            val until = System.currentTimeMillis() + 10_000
-            while (System.currentTimeMillis() < until && file.length() > Trace.FILE_LIMIT) {
-                Thread.sleep(25)
-            }
-            file.length()
+        // Waited for on the thing being asserted, not on a proxy: the writer truncates
+        // and then writes, so a read that lands between the two sees a file that is
+        // short enough and has no marker in it yet.
+        val marker = "… earlier lines were dropped …"
+        val until = System.currentTimeMillis() + 10_000
+        while (System.currentTimeMillis() < until && !file.readText().startsWith(marker)) {
+            Thread.sleep(25)
         }
-        assertTrue("the file stays bounded: $trimmed", trimmed <= Trace.FILE_LIMIT)
+        assertTrue("the file stays bounded: ${file.length()}", file.length() <= Trace.FILE_LIMIT)
         assertTrue(
-            "and says some lines went",
-            file.readText().startsWith("… earlier lines were dropped …"),
+            "and says some lines went: ${file.readText().take(60)}",
+            file.readText().startsWith(marker),
         )
         dir.deleteRecursively()
     }
