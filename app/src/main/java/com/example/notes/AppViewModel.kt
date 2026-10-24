@@ -301,8 +301,22 @@ class AppViewModel @JvmOverloads constructor(
     /** True when there is a level above. */
     val canGoUp: Boolean get() = path.isNotEmpty()
 
-    /** The names of the projects on this phone. */
-    val projectNames: List<String> get() = workspace?.projectNames() ?: emptyList()
+    /**
+     * The names of the projects on this phone, as **observable state**.
+     *
+     * A plain `get()` over the filesystem was invisible to Compose: `refresh()` read the
+     * names, so the trace correctly reported "2 rows" — and nothing the screen observed had
+     * changed, so nothing redrew. Adding or deleting a project then showed up only after
+     * leaving the Projects screen and coming back, because navigation forces the
+     * recomposition the change itself could not. Reported from the live log: "adding and
+     * deleting a project shows the change only after you exit and enter the project menu
+     * again".
+     *
+     * The list is replaced, never mutated: `mutableStateOf` compares by identity, so a
+     * `MutableList` edited in place is also a change Compose cannot see.
+     */
+    var projectNames: List<String> by mutableStateOf(emptyList())
+        private set
 
     /**
      * True when a file may be moved into [dir].
@@ -334,6 +348,7 @@ class AppViewModel @JvmOverloads constructor(
         // The folders the app owns exist from the moment the account is shown, so
         // that an empty account and a new one look the same.
         ws.ensure()
+        projectNames = ws.projectNames()
         entries = currentDir?.let { ws.list(it) } ?: emptyList()
         pins = ws.pins()
         lockedPaths = ws.locked()
@@ -1820,11 +1835,19 @@ class AppViewModel @JvmOverloads constructor(
         } else {
             history?.restore(text, revisionId) == true
         }
-        // **Only a failure is announced.** A restore replaces the text on the screen the
-        // person is looking at, so saying "restored that version" repeats what they can
-        // see — and it then lingered on the way out of the editor, which is what made it
-        // feel like a pop-up about nothing.
-        if (!ok) message = "Could not restore it"
+        // **Only a failure is announced on the screen.** A restore replaces the text the
+        // person is looking at, so a message saying "restored that version" repeats what
+        // they can see — and it then lingered on the way out of the editor, which is what
+        // made it feel like a pop-up about nothing. The *trace* still answers, because a
+        // tap with no line after it is the one thing the log exists to find: this tap sat
+        // unanswered until the next back press claimed it, which read as though closing the
+        // history had answered a restore.
+        if (!ok) {
+            message = "Could not restore it"
+            Trace.failure("Could not restore ${target.lastOrNull()} from ${revisionId.take(7)}", "restore version")
+        } else {
+            Trace.said("Restored ${target.lastOrNull()} from ${revisionId.take(7)}")
+        }
         if (ok) {
             refresh()
             // A restore changes what is on disk, so it is itself a version: the

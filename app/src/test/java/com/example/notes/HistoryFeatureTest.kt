@@ -52,6 +52,30 @@ class HistoryFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `a restore answers itself, so the next press does not have to`() {
+        // The live log, 23:42:26: `restore-version da4ffd1` and then `close-history` 15
+        // milliseconds later — and the answer went to the close, which nobody had pressed.
+        // A restore said nothing on purpose, because it changes the text on the screen the
+        // person is already looking at; but silence in the *screen* is not silence in the
+        // *log*, and an unanswered tap is the one thing the log exists to find.
+        scene.folder("letters")
+        scene.await("a version") { scene.versionsOfFolder("letters").isNotEmpty() }
+        scene.openHistory(File(scene.workspace!!.accountDir, "letters"))
+
+        // The ring is shared by every test in this JVM, so the taps another one left
+        // waiting would be indistinguishable from this one's.
+        Trace.resetForTest()
+        scene.restore(scene.versionsOfFolder("letters").first().first.id)
+        Trace.awaitWrites()
+
+        assertEquals(
+            "nothing is left waiting after a restore",
+            emptyList<String>(),
+            Trace.report().waiting.map { it.what },
+        )
+    }
+
+    @Test
     fun `a change to the tree is committed`() {
         val before = log().size
 

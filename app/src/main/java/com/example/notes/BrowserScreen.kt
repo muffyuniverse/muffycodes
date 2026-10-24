@@ -7,6 +7,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -194,42 +195,45 @@ fun BrowserScreen(
                         // Reported from the live log: "it will be good if options for +
                         // button will have their backgrounds — currently they overlap with
                         // text from file rows".
+                        //
+                        // **Hugging the widest label, not the screen.** The first fix put
+                        // `fillMaxWidth` on every item, so the panel ran the whole width and
+                        // read as a stray band across the list. `IntrinsicSize.Max` makes it
+                        // exactly as wide as its widest row plus the little that the padding
+                        // adds — and since the column is aligned to the end, it sits against
+                        // the add button. Reported from the live log: "background for +
+                        // button options is ugly, align to the right and make it the width
+                        // just a bit wider than the widest word".
                         Surface(
                             shape = MaterialTheme.shapes.medium,
-                            tonalElevation = 3.dp,
-                            shadowElevation = 6.dp,
+                            tonalElevation = 2.dp,
+                            shadowElevation = 4.dp,
                             color = MaterialTheme.colorScheme.surface,
-                            modifier = Modifier.padding(bottom = 12.dp),
+                            modifier = Modifier
+                                .width(IntrinsicSize.Max)
+                                .padding(bottom = 12.dp),
                         ) {
-                            Column(
-                                horizontalAlignment = Alignment.Start,
-                                modifier = Modifier.padding(8.dp),
-                            ) {
+                            Column(modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)) {
                                 // Putting something in from Downloads sits beside making
                                 // something, because to a person they are the same
                                 // question: "how does a file get here?"
-                                TextButton(
-                                    onClick = { adding = false; onUploadFolder() },
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) { Text("Upload a folder…") }
-                                TextButton(
-                                    onClick = { adding = false; onUploadFiles() },
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) { Text("Upload files…") }
-                                TextButton(
-                                    onClick = { adding = false; onCreateFolder() },
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) { Text("New folder") }
-                                TextButton(
-                                    onClick = { adding = false; onCreateFile() },
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) { Text("New file") }
+                                TextButton(onClick = { adding = false; onUploadFolder() }) {
+                                    Text("Upload a folder…")
+                                }
+                                TextButton(onClick = { adding = false; onUploadFiles() }) {
+                                    Text("Upload files…")
+                                }
+                                TextButton(onClick = { adding = false; onCreateFolder() }) {
+                                    Text("New folder")
+                                }
+                                TextButton(onClick = { adding = false; onCreateFile() }) {
+                                    Text("New file")
+                                }
                                 // The one way back for a deleted file: its row is gone,
                                 // so there is nothing left to open a history on.
-                                TextButton(
-                                    onClick = { adding = false; onRestoreDeleted() },
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) { Text("Restore deleted…") }
+                                TextButton(onClick = { adding = false; onRestoreDeleted() }) {
+                                    Text("Restore deleted…")
+                                }
                             }
                         }
                     }
