@@ -101,7 +101,10 @@ class ReportTest {
 
         Trace.checkpoint("Save does nothing")
 
-        assertEquals("still unanswered", listOf(id), Trace.broken().map { it.id })
+        // `waiting`, not `broken`: `broken` is the "waited too long" filter, and this tap
+        // is milliseconds old. The claim is that the checkpoint consumed nothing, which is
+        // a different question from how long it has been waiting.
+        assertEquals("still unanswered", listOf(id), Trace.report().waiting.map { it.id })
     }
 
     @Test
@@ -152,6 +155,9 @@ class ReportTest {
     @Test
     fun `the window names what has no answer, in the app's own words`() {
         val id = Trace.tap("Save", "milk.txt")
+        // Five seconds in the future, so the tap is past the stale threshold and the
+        // window's own filter shows it — the same thing a person sees after a tap that
+        // did not work, twenty seconds ago.
         val waiting = Trace.report(System.currentTimeMillis() + 5_000).waiting
 
         compose.setContent {
