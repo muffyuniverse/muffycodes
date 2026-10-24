@@ -51,16 +51,18 @@ class DownloadsSink(context: Context) : Trace.Sink {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val existing = uri ?: find()
             if (existing != null) {
-                if (appendTo(existing, text)) {
+                if (write(existing, text, first = false)) {
                     uri = existing
+                    path = "Download/$FOLDER/$NAME"
                     return
                 }
-                // The entry went away (the person deleted the folder). Fall through and
-                // make a new one rather than writing nowhere for the rest of the session.
+                // The entry went away (the person deleted the folder), or the row is one
+                // whose file was never made. Either way, stop trusting it and make a real
+                // one rather than writing nowhere for the rest of the session.
                 uri = null
             }
-            val made = create()
-            if (made != null && appendTo(made, text)) {
+            val made = createThenWrite(text)
+            if (made != null) {
                 uri = made
                 path = "Download/$FOLDER/$NAME"
                 return
@@ -112,44 +114,90 @@ class DownloadsSink(context: Context) : Trace.Sink {
         }
     }
 
-    /** Appended rather than rewritten: the mode is the whole of it. */
+    /**
+     * Adds text to an existing file, and never loses what was there.
+     *
+     * **"wa" needs a file that already exists.** On a `MediaStore` row that has just been
+     * inserted and never written, append can throw — and when it did, the folder appeared
+     * in Downloads and the log did not: a session's evidence went to the private fallback
+     * while the app reported the other path. So an append that fails is not the end of it:
+     * the text already in the file is read, the new text is put after it, and the whole
+     * thing is written. Slower, and only on the path that was already broken.
+     */
     @RequiresApi(Build.VERSION_CODES.Q)
-    private fun appendTo(target: Uri, text: String): Boolean = try {
-        app.contentResolver.openOutputStream(target, "wa")?.use {
-            it.write(text.toByteArray())
+    private fun write(target: Uri, text: String, first: Boolean): Boolean {
+        if (!first) {
+            try {
+                app.contentResolver.openOutputStream(target, "wa")?.use {
+                    it.write(text.toByteArray())
+                }
+                return true
+            } catch (t: Throwable) {
+                // Falls through to read-and-rewrite.
+            }
         }
-        true
-    } catch (t: Throwable) {
-        false
+        return try {
+            val before = try {
+                app.contentResolver.openInputStream(target)?.use {
+                    it.readBytes().toString(Charsets.UTF_8)
+                }
+            } catch (t: Throwable) {
+                null
+            }.orEmpty()
+            app.contentResolver.openOutputStream(target, "w")?.use {
+                it.write((before + text).toByteArray())
+            }
+            true
+        } catch (t: Throwable) {
+            false
+        }
     }
 
     /**
-     * The first write makes the file, complete and visible.
+     * Makes the file and puts the first lines in it.
      *
-     * `IS_PENDING` is set and then cleared rather than left at 0 from the start: a file
-     * another app reads halfway through its first line is worse than one that appears a
-     * second later.
+     * `IS_PENDING` stays set until those lines are written, and only then is cleared: the
+     * point of pending is that no other app can read a half-made file, and clearing it
+     * before the file existed was the other half of the same bug — a visible row for a
+     * file nobody had created yet.
+     *
+     * A failure deletes the row rather than leaving it: a phantom entry is worse than no
+     * entry, because [find] would keep choosing it.
      */
     @RequiresApi(Build.VERSION_CODES.Q)
-    private fun create(): Uri? = try {
-        val values = ContentValues().apply {
-            put(MediaStore.Downloads.DISPLAY_NAME, NAME)
-            put(MediaStore.Downloads.MIME_TYPE, "text/plain")
-            put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/$FOLDER")
-            put(MediaStore.Downloads.IS_PENDING, 1)
+    private fun createThenWrite(text: String): Uri? {
+        val made = try {
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, NAME)
+                put(MediaStore.Downloads.MIME_TYPE, "text/plain")
+                put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/$FOLDER")
+                put(MediaStore.Downloads.IS_PENDING, 1)
+            }
+            app.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+        } catch (t: Throwable) {
+            null
+        } ?: return null
+
+        if (!write(made, text, first = true)) {
+            try {
+                app.contentResolver.delete(made, null, null)
+            } catch (t: Throwable) {
+                // Nothing to clean up.
+            }
+            return null
         }
-        val made = app.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-        if (made != null) {
+        try {
             app.contentResolver.update(
                 made,
                 ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) },
                 null,
                 null,
             )
+        } catch (t: Throwable) {
+            // Written but still marked pending: other apps cannot see it yet, which is a
+            // smaller problem than a log that is not being written at all.
         }
-        made
-    } catch (t: Throwable) {
-        null
+        return made
     }
 
     /** The existing log, if this phone already has one from an earlier session. */

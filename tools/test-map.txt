@@ -54,3 +54,4 @@ KeySafetyFeatureTest  app/src/main/java/com/example/notes/GitHub.kt app/src/main
 # them, which would run too few tests rather than too many.
 # always-full app/src/main/java/com/example/notes/Dialogs.kt
 # always-full app/src/main/java/com/example/notes/MainActivity.kt
+DownloadsSinkTest  app/src/main/java/com/example/notes/DownloadsSink.kt
