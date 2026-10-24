@@ -440,6 +440,10 @@ class AppViewModel @JvmOverloads constructor(
      */
     fun renameTo(file: File, newName: String): File? {
         val ws = workspace ?: return null
+        if (isLocked(file)) {
+            message = "${file.name} is locked, so it cannot be renamed"
+            return null
+        }
         val wasEditing = editingPath != null && editingPath == ws.relative(file)
         val result = ws.rename(file, newName)
         // The editor and the history point at a path, not at a file object, so a
@@ -809,6 +813,13 @@ class AppViewModel @JvmOverloads constructor(
         // held only by the caller is a convention. A `.zip` opened by mistake must
         // survive even a bug in the screen.
         if (ws.kindOf(file) != EntryKind.TEXT) return
+        // A locked file can be read and nothing else. The screen greys Save out, and
+        // that is not enough for the same reason: a lock that only the screen honours
+        // is a lock the next screen will not.
+        if (isLocked(file)) {
+            message = "${file.name} is locked, so it cannot be changed"
+            return
+        }
         ws.write(file, text)
         val keep = settings.historyLength
         val h = history

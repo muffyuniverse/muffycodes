@@ -148,7 +148,9 @@ fun EditorScreen(
 
     /** Leaves the editor, dropping anything not saved. */
     fun leave() {
-        val dropped = kind == EntryKind.TEXT && writing && text != saved
+        // Whether it is showing or writing: text that was typed and not saved is
+        // text that is about to be lost, and the person should be told.
+        val dropped = kind == EntryKind.TEXT && text != saved
         focus.clearFocus()
         onBack()
         if (dropped) viewModel.message = "Left without saving"

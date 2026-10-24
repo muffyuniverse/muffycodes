@@ -151,6 +151,26 @@ class SelectionFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `a locked file cannot be written or renamed, even from the model`() {
+        // The screen greys Save out, and that is not enough: a lock honoured only by
+        // the screen is a lock the next screen will not honour.
+        val file = scene.file("milk.txt", "two litres")
+        scene.viewModel.toggleLocked(file)
+        scene.viewModel.openEditor(file)
+
+        scene.viewModel.saveEditor("two litres and a lemon")
+        assertEquals("the text did not change", "two litres", file.readText())
+        assertTrue(
+            "and it said why: ${scene.viewModel.message}",
+            scene.viewModel.message?.contains("locked") == true,
+        )
+
+        assertTrue("no rename happened", scene.viewModel.renameTo(file, "groceries") == null)
+        assertTrue("the file kept its name", file.isFile)
+        scene.viewModel.closeEditor()
+    }
+
+    @Test
     fun `a lock is remembered, and it is not part of the file`() {
         // The lock lives in `.muffy`, so it changes nothing in the file and makes no
         // commit. Locking a note and then syncing must not carry the lock to GitHub,
