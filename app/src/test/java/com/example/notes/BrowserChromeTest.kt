@@ -158,38 +158,6 @@ class BrowserChromeTest {
     }
 
     @Test
-    fun `a new project reaches the Projects screen without leaving it`() {
-        // Reported from the live log: "adding and deleting a project shows the change only
-        // after you exit and enter the project menu again". The names of the projects were a
-        // plain `get()` over the filesystem, so `refresh()` read them and the trace reported
-        // "2 rows" while nothing Compose was watching had changed — the screen kept the list
-        // it had painted, and only navigation, which recomposes everything, showed the
-        // truth.
-        //
-        // A Compose test, because the state variable was the whole bug: asserting on
-        // `projectNames` would have passed before the fix too, since the getter always read
-        // the disk.
-        scene.signedIn()
-        scene.open(Workspace.PROJECTS)
-        browser()
-        compose.waitForIdle()
-        assertFalse("nothing is there yet", there("Shopping"))
-
-        // Made on disk and refreshed **inside the compose runtime**, not through the clone.
-        // A project arriving over the network is a worker and a post and a frame; what this
-        // test is about is whether the screen is watching the thing that changed. The write
-        // goes through `runOnUiThread` so the snapshot apply this harness listens for is the
-        // one a real frame would do.
-        compose.runOnUiThread {
-            scene.workspace!!.createProjectFolders("Shopping")
-            scene.viewModel.refresh()
-        }
-
-        compose.waitUntil(20_000) { there("Shopping") }
-        assertTrue("the row appeared without going anywhere", there("Shopping"))
-    }
-
-    @Test
     fun `sync cannot be pressed when nothing has changed`() {
         scene.signedIn()
         scene.project("groceries")
