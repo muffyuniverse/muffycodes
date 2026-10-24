@@ -93,6 +93,8 @@ class EditorScreenTest {
         editorFor(file)
         compose.onNodeWithText("two litres").performTextReplacement("three litres")
         compose.onNodeWithText("Save").performClick()
+        // Saving writes on the app's worker, so the file answers a moment later.
+        compose.waitUntil(10_000) { file.readText() == "three litres" }
 
         assertEquals("saved", "three litres", file.readText())
 
@@ -196,6 +198,9 @@ class EditorScreenTest {
         compose.onNodeWithText("Edit").assertIsDisplayed()
         compose.onNodeWithText("two litres").performTextReplacement("three litres")
         compose.onNodeWithText("Save").performClick()
+        // The write and the commit are one act on the app's worker, so the file on
+        // disk answers a moment after the button does — exactly as on a phone.
+        compose.waitUntil(10_000) { file.readText() == "three litres" }
         assertEquals("written", "three litres", file.readText())
     }
 
