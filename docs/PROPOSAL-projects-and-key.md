@@ -48,6 +48,19 @@ files/
 - **Files are pristine** — nothing is added to what you type. A file's identity
   is its path; renaming renames the file and git sees a rename.
 - **The extension is just the part of the name after the dot.** Default `.txt`.
+- **One name shape, for everything a person makes:** lowercase letters and
+  digits, joined by single underscores — `My Shopping List` is written
+  `my_shopping_list.txt`, and an imported `Holo and Lawrence, Kraft - Spice and
+  Wolf.jpeg` arrives as `holo_and_lawrence_kraft_spice_and_wolf.jpeg`. The
+  extension survives, lowercased. A name here is a path component in two git
+  repositories and in the folder tree that *is* the account, so the rule lives in
+  one function (`Workspace.cleanName`) and every way in — typing, renaming,
+  importing a file or a whole folder — goes through it. When it changes a name it
+  says so, because a file that arrives under an unexpected name reads as a file
+  that did not arrive.
+- **A project's folder is the exception**, and deliberately: it is named after its
+  repository, which may already exist on GitHub. The app never renames somebody's
+  repository on the phone.
 
 ---
 
@@ -73,19 +86,26 @@ files/
 Moving is an ordinary action on any file or folder **you** made — and only on
 those:
 
-- inside `repo/`, a move is a git rename, and the next sync carries it to GitHub;
+- inside `repo/`, a move is a git change, and it is committed there at once — the
+  same as any other change, so sync is only the push;
 - beside `repo/`, a move is an ordinary move, and the app-wide history of §4
   records it;
-- **into or out of `repo/`** — the two crosses, which are also just moves:
+- **into or out of `repo/`** is the same command. There is no "move into the
+  repository" and no "keep only on this phone": the picker offers **every folder
+  in the account**, and where the file lands is what decides which history owns
+  it.
 
-| action (in a file's or folder's menu) | what it does |
+A move is the one command that can cross the line between the two histories, so
+**both sides are committed**: the destination repository records the file as
+tracked, and the source repository records that it is gone. Committing only the
+destination is how GitHub ends up holding a copy this phone no longer has.
+
+| where it went | which history records it |
 |---|---|
-| **Move into the repository** | the item moves inside `repo/`; the next sync carries it to GitHub |
-| **Keep only on this phone** | the item moves out of `repo/`; the next sync removes it from GitHub |
-
-Both are recorded in **both** histories — the project's repository sees a
-rename or a removal, and the app-wide history sees the move as it happened on
-this phone.
+| into a project's `repo/` | that project — a new tracked file |
+| out of a project's `repo/` | that project — a removal, from where it used to be |
+| between two projects | both of them, one each |
+| anywhere else | the account's own history |
 
 ---
 
@@ -109,10 +129,11 @@ twice and the two histories never fight.
 
 ### When it commits
 
-- **when the editor saves** — an edit becomes a commit; consecutive saves within
-  a few seconds fold into one
-- **when the tree changes** — creating, renaming, moving or deleting a file or a
-  folder
+- **when the editor saves** — saving is a button, and pressing it writes the text
+  and commits it. Consecutive changes within a few seconds fold into one, because
+  a commit takes everything that is waiting
+- **when the tree changes** — creating, renaming, moving, importing or deleting a
+  file or a folder
 
 Each commit message is written from what happened, in the same plain style as
 sync's: `Edited ideas.txt`, `Created Drafts/`, `Moved Shopping-list.txt into
@@ -125,6 +146,10 @@ Drafts/`, `Deleted Drafts/`. Empty commits are never made.
   moment, are browsable and restorable the same way.
 - **A deleted folder is no longer gone.** Deleting `Drafts/` commits the
   deletion, so the folder and everything in it can be brought back.
+- **A deleted file is no longer lost either.** Its row is gone, so the add button
+  offers **Restore deleted…**: the files the folder's own history holds and the
+  folder no longer does, put back byte for byte — a version of a picture is not
+  text, and writing a UTF-8 reading of it back would destroy the picture.
 - **Folder organisation is versioned.** Renames and moves of local things are
   reversible, which is exactly where people regret things most.
 - **It is invisible until wanted.** No status, no count, no badge. The Project
@@ -205,7 +230,7 @@ One row per project of the active account:
 
 | item | what it does |
 |---|---|
-| **Sync** | commits and force-pushes — the same action as the button inside, so you never have to enter a project just to push it |
+| **Sync** | pushes — the same action as the button inside, so you never have to enter a project just to push it |
 | **Rename…** | renames the project **and its repository on GitHub** (and commits the rename to the app-wide history) |
 | **Delete…** | one command; the dialog carries the choice, below |
 
@@ -256,6 +281,24 @@ muffyuniverse · Shopping              3 changed   [ Sync ]
 - The old commit button, its badge and the `git:` subtitle are gone.
 - Folders nest freely; the editor, pinning and the version history stay — and
   history now covers local files too (§4).
+
+### The editor's row, left to right
+
+```text
+[<-]  milk.txt            History  [ Save ]  ...
+```
+
+- **`<-` leaves and discards.** Saving is not a pause in typing any more, so back
+  means back: what was typed and not saved does not reach the file.
+- **The name is the title, and the title is editable.** Renaming is not a separate
+  command in a menu — changing a word you are already looking at should not need a
+  window. It commits on "done" and on leaving the field, never on a keystroke,
+  because the name rule would otherwise rewrite the name under the finger.
+- **History** opens the versions, where `<-` leaves them alone and **Select** puts
+  one back — and returns to the file, because a person who has found the version
+  they wanted has finished with the history.
+- **Save** is a button with a background, because it is the action of the screen.
+  It is disabled until something has changed.
 - **Search is scoped to this project** — one button in the top bar, covering both
   the tracked and the local parts of the project. There is no search across
   projects: the Projects list is that index already.
@@ -264,13 +307,20 @@ muffyuniverse · Shopping              3 changed   [ Sync ]
 
 ## 8. Sync
 
-1. Commit everything that changed inside `repo/`, with a message the app writes
-   from **the names that changed** — `Milk.txt, Shop.png`, `+3 more` past a few.
-2. **Force push.** Local always wins; it cannot fail on a conflict.
+**A sync is a push, and nothing else.** Every change inside `repo/` is already
+committed when it happens — a save, a rename, a move, an import, a deletion — so by
+the time Sync is pressed there is nothing left to decide about.
 
-No commit dialog and no sync states: every commit is a sync, and a sync always
-ends with the phone and GitHub holding the same thing. Local files beside `repo/`
-are not part of it — they are already versioned by §4, on this phone.
+1. Commit anything that somehow slipped past — a file half-written by another app,
+   a deletion made outside this app. This is a guard, not the design: a push that
+   silently leaves a change behind is worse than a commit nobody asked for.
+2. **Force push.** Local always wins; it cannot fail on a conflict. The message is
+   written from **the names that changed** — `Milk.txt, Shop.png`, `+3 more` past a
+   few.
+
+The history's arrows move between **changes**, not between pushes: a version exists
+the moment you save, and an undo does not wait for a network. Local files beside
+`repo/` are not part of the push — they are already versioned by §4, on this phone.
 
 **Online is required.** With no network, sync does nothing and says so plainly —
 nothing lands half-done, and the changed count stays as it was. A repository
@@ -363,15 +413,17 @@ Steps 1–3 are the load-bearing ones; 4–6 land on top of them.
 
 ---
 
-## 14. The history lengths (added at build time)
+## 14. The history length (added at build time)
 
-Two settings, one for each history, both applied **at the next change** rather
-than when the number is typed:
+**One setting, one sentence:** how many changes are kept in each project's repo,
+and in the local one that holds everything else. It applies **at the next change**
+rather than when the number is typed — a history that shortened itself the moment
+a number was typed would destroy commits before their replacements existed.
 
-| setting | what it bounds |
+| it bounds | what that means |
 |---|---|
-| **This phone's history** | the account's own history: every save, every rename, every move, every deletion |
-| **Each project's history** | a project's commits, shortened after the next sync |
+| each project's repository | its commits, shortened after the next change |
+| the account's own history | every save, rename, move, import and deletion outside a worktree |
 
 An empty field means **keep everything**, which is the default. When a length is
 set, the oldest commits are dropped by rebuilding the chain from the newest ones
