@@ -281,6 +281,74 @@ class ScenariosTest {
     }
 
     @Test
+    fun theEditorsRow() {
+        scene.signedIn()
+        scene.open()
+        val file = scene.file("milk.txt", "two litres")
+
+        scenario(
+            compose, "11-the-editor",
+            "The editor, with its row.",
+            "a note open, with the four things the row does.",
+            screen = { browser() },
+            afterScreen = {
+                Screen {
+                    EditorScreen(
+                        viewModel = viewModel,
+                        file = file,
+                        onBack = {},
+                        onDelete = {},
+                        onOpenHistory = {},
+                    )
+                }
+            },
+        ) {
+            before()
+            then("The note is opened.") {
+                scene.openEditor(file)
+            }
+            after()
+            result(
+                "Back leaves and discards, the name is the title and can be changed " +
+                    "where it stands, History opens the versions, and Save is a button " +
+                    "because saving is something a person does.",
+            )
+        }
+    }
+
+    @Test
+    fun theHistoryWithSelectOnTheRight() {
+        scene.signedIn()
+        scene.open()
+        val file = scene.file("milk.txt")
+        scene.openEditor(file)
+        scene.saveAsVersion("one litre")
+        scene.saveAsVersion("two litres")
+        scene.closeEditor()
+
+        scenario(
+            compose, "12-the-history-with-select",
+            "The history of a file, with Select where the restore button was.",
+            "a note with two versions, and the one being looked at is not the newest.",
+            screen = { browser() },
+            afterScreen = {
+                Screen { HistoryScreen(viewModel = viewModel, title = "milk.txt", onBack = {}) }
+            },
+        ) {
+            before()
+            then("The history is opened and the older version is stepped back to.") {
+                scene.versionsOf(file)
+            }
+            after()
+            result(
+                "Select puts the version back and returns to the file, in one act: " +
+                    "a person who has found the version they wanted has finished with " +
+                    "the history.",
+            )
+        }
+    }
+
+    @Test
     fun theHistoryOfAFolderThatWasDeleted() {
         scene.signedIn()
         scene.folder("letters")
