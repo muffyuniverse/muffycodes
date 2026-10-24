@@ -360,6 +360,9 @@ class HistoryFeatureTest : FeatureTest() {
         val file = scene.file("milk.txt", "one litre")
         scene.viewModel.openEditor(file)
         scene.viewModel.saveEditor("two litres")
+        scene.viewModel.closeEditor()
+        // The history screen is what asks, so the history is what has to be open.
+        scene.viewModel.openHistory(file)
 
         var seen: List<Pair<GitService.CommitInfo, String?>> = emptyList()
         scene.viewModel.requestVersions { seen = it }
