@@ -64,7 +64,6 @@ class ScenariosTest {
             viewModel = viewModel,
             username = viewModel.activeLogin,
             onOpenSettings = {},
-            onOpenAccount = {},
             actions = noActions(),
             onAddProject = {},
             onRowSync = {},
@@ -72,6 +71,8 @@ class ScenariosTest {
             onRowDelete = {},
             onCreateFile = {},
             onCreateFolder = {},
+            onUploadFiles = {},
+            onUploadFolder = {},
         )
     }
 
@@ -82,7 +83,7 @@ class ScenariosTest {
             onBack = {},
             onSignIn = {},
             onRemoveAccount = {},
-            onEditIdentity = {},
+            onTestAccount = {},
         )
     }
 
