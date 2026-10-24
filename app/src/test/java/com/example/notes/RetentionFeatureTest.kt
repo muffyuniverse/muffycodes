@@ -48,7 +48,7 @@ class RetentionFeatureTest : FeatureTest() {
 
     @Test
     fun `shortening the account's history happens at the next change, not when it is set`() {
-        repeat(6) { scene.folder("folder-$it") }
+        repeat(6) { scene.folder("folder_$it") }
         scene.await("six commits") { historySize() >= 6 }
         val before = historySize()
 
@@ -59,11 +59,11 @@ class RetentionFeatureTest : FeatureTest() {
 
     @Test
     fun `after the next change the account's history keeps only the length it was given`() {
-        repeat(6) { scene.folder("folder-$it") }
+        repeat(6) { scene.folder("folder_$it") }
         scene.await("six commits") { historySize() >= 6 }
         scene.settings.keepHistory(3)
 
-        scene.folder("the-last-one")
+        scene.folder("the_last_one")
         scene.await("the history to be shortened") { historySize() <= 3 }
 
         assertEquals("three versions are kept", 3, historySize())
@@ -71,14 +71,14 @@ class RetentionFeatureTest : FeatureTest() {
 
     @Test
     fun `shortening the history does not touch a single file`() {
-        repeat(5) { scene.folder("folder-$it") }
-        scene.open("folder-2")
+        repeat(5) { scene.folder("folder_$it") }
+        scene.open("folder_2")
         val file = scene.file("milk.txt", "two litres")
         scene.open()
         scene.await("the commits") { historySize() >= 5 }
 
         scene.settings.keepHistory(2)
-        scene.folder("after-the-shortening")
+        scene.folder("after_the_shortening")
         scene.await("the history to be shortened") { historySize() <= 2 }
 
         assertEquals("the file is exactly as it was", "two litres", file.readText())

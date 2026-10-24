@@ -52,7 +52,7 @@ class ImportsFeatureTest {
 
         val result = Imports.filesInto(context, listOf(uri), dir)
 
-        assertEquals("one file arrived", 1, result.getOrNull())
+        assertEquals("one file arrived", 1, result.getOrThrow().copied)
         val arrived = File(dir, "photo.png")
         assertTrue("it is there", arrived.isFile)
         assertArrayEquals("and it is exactly what was sent", bytes, arrived.readBytes())
@@ -82,7 +82,7 @@ class ImportsFeatureTest {
     fun `a name that is already taken is numbered rather than overwritten`() {
         val dir = File(context.cacheDir, "names-${System.nanoTime()}").apply { mkdirs() }
         File(dir, "photo.png").writeText("one")
-        File(dir, "photo 2.png").writeText("two")
+        File(dir, "photo_2.png").writeText("two")
 
         val third = Imports.freeName(dir, "photo.png")
 
@@ -95,7 +95,7 @@ class ImportsFeatureTest {
         val dir = File(context.cacheDir, "names2-${System.nanoTime()}").apply { mkdirs() }
         File(dir, "journal").writeText("one")
 
-        assertEquals("journal 2", Imports.freeName(dir, "journal").name)
+        assertEquals("journal_2", Imports.freeName(dir, "journal").name)
     }
 
     @Test
@@ -142,9 +142,10 @@ class ImportsFeatureTest {
         val dir = File(context.cacheDir, "shape2-${System.nanoTime()}").apply { mkdirs() }
         val uri = uriWith("(1).png", "x".toByteArray())
 
-        assertEquals("imported.png", Imports.filesInto(context, listOf(uri), dir).getOrThrow().let {
-            dir.listFiles()!!.single().name
-        })
+        val report = Imports.filesInto(context, listOf(uri), dir).getOrThrow()
+
+        assertEquals("imported.png", dir.listFiles()!!.single().name)
+        assertEquals("and it says so", listOf("(1).png" to "imported.png"), report.renamed)
     }
 
     @Test
@@ -155,6 +156,6 @@ class ImportsFeatureTest {
         val dir = File(context.cacheDir, "names3-${System.nanoTime()}").apply { mkdirs() }
         File(dir, "archive.tar.gz").writeText("one")
 
-        assertEquals("archive.tar 2.gz", Imports.freeName(dir, "archive.tar.gz").name)
+        assertEquals("archive_tar_2.gz", Imports.freeName(dir, "archive.tar.gz").name)
     }
 }

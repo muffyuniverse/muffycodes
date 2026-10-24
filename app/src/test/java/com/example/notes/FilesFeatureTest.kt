@@ -21,7 +21,7 @@ class FilesFeatureTest : FeatureTest() {
     fun `a new file gets the default extension when the name has none`() {
         scene.file("Shopping")
 
-        assertTrue("the name got .txt", scene.names().contains("Shopping.txt"))
+        assertTrue("the name got .txt", scene.names().contains("shopping.txt"))
     }
 
     @Test
@@ -79,10 +79,13 @@ class FilesFeatureTest : FeatureTest() {
 
     @Test
     fun `a picture is recognised whatever case its extension is written in`() {
-        // A camera writes .JPG as often as .jpg, and the rule is about the part of
-        // the name after the dot, not how it was typed.
-        scene.file("holiday.JPG")
-        scene.file("scan.PNG")
+        // A camera writes .JPG as often as .jpg, and a file already on the phone
+        // keeps the name it has: the rule is about the part of the name after the
+        // dot, not how it was typed. Written to the disk directly, because the app
+        // would lower-case a name it made itself.
+        File(scene.viewModel.currentDir!!, "holiday.JPG").writeBytes(byteArrayOf(1, 2))
+        File(scene.viewModel.currentDir!!, "scan.PNG").writeBytes(byteArrayOf(1, 2))
+        scene.viewModel.refresh()
 
         assertEquals(EntryKind.IMAGE, scene.entry("holiday.JPG").kind)
         assertEquals(EntryKind.IMAGE, scene.entry("scan.PNG").kind)
@@ -105,14 +108,14 @@ class FilesFeatureTest : FeatureTest() {
         // §9: "rename, move and delete only" — the restrictions are about editing,
         // not about ownership.
         val file = scene.file("archive.zip")
-        scene.folder("Drafts")
+        scene.folder("drafts")
 
         assertTrue("renamed", scene.viewModel.rename(file, "renamed.zip"))
         val moved = File(file.parentFile, "renamed.zip")
-        assertTrue("moved", scene.viewModel.move(moved, File(moved.parentFile, "Drafts")))
+        assertTrue("moved", scene.viewModel.move(moved, File(moved.parentFile, "drafts")))
         assertFalse("it was moved", File(file.parentFile, "renamed.zip").exists())
 
-        val placed = File(File(file.parentFile, "Drafts"), "renamed.zip")
+        val placed = File(File(file.parentFile, "drafts"), "renamed.zip")
         assertTrue("deleted", scene.viewModel.delete(placed))
         assertFalse("it is gone", placed.exists())
     }
@@ -259,14 +262,14 @@ class FilesFeatureTest : FeatureTest() {
         assertFalse("and no longer beside it", local.exists())
         assertTrue(
             "and the project tracks it",
-            scene.awaitCommits(project, 1) { paths -> paths.contains("milk.txt") },
+            scene.awaitCommits(project, 2) { paths -> paths.contains("milk.txt") },
         )
 
         assertTrue("out of the repository", scene.viewModel.move(inside, repo.parentFile!!))
         assertTrue("back beside the worktree", File(local.parentFile, "milk.txt").isFile)
         assertTrue(
             "and the project recorded the removal",
-            scene.awaitCommits(project, 2) { paths -> !paths.contains("milk.txt") },
+            scene.awaitCommits(project, 3) { paths -> !paths.contains("milk.txt") },
         )
     }
 
@@ -283,15 +286,23 @@ class FilesFeatureTest : FeatureTest() {
         val office = scene.workspace!!.repoOf("work")
 
         assertTrue("into the worktree", scene.viewModel.move(file, shop))
+        // Waited for here, because a commit takes everything that is waiting: two
+        // moves in the same millisecond would be one version, and the first project
+        // would never have seen the file at all.
+        assertTrue(
+            "the first project tracks it",
+            scene.awaitCommits("shopping", 2) { paths -> paths.contains("milk.txt") },
+        )
+
         assertTrue("and across", scene.viewModel.move(File(shop, "milk.txt"), office))
 
         assertTrue(
             "the second project has it",
-            scene.awaitCommits("work", 1) { paths -> paths.contains("milk.txt") },
+            scene.awaitCommits("work", 2) { paths -> paths.contains("milk.txt") },
         )
         assertTrue(
             "the first does not",
-            scene.awaitCommits("shopping", 2) { paths -> !paths.contains("milk.txt") },
+            scene.awaitCommits("shopping", 3) { paths -> !paths.contains("milk.txt") },
         )
     }
 

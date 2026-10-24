@@ -99,23 +99,23 @@ class AccountsFeatureTest : FeatureTest() {
     @Test
     fun `switching accounts shows the other account's tree`() {
         scene.signedIn()
-        scene.folder("only-in-the-first")
-        val first = File(scene.workspace!!.accountDir, "only-in-the-first")
+        scene.folder("only_in_the_first")
+        val first = File(scene.workspace!!.accountDir, "only_in_the_first")
 
         scene.viewModel.signIn("second", "a-key", "Second", "second@example.com")
         assertTrue("the second account is active", scene.viewModel.activeLogin == "second")
-        assertFalse("the first account's file is not shown", scene.names().contains("only-in-the-first"))
+        assertFalse("the first account's file is not shown", scene.names().contains("only_in_the_first"))
         assertTrue("but it is still on the phone", first.isDirectory)
 
         scene.viewModel.switchTo("test-account")
-        assertTrue("switching back shows it again", scene.names().contains("only-in-the-first"))
+        assertTrue("switching back shows it again", scene.names().contains("only_in_the_first"))
     }
 
     @Test
     fun `removing an account keeping the copies leaves every file on the phone`() {
         scene.signedIn()
-        scene.folder("keep-me")
-        val kept = File(scene.workspace!!.accountDir, "keep-me")
+        scene.folder("keep_me")
+        val kept = File(scene.workspace!!.accountDir, "keep_me")
 
         scene.viewModel.removeAccount(scene.login, deleteCopies = false)
 
@@ -132,8 +132,8 @@ class AccountsFeatureTest : FeatureTest() {
     @Test
     fun `removing an account and its copies leaves nothing of it on the phone`() {
         scene.signedIn()
-        scene.folder("go-away")
-        val gone = File(scene.workspace!!.accountDir, "go-away")
+        scene.folder("go_away")
+        val gone = File(scene.workspace!!.accountDir, "go_away")
         // A save is still on its way to the worker when the account is removed.
         scene.viewModel.saveEditor("anything")
 
@@ -154,8 +154,8 @@ class AccountsFeatureTest : FeatureTest() {
         scene.signedIn()
         scene.viewModel.refresh()
         scene.viewModel.signIn("second", "a-key", "Second", "second@example.com")
-        scene.folder("second-folder")
-        val second = File(scene.viewModel.workspace!!.accountDir, "second-folder")
+        scene.folder("second_folder")
+        val second = File(scene.viewModel.workspace!!.accountDir, "second_folder")
 
         scene.viewModel.removeAccount("second", deleteCopies = false)
 

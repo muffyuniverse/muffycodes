@@ -239,7 +239,9 @@ class HistoryFeatureTest : FeatureTest() {
         assertEquals("three changes, three versions", 3, versions.size)
         assertEquals("the newest is what is on disk", "three", versions[0].second)
         assertEquals("and the first is still there", "one", versions[2].second)
-        assertEquals("no sync happened", 0, scene.remoteCommits("shopping"))
+        // One commit arrived with the project — its licence — and none of the three
+        // saves was a push.
+        assertEquals("no sync happened", 1, scene.remoteCommits("shopping"))
     }
 
     @Test
@@ -265,8 +267,10 @@ class HistoryFeatureTest : FeatureTest() {
         scene.viewModel.closeHistory()
 
         assertEquals("the text went back", "one", file.readText())
-        val after = scene.versionsOf(file)
-        assertEquals("and the restore is its own version", 3, after.size)
+        scene.await("the restore to become a version", 20_000) {
+            scene.versionsOf(file).size == 3
+        }
+        assertEquals("and the restore is its own version", 3, scene.versionsOf(file).size)
         // And the worktree is clean: the restore was committed to the project, not
         // left for the next sync to notice.
         scene.await("the restore to be committed", 20_000) {
@@ -305,7 +309,10 @@ class HistoryFeatureTest : FeatureTest() {
         val bytes = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0xFF.toByte(), 0x00)
         val picture = File(scene.viewModel.currentDir!!, "dot.png")
         picture.writeBytes(bytes)
-        scene.viewModel.refresh()
+        // Written behind the app's back, so it needs a change to carry it into the
+        // history — every commit takes everything that is waiting, which is what
+        // makes a file dropped in by another app show up at all.
+        scene.folder("marker")
         scene.await("the picture to be recorded", 20_000) {
             scene.appHistoryFiles().contains("pictures/dot.png")
         }

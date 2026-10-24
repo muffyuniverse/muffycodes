@@ -74,7 +74,8 @@ class VisibilityFeatureTest : FeatureTest() {
         scene.file("Milk.txt")
         scene.file("apple.txt")
 
-        assertEquals(listOf("projects", "zebra", "apple.txt", "Milk.txt"), scene.names())
+        // Called for in lowercase, because that is how the app writes a name it makes.
+        assertEquals(listOf("projects", "zebra", "apple.txt", "milk.txt"), scene.names())
     }
 
     @Test

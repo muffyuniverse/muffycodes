@@ -237,9 +237,26 @@ class Workspace(val accountDir: File) {
         }
     }
 
-    /** Renames [file] to [newName] in the same folder. */
-    fun rename(file: File, newName: String): Result<File> {
+    /**
+     * Renames [file] to [newName] in the same folder.
+     *
+     * [tidy] is false for a project folder, which is named after its repository: the
+     * name of a repository is GitHub's, and one that was pulled in already has it.
+     * Putting that through [cleanName] would rename `muffyuniverse/muffycodes` on the
+     * phone and leave the remote called something else.
+     */
+    fun rename(file: File, newName: String, tidy: Boolean = true): Result<File> {
         touchedProblem(file)?.let { return Result.failure(IllegalArgumentException(it)) }
+        if (!tidy) {
+            val asIs = newName.trim()
+            val target = File(file.parentFile, asIs)
+            if (target.canonicalFile == file.canonicalFile) return Result.success(file)
+            if (target.exists()) {
+                return Result.failure(IllegalArgumentException("There is already a \"$asIs\" here"))
+            }
+            return if (file.renameTo(target)) Result.success(target)
+            else Result.failure(IllegalStateException("Could not rename \"${file.name}\""))
+        }
         // A new name without an extension keeps the one the file has. The extension
         // is not decoration here: it is how §9 decides what may be edited and what
         // must be left alone, so dropping it by accident would turn a picture into

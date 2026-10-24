@@ -737,7 +737,8 @@ class AppViewModel @JvmOverloads constructor(
                 val renamed = api.renameRepo(token, login, project, clean)
                 if (renamed.error != null) note = renamed.error
             }
-            val moved = ws.rename(File(ws.projectsDir, project), clean)
+            // Not tidied: this folder stands for a repository, whose name is its own.
+            val moved = ws.rename(File(ws.projectsDir, project), clean, tidy = false)
             if (moved.isFailure) {
                 main.post {
                     busy = false
@@ -1099,6 +1100,11 @@ class AppViewModel @JvmOverloads constructor(
             for (full in held) {
                 val name = if (base.isEmpty()) full else full.removePrefix("$base/")
                 if (name.isEmpty() || name in onDisk) continue
+                // The app's own markers are in the history and are not a person's
+                // files: `.gitkeep` exists so that an empty folder has a version, and
+                // offering it back as a deleted file would be the app talking to
+                // itself.
+                if (name.split("/").any { ws.isHidden(it) }) continue
                 found.putIfAbsent(name, commit.id)
             }
         }
