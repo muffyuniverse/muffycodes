@@ -1,5 +1,10 @@
 package com.example.notes
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -17,7 +22,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -39,6 +43,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -708,11 +714,45 @@ fun SyncDialog(
  */
 @Composable
 fun ReportButton(onReport: () -> Unit) {
+    // The colour is read out here rather than inside the drawing: a `Canvas` block is
+    // not a composable context, and reading the theme in it is a compile error.
+    val ink = MaterialTheme.colorScheme.onSurfaceVariant
     IconButton(onClick = onReport) {
-        Icon(
-            Icons.Filled.BugReport,
-            contentDescription = "Report a problem",
-        )
+        // **Drawn, not imported.** `Icons.Filled.BugReport` lives in
+        // material-icons-extended — a dependency this app does not have and should not
+        // take for one glyph, since the whole set ships in the APK. Six legs and a body
+        // are the same drawing at every size, and they answer to the theme like any
+        // other icon.
+        Canvas(
+            modifier = Modifier
+                .size(22.dp)
+                // The description lives on the drawing, because that is what a screen
+                // reader announces for this button.
+                .semantics { contentDescription = "Report a problem" },
+        ) {
+            val w = size.width
+            val h = size.height
+            val stroke = w * 0.075f
+            // The body, and the head above it.
+            drawOval(
+                color = ink,
+                topLeft = Offset(w * 0.28f, h * 0.34f),
+                size = Size(w * 0.44f, h * 0.52f),
+                style = Stroke(width = stroke),
+            )
+            drawCircle(
+                color = ink,
+                radius = w * 0.13f,
+                center = Offset(w * 0.5f, h * 0.24f),
+                style = Stroke(width = stroke),
+            )
+            // Three legs a side, angled out from the body.
+            for (i in 0..2) {
+                val y = h * (0.42f + i * 0.16f)
+                drawLine(ink, Offset(w * 0.28f, y), Offset(w * 0.08f, y - h * 0.06f), stroke)
+                drawLine(ink, Offset(w * 0.72f, y), Offset(w * 0.92f, y - h * 0.06f), stroke)
+            }
+        }
     }
 }
 
