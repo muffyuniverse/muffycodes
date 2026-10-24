@@ -167,6 +167,16 @@ object Trace {
     private var answered = 0
     private var taps = 0
 
+    /**
+     * When the app last answered anything.
+     *
+     * A tap older than this cannot be what a new answer is about: something has already
+     * been said since the press, so the press was served. This is the difference the
+     * clock alone could not make — creating a folder produces a redraw *and* a sentence,
+     * and the sentence was landing on a tap from ten seconds earlier.
+     */
+    private var lastAnswerAt = 0L
+
     @Volatile
     private var sink: Sink? = null
 
@@ -278,6 +288,15 @@ object Trace {
      */
     const val FRESH_MS = 5_000L
 
+    /**
+     * How long the app's own words may take and still be the answer to a tap.
+     *
+     * Longer than a redraw, on purpose: a redraw arrives at once or is the screen's own
+     * business, but the words after a sign-in wait for a network round trip, and a tap
+     * that was answered slowly was answered.
+     */
+    const val ANSWER_MS = 60_000L
+
     /** The app could not do what was asked, in its own words. */
     fun failure(said: String, what: String = "failed") = answer(Kind.FAIL, slug(what), said)
 
@@ -326,13 +345,22 @@ object Trace {
         what: String,
         detail: String,
         at: Long = now(),
-        withinMs: Long = Long.MAX_VALUE,
+        withinMs: Long = ANSWER_MS,
     ) {
         try {
             val line: String
             synchronized(guard) {
-                val act = unanswered.values.lastOrNull()?.takeIf { at - it.at <= withinMs }
+                // **Two conditions, and both are needed.** Recent enough that it could be
+                // what this answers, and made *after* the last answer — because a press
+                // that has already been answered is not waiting for a second reply, and
+                // the app sometimes speaks twice for one press (a redraw and a sentence).
+                val act = unanswered.values.lastOrNull()
+                    ?.takeIf { at - it.at <= withinMs && it.at >= lastAnswerAt }
                 val id = act?.id ?: 0
+                // Only a line that answered a tap moves the boundary. An answer that
+                // claimed nothing is the app talking on its own account, and letting it
+                // push the boundary forward would orphan a tap that is still waiting.
+                if (act != null) lastAnswerAt = at
                 if (act != null) {
                     unanswered.remove(act.id)
                     answered++

@@ -319,6 +319,33 @@ class TraceTest {
     }
 
     @Test
+    fun `a second answer does not claim a tap made before the first`() {
+        // **The other half of the live bug.** Creating a folder produces a redraw and then
+        // a sentence. The redraw answered the press; the sentence went looking for the
+        // next waiting tap and found `upload-folder` from ten seconds earlier, because
+        // opening the system picker is a tap the app can never answer itself.
+        val picker = Trace.tap("upload-folder")
+        val create = Trace.tap("new-folder")
+
+        Trace.changed("at / · 2 rows · new_folder/")
+        Trace.said("Created new_folder/ (was \"New folder\")")
+
+        // `time id kind name detail`, so the id is the second field of every line.
+        val byKind = settle().groupBy { it.split(Regex("\\s+"))[2] }
+        fun idsOf(kind: String) = byKind[kind].orEmpty()
+            .map { it.split(Regex("\\s+"))[1].toInt() }
+
+        assertEquals("the redraw answered the press that caused it", listOf(create), idsOf("CHANGED"))
+        // The sentence is the app talking after the press was already served.
+        assertEquals("and the sentence claims no tap at all", listOf(0), idsOf("SAID"))
+        assertEquals(
+            "the picker is still waiting, which is the truth",
+            listOf(picker),
+            Trace.report().waiting.map { it.id },
+        )
+    }
+
+    @Test
     fun `a screen change at once is the answer to the tap`() {
         // The other half of the rule, so the fix cannot be "never pair anything" and still
         // pass: a press shows itself at once, and that is what pairing is for.
