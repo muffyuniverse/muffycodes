@@ -109,6 +109,34 @@ class BrowserChromeTest {
     }
 
     @Test
+    fun `saving a file leaves the project with something to send`() {
+        // Reported from the live log, twice: "changed a file, saved but sync is still grey
+        // and inactive and new change isnt reported". Every change is committed as it
+        // happens, so git reports a clean worktree the instant a save lands — and the row
+        // was built from that, so a save looked like nothing at all and Sync stayed grey.
+        // A save is exactly the thing a person syncs.
+        scene.signedIn()
+        scene.project("groceries")
+        val file = scene.worktreeFile("milk.txt", "two litres")
+        scene.viewModel.refreshChanges()
+        scene.await("the new file to be counted") { scene.viewModel.changesOf("groceries") > 0 }
+
+        scene.open(Workspace.PROJECTS, "groceries", Workspace.REPO)
+        scene.viewModel.openEditor(file)
+        scene.viewModel.saveEditor("three litres")
+        scene.await("the save to be committed", 20_000) { file.readText() == "three litres" }
+
+        // The worktree is now clean by git's lights — the commit happened — and the work is
+        // still only on this phone. Both are true at once, and the row has to say the
+        // second.
+        assertEquals(
+            "a saved file is still work GitHub does not have",
+            1,
+            scene.viewModel.changesOf("groceries"),
+        )
+    }
+
+    @Test
     fun `the sync row appears inside the repo and not one level above it`() {
         scene.signedIn()
         scene.project("groceries")

@@ -49,11 +49,11 @@ class DownloadsSink(context: Context) : Trace.Sink {
         if (lines.isEmpty()) return
         val text = lines.joinToString("") { it + "\n" }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val existing = uri ?: find()
-            if (existing != null) {
-                if (write(existing, text, first = false)) {
-                    uri = existing
-                    path = "Download/$FOLDER/$NAME"
+            val found = if (uri != null) uri else find()?.first
+            if (found != null) {
+                if (write(found, text, first = false)) {
+                    uri = found
+                    path = "Download/$FOLDER/${name(found)}"
                     return
                 }
                 // The entry went away (the person deleted the folder), or the row is one
@@ -64,7 +64,7 @@ class DownloadsSink(context: Context) : Trace.Sink {
             val made = createThenWrite(text)
             if (made != null) {
                 uri = made
-                path = "Download/$FOLDER/$NAME"
+                path = "Download/$FOLDER/${name(made)}"
                 return
             }
         }
@@ -73,7 +73,7 @@ class DownloadsSink(context: Context) : Trace.Sink {
 
     override fun read(): String? {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val target = uri ?: find()
+            val target = uri ?: find()?.first
             if (target != null) {
                 uri = target
                 return read(target)
@@ -90,9 +90,17 @@ class DownloadsSink(context: Context) : Trace.Sink {
 
     override fun where(): String? = path ?: privateFile()?.absolutePath
 
+    /**
+     * The file this session is writing to, found or made on first use.
+     *
+     * Exposed so a test can ask what the sink would choose without writing anything.
+     */
+    @RequiresApi(Build.VERSION_CODES.Q)
+    fun current(): Uri? = uri ?: find()?.first
+
     override fun clear() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val target = uri ?: find()
+            val target = uri ?: find()?.first
             if (target != null) {
                 try {
                     // A null stream is a clear that did not happen; the private copy
@@ -207,9 +215,22 @@ class DownloadsSink(context: Context) : Trace.Sink {
         return made
     }
 
-    /** The existing log, if this phone already has one from an earlier session. */
+    /**
+     * The log this phone already has, with the name it is really stored under.
+     *
+     * **The name is not what was asked for, and assuming it was cost a session's log.**
+     * A `MediaStore` row inserted as `trace.log` with a text MIME type comes back as
+     * `trace.log.txt`: the store appends an extension for what the type says the file is.
+     * Searching for the exact name therefore never found the file this app had made, so
+     * every launch inserted a fresh row — `trace.log.txt`, `trace.log (1).txt`,
+     * `trace.log (2).txt` — and the one-log promise, and the monitoring that depended on
+     * it, quietly became one file per launch.
+     *
+     * So the search is by prefix, and the newest row wins. That also adopts a file made by
+     * an older build, and a file a person renamed within the folder keeps being found.
+     */
     @RequiresApi(Build.VERSION_CODES.Q)
-    private fun find(): Uri? = try {
+    private fun find(): Pair<Uri, String>? = try {
         val projection = arrayOf(
             MediaStore.Downloads._ID,
             MediaStore.Downloads.DISPLAY_NAME,
@@ -218,18 +239,21 @@ class DownloadsSink(context: Context) : Trace.Sink {
         app.contentResolver.query(
             MediaStore.Downloads.EXTERNAL_CONTENT_URI,
             projection,
-            "${MediaStore.Downloads.DISPLAY_NAME} = ?",
-            arrayOf(NAME),
-            null,
+            "${MediaStore.Downloads.DISPLAY_NAME} LIKE ?",
+            arrayOf("$NAME%"),
+            // Newest first: `_ID DESC` is insertion order, which is what "the one that has
+            // been appended to lately" means here. Sorting in the query rather than in
+            // memory is what makes the newest row the one the cursor sees first.
+            "${MediaStore.Downloads._ID} DESC",
         )?.use { cursor ->
-            var found: Uri? = null
-            while (cursor.moveToNext()) {
+            var found: Pair<Uri, String>? = null
+            while (cursor.moveToNext() && found == null) {
                 val folder = cursor.getString(2).orEmpty().trimEnd('/')
                 if (folder.endsWith(FOLDER)) {
                     found = android.content.ContentUris.withAppendedId(
                         MediaStore.Downloads.EXTERNAL_CONTENT_URI,
                         cursor.getLong(0),
-                    )
+                    ) to cursor.getString(1).orEmpty()
                 }
             }
             found
@@ -238,7 +262,17 @@ class DownloadsSink(context: Context) : Trace.Sink {
         null
     }
 
-    /** Before Android 10, or when Downloads cannot be written at all. */
+    /** The display name behind [target], asked of the store rather than assumed. */
+    @RequiresApi(Build.VERSION_CODES.Q)
+    private fun name(target: Uri): String = try {
+        app.contentResolver.query(target, arrayOf(MediaStore.Downloads.DISPLAY_NAME), null, null, null)
+            ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0).orEmpty() else NAME }
+            ?.takeIf { it.isNotBlank() } ?: NAME
+    } catch (t: Throwable) {
+        NAME
+    }
+
+/** Before Android 10, or when Downloads cannot be written at all. */
     private fun intoPrivate(text: String) {
         val file = privateFile() ?: return
         try {

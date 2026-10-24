@@ -60,13 +60,27 @@ object GitService {
         val isDirectory: Boolean,
     )
 
-    /** How many changes are waiting to be committed. */
+    /**
+     * What a project has that GitHub does not.
+     *
+     * **Asked as three questions, not one.** [staged], [unstaged] and [untracked] are
+     * git's own view — files not yet committed — and they are zero the moment a save
+     * lands, because every change is committed as it happens. What a person means by
+     * "changed" is [ahead]: work committed here and never pushed. A row built from the
+     * first three alone read `changed 0` with the work unsent, so Sync stayed grey and
+     * the file went nowhere.
+     *
+     * [ahead] is one, not a count, and that is deliberate: the history is rebuilt when it
+     * is shortened, so no commit id survives a sync to count from. "There is something
+     * unsent" is the question the row actually asks.
+     */
     data class Changes(
         val staged: Int,
         val unstaged: Int,
         val untracked: Int,
+        val ahead: Int = 0,
     ) {
-        val total: Int get() = staged + unstaged + untracked
+        val total: Int get() = staged + unstaged + untracked + ahead
         val isClean: Boolean get() = total == 0
     }
 

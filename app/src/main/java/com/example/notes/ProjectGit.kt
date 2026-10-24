@@ -63,15 +63,23 @@ class ProjectGit(
     var lastError: String? = null
         private set
 
-    /** How many changes are waiting in the project, for the row's count. */
+    /**
+     * What the project has that GitHub does not: changes not yet committed, and commits
+     * not yet pushed.
+     *
+     * **Both, because both are "not sent".** Committing happens by itself, so a project
+     * that has been edited and saved is clean in git's sense and stale in every sense a
+     * person cares about. The row's number and the Sync button are about the second.
+     */
     fun changes(project: String): GitService.Changes {
         val repo = open(project) ?: return GitService.Changes(0, 0, 0)
+        val unsent = workspace.isUnsent(project)
         return repo.use {
             try {
-                GitService.status(it)
+                GitService.status(it).let { if (unsent) it.copy(ahead = 1) else it }
             } catch (e: Throwable) {
                 lastError = Secrets.describe(e)
-                GitService.Changes(0, 0, 0)
+                if (unsent) GitService.Changes(0, 0, 0, ahead = 1) else GitService.Changes(0, 0, 0)
             }
         }
     }
@@ -112,7 +120,17 @@ class ProjectGit(
         )
         return repo.use {
             val outcome = GitService.commitEverything(it, what, authorProvider())
-            if (outcome.written) prune(it)
+            if (outcome.written) {
+                prune(it)
+                // **A committed change is still unsent.** Every change is committed as it
+                // happens and Sync is then only the push, so a version in this phone's
+                // history is work GitHub has never seen. Nothing recorded that, and the row
+                // counted only uncommitted files — so saving a file left the project
+                // reading `changed 0`, with Sync greyed out and the work going nowhere.
+                // Reported from the live log: "changed a file, saved but sync is still grey
+                // and inactive and new change isnt reported".
+                workspace.markUnsent(project)
+            }
             outcome
         }
     }
@@ -167,7 +185,12 @@ class ProjectGit(
                 // this phone's copy and leave the repository as long as it was —
                 // the length would only appear to take effect on the next sync.
                 prune(it)
-                GitService.pushForce(it, tokenProvider())
+                val pushed = GitService.pushForce(it, tokenProvider())
+                // Only a push that landed clears the flag. A failed push leaves the row
+                // saying there is work to send, which is the truth, and is what makes the
+                // button something a person can press again.
+                if (pushed.success) workspace.markSent(project)
+                pushed
             } catch (e: Throwable) {
                 GitService.RemoteResult(Secrets.describe(e), false)
             }
@@ -190,7 +213,10 @@ class ProjectGit(
         val repo = open(project) ?: return GitService.RemoteResult(
             "This project has no repository yet", false
         )
-        return repo.use { GitService.resetToRemote(it, tokenProvider()) }
+        val result = repo.use { GitService.resetToRemote(it, tokenProvider()) }
+        // The files are now GitHub's, so nothing of this phone's is waiting to go there.
+        if (result.success) workspace.markSent(project)
+        return result
     }
 
     /** Clones a remote into the project's `repo` folder. */

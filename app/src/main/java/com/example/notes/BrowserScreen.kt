@@ -315,7 +315,10 @@ fun SlimRow(
                 modifier = Modifier.weight(1f),
             )
             Text(
-                text = if (changes > 0) "$changes changed" else "up to date",
+                // "to send", not "changed": a saved file is committed at once and is only
+                // waiting for the push, so calling it "changed" described git's state
+                // rather than the person's.
+                text = if (changes > 0) "$changes to send" else "up to date",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -374,8 +377,11 @@ private fun ProjectList(
                     ) {
                         Text(name, style = MaterialTheme.typography.bodyLarge)
                         Text(
+                            // The same words as the row inside the project: what
+                            // GitHub does not have yet, which is the only reason a
+                            // person opens this screen.
                             text = viewModel.changesOf(name).let {
-                                if (it > 0) "$it changed" else "up to date"
+                                if (it > 0) "$it to send" else "up to date"
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,

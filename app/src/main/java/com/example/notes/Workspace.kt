@@ -495,6 +495,41 @@ class Workspace(val accountDir: File) {
     }
 
     /**
+     * Whether a project has work GitHub has not been sent since the last push.
+     *
+     * **A flag, not a count of commits, and that is the prune's doing.** The history is
+     * shortened by *rebuilding* it — every kept commit is written again with a new id — so
+     * anything remembered as a commit id (a marker, a remote-tracking ref) is stale after
+     * the next sync, and a walk from it marks nothing: the whole history then reads as
+     * unsent and Sync says "50 changed" on a project that is up to date. A flag survives
+     * a rewrite because it does not name anything.
+     *
+     * The marker lives in `.muffy` beside the other flags and is named after the project.
+     */
+    fun isUnsent(project: String): Boolean = File(stateDir, "unsent/$project").isFile
+
+    /** Records that [project] has work not yet pushed. */
+    fun markUnsent(project: String) {
+        try {
+            val marker = File(stateDir, "unsent/$project")
+            marker.parentFile?.mkdirs()
+            marker.writeText("")
+        } catch (e: Exception) {
+            // A flag that could not be written is a row that says "up to date" too early;
+            // the sync still pushes, so nothing is lost but the warning.
+        }
+    }
+
+    /** Records that [project] is now exactly what GitHub holds. */
+    fun markSent(project: String) {
+        try {
+            File(stateDir, "unsent/$project").delete()
+        } catch (e: Exception) {
+            // Nothing to clear.
+        }
+    }
+
+    /**
      * A name list in `.muffy`, which is where every flag of the app lives.
      *
      * A file that cannot be read is an empty set, not a crash: flags are a
