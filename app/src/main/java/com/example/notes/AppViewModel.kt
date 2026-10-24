@@ -1105,8 +1105,17 @@ class AppViewModel @JvmOverloads constructor(
             main.post {
                 refresh()
                 refreshChanges()
+                // **The save answers itself.** A save changes the file and its history,
+                // and neither is on the screen: the name is the same afterwards, so the
+                // state line is either unchanged (and never written) or identical. The
+                // tap therefore waited forever — the live log shows `save file26.txt`
+                // with no answer at all, while the next back press spent it.
                 if (refused != null) {
-                    message = "Saved to the file, but not to its history: $refused"
+                    val said = "Saved to the file, but not to its history: $refused"
+                    message = said
+                    Trace.failure(said, "save")
+                } else {
+                    Trace.said("Saved $name")
                 }
             }
         }
@@ -1561,7 +1570,12 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     fun closeHistory() {
-        Trace.tap("close history")
+        // **One recorder for one press.** The screen recorded this too, so every close
+        // appeared twice in the same millisecond — a variant with the file's name and one
+        // without — and, since neither was answered, two unanswered taps for one press.
+        // Recorded here instead, because every way of closing goes through this method:
+        // the back arrow, the back gesture, and choosing a version.
+        Trace.tap("close history", historyPath?.lastOrNull().orEmpty())
         historyPath = null
         historyIsFolder = false
     }

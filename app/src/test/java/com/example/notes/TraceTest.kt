@@ -346,6 +346,25 @@ class TraceTest {
     }
 
     @Test
+    fun `a tap that waited on the system can still be answered by its id`() {
+        // Upload hands the person to the system's file picker, which the app cannot see.
+        // A minute later the picker returns, and the reply belongs to *that* press —
+        // longer than the freshness window, and older than whatever else is waiting.
+        val picker = Trace.tap("upload files")
+        Trace.tap("new-folder")
+
+        Trace.answered(picker, "Chose 2 file(s)")
+
+        assertEquals(
+            "the press that opened the picker is the one answered",
+            listOf("new-folder"),
+            Trace.report().waiting.map { it.what },
+        )
+        val line = settle().last { it.contains("SAID") }
+        assertEquals("and it quotes the picker's own id", picker.toString().padStart(4), line.split(Regex("\\s+"))[1])
+    }
+
+    @Test
     fun `a screen change at once is the answer to the tap`() {
         // The other half of the rule, so the fix cannot be "never pair anything" and still
         // pass: a press shows itself at once, and that is what pairing is for.

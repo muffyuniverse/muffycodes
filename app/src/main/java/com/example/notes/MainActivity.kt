@@ -27,6 +27,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -148,12 +149,29 @@ private fun AppRoot(viewModel: AppViewModel) {
 
     // The picker is the system's, so the app never asks for storage permission: it
     // sees only what a person just pointed at, and only reads it.
+    // **The picker's answer is the press's answer.** Upload hands the person to a
+    // system screen, and the app cannot see anything until they come back — with files
+    // or with nothing. Recording only the import left `upload files` unanswered in every
+    // trace where somebody changed their mind, and the tap that opened the picker was the
+    // one press the log could never pair. The tap's id is kept here so the reply is
+    // addressed to it rather than to whatever happens to be waiting when the picker closes.
+    var pickingFiles by remember { mutableIntStateOf(0) }
+    var pickingFolder by remember { mutableIntStateOf(0) }
     val pickFiles = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments(),
-    ) { uris -> if (uris.isNotEmpty()) viewModel.importFiles(uris) }
+    ) { uris ->
+        Trace.answered(
+            pickingFiles,
+            if (uris.isEmpty()) "Nothing was chosen" else "Chose ${uris.size} file(s)",
+        )
+        if (uris.isNotEmpty()) viewModel.importFiles(uris)
+    }
     val pickFolder = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree(),
-    ) { uri -> if (uri != null) viewModel.importFolder(uri) }
+    ) { uri ->
+        Trace.answered(pickingFolder, if (uri == null) "Nothing was chosen" else "Chose a folder")
+        if (uri != null) viewModel.importFolder(uri)
+    }
 
     BackHandler(enabled = showTrace) { showTrace = false }
     BackHandler(enabled = showSettings) { showSettings = false }
@@ -290,7 +308,7 @@ private fun AppRoot(viewModel: AppViewModel) {
         historyPath != null -> HistoryScreen(
             viewModel = viewModel,
             title = historyPath.last(),
-            onBack = { tap("close history", historyPath.last()); viewModel.closeHistory() },
+            onBack = { viewModel.closeHistory() },
             // Select puts the version back and returns to the file: one act, and
             // the person is looking at the result of it.
             onSelect = { viewModel.closeHistory() },
@@ -326,8 +344,8 @@ private fun AppRoot(viewModel: AppViewModel) {
                 onRowDelete = { project -> tap("delete project", project); pending = Pending.DeleteProject(project) },
                 onCreateFile = { tap("new file"); viewModel.currentDir?.let { pending = Pending.NewFile(it) } },
                 onCreateFolder = { tap("new folder"); viewModel.currentDir?.let { pending = Pending.NewFolder(it) } },
-                onUploadFiles = { tap("upload files"); pickFiles.launch(arrayOf("*/*")) },
-                onUploadFolder = { tap("upload folder"); pickFolder.launch(null) },
+                onUploadFiles = { pickingFiles = tap("upload files"); pickFiles.launch(arrayOf("*/*")) },
+                onUploadFolder = { pickingFolder = tap("upload folder"); pickFolder.launch(null) },
                 onRestoreDeleted = {
                     tap("restore deleted")
                     viewModel.currentDir?.let { pending = Pending.RestoreDeleted(it) }
@@ -723,9 +741,7 @@ private fun NewProjectUI(viewModel: AppViewModel, dismiss: () -> Unit) {
  * which screen did not answer. A trace that said `saveEditor` would be a stack trace
  * with extra steps.
  */
-private fun tap(what: String, detail: String = "") {
-    Trace.tap(what, detail)
-}
+private fun tap(what: String, detail: String = ""): Int = Trace.tap(what, detail)
 
 /**
  * Hands the trace to another app.

@@ -92,6 +92,9 @@ class EditorScreenTest {
 
         editorFor(file)
         compose.onNodeWithText("two litres").performTextReplacement("three litres")
+        // Counted as a difference rather than as "the line is there", because the ring is
+        // shared by every test in this JVM and another one saves a milk.txt too.
+        val saidBefore = savedLines()
         compose.onNodeWithText("Save").performClick()
         // Saving writes on the app's worker, so the file answers a moment later.
         compose.waitUntil(10_000) { file.readText() == "three litres" }
@@ -103,7 +106,18 @@ class EditorScreenTest {
 
         assertEquals("and the unsaved change went with it", "three litres", file.readText())
         assertTrue("with a note saying so", scene.viewModel.message == "Left without saving")
+        // **A save says it happened.** It changes the file and its history, and neither
+        // is on the screen — the file's name is the same afterwards — so nothing the app
+        // draws can answer it, and the log showed `save milk.txt` waiting for ever while
+        // the next back press spent it.
+        assertTrue(
+            "and the log says the save was answered",
+            savedLines() > saidBefore,
+        )
     }
+
+    /** How many times the app has said it saved this file, in the log's ring. */
+    private fun savedLines(): Int = Trace.report().lines.count { it.contains("Saved milk.txt") }
 
     @Test
     fun `renaming the file does not throw away what was typed`() {

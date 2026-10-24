@@ -261,6 +261,17 @@ object Trace {
     fun said(text: String) = answer(Kind.SAID, "said", text)
 
     /**
+     * The app's own words about **one tap in particular**, however long it has waited.
+     *
+     * For work the app hands to somebody else: the system file picker shows its own
+     * screen, and the person may spend a minute in it. The freshness window exists to
+     * stop a redraw claiming a tap it did not cause, and it would also drop the answer to
+     * a press the app could not have answered sooner. This is that press's reply, by id,
+     * so "upload files" is paired even when the choosing took a while.
+     */
+    fun answered(id: Int, text: String) = answer(Kind.SAID, "said", text, to = id)
+
+    /**
      * The app's visible state changed — which answers a tap **only if the tap is what
      * caused it.**
      *
@@ -346,6 +357,7 @@ object Trace {
         detail: String,
         at: Long = now(),
         withinMs: Long = ANSWER_MS,
+        to: Int? = null,
     ) {
         try {
             val line: String
@@ -354,8 +366,12 @@ object Trace {
                 // what this answers, and made *after* the last answer — because a press
                 // that has already been answered is not waiting for a second reply, and
                 // the app sometimes speaks twice for one press (a redraw and a sentence).
-                val act = unanswered.values.lastOrNull()
-                    ?.takeIf { at - it.at <= withinMs && it.at >= lastAnswerAt }
+                val act = if (to != null) {
+                    unanswered[to]
+                } else {
+                    unanswered.values.lastOrNull()
+                        ?.takeIf { at - it.at <= withinMs && it.at >= lastAnswerAt }
+                }
                 val id = act?.id ?: 0
                 // Only a line that answered a tap moves the boundary. An answer that
                 // claimed nothing is the app talking on its own account, and letting it
