@@ -112,15 +112,15 @@ class ScenariosTest {
     fun theSettingsScreenWithItsThemesAndHistoryLengths() {
         scenario(
             compose, "02-settings", "Settings, before anything has been kept.",
-            "the themes and the two history lengths, all at their defaults.",
+            "the themes and how much change history is kept, at their defaults.",
             screen = { settingsScreen() },
         ) {
             before()
             then("Nothing is done here: this is the settings screen as it is, with nothing changed.") {}
             after()
             result(
-                "Themes are a row of swatches with one light/dark switch, and both history " +
-                    "lengths are empty, which means everything is kept.",
+                "Themes are a row of swatches with one light/dark switch, and the change " +
+                    "history field is empty, which means every change is kept.",
             )
         }
     }
@@ -272,8 +272,9 @@ class ScenariosTest {
             }
             after()
             result(
-                "Every save is a version that can be put back, including the first. " +
-                    "Restoring one adds it back rather than deleting the newer ones.",
+                "Each save is one version, and < and > step between them — from the newest, " +
+                    "which is what is on disk, back to the first. The preview is read-only: " +
+                    "the file changes only when Restore is pressed.",
             )
         }
     }
