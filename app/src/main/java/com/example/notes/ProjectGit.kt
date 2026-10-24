@@ -73,13 +73,13 @@ class ProjectGit(
      */
     fun changes(project: String): GitService.Changes {
         val repo = open(project) ?: return GitService.Changes(0, 0, 0)
-        val unsent = workspace.isUnsent(project)
+        val unsent = workspace.unsentCount(project)
         return repo.use {
             try {
-                GitService.status(it).let { if (unsent) it.copy(ahead = 1) else it }
+                GitService.status(it).let { it.copy(ahead = unsent) }
             } catch (e: Throwable) {
                 lastError = Secrets.describe(e)
-                if (unsent) GitService.Changes(0, 0, 0, ahead = 1) else GitService.Changes(0, 0, 0)
+                GitService.Changes(0, 0, 0, ahead = unsent)
             }
         }
     }

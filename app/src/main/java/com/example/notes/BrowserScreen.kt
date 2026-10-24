@@ -355,14 +355,18 @@ fun SlimRow(
             if (busy) {
                 CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
             } else if (changes > 0) {
-                // **A button that would do nothing says so.** Sync with nothing
-                // changed is a request with no answer, and a person pressing it
-                // cannot tell "already up to date" from "it did not work". The count
-                // is on the button because it is the reason the button is there.
+                // **A button that would do nothing says so.** Sync with nothing changed is a
+                // request with no answer, and a person pressing it cannot tell "already up to
+                // date" from "it did not work".
+                //
+                // **And no number on it.** The count was on the button for a while, and it
+                // read as a second, competing number beside the one in the row. Reported from
+                // the live log: "and why sync button itself started to show a number? remove
+                // it". The row already says how many; the button says what pressing it does.
                 Button(
                     onClick = onSync,
                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
-                ) { Text("Sync $changes") }
+                ) { Text("Sync") }
             } else {
                 TextButton(onClick = onSync, enabled = false) { Text("Sync") }
             }

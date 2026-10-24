@@ -506,17 +506,34 @@ class Workspace(val accountDir: File) {
      *
      * The marker lives in `.muffy` beside the other flags and is named after the project.
      */
-    fun isUnsent(project: String): Boolean = File(stateDir, "unsent/$project").isFile
+    /**
+     * How many changes this project has that GitHub does not.
+     *
+     * **A count, not a boolean, and not a commit walk.** Both alternatives were tried and
+     * both are wrong here: the row was a boolean at first, so five changes read "1 to send";
+     * and a walk would have to start from something that names a commit, which the history
+     * prune destroys by rebuilding every kept commit under a new id. A counter names
+     * nothing, so it survives a rewrite.
+     *
+     * It is incremented where commits are made and cleared where a push lands, which are
+     * the only two events that can change the answer.
+     */
+    fun unsentCount(project: String): Int = try {
+        val file = File(stateDir, "unsent/$project")
+        if (!file.isFile) 0 else file.readText().trim().toIntOrNull() ?: 0
+    } catch (e: Exception) {
+        0
+    }
 
-    /** Records that [project] has work not yet pushed. */
-    fun markUnsent(project: String) {
+    /** Records that [project] has [by] more changes GitHub has not been sent. */
+    fun markUnsent(project: String, by: Int = 1) {
         try {
-            val marker = File(stateDir, "unsent/$project")
-            marker.parentFile?.mkdirs()
-            marker.writeText("")
+            val file = File(stateDir, "unsent/$project")
+            file.parentFile?.mkdirs()
+            file.writeText((unsentCount(project) + by).toString())
         } catch (e: Exception) {
-            // A flag that could not be written is a row that says "up to date" too early;
-            // the sync still pushes, so nothing is lost but the warning.
+            // A count that could not be written leaves the row saying "up to date" too
+            // early; the sync still pushes, so nothing is lost but the warning.
         }
     }
 

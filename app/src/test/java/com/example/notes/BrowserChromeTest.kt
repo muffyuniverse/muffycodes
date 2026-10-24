@@ -193,7 +193,7 @@ class BrowserChromeTest {
     }
 
     @Test
-    fun `sync is a counted, pressable button when something has changed`() {
+    fun `sync is a pressable button when something has changed, and it carries no number`() {
         scene.signedIn()
         scene.project("groceries")
         scene.open(Workspace.PROJECTS, "groceries", Workspace.REPO)
@@ -204,10 +204,42 @@ class BrowserChromeTest {
         }
         browser()
 
-        // The count is on the button, because it is the reason the button is there.
-        awaitText("Sync 1")
-        compose.onNodeWithText("Sync 1").assertIsEnabled()
-        compose.onNodeWithText("Sync 1").performClick()
+        // The row says how many; the button says what pressing it does. It carried the
+        // count for a while and read as a second, competing number — reported from the live
+        // log as "why sync button itself started to show a number? remove it".
+        awaitText("1 to send")
+        compose.onNodeWithText("Sync").assertIsEnabled()
+        compose.onNodeWithText("Sync").performClick()
+    }
+
+    @Test
+    fun `the count is every change, not just "something"`() {
+        // Reported from the live log: "sync always shows 1 to send even when where are many
+        // changes". The first fix recorded a flag, so any number of changes read as one.
+        scene.signedIn()
+        scene.project("groceries")
+        scene.open(Workspace.PROJECTS, "groceries", Workspace.REPO)
+        val ws = scene.workspace!!
+        val worktree = ws.repoOf("groceries")
+        // Three saves, through the app's own path — a save is the change, and it is what
+        // records one. Writing the files behind its back would leave the count at zero and
+        // the test would be measuring the harness.
+        listOf("milk.txt", "bread.txt", "eggs.txt").forEachIndexed { i, name ->
+            val file = File(worktree, name)
+            ws.write(file, "first")
+            scene.viewModel.openEditor(file)
+            scene.viewModel.saveEditor("second")
+            scene.await("save ${i + 1} to be recorded", 20_000) {
+                ws.unsentCount("groceries") == i + 1
+            }
+        }
+        scene.viewModel.closeEditor()
+        scene.viewModel.refreshChanges()
+        scene.await("the row to count all three", 20_000) {
+            scene.viewModel.changesOf("groceries") == 3
+        }
+
+        assertEquals("three changes, three to send", 3, scene.viewModel.changesOf("groceries"))
     }
 
     @Test

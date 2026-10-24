@@ -70,9 +70,10 @@ object GitService {
      * first three alone read `changed 0` with the work unsent, so Sync stayed grey and
      * the file went nowhere.
      *
-     * [ahead] is one, not a count, and that is deliberate: the history is rebuilt when it
-     * is shortened, so no commit id survives a sync to count from. "There is something
-     * unsent" is the question the row actually asks.
+     * [ahead] is a count, and it is kept as one rather than worked out from a commit id:
+     * the history is *rebuilt* when it is shortened, so every id changes and anything that
+     * remembered one would read the whole history as unsent after the next sync. A number
+     * that names nothing survives the rewrite.
      */
     data class Changes(
         val staged: Int,
