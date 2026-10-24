@@ -184,13 +184,25 @@ private fun AppRoot(viewModel: AppViewModel) {
 
     // **The trace answers taps that never reach the view model.** Cancel, opening a
     // menu, choosing a row: those change what is on the screen without changing the
-    // folder, so `refresh()` cannot see them. Watching the two pieces of screen state
-    // that this composable owns is what keeps "every element leaves a trace" from
-    // being a claim with a hole in it where the local controls are.
-    LaunchedEffect(pending, showSettings, showTrace) {
+    // folder, so `refresh()` cannot see them. Watching the pieces of screen state that
+    // this composable owns is what keeps "every element leaves a trace" from being a
+    // claim with a hole in it where the local controls are.
+    //
+    // **Which screen, not just which dialog.** The editor and the history were left out
+    // of this key, and the live log showed the cost: `open-file` reached the editor with
+    // nothing recorded, so the tap waited unanswered until a later screen change claimed
+    // it — the file being opened was the one thing a reader most wanted a line about.
+    // They are named here rather than read from `viewModel` because the editor is this
+    // composable's screen the moment `editing` is set, whatever `pending` says.
+    LaunchedEffect(pending, showSettings, showTrace, editing, historyPath) {
         Trace.changed(
-            "screen " + (if (showTrace) "trace" else if (showSettings) "settings" else "browser") +
-                " dialog " + pending.javaClass.simpleName,
+            "screen " + when {
+                showTrace -> "trace"
+                showSettings -> "settings"
+                historyPath != null -> "history"
+                editing != null -> "editor"
+                else -> "browser"
+            } + " dialog " + pending.javaClass.simpleName,
         )
     }
     BackHandler(enabled = !showSettings && historyPath != null) {
