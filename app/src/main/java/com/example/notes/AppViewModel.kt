@@ -659,7 +659,12 @@ class AppViewModel @JvmOverloads constructor(
             "Deleted ${gone.size} items"
         }
         record(what)
-        gone.mapNotNull { ws.projectOf(it)?.takeIf { ws.inWorktree(it) } }
+        gone.mapNotNull { file ->
+            val project = ws.projectOf(file) ?: return@mapNotNull null
+            // Only a worktree has a repository: a local file beside one is versioned
+            // by the account's history, which `record` has already dealt with.
+            if (ws.inWorktree(file)) project else null
+        }
             .distinct()
             .forEach { commitProject(it, what) }
         historyGeneration++
