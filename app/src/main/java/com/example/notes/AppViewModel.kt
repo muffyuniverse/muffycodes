@@ -324,7 +324,7 @@ class AppViewModel @JvmOverloads constructor(
     fun importFiles(uris: List<android.net.Uri>): Boolean {
         val ws = workspace ?: return false
         val dir = currentDir ?: return false
-        val result = Imports.filesInto(application, uris, dir)
+        val result = Imports.filesInto(getApplication(), uris, dir)
         val ok = afterChange(result, "Imported into ${dir.name}/", dir)
         if (ok) {
             val n = result.getOrNull() ?: 0
@@ -337,7 +337,7 @@ class AppViewModel @JvmOverloads constructor(
     fun importFolder(tree: android.net.Uri): Boolean {
         val ws = workspace ?: return false
         val dir = currentDir ?: return false
-        val result = Imports.folderInto(application, tree, dir)
+        val result = Imports.folderInto(getApplication(), tree, dir)
         val ok = afterChange(result, "Imported a folder into ${dir.name}/", dir)
         if (ok) {
             val n = result.getOrNull() ?: 0

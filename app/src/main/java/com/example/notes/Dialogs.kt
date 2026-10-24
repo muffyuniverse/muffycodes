@@ -419,7 +419,7 @@ fun SignInDialog(
                         "belongs to: its name and its email, taken from GitHub.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                ),
+                )
                 Text(
                     "The key needs the repo and delete_repo scopes.",
                     style = MaterialTheme.typography.bodySmall,

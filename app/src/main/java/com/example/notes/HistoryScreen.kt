@@ -182,8 +182,7 @@ fun HistoryScreen(
             HorizontalDivider()
             Row(
                 modifier = Modifier.fillMaxWidth().padding(12.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
+                horizontalArrangement = Arrangement.Center,
             ) {
                 if (index == 0) {
                     Text(
