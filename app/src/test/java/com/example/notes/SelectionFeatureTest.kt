@@ -71,6 +71,12 @@ class SelectionFeatureTest : FeatureTest() {
         chooseAll("milk.txt", "bread.txt")
 
         assertTrue("moved into the worktree", scene.viewModel.moveSelected(worktree))
+        // The commit happens on the worker, so the repository has not answered yet:
+        // what is asked for is the project's own answer, not the app's opinion of
+        // what it just did.
+        scene.awaitCommits("groceries", 1) { paths ->
+            paths.any { it.endsWith("milk.txt") } && paths.any { it.endsWith("bread.txt") }
+        }
 
         val project = try {
             org.eclipse.jgit.api.Git.open(scene.workspace!!.repoOf("groceries"))
@@ -81,7 +87,7 @@ class SelectionFeatureTest : FeatureTest() {
         project!!.use { git ->
             val tracked = git.status().call()
             assertTrue(
-                "both files are tracked by the project",
+                "both files are tracked by the project: $tracked",
                 tracked.untracked.none { it.endsWith("milk.txt") } &&
                     tracked.untracked.none { it.endsWith("bread.txt") } &&
                     tracked.missing.none { it.endsWith("milk.txt") },
@@ -89,8 +95,7 @@ class SelectionFeatureTest : FeatureTest() {
             assertTrue(
                 "and committed, not merely staged",
                 git.log().call().any { commit ->
-                    commit.fullMessage.contains("Moved 2 items") ||
-                        commit.fullMessage.contains("Moved")
+                    commit.fullMessage.contains("Moved 2 items into")
                 },
             )
         }
