@@ -63,13 +63,25 @@ class AccountStore(private val filesDir: File) {
     private fun read(dir: File): Account = try {
         val json = JSONObject(File(stateDir(dir.name), DETAILS).readText())
         Account(
-            login = json.optString("login").ifBlank { dir.name },
-            commitName = json.optString("commitName"),
-            commitEmail = json.optString("commitEmail"),
+            // **`optString` is not a substitute for a null check.** Android's `org.json`
+            // answers the four-character string "null" for a JSON null, because it
+            // stringifies the value instead of treating it as absent. That put the word
+            // "null" on the Settings screen where a person's email belongs — and, worse,
+            // it went into commits as the author's address. [text] asks for a String and
+            // nothing else.
+            login = text(json, "login").ifBlank { dir.name },
+            commitName = text(json, "commitName"),
+            commitEmail = text(json, "commitEmail"),
             dev = json.optBoolean("dev"),
         )
     } catch (e: Exception) {
         Account(login = dir.name, commitName = "", commitEmail = "")
+    }
+
+    /** A field that is only ever a string, or empty when it is missing or null. */
+    private fun text(json: JSONObject, key: String): String {
+        val value = json.opt(key)
+        return if (value is String && value != "null") value else ""
     }
 
     /** Writes an account into its folder, making the folder if needed. */

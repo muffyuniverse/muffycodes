@@ -217,20 +217,25 @@ private fun AppRoot(viewModel: AppViewModel) {
     // **Every row's control names itself in the trace**, with the row's own name, so a
     // report reads like the screen it came from: "history milk.txt", "lock milk.txt".
     val actions = BrowserActions(
+        // **A gesture is recorded once, by the thing that does the work.** Every one of
+        // these also calls `Trace.tap` inside the view model, so logging here as well
+        // gave one press two ids a millisecond apart — and a log where every gesture
+        // half-answers itself cannot answer "which taps were never answered". This is
+        // why the screen's copy is gone rather than the view model's.
         onOpen = { entry ->
-            tap(if (entry.isFolder) "open folder" else "open file", entry.name)
             when (entry.kind) {
                 EntryKind.FOLDER -> viewModel.openChild(entry.name)
                 else -> viewModel.openEditor(entry.file)
             }
         },
-        onRename = { entry -> tap("rename", entry.name); pending = Pending.RenameEntry(entry) },
-        onMove = { entry -> tap("move", entry.name); pending = Pending.MoveEntry(entry) },
-        onDelete = { entry -> tap("delete", entry.name); pending = Pending.DeleteEntry(entry) },
-        onTogglePin = { entry -> tap("pin", entry.name); viewModel.togglePinned(entry.file) },
-        onToggleLock = { entry -> tap("lock", entry.name); viewModel.toggleLocked(entry.file) },
-        onHistory = { entry -> tap("history", entry.name); viewModel.openHistory(entry.file) },
-        onSelect = { entry -> tap("select", entry.name); viewModel.toggleSelected(entry.file) },
+        onRename = { entry -> pending = Pending.RenameEntry(entry) },
+        onMove = { entry -> pending = Pending.MoveEntry(entry) },
+        onDelete = { entry -> pending = Pending.DeleteEntry(entry) },
+        onTogglePin = { entry -> viewModel.togglePinned(entry.file) },
+        onToggleLock = { entry -> viewModel.toggleLocked(entry.file) },
+        onHistory = { entry -> viewModel.openHistory(entry.file) },
+        onSelect = { entry -> viewModel.toggleSelected(entry.file) },
+    )
     )
 
     when {
@@ -275,7 +280,9 @@ private fun AppRoot(viewModel: AppViewModel) {
         editing != null -> EditorScreen(
             viewModel = viewModel,
             file = editing,
-            onBack = { tap("close editor", editing.name); viewModel.closeEditor() },
+            // `closeEditor` records the tap itself; recording it here as well gave
+            // one press two ids.
+            onBack = { viewModel.closeEditor() },
             // No delete here: deleting is a thing done to a row in the folder, where
             // the row and its neighbours are visible and a mistake is one undo away.
             // A three-dot menu inside the editor put the most destructive command in
@@ -337,9 +344,10 @@ private fun AppRoot(viewModel: AppViewModel) {
                 // context, because a log is ordered — nothing has to be captured,
                 // frozen, slugged, filed or sent for the report to exist and be found.
                 Trace.checkpoint(note)
-                // Read out once, so the sentence carries no nested quote.
-                val where = Trace.where ?: "the app's own folder"
-                viewModel.message = "Written down. The log is at $where"
+                // **And nothing is said about it.** The dialog closing is the
+                // confirmation, and the log is written as it happens — a toast
+                // saying so asks a person to trust a message instead of the file.
+                // It also repeated a path nothing on that screen can open.
             },
         )
     }
@@ -561,7 +569,7 @@ private fun Dialogs(
             // including why nothing did — and the message goes to the snackbar; a
             // tap that closes a window and changes nothing is the worst of both.
             onPick = { gone ->
-                Trace.tap("restore deleted", "${pending.folder.name}/$gone.name")
+                Trace.tap("restore deleted", "${pending.folder.name}/${gone.name}")
                 dismiss()
                 viewModel.restoreDeleted(pending.folder, gone)
             },

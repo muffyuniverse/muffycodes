@@ -8,6 +8,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -27,6 +28,7 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -173,6 +175,12 @@ fun BrowserScreen(
                 FloatingActionButton(onClick = onAddProject) {
                     Icon(Icons.Filled.Add, contentDescription = "New project or pull one in")
                 }
+            } else if (viewModel.path.isEmpty()) {
+                // **The account root is not a folder to put things in.** It holds
+                // `projects/` and the app's own state, both of which it made; a file
+                // made here would sit beside the projects rather than in one, and this
+                // level is meant to be a fixed, app-owned list.
+                Spacer(Modifier.size(0.dp))
             } else {
                 // A folder gets the two things a folder gets (§3).
                 Column(horizontalAlignment = Alignment.End) {
@@ -311,8 +319,17 @@ fun SlimRow(
             Spacer(Modifier.width(8.dp))
             if (busy) {
                 CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+            } else if (changes > 0) {
+                // **A button that would do nothing says so.** Sync with nothing
+                // changed is a request with no answer, and a person pressing it
+                // cannot tell "already up to date" from "it did not work". The count
+                // is on the button because it is the reason the button is there.
+                Button(
+                    onClick = onSync,
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                ) { Text("Sync $changes") }
             } else {
-                TextButton(onClick = onSync) { Text("Sync") }
+                TextButton(onClick = onSync, enabled = false) { Text("Sync") }
             }
         }
     }
@@ -536,6 +553,11 @@ private fun EntryRow(
                 Icon(Icons.Filled.MoreVert, contentDescription = "More")
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                // **Two things, because they are the two that need a menu.** Lock has its
+                // own button on the row and History has one in the editor, so listing them
+                // here made the menu a set of shortcuts to what is already on screen. Pin
+                // is here because nothing else carries it; Move because it asks a question
+                // a tap cannot.
                 DropdownMenuItem(
                     text = { Text(if (pinned) "Unpin" else "Pin") },
                     onClick = {
@@ -543,22 +565,18 @@ private fun EntryRow(
                         actions.onTogglePin(entry)
                     },
                 )
-                if (entry.kind == EntryKind.TEXT) {
+                // **Not offered on a locked file.** Rename would be refused, so the item
+                // could only disappoint — the same rule Delete already followed. The model
+                // refuses it either way; hiding it is not the refusal.
+                if (!locked) {
                     DropdownMenuItem(
-                        text = { Text(if (locked) "Unlock" else "Lock") },
+                        text = { Text("Rename…") },
                         onClick = {
                             menu = false
-                            actions.onToggleLock(entry)
+                            actions.onRename(entry)
                         },
                     )
                 }
-                DropdownMenuItem(
-                    text = { Text("Rename…") },
-                    onClick = {
-                        menu = false
-                        actions.onRename(entry)
-                    },
-                )
                 DropdownMenuItem(
                     text = { Text("Move…") },
                     onClick = {
@@ -566,17 +584,6 @@ private fun EntryRow(
                         actions.onMove(entry)
                     },
                 )
-                DropdownMenuItem(
-                    text = { Text("History") },
-                    onClick = {
-                        menu = false
-                        actions.onHistory(entry)
-                    },
-                )
-                // A locked file is read-only in every direction, so the menu does
-                // not offer the one act that cannot be undone. The model refuses it
-                // as well: a screen that hides a command is not the same as an app
-                // that refuses it.
                 if (!locked) {
                     DropdownMenuItem(
                         text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
@@ -656,6 +663,10 @@ private fun EmptyState(title: String, text: String) {
  */
 @Composable
 fun ProjectSlimRow(viewModel: AppViewModel, onSync: (String) -> Unit) {
+    // **Only inside the repo.** The row carries Sync, and Sync sends what is in
+    // the worktree — offering it one level above, where nothing of the project is
+    // on screen, raises a question the screen cannot answer.
+    if (!viewModel.inWorktree) return
     val project = viewModel.currentProject ?: return
     SlimRow(
         account = viewModel.account?.login ?: "",

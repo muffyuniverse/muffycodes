@@ -20,6 +20,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
@@ -41,8 +43,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.input.ImeAction
 
 /**
  * Settings: the account, the appearance, and how much history is kept — and
@@ -320,10 +325,19 @@ private fun Swatch(theme: AppTheme, selected: Boolean, onClick: () -> Unit) {
     }
 }
 
-/** A number of versions to keep; an empty field means no limit. */
+/**
+ * A number of versions to keep; an empty field means no limit.
+ *
+ * **Enter means done.** The number is applied as it is typed — there is no Save — so the
+ * only thing pressing Enter can still do is put the keyboard away. Leaving the cursor
+ * blinking in a field the person has finished with says the opposite: that something is
+ * still waiting for them.
+ */
 @Composable
 private fun LengthField(label: String, value: Int, onValueChange: (Int) -> Unit) {
     var text by remember(value) { mutableStateOf(SettingsStore.showLength(value)) }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focus = LocalFocusManager.current
     OutlinedTextField(
         value = text,
         onValueChange = { typed ->
@@ -335,6 +349,13 @@ private fun LengthField(label: String, value: Int, onValueChange: (Int) -> Unit)
         label = { Text(label) },
         placeholder = { Text("all of it") },
         singleLine = true,
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(
+            onDone = {
+                focus.clearFocus()
+                keyboard?.hide()
+            },
+        ),
         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
     )
 }

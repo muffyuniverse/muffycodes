@@ -70,6 +70,28 @@ class AccountStoreTest {
     }
 
     @Test
+    fun aWrittenNullIsNotTheWordNull() {
+        // `org.json`'s `optString` stringifies a JSON null into the four-letter word
+        // "null", so an account whose email was stored as null showed that word where a
+        // person's address belongs — and committed as it. Absent and null both mean
+        // "nothing stored".
+        store.save(Account("muffyuniverse", "Muffy", "muffy@example.com"))
+        val details = File(store.stateDir("muffyuniverse"), "account.json")
+        assertTrue("the details file is there", details.isFile)
+        details.writeText("""{"login":"muffyuniverse","commitName":null,"commitEmail":null}""")
+
+        val read = store.account("muffyuniverse")
+
+        assertEquals("no name stored", "", read!!.commitName)
+        assertEquals("no email stored, rather than the word", "", read.commitEmail)
+        assertEquals(
+            "so the commit falls back to the login",
+            "muffyuniverse@users.noreply.github.com",
+            read.author().email,
+        )
+    }
+
+    @Test
     fun theCommitIdentityFallsBackToTheLogin() {
         val account = Account("muffyuniverse", "", "")
         assertEquals("muffyuniverse", account.author().name)

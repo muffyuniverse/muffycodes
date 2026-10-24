@@ -432,8 +432,16 @@ class AppViewModel @JvmOverloads constructor(
         refresh()
     }
 
-    /** Opens the child of the current folder with this name. */
-    fun openChild(name: String) = open(path + name)
+    /**
+     * Opens the child of the current folder with this name.
+     *
+     * The tap is recorded here rather than in the screen, because this is the whole of
+     * what pressing a folder does — and a gesture recorded in two places gets two ids.
+     */
+    fun openChild(name: String) {
+        Trace.tap("open folder", name)
+        open(path + name)
+    }
 
     /** Goes up one level. Returns false when already at the root. */
     fun up(): Boolean {
@@ -694,6 +702,7 @@ class AppViewModel @JvmOverloads constructor(
         val ws = workspace ?: return
         val target = ws.relative(file) ?: return
         val key = ws.pathString(target)
+        Trace.tap(if (key in selected) "unselect" else "select", file.name)
         selected = if (key in selected) selected - key else selected + key
     }
 
@@ -1142,7 +1151,10 @@ class AppViewModel @JvmOverloads constructor(
             main.post {
                 busy = false
                 message = clone.message
-                open(listOf(Workspace.PROJECTS, clean))
+                // **It does not move you inside.** A project appearing in the list is the
+                // result, and being teleported into an empty folder is how a person loses
+                // track of where they were — the row is right there when they want it.
+                refresh()
                 record("Created project $clean")
                 onDone(clone.success)
             }
@@ -1296,7 +1308,9 @@ class AppViewModel @JvmOverloads constructor(
             main.post {
                 busy = false
                 message = result.message
-                open(listOf(Workspace.PROJECTS, repo.name))
+                // Same rule as creating one: pulling a project in adds a row, it
+                // does not take over the screen.
+                refresh()
             }
         }
     }
@@ -1324,7 +1338,10 @@ class AppViewModel @JvmOverloads constructor(
                     onDone(false)
                 } else {
                     signIn(who.login, token, who.name, who.email)
-                    message = "Signed in as ${who.login}"
+                    // **Not announced.** The screen this closes onto already says who is
+                    // signed in, in the same words — a toast repeating it makes a person
+                    // check whether something else happened. A sign-in that worked is
+                    // visible; only one that did not gets a sentence.
                     onDone(true)
                 }
             }
@@ -1374,7 +1391,6 @@ class AppViewModel @JvmOverloads constructor(
                 activeLogin = login
                 path = emptyList()
                 refresh()
-                message = "Signed in as the test account"
                 onDone(true)
             }
         }
@@ -1700,7 +1716,11 @@ class AppViewModel @JvmOverloads constructor(
         } else {
             history?.restore(text, revisionId) == true
         }
-        message = if (ok) "Restored that version" else "Could not restore it"
+        // **Only a failure is announced.** A restore replaces the text on the screen the
+        // person is looking at, so saying "restored that version" repeats what they can
+        // see — and it then lingered on the way out of the editor, which is what made it
+        // feel like a pop-up about nothing.
+        if (!ok) message = "Could not restore it"
         if (ok) {
             refresh()
             // A restore changes what is on disk, so it is itself a version: the

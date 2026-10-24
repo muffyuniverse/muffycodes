@@ -29,10 +29,17 @@ class ProjectsFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `a new project is opened when it is made`() {
+    fun `a new project appears in the list and the view stays where it was`() {
+        // It used to open the project. Being moved into an empty folder the moment a
+        // clone finishes loses the thread: the list is what shows the thing was made,
+        // and the row is there to open when the person wants it.
         scene.project("Shopping")
 
-        assertEquals(listOf(Workspace.PROJECTS, "Shopping"), scene.viewModel.path)
+        assertTrue("the project is in the list", scene.viewModel.projectNames.contains("Shopping"))
+        assertFalse(
+            "and the browser was not moved inside it: ${scene.viewModel.path}",
+            scene.viewModel.path.size > 1,
+        )
     }
 
     @Test
