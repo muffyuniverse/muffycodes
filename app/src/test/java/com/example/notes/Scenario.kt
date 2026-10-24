@@ -224,6 +224,37 @@ class Scenario(
     }
 
     /**
+     * The text of [file] in the newest version of whichever history owns it.
+     *
+     * A file inside a project's worktree is versioned by that project, so reading
+     * the account's history for it would always answer "no versions" — and a test
+     * waiting for one would fail for a reason that is not the app's.
+     */
+    fun newestVersionText(file: File): String? {
+        val ws = workspace ?: return null
+        val path = ws.relative(file) ?: return null
+        return if (ws.inWorktree(file)) {
+            val project = ws.projectOf(file) ?: return null
+            try {
+                Git.open(ws.repoOf(project)).use { git ->
+                    git.repository.resolve("HEAD")?.let { head ->
+                        GitService.fileAt(
+                            git.repository,
+                            path.drop(3).joinToString("/"),
+                            head.name,
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                null
+            }
+        } else {
+            val key = ws.pathString(path)
+            accountHistory().head()?.let { head -> accountHistory().fileAt(key, head) }
+        }
+    }
+
+    /**
      * Saves, and waits for the version to exist.
      *
      * The app waits a moment before committing a save, so that a burst of typing
@@ -233,13 +264,9 @@ class Scenario(
      */
     fun saveAsVersion(text: String) {
         val file = viewModel.editingFile ?: error("the editor is not open")
-        val key = viewModel.workspace!!.pathString(viewModel.workspace!!.relative(file).orEmpty())
         viewModel.saveEditor(text)
         await("a version of ${file.name} holding \"$text\"", 30_000) {
-            val versions = accountHistory().log(key)
-            versions.isNotEmpty() && versions.first().let { newest ->
-                accountHistory().fileAt(key, newest.id) == text
-            }
+            newestVersionText(file) == text && file.readText() == text
         }
     }
 

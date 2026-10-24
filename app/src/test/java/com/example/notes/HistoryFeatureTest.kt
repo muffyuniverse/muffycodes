@@ -217,6 +217,144 @@ class HistoryFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `each save inside a project is a version of it, with no sync anywhere`() {
+        // The worry this answers: inside a project, does the history move between
+        // *syncs*, or between changes? It has to be changes — "go back to how it was"
+        // is wanted a second after the mistake, not after the next push — and the way
+        // to know is to save twice and never sync at all.
+        scene.project("shopping")
+        scene.open(Workspace.PROJECTS, "shopping")
+        val ws = scene.workspace!!
+        val file = File(ws.repoOf("shopping"), "milk.txt")
+        // Written through the editor, because the editor is what commits: writing
+        // to the disk behind it is not a change the app was told about.
+        scene.viewModel.refresh()
+        scene.openEditor(file)
+        scene.saveAsVersion("one")
+        scene.saveAsVersion("two")
+        scene.saveAsVersion("three")
+        scene.closeEditor()
+
+        val versions = scene.versionsOf(file)
+        assertEquals("three changes, three versions", 3, versions.size)
+        assertEquals("the newest is what is on disk", "three", versions[0].second)
+        assertEquals("and the first is still there", "one", versions[2].second)
+        assertEquals("no sync happened", 0, scene.remoteCommits("shopping"))
+    }
+
+    @Test
+    fun `a version put back inside a project becomes a version of that project`() {
+        // A restore is a change like any other. Recording only the account's history
+        // left the worktree modified and uncommitted: the file said "1 changed"
+        // until the next sync, and the version it was put back to was not in the
+        // history it came from.
+        scene.project("shopping")
+        scene.open(Workspace.PROJECTS, "shopping")
+        val ws = scene.workspace!!
+        val file = File(ws.repoOf("shopping"), "milk.txt")
+        scene.viewModel.refresh()
+        scene.openEditor(file)
+        scene.saveAsVersion("one")
+        scene.saveAsVersion("two")
+        scene.closeEditor()
+
+        val versions = scene.versionsOf(file)
+        val first = versions.last().first.id
+        scene.viewModel.openHistory(file)
+        scene.restore(first)
+        scene.viewModel.closeHistory()
+
+        assertEquals("the text went back", "one", file.readText())
+        val after = scene.versionsOf(file)
+        assertEquals("and the restore is its own version", 3, after.size)
+        // And the worktree is clean: the restore was committed to the project, not
+        // left for the next sync to notice.
+        scene.await("the restore to be committed", 20_000) {
+            scene.viewModel.changesOf("shopping") == 0
+        }
+        assertEquals("nothing is waiting to be synced", 0, scene.viewModel.changesOf("shopping"))
+    }
+
+    @Test
+    fun `a deleted file can be brought back from the folder it was deleted from`() {
+        // Deleting is the one change with no way back from the folder it happened in:
+        // the row is gone, so there is nothing to open a history on. Hence the list
+        // the add button offers.
+        scene.folder("letters")
+        scene.open("letters")
+        val letter = scene.file("milk.txt", "two litres")
+        scene.viewModel.delete(letter)
+        scene.await("the deletion to be recorded", 20_000) { !letter.exists() }
+
+        val gone = scene.viewModel.deletedIn(scene.viewModel.currentDir!!)
+        assertTrue("the file is offered back", gone.any { it.name == "milk.txt" })
+
+        val offered = gone.first { it.name == "milk.txt" }
+        assertTrue("and put back", scene.viewModel.restoreDeleted(scene.viewModel.currentDir!!, offered))
+        assertTrue("it is there again", letter.isFile)
+        assertEquals("with what it held", "two litres", letter.readText())
+    }
+
+    @Test
+    fun `a deleted picture comes back as the same bytes, not as text`() {
+        // A version is not always text. Writing a UTF-8 reading of a picture back
+        // over it replaces the picture with a row of replacement characters, which
+        // is a restore that destroys the thing it restored.
+        scene.folder("pictures")
+        scene.open("pictures")
+        val bytes = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0xFF.toByte(), 0x00)
+        val picture = File(scene.viewModel.currentDir!!, "dot.png")
+        picture.writeBytes(bytes)
+        scene.viewModel.refresh()
+        scene.await("the picture to be recorded", 20_000) {
+            scene.appHistoryFiles().contains("pictures/dot.png")
+        }
+        scene.viewModel.delete(picture)
+        scene.await("the deletion to be recorded", 20_000) { !picture.exists() }
+
+        val offered = scene.viewModel.deletedIn(scene.viewModel.currentDir!!)
+            .firstOrNull { it.name == "dot.png" }
+        assertTrue("it is offered back", offered != null)
+        assertTrue("put back", scene.viewModel.restoreDeleted(scene.viewModel.currentDir!!, offered!!))
+
+        assertTrue("byte for byte", picture.readBytes().contentEquals(bytes))
+    }
+
+    @Test
+    fun `a deleted file inside a project comes back from that project's history`() {
+        scene.project("shopping")
+        scene.open(Workspace.PROJECTS, "shopping")
+        val ws = scene.workspace!!
+        val file = File(ws.repoOf("shopping"), "milk.txt")
+        scene.viewModel.refresh()
+        scene.openEditor(file)
+        scene.saveAsVersion("two litres")
+        scene.closeEditor()
+        scene.viewModel.delete(file)
+        scene.await("the deletion", 20_000) { !file.exists() }
+
+        scene.open(Workspace.PROJECTS, "shopping", "repo")
+        val offered = scene.viewModel.deletedIn(scene.viewModel.currentDir!!)
+            .firstOrNull { it.name == "milk.txt" }
+        assertTrue("the worktree offers it back", offered != null)
+        assertTrue("put back", scene.viewModel.restoreDeleted(scene.viewModel.currentDir!!, offered!!))
+        assertEquals("with its text", "two litres", file.readText())
+    }
+
+    @Test
+    fun `a folder with nothing deleted says so rather than showing an empty window`() {
+        scene.folder("letters")
+        scene.open("letters")
+        scene.file("kept.txt", "here")
+
+        assertEquals(
+            "nothing is offered",
+            emptyList<String>(),
+            scene.viewModel.deletedIn(scene.viewModel.currentDir!!).map { it.name },
+        )
+    }
+
+    @Test
     fun `a local note beside a project is versioned by the account, not lost`() {
         // The two histories divide at `repo/`, and the boundary is not "belongs to a
         // project". A note kept in the project's own folder sits *beside* the
