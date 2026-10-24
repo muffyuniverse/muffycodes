@@ -329,7 +329,12 @@ object Trace {
      * The file first, because it is the whole truth including what the ring dropped.
      */
     fun dump(at: Long = now()): String {
-        val fromFile = sink?.read()
+        // **A blank file is not a log.** The first version returned the file's contents
+        // whenever the read did not throw — and on the day the file was empty that made
+        // Share produce a heading and nothing else, while the ring still held a whole
+        // session. A dump that can be empty is a dump that hides the evidence it exists
+        // to carry, so an empty read falls through to what is in memory.
+        val fromFile = sink?.read()?.takeIf { it.isNotBlank() }
         if (fromFile != null) {
             return buildString {
                 appendLine("Muffy Codes — what the app did")
