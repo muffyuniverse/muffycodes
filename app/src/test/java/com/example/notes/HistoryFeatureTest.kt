@@ -350,6 +350,75 @@ class HistoryFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `the version that was just saved is the newest one in the history`() {
+        // "I save, then open the history, and the newest version is the one before the
+        // save." The save was queued on the worker and the history was read on the UI
+        // thread, so the read happened first. Asking for the versions on the same
+        // worker puts them in the order they were asked for.
+        scene.signedIn()
+        scene.open()
+        val file = scene.file("milk.txt", "one litre")
+        scene.viewModel.openEditor(file)
+        scene.viewModel.saveEditor("two litres")
+
+        var seen: List<Pair<GitService.CommitInfo, String?>> = emptyList()
+        scene.viewModel.requestVersions { seen = it }
+        scene.await("the versions to arrive") { seen.isNotEmpty() }
+
+        assertEquals(
+            "the newest version is what was just saved",
+            "two litres",
+            seen.first().second,
+        )
+    }
+
+    @Test
+    fun `every file deleted from a folder is offered back, not only the last one`() {
+        // The list was built from commits that a path filter said touched the
+        // folder, and deleting a file from a folder does not always answer as a
+        // change to the folder. One name came back for three deletions.
+        scene.folder("letters")
+        scene.open("letters")
+        val first = scene.file("one.txt", "the first")
+        val second = scene.file("two.txt", "the second")
+        val third = scene.file("three.txt", "the third")
+        scene.viewModel.delete(first)
+        scene.await("the first deletion", 20_000) { !first.exists() }
+        scene.viewModel.delete(second)
+        scene.await("the second deletion", 20_000) { !second.exists() }
+        scene.viewModel.delete(third)
+        scene.await("the third deletion", 20_000) { !third.exists() }
+
+        val offered = scene.viewModel.deletedIn(scene.viewModel.currentDir!!).map { it.name }
+        assertEquals(
+            "all three, and in a shape a person can read",
+            listOf("one.txt", "three.txt", "two.txt"),
+            offered,
+        )
+    }
+
+    @Test
+    fun `a file deleted from a folder inside this one is not offered here`() {
+        // Restoring puts a row back in *this* folder. A file that lived in a folder
+        // inside it was never a row here, and putting it here would be a restore
+        // that creates something the person never had.
+        scene.folder("letters")
+        scene.open("letters")
+        scene.folder("drafts")
+        scene.open("letters", "drafts")
+        val deep = scene.file("deep.txt", "kept in drafts")
+        scene.viewModel.delete(deep)
+        scene.await("the deletion", 20_000) { !deep.exists() }
+        scene.open("letters")
+
+        assertEquals(
+            "nothing from inside a folder is offered",
+            emptyList<String>(),
+            scene.viewModel.deletedIn(scene.viewModel.currentDir!!).map { it.name },
+        )
+    }
+
+    @Test
     fun `a folder with nothing deleted says so rather than showing an empty window`() {
         scene.folder("letters")
         scene.open("letters")

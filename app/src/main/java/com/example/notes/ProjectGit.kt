@@ -14,6 +14,15 @@ import java.io.File
  * The class takes its secrets and identity as functions rather than reading
  * them itself: that keeps it free of Android dependencies and lets the JVM tests
  * drive it directly.
+ *
+ * **Every failure here is caught as `Throwable`, and that is not laziness.** Git
+ * on a phone fails in ways that are not `Exception`s: a class the runtime cannot
+ * resolve arrives as a `NoClassDefFoundError`, whose message is "Failed resolution
+ * of: ...". Catching only `Exception` let one of those out of the worker, where it
+ * ended the process or came back as a message with no project, no file and no
+ * action in it — "sync doesn't follow" with an exception on the screen and nothing
+ * else. What a failure must never do is stop the app or leave a change half-done
+ * silently; it must say what happened.
  */
 class ProjectGit(
     private val workspace: Workspace,
@@ -35,7 +44,7 @@ class ProjectGit(
         if (!GitService.isRepository(dir)) return null
         return try {
             GitService.initOrOpen(dir, authorProvider())
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             null
         }
     }
@@ -46,7 +55,7 @@ class ProjectGit(
         dir.mkdirs()
         GitService.initOrOpen(dir, authorProvider()).close()
         Result.success(Unit)
-    } catch (e: Exception) {
+    } catch (e: Throwable) {
         Result.failure(e)
     }
 
@@ -60,8 +69,8 @@ class ProjectGit(
         return repo.use {
             try {
                 GitService.status(it)
-            } catch (e: Exception) {
-                lastError = Secrets.scrub(e.message ?: "Could not read the project")
+            } catch (e: Throwable) {
+                lastError = Secrets.describe(e)
                 GitService.Changes(0, 0, 0)
             }
         }
@@ -91,13 +100,14 @@ class ProjectGit(
                 val id = GitService.commitAll(it, what, authorProvider())
                 if (id != null) prune(it)
                 id
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 null
             }
         }
     }
 
-    fun sync(project: String): GitService.RemoteResult {
+    @JvmOverloads
+    fun sync(project: String, note: String = ""): GitService.RemoteResult {
         val repo = open(project) ?: return GitService.RemoteResult(
             "This project has no repository yet", false
         )
@@ -109,16 +119,26 @@ class ProjectGit(
                 // change behind is worse than a commit nobody asked for.
                 val changed = GitService.changedPaths(it)
                 if (changed.isNotEmpty()) {
-                    GitService.commitAll(it, CommitMessage.sync(changed), authorProvider())
+                    // The person's words when they gave any, the names otherwise: a
+                    // commit made here is still a change that has to be explained,
+                    // and their sentence explains it better than the app can.
+                    GitService.commitAll(
+                        it,
+                        note.trim().ifBlank { CommitMessage.sync(changed) },
+                        authorProvider(),
+                    )
                 }
+                // The sync's own message, on its own commit, so that the push carries
+                // a reason to GitHub rather than only a list of files.
+                GitService.commitMarker(it, note, authorProvider())
                 // Shorten before pushing, not after. The push is what carries the
                 // history to GitHub, so a prune that ran afterwards would shorten
                 // this phone's copy and leave the repository as long as it was —
                 // the length would only appear to take effect on the next sync.
                 prune(it)
                 GitService.pushForce(it, tokenProvider())
-            } catch (e: Exception) {
-                GitService.RemoteResult(Secrets.scrub(e.message ?: "Sync failed"), false)
+            } catch (e: Throwable) {
+                GitService.RemoteResult(Secrets.describe(e), false)
             }
         }
     }
@@ -129,7 +149,7 @@ class ProjectGit(
         if (keep <= 0) return
         try {
             HistoryPrune.prune(repo, keep)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             // A history that could not be shortened is still a working history.
         }
     }
@@ -171,7 +191,7 @@ class ProjectGit(
         return repo.use {
             try {
                 GitService.log(it, path, limit)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 emptyList()
             }
         }
@@ -183,7 +203,7 @@ class ProjectGit(
         return repo.use {
             try {
                 GitService.versionsOf(it, path)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 emptyList()
             }
         }
@@ -195,7 +215,7 @@ class ProjectGit(
         return repo.use {
             try {
                 GitService.pathsUnder(it, path?.ifBlank { null }, revisionId)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 emptyList()
             }
         }
@@ -207,7 +227,7 @@ class ProjectGit(
         return repo.use {
             try {
                 GitService.bytesAt(it, path, revisionId)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 null
             }
         }
@@ -222,7 +242,7 @@ class ProjectGit(
             try {
                 GitService.restore(it, path, revisionId)
                 Result.success(Unit)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Result.failure(e)
             }
         }

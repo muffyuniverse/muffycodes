@@ -73,6 +73,9 @@ private sealed interface Pending {
     data class NewFile(val folder: File) : Pending
     data class NewFolder(val folder: File) : Pending
     data class MoveEntry(val entry: Entry) : Pending
+    data object MoveSelected : Pending
+    data object DeleteSelected : Pending
+    data class SyncProject(val project: String) : Pending
     data class RestoreDeleted(val folder: File) : Pending
     data class DeleteEntry(val entry: Entry) : Pending
     data class ReplaceProject(val project: String) : Pending
@@ -159,7 +162,9 @@ private fun AppRoot(viewModel: AppViewModel) {
         onMove = { entry -> pending = Pending.MoveEntry(entry) },
         onDelete = { entry -> pending = Pending.DeleteEntry(entry) },
         onTogglePin = { entry -> viewModel.togglePinned(entry.file) },
+        onToggleLock = { entry -> viewModel.toggleLocked(entry.file) },
         onHistory = { entry -> viewModel.openHistory(entry.file) },
+        onSelect = { entry -> viewModel.toggleSelected(entry.file) },
     )
 
     when {
@@ -188,15 +193,10 @@ private fun AppRoot(viewModel: AppViewModel) {
             viewModel = viewModel,
             file = editing,
             onBack = { viewModel.closeEditor() },
-            onDelete = {
-                val target = viewModel.editingFile ?: editing
-                val entry = Entry(
-                    target.name,
-                    target,
-                    viewModel.workspace?.kindOf(target) ?: EntryKind.TEXT,
-                )
-                pending = Pending.DeleteEntry(entry)
-            },
+            // No delete here: deleting is a thing done to a row in the folder, where
+            // the row and its neighbours are visible and a mistake is one undo away.
+            // A three-dot menu inside the editor put the most destructive command in
+            // the app beside Save.
             onOpenHistory = { viewModel.editingFile?.let { viewModel.openHistory(it) } },
         )
 
@@ -207,7 +207,7 @@ private fun AppRoot(viewModel: AppViewModel) {
                 onOpenSettings = { showSettings = true },
                 actions = actions,
                 onAddProject = { pending = Pending.AddProject },
-                onRowSync = { project -> viewModel.sync(project) },
+                onRowSync = { project -> pending = Pending.SyncProject(project) },
                 onRowRename = { project -> pending = Pending.RenameProject(project) },
                 onRowDelete = { project -> pending = Pending.DeleteProject(project) },
                 onCreateFile = { viewModel.currentDir?.let { pending = Pending.NewFile(it) } },
@@ -217,16 +217,20 @@ private fun AppRoot(viewModel: AppViewModel) {
                 onRestoreDeleted = {
                     viewModel.currentDir?.let { pending = Pending.RestoreDeleted(it) }
                 },
+                onMoveSelected = { pending = Pending.MoveSelected },
+                onDeleteSelected = { pending = Pending.DeleteSelected },
             )
-            // At the bottom, and inset from it. A snackbar at the top of the
-            // window sat under the phone's status bar and was cropped by it — the
-            // success and failure messages of every action were half a line of text
-            // in the one place nothing can be drawn.
+            // At the bottom, and **clear of the add button**. It used to sit at the
+            // bottom centre with 16dp of margin, which is exactly where the button
+            // is: the message that said what had just happened covered the control
+            // that does the next thing, and both were unreachable at once. A
+            // floating button is 56dp tall and inset by 16, so the message starts
+            // above it.
             SnackbarHost(
                 snackbar,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(16.dp),
+                    .padding(start = 16.dp, end = 16.dp, bottom = 88.dp),
             )
         }
     }
@@ -369,9 +373,53 @@ private fun Dialogs(
 
         is Pending.MoveEntry -> MoveDialog(
             title = "Move ${pending.entry.name}",
-            folders = moveTargets(viewModel, pending.entry),
+            root = viewModel.workspace?.accountDir ?: viewModel.currentDir ?: return,
+            forbidden = listOf(pending.entry.file),
+            canChoose = { viewModel.canHoldFiles(it) },
             onDismiss = dismiss,
-            onPick = { target -> if (!viewModel.move(pending.entry.file, target)) Unit },
+            onMove = { target ->
+                dismiss()
+                if (!viewModel.move(pending.entry.file, target)) Unit
+            },
+        )
+
+        Pending.MoveSelected -> MoveDialog(
+            title = if (viewModel.selected.size == 1) "Move 1 chosen item"
+            else "Move ${viewModel.selected.size} chosen items",
+            root = viewModel.workspace?.accountDir ?: viewModel.currentDir ?: return,
+            // The things being moved cannot hold themselves, and a folder cannot be
+            // moved inside itself — the window refuses to offer either.
+            forbidden = viewModel.selected.mapNotNull { viewModel.fileAt(it.split("/")) },
+            canChoose = { viewModel.canHoldFiles(it) },
+            onDismiss = dismiss,
+            onMove = { target ->
+                dismiss()
+                if (!viewModel.moveSelected(target)) Unit
+            },
+        )
+
+        Pending.DeleteSelected -> ConfirmDialog(
+            title = if (viewModel.selected.size == 1) "Delete 1 chosen item?"
+            else "Delete ${viewModel.selected.size} chosen items?",
+            text = "Everything chosen goes. It can be brought back from the history of " +
+                "the folder it was in.",
+            confirm = "Delete",
+            destructive = true,
+            onDismiss = dismiss,
+            onConfirm = {
+                dismiss()
+                if (!viewModel.deleteSelected()) Unit
+            },
+        )
+
+        is Pending.SyncProject -> SyncDialog(
+            project = pending.project,
+            changes = viewModel.changesOf(pending.project),
+            onDismiss = dismiss,
+            onSync = { note ->
+                dismiss()
+                viewModel.sync(pending.project, note)
+            },
         )
 
         is Pending.RestoreDeleted -> RestoreDeletedDialog(
@@ -407,47 +455,6 @@ private fun Dialogs(
             onConfirm = { viewModel.replaceWithRemote(pending.project) },
         )
     }
-}
-
-/**
- * Every folder in the account a thing can be moved into.
- *
- * A thing moves freely inside the account root — that is what makes a project's
- * `repo/` one place among others rather than a mode you enter with a special
- * command. Moving a file into a worktree is how it becomes tracked; moving it out
- * is how it stops being tracked, and both sides are committed by [AppViewModel.move].
- *
- * Three folders are left out of the list, and each for its own reason: the app's
- * own hidden ones (§3), `projects/` itself, where a file would be invisible on the
- * projects screen, and the file's own subtree, which cannot hold itself.
- *
- * The visibility rule is asked for, not restated. A move picker that wrote
- * `!it.name.startsWith(".")` itself would drift from the rule the moment the rule
- * changed — that is exactly how `projects/` and `repo/` once ended up offered as
- * ordinary destinations.
- */
-private fun moveTargets(viewModel: AppViewModel, entry: Entry): List<Pair<String, File>> {
-    val ws = viewModel.workspace ?: return emptyList()
-    val from = entry.file.canonicalPath
-    val found = mutableListOf<Pair<String, File>>()
-
-    fun walk(dir: File, shown: String, depth: Int) {
-        if (depth > 8) return
-        for (child in dir.listFiles() ?: emptyArray()) {
-            if (!child.isDirectory || ws.isHidden(child.name)) continue
-            val insideItself = child.canonicalPath == from ||
-                child.canonicalPath.startsWith("$from${File.separator}")
-            if (entry.isFolder && insideItself) continue
-            val label = if (shown.isEmpty()) child.name else "$shown/${child.name}"
-            val isTheAppFolder = depth == 0 && child.name == Workspace.PROJECTS
-            if (!isTheAppFolder && child != entry.file.parentFile) {
-                found += "$label/" to child
-            }
-            walk(child, label, depth + 1)
-        }
-    }
-    walk(ws.accountDir, "", 0)
-    return found.sortedBy { it.first.lowercase() }
 }
 
 /**

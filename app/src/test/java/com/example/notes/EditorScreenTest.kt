@@ -76,7 +76,6 @@ class EditorScreenTest {
                     viewModel = scene.viewModel,
                     file = file,
                     onBack = {},
-                    onDelete = {},
                     onOpenHistory = {},
                 )
             }
@@ -121,6 +120,109 @@ class EditorScreenTest {
         val renamed = File(scene.viewModel.currentDir!!, "shopping_list.txt")
         assertTrue("the file was renamed", renamed.isFile)
         assertEquals("with the text that was on the screen", "three litres", renamed.readText())
+    }
+
+    @Test
+    fun `renaming twice shows the name the app wrote, both times`() {
+        // The lag, exactly: the field showed the *previous* name after every
+        // rename, because "done" commits the name and then moving focus commits it
+        // again — and the second attempt compared the new name against the file as
+        // it was before the first, failed, and put the old name back.
+        val file = scene.file("milk.txt", "two litres")
+
+        editorFor(file)
+        compose.onNodeWithText("milk.txt").performTextReplacement("shopping list")
+        compose.onNodeWithText("shopping list").performImeAction()
+
+        compose.onNodeWithText("shopping_list.txt").assertIsDisplayed()
+        assertTrue(
+            "the file, renamed",
+            File(scene.viewModel.currentDir!!, "shopping_list.txt").isFile,
+        )
+
+        compose.onNodeWithText("shopping_list.txt").performTextReplacement("groceries")
+        compose.onNodeWithText("groceries").performImeAction()
+
+        compose.onNodeWithText("groceries.txt").assertIsDisplayed()
+        assertTrue(
+            "renamed again from the name it now has",
+            File(scene.viewModel.currentDir!!, "groceries.txt").isFile,
+        )
+    }
+
+    @Test
+    fun `the top row is the way back and the name, and nothing else`() {
+        // The delete command used to live behind a three-dot button up here, beside
+        // Save: the most destructive thing in the app, one press away from the most
+        // ordinary one, in a screen with no rows to show what "it" even is.
+        val file = scene.file("milk.txt", "two litres")
+
+        editorFor(file)
+
+        compose.onNodeWithContentDescription("More").assertDoesNotExist()
+        compose.onNodeWithText("Delete").assertDoesNotExist()
+        // The four things that are still there, in the order the row gives them.
+        compose.onNodeWithContentDescription("Back without saving").assertIsDisplayed()
+        compose.onNodeWithText("milk.txt").assertIsDisplayed()
+        compose.onNodeWithText("History").assertIsDisplayed()
+        compose.onNodeWithText("Save").assertIsDisplayed()
+    }
+
+    @Test
+    fun `a locked file opens in view and offers no way to write it`() {
+        // Locked means "can only be viewed". The switch is what would otherwise
+        // put the text field back, so it is the switch that has to refuse.
+        val file = scene.file("milk.txt", "two litres")
+        scene.viewModel.toggleLocked(file)
+
+        editorFor(file)
+
+        compose.onNodeWithText("two litres").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Locked, so it cannot be edited")
+            .assertIsDisplayed()
+        compose.onNodeWithText("Save").assertIsNotEnabled()
+        // The switch cannot put it back into editing.
+        compose.onNodeWithText("View").assertIsNotEnabled()
+    }
+
+    @Test
+    fun `an unlocked file opens ready to be written`() {
+        // "switch enabled on enter": opening a note is asking to write it.
+        val file = scene.file("milk.txt", "two litres")
+
+        editorFor(file)
+
+        compose.onNodeWithText("Edit").assertIsDisplayed()
+        compose.onNodeWithText("two litres").performTextReplacement("three litres")
+        compose.onNodeWithText("Save").performClick()
+        assertEquals("written", "three litres", file.readText())
+    }
+
+    @Test
+    fun `markdown is shown as the thing it describes in view mode`() {
+        // A `.md` file read as bytes still has its `#` and its `**`, which looks
+        // like a draft rather than a finished page. The reader is only for view
+        // mode: editing is editing, and the markers are the text there.
+        val file = scene.file("notes.md", "# Shopping\n\n- milk\n- bread")
+
+        scene.viewModel.openEditor(file)
+        compose.setContent {
+            Frame {
+                EditorScreen(
+                    viewModel = scene.viewModel,
+                    file = file,
+                    onBack = {},
+                    onOpenHistory = {},
+                )
+            }
+        }
+        // Into view mode.
+        compose.onNodeWithText("Edit").performClick()
+
+        compose.onNodeWithText("Shopping").assertIsDisplayed()
+        compose.onNodeWithText("# Shopping", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("- milk", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("milk", substring = true).assertIsDisplayed()
     }
 
     @Test

@@ -77,15 +77,15 @@ class AppHistory(
         if (!accountDir.isDirectory) return null
         val repo = try {
             open()
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             lastError = e.message
             return null
         }
         return repo.use {
             val id = try {
                 GitService.commitAll(it, message, authorProvider())
-            } catch (e: Exception) {
-                lastError = Secrets.scrub(e.message ?: "Could not record the change")
+            } catch (e: Throwable) {
+                lastError = Secrets.describe(e)
                 null
             } ?: return@use null
             pruneIfNeeded(it, keep)
@@ -98,7 +98,7 @@ class AppHistory(
         if (keep <= 0) return
         try {
             HistoryPrune.prune(repo, keep)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             // A history that could not be shortened is still a working history.
         }
     }
@@ -110,7 +110,7 @@ class AppHistory(
         return repo.use {
             try {
                 GitService.log(it, path, limit)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 emptyList()
             }
         }
@@ -123,7 +123,7 @@ class AppHistory(
         return repo.use {
             try {
                 GitService.fileAt(it, path, revisionId)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 null
             }
         }
@@ -137,7 +137,7 @@ class AppHistory(
             try {
                 GitService.restore(it, path, revisionId)
                 true
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 false
             }
         }
@@ -158,8 +158,8 @@ class AppHistory(
         if (!GitService.isRepository(accountDir)) return emptyList()
         val repo = try {
             open()
-        } catch (e: Exception) {
-            lastError = Secrets.scrub(e.message ?: "Could not open the history")
+        } catch (e: Throwable) {
+            lastError = Secrets.describe(e)
             return emptyList()
         }
         return repo.use {
@@ -168,8 +168,8 @@ class AppHistory(
                 // and the reference that points at them do not appear at the same
                 // instant, so an id can briefly name something not yet on disk.
                 GitService.filesUnder(it, null, null).map { file -> file.first }
-            } catch (e: Exception) {
-                lastError = Secrets.scrub(e.message ?: "Could not read the newest version")
+            } catch (e: Throwable) {
+                lastError = Secrets.describe(e)
                 emptyList()
             }
         }
@@ -182,7 +182,7 @@ class AppHistory(
         return repo.use {
             try {
                 GitService.pathsUnder(it, path?.ifBlank { null }, revisionId)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 emptyList()
             }
         }
@@ -195,7 +195,7 @@ class AppHistory(
         return repo.use {
             try {
                 GitService.bytesAt(it, path, revisionId)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 null
             }
         }
@@ -208,7 +208,7 @@ class AppHistory(
         return repo.use {
             try {
                 GitService.filesUnder(it, path, revisionId)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 emptyList()
             }
         }
@@ -221,7 +221,7 @@ class AppHistory(
         return repo.use {
             try {
                 GitService.treeAt(it, path, revisionId)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 emptyList()
             }
         }

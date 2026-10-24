@@ -73,18 +73,39 @@ object Imports {
         val renamed = mutableListOf<Pair<String, String>>()
         val failures = mutableListOf<String>()
         uris.forEach { uri ->
+            val asked = try {
+                displayName(context, uri) ?: "imported file"
+            } catch (e: Throwable) {
+                "imported file"
+            }
             try {
-                val asked = displayName(context, uri) ?: "imported file"
+                // The folder is asked for again before every file, not once at the
+                // start: a copy that takes a while can outlive the folder it is
+                // copying into if the same account is being changed on another
+                // screen, and the failure for that is a bare "open failed: ENOENT"
+                // that names neither the file nor the reason.
+                into.mkdirs()
+                if (!into.isDirectory) {
+                    throw IllegalStateException("The folder is no longer there")
+                }
                 val target = freeName(into, asked)
                 if (target.name != asked.trim()) renamed += asked.trim() to target.name
-                context.contentResolver.openInputStream(uri)?.use { input ->
-                    target.outputStream().use { output -> input.copyTo(output) }
-                } ?: throw IllegalStateException("Could not read \"$asked\"")
+                val input = context.contentResolver.openInputStream(uri)
+                    ?: throw IllegalStateException(
+                        "\"$asked\" is no longer available to the app. It may have been " +
+                            "moved or deleted since it was picked.",
+                    )
+                input.use { source ->
+                    target.outputStream().use { output -> source.copyTo(output) }
+                }
                 copied++
             } catch (e: Throwable) {
-                // A file that cannot be copied is named, not swallowed, and does not
-                // stop the ones after it.
-                failures += e.message ?: "one file could not be read"
+                // **Which file, and why.** Android's own words for a document that
+                // has gone are "open failed: ENOENT (No such file or directory)",
+                // which names no file and reads like a bug in this app. A failure is
+                // reported with the name that was being imported, and does not stop
+                // the files after it.
+                failures += "\"$asked\": ${e.message ?: "could not be read"}"
             }
         }
         if (copied == 0 && failures.isNotEmpty()) {
@@ -106,6 +127,8 @@ object Imports {
      * directory.
      */
     fun folderInto(context: Context, tree: Uri, into: File): Result<Report> = try {
+        into.mkdirs()
+        if (!into.isDirectory) throw IllegalStateException("The folder is no longer there")
         val asked = displayName(context, tree) ?: "imported folder"
         val target = freeName(into, asked)
         val renamed = mutableListOf<Pair<String, String>>()

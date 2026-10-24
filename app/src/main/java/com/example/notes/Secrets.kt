@@ -23,6 +23,26 @@ object Secrets {
         URL_USER_INFO.replace(text) { "${it.groupValues[1]}***@" }
             .replace(TOKEN_SHAPE, "***")
 
+    /**
+     * A failure, in a sentence a person can act on.
+     *
+     * JGit reports a failure as a chain of nested exception messages, and some of
+     * what it can throw on Android is not an `Exception` at all: a class it needs but
+     * the phone cannot resolve arrives as a `NoClassDefFoundError` whose message is
+     * "Failed resolution of: ...", which named no file, no project and no action.
+     * Naming the *kind* of failure is what turns that into something reportable.
+     */
+    fun describe(error: Throwable): String {
+        val said = scrub(error.message ?: "").trim()
+        val kind = error.javaClass.simpleName
+        // A plain message is the answer; a bare class name, or an Error, is not.
+        return when {
+            said.isEmpty() -> kind
+            error !is Exception -> "$said ($kind)"
+            else -> said
+        }
+    }
+
     /** [url] with any credentials removed from its address. */
     fun stripCredentials(url: String): String =
         URL_USER_INFO.replace(url) { it.groupValues[1] }

@@ -196,6 +196,31 @@ object GitService {
     }
 
     /**
+     * A commit that changes nothing and says something.
+     *
+     * This is the **sync's own commit**: the tree is already what it is, and the
+     * message is the person's answer to "what did you change?". Every other commit in
+     * a project is the app narrating a file ("Edited milk.txt"), which is the right
+     * message for an undo step and the wrong one for the history on GitHub — there,
+     * the question is why a push happened. An empty commit is normally noise, and a
+     * design that made one per change would be nothing but; one per sync is a
+     * landmark.
+     */
+    fun commitMarker(repo: Repository, message: String, author: GitAuthor): String? {
+        val said = message.trim()
+        if (said.isEmpty()) return null
+        return Git(repo).use { git ->
+            git.commit()
+                .setMessage(said)
+                .setAuthor(author.ident())
+                .setCommitter(author.ident())
+                .setAllowEmpty(true)
+                .call()
+                .name
+        }
+    }
+
+    /**
      * The paths that changed in the working tree, as the repository names them.
      * This is what a commit message is written from: the names, not a count.
      */
@@ -227,9 +252,23 @@ object GitService {
                 credentials(token)?.let { fetch.setCredentialsProvider(it) }
                 fetch.call()
 
+                // **Which branch is the project's?** Not necessarily the one this
+                // phone is on. A repository made before GitHub's own default changed
+                // has `master`, and one this app created but never synced has no
+                // remote branch at all — both used to reach
+                // `ResetCommand`/`RevWalk` with a ref that does not exist and answer
+                // with `RefNotFoundException: Ref origin/main not found`, which reads
+                // as the app being broken rather than as a different branch name.
+                val remote = remoteBranch(repo, branch)
+                    ?: return RemoteResult(
+                        "GitHub has nothing on this project yet, so there is no copy to " +
+                            "replace it with. Sync this phone's copy to put it there.",
+                        false,
+                    )
+
                 git.reset()
                     .setMode(ResetCommand.ResetType.HARD)
-                    .setRef("origin/$branch")
+                    .setRef("refs/remotes/origin/$remote")
                     .call()
 
                 // Anything the remote does not have goes, so the folder really
@@ -239,9 +278,35 @@ object GitService {
                     .forEach { path -> File(repo.workTree, path).deleteRecursively() }
             }
             RemoteResult("Replaced with what GitHub has", true)
-        } catch (e: Exception) {
-            RemoteResult(Secrets.scrub(e.message ?: "Pull failed"), false)
+        } catch (e: Throwable) {
+            // `Throwable`, not `Exception`: what JGit can throw on a phone includes
+            // errors rather than exceptions, and an error that escapes here ends the
+            // app instead of saying what went wrong.
+            RemoteResult(Secrets.describe(e), false)
         }
+    }
+
+    /**
+     * The remote branch that stands for this project.
+     *
+     * Tried in order: the branch this phone is on, the remote's own default, and
+     * then the only branch there is. The last one matters for a repository that has
+     * exactly one branch but does not point `origin/HEAD` at it, which is common in
+     * cloned projects that were never given a default.
+     */
+    fun remoteBranch(repo: Repository, local: String): String? {
+        fun exists(name: String): Boolean =
+            repo.exactRef("refs/remotes/origin/$name") != null
+
+        if (exists(local)) return local
+        val head = repo.exactRef("refs/remotes/origin/HEAD")
+        val pointed = head?.target?.name?.removePrefix("refs/remotes/origin/")
+            ?.takeIf { it.isNotBlank() && it != "HEAD" }
+        if (pointed != null && exists(pointed)) return pointed
+        val others = repo.refDatabase.getRefsByPrefix("refs/remotes/origin/")
+            .map { it.name.removePrefix("refs/remotes/origin/") }
+            .filter { it != "HEAD" }
+        return others.singleOrNull()
     }
 
     /** How many changes are waiting in the working tree. */

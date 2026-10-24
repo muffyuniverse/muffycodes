@@ -30,12 +30,16 @@ class AppViewModel @JvmOverloads constructor(
     private val credentials: Credentials = CredentialStore(app),
     val settings: SettingsStore = SettingsStore(app),
     /**
-     * How long a save waits before it is committed into the account's history.
+     * How long a save waits before it is committed.
      *
-     * A person types; a test does not, so the wait is given rather than assumed.
-     * Zero commits at once, which is what a walking skeleton of a test wants.
+     * **Zero, because saving is a button now.** The wait existed when a pause in
+     * typing was the save: it folded a sentence's worth of pauses into one commit.
+     * With an explicit Save the wait buys nothing and costs something real — the
+     * commit had not landed yet when the history was opened a moment later, so the
+     * newest version in the list was the one *before* the save. The value stays as a
+     * parameter because a test may want to coalesce deliberately.
      */
-    private val saveDebounceMs: Long = 1500L,
+    private val saveDebounceMs: Long = 0L,
     /**
      * Whether this build may keep a test account. A release build may not, and the
      * answer is given rather than read from the build type so that the refusal can
@@ -99,6 +103,14 @@ class AppViewModel @JvmOverloads constructor(
 
     /** The paths that are pinned, as paths from the account root. */
     var pins: Set<String> by mutableStateOf(emptySet())
+        private set
+
+    /** The paths that are locked against editing, as paths from the account root. */
+    var lockedPaths: Set<String> by mutableStateOf(emptySet())
+        private set
+
+    /** The paths that are selected, for a move or a delete of several at once. */
+    var selected: Set<String> by mutableStateOf(emptySet())
         private set
 
     /** The search text, which searches inside the current project (§7). */
@@ -235,6 +247,25 @@ class AppViewModel @JvmOverloads constructor(
     /** The names of the projects on this phone. */
     val projectNames: List<String> get() = workspace?.projectNames() ?: emptyList()
 
+    /**
+     * True when a file may be moved into [dir].
+     *
+     * Asked by the move window rather than restated there: the app's own folders —
+     * the hidden ones, and `projects/` itself — cannot hold a person's file, and
+     * `repo/` is the deliberate exception. A window that decided this for itself
+     * would be a second copy of the rule, and the copy that is wrong is always the
+     * one nobody is looking at.
+     */
+    fun canHoldFiles(dir: File): Boolean {
+        val ws = workspace ?: return false
+        if (!dir.isDirectory) return false
+        if (ws.isHidden(dir.name)) return false
+        return !(ws.isStructural(dir) && dir.name != Workspace.REPO)
+    }
+
+    /** The file at a path from the account root, as names. */
+    fun fileAt(path: List<String>): File? = workspace?.fileAt(path)
+
     /** Re-reads the folder and the pins. */
     fun refresh() {
         val ws = workspace ?: run {
@@ -247,6 +278,11 @@ class AppViewModel @JvmOverloads constructor(
         ws.ensure()
         entries = currentDir?.let { ws.list(it) } ?: emptyList()
         pins = ws.pins()
+        lockedPaths = ws.locked()
+        // A selection is a set of paths, and a path that is no longer there cannot
+        // be selected: an item moved or deleted out from under the selection would
+        // otherwise be acted on again by the next press.
+        selected = selected.filterTo(mutableSetOf()) { ws.fileAt(it.split("/")).exists() }
         refreshChanges()
     }
 
@@ -391,20 +427,33 @@ class AppViewModel @JvmOverloads constructor(
         return afterChange(result, "Created $made${namedFrom(name, made.trimEnd('/'))}", File(dir, made.trimEnd('/')))
     }
 
-    fun rename(file: File, newName: String): Boolean {
-        val ws = workspace ?: return false
+    fun rename(file: File, newName: String): Boolean = renameTo(file, newName) != null
+
+    /**
+     * Renames [file] and answers with the file as it now is.
+     *
+     * The answer is the **file**, not "yes": a rename is the one change where the
+     * thing being changed gets a new identity, and a caller that has to guess the new
+     * name — or read it back out of the app's state — gets the name from *before* the
+     * change. That is exactly how the editor's title ended up lagging one rename
+     * behind, and showing a name the file no longer had.
+     */
+    fun renameTo(file: File, newName: String): File? {
+        val ws = workspace ?: return null
         val wasEditing = editingPath != null && editingPath == ws.relative(file)
         val result = ws.rename(file, newName)
         // The editor and the history point at a path, not at a file object, so a
         // rename of the file being edited would leave both looking at a name that no
         // longer exists. They follow it instead — renaming from inside the editor is
         // exactly when this happens.
-        if (result.isSuccess) {
-            val moved = result.getOrNull() ?: file
-            if (wasEditing) editingPath = ws.relative(moved)
+        val moved = result.getOrNull()
+        if (result.isSuccess && moved != null && wasEditing) editingPath = ws.relative(moved)
+        val made = moved?.name ?: newName.trim()
+        return if (afterChange(result, "Renamed ${file.name} to $made${namedFrom(newName, made)}", file.parentFile)) {
+            moved
+        } else {
+            null
         }
-        val made = result.getOrNull()?.name ?: newName.trim()
-        return afterChange(result, "Renamed ${file.name} to $made${namedFrom(newName, made)}", file.parentFile)
     }
 
     /**
@@ -457,6 +506,32 @@ class AppViewModel @JvmOverloads constructor(
         return afterChange(result, if (wasFolder) "Deleted $name/" else "Deleted $name", file.parentFile)
     }
 
+    /**
+     * Locks or unlocks a file.
+     *
+     * A locked file can be opened and read, and — inside the editor — not written.
+     * The lock is a property of this phone's copy (`.muffy/locked.json`), so it makes
+     * no commit: locking does not change the file, and unlocking does not undo
+     * anything. Anything that writes has to ask [isLocked] first, which is why the
+     * question is answered here and not by the screen alone.
+     */
+    fun toggleLocked(file: File) {
+        val ws = workspace ?: return
+        val target = ws.relative(file) ?: return
+        val key = ws.pathString(target)
+        val next = if (key in lockedPaths) lockedPaths - key else lockedPaths + key
+        ws.setLocked(next)
+        lockedPaths = next
+        message = if (key in next) "Locked ${file.name}" else "Unlocked ${file.name}"
+    }
+
+    /** True when [file] may not be written. */
+    fun isLocked(file: File): Boolean {
+        val ws = workspace ?: return false
+        val target = ws.relative(file) ?: return false
+        return ws.pathString(target) in lockedPaths
+    }
+
     /** Pins or unpins a file or folder (§2: the flags live in `.muffy`). */
     fun togglePinned(file: File) {
         val ws = workspace ?: return
@@ -465,6 +540,131 @@ class AppViewModel @JvmOverloads constructor(
         val next = if (key in pins) pins - key else pins + key
         ws.setPins(next)
         pins = next
+    }
+
+    // ---- choosing several things --------------------------------------------
+
+    /** True when [file] is selected. */
+    fun isSelected(file: File): Boolean {
+        val ws = workspace ?: return false
+        val target = ws.relative(file) ?: return false
+        return ws.pathString(target) in selected
+    }
+
+    /** Adds [file] to the selection, or takes it out. */
+    fun toggleSelected(file: File) {
+        val ws = workspace ?: return
+        val target = ws.relative(file) ?: return
+        val key = ws.pathString(target)
+        selected = if (key in selected) selected - key else selected + key
+    }
+
+    /** Drops the selection — leaving selection mode, or finishing with it. */
+    fun clearSelection() {
+        selected = emptySet()
+    }
+
+    /** The selected things that still exist, deepest path last. */
+    private fun selectedFiles(): List<File> {
+        val ws = workspace ?: return emptyList()
+        return selected
+            .map { ws.fileAt(it.split("/")) }
+            .filter { it.exists() }
+            // Parents before children, so deleting a folder does not leave its
+            // children to be deleted twice — and a failure on one is reported
+            // without stopping the rest.
+            .sortedBy { it.path }
+    }
+
+    /**
+     * Moves everything selected into [into], and records both sides of every cross.
+     *
+     * The files are moved one at a time so that a single refusal — a name already
+     * taken in the destination, a folder into itself — does not take the rest with
+     * it. The commits happen after the moves, not per move: a commit takes
+     * everything that is waiting anyway, so per-move commits would fold into one and
+     * cost a repository walk each.
+     */
+    fun moveSelected(into: File): Boolean {
+        val ws = workspace ?: return false
+        val files = selectedFiles().filter { it.canonicalFile != into.canonicalFile }
+        if (files.isEmpty()) {
+            message = "Nothing is selected"
+            return false
+        }
+        val refused = mutableListOf<String>()
+        var movedCount = 0
+        // Which repositories the things came out of. A move that crosses the
+        // boundary has to be recorded on both sides, and with several things at once
+        // the sources can be more than one.
+        val was = mutableSetOf<String>()
+        files.forEach { file ->
+            ws.projectOf(file)?.takeIf { ws.inWorktree(file) }?.let { was += it }
+            val result = ws.move(file, into)
+            if (result.isFailure) {
+                refused += result.exceptionOrNull()?.message ?: "One file could not be moved"
+            } else {
+                movedCount++
+            }
+        }
+        selected = emptySet()
+        refresh()
+        if (movedCount == 0) {
+            message = refused.firstOrNull() ?: "Nothing was moved"
+            return false
+        }
+        val what = if (movedCount == 1) {
+            "Moved 1 item into ${into.name}/"
+        } else {
+            "Moved $movedCount items into ${into.name}/"
+        }
+        record(what)
+        // Both sides of the boundary, as for one move: the destination gains what
+        // arrived, and every source repository records what left it.
+        val arriving = ws.projectOf(into)?.takeIf { ws.inWorktree(into) }
+        val leaving = was - setOfNotNull(arriving)
+        leaving.forEach { commitProject(it, what) }
+        if (arriving != null) commitProject(arriving, what)
+        historyGeneration++
+        message = if (refused.isEmpty()) what else "$what — ${refused.first()}"
+        return true
+    }
+
+    /** Deletes everything selected, in one recorded change. */
+    fun deleteSelected(): Boolean {
+        val ws = workspace ?: return false
+        val files = selectedFiles()
+        if (files.isEmpty()) {
+            message = "Nothing is selected"
+            return false
+        }
+        // A folder that is already going takes its children with it, and deleting
+        // them afterwards would either fail or delete something that was made again.
+        val gone = mutableListOf<File>()
+        files.forEach { file ->
+            if (gone.any { file.path.startsWith(it.path + File.separator) }) return@forEach
+            if (ws.delete(file).isSuccess) gone += file else message = "Could not delete ${file.name}"
+        }
+        selected = emptySet()
+        // The view must not be left pointing inside a folder that is gone.
+        if (gone.isNotEmpty()) {
+            val stillThere = currentDir?.exists() == true
+            if (!stillThere) path = path.dropLast(1)
+        }
+        refresh()
+        if (gone.isEmpty()) return false
+        val what = if (gone.size == 1) {
+            "Deleted ${gone.first().name}"
+        } else {
+            "Deleted ${gone.size} items"
+        }
+        record(what)
+        gone.mapNotNull { ws.projectOf(it)?.takeIf { ws.inWorktree(it) } }
+            .distinct()
+            .forEach { commitProject(it, what) }
+        historyGeneration++
+        message = what
+        return true
     }
 
     /** Runs a change, records it in the account's history, and reloads. */
@@ -628,17 +828,28 @@ class AppViewModel @JvmOverloads constructor(
 
     // ---- the project actions ------------------------------------------------
 
-    /** Syncs a project: commit what changed with the names, then force push. */
-    fun sync(project: String) {
+    /**
+     * Syncs a project: commit what changed, then force push.
+     *
+     * [note] is the message the person typed in the window the Sync button opens.
+     * It is written as the sync's **own** commit — a commit whose tree is what was
+     * already committed, whose message is theirs. Without it the only messages in a
+     * project's history would be the app's own ("Edited milk.txt"), and the answer to
+     * "why was this pushed" would be a list of file names. A blank note means "just
+     * push", which is what a project with nothing waiting gets.
+     */
+    @JvmOverloads
+    fun sync(project: String, note: String? = null) {
         val g = git ?: return
         busy = true
+        val said = note?.trim().orEmpty()
         onWorker {
-            val result = g.sync(project)
+            val result = g.sync(project, said)
             main.post {
                 busy = false
                 message = result.message
                 refreshChanges()
-                record("Synced $project")
+                record(if (said.isEmpty()) "Synced $project" else "Synced $project: $said")
             }
         }
     }
@@ -1038,6 +1249,23 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /**
+     * Asks for the versions, on the worker, and hands them to [onDone] on the UI.
+     *
+     * Reading a history opens a repository and walks it, which is not something to
+     * do inside a frame. More importantly it is not something to do **before** the
+     * save that was just made has been committed: both run on the one worker, in the
+     * order they were asked for, so asking here guarantees the answer includes the
+     * commit the save queued a moment ago. Reading synchronously on the UI thread
+     * raced the commit and showed the version before the one that was just saved.
+     */
+    fun requestVersions(onDone: (List<Pair<GitService.CommitInfo, String?>>) -> Unit) {
+        onWorker {
+            val found = versions()
+            main.post { onDone(found) }
+        }
+    }
+
+    /**
      * The versions of the file whose history is open, newest first.
      *
      * Which history answers depends on where the file is: inside a project's
@@ -1100,10 +1328,16 @@ class AppViewModel @JvmOverloads constructor(
         }
         collect(dir, "")
 
+        // Every recent commit, not only the ones a path filter says touched this
+        // folder. The filter is asked about a *directory*, and a commit that removed
+        // a file from it does not always answer as a change to the directory — which
+        // is how this list came to hold one name when five files had been deleted.
+        // The tree at each commit is read anyway, so the filter only ever narrowed
+        // the question and never widened the answer.
         val commits = if (inside) {
-            repo?.log(project!!, base.ifEmpty { null }, DELETED_LOOKBACK).orEmpty()
+            repo?.log(project!!, null, DELETED_LOOKBACK).orEmpty()
         } else {
-            hist?.log(base.ifEmpty { null }, DELETED_LOOKBACK).orEmpty()
+            hist?.log(null, DELETED_LOOKBACK).orEmpty()
         }
         // Newest first, so the first commit that holds a name is the version to
         // bring back: the file as it last was, not as it was years ago.
@@ -1117,11 +1351,16 @@ class AppViewModel @JvmOverloads constructor(
             for (full in held) {
                 val name = if (base.isEmpty()) full else full.removePrefix("$base/")
                 if (name.isEmpty() || name in onDisk) continue
+                // **Direct children only.** Restoring is bringing back a row that
+                // used to be in *this* folder; a file from a folder inside it was
+                // never a row here, and offering it would put it back in a folder
+                // that may not exist any more.
+                if ('/' in name) continue
                 // The app's own markers are in the history and are not a person's
                 // files: `.gitkeep` exists so that an empty folder has a version, and
                 // offering it back as a deleted file would be the app talking to
                 // itself.
-                if (name.split("/").any { ws.isHidden(it) }) continue
+                if (ws.isHidden(name)) continue
                 found.putIfAbsent(name, commit.id)
             }
         }

@@ -56,8 +56,6 @@ class Workspace(val accountDir: File) {
 
     val stateDir: File get() = File(accountDir, STATE_DIR)
 
-    private val pinFile: File get() = File(stateDir, PINS_FILE)
-
     /**
      * Makes the folders the app itself owns, so that the shape of an account is
      * the same the moment it is signed in as it is after the first project.
@@ -346,10 +344,52 @@ class Workspace(val accountDir: File) {
     // ---- pinned flags ------------------------------------------------------
 
     /** The paths that are pinned, as git-style paths from the account root. */
-    fun pins(): Set<String> {
-        if (!pinFile.isFile) return emptySet()
+    fun pins(): Set<String> = readFlags(PINS_FILE)
+
+    /** Replaces the pinned paths. */
+    fun setPins(paths: Set<String>) = writeFlags(PINS_FILE, paths)
+
+    /** True when [file] is pinned. */
+    fun isPinned(file: File): Boolean {
+        val path = relative(file) ?: return false
+        return pathString(path) in pins()
+    }
+
+    // ---- locked files -------------------------------------------------------
+
+    /**
+     * The paths that are locked, as paths from the account root.
+     *
+     * A locked file is one the app will only ever **show**. It is a property of
+     * this phone's copy, not of the file: nothing is written into the file or into
+     * its history, so locking does not make a commit and unlocking does not undo
+     * one. Two reasons it is stored here rather than in the file itself — a marker
+     * in the text would be content the person did not write, and a marker in the
+     * name would change the name the file has.
+     */
+    fun locked(): Set<String> = readFlags(LOCKED_FILE)
+
+    /** Replaces the locked paths. */
+    fun setLocked(paths: Set<String>) = writeFlags(LOCKED_FILE, paths)
+
+    /** True when [file] is locked against editing. */
+    fun isLocked(file: File): Boolean {
+        val path = relative(file) ?: return false
+        return pathString(path) in locked()
+    }
+
+    /**
+     * A name list in `.muffy`, which is where every flag of the app lives.
+     *
+     * A file that cannot be read is an empty set, not a crash: flags are a
+     * convenience, and a damaged one must not stop the app from opening the folder
+     * it describes.
+     */
+    private fun readFlags(name: String): Set<String> {
+        val file = File(stateDir, name)
+        if (!file.isFile) return emptySet()
         return try {
-            val array = JSONArray(pinFile.readText())
+            val array = JSONArray(file.readText())
             (0 until array.length()).mapNotNull { array.optString(it)?.takeIf(String::isNotEmpty) }
                 .toSet()
         } catch (e: Exception) {
@@ -357,18 +397,11 @@ class Workspace(val accountDir: File) {
         }
     }
 
-    /** Replaces the pinned paths. */
-    fun setPins(paths: Set<String>) {
+    private fun writeFlags(name: String, paths: Set<String>) {
         stateDir.mkdirs()
         val array = JSONArray()
         paths.sorted().forEach { array.put(it) }
-        write(pinFile, array.toString())
-    }
-
-    /** True when [file] is pinned. */
-    fun isPinned(file: File): Boolean {
-        val path = relative(file) ?: return false
-        return pathString(path) in pins()
+        write(File(stateDir, name), array.toString())
     }
 
     // ---- creating a project on disk ---------------------------------------
@@ -453,6 +486,7 @@ class Workspace(val accountDir: File) {
          */
         const val KEEPER = ".gitkeep"
         const val PINS_FILE = "pins.json"
+        const val LOCKED_FILE = "locked.json"
 
         /** The extensions treated as pictures rather than text (§9). */
         val IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp")

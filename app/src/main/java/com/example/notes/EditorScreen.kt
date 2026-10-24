@@ -1,25 +1,29 @@
 package com.example.notes
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -39,33 +43,43 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * The editor: the file's text, its name, and the two things to do with them.
+ * The editor: the file's name in the top row, and its text below.
  *
- * The top row is, left to right: **back**, the **name** (editable where it is,
- * because renaming a file you are looking at is not a separate act), **history**,
- * and **Save**.
+ * ```text
+ * [<-]  milk.txt                     <- the top row, and nothing else
  *
- * **Saving is something a person does.** It used to happen on every pause in
- * typing, which made the back arrow a lie: it looked like leaving, and the work
- * was already kept. Now the pause-save is gone, so back really does discard
- * anything unsaved, and Save really does mean "keep this".
+ * History   [ Edit | View ]   [ Save ]   <- the second row, and it scrolls
+ * ```
  *
- * There is no title field besides the name and no preview (§8): the file's name
- * **is** its title, and every text file opens here however it is named.
+ * **Two rows, because the top row belongs to the file and the second to what can
+ * be done with it.** Four buttons wedged beside the name left the name — the one
+ * thing the screen is about — a few characters wide.
+ *
+ * **Back discards.** Saving is something a person does, so the arrow really does
+ * leave without keeping what was typed; the message says so when something was
+ * dropped.
+ *
+ * **The name is editable where it stands**, and it is committed on "done" and on
+ * leaving the field, never on a keystroke: the naming rule would otherwise rewrite
+ * the name under the finger as it was typed.
+ *
+ * **A locked file opens in View and cannot leave it.** The lock lives in `.muffy`,
+ * so it changes nothing in the file and makes no commit — which is why unlocking is
+ * also free.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -73,10 +87,10 @@ fun EditorScreen(
     viewModel: AppViewModel,
     file: java.io.File,
     onBack: () -> Unit,
-    onDelete: () -> Unit,
     onOpenHistory: () -> Unit,
 ) {
     val kind = viewModel.workspace?.kindOf(file) ?: EntryKind.TEXT
+    val locked = viewModel.isLocked(file)
     // Keyed on the *session*, not on the file: renaming the file you are writing
     // changes its path, and resetting the text on that would throw away everything
     // typed so far. Opening another file starts a new session and resets both.
@@ -85,8 +99,18 @@ fun EditorScreen(
     // What is on disk, so that Save can say whether there is anything to save.
     var saved by remember(session) { mutableStateOf(text) }
     var name by remember(session) { mutableStateOf(file.name) }
-    var menu by remember { mutableStateOf(false) }
+    // A locked file is read-only, so it opens in View. Every other text file opens
+    // ready to be written, which is what opening a note is for.
+    var writing by remember(session) { mutableStateOf(!locked) }
+    var focused by remember { mutableStateOf(false) }
     val focus = LocalFocusManager.current
+
+    // The file can be renamed from elsewhere — a move, or the browser's rename — and
+    // the field must show the name it has. Only while it is not being typed in,
+    // because overwriting a half-typed name is the same bug in the other direction.
+    LaunchedEffect(file.path) {
+        if (!focused) name = file.name
+    }
 
     // A version put back from the history changes the file underneath the editor,
     // which stays open. Pick it up — but only when there is nothing unsaved to
@@ -102,30 +126,29 @@ fun EditorScreen(
     /**
      * Renames the file to what is in the field, if that is a different name.
      *
-     * Only on "done" and on leaving the field, never on a keystroke: the cleaning
-     * rule would otherwise rewrite the name under the person's finger as they typed
-     * a capital letter or a space.
+     * Idempotent, and that is not a detail: pressing "done" on the keyboard moves
+     * focus, and moving focus calls this again. The second call used to compare the
+     * *cleaned* name against the name of the file from before the rename, decide it
+     * had work to do, fail because that file no longer existed — and put the old
+     * name back in the field. Which is exactly what "the title lags one rename
+     * behind" looks like from the outside.
      */
     fun commitName() {
+        val live = viewModel.editingFile ?: file
         val wanted = name.trim()
-        if (wanted.isEmpty() || wanted == file.name) {
-            name = file.name
+        if (wanted.isEmpty() || wanted == live.name) {
+            name = live.name
             return
         }
-        if (viewModel.rename(file, wanted)) {
-            // The field shows the name the file actually has: the app writes a name
-            // one way, so `Shopping List` comes back as `shopping_list.txt`.
-            name = viewModel.editingFile?.name ?: file.name
-        } else {
-            // The rename was refused; the field must not go on showing a name that
-            // is not the file's.
-            name = file.name
-        }
+        // The answer is the file, not "yes": the name to show is the one the app
+        // actually wrote, which is not always the one that was typed.
+        val moved = viewModel.renameTo(live, wanted)
+        name = moved?.name ?: live.name
     }
 
     /** Leaves the editor, dropping anything not saved. */
     fun leave() {
-        val dropped = kind == EntryKind.TEXT && text != saved
+        val dropped = kind == EntryKind.TEXT && writing && text != saved
         focus.clearFocus()
         onBack()
         if (dropped) viewModel.message = "Left without saving"
@@ -144,62 +167,38 @@ fun EditorScreen(
                     }
                 },
                 title = {
-                    // The name, editable where it stands. "Rename" as a separate
-                    // command made a person open a window to change a word they were
-                    // already looking at.
-                    BasicTextField(
-                        value = name,
-                        onValueChange = { name = it },
-                        singleLine = true,
-                        textStyle = MaterialTheme.typography.titleMedium.copy(
-                            color = MaterialTheme.colorScheme.onSurface,
-                        ),
-                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                        keyboardActions = KeyboardActions(onDone = {
-                            commitName()
-                            focus.clearFocus()
-                        }),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .onFocusChanged { state -> if (!state.isFocused) commitName() },
-                    )
-                },
-                actions = {
-                    TextButton(onClick = {
-                        // The name is committed first: a version list is a list of
-                        // this file's versions, and the file it belongs to may just
-                        // have been given another name.
-                        commitName()
-                        onOpenHistory()
-                    }) { Text("History") }
-                    // A button with a background, not a word where a button should
-                    // be: saving is the action of this screen, and it should look
-                    // like one.
-                    Button(
-                        onClick = {
-                            // Saved before the name is committed: the text belongs to
-                            // this file as it is now, and a rename afterwards carries
-                            // the file — with its text — to the new name.
-                            viewModel.saveEditor(text)
-                            saved = text
-                            commitName()
-                            focus.clearFocus()
-                        },
-                        enabled = kind == EntryKind.TEXT && text != saved,
-                        modifier = Modifier.padding(end = 8.dp),
-                    ) { Text("Save") }
-                    IconButton(onClick = { menu = true }) {
-                        Icon(Icons.Filled.MoreVert, contentDescription = "More")
-                    }
-                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
-                            leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
-                            onClick = {
-                                menu = false
-                                onDelete()
-                            },
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (locked) {
+                            Icon(
+                                Icons.Filled.Lock,
+                                contentDescription = "Locked, so it cannot be edited",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                        // The name, editable where it stands — but only while the
+                        // file can be written. A named anything on a locked file is
+                        // a rename, and a locked file is one this app does not touch.
+                        BasicTextField(
+                            value = name,
+                            onValueChange = { if (!locked) name = it },
+                            singleLine = true,
+                            readOnly = locked,
+                            textStyle = MaterialTheme.typography.titleMedium.copy(
+                                color = MaterialTheme.colorScheme.onSurface,
+                            ),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = {
+                                commitName()
+                                focus.clearFocus()
+                            }),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .onFocusChanged { state ->
+                                    focused = state.isFocused
+                                    if (!state.isFocused) commitName()
+                                },
                         )
                     }
                 },
@@ -207,32 +206,107 @@ fun EditorScreen(
         },
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+            // The second row. It scrolls sideways so that it can carry what it
+            // needs to without squeezing the text into a column four buttons wide —
+            // and because a phone in a large font has no room for all of it.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                TextButton(onClick = {
+                    // The name is committed first: a version list is a list of this
+                    // file's versions, and the file may just have been given another
+                    // name.
+                    commitName()
+                    onOpenHistory()
+                }) { Text("History") }
+
+                // View | Edit. One switch rather than two buttons, and it says which
+                // of the two you are in — "View" a person can read, "Editing" a
+                // person has to work out.
+                if (kind == EntryKind.TEXT) {
+                    FilterChip(
+                        selected = writing,
+                        enabled = !locked,
+                        onClick = {
+                            if (writing) {
+                                // Leaving the editor's way of writing does not throw
+                                // anything away: what was typed is still on the
+                                // screen, and Save is still there.
+                                focus.clearFocus()
+                                commitName()
+                            }
+                            writing = !writing
+                        },
+                        label = { Text(if (writing) "Edit" else "View") },
+                    )
+                }
+
+                Button(
+                    onClick = {
+                        // Saved before the name is committed: the text belongs to this
+                        // file as it is now, and a rename afterwards carries the file —
+                        // with its text — to the new name.
+                        viewModel.saveEditor(text)
+                        saved = text
+                        commitName()
+                        focus.clearFocus()
+                    },
+                    enabled = kind == EntryKind.TEXT && !locked && text != saved,
+                ) { Text("Save") }
+            }
+            HorizontalDivider()
+
             // No sync row here. The editor is a page of writing, not a place where
             // projects are managed: a line of account, project and "3 changed" above
             // the text was the app talking over the thing being written.
-            //
-            // The outer Column has taken the top padding, so the content must not
-            // add it again — doing so pushed the text field over the slim row.
             val content = PaddingValues(top = 0.dp)
             when (kind) {
                 EntryKind.IMAGE -> Picture(file = file, padding = content)
                 EntryKind.UNKNOWN -> CannotEdit(file = file, padding = content)
 
-                else -> TextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    modifier = Modifier.fillMaxSize(),
-                    textStyle = MaterialTheme.typography.bodyLarge,
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                    ),
-                    placeholder = { Text("Start writing…") },
-                )
+                else -> if (writing && !locked) {
+                    TextField(
+                        value = text,
+                        onValueChange = { text = it },
+                        modifier = Modifier.fillMaxSize(),
+                        textStyle = MaterialTheme.typography.bodyLarge,
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                        ),
+                        placeholder = { Text("Start writing…") },
+                    )
+                } else {
+                    // Reading. A `.md` file is shown as the thing it describes,
+                    // because the markdown is not what its author wanted read; every
+                    // other text is shown exactly as it is.
+                    val scrolling = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(16.dp)
+                    if (isMarkdown(file)) {
+                        MarkdownBody(text = text, modifier = scrolling)
+                    } else {
+                        Text(
+                            text = text,
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = scrolling,
+                        )
+                    }
+                }
             }
         }
     }
 }
+
+/** True for a file whose text is meant to be read as Markdown. */
+internal fun isMarkdown(file: java.io.File): Boolean =
+    file.extension.lowercase() in setOf("md", "markdown")
 
 /**
  * A picture, decoded away from the main thread.

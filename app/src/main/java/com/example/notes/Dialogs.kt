@@ -1,6 +1,9 @@
 package com.example.notes
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,9 +13,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -25,7 +32,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
 /** Asks for one line of text. */
@@ -469,36 +478,212 @@ fun SignInDialog(
 }
 
 /** Picks the folder a thing should be moved into. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MoveDialog(
     title: String,
-    folders: List<Pair<String, java.io.File>>,
+    /** The account's root, which is where the browser starts. */
+    root: java.io.File,
+    /** Folders that must not be offered: the things being moved, and their insides. */
+    forbidden: List<java.io.File>,
+    /** The folder the browser starts in. */
+    start: java.io.File = root,
+    /**
+     * Whether a folder may be *chosen*. A folder that may not be chosen can still be
+     * looked inside — `projects/` holds every project's repository, and walking
+     * through it to reach one is the whole point of a browser.
+     */
+    canChoose: (java.io.File) -> Boolean = { true },
     onDismiss: () -> Unit,
-    onPick: (java.io.File) -> Unit,
+    onMove: (java.io.File) -> Unit,
 ) {
+    // **One layer at a time, from the root.** A flat list of every folder in the
+    // account answered "where can this go" with a wall of paths whose shape was
+    // invisible — and the answer a person has is a *place*, reached by walking to it.
+    var here by remember(start) { mutableStateOf(start) }
+    var chosen by remember(start) { mutableStateOf<java.io.File?>(null) }
+    var hint by remember(start) { mutableStateOf<String?>(null) }
+
+    /** The folders this one holds that may be moved into. */
+    fun children(dir: java.io.File): List<java.io.File> =
+        (dir.listFiles() ?: emptyArray())
+            .filter { it.isDirectory }
+            .filter { child -> !forbidden.any { it.name == child.name && it.parentFile == child.parentFile } }
+            .filter { child -> forbidden.none { it.canonicalFile == child.canonicalFile } }
+            .filter { child -> forbidden.none { f -> f.isDirectory && child.path.startsWith(f.path + java.io.File.separator) } }
+            .sortedBy { it.name.lowercase() }
+
+    val hereChildren = children(here)
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
-            Column(modifier = Modifier.heightIn(max = 420.dp)) {
-                if (folders.isEmpty()) {
-                    Text("There is no other folder to move into")
+            Column(modifier = Modifier.heightIn(max = 440.dp)) {
+                // Where the browser is, and the way back up.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        enabled = here.canonicalFile != start.canonicalFile || here != start,
+                        onClick = {
+                            val parent = here.parentFile
+                            if (parent != null) here = parent
+                            hint = null
+                        },
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Up one folder")
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (here == root) "The account" else here.name,
+                            style = MaterialTheme.typography.titleSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = "Tap a folder to look inside it; press and hold to choose it.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                HorizontalDivider()
+
+                if (hereChildren.isEmpty()) {
+                    Text(
+                        "There is no folder inside this one to move into.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(vertical = 12.dp),
+                    )
                 } else {
                     LazyColumn {
-                        items(folders) { (label, dir) ->
-                            Text(
-                                text = label,
-                                style = MaterialTheme.typography.bodyMedium,
+                        items(hereChildren) { child ->
+                            val picked = chosen?.canonicalFile == child.canonicalFile
+                            val deeper = children(child).isNotEmpty()
+                            Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { onPick(dir) }
-                                    .padding(vertical = 10.dp),
-                            )
+                                    .background(
+                                        if (picked) MaterialTheme.colorScheme.secondaryContainer
+                                        else Color.Transparent,
+                                    )
+                                    .combinedClickable(
+                                        onClick = {
+                                            if (deeper) {
+                                                here = child
+                                                hint = null
+                                            } else {
+                                                // A folder with nothing inside cannot be
+                                                // walked into, so a tap would look like
+                                                // nothing happened. Say what to do instead.
+                                                hint = "Press and hold \"${child.name}\" to move into it."
+                                            }
+                                        },
+                                        onLongClick = {
+                                            if (canChoose(child)) {
+                                                chosen = child
+                                                hint = null
+                                            } else {
+                                                hint = "\"${child.name}\" belongs to the app."
+                                            }
+                                        },
+                                    )
+                                    .padding(horizontal = 8.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = child.name + "/",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                if (picked) {
+                                    Text(
+                                        "chosen",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
+                            }
+                            HorizontalDivider()
                         }
                     }
                 }
+
+                val said = hint
+                if (said != null) {
+                    Text(
+                        said,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+                Text(
+                    text = chosen?.let { "Move into ${it.name}/" } ?: "Nothing chosen yet",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        confirmButton = {
+            // A button, not a tap on the row: choosing where something goes and
+            // then moving it is two decisions, and a folder that was only looked
+            // into must never be a folder that was moved into.
+            TextButton(
+                enabled = chosen != null,
+                onClick = { chosen?.let(onMove) },
+            ) { Text("Move") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/**
+ * Asks what a sync was for.
+ *
+ * A project's history is the app narrating files — "Edited milk.txt" — which is the
+ * right message for an undo step and the wrong one for the history on GitHub, where
+ * the question is why a push happened. So the push asks, and what is typed becomes
+ * the sync's own commit.
+ */
+@Composable
+fun SyncDialog(
+    project: String,
+    changes: Int,
+    onDismiss: () -> Unit,
+    onSync: (String) -> Unit,
+) {
+    var note by remember(project) {
+        mutableStateOf(if (changes > 0) "$changes change${if (changes == 1) "" else "s"}" else "")
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Sync $project") },
+        text = {
+            Column {
+                Text(
+                    if (changes > 0) {
+                        "The changes are already committed on this phone. Say what they " +
+                            "were for, and it becomes the message GitHub shows."
+                    } else {
+                        "Nothing is waiting. Syncing only pushes what is already here."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                OutlinedTextField(
+                    value = note,
+                    onValueChange = { note = it },
+                    label = { Text("What changed?") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSync(note) }) { Text("Sync") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

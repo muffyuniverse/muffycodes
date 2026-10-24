@@ -297,7 +297,6 @@ class ScenariosTest {
                         viewModel = viewModel,
                         file = file,
                         onBack = {},
-                        onDelete = {},
                         onOpenHistory = {},
                     )
                 }
@@ -417,7 +416,6 @@ class ScenariosTest {
         onOpen = {},
         onRename = {},
         onMove = {},
-        onDelete = {},
         onTogglePin = {},
         onHistory = {},
     )

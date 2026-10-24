@@ -21,6 +21,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -68,10 +69,21 @@ fun HistoryScreen(
     onBack: () -> Unit,
     onSelect: () -> Unit = onBack,
 ) {
-    // Recomputed when the file changes or something is restored, not on every frame:
-    // `versions()` opens the repository and walks it.
-    val versions = remember(viewModel.historyPath, viewModel.historyGeneration) {
-        viewModel.versions()
+    // Asked for on the worker, so the repository walk never happens in a frame — and,
+    // more to the point, so it happens **after** the save that was just made has been
+    // committed. Both run on the app's one worker, in the order they were asked for,
+    // so the newest version here is the one that was just saved rather than the one
+    // before it.
+    var versions by remember(viewModel.historyPath) {
+        mutableStateOf<List<Pair<GitService.CommitInfo, String?>>>(emptyList())
+    }
+    var loading by remember(viewModel.historyPath) { mutableStateOf(true) }
+    LaunchedEffect(viewModel.historyPath, viewModel.historyGeneration) {
+        loading = true
+        viewModel.requestVersions { found ->
+            versions = found
+            loading = false
+        }
     }
     var at by remember(viewModel.historyPath) { mutableStateOf(0) }
     val index = at.coerceIn(0, maxOf(versions.lastIndex, 0))
@@ -134,12 +146,17 @@ fun HistoryScreen(
                     modifier = Modifier.fillMaxSize().padding(24.dp),
                     verticalArrangement = Arrangement.Center,
                 ) {
-                    Text("No earlier versions", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "A version appears here as soon as something changes.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        if (loading) "Reading the history…" else "No earlier versions",
+                        style = MaterialTheme.typography.titleMedium,
                     )
+                    if (!loading) {
+                        Text(
+                            "A version appears here as soon as something changes.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
                 return@Scaffold
             }
@@ -159,19 +176,32 @@ fun HistoryScreen(
                     Text("<", style = MaterialTheme.typography.titleLarge)
                 }
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = commit.message.lineSequence().first().ifBlank { "Changed" },
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    // **When, and which version — and nothing else.** The message
+                    // was the app narrating itself ("Edited milk.txt", "Created
+                    // shop/"), which every version of the same file repeats and which
+                    // says nothing a person picking a version needs. What they need is
+                    // how long ago the version was and its name in git.
                     Text(
                         text = DateFormat.getDateTimeInstance(
                             DateFormat.MEDIUM,
                             DateFormat.SHORT,
-                        ).format(Date(commit.timestamp)) + "  ·  " + commit.shortId,
+                        ).format(Date(commit.timestamp)),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    // The one message worth showing is the person's own: the note
+                    // typed when this was pushed. Everything else is the app's voice,
+                    // and it is left out.
+                    val note = commit.message.lineSequence().first().trim()
+                    Text(
+                        text = commit.shortId + if (note.isNotEmpty() && !appVoice(note)) {
+                            "  ·  $note"
+                        } else {
+                            ""
+                        },
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
                 TextButton(
@@ -217,4 +247,22 @@ fun HistoryScreen(
 
         }
     }
+}
+
+/**
+ * True when a commit message is the app narrating a change rather than a person
+ * explaining one.
+ *
+ * Every change the app makes is committed with a sentence it wrote — "Edited
+ * milk.txt", "Moved a into b/", "Restored an older version". In a list of versions
+ * of one file those repeat, and they are the same sentence for every row. The one
+ * message that is not the app's is the note typed when a project was pushed, so
+ * that is the one worth the width.
+ */
+internal fun appVoice(message: String): Boolean {
+    val verbs = listOf(
+        "Edited ", "Created ", "Deleted ", "Renamed ", "Moved ", "Imported ",
+        "Restored ", "Brought ", "Synced ",
+    )
+    return verbs.any { message.startsWith(it) }
 }

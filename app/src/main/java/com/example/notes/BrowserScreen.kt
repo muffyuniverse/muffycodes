@@ -1,6 +1,7 @@
 package com.example.notes
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,10 +19,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -44,6 +47,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
@@ -54,7 +58,9 @@ class BrowserActions(
     val onMove: (Entry) -> Unit,
     val onDelete: (Entry) -> Unit,
     val onTogglePin: (Entry) -> Unit,
+    val onToggleLock: (Entry) -> Unit,
     val onHistory: (Entry) -> Unit,
+    val onSelect: (Entry) -> Unit,
 )
 
 /**
@@ -82,6 +88,8 @@ fun BrowserScreen(
     onUploadFiles: () -> Unit,
     onUploadFolder: () -> Unit,
     onRestoreDeleted: () -> Unit,
+    onMoveSelected: () -> Unit,
+    onDeleteSelected: () -> Unit,
 ) {
     val projects = viewModel.atProjects
     val here = viewModel.path
@@ -184,6 +192,18 @@ fun BrowserScreen(
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             ProjectSlimRow(viewModel, onRowSync)
+
+            // What can be done with what is chosen. It appears only when
+            // something is chosen, because it is a mode: a long press on a row
+            // enters it, and the cross leaves it.
+            if (viewModel.selected.isNotEmpty()) {
+                SelectionBar(
+                    count = viewModel.selected.size,
+                    onMove = onMoveSelected,
+                    onDelete = onDeleteSelected,
+                    onClear = { viewModel.clearSelection() },
+                )
+            }
 
             if (viewModel.showSearch) {
                 OutlinedTextField(
@@ -363,6 +383,9 @@ private fun EntryList(viewModel: AppViewModel, actions: BrowserActions) {
             EntryRow(
                 entry = entry,
                 pinned = pinned,
+                locked = viewModel.isLocked(entry.file),
+                selected = viewModel.isSelected(entry.file),
+                choosing = viewModel.selected.isNotEmpty(),
                 local = !viewModel.inWorktree && viewModel.currentProject != null,
                 // `projects/` at the root and `repo/` inside a project are the app's
                 // own folders: they can be opened, and nothing else. Renaming,
@@ -384,19 +407,36 @@ private fun EntryList(viewModel: AppViewModel, actions: BrowserActions) {
 private fun EntryRow(
     entry: Entry,
     pinned: Boolean,
+    locked: Boolean,
+    selected: Boolean,
+    choosing: Boolean,
     local: Boolean,
     system: Boolean,
     actions: BrowserActions,
     onOpen: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
+    val background = if (selected) MaterialTheme.colorScheme.secondaryContainer
+    else Color.Transparent
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = onOpen, onLongClick = { if (!system) menu = true })
+            .background(background)
+            // **A long press chooses; it does not open a menu.** A menu is a list of
+            // things to do to one row; the thing people want with several rows is to
+            // do the same thing to all of them, which needs a way to mark them that
+            // does not cover the rows with a window.
+            .combinedClickable(
+                onClick = { if (choosing) actions.onSelect(entry) else onOpen() },
+                onLongClick = { if (!system) actions.onSelect(entry) },
+            )
             .padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (choosing) {
+            Checkbox(checked = selected, onCheckedChange = { actions.onSelect(entry) })
+            Spacer(Modifier.width(4.dp))
+        }
         if (pinned) {
             Icon(
                 Icons.Filled.Star,
@@ -426,7 +466,26 @@ private fun EntryRow(
                 )
             }
         }
-        if (!system) Box {
+        if (!choosing && !system && entry.kind == EntryKind.TEXT) {
+            // The lock sits to the left of the menu, and only where it can mean
+            // something: a file this app would otherwise let you write.
+            IconButton(onClick = { actions.onToggleLock(entry) }) {
+                // One glyph, two states, told apart by colour and by what a screen
+                // reader says. The open padlock lives in the extended icon set, and
+                // one icon is not worth a whole dependency.
+                Icon(
+                    Icons.Filled.Lock,
+                    contentDescription = if (locked) {
+                        "${entry.name} is locked; tap to unlock"
+                    } else {
+                        "Lock ${entry.name}, so it can only be viewed"
+                    },
+                    tint = if (locked) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.outline,
+                )
+            }
+        }
+        if (!choosing && !system) Box {
             IconButton(onClick = { menu = true }) {
                 Icon(Icons.Filled.MoreVert, contentDescription = "More")
             }
@@ -438,6 +497,15 @@ private fun EntryRow(
                         actions.onTogglePin(entry)
                     },
                 )
+                if (entry.kind == EntryKind.TEXT) {
+                    DropdownMenuItem(
+                        text = { Text(if (locked) "Unlock" else "Lock") },
+                        onClick = {
+                            menu = false
+                            actions.onToggleLock(entry)
+                        },
+                    )
+                }
                 DropdownMenuItem(
                     text = { Text("Rename…") },
                     onClick = {
@@ -466,6 +534,43 @@ private fun EntryRow(
                         actions.onDelete(entry)
                     },
                 )
+            }
+        }
+    }
+}
+
+/**
+ * What is chosen, and what can be done with it.
+ *
+ * The buttons are words rather than icons because there are two of them and they
+ * are dangerous ones: "Delete" on four rows at once is not a thing to make a
+ * person guess at from a shape.
+ */
+@Composable
+private fun SelectionBar(
+    count: Int,
+    onMove: () -> Unit,
+    onDelete: () -> Unit,
+    onClear: () -> Unit,
+) {
+    Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = if (count == 1) "1 chosen" else "$count chosen",
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onMove) { Text("Move…") }
+            TextButton(onClick = onDelete) {
+                Text("Delete", color = MaterialTheme.colorScheme.error)
+            }
+            IconButton(onClick = onClear) {
+                Icon(Icons.Filled.Clear, contentDescription = "Stop choosing")
             }
         }
     }
