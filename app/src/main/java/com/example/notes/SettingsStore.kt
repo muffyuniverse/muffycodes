@@ -7,12 +7,15 @@ import androidx.compose.runtime.setValue
 
 /**
  * The settings that are not about an account: the appearance, and how much
- * history is kept.
+ * change history is kept.
  *
- * Two separate lengths are kept, because the two histories have different
- * shapes — the account's own history records every edit and every move and
- * grows quickly, while a project's history grows only when the project is
- * synced. Zero means "keep everything", which is the default.
+ * **One length, not two.** It used to be two — the account's own history and
+ * each project's — and the difference was invisible in use: somebody setting a
+ * limit is answering "how far back can I go?", which is one question. The number
+ * now applies to this phone and to each project individually, which is what it
+ * always meant.
+ *
+ * Zero means "keep everything", which is the default.
  *
  * A length is applied **on the next change**: nothing is pruned when the number
  * is typed, so shortening the history of a large tree is a decision whose cost
@@ -31,12 +34,13 @@ class SettingsStore(context: Context, name: String = "settings") {
     var useDark: Boolean by mutableStateOf(prefs.getBoolean(KEY_DARK, false))
         private set
 
-    /** How many commits the account's history keeps. 0 keeps everything. */
-    var appHistoryLength: Int by mutableStateOf(prefs.getInt(KEY_APP_HISTORY, 0))
-        private set
-
-    /** How many commits a project's history keeps. 0 keeps everything. */
-    var projectHistoryLength: Int by mutableStateOf(prefs.getInt(KEY_PROJECT_HISTORY, 0))
+    /**
+     * How many changes — local commits — are kept on this phone. 0 keeps all.
+     *
+     * Applies to the phone's own change history and to each project's individual
+     * limit alike.
+     */
+    var historyLength: Int by mutableStateOf(prefs.getInt(KEY_HISTORY, legacyLength()))
         private set
 
     fun selectTheme(theme: AppTheme) {
@@ -49,19 +53,22 @@ class SettingsStore(context: Context, name: String = "settings") {
         prefs.edit().putBoolean(KEY_DARK, useDark).apply()
     }
 
-    /** Sets the account history length; a negative number means no limit. */
-    fun keepAppHistory(value: Int) {
+    /** Sets the change history length; a negative number means no limit. */
+    fun keepHistory(value: Int) {
         val clean = value.coerceAtLeast(0)
-        appHistoryLength = clean
-        prefs.edit().putInt(KEY_APP_HISTORY, clean).apply()
+        historyLength = clean
+        prefs.edit().putInt(KEY_HISTORY, clean).apply()
     }
 
-    /** Sets the project history length; a negative number means no limit. */
-    fun keepProjectHistory(value: Int) {
-        val clean = value.coerceAtLeast(0)
-        projectHistoryLength = clean
-        prefs.edit().putInt(KEY_PROJECT_HISTORY, clean).apply()
-    }
+    /**
+     * The two lengths older builds stored separately, read once for the migration.
+     *
+     * The larger of the two is kept: a person who had set either history longer
+     * than the other meant to be able to go back that far, and reading the smaller
+     * would silently delete versions they had asked to keep.
+     */
+    private fun legacyLength(): Int =
+        maxOf(prefs.getInt(KEY_APP_HISTORY, 0), prefs.getInt(KEY_PROJECT_HISTORY, 0))
 
     /**
      * Reads a length typed into a field. A blank field, or anything that is not
@@ -70,6 +77,9 @@ class SettingsStore(context: Context, name: String = "settings") {
     companion object {
         const val KEY_THEME = "theme"
         const val KEY_DARK = "use_dark"
+        const val KEY_HISTORY = "history_length"
+
+        /** The two keys older builds wrote; read once, then ignored. */
         const val KEY_APP_HISTORY = "app_history_length"
         const val KEY_PROJECT_HISTORY = "project_history_length"
 

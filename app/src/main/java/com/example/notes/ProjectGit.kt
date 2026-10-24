@@ -74,12 +74,39 @@ class ProjectGit(
      * history is shortened to the configured length afterwards — the same
      * setting the account's own history obeys, applied to this project.
      */
+    /**
+     * Commits whatever has changed in the project's worktree, now.
+     *
+     * Every change is committed as it happens — that is the project's **sync
+     * history**, and it is what the history screen walks. Syncing is then only the
+     * push: a person is never asked to decide what a change means before they can
+     * go back to it.
+     *
+     * Returns the new commit's id, or null when there was nothing to commit.
+     */
+    fun commit(project: String, what: String): String? {
+        val repo = open(project) ?: return null
+        return repo.use {
+            try {
+                val id = GitService.commitAll(it, what, authorProvider())
+                if (id != null) prune(it)
+                id
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+
     fun sync(project: String): GitService.RemoteResult {
         val repo = open(project) ?: return GitService.RemoteResult(
             "This project has no repository yet", false
         )
         return repo.use {
             try {
+                // Every change is already committed, so this can only be catching
+                // something that slipped past — a half-written file, a deletion made
+                // by another app. It stays because a push that silently leaves a
+                // change behind is worse than a commit nobody asked for.
                 val changed = GitService.changedPaths(it)
                 if (changed.isNotEmpty()) {
                     GitService.commitAll(it, CommitMessage.sync(changed), authorProvider())

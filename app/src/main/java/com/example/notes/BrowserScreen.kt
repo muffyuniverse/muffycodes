@@ -77,7 +77,6 @@ fun BrowserScreen(
     viewModel: AppViewModel,
     username: String?,
     onOpenSettings: () -> Unit,
-    onOpenAccount: () -> Unit,
     actions: BrowserActions,
     onAddProject: () -> Unit,
     onRowSync: (String) -> Unit,
@@ -85,6 +84,8 @@ fun BrowserScreen(
     onRowDelete: (String) -> Unit,
     onCreateFile: () -> Unit,
     onCreateFolder: () -> Unit,
+    onUploadFiles: () -> Unit,
+    onUploadFolder: () -> Unit,
 ) {
     val projects = viewModel.atProjects
     val here = viewModel.path
@@ -93,13 +94,13 @@ fun BrowserScreen(
         topBar = {
             TopAppBar(
                 navigationIcon = {
+                    // Nothing at the root. The three-lined button that used to be
+                    // here opened a window of the account, its switch list and its
+                    // buttons — every one of which Settings already has, so it was
+                    // two places to keep in step and the wrong one to find first.
                     if (viewModel.canGoUp) {
                         IconButton(onClick = { viewModel.up() }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Up")
-                        }
-                    } else {
-                        IconButton(onClick = onOpenAccount) {
-                            Icon(Icons.Filled.Menu, contentDescription = "Account")
                         }
                     }
                 },
@@ -157,6 +158,15 @@ fun BrowserScreen(
                 var adding by remember { mutableStateOf(false) }
                 Column(horizontalAlignment = Alignment.End) {
                     if (adding) {
+                        // Putting something in from Downloads sits beside making
+                        // something, because to a person they are the same question:
+                        // "how does a file get here?"
+                        TextButton(onClick = { adding = false; onUploadFolder() }) {
+                            Text("Upload a folder…")
+                        }
+                        TextButton(onClick = { adding = false; onUploadFiles() }) {
+                            Text("Upload files…")
+                        }
                         TextButton(onClick = { adding = false; onCreateFolder() }) {
                             Text("New folder")
                         }
@@ -354,6 +364,11 @@ private fun EntryList(viewModel: AppViewModel, actions: BrowserActions) {
                 pinned = pinned,
                 inWorktree = viewModel.inWorktree,
                 local = !viewModel.inWorktree && viewModel.currentProject != null,
+                // `projects/` at the root and `repo/` inside a project are the app's
+                // own folders: they can be opened, and nothing else. Renaming,
+                // moving or deleting one is how the account's tree stops being the
+                // tree the app thinks it is.
+                system = ws?.isStructural(entry.file) == true,
                 actions = actions,
                 onOpen = {
                     if (entry.isFolder) viewModel.openChild(entry.name) else actions.onOpen(entry)
@@ -371,6 +386,7 @@ private fun EntryRow(
     pinned: Boolean,
     inWorktree: Boolean,
     local: Boolean,
+    system: Boolean,
     actions: BrowserActions,
     onOpen: () -> Unit,
 ) {
@@ -378,7 +394,7 @@ private fun EntryRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = onOpen, onLongClick = { menu = true })
+            .combinedClickable(onClick = onOpen, onLongClick = { if (!system) menu = true })
             .padding(start = 16.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -393,24 +409,25 @@ private fun EntryRow(
         }
         Column(modifier = Modifier.weight(1f)) {
             Text(
+                // A trailing slash is the whole of "this is a folder": the name and
+                // its extension already say what kind of file a file is, so the line
+                // that used to spell it out underneath was saying it twice.
                 text = entry.name + if (entry.isFolder) "/" else "",
                 style = MaterialTheme.typography.bodyLarge,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                text = when (entry.kind) {
-                    EntryKind.FOLDER -> "folder"
-                    EntryKind.IMAGE -> "image"
-                    EntryKind.TEXT -> "text"
-                    // §9's third class, named as the design names it.
-                    EntryKind.UNKNOWN -> "unknown"
-                } + if (local) "  ·  local" else "",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            if (local) {
+                Text(
+                    // Not a type — a fact about where the file lives, which no
+                    // extension can tell you.
+                    text = "local",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
-        Box {
+        if (!system) Box {
             IconButton(onClick = { menu = true }) {
                 Icon(Icons.Filled.MoreVert, contentDescription = "More")
             }
@@ -488,52 +505,6 @@ private fun EmptyState(title: String, text: String) {
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
     }
-}
-
-/** The account sheet the top bar's menu opens (§5). */
-@Composable
-fun AccountSheet(
-    account: Account?,
-    stored: List<Account>,
-    onDismiss: () -> Unit,
-    onAdd: () -> Unit,
-    onSwitch: (String) -> Unit,
-    onRemove: () -> Unit,
-    onEditIdentity: () -> Unit,
-    onTestAccount: (() -> Unit)? = null,
-) {
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(account?.login ?: "No account") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (account != null) {
-                    Text(
-                        account.commitEmail,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    TextButton(onClick = { onEditIdentity() }) { Text("Change commit name and email") }
-                    HorizontalDivider()
-                }
-                if (stored.size > 1) {
-                    Text("Switch to", style = MaterialTheme.typography.labelMedium)
-                    stored.filter { it.login != account?.login }.forEach { other ->
-                        TextButton(onClick = { onSwitch(other.login) }) { Text(other.login) }
-                    }
-                }
-                Row {
-                    TextButton(onClick = onAdd) { Text("Add") }
-                    if (account != null) {
-                        TextButton(onClick = onRemove) {
-                            Text("Remove", color = MaterialTheme.colorScheme.error)
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
-    )
 }
 
 /**

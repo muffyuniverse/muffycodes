@@ -22,8 +22,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import java.io.File
 import kotlinx.coroutines.flow.filterNotNull
@@ -56,7 +58,6 @@ private sealed interface Pending {
     data object AddProject : Pending
     data object NewProject : Pending
     data object RemoveAccount : Pending
-    data object EditIdentity : Pending
     data class RenameProject(val project: String) : Pending
     data class DeleteProject(val project: String) : Pending
     data class RenameEntry(val entry: Entry) : Pending
@@ -77,7 +78,6 @@ private sealed interface Pending {
 @Composable
 private fun AppRoot(viewModel: AppViewModel) {
     var showSettings by remember { mutableStateOf(false) }
-    var showAccount by remember { mutableStateOf(false) }
     var pending by remember { mutableStateOf<Pending>(Pending.None) }
 
     val snackbar = remember { SnackbarHostState() }
@@ -115,16 +115,24 @@ private fun AppRoot(viewModel: AppViewModel) {
     val editing = viewModel.editingFile
     val historyPath = viewModel.historyPath
 
+    // The picker is the system's, so the app never asks for storage permission: it
+    // sees only what a person just pointed at, and only reads it.
+    val pickFiles = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris -> if (uris.isNotEmpty()) viewModel.importFiles(uris) }
+    val pickFolder = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree(),
+    ) { uri -> if (uri != null) viewModel.importFolder(uri) }
+
     BackHandler(enabled = showSettings) { showSettings = false }
-    BackHandler(enabled = !showSettings && showAccount) { showAccount = false }
-    BackHandler(enabled = !showSettings && !showAccount && historyPath != null) {
+    BackHandler(enabled = !showSettings && historyPath != null) {
         viewModel.closeHistory()
     }
-    BackHandler(enabled = !showSettings && !showAccount && historyPath == null && editing != null) {
+    BackHandler(enabled = !showSettings && historyPath == null && editing != null) {
         viewModel.closeEditor()
     }
     BackHandler(
-        enabled = !showSettings && !showAccount && historyPath == null && editing == null &&
+        enabled = !showSettings && historyPath == null && editing == null &&
             viewModel.canGoUp
     ) {
         viewModel.up()
@@ -156,14 +164,29 @@ private fun AppRoot(viewModel: AppViewModel) {
             onBack = { showSettings = false },
             onSignIn = { pending = Pending.SignIn },
             onRemoveAccount = { pending = Pending.RemoveAccount },
-            onEditIdentity = { pending = Pending.EditIdentity },
+            onTestAccount = { viewModel.signInAsTestAccount() },
+        )
+
+        // History is checked *before* the editor, and the order is the whole of a
+        // bug: the editor stays open underneath while its file's history is being
+        // looked at, so testing `editing != null` first kept drawing the editor and
+        // the history only appeared after Done had closed it.
+        historyPath != null -> HistoryScreen(
+            viewModel = viewModel,
+            title = historyPath.last(),
+            onBack = { viewModel.closeHistory() },
         )
 
         editing != null -> EditorScreen(
             viewModel = viewModel,
             file = editing,
-            onSync = { project -> viewModel.sync(project) },
             onBack = { viewModel.closeEditor() },
+            onRename = {
+                pending = Pending.RenameEntry(
+                    Entry(editing.name, editing, viewModel.workspace?.kindOf(editing)
+                        ?: EntryKind.TEXT)
+                )
+            },
             onDelete = {
                 val entry = Entry(editing.name, editing, viewModel.workspace?.kindOf(editing)
                     ?: EntryKind.TEXT)
@@ -172,19 +195,11 @@ private fun AppRoot(viewModel: AppViewModel) {
             onOpenHistory = { viewModel.openHistory(editing) },
         )
 
-        historyPath != null -> HistoryScreen(
-            viewModel = viewModel,
-            title = historyPath.last(),
-            onSync = { project -> viewModel.sync(project) },
-            onBack = { viewModel.closeHistory() },
-        )
-
         else -> androidx.compose.foundation.layout.Box {
             BrowserScreen(
                 viewModel = viewModel,
                 username = viewModel.account?.login,
                 onOpenSettings = { showSettings = true },
-                onOpenAccount = { showAccount = true },
                 actions = actions,
                 onAddProject = { pending = Pending.AddProject },
                 onRowSync = { project -> viewModel.sync(project) },
@@ -192,41 +207,20 @@ private fun AppRoot(viewModel: AppViewModel) {
                 onRowDelete = { project -> pending = Pending.DeleteProject(project) },
                 onCreateFile = { viewModel.currentDir?.let { pending = Pending.NewFile(it) } },
                 onCreateFolder = { viewModel.currentDir?.let { pending = Pending.NewFolder(it) } },
+                onUploadFiles = { pickFiles.launch(arrayOf("*/*")) },
+                onUploadFolder = { pickFolder.launch(null) },
             )
-            SnackbarHost(snackbar, modifier = Modifier)
+            // At the bottom, and inset from it. A snackbar at the top of the
+            // window sat under the phone's status bar and was cropped by it — the
+            // success and failure messages of every action were half a line of text
+            // in the one place nothing can be drawn.
+            SnackbarHost(
+                snackbar,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(16.dp),
+            )
         }
-    }
-
-    if (showAccount) {
-        AccountSheet(
-            account = viewModel.account,
-            stored = viewModel.accountList,
-            onDismiss = { showAccount = false },
-            onAdd = {
-                showAccount = false
-                pending = Pending.SignIn
-            },
-            onSwitch = { login ->
-                viewModel.switchTo(login)
-                showAccount = false
-            },
-            onRemove = {
-                showAccount = false
-                pending = Pending.RemoveAccount
-            },
-              onTestAccount = if (viewModel.canMakeTestAccount) {
-                  {
-                      showAccount = false
-                      viewModel.signInAsTestAccount()
-                  }
-              } else {
-                  null
-              },
-              onEditIdentity = {
-                  showAccount = false
-                pending = Pending.EditIdentity
-            },
-        )
     }
 
     Dialogs(
@@ -262,10 +256,10 @@ private fun Dialogs(
                 error = error,
                 // The login is whatever GitHub says it is, not what was typed, and
                 // the question goes to GitHub off the main thread.
-                onSignIn = { _, token, name, email ->
+                onSignIn = { token ->
                     signingIn = true
                     error = null
-                    viewModel.signInWithToken(token, name, email) { ok ->
+                    viewModel.signInWithToken(token) { ok ->
                         signingIn = false
                         if (ok) {
                             dismiss()
@@ -276,41 +270,6 @@ private fun Dialogs(
                             error = viewModel.message ?: "That key did not work"
                         }
                     }
-                },
-            )
-        }
-
-        Pending.EditIdentity -> {
-            val account = viewModel.account ?: return
-            var name by remember { mutableStateOf(account.commitName) }
-            var email by remember { mutableStateOf(account.commitEmail) }
-            androidx.compose.material3.AlertDialog(
-                onDismissRequest = dismiss,
-                title = { Text("Commits are written as") },
-                text = {
-                    androidx.compose.foundation.layout.Column {
-                        androidx.compose.material3.OutlinedTextField(
-                            value = name,
-                            onValueChange = { name = it },
-                            label = { Text("Name") },
-                            singleLine = true,
-                        )
-                        androidx.compose.material3.OutlinedTextField(
-                            value = email,
-                            onValueChange = { email = it },
-                            label = { Text("Email") },
-                            singleLine = true,
-                        )
-                    }
-                },
-                confirmButton = {
-                    androidx.compose.material3.TextButton(onClick = {
-                        viewModel.updateIdentity(name, email)
-                        dismiss()
-                    }) { Text("Save") }
-                },
-                dismissButton = {
-                    androidx.compose.material3.TextButton(onClick = dismiss) { Text("Cancel") }
                 },
             )
         }

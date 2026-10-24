@@ -30,6 +30,7 @@ ProjectsFeatureTest  app/src/main/java/com/example/notes/AppViewModel.kt app/src
 SyncFeatureTest    app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/GitHub.kt
 HistoryFeatureTest app/src/main/java/com/example/notes/AppHistory.kt app/src/main/java/com/example/notes/HistoryPrune.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/GitService.kt
 RetentionFeatureTest  app/src/main/java/com/example/notes/SettingsStore.kt app/src/main/java/com/example/notes/HistoryPrune.kt app/src/main/java/com/example/notes/AppHistory.kt app/src/main/java/com/example/notes/ProjectGit.kt
+ImportsFeatureTest app/src/main/java/com/example/notes/Imports.kt
 ScenariosTest      app/src/main/java/com/example/notes/BrowserScreen.kt app/src/main/java/com/example/notes/HistoryScreen.kt app/src/main/java/com/example/notes/SettingsScreen.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/AppTheme.kt app/src/main/java/com/example/notes/Workspace.kt
 KeySafetyFeatureTest  app/src/main/java/com/example/notes/GitHub.kt app/src/main/java/com/example/notes/Secrets.kt app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/AccountStore.kt
 

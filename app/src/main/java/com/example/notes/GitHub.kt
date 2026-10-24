@@ -52,6 +52,19 @@ data class Repo(
 data class Licence(val key: String, val name: String)
 
 /**
+ * Who a key belongs to, as GitHub itself says.
+ *
+ * Name and email are the account's own, so signing in asks for nothing but the
+ * key: a commit is written as the person whose account it is, and they have
+ * already told GitHub who that is.
+ */
+data class Identity(
+    val login: String,
+    val name: String,
+    val email: String,
+)
+
+/**
  * The part of GitHub the app uses: who the key belongs to, the account's
  * repositories, and making, renaming and deleting one.
  *
@@ -64,8 +77,8 @@ data class Licence(val key: String, val name: String)
  */
 interface GitHub {
 
-    /** The name the key belongs to. */
-    fun whoami(token: String): GitHubResult<String>
+    /** Who the key belongs to: the login, and the name and email to commit as. */
+    fun identity(token: String): GitHubResult<Identity>
 
     /** The account's repositories, most recently changed first. */
     fun listRepos(token: String): GitHubResult<List<Repo>>
@@ -109,16 +122,26 @@ interface GitHub {
  */
 class HttpGitHub(private val api: String = DEFAULT_API) : GitHub {
 
-    override fun whoami(token: String): GitHubResult<String> {
+    override fun identity(token: String): GitHubResult<Identity> {
         val response = get("GET", "/user", token)
         if (response.error != null) {
             return GitHubResult(error = response.error, status = response.status)
         }
-        val login = response.value?.optString("login").orEmpty()
+        val user = response.value
+        val login = user?.optString("login").orEmpty()
         if (login.isEmpty()) {
             return GitHubResult(error = "GitHub did not return an account name")
         }
-        return GitHubResult(value = login)
+        // A name is optional on GitHub, and so is a public email. Both have a
+        // truthful fallback: the login is what the person is called here, and
+        // GitHub's own noreply address is what it uses for a commit that must not
+        // expose a real one.
+        val name = user?.optString("name").orEmpty().ifBlank { login }
+        val email = user?.optString("email").orEmpty().ifBlank {
+            val id = user?.optLong("id", 0L) ?: 0L
+            if (id > 0) "$id+$login@users.noreply.github.com" else "$login@users.noreply.github.com"
+        }
+        return GitHubResult(value = Identity(login = login, name = name, email = email))
     }
 
     override fun listRepos(token: String): GitHubResult<List<Repo>> {
@@ -309,14 +332,20 @@ class DiskGitHub(
     /** Where one repository lives on disk. */
     fun repoDir(name: String): File = File(ownerDir, "$name.git")
 
-    override fun whoami(token: String): GitHubResult<String> =
+    override fun identity(token: String): GitHubResult<Identity> =
         // A key is required, exactly as GitHub requires one. Returning the owner
         // regardless made this seam unable to say no, so nothing ever exercised the
         // half of signing in that reports a refusal.
         if (token.isBlank()) {
             GitHubResult(error = "Bad credentials", status = 401)
         } else {
-            GitHubResult(value = owner)
+            GitHubResult(
+                value = Identity(
+                    login = owner,
+                    name = "Test Account",
+                    email = "$owner@example.com",
+                )
+            )
         }
 
     override fun listRepos(token: String): GitHubResult<List<Repo>> {

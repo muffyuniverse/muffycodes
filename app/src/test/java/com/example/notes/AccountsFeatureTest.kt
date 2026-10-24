@@ -23,7 +23,7 @@ class AccountsFeatureTest : FeatureTest() {
     @Test
     fun `a key GitHub refuses is reported, and no account is kept`() {
         // The half of signing in that used to be untestable, and therefore was never
-        // run: `whoami` always said yes. A refused key must say so out loud — the
+        // run: `identity` always said yes. A refused key must say so out loud — the
         // dialog keeps itself open and shows the reason — and must not leave an
         // account behind that cannot reach anything.
         val phone = Scenario(
@@ -35,7 +35,7 @@ class AccountsFeatureTest : FeatureTest() {
             var answered: Boolean? = null
             var sawMessage: String? = null
 
-            phone.viewModel.signInWithToken("a-key-github-does-not-like", "", "") { ok ->
+            phone.viewModel.signInWithToken("a-key-github-does-not-like") { ok ->
                 answered = ok
                 sawMessage = phone.viewModel.message
             }
@@ -169,13 +169,23 @@ class AccountsFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `an account's identity is what its commits are written with`() {
-        scene.signedIn()
-        scene.viewModel.updateIdentity("A Writer", "writer@example.com")
+    fun `signing in asks GitHub who you are, and commits as that`() {
+        // Name and email are not typed any more: they come back from the key's own
+        // account, so a commit is written as the person whose account it is and
+        // there is nothing to keep in step with GitHub by hand.
+        val phone = Scenario(RuntimeEnvironment.getApplication(), signIn = false)
+        try {
+            var answered: Boolean? = null
+            phone.viewModel.signInWithToken("a-key") { answered = it }
+            phone.await("the answer") { answered != null }
 
-        val author = scene.viewModel.account!!.author()
-        assertEquals("A Writer", author.name)
-        assertEquals("writer@example.com", author.email)
+            assertEquals("signed in", true, answered)
+            val author = phone.viewModel.account!!.author()
+            assertEquals("Test Account", author.name)
+            assertEquals("${phone.login}@example.com", author.email)
+        } finally {
+            phone.close()
+        }
     }
 
     @Test
@@ -190,7 +200,6 @@ class AccountsFeatureTest : FeatureTest() {
     @Test
     fun `the account on disk outlives the app being started again`() {
         scene.signedIn()
-        scene.viewModel.updateIdentity("A Writer", "writer@example.com")
 
         val reopened = AppViewModel(
             scene.app, rootDir = scene.root, credentials = scene.credentials,
@@ -198,7 +207,7 @@ class AccountsFeatureTest : FeatureTest() {
         )
 
         assertEquals("test-account", reopened.account?.login)
-        assertEquals("A Writer", reopened.account?.commitName)
+        assertEquals("Test Account", reopened.account?.commitName)
         assertTrue("it is still the test account", reopened.account!!.dev)
     }
 }
@@ -211,7 +220,7 @@ class AccountsFeatureTest : FeatureTest() {
  * one exists only to say no, the way GitHub does to an expired or mistyped key.
  */
 private class RefusingGitHub : GitHub {
-    override fun whoami(token: String): GitHubResult<String> =
+    override fun identity(token: String): GitHubResult<Identity> =
         GitHubResult(error = "Bad credentials", status = 401)
 
     override fun listRepos(token: String): GitHubResult<List<Repo>> =

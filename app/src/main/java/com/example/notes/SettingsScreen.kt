@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -54,10 +55,11 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onSignIn: () -> Unit,
     onRemoveAccount: () -> Unit,
-    onEditIdentity: () -> Unit,
+    onTestAccount: () -> Unit,
 ) {
     val settings = viewModel.settings
     val account = viewModel.account
+    var showingSwitch by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -90,24 +92,25 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            // Add, Switch, Remove — and nothing that reads back at you. The commit
+            // name and email are no longer something to type: they come from the
+            // account GitHub already knows, so the only reason to change them would
+            // be to commit as somebody else, which this app has no use for.
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onSignIn) { Text("Add") }
                 if (account != null) {
-                    TextButton(onClick = onEditIdentity) { Text("Identity") }
+                    TextButton(onClick = { showingSwitch = true }) { Text("Switch") }
                     TextButton(onClick = onRemoveAccount) {
                         Text("Remove", color = MaterialTheme.colorScheme.error)
                     }
                 }
             }
-            if (viewModel.accountList.size > 1) {
-                Text("Switch to", style = MaterialTheme.typography.labelMedium)
-                viewModel.accountList
-                    .filter { it.login != account?.login }
-                    .forEach { other ->
-                        TextButton(onClick = { viewModel.switchTo(other.login) }) {
-                            Text(other.login)
-                        }
-                    }
+            // A debug build can make a test account. It lived in the account window
+            // that the three-lined button opened, and that window is gone — so the
+            // capability came here rather than being quietly dropped with it. A
+            // release build never sees this: `canMakeTestAccount` is false.
+            if (viewModel.canMakeTestAccount) {
+                TextButton(onClick = onTestAccount) { Text("Use the test account") }
             }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
@@ -143,27 +146,85 @@ fun SettingsScreen(
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
-            // ---- how much history is kept ----
-            Text("History kept", style = MaterialTheme.typography.titleMedium)
+            // ---- how much change history is kept ----
+            //
+            // Said plainly, because the two histories used to be two fields and the
+            // difference between them was never visible: the phone keeps a change
+            // history, a project keeps a sync history, and one number covers both.
+            Text("Change history", style = MaterialTheme.typography.titleMedium)
             Text(
-                "How many versions are kept. An empty field keeps everything. " +
-                    "The length is applied at the next change.",
+                "Every change is committed on this phone: that is the phone's change " +
+                    "history, and each project's sync history. This is how many of those " +
+                    "changes are kept — for the phone, and for each project alike. " +
+                    "An empty field keeps all of them. It applies at the next change.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             LengthField(
-                label = "This phone's history",
-                value = settings.appHistoryLength,
-                onValueChange = { settings.keepAppHistory(it) },
-            )
-            LengthField(
-                label = "Each project's history",
-                value = settings.projectHistoryLength,
-                onValueChange = { settings.keepProjectHistory(it) },
+                label = "Changes kept",
+                value = settings.historyLength,
+                onValueChange = { settings.keepHistory(it) },
             )
             Spacer(Modifier.height(24.dp))
         }
     }
+
+    if (showingSwitch) {
+        SwitchAccountDialog(
+            current = account?.login,
+            others = viewModel.accountList.map { it.login }.filter { it != account?.login },
+            onPick = { login ->
+                viewModel.switchTo(login)
+                showingSwitch = false
+            },
+            onDismiss = { showingSwitch = false },
+        )
+    }
+}
+
+/**
+ * The accounts this phone holds, to move between.
+ *
+ * When there are none, it says so and names the button that makes one, rather
+ * than showing an empty window that looks broken.
+ */
+@Composable
+private fun SwitchAccountDialog(
+    current: String?,
+    others: List<String>,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Switch account") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (others.isEmpty()) {
+                    Text("There are no other accounts on this phone yet.")
+                    Text(
+                        "Use Add to sign in to another one first.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    if (current != null) {
+                        Text(
+                            "Now: $current",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    others.forEach { login ->
+                        TextButton(onClick = { onPick(login) }, modifier = Modifier.fillMaxWidth()) {
+                            Text(login)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+    )
 }
 
 /** One swatch of the theme row: tap to select, framed when selected. */

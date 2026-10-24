@@ -107,6 +107,24 @@ class AppViewModel @JvmOverloads constructor(
     var historyIsFolder: Boolean by mutableStateOf(false)
         private set
 
+    /**
+     * Bumped whenever the list of versions could have changed.
+     *
+     * The history screen reads the repository to draw itself, which is too much
+     * work to redo on every recomposition; this says when the answer is stale.
+     */
+    var historyGeneration: Int by mutableStateOf(0)
+        private set
+
+    /** What kind of thing the open history belongs to, so it can be previewed. */
+    val historyKind: EntryKind
+        get() {
+            val ws = workspace ?: return EntryKind.TEXT
+            val target = historyPath ?: return EntryKind.TEXT
+            if (historyIsFolder) return EntryKind.FOLDER
+            return ws.kindOf(ws.fileAt(target))
+        }
+
     // ---- the account in use -------------------------------------------------
 
     /**
@@ -159,7 +177,7 @@ class AppViewModel @JvmOverloads constructor(
                 workspace = ws,
                 tokenProvider = { activeLogin?.let { credentials.token(it) } },
                 authorProvider = { author },
-                keepProvider = { settings.projectHistoryLength },
+                keepProvider = { settings.historyLength },
             )
         }
 
@@ -294,26 +312,66 @@ class AppViewModel @JvmOverloads constructor(
         val dir = currentDir ?: return false
         val withExtension = Workspace.withDefaultExtension(name.trim())
         val result = ws.createFile(dir, withExtension)
-        return afterChange(result, "Created $withExtension")
+        return afterChange(result, "Created $withExtension", File(dir, withExtension))
+    }
+
+    /**
+     * Brings files in from the phone's picker.
+     *
+     * Bytes are copied, never decoded: the commonest import is a picture or a PDF,
+     * and reading one as text on the way in is how it arrives corrupted.
+     */
+    fun importFiles(uris: List<android.net.Uri>): Boolean {
+        val ws = workspace ?: return false
+        val dir = currentDir ?: return false
+        val result = Imports.filesInto(application, uris, dir)
+        val ok = afterChange(result, "Imported into ${dir.name}/", dir)
+        if (ok) {
+            val n = result.getOrNull() ?: 0
+            message = if (n == 1) "Imported 1 file" else "Imported $n files"
+        }
+        return ok
+    }
+
+    /** Brings a whole folder in, keeping its shape. */
+    fun importFolder(tree: android.net.Uri): Boolean {
+        val ws = workspace ?: return false
+        val dir = currentDir ?: return false
+        val result = Imports.folderInto(application, tree, dir)
+        val ok = afterChange(result, "Imported a folder into ${dir.name}/", dir)
+        if (ok) {
+            val n = result.getOrNull() ?: 0
+            message = if (n == 1) "Imported 1 file" else "Imported $n files"
+        }
+        return ok
     }
 
     fun createFolder(name: String): Boolean {
         val ws = workspace ?: return false
         val dir = currentDir ?: return false
         val result = ws.createFolder(dir, name)
-        return afterChange(result, "Created ${name.trim()}/")
+        return afterChange(result, "Created ${name.trim()}/", File(dir, name.trim()))
     }
 
     fun rename(file: File, newName: String): Boolean {
         val ws = workspace ?: return false
+        val wasEditing = editingPath != null && editingPath == ws.relative(file)
         val result = ws.rename(file, newName)
-        return afterChange(result, "Renamed ${file.name} to ${newName.trim()}")
+        // The editor and the history point at a path, not at a file object, so a
+        // rename of the file being edited would leave both looking at a name that no
+        // longer exists. They follow it instead — renaming from inside the editor is
+        // exactly when this happens.
+        if (result.isSuccess) {
+            val moved = result.getOrNull() ?: file
+            if (wasEditing) editingPath = ws.relative(moved)
+        }
+        return afterChange(result, "Renamed ${file.name} to ${newName.trim()}", file.parentFile)
     }
 
     fun move(file: File, into: File): Boolean {
         val ws = workspace ?: return false
         val result = ws.move(file, into)
-        return afterChange(result, "Moved ${file.name} into ${into.name}/")
+        return afterChange(result, "Moved ${file.name} into ${into.name}/", into)
     }
 
     fun delete(file: File): Boolean {
@@ -330,7 +388,7 @@ class AppViewModel @JvmOverloads constructor(
                 if (target != null && (path.size > target.size)) path = target
             }
         }
-        return afterChange(result, if (wasFolder) "Deleted $name/" else "Deleted $name")
+        return afterChange(result, if (wasFolder) "Deleted $name/" else "Deleted $name", file.parentFile)
     }
 
     /** Moves a file or folder into the project's worktree (§3: the crosses). */
@@ -338,7 +396,7 @@ class AppViewModel @JvmOverloads constructor(
         val ws = workspace ?: return false
         val project = ws.projectOf(file) ?: return false
         val result = ws.move(file, ws.repoOf(project))
-        return afterChange(result, "Moved ${file.name} into the repository")
+        return afterChange(result, "Moved ${file.name} into the repository", ws.repoOf(project))
     }
 
     /** Moves a tracked file out of the worktree, to stay on this phone only. */
@@ -347,7 +405,7 @@ class AppViewModel @JvmOverloads constructor(
         val project = ws.projectOf(file) ?: return false
         val projectDir = File(ws.projectsDir, project)
         val result = ws.move(file, projectDir)
-        return afterChange(result, "Kept ${file.name} on this phone only")
+        return afterChange(result, "Kept ${file.name} on this phone only", projectDir)
     }
 
     /** Pins or unpins a file or folder (§2: the flags live in `.muffy`). */
@@ -361,21 +419,51 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /** Runs a change, records it in the account's history, and reloads. */
-    private fun afterChange(result: Result<*>, what: String): Boolean {
+    /**
+     * Finishes a change: refresh, then commit it.
+     *
+     * Two histories answer, and which one depends on where the change happened. A
+     * file inside a project's worktree belongs to that project's repository; the
+     * rest of the tree belongs to the account's own history. Both are committed
+     * **now**, because "go back to how it was" is a thing a person wants a second
+     * after the mistake, not after the next sync.
+     *
+     * [touched] is where the change happened, when that is known. It is only a hint
+     * — committing a project with nothing to commit does nothing — so a change whose
+     * file has just been deleted still lands in the right history.
+     */
+    private fun afterChange(result: Result<*>, what: String, touched: File? = null): Boolean {
         if (result.isFailure) {
             message = result.exceptionOrNull()?.message ?: "That did not work"
             return false
         }
         refresh()
         record(what)
+        touched?.let { commitProjectOf(it, what) }
         return true
+    }
+
+    /**
+     * Commits the project whose tree [file] belongs to, if any.
+     *
+     * A local file beside a project is not in the project's repository, so it has
+     * nothing to commit there and the call does nothing.
+     */
+    private fun commitProjectOf(file: File, what: String) {
+        val ws = workspace ?: return
+        val project = ws.projectOf(file) ?: return
+        val g = git ?: return
+        val login = activeLogin
+        worker.execute {
+            if (login != null && accounts.exists(login)) g.commit(project, what)
+        }
     }
 
     /** Commits a change into the account's own history, behind the UI. */
     private fun record(what: String) {
         val login = activeLogin ?: return
         val h = history ?: return
-        val keep = settings.appHistoryLength
+        val keep = settings.historyLength
         // The account can be removed while this is still on its way to the worker.
         // Writing then would make its folder again, and it would come back.
         worker.execute {
@@ -427,14 +515,20 @@ class AppViewModel @JvmOverloads constructor(
         // survive even a bug in the screen.
         if (ws.kindOf(file) != EntryKind.TEXT) return
         ws.write(file, text)
-        val keep = settings.appHistoryLength
+        val keep = settings.historyLength
         val h = history
+        val g = git
         val name = file.name
-        if (h != null) {
-            val login = activeLogin
-            worker.execute {
-                if (saveDebounceMs > 0) Thread.sleep(saveDebounceMs)
-                if (login != null && accounts.exists(login)) h.commit("Edited $name", keep)
+        // A file inside a project's worktree is versioned by that project, and
+        // everything else by the account. The commit happens on every pause in
+        // typing — that *is* the change history — and sync is then only the push.
+        val project = ws.projectOf(file)
+        val login = activeLogin
+        worker.execute {
+            if (saveDebounceMs > 0) Thread.sleep(saveDebounceMs)
+            if (login != null && accounts.exists(login)) {
+                if (project != null) g?.commit(project, "Edited $name")
+                else h?.commit("Edited $name", keep)
             }
         }
         refresh()
@@ -527,7 +621,7 @@ class AppViewModel @JvmOverloads constructor(
                 ws,
                 { credentials.token(login) },
                 { accounts.account(login)?.author() ?: DEFAULT_AUTHOR },
-                { settings.projectHistoryLength },
+                { settings.historyLength },
             ).cloneInto(clean, url)
 
             main.post {
@@ -578,7 +672,7 @@ class AppViewModel @JvmOverloads constructor(
                     ws,
                     { credentials.token(login) },
                     { accounts.account(login)?.author() ?: DEFAULT_AUTHOR },
-                    { settings.projectHistoryLength },
+                    { settings.historyLength },
                 )
                 // A null here is not a failure: the folder was renamed, and only
                 // the address of the repository could not follow.
@@ -680,7 +774,7 @@ class AppViewModel @JvmOverloads constructor(
                     ws,
                     { credentials.token(login) },
                     { accounts.account(login)?.author() ?: DEFAULT_AUTHOR },
-                    { settings.projectHistoryLength },
+                    { settings.historyLength },
                 ).cloneInto(repo.name, repo.cloneUrl)
             }
             main.post {
@@ -694,21 +788,27 @@ class AppViewModel @JvmOverloads constructor(
     // ---- accounts -----------------------------------------------------------
 
     /**
-     * Signs in with a key: GitHub is asked who the key belongs to, and only then
-     * is the account stored. The call reaches the network, so it runs behind the
-     * UI like every other piece of git work.
+     * Signs in with a key — and asks for nothing else.
+     *
+     * GitHub is asked who the key belongs to, and the name and email to commit as
+     * come back with the answer. Asking a person to retype what their account
+     * already knows was two fields that could disagree with the account they
+     * belonged to; a commit is now written as whoever GitHub says holds the key.
+     *
+     * The call reaches the network, so it runs behind the UI like every other piece
+     * of git work.
      */
-    fun signInWithToken(token: String, name: String, email: String, onDone: (Boolean) -> Unit) {
+    fun signInWithToken(token: String, onDone: (Boolean) -> Unit) {
         worker.execute {
-            val result = signInGitHub().whoami(token)
-            val login = result.value
+            val result = signInGitHub().identity(token)
+            val who = result.value
             main.post {
-                if (login == null) {
+                if (who == null) {
                     message = result.error ?: "That key did not work"
                     onDone(false)
                 } else {
-                    signIn(login, token, name, email)
-                    message = "Signed in as $login"
+                    signIn(who.login, token, who.name, who.email)
+                    message = "Signed in as ${who.login}"
                     onDone(true)
                 }
             }
@@ -790,13 +890,6 @@ class AppViewModel @JvmOverloads constructor(
         refresh()
     }
 
-    /** Updates the commit identity of the active account. */
-    fun updateIdentity(name: String, email: String) {
-        val current = account ?: return
-        accounts.save(current.copy(commitName = name, commitEmail = email))
-        refresh()
-    }
-
     /**
      * Removes an account. [deleteCopies] also deletes its tree from this phone;
      * without it the folders stay and signing in again returns to them (§5).
@@ -839,6 +932,7 @@ class AppViewModel @JvmOverloads constructor(
     fun openHistory(file: File) {
         historyPath = workspace?.relative(file)
         historyIsFolder = file.isDirectory
+        historyGeneration++
     }
 
     fun closeHistory() {
@@ -904,6 +998,9 @@ class AppViewModel @JvmOverloads constructor(
             // history must be able to undo it, and an undo that cannot be undone
             // is not what "any state can be rolled back" means.
             record("Restored an older version")
+            // The version the screen was showing is now a new version at the top of
+            // the list, so the list the screen is holding is out of date.
+            historyGeneration++
         }
     }
 

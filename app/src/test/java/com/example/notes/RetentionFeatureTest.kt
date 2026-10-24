@@ -27,8 +27,8 @@ class RetentionFeatureTest : FeatureTest() {
 
     @Test
     fun `an empty length keeps everything`() {
-        assertEquals("zero means all of it", 0, scene.settings.appHistoryLength)
-        assertEquals("and the same for a project", 0, scene.settings.projectHistoryLength)
+        assertEquals("zero means all of it", 0, scene.settings.historyLength)
+        assertEquals("and the same for a project", 0, scene.settings.historyLength)
     }
 
     @Test
@@ -52,7 +52,7 @@ class RetentionFeatureTest : FeatureTest() {
         scene.await("six commits") { historySize() >= 6 }
         val before = historySize()
 
-        scene.settings.keepAppHistory(3)
+        scene.settings.keepHistory(3)
 
         assertEquals("nothing has happened yet", before, historySize())
     }
@@ -61,7 +61,7 @@ class RetentionFeatureTest : FeatureTest() {
     fun `after the next change the account's history keeps only the length it was given`() {
         repeat(6) { scene.folder("folder-$it") }
         scene.await("six commits") { historySize() >= 6 }
-        scene.settings.keepAppHistory(3)
+        scene.settings.keepHistory(3)
 
         scene.folder("the-last-one")
         scene.await("the history to be shortened") { historySize() <= 3 }
@@ -77,7 +77,7 @@ class RetentionFeatureTest : FeatureTest() {
         scene.open()
         scene.await("the commits") { historySize() >= 5 }
 
-        scene.settings.keepAppHistory(2)
+        scene.settings.keepHistory(2)
         scene.folder("after-the-shortening")
         scene.await("the history to be shortened") { historySize() <= 2 }
 
@@ -91,7 +91,7 @@ class RetentionFeatureTest : FeatureTest() {
         scene.await("a commit") { historySize() >= 1 }
         val before = historySize()
 
-        scene.settings.keepAppHistory(50)
+        scene.settings.keepHistory(50)
         scene.folder("two")
         scene.await("the next change") { historySize() > before }
 
@@ -109,7 +109,7 @@ class RetentionFeatureTest : FeatureTest() {
         val before = scene.remoteCommits("Shopping")
         assertTrue("there are several commits to shorten, found $before", before >= 5)
 
-        scene.settings.keepProjectHistory(2)
+        scene.settings.keepHistory(2)
         scene.worktreeFile("last.txt", "the last round")
         scene.sync("Shopping")
 
@@ -127,7 +127,7 @@ class RetentionFeatureTest : FeatureTest() {
             scene.worktreeFile("file-$round.txt", "round $round")
             scene.sync("Shopping")
         }
-        scene.settings.keepProjectHistory(1)
+        scene.settings.keepHistory(1)
         scene.worktreeFile("last.txt", "kept")
         scene.sync("Shopping")
 
@@ -139,18 +139,54 @@ class RetentionFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `the two lengths are kept apart`() {
-        scene.settings.keepAppHistory(4)
-        scene.settings.keepProjectHistory(9)
+    fun `one number governs the phone and each project alike`() {
+        // The field used to be two, and the difference between them was invisible:
+        // somebody setting a limit is answering "how far back can I go?", which is
+        // one question. So one number, and the last thing typed wins.
+        scene.settings.keepHistory(4)
+        assertEquals("the number that was set", 4, scene.settings.historyLength)
 
-        assertEquals(4, scene.settings.appHistoryLength)
-        assertEquals(9, scene.settings.projectHistoryLength)
+        scene.settings.keepHistory(9)
+        assertEquals("and setting it again replaces it", 9, scene.settings.historyLength)
+    }
+
+    @Test
+    fun `an older build's two lengths survive as the one number`() {
+        // Every build before this one wrote two keys. Reading the larger of them is
+        // deliberate: a person who had set either history longer meant to be able to
+        // go back that far, and reading the smaller would delete versions they had
+        // asked to keep — silently, on the first change after the update.
+        val name = "legacy-${System.nanoTime()}"
+        scene.app.getSharedPreferences(name, 0).edit()
+            .putInt(SettingsStore.KEY_APP_HISTORY, 4)
+            .putInt(SettingsStore.KEY_PROJECT_HISTORY, 9)
+            .apply()
+
+        val settings = SettingsStore(scene.app, name)
+
+        assertEquals("the larger of the two is kept", 9, settings.historyLength)
+    }
+
+    @Test
+    fun `a length set now is not overwritten by the old keys`() {
+        // The migration must run once. If it kept reading the legacy keys, a person
+        // who had 9 and set 2 would find 9 again on the next start.
+        val name = "legacy2-${System.nanoTime()}"
+        scene.app.getSharedPreferences(name, 0).edit()
+            .putInt(SettingsStore.KEY_APP_HISTORY, 9)
+            .putInt(SettingsStore.KEY_PROJECT_HISTORY, 9)
+            .apply()
+
+        SettingsStore(scene.app, name).keepHistory(2)
+        val reopened = SettingsStore(scene.app, name)
+
+        assertEquals("the number that was set", 2, reopened.historyLength)
     }
 
     @Test
     fun `a length survives the app being started again`() {
-        scene.settings.keepAppHistory(5)
+        scene.settings.keepHistory(5)
 
-        assertEquals(5, scene.settings.appHistoryLength)
+        assertEquals(5, scene.settings.historyLength)
     }
 }

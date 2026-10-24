@@ -58,8 +58,8 @@ import kotlinx.coroutines.withContext
 fun EditorScreen(
     viewModel: AppViewModel,
     file: java.io.File,
-    onSync: (String) -> Unit,
     onBack: () -> Unit,
+    onRename: () -> Unit,
     onDelete: () -> Unit,
     onOpenHistory: () -> Unit,
 ) {
@@ -85,9 +85,11 @@ fun EditorScreen(
         topBar = {
             TopAppBar(
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
+                    // "Done", not an arrow. Leaving the editor is not going back:
+                    // the writing is saved, and what a person has finished doing is
+                    // done. An arrow said "undo", which is the one thing it never
+                    // did.
+                    TextButton(onClick = onBack) { Text("Done") }
                 },
                 title = {
                     Text(
@@ -103,6 +105,13 @@ fun EditorScreen(
                     }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         DropdownMenuItem(
+                            text = { Text("Rename…") },
+                            onClick = {
+                                menu = false
+                                onRename()
+                            },
+                        )
+                        DropdownMenuItem(
                             text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
                             leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
                             onClick = {
@@ -116,11 +125,10 @@ fun EditorScreen(
         },
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            // §7: every screen while a project is open carries the slim row, and the
-            // editor is exactly where somebody decides they are done and wants to
-            // sync.
-            ProjectSlimRow(viewModel, onSync)
-
+            // No sync row here. The editor is a page of writing, not a place where
+            // projects are managed: a line of account, project and "3 changed" above
+            // the text was the app talking over the thing being written.
+            //
             // The outer Column has taken the top padding, so the content must not
             // add it again — doing so pushed the text field over the slim row.
             val content = PaddingValues(top = 0.dp)

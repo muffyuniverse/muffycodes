@@ -262,7 +262,7 @@ class ScenariosTest {
             "a note that was written three times, and the versions it kept.",
             screen = { browser() },
             afterScreen = {
-                Screen { HistoryScreen(viewModel = viewModel, title = "milk.txt", onSync = {}, onBack = {}) }
+                Screen { HistoryScreen(viewModel = viewModel, title = "milk.txt", onBack = {}) }
             },
         ) {
             before()
@@ -292,7 +292,7 @@ class ScenariosTest {
             "a folder removed from the phone, with every file of it still recoverable.",
             screen = { browser() },
             afterScreen = {
-                Screen { HistoryScreen(viewModel = viewModel, title = "letters", onSync = {}, onBack = {}) }
+                Screen { HistoryScreen(viewModel = viewModel, title = "letters", onBack = {}) }
             },
         ) {
             before()
@@ -325,7 +325,7 @@ class ScenariosTest {
             "a file inside a project, changed and synced twice, and the versions GitHub holds.",
             screen = { browser() },
             afterScreen = {
-                Screen { HistoryScreen(viewModel = viewModel, title = "milk.txt", onSync = {}, onBack = {}) }
+                Screen { HistoryScreen(viewModel = viewModel, title = "milk.txt", onBack = {}) }
             },
         ) {
             before()

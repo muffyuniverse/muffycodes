@@ -399,11 +399,9 @@ fun SignInDialog(
     onDismiss: () -> Unit,
     signingIn: Boolean = false,
     error: String? = null,
-    onSignIn: (login: String, token: String, name: String, email: String) -> Unit,
+    onSignIn: (token: String) -> Unit,
 ) {
     var token by remember { mutableStateOf("") }
-    var name by remember { mutableStateOf("") }
-    var email by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Sign in to GitHub") },
@@ -416,18 +414,12 @@ fun SignInDialog(
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                 )
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Commit name (optional)") },
-                    singleLine = true,
-                )
-                OutlinedTextField(
-                    value = email,
-                    onValueChange = { email = it },
-                    label = { Text("Commit email (optional)") },
-                    singleLine = true,
-                )
+                Text(
+                    "Your commits are written as the GitHub account this key " +
+                        "belongs to: its name and its email, taken from GitHub.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                ),
                 Text(
                     "The key needs the repo and delete_repo scopes.",
                     style = MaterialTheme.typography.bodySmall,
@@ -466,7 +458,7 @@ fun SignInDialog(
                     // Asked, not dismissed. The dialog closes when the answer is
                     // yes, and stays on a no so the reason can be read — and the key
                     // can be corrected rather than retyped.
-                    onSignIn("", token.trim(), name.trim(), email.trim())
+                    onSignIn(token.trim())
                 },
             ) { Text(if (signingIn) "Signing in…" else "Sign in") }
         },
