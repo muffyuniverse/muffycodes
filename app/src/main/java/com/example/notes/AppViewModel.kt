@@ -369,6 +369,30 @@ class AppViewModel @JvmOverloads constructor(
         }
     }
 
+    /**
+     * The build, in one line, for a report to carry.
+     *
+     * `versionName` and `versionCode` are what the phone installed; the device line is
+     * what makes "it crashes on mine" reproducible by somebody who is not holding it.
+     * Nothing here identifies the person or the account.
+     */
+    val versionLine: String
+        get() = try {
+            val info = getApplication<android.app.Application>().packageManager
+                .getPackageInfo(getApplication<android.app.Application>().packageName, 0)
+            val version = if (android.os.Build.VERSION.SDK_INT >= 28) {
+                info.versionName + " (" + info.longVersionCode + ")"
+            } else {
+                @Suppress("DEPRECATION")
+                info.versionName + " (" + info.versionCode + ")"
+            }
+            "Muffy Codes $version · Android ${android.os.Build.VERSION.RELEASE} " +
+                "(API ${android.os.Build.VERSION.SDK_INT}) · ${android.os.Build.MANUFACTURER} " +
+                "${android.os.Build.MODEL}"
+        } catch (t: Throwable) {
+            "Muffy Codes · Android ${android.os.Build.VERSION.RELEASE}"
+        }
+
     /** How many changes [project] has waiting, as last counted. */
     fun changesOf(project: String): Int = changesByProject[project] ?: 0
 
@@ -945,7 +969,6 @@ class AppViewModel @JvmOverloads constructor(
                 if (refused != null) {
                     message = "Saved to the file, but not to its history: $refused"
                 }
-            }
             }
         }
     }

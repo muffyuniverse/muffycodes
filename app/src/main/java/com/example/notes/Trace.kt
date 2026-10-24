@@ -324,6 +324,82 @@ object Trace {
     fun broken(at: Long = now()): List<Broken> =
         report(at).waiting.filter { it.waitedMs > staleMs }
 
+    /**
+     * A report, frozen at the moment somebody decided something was wrong.
+     *
+     * **Frozen, not read later.** The dialog the person then types in is itself a
+     * stream of taps, and a report assembled after they close it would show a trace in
+     * which the last thing that happened is "report" — the one event that is certainly
+     * not the bug. So the state is taken on the press, and everything after it is
+     * text the person chose to add.
+     */
+    data class Frozen(
+        val report: Report,
+        val at: Long,
+        /** The sentences a report should carry that the trace cannot know. */
+        val context: List<Pair<String, String>>,
+    ) {
+        /** The taps with no answer, as sentences. Empty when the app was reacting. */
+        fun stuck(staleAfter: Long = Trace.staleMs): List<Broken> =
+            report.waiting.filter { it.waitedMs > staleAfter }
+    }
+
+    /**
+     * Takes the report now.
+     *
+     * [context] is what the screen knows and the trace does not: which screen, which
+     * account, which folder, which file. It is passed in rather than read from a view
+     * model here, so that this file stays a recorder and never reaches back into the
+     * app it is watching.
+     */
+    fun freeze(context: List<Pair<String, String>> = emptyList()): Frozen =
+        Frozen(report(), now(), context)
+
+    /**
+     * The report as one piece of text a person can send somebody.
+     *
+     * The order is deliberate: what they say first, because it is the only part with
+     * their intent in it; then what the app already knows was unanswered; then the
+     * context; then the log. A reader should be able to stop after the first two
+     * sections and know what to look at.
+     */
+    fun reportText(
+        frozen: Frozen,
+        note: String,
+        staleAfter: Long = Trace.staleMs,
+    ): String {
+        val stuck = frozen.stuck(staleAfter)
+        val said = note.trim()
+        return buildString {
+            appendLine("Muffy Codes — problem report")
+            appendLine()
+            appendLine(if (said.isEmpty()) "(nothing written down)" else said)
+            appendLine()
+            if (stuck.isEmpty()) {
+                appendLine("Nothing was waiting for an answer when this was sent.")
+            } else {
+                appendLine("Taps with no answer at the moment of the report:")
+                stuck.forEach { appendLine("  · ${it.line}") }
+            }
+            if (frozen.report.failures.isNotEmpty()) {
+                appendLine()
+                appendLine("Refused:")
+                frozen.report.failures.take(20).forEach { appendLine("  · $it") }
+            }
+            if (frozen.context.isNotEmpty()) {
+                appendLine()
+                appendLine("Where:")
+                frozen.context.forEach { (k, v) -> appendLine("  $k: $v") }
+            }
+            appendLine()
+            appendLine("— the app's own record, newest first (frozen at ${stamp(frozen.at)}) —")
+            frozen.report.lines.forEach { appendLine(it) }
+            appendLine()
+            appendLine(frozen.report.summary)
+            where?.let { appendLine("Also in $it") }
+        }
+    }
+
     /** The whole trace as one piece of text, for sharing. */
     fun dump(at: Long = now()): String {
         val r = report(at)

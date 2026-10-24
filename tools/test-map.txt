@@ -25,6 +25,7 @@ AccountStoreTest    app/src/main/java/com/example/notes/AccountStore.kt
 VisibilityFeatureTest  app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AppViewModel.kt
 FilesFeatureTest   app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AppViewModel.kt
 TraceTest          app/src/main/java/com/example/notes/Trace.kt
+ReportTest         app/src/main/java/com/example/notes/Reports.kt app/src/main/java/com/example/notes/Trace.kt app/src/main/java/com/example/notes/Dialogs.kt
 ObservabilityScreenTest  app/src/main/java/com/example/notes/ObservabilityScreen.kt app/src/main/java/com/example/notes/Trace.kt
 HistoryScreenTest  app/src/main/java/com/example/notes/HistoryScreen.kt
 EditorScreenTest   app/src/main/java/com/example/notes/EditorScreen.kt app/src/main/java/com/example/notes/Markdown.kt app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/BrowserScreen.kt

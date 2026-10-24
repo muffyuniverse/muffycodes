@@ -88,6 +88,7 @@ fun EditorScreen(
     file: java.io.File,
     onBack: () -> Unit,
     onOpenHistory: () -> Unit,
+    onReport: () -> Unit = {},
 ) {
     val kind = viewModel.workspace?.kindOf(file) ?: EntryKind.TEXT
     val locked = viewModel.isLocked(file)
@@ -204,6 +205,7 @@ fun EditorScreen(
                         )
                     }
                 },
+                actions = { ReportButton(onReport) },
             )
         },
     ) { padding ->

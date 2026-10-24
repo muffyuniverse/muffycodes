@@ -15,6 +15,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -683,6 +689,123 @@ fun SyncDialog(
         },
         confirmButton = {
             TextButton(onClick = { onSync(note) }) { Text("Sync") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/**
+ * The bug button: one press, everywhere, from any screen.
+ *
+ * It is deliberately the smallest thing in each app bar and the same thing on every
+ * screen, so that finding it never depends on where you are — the moment a person
+ * wants it is the moment something has just gone wrong, and hunting for it then is
+ * the worst possible time.
+ *
+ * It answers its own tap immediately ([onReport] is called by the screen that opened
+ * it). A report button that sat in the trace as an unanswered intent would make every
+ * report the app ever receives claim one extra broken sequence — its own.
+ */
+@Composable
+fun ReportButton(onReport: () -> Unit) {
+    IconButton(onClick = onReport) {
+        Icon(
+            Icons.Filled.BugReport,
+            contentDescription = "Report a problem",
+        )
+    }
+}
+
+/**
+ * Says what went wrong, on top of the app's own frozen record.
+ *
+ * The record is shown, not hidden behind the send: a person who can see that the app
+ * already noticed "Save — no change and no message after 2410 ms" will say less and say
+ * it about the right thing. And a report nobody can read before sending is a report
+ * that will arrive describing the wrong screen.
+ */
+@Composable
+fun ReportDialog(
+    frozen: Trace.Frozen,
+    onDismiss: () -> Unit,
+    onSend: (String) -> Unit,
+) {
+    var note by remember(frozen.at) { mutableStateOf("") }
+    val stuck = frozen.stuck()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Report a problem") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Text(
+                    "What happened, and what you were trying to do?",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                OutlinedTextField(
+                    value = note,
+                    onValueChange = { note = it },
+                    label = { Text("What went wrong?") },
+                    minLines = 3,
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                )
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+                // The frozen finding, in the same words the trace screen uses. If the
+                // app already noticed, say so here — it is the difference between a
+                // report that points at something and one that describes a mood.
+                if (stuck.isEmpty()) {
+                    Text(
+                        "The app was answering everything when you pressed this.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Text(
+                        "The app had already noticed these:",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    stuck.forEach {
+                        Text(
+                            "· ${it.line}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                }
+                if (frozen.report.failures.isNotEmpty()) {
+                    Text(
+                        "And these were refused:",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                    frozen.report.failures.take(5).forEach {
+                        Text(
+                            "· $it",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
+                    }
+                }
+                Text(
+                    "The whole record goes with it — ${frozen.report.lines.size} lines of " +
+                        "what the app did, taken at the moment you pressed this.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 12.dp),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSend(note) }) { Text("Send") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )

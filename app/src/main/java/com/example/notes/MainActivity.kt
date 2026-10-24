@@ -92,6 +92,10 @@ private sealed interface Pending {
 private fun AppRoot(viewModel: AppViewModel) {
     var showSettings by remember { mutableStateOf(false) }
     var showTrace by remember { mutableStateOf(false) }
+    // The report, frozen the instant the button is pressed — see Trace.freeze. Held
+    // here rather than in a dialog so that the record is taken before the typing
+    // starts, and every screen can open it.
+    var report by remember { mutableStateOf<Trace.Frozen?>(null) }
     var pending by remember { mutableStateOf<Pending>(Pending.None) }
 
     val snackbar = remember { SnackbarHostState() }
@@ -151,6 +155,35 @@ private fun AppRoot(viewModel: AppViewModel) {
     BackHandler(enabled = showTrace) { showTrace = false }
     BackHandler(enabled = showSettings) { showSettings = false }
 
+    /**
+     * The bug button, wired once.
+     *
+     * What the trace cannot know is added here — which screen, which folder, which
+     * file, whose account — because that is what a reader needs to reproduce the
+     * thing, and it is exactly what the app's own record leaves out.
+     */
+    val openReport: () -> Unit = {
+        Trace.note("report opened", "")
+        report = Trace.freeze(
+            listOf(
+                "screen" to when {
+                    showTrace -> "trace"
+                    showSettings -> "settings"
+                    historyPath != null -> "history of ${historyPath.last()}"
+                    editing != null -> "editor of ${editing.name}"
+                    else -> "browser at " + (viewModel.path.ifEmpty { listOf("/") }.joinToString("/"))
+                },
+                "account" to (viewModel.activeLogin ?: "nobody"),
+                "folder" to (viewModel.currentDir?.absolutePath ?: "—"),
+                "projects" to viewModel.projectNames.joinToString(", ").ifEmpty { "none" },
+                // A report without the build is a report about a version that may no
+                // longer exist — and "it used to work" is the commonest thing a
+                // person says, which makes *which* build the first question.
+                "version" to viewModel.versionLine,
+            ),
+        )
+    }
+
     // **The trace answers taps that never reach the view model.** Cancel, opening a
     // menu, choosing a row: those change what is on the screen without changing the
     // folder, so `refresh()` cannot see them. Watching the two pieces of screen state
@@ -209,6 +242,16 @@ private fun AppRoot(viewModel: AppViewModel) {
             report = traceReport,
             onBack = { showTrace = false },
             onShare = { shareTrace(context) },
+            onSave = {
+                val saved = Reports.save(context, Trace.dump(), what = "trace")
+                Trace.note("trace saved", saved.where ?: "could not be written")
+                viewModel.message = if (saved.ok) {
+                    "Saved to ${saved.where}"
+                } else {
+                    "Could not save the trace"
+                }
+            },
+            onReport = openReport,
             onClear = {
                 Trace.clear()
                 traceReport = Trace.report()
@@ -222,6 +265,7 @@ private fun AppRoot(viewModel: AppViewModel) {
             onRemoveAccount = { tap("remove account"); pending = Pending.RemoveAccount },
             onTestAccount = { tap("use test account"); viewModel.signInAsTestAccount() },
             onOpenTrace = { showTrace = true },
+            onReport = openReport,
         )
 
         // History is checked *before* the editor, and the order is the whole of a
@@ -235,6 +279,7 @@ private fun AppRoot(viewModel: AppViewModel) {
             // Select puts the version back and returns to the file: one act, and
             // the person is looking at the result of it.
             onSelect = { viewModel.closeHistory() },
+            onReport = openReport,
         )
 
         editing != null -> EditorScreen(
@@ -249,6 +294,7 @@ private fun AppRoot(viewModel: AppViewModel) {
                         tap("history from editor", editing.name)
                         viewModel.editingFile?.let { viewModel.openHistory(it) }
                     },
+                    onReport = openReport,
         )
 
         else -> androidx.compose.foundation.layout.Box {
@@ -256,6 +302,7 @@ private fun AppRoot(viewModel: AppViewModel) {
                 viewModel = viewModel,
                 username = viewModel.account?.login,
                 onOpenSettings = { tap("settings"); showSettings = true },
+                onReport = openReport,
                 actions = actions,
                 onAddProject = { tap("add project"); pending = Pending.AddProject },
                 onRowSync = { project -> tap("sync", project); pending = Pending.SyncProject(project) },
@@ -285,6 +332,35 @@ private fun AppRoot(viewModel: AppViewModel) {
                     .padding(start = 16.dp, end = 16.dp, bottom = 104.dp),
             )
         }
+    }
+
+    // The report sits above every other window, because the moment it is wanted is the
+    // moment something else on the screen is not working.
+    report?.let { frozen ->
+        ReportDialog(
+            frozen = frozen,
+            onDismiss = { report = null },
+            onSend = { note ->
+                report = null
+                val text = Trace.reportText(frozen, note)
+                val saved = Reports.save(
+                    context,
+                    text,
+                    slug = Reports.slugOf(note),
+                    at = frozen.at,
+                )
+                // **Written first, then offered.** The share sheet is a convenience and
+                // the file is the record: a person who dismisses the sheet still has the
+                // report, and nothing the next minute does can lose it.
+                Trace.note("report saved", saved.where ?: "could not be written")
+                shareReport(context, text, saved)
+                viewModel.message = if (saved.ok) {
+                    "Report saved to ${saved.where}"
+                } else {
+                    "The report could not be written, so it was offered as text"
+                }
+            },
+        )
     }
 
     Dialogs(
@@ -610,6 +686,38 @@ private fun NewProjectUI(viewModel: AppViewModel, dismiss: () -> Unit) {
  */
 private fun tap(what: String, detail: String = "") {
     Trace.tap(what, detail)
+}
+
+/**
+ * Offers a saved report, saying where the copy is.
+ *
+ * The path goes in the text as well as the message, because the person reading it on
+ * the other end needs to say which file they mean — and the file is the one thing the
+ * share sheet cannot carry.
+ */
+private fun shareReport(
+    context: android.content.Context,
+    text: String,
+    saved: Reports.Saved,
+) {
+    val where = saved.where
+    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(android.content.Intent.EXTRA_SUBJECT, "Muffy Codes — problem report")
+        putExtra(
+            android.content.Intent.EXTRA_TEXT,
+            if (where == null) text else text + "\n\nThe same report is on the phone at: $where\n",
+        )
+    }
+    try {
+        context.startActivity(
+            android.content.Intent.createChooser(send, "Send the report")
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    } catch (t: Throwable) {
+        // Nothing can take text. The message on the screen already says where the file
+        // is, which is the part that matters.
+    }
 }
 
 /**

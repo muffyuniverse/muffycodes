@@ -73,6 +73,7 @@ fun HistoryScreen(
     title: String,
     onBack: () -> Unit,
     onSelect: () -> Unit = onBack,
+    onReport: () -> Unit = {},
 ) {
     // Asked for on the worker, so the repository walk never happens in a frame — and,
     // more to the point, so it happens **after** the save that was just made has been

@@ -57,6 +57,10 @@ fun SettingsScreen(
     onSignIn: () -> Unit,
     onRemoveAccount: () -> Unit,
     onTestAccount: () -> Unit,
+    /** Opens the trace: what the app was asked to do and what answered. */
+    onOpenTrace: () -> Unit = {},
+    /** The bug button, on every screen, always. */
+    onReport: () -> Unit = {},
 ) {
     val settings = viewModel.settings
     val account = viewModel.account
@@ -71,6 +75,7 @@ fun SettingsScreen(
                     }
                 },
                 title = { Text("Settings") },
+                  actions = { ReportButton(onReport) },
             )
         },
     ) { padding ->

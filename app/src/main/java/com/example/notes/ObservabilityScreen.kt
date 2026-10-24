@@ -48,6 +48,8 @@ fun ObservabilityScreen(
     onBack: () -> Unit,
     onShare: () -> Unit,
     onClear: () -> Unit,
+    onSave: () -> Unit = {},
+    onReport: () -> Unit = {},
 ) {
     Scaffold(
         topBar = {
@@ -59,7 +61,13 @@ fun ObservabilityScreen(
                 },
                 title = { Text("What the app did") },
                 actions = {
+                    ReportButton(onReport)
                     if (report.total > 0) {
+                        // **Saved, not only shared.** A share sheet needs the person to
+                        // pick an app and hope it keeps the text; a file in Downloads is
+                        // already on the phone, in the folder they can reach, named with
+                        // the moment it was taken.
+                        TextButton(onClick = onSave) { Text("Save") }
                         TextButton(onClick = onShare) { Text("Share") }
                         TextButton(onClick = onClear) { Text("Clear") }
                     }

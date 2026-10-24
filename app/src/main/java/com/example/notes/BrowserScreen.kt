@@ -92,6 +92,7 @@ fun BrowserScreen(
     onRestoreDeleted: () -> Unit,
     onMoveSelected: () -> Unit,
     onDeleteSelected: () -> Unit,
+    onReport: () -> Unit = {},
 ) {
     val projects = viewModel.atProjects
     val here = viewModel.path
@@ -142,6 +143,10 @@ fun BrowserScreen(
                     }
                 },
                 actions = {
+                    // **First in the row, on every screen, always in the same place.**
+                    // The moment a person wants it is the moment something has just gone
+                    // wrong, and hunting for it then is the worst possible time.
+                    ReportButton(onReport)
                     if (viewModel.currentProject != null) {
                         // Search is scoped to the project (§7): it exists because a
                         // project's tree nests and what you remember is a name.
