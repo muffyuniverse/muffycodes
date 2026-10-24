@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -87,6 +88,19 @@ class BrowserChromeTest {
     private fun there(text: String): Boolean =
         compose.onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty()
 
+    /**
+     * The add button is an **icon**, so it carries a content description and no text.
+     *
+     * The first version of this test looked for the word "Add" among the *text* nodes and
+     * found none anywhere — which made "no Add at the root" pass for the wrong reason and
+     * "a folder does offer Add" fail against a screen that was right. Asking the same
+     * question of the right thing is what makes either of them mean anything.
+     */
+    private fun thereIcon(description: String): Boolean =
+        compose.onAllNodesWithContentDescription(description, substring = true)
+            .fetchSemanticsNodes().isNotEmpty()
+
+
     private fun awaitText(text: String, present: Boolean = true) {
         compose.waitUntil(20_000) { there(text) == present }
     }
@@ -147,7 +161,9 @@ class BrowserChromeTest {
         // The root holds `projects/` and the app's own state. Both are the app's, so an
         // Add button there would promise something it cannot do.
         awaitText("projects")
-        assertFalse("no Add at the account root", there("Add"))
+        // Wait for the row to be painted before reading the absence as a decision.
+        compose.waitForIdle()
+        assertFalse("no Add at the account root", thereIcon("Add"))
     }
 
     @Test
@@ -160,6 +176,6 @@ class BrowserChromeTest {
         browser()
 
         awaitText(Workspace.REPO)
-        assertTrue("a real folder keeps its Add", there("Add"))
+        assertTrue("a real folder keeps its Add", thereIcon("Add"))
     }
 }
