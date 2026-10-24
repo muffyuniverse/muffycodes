@@ -40,38 +40,39 @@ class TraceTest {
         dir.deleteRecursively()
     }
 
-    /** The file, once the writer thread has caught up. */
-    private fun written(): List<String> {
-        val until = System.currentTimeMillis() + 5_000
+    /**
+     * Waits until everything recorded so far is on disk.
+     *
+     * The writer is a queue on another thread, so polling for a line count is a race
+     * dressed as a wait. A marker event goes through the same queue, so when it appears
+     * everything before it has already been written — and the number is different every
+     * time, so a marker from a previous call cannot be mistaken for this one.
+     */
+    private fun settle(): List<String> {
+        val marker = "settle-${markerAt.incrementAndGet()}"
+        Trace.note(marker, "all before this is on disk")
+        val until = System.currentTimeMillis() + 10_000
         while (System.currentTimeMillis() < until) {
-            if (file.isFile) {
-                val lines = file.readLines().filter { it.isNotBlank() }
-                // The last line is written by whatever was last emitted; give the writer
-                // a moment to have it.
-                if (lines.isNotEmpty()) return lines
-            }
-            Thread.sleep(20)
-        }
-        return emptyList()
-    }
-
-    /** Waits for the file to hold at least [n] lines. */
-    private fun writtenAtLeast(n: Int): List<String> {
-        val until = System.currentTimeMillis() + 5_000
-        while (System.currentTimeMillis() < until) {
-            val lines = if (file.isFile) file.readLines().filter { it.isNotBlank() } else emptyList()
-            if (lines.size >= n) return lines
-            Thread.sleep(20)
+            val lines = if (file.isFile) file.readLines() else emptyList()
+            if (lines.any { it.contains(marker) }) return lines.filter { it.isNotBlank() }
+            Thread.sleep(10)
         }
         return if (file.isFile) file.readLines().filter { it.isNotBlank() } else emptyList()
     }
+
+    private val markerAt = java.util.concurrent.atomic.AtomicInteger()
+
+    /** The first line of the log, once everything written so far has landed. */
+    private fun firstLine(): String =
+        settle().firstOrNull { !it.contains("settle-") }.orEmpty()
+
 
     // ---- the columns --------------------------------------------------------
 
     @Test
     fun `a line is time, id, kind, name, detail`() {
         val id = Trace.tap("Save", "milk.txt")
-        val line = writtenAtLeast(1).first()
+        val line = firstLine()
 
         val fields = line.split(Regex("\\s+"))
         assertTrue("the time is first: $line", Regex("""^\d\d:\d\d:\d\d\.\d\d\d""").containsMatchIn(line))
@@ -84,10 +85,12 @@ class TraceTest {
     @Test
     fun `a name with spaces becomes a slug, so the columns stay columns`() {
         Trace.tap("confirm delete chosen", "3 items")
-        val line = writtenAtLeast(1).first()
+        val line = firstLine()
 
         assertTrue("no spaces in the name field: $line", line.contains("confirm-delete-chosen"))
-        assertEquals("the detail keeps its own spelling", "3 items", line.substringAfter("  "))
+        // The detail is the tail. Splitting on the first double space would find the gap
+        // after the time, which is why this asserts where the line ends instead.
+        assertTrue("the detail keeps its own spelling: $line", line.endsWith("3 items"))
     }
 
     @Test
@@ -95,7 +98,7 @@ class TraceTest {
         val id = Trace.tap("Save", "milk.txt")
         Trace.changed("at / · 1 rows")
 
-        val lines = writtenAtLeast(2)
+        val lines = settle()
         assertEquals("two lines", 2, lines.size)
         assertTrue("the answer leads with the same id: ${lines[1]}", lines[1].contains(" $id CHANGED"))
     }
@@ -105,7 +108,7 @@ class TraceTest {
         // Zero is not a tap, so a `uniq -c` pass over the ids cannot mistake a note for a
         // promise the app failed to keep.
         Trace.note("app-opened", "Muffy Codes 91")
-        val line = writtenAtLeast(1).first()
+        val line = firstLine()
 
         assertTrue("id zero: $line", line.split(Regex("\\s+"))[1] == "0")
         assertTrue("and the kind says it answers nothing", line.contains("NOTE"))
@@ -114,27 +117,31 @@ class TraceTest {
     // ---- the pairing --------------------------------------------------------
 
     @Test
-    fun `a tap whose id appears once is a tap with no answer`() {
-        // The whole design, stated as a test: two taps, one answered. A shell finds the
-        // unanswered one by counting ids; so does this.
-        val answeredId = Trace.tap("Save", "milk.txt")
-        val orphanId = Trace.tap("Sync", "testrepo")
+    fun `the id that appears once is the query the format exists for`() {
+        // The whole design, stated as a shell would state it. Two taps, one answer; the
+        // answer belongs to the newest tap (the UI serves one at a time, and pretending
+        // an old answer was for a new tap is how a missing reaction gets hidden), so the
+        // *older* tap is the one left over.
+        val older = Trace.tap("Save", "milk.txt")
+        val newer = Trace.tap("Sync", "testrepo")
         Trace.changed("at /")
 
-        val lines = writtenAtLeast(3)
+        val lines = settle()
         val ids = lines.mapNotNull { line ->
             val fields = line.split(Regex("\\s+"))
             if (fields.size > 2 && fields[2] == "TAP") fields[1].toIntOrNull() else null
         }
-        val counts = lines.flatMap { line ->
-            val fields = line.split(Regex("\\s+"))
-            if (fields.size > 1) listOfNotNull(fields[1].toIntOrNull()) else emptyList()
-        }.groupingBy { it }.eachCount()
+        val counts = lines.mapNotNull { it.split(Regex("\\s+")).getOrNull(1)?.toIntOrNull() }
+            .groupingBy { it }.eachCount()
 
-        assertEquals("both taps are in the log", listOf(answeredId, orphanId), ids)
-        assertEquals("the answered one appears twice", 2, counts[answeredId])
-        assertEquals("the orphan appears once, which is the finding", 1, counts[orphanId])
-        assertEquals("and the app agrees", listOf(orphanId), Trace.broken().map { it.id })
+        assertEquals("both taps are in the log, in order", listOf(older, newer), ids)
+        assertEquals("the newest is the one the answer quotes", 2, counts[newer])
+        assertEquals("the older appears once, which is the finding", 1, counts[older])
+        assertEquals(
+            "and the app agrees with the shell",
+            listOf(older),
+            Trace.report().waiting.map { it.id },
+        )
     }
 
     @Test
@@ -211,7 +218,7 @@ class TraceTest {
         Trace.tap("Save", "milk.txt")
         Trace.checkpoint("I pressed Save and nothing appeared in the history")
 
-        val lines = writtenAtLeast(2)
+        val lines = settle()
         val report = lines.last()
         assertTrue("it is a REPORT line: $report", report.contains("REPORT"))
         assertTrue(
@@ -227,7 +234,7 @@ class TraceTest {
     fun `a report with no words still marks the place`() {
         Trace.checkpoint("")
 
-        val line = writtenAtLeast(1).first()
+        val line = firstLine()
         assertTrue("the checkpoint exists: $line", line.contains("REPORT"))
         assertTrue(
             "and says it was a report rather than looking like an empty line",
@@ -243,7 +250,10 @@ class TraceTest {
         val id = Trace.tap("Save", "milk.txt")
         Trace.checkpoint("Save does nothing")
 
-        assertEquals("still waiting", listOf(id), Trace.broken().map { it.id })
+        // `waiting`, not `broken`: `broken` is the stale filter, and this tap is
+        // milliseconds old. The claim being tested is that the checkpoint consumed
+        // nothing, which is a different question from how long it has waited.
+        assertEquals("still waiting", listOf(id), Trace.report().waiting.map { it.id })
     }
 
     // ---- the file -----------------------------------------------------------
@@ -251,10 +261,10 @@ class TraceTest {
     @Test
     fun `the log is appended to, never rewritten`() {
         Trace.note("first", "one")
-        val before = writtenAtLeast(1).first()
+        val before = firstLine()
         Trace.note("second", "two")
 
-        val after = writtenAtLeast(2)
+        val after = settle()
         assertEquals("the first line is still there, unchanged", before, after.first { it.contains("first") })
         assertTrue("and the second came after it", after.indexOfFirst { it.contains("second") } > after.indexOfFirst { it.contains("first") })
     }
@@ -310,11 +320,20 @@ class TraceTest {
     fun `clearing the screen keeps the file`() {
         Trace.tap("Save")
         Trace.changed("at /")
-        writtenAtLeast(2)
+        settle()
 
         Trace.clearScreen()
 
-        assertTrue("the screen is empty", Trace.report().lines.isEmpty())
+        // The ring is emptied of what happened; the one line left is the note that says
+        // it was cleared, which is itself worth seeing.
+        assertTrue(
+            "no tap remains on the screen: ${Trace.report().lines}",
+            Trace.report().lines.none { it.contains("TAP") },
+        )
+        assertTrue(
+            "and the clearing is on record",
+            Trace.report().lines.any { it.contains("screen-cleared") },
+        )
         // The file is the evidence. A Clear that deleted it would be the one control in
         // the app that destroys the record of what went wrong.
         val kept = if (file.isFile) file.readText() else ""
@@ -325,7 +344,7 @@ class TraceTest {
     fun `clearing everything wipes the log too`() {
         Trace.tap("Save")
         Trace.changed("at /")
-        writtenAtLeast(2)
+        settle()
 
         Trace.clear()
 
