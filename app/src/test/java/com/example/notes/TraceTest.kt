@@ -300,6 +300,37 @@ class TraceTest {
     }
 
     @Test
+    fun `a screen change long after a tap does not answer it`() {
+        // **This is the bug the live log caught.** Choosing a theme answered nothing, so
+        // three taps sat waiting; the next unrelated screen change — a dialog dismissed, a
+        // back press — claimed one each, because a change in the screen was treated as the
+        // visible result of whatever was being served. All three then appeared twice, so
+        // "the id that appears once" reported nothing unanswered while three taps had in
+        // fact gone unanswered.
+        Trace.tap("theme", "GOLD")
+
+        Trace.changed("screen browser dialog None", at = System.currentTimeMillis() + Trace.FRESH_MS + 1_000)
+
+        assertEquals(
+            "the tap is still waiting, because nothing answered it",
+            listOf("theme"),
+            Trace.report().waiting.map { it.what },
+        )
+    }
+
+    @Test
+    fun `a screen change at once is the answer to the tap`() {
+        // The other half of the rule, so the fix cannot be "never pair anything" and still
+        // pass: a press shows itself at once, and that is what pairing is for.
+        Trace.tap("open-folder", "projects")
+
+        Trace.changed("at /projects · 1 rows · repo/")
+
+        assertEquals("nothing is left waiting", emptyList<String>(), Trace.report().waiting.map { it.what })
+        assertEquals("and the tap was answered", 1, Trace.report().answered)
+    }
+
+    @Test
     fun `a log that cannot be written does not break the app`() {
         // A file whose parent is a plain file: `mkdirs` fails, every append fails. A
         // recorder that threw would take the app down while reporting on it.

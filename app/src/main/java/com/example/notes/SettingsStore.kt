@@ -74,12 +74,19 @@ class SettingsStore(context: Context, name: String = "settings") {
         Trace.tap("theme", theme.name)
         this.theme = theme
         prefs.edit().putString(KEY_THEME, theme.name).apply()
+        // **Answered here, because nothing else will.** The theme is applied by this store
+        // and never passes through the view model, so the screen never redraws as a
+        // consequence of the press and no state line could answer it. It sat unanswered
+        // until the next unrelated screen change claimed it — a cancel or a back press
+        // spending a tap it had nothing to do with.
+        Trace.said("theme is now ${theme.name.lowercase()}")
     }
 
     fun selectDarkVariant(useDark: Boolean) {
         Trace.tap(if (useDark) "dark" else "light")
         this.useDark = useDark
         prefs.edit().putBoolean(KEY_DARK, useDark).apply()
+        Trace.said(if (useDark) "dark colours" else "light colours")
     }
 
     /** Sets the change history length; a negative number means no limit. */
@@ -90,6 +97,7 @@ class SettingsStore(context: Context, name: String = "settings") {
         Trace.tap("history limit", if (clean == 0) "all" else clean.toString())
         historyLength = clean
         prefs.edit().putInt(KEY_HISTORY, clean).apply()
+        Trace.said(if (clean == 0) "every version is kept" else "the last $clean versions are kept")
     }
 
     /**

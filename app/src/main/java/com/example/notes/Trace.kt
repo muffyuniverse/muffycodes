@@ -250,8 +250,33 @@ object Trace {
     /** The app's own words, which answer whatever was being served. */
     fun said(text: String) = answer(Kind.SAID, "said", text)
 
-    /** The app's visible state changed, which answers whatever was being served. */
-    fun changed(what: String) = answer(Kind.CHANGED, "state", what)
+    /**
+     * The app's visible state changed — which answers a tap **only if the tap is what
+     * caused it.**
+     *
+     * The first version answered whatever was being served, on the argument that a
+     * change in the screen is the visible result of a press. It is — but the screen also
+     * changes when nothing was pressed: a dialog is cancelled, a sheet is dismissed, a
+     * back gesture returns. Each of those found the oldest unanswered tap waiting and
+     * spent it, so a log whose whole purpose is "an id that appears once is a tap nobody
+     * answered" reported three theme taps as answered by a cancel, a dismiss and a back
+     * press. The query was not merely inaccurate: it said the opposite of the truth.
+     *
+     * So a claim now needs to be timely. What a person pressed shows itself at once; a
+     * change arriving seconds later is the screen doing its own housekeeping, and it
+     * carries id 0 while the unanswered tap stays unanswered.
+     */
+    fun changed(what: String, at: Long = now()) =
+        answer(Kind.CHANGED, "state", what, at = at, withinMs = FRESH_MS)
+
+    /**
+     * How long after a tap its visible result still counts as that tap's answer.
+     *
+     * Generous, because the work between a press and a redraw goes through a worker and,
+     * for a save, a commit. Tight enough that the seconds a person spends reading a dialog
+     * are outside it — which is the interval the borrowing happened in.
+     */
+    const val FRESH_MS = 5_000L
 
     /** The app could not do what was asked, in its own words. */
     fun failure(said: String, what: String = "failed") = answer(Kind.FAIL, slug(what), said)
@@ -289,13 +314,24 @@ object Trace {
         }
     }
 
-    /** The one path every answer takes. */
-    private fun answer(kind: Kind, what: String, detail: String) {
+    /**
+     * The one path every answer takes.
+     *
+     * `withinMs` is how stale a waiting tap may be and still be what this answers;
+     * `Long.MAX_VALUE` means "the app is speaking, so it is answering", which is right for
+     * words and wrong for a redraw (see [changed]).
+     */
+    private fun answer(
+        kind: Kind,
+        what: String,
+        detail: String,
+        at: Long = now(),
+        withinMs: Long = Long.MAX_VALUE,
+    ) {
         try {
-            val at = now()
             val line: String
             synchronized(guard) {
-                val act = unanswered.values.lastOrNull()
+                val act = unanswered.values.lastOrNull()?.takeIf { at - it.at <= withinMs }
                 val id = act?.id ?: 0
                 if (act != null) {
                     unanswered.remove(act.id)
