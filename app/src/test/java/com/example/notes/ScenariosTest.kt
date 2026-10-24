@@ -73,6 +73,7 @@ class ScenariosTest {
             onCreateFolder = {},
             onUploadFiles = {},
             onUploadFolder = {},
+            onRestoreDeleted = {},
         )
     }
 
