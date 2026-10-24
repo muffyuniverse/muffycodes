@@ -219,11 +219,13 @@ class CopyFeatureTest : FeatureTest() {
             File(scene.workspace!!.repoOf("groceries"), "shopping.txt").isFile,
         )
         assertTrue("and the original is where it was", beside.isFile)
-        // **Waited for, not read once.** `changesOf` is computed on the worker after a
-        // commit; asking immediately after the commit landed reads the previous count,
-        // which is the one thing a copy into a worktree is supposed to have cleared.
-        scene.await("the project to report nothing left to send", 30_000) {
-            scene.viewModel.changesOf("groceries") == 0
+        // **Committed and still to send, both at once.** The copy is a change like any
+        // other: it is committed to the project's own history the moment it lands, and that
+        // commit is what the row counts as "to send" until a push puts it on GitHub.
+        // Reading the count as "nothing left to send" was the same mistake the row itself
+        // made — a clean worktree is not a synced project.
+        scene.await("the copy to be waiting to be sent", 30_000) {
+            scene.viewModel.changesOf("groceries") == 1
         }
     }
 

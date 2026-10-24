@@ -90,14 +90,6 @@ class DownloadsSink(context: Context) : Trace.Sink {
 
     override fun where(): String? = path ?: privateFile()?.absolutePath
 
-    /**
-     * The file this session is writing to, found or made on first use.
-     *
-     * Exposed so a test can ask what the sink would choose without writing anything.
-     */
-    @RequiresApi(Build.VERSION_CODES.Q)
-    fun current(): Uri? = uri ?: find()?.first
-
     override fun clear() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val target = uri ?: find()?.first

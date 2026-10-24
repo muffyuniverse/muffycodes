@@ -389,13 +389,13 @@ class HistoryFeatureTest : FeatureTest() {
             scene.versionsOf(file).size == 3
         }
         assertEquals("and the restore is its own version", 3, scene.versionsOf(file).size)
-        // And the worktree is clean: the restore was committed to the project, not
-        // left for the next sync to notice — which is what the row's count says, and
-        // the app recounts it once the commit lands.
+        // And the restore is a change waiting to leave: committed to the project at once
+        // (so the history holds it) and not yet pushed (so the row says there is one thing
+        // to send). Both were counted as 0 before, which is the bug the live log reported.
         scene.await("the restore to be committed", 20_000) {
-            scene.viewModel.changesOf("shopping") == 0
+            scene.viewModel.changesOf("shopping") == 1
         }
-        assertEquals("nothing is waiting to be synced", 0, scene.viewModel.changesOf("shopping"))
+        assertEquals("one thing to send", 1, scene.viewModel.changesOf("shopping"))
     }
 
     @Test
