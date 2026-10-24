@@ -554,7 +554,7 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `a local note beside a project is versioned by the account, not lost`() {
-        // The two histories divide at `repo/`, and the boundary is not "belongs to a
+        // The two histories divide at the worktree folder, and the boundary is not "belongs to a
         // project". A note kept in the project's own folder sits *beside* the
         // repository: if both histories assume the other committed it, the change is
         // committed nowhere and the note has no history at all — which is how this
@@ -573,7 +573,7 @@ class HistoryFeatureTest : FeatureTest() {
         assertTrue("the note is where it was written", note.isFile)
 
         // And the project's own repository does not hold it: it is not code.
-        val projectRepo = File(scene.workspace!!.accountDir, "projects/groceries/repo")
+        val projectRepo = File(scene.workspace!!.accountDir, "projects/groceries/${Workspace.REPO}")
         org.eclipse.jgit.api.Git.open(projectRepo).use { git ->
             val status = git.status().call()
             assertFalse(
