@@ -363,6 +363,15 @@ class EditorScreenTest {
 
         editorFor(file)
 
+        // **The decode happens off the main thread,** so the first frame is a spinner
+        // and the answer arrives after it. Asserting straight away caught whichever of
+        // the two the scheduler happened to reach first, which is why this passed for
+        // months and then stopped — not because the app changed, but because the
+        // machine did. Waiting for the thing being asserted is the fix.
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("This picture could not be read on this phone.")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
         compose.onNodeWithText(
             "This picture could not be read on this phone.",
         ).assertIsDisplayed()
@@ -378,6 +387,12 @@ class EditorScreenTest {
 
         editorFor(file)
 
+        // The same wait as the test above, and for the same reason: the answer to "can
+        // this be decoded" arrives after the first frame.
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("This picture could not be read on this phone.")
+                .fetchSemanticsNodes().isNotEmpty()
+        }
         compose.onNodeWithText(
             "This picture could not be read on this phone.",
         ).assertIsDisplayed()
