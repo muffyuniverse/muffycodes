@@ -69,9 +69,60 @@ class Workspace(val accountDir: File) {
      */
     fun ensure() {
         projectsDir.mkdirs()
+        moveLegacyRepos()
     }
 
-    // ---- reading -----------------------------------------------------------
+    /**
+     * Renames the old `repo/` worktree to `GitHub/`, once, per project.
+     *
+     * The folder was called `repo`, which is only obvious to somebody who already knows
+     * what a repository is. Its new name says the thing that matters to a person: **this
+     * is the part that lives on GitHub, and it is the only part that syncs.**
+     *
+     * Two things have to move with it, or a person loses state they cannot see:
+     * - the worktree itself, with `.git` inside it, which is what makes the rename safe
+     *   rather than a copy;
+     * - the pin and lock lists in `.muffy/`, which name files by path — a locked file
+     *   under `projects/x/repo/` would silently become unlocked.
+     *
+     * It runs from [ensure], which every account calls on open, so an old installation
+     * is migrated the first time it is used and never again: after the rename there is
+     * nothing left to find.
+     */
+    private fun moveLegacyRepos() {
+        val projects = projectsDir.listFiles()?.filter { it.isDirectory } ?: return
+        var moved = false
+        for (project in projects) {
+            val old = File(project, LEGACY_REPO)
+            val new = File(project, REPO)
+            if (!old.isDirectory || new.exists()) continue
+            if (!old.renameTo(new)) continue
+            moved = true
+        }
+        if (moved) rewriteFlagPaths()
+    }
+
+    /**
+     * Points every stored pin and lock at the new folder name.
+     *
+     * By path, not by text: a stored path is `projects/<project>/repo/<file>`, so the
+     * *third* segment is the one that changed. A blind text replace would also rewrite a
+     * file a person happens to have called `repo`.
+     */
+    private fun rewriteFlagPaths() {
+        for (name in listOf(PINS_FILE, LOCKED_FILE)) {
+            val current = readFlags(name)
+            if (current.isEmpty()) continue
+            val rewritten = current.map { path ->
+                val parts = path.split("/").toMutableList()
+                if (parts.size >= 3 && parts[0] == PROJECTS && parts[2] == LEGACY_REPO) {
+                    parts[2] = REPO
+                }
+                parts.joinToString("/")
+            }.toSet()
+            writeFlags(name, rewritten)
+        }
+    }
 
     /** The folder's contents, hidden things left out: folders first, then names. */
     fun list(dir: File): List<Entry> {
@@ -479,7 +530,18 @@ class Workspace(val accountDir: File) {
             return out.toString()
         }
         const val PROJECTS = "projects"
-        const val REPO = "repo"
+        /**
+         * The folder that syncs, inside a project.
+         *
+         * It is named for where its contents go, because that is the fact a person needs
+         * to know: everything here is on GitHub, nothing outside it is, and the Sync
+         * button lives here. It used to be `repo`, which names a concept rather than a
+         * place — see [moveLegacyRepos] for the rename.
+         */
+        const val REPO = "GitHub"
+
+        /** What [REPO] was called before the rename, and what is migrated from. */
+        const val LEGACY_REPO = "repo"
         const val STATE_DIR = ".muffy"
         /**
          * The hidden marker that gives an empty folder a version.

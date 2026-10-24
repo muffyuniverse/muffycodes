@@ -119,7 +119,7 @@ class WorkspaceTest {
         val repo = File(project, Workspace.REPO)
         val file = File(repo, "Milk.txt")
         assertEquals("Shopping", workspace.projectOf(file))
-        assertEquals("Shopping", workspace.projectAt(listOf("projects", "Shopping", "repo")))
+        assertEquals("Shopping", workspace.projectAt(listOf(Workspace.PROJECTS, "Shopping", Workspace.REPO)))
         assertNull(workspace.projectAt(listOf("projects")))
         assertNull(workspace.projectAt(emptyList()))
     }
@@ -157,6 +157,45 @@ class WorkspaceTest {
         val second = workspace.createFile(workspace.accountDir, "note.txt", "b")
         assertTrue(second.isFailure)
         assertTrue(second.exceptionOrNull()?.message.orEmpty().contains("already"))
+    }
+
+    @Test
+    fun anOldRepoFolderBecomesGitHubAndKeepsItsFiles() {
+        // An installation from before the rename: `projects/testrepo/repo/`, with a file
+        // and a lock on it stored by the old path.
+        val worktree = File(workspace.projectsDir, "testrepo/repo")
+        worktree.mkdirs()
+        File(worktree, "milk.txt").writeText("two litres")
+        File(worktree, ".git").mkdirs()
+        workspace.setLocked(setOf("projects/testrepo/repo/milk.txt"))
+
+        workspace.ensure()
+
+        val renamed = File(workspace.projectsDir, "testrepo/${Workspace.REPO}")
+        assertFalse("the old folder is gone", worktree.exists())
+        assertTrue("the new one is there", renamed.isDirectory)
+        assertEquals("with its files", "two litres", File(renamed, "milk.txt").readText())
+        assertTrue("and its repository", File(renamed, ".git").isDirectory)
+        assertEquals(
+            "and the lock followed the file, rather than silently lifting",
+            setOf("projects/testrepo/${Workspace.REPO}/milk.txt"),
+            workspace.locked(),
+        )
+    }
+
+    @Test
+    fun aProjectWithBothFoldersIsLeftAlone() {
+        // A half-finished migration, or a person's own `repo` folder beside the worktree:
+        // nothing is renamed over, because the destination already exists.
+        File(workspace.projectsDir, "testrepo/${Workspace.REPO}").mkdirs()
+        val old = File(workspace.projectsDir, "testrepo/repo")
+        old.mkdirs()
+        File(old, "keep.txt").writeText("mine")
+
+        workspace.ensure()
+
+        assertTrue("the old folder stays where it is", old.isDirectory)
+        assertEquals("and so does its file", "mine", File(old, "keep.txt").readText())
     }
 
     @Test

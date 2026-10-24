@@ -226,8 +226,10 @@ fun SettingsScreen(
             // for everything else — and this is how many of those are kept.
             Text("Change history", style = MaterialTheme.typography.titleMedium)
             Text(
-                "How many changes are kept in each project's repo, and in the local " +
-                    "one that holds everything else. Empty keeps all of them.",
+                // "repo" was the folder's old name, and a concept most people do not
+                // hold; the sentence now says what the number governs in plain words.
+                "How many changes are kept in each project, and in the local history " +
+                    "that holds everything outside one. Empty keeps all of them.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

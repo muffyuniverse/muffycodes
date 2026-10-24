@@ -6,7 +6,7 @@ import java.io.File
 /**
  * The git side of one project.
  *
- * A project's repository lives in its `repo/` folder and tracks exactly what is
+ * A project's repository lives in its `GitHub/` folder and tracks exactly what is
  * there. Everything else in the project folder — the files the user keeps beside
  * the worktree — belongs to the account's own history instead
  * ([AppHistory]), so the two histories never overlap.

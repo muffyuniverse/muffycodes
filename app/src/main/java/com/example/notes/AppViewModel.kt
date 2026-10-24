@@ -309,7 +309,7 @@ class AppViewModel @JvmOverloads constructor(
      *
      * Asked by the move window rather than restated there: the app's own folders —
      * the hidden ones, and `projects/` itself — cannot hold a person's file, and
-     * `repo/` is the deliberate exception. A window that decided this for itself
+     * `GitHub/` is the deliberate exception. A window that decided this for itself
      * would be a second copy of the rule, and the copy that is wrong is always the
      * one nobody is looking at.
      */

@@ -76,7 +76,7 @@ class AppHistoryTest {
         history.commit("Nothing much")
 
         // The worktree is ignored, so its files have no versions in this history.
-        assertTrue(history.log("projects/Shopping/repo/Milk.txt").isEmpty())
+        assertTrue(history.log("projects/Shopping/${Workspace.REPO}/Milk.txt").isEmpty())
         // A local file beside it does.
         File(File(workspace.projectsDir, "Shopping"), "ideas.txt").writeText("later")
         history.commit("Created ideas.txt")

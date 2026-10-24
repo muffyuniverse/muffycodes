@@ -8,7 +8,7 @@ import java.io.File
  * The account's whole tree, as a history of this phone.
  *
  * This is the second history of §4 of the design: **every** change outside a
- * project's `repo/` is committed here automatically — a saved edit, a new file,
+ * project's `GitHub/` is committed here automatically — a saved edit, a new file,
  * a rename, a move, a deletion, a project's own name. It has no remote and takes
  * no key, so nothing it remembers can leave the phone.
  *
@@ -29,7 +29,7 @@ class AppHistory(
             appendLine("# The app's own bookkeeping.")
             appendLine(".muffy/")
             appendLine("# A project's repository is its own history; it is not repeated here.")
-            // Both forms are needed. `repo/` matches what is inside the folder,
+            // Both forms are needed. `GitHub/` matches what is inside the folder,
             // but the folder itself is a working tree with its own `.git`, and git
             // would otherwise record that folder as a *submodule* — a pointer to a
             // commit that lives in the other repository. Reading the account's
@@ -75,7 +75,7 @@ class AppHistory(
     /**
      * Commits, and says which of three things happened.
      *
-     * The account's history is where a note beside `repo/` is versioned, so a save
+     * The account's history is where a note beside `GitHub/` is versioned, so a save
      * refused here is the same silent loss as one refused in a project: see
      * [GitService.CommitOutcome].
      */

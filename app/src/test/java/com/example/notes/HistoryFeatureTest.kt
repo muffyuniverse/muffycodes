@@ -459,7 +459,7 @@ class HistoryFeatureTest : FeatureTest() {
         scene.viewModel.delete(file)
         scene.await("the deletion", 20_000) { !file.exists() }
 
-        scene.open(Workspace.PROJECTS, "shopping", "repo")
+        scene.open(Workspace.PROJECTS, "shopping", Workspace.REPO)
         val offered = scene.viewModel.deletedIn(scene.viewModel.currentDir!!)
             .firstOrNull { it.name == "milk.txt" }
         assertTrue("the worktree offers it back", offered != null)
@@ -610,12 +610,12 @@ class HistoryFeatureTest : FeatureTest() {
         val tracked = scene.appHistoryFiles()
         assertFalse(
             "the worktree is not part of the account's history",
-            tracked.any { it.startsWith("projects/Shopping/repo/") },
+            tracked.any { it.startsWith("projects/Shopping/${Workspace.REPO}/") },
         )
         assertEquals(
             "and nothing of the repository leaked in beside it",
             emptyList<String>(),
-            tracked.filter { it.contains("repo/") },
+            tracked.filter { it.contains("${Workspace.REPO}/") },
         )
     }
 
