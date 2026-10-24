@@ -51,8 +51,15 @@ class HistoryScreenTest {
         Scenario(RuntimeEnvironment.getApplication(), signIn = true)
     }
 
-    /** A file with three versions, newest first: "four litres", "three", "one". */
-    private fun threeVersions(): File {
+    /**
+     * A file with four versions, newest first: "four litres of milk", "three
+     * litres of milk", "one litre of milk", and the empty file it was created as.
+     *
+     * Four, not three, because making a file is itself a version: that is the app
+     * being honest about what happened, and a screen test that pretended otherwise
+     * would be testing a history the app does not have.
+     */
+    private fun versions(): File {
         val file = scene.file("milk.txt", "one litre of milk")
         scene.openEditor(file)
         scene.saveAsVersion("three litres of milk")
@@ -88,7 +95,7 @@ class HistoryScreenTest {
 
     @Test
     fun `the newest version is the one on the glass, and it is the whole of it`() {
-        threeVersions()
+        versions()
 
         compose.setContent { history() }
 
@@ -111,7 +118,7 @@ class HistoryScreenTest {
 
     @Test
     fun `the arrow at the corner turns back one version`() {
-        threeVersions()
+        versions()
         compose.setContent { history() }
         waitFor("four litres of milk")
 
@@ -126,7 +133,7 @@ class HistoryScreenTest {
         // A history a person can only move through by finding a small button is a
         // history that does not feel like pages, and the phone's own gesture is a
         // swipe. Same state, same result.
-        threeVersions()
+        versions()
         compose.setContent { history() }
         waitFor("four litres of milk")
 
@@ -137,7 +144,7 @@ class HistoryScreenTest {
 
     @Test
     fun `the oldest version cannot be turned further back, and the newest cannot go on`() {
-        threeVersions()
+        versions()
         compose.setContent { history() }
         waitFor("four litres of milk")
 
@@ -148,6 +155,12 @@ class HistoryScreenTest {
         waitFor("three litres of milk")
         compose.onNodeWithText(">").performClick()
         waitFor("one litre of milk")
+        compose.onNodeWithText(">").assertIsEnabled()
+
+        // The file's first version is the empty file it was made as, so the last
+        // page is what the count says rather than a sentence on the page.
+        compose.onNodeWithText(">").performClick()
+        waitFor("4 of 4")
 
         // And the oldest is the last page, so the arrow on that side has nothing to
         // do — while the one going back towards the newest still does.
@@ -157,15 +170,15 @@ class HistoryScreenTest {
 
     @Test
     fun `the row above the page says which version this is`() {
-        threeVersions()
+        versions()
         compose.setContent { history() }
 
-        // "1 of 3 · newest first": the page number and the order agree, which is
+        // "1 of 4 · newest first": the page number and the order agree, which is
         // what a person needs in order to know which way the arrows go.
-        waitFor("1 of 3")
+        waitFor("1 of 4")
 
         compose.onNodeWithText(">").performClick()
 
-        waitFor("2 of 3")
+        waitFor("2 of 4")
     }
 }

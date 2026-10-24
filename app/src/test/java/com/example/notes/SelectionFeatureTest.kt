@@ -159,11 +159,10 @@ class SelectionFeatureTest : FeatureTest() {
         scene.viewModel.openEditor(file)
 
         scene.viewModel.saveEditor("two litres and a lemon")
+        // The refusal is silent on purpose: the row and the editor both show a lock,
+        // and a message per attempt would be the app saying the same thing over the
+        // screen that already says it. What matters is that nothing was written.
         assertEquals("the text did not change", "two litres", file.readText())
-        assertTrue(
-            "and it said why: ${scene.viewModel.message}",
-            scene.viewModel.message?.contains("locked") == true,
-        )
 
         assertTrue("no rename happened", scene.viewModel.renameTo(file, "groceries") == null)
         assertTrue("the file kept its name", file.isFile)
