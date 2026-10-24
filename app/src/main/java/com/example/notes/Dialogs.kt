@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -777,9 +778,14 @@ fun ReportDialog(
         onDismissRequest = onDismiss,
         title = { Text("Report a problem") },
         text = {
+            // **A bounded box, then a scroll inside it.** A `verticalScroll` inside a
+            // dialog asks for infinite height and is handed an unbounded slot, which
+            // measures forever; the cap is what makes the scroll have something to
+            // scroll within.
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(max = 420.dp)
                     .verticalScroll(rememberScrollState()),
             ) {
                 Text(

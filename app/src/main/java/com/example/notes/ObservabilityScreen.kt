@@ -147,7 +147,7 @@ fun ObservabilityScreen(
 
             if (report.lines.isEmpty()) {
                 Text(
-                    text = "Nothing has happened yet.",
+                    text = "Tap anything and it appears here.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(16.dp),

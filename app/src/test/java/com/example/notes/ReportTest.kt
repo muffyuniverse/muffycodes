@@ -124,7 +124,9 @@ class ReportTest {
     fun `a report leads with the words and the unanswered taps`() {
         // The app already knows a save never answered; the person types one sentence.
         // Both must be in what ships, and the person's own words must come first.
-        Trace.staleMs = 0
+        // -1, so the tap counts as unanswered even in the millisecond it was made: the
+        // subject is what the report contains, not the clock.
+        Trace.staleMs = -1
         Trace.tap("Save", "milk.txt")
         Trace.note("a fact", "worth keeping")
         val frozen = Trace.freeze(listOf("screen" to "editor of milk.txt", "account" to "muffy"))
@@ -191,7 +193,7 @@ class ReportTest {
 
     @Test
     fun `the window shows what the app already noticed`() {
-        Trace.staleMs = 0
+        Trace.staleMs = -1
         Trace.tap("Save", "milk.txt")
         val frozen = Trace.freeze()
 

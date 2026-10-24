@@ -185,9 +185,22 @@ class KeySafetyTest {
         // The falsification of all of the above: a failure that is not one of the
         // four known shapes must not be swallowed into a friendly sentence that says
         // nothing. JGit's own words are what a person can search for.
-        val odd = RuntimeException("Cannot lock /some/path")
-        assertEquals("Cannot lock /some/path", Secrets.explain(odd, "Push failed"))
+        val odd = RuntimeException("Unknown command: frobnicate")
+        assertEquals("Unknown command: frobnicate", Secrets.explain(odd, "Push failed"))
         assertEquals("Push failed", Secrets.explain(RuntimeException(), "Push failed"))
+    }
+
+    @Test
+    fun aLockIsSaidAsSomethingThePersonCanDo() {
+        // A lock is the one failure whose own words are useless here: "Ensure that no
+        // other process has an open file handle on /data/user/0/..." is an instruction
+        // for a terminal, and a phone has no terminal. It gets a sentence instead.
+        val locked = RuntimeException("Cannot lock /data/user/0/x/.git/index.lock")
+        assertEquals(
+            "This project was locked by another copy of the app, so nothing was changed. " +
+                "Close the app completely and try again.",
+            Secrets.explain(locked, "Push failed"),
+        )
     }
 
     @Test

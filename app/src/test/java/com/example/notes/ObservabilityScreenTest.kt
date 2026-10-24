@@ -1,7 +1,9 @@
 package com.example.notes
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -109,7 +111,10 @@ class ObservabilityScreenTest {
     fun `an empty trace does not pretend to be healthy`() {
         show(Trace.Report(emptyList(), emptyList(), emptyList(), 0, 0))
 
-        compose.onNodeWithText("Nothing has happened yet.").assertIsDisplayed()
+        // One node, not two: the summary and the empty-state body used to say the same
+        // sentence, which reads as a stutter and made this assertion ambiguous.
+        compose.onAllNodesWithText("Nothing has happened yet.").assertCountEquals(1)
+        compose.onNodeWithText("Tap anything and it appears here.", substring = true).assertIsDisplayed()
         // No Clear button: there is nothing to clear, and a control that does nothing
         // is the kind of thing this app keeps having to fix.
         compose.onNodeWithText("Share").assertDoesNotExist()
