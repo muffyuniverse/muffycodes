@@ -360,8 +360,10 @@ class TraceTest {
             listOf("new-folder"),
             Trace.report().waiting.map { it.what },
         )
+        // The id column is padded to four characters in the file, and `split` collapses
+        // whitespace, so the field to compare is the number itself.
         val line = settle().last { it.contains("SAID") }
-        assertEquals("and it quotes the picker's own id", picker.toString().padStart(4), line.split(Regex("\\s+"))[1])
+        assertEquals("and it quotes the picker's own id", picker, line.split(Regex("\\s+"))[1].toInt())
     }
 
     @Test
