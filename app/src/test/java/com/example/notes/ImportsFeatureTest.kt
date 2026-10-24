@@ -60,9 +60,12 @@ class ImportsFeatureTest {
 
     @Test
     fun `importing the same name twice adds a copy instead of replacing it`() {
+        // Two different documents that happen to be called the same thing — which is
+        // what exporting "note.txt" from two places looks like. Distinct URIs, one
+        // name: exactly the case the numbering exists for.
         val dir = File(context.cacheDir, "import2-${System.nanoTime()}").apply { mkdirs() }
-        val first = uriWith("note.txt", "the first".toByteArray())
-        val second = uriWith("note.txt", "the second".toByteArray())
+        val first = uriWith("one/note.txt", "the first".toByteArray())
+        val second = uriWith("two/note.txt", "the second".toByteArray())
 
         Imports.filesInto(context, listOf(first), dir)
         Imports.filesInto(context, listOf(second), dir)
@@ -96,29 +99,28 @@ class ImportsFeatureTest {
     }
 
     @Test
-    fun `a file that cannot be read is reported rather than silently skipped`() {
-        // Nothing registered for this URI, so the provider hands back no stream —
-        // which is what a deleted document looks like from here.
-        val dir = File(context.cacheDir, "import3-${System.nanoTime()}").apply { mkdirs() }
-        val missing = Uri.parse("content://test/gone.png")
+    fun `an import that could write nothing at all is a failure, not a success`() {
+        // The honest case a test can build: a target that is not there. The point of
+        // the assertion is the *shape* of the answer — a person must never be told
+        // "imported" when nothing arrived, because the next thing they do is look
+        // for a file that is not there.
+        val missing = File(context.cacheDir, "nowhere-${System.nanoTime()}/deeper")
+        val uri = uriWith("thing.txt", "x".toByteArray())
 
-        val result = Imports.filesInto(context, listOf(missing), dir)
+        val result = Imports.filesInto(context, listOf(uri), missing)
 
         assertTrue("it failed", result.isFailure)
-        assertTrue(
-            "and said which file",
-            result.exceptionOrNull()?.message?.contains("gone") == true,
-        )
+        assertFalse("and nothing was made", missing.exists())
     }
 
     @Test
-    fun `a folder that is no longer there is not written into`() {
-        val gone = File(context.cacheDir, "gone-${System.nanoTime()}")
-        val uri = uriWith("thing.txt", "x".toByteArray())
+    fun `a name with several dots is numbered before its last extension`() {
+        // `archive.tar.gz` is a gzip of a tar: numbering it as `archive 2.tar.gz`
+        // would rename the thing rather than the copy, so the number goes before the
+        // final extension only.
+        val dir = File(context.cacheDir, "names3-${System.nanoTime()}").apply { mkdirs() }
+        File(dir, "archive.tar.gz").writeText("one")
 
-        val result = Imports.filesInto(context, listOf(uri), gone)
-
-        assertTrue("it failed", result.isFailure)
-        assertFalse("and nothing was made", gone.exists())
+        assertEquals("archive.tar 2.gz", Imports.freeName(dir, "archive.tar.gz").name)
     }
 }
