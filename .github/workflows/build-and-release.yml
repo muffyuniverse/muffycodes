@@ -982,6 +982,17 @@ jobs:
           path: app/build/outputs/apk/release/app-release.apk
           retention-days: 7
           if-no-files-found: error
+
+      # The dev copy rides in its own artifact, and only when one was built. It is never
+      # part of the release: anything published is the shipping app and is attested.
+      - name: Hand the dev copy onward
+        if: github.event_name == 'workflow_dispatch' && inputs.dev_build
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dev-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7
+          if-no-files-found: error
   # -------------------------------------------------------------------------
   # Delivery: what the run has to hand over, made once.
   #
@@ -1047,6 +1058,14 @@ jobs:
         with:
           name: scenarios
           path: scenarios
+
+      # Optional: only a run that asked for a dev copy has one.
+      - name: Take the dev copy, if there is one
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dev-apk
+          path: dev
 
       - name: Write down what changed
         env:
