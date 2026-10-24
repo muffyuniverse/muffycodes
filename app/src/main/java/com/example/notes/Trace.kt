@@ -377,6 +377,27 @@ object Trace {
 
     private fun now(): Long = System.currentTimeMillis()
 
+    /**
+     * Waits until everything recorded so far has been written.
+     *
+     * **The queue is single-threaded and in order,** so a task put behind the writes runs
+     * after all of them: that is the whole mechanism. It is here rather than in the test
+     * so that a test never has to write a marker into the log it is about to assert on —
+     * which was the first version of this wait, and it made the log longer every time
+     * somebody looked at it.
+     *
+     * Only a test needs this: the app writes and moves on, which is the point of a log.
+     */
+    internal fun awaitWrites() {
+        val done = java.util.concurrent.CountDownLatch(1)
+        try {
+            writer.execute { done.countDown() }
+        } catch (t: Throwable) {
+            return
+        }
+        done.await(10, java.util.concurrent.TimeUnit.SECONDS)
+    }
+
     // ---- writing ------------------------------------------------------------
 
     private fun emit(lines: List<String>) {

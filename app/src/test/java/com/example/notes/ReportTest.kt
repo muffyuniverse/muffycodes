@@ -62,11 +62,9 @@ class ReportTest {
         dir.deleteRecursively()
     }
 
+    /** The log, once everything recorded so far has been written. */
     private fun log(): String {
-        val until = System.currentTimeMillis() + 5_000
-        while (System.currentTimeMillis() < until && (!file.isFile || file.readText().isBlank())) {
-            Thread.sleep(20)
-        }
+        Trace.awaitWrites()
         return if (file.isFile) file.readText() else ""
     }
 

@@ -41,57 +41,20 @@ class TraceTest {
     }
 
     /**
-     * Waits until everything recorded so far is on disk, and returns the log.
+     * The log, once everything recorded so far has been written.
      *
      * The writer is a queue on another thread, so "read the file and hope" is a race
-     * dressed as a wait. The marker goes through the same queue, so when it appears,
-     * everything before it has already been written — and it is a **separate file** from
-     * the log, because a marker written into the log would be counted, searched and
-     * asserted on by the very tests that are waiting for it.
+     * dressed as a wait. `awaitWrites` puts a task behind the writes on that same
+     * single-threaded queue, so when it runs they have all run — and nothing is added to
+     * the log to find out, which is what a marker written into it would have done.
      */
     private fun settle(): List<String> {
-        val mark = File(dir, "settle")
-        mark.parentFile?.mkdirs()
-        mark.writeText("")
-        Trace.attach(RecordingSink(file, mark))
-        Trace.note("settle", "all before this is on disk")
-        val until = System.currentTimeMillis() + 10_000
-        while (System.currentTimeMillis() < until) {
-            if (mark.readText().isNotEmpty()) break
-            Thread.sleep(10)
-        }
-        Trace.attach(file)
+        Trace.awaitWrites()
         return if (file.isFile) file.readLines().filter { it.isNotBlank() } else emptyList()
     }
 
     /** The first line of the log, once everything written so far has landed. */
     private fun firstLine(): String = settle().firstOrNull().orEmpty()
-
-    /**
-     * The real file sink, with a side channel that says when the queue has drained.
-     *
-     * It exists only so a test can know that a write has landed without asking the log
-     * itself — the question "has everything been written?" must not be answered by
-     * writing something.
-     */
-    private class RecordingSink(log: File, private val mark: File) : Trace.Sink {
-        private val inner = Trace.FileSink(log)
-        override fun append(lines: List<String>) {
-            inner.append(lines)
-            if (lines.any { it.contains("settle") }) {
-                try {
-                    mark.writeText("done")
-                } catch (t: Throwable) {
-                    // The test's own flag; if it cannot be set, settle() times out and
-                    // the failure names itself.
-                }
-            }
-        }
-        override fun read(): String? = inner.read()
-        override fun where(): String = inner.where()
-        override fun clear() = inner.clear()
-    }
-
 
     // ---- the columns --------------------------------------------------------
 
