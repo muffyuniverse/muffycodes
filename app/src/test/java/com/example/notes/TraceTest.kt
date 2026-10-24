@@ -41,30 +41,56 @@ class TraceTest {
     }
 
     /**
-     * Waits until everything recorded so far is on disk.
+     * Waits until everything recorded so far is on disk, and returns the log.
      *
-     * The writer is a queue on another thread, so polling for a line count is a race
-     * dressed as a wait. A marker event goes through the same queue, so when it appears
-     * everything before it has already been written — and the number is different every
-     * time, so a marker from a previous call cannot be mistaken for this one.
+     * The writer is a queue on another thread, so "read the file and hope" is a race
+     * dressed as a wait. The marker goes through the same queue, so when it appears,
+     * everything before it has already been written — and it is a **separate file** from
+     * the log, because a marker written into the log would be counted, searched and
+     * asserted on by the very tests that are waiting for it.
      */
     private fun settle(): List<String> {
-        val marker = "settle-${markerAt.incrementAndGet()}"
-        Trace.note(marker, "all before this is on disk")
+        val mark = File(dir, "settle")
+        mark.parentFile?.mkdirs()
+        mark.writeText("")
+        Trace.attach(RecordingSink(file, mark))
+        Trace.note("settle", "all before this is on disk")
         val until = System.currentTimeMillis() + 10_000
         while (System.currentTimeMillis() < until) {
-            val lines = if (file.isFile) file.readLines() else emptyList()
-            if (lines.any { it.contains(marker) }) return lines.filter { it.isNotBlank() }
+            if (mark.readText().isNotEmpty()) break
             Thread.sleep(10)
         }
+        Trace.attach(file)
         return if (file.isFile) file.readLines().filter { it.isNotBlank() } else emptyList()
     }
 
-    private val markerAt = java.util.concurrent.atomic.AtomicInteger()
-
     /** The first line of the log, once everything written so far has landed. */
-    private fun firstLine(): String =
-        settle().firstOrNull { !it.contains("settle-") }.orEmpty()
+    private fun firstLine(): String = settle().firstOrNull().orEmpty()
+
+    /**
+     * The real file sink, with a side channel that says when the queue has drained.
+     *
+     * It exists only so a test can know that a write has landed without asking the log
+     * itself — the question "has everything been written?" must not be answered by
+     * writing something.
+     */
+    private class RecordingSink(private val log: File, private val mark: File) : Trace.Sink {
+        private val inner = Trace.FileSink(log)
+        override fun append(lines: List<String>) {
+            inner.append(lines)
+            if (lines.any { it.contains("settle") }) {
+                try {
+                    mark.writeText("done")
+                } catch (t: Throwable) {
+                    // The test's own flag; if it cannot be set, settle() times out and
+                    // the failure names itself.
+                }
+            }
+        }
+        override fun read(): String? = inner.read()
+        override fun where(): String = inner.where()
+        override fun clear() = inner.clear()
+    }
 
 
     // ---- the columns --------------------------------------------------------
@@ -219,7 +245,7 @@ class TraceTest {
         Trace.checkpoint("I pressed Save and nothing appeared in the history")
 
         val lines = settle()
-        val report = lines.last()
+        val report = lines.lastOrNull { it.contains("REPORT") }.orEmpty()
         assertTrue("it is a REPORT line: $report", report.contains("REPORT"))
         assertTrue(
             "carrying the sentence as written, spaces and all: $report",
@@ -227,7 +253,10 @@ class TraceTest {
         )
         // And it sits after the taps, because a log is ordered: those lines are the
         // context, and nothing had to be captured for them to be.
-        assertTrue("after the taps", lines.indexOfFirst { it.contains("TAP") } < lines.lastIndex)
+        assertTrue(
+            "after the taps, which is what makes them the context",
+            lines.indexOfFirst { it.contains("TAP") } < lines.indexOfLast { it.contains("REPORT") },
+        )
     }
 
     @Test
@@ -261,12 +290,22 @@ class TraceTest {
     @Test
     fun `the log is appended to, never rewritten`() {
         Trace.note("first", "one")
-        val before = firstLine()
+        val before = settle().firstOrNull { it.contains(" first ") }.orEmpty()
+        assertTrue("the first line was written: $before", before.isNotEmpty())
+
         Trace.note("second", "two")
 
         val after = settle()
-        assertEquals("the first line is still there, unchanged", before, after.first { it.contains("first") })
-        assertTrue("and the second came after it", after.indexOfFirst { it.contains("second") } > after.indexOfFirst { it.contains("first") })
+        assertEquals(
+            "the first line is still there, byte for byte",
+            before,
+            after.firstOrNull { it.contains(" first ") }.orEmpty(),
+        )
+        assertTrue(
+            "and the second came after it: $after",
+            after.indexOfLast { it.contains(" second ") } >
+                after.indexOfFirst { it.contains(" first ") },
+        )
     }
 
     @Test
