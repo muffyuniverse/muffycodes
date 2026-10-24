@@ -74,7 +74,7 @@ class TraceTest {
      * itself — the question "has everything been written?" must not be answered by
      * writing something.
      */
-    private class RecordingSink(private val log: File, private val mark: File) : Trace.Sink {
+    private class RecordingSink(log: File, private val mark: File) : Trace.Sink {
         private val inner = Trace.FileSink(log)
         override fun append(lines: List<String>) {
             inner.append(lines)

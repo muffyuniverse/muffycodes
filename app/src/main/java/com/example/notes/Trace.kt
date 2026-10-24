@@ -174,15 +174,20 @@ object Trace {
 
     private fun stamp(at: Long): String = clock.get()!!.format(Date(at))
 
-    // The writer: lines are handed over here and written in batches, so forty events in
-    // a second cost four opens of the file rather than forty, and nothing on the screen
-    // ever waits for a write.
+    /**
+     * The writer: one thread, and one task per event.
+     *
+     * **One task per event, deliberately.** Batching was a "fewer file opens" saving that
+     * needed a `flushing` flag to remember whether a batch was already queued — and a
+     * flag like that, set on one thread and cleared on another, is exactly the kind of
+     * state that gets stuck. When it did, every event after it silently went nowhere,
+     * which is the one failure a log must never have. A single-threaded executor already
+     * serialises the writes and keeps them in order; the file open per line is nothing
+     * beside a git commit.
+     */
     private val writer = Executors.newSingleThreadExecutor { r ->
         Thread(r, "trace").apply { isDaemon = true }
     }
-    private val pending = ArrayDeque<String>()
-    private var flushing = false
-    private val writeGuard = Any()
 
     /** Sends the log to [target], replacing wherever it went before. */
     fun attach(target: Sink?) {
@@ -375,29 +380,20 @@ object Trace {
     // ---- writing ------------------------------------------------------------
 
     private fun emit(lines: List<String>) {
+        if (lines.isEmpty()) return
+        // The sink is read here, on the caller's thread, so a sink attached mid-session
+        // takes effect from the next line rather than from the next batch.
         val target = sink ?: return
-        synchronized(writeGuard) {
-            pending.addAll(lines)
-            if (flushing) return
-            flushing = true
-            try {
-                writer.execute {
-                    val batch = mutableListOf<String>()
-                    synchronized(writeGuard) {
-                        batch.addAll(pending)
-                        pending.clear()
-                        flushing = false
-                    }
-                    try {
-                        target.append(batch)
-                    } catch (t: Throwable) {
-                        // A trace that cannot be written is not a reason to stop the app.
-                    }
+        try {
+            writer.execute {
+                try {
+                    target.append(lines)
+                } catch (t: Throwable) {
+                    // A log that cannot be written is not a reason to stop the app.
                 }
-            } catch (t: Throwable) {
-                // The executor is shutting down, or the phone is out of threads.
-                flushing = false
             }
+        } catch (t: Throwable) {
+            // The executor is shutting down, or the phone is out of threads.
         }
     }
 
