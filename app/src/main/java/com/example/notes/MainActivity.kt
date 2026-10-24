@@ -92,23 +92,24 @@ private sealed interface Pending {
 private fun AppRoot(viewModel: AppViewModel) {
     var showSettings by remember { mutableStateOf(false) }
     var showTrace by remember { mutableStateOf(false) }
-    // The report, frozen the instant the button is pressed — see Trace.freeze. Held
-    // here rather than in a dialog so that the record is taken before the typing
-    // starts, and every screen can open it.
-    var report by remember { mutableStateOf<Trace.Frozen?>(null) }
+    // The report window. No snapshot to take: the log is already being appended to, so
+    // the moment the person writes their sentence is a `REPORT` line and everything
+    // above it is the context. That is the whole simplification — one stream, one
+    // document, and the button only adds a checkpoint to it.
+    var reportOpen by remember { mutableStateOf(false) }
     var pending by remember { mutableStateOf<Pending>(Pending.None) }
 
     val snackbar = remember { SnackbarHostState() }
 
-    // The trace screen shows a snapshot, re-taken while it is open: a report that
-    // stopped updating would freeze the very thing being watched for not reacting.
+    // The trace screen shows the ring, re-read while it is open: a screen that stopped
+    // updating would freeze the very thing being watched for not reacting.
     var traceReport by remember { mutableStateOf(Trace.report()) }
     LaunchedEffect(showTrace) {
         while (showTrace) {
             traceReport = Trace.report()
             kotlinx.coroutines.delay(1_000)
         }
-}
+    }
 
     // The settings screen holds the field where a key is typed. While it is up,
     // the window refuses to be screenshotted or appear in the app switcher.
@@ -163,50 +164,20 @@ private fun AppRoot(viewModel: AppViewModel) {
      * thing, and it is exactly what the app's own record leaves out.
      */
     val openReport: () -> Unit = {
-        Trace.note("report opened", "")
-        report = Trace.freeze(
-            listOf(
-                "screen" to when {
-                    showTrace -> "trace"
-                    showSettings -> "settings"
-                    historyPath != null -> "history of ${historyPath.last()}"
-                    editing != null -> "editor of ${editing.name}"
-                    else -> "browser at " + (viewModel.path.ifEmpty { listOf("/") }.joinToString("/"))
-                },
-                "account" to (viewModel.activeLogin ?: "nobody"),
-                "folder" to (viewModel.currentDir?.absolutePath ?: "—"),
-                "projects" to viewModel.projectNames.joinToString(", ").ifEmpty { "none" },
-                // A report without the build is a report about a version that may no
-                // longer exist — and "it used to work" is the commonest thing a
-                // person says, which makes *which* build the first question.
-                "version" to viewModel.versionLine,
-            ),
+        // One line saying where they were, so the checkpoint is not the only thing on
+        // record about the moment — but no snapshot: the log below it is the state.
+        Trace.note(
+            "report-opened",
+            (when {
+                showTrace -> "trace"
+                showSettings -> "settings"
+                historyPath != null -> "history/${historyPath.last()}"
+                editing != null -> "editor/${editing.name}"
+                else -> "browser/" + (viewModel.path.ifEmpty { listOf("/") }.joinToString("/"))
+            }) + " · " + (viewModel.activeLogin ?: "nobody") +
+                " · projects=" + (viewModel.projectNames.joinToString(",").ifEmpty { "none" }),
         )
-    }
-
-    /**
-     * The live trace, while the app is being used.
-     *
-     * A debug build with the switch on copies the record into Downloads every few
-     * seconds, so somebody watching that folder can see what the app is doing without
-     * waiting for a report to be written by hand. It is deliberately unglamorous: one
-     * file, replaced, written only when something has actually changed since last time,
-     * and only while this screen is composed.
-     *
-     * A release build never gets here: [SettingsStore.liveTrace] is false there, and
-     * `liveTraceAvailable` is false, so the switch cannot be turned on either.
-     */
-    LaunchedEffect(viewModel.settings.liveTrace) {
-        if (!viewModel.settings.liveTrace || !viewModel.settings.liveTraceAvailable) return@LaunchedEffect
-        var last = ""
-        while (true) {
-            val text = Trace.liveText(viewModel.versionLine)
-            if (text != last) {
-                last = text
-                Reports.saveLive(context, text)
-            }
-            kotlinx.coroutines.delay(4_000)
-        }
+        reportOpen = true
     }
 
     // **The trace answers taps that never reach the view model.** Cancel, opening a
@@ -267,18 +238,12 @@ private fun AppRoot(viewModel: AppViewModel) {
             report = traceReport,
             onBack = { showTrace = false },
             onShare = { shareTrace(context) },
-            onSave = {
-                val saved = Reports.save(context, Trace.dump(), what = "trace")
-                Trace.note("trace saved", saved.where ?: "could not be written")
-                viewModel.message = if (saved.ok) {
-                    "Saved to ${saved.where}"
-                } else {
-                    "Could not save the trace"
-                }
-            },
             onReport = openReport,
             onClear = {
-                Trace.clear()
+                // The screen is emptied; the file is not. What has already happened is
+                // evidence, and a Clear that deleted it would be the one control in the
+                // app that destroys the record of what went wrong.
+                Trace.clearScreen()
                 traceReport = Trace.report()
             },
         )
@@ -361,29 +326,18 @@ private fun AppRoot(viewModel: AppViewModel) {
 
     // The report sits above every other window, because the moment it is wanted is the
     // moment something else on the screen is not working.
-    report?.let { frozen ->
+    if (reportOpen) {
         ReportDialog(
-            frozen = frozen,
-            onDismiss = { report = null },
+            waiting = Trace.broken(),
+            failures = Trace.report().failures,
+            onDismiss = { reportOpen = false },
             onSend = { note ->
-                report = null
-                val text = Trace.reportText(frozen, note)
-                val saved = Reports.save(
-                    context,
-                    text,
-                    slug = Reports.slugOf(note),
-                    at = frozen.at,
-                )
-                // **Written first, then offered.** The share sheet is a convenience and
-                // the file is the record: a person who dismisses the sheet still has the
-                // report, and nothing the next minute does can lose it.
-                Trace.note("report saved", saved.where ?: "could not be written")
-                shareReport(context, text, saved)
-                viewModel.message = if (saved.ok) {
-                    "Report saved to ${saved.where}"
-                } else {
-                    "The report could not be written, so it was offered as text"
-                }
+                reportOpen = false
+                // **The whole act is one line in the log.** Everything above it is the
+                // context, because a log is ordered — nothing has to be captured,
+                // frozen, slugged, filed or sent for the report to exist and be found.
+                Trace.checkpoint(note)
+                viewModel.message = "Written down. The log is at ${Trace.where() ?: "the app's folder"}"
             },
         )
     }
@@ -714,38 +668,6 @@ private fun tap(what: String, detail: String = "") {
 }
 
 /**
- * Offers a saved report, saying where the copy is.
- *
- * The path goes in the text as well as the message, because the person reading it on
- * the other end needs to say which file they mean — and the file is the one thing the
- * share sheet cannot carry.
- */
-private fun shareReport(
-    context: android.content.Context,
-    text: String,
-    saved: Reports.Saved,
-) {
-    val where = saved.where
-    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-        type = "text/plain"
-        putExtra(android.content.Intent.EXTRA_SUBJECT, "Muffy Codes — problem report")
-        putExtra(
-            android.content.Intent.EXTRA_TEXT,
-            if (where == null) text else text + "\n\nThe same report is on the phone at: $where\n",
-        )
-    }
-    try {
-        context.startActivity(
-            android.content.Intent.createChooser(send, "Send the report")
-                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-        )
-    } catch (t: Throwable) {
-        // Nothing can take text. The message on the screen already says where the file
-        // is, which is the part that matters.
-    }
-}
-
-/**
  * Hands the trace to another app.
  *
  * Plain text through the system's share sheet, deliberately: it needs no permission, no
@@ -758,6 +680,7 @@ private fun shareTrace(context: android.content.Context) {
         type = "text/plain"
         putExtra(android.content.Intent.EXTRA_SUBJECT, "Muffy Codes — what the app did")
         putExtra(android.content.Intent.EXTRA_TEXT, Trace.dump())
+        Trace.where()?.let { putExtra(android.content.Intent.EXTRA_TEXT, Trace.dump() + "\n\nOn this phone: $it\n") }
     }
     try {
         context.startActivity(

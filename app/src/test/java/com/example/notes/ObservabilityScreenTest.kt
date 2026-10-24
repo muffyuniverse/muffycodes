@@ -1,14 +1,13 @@
 package com.example.notes
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.ui.test.assertCountEquals
-import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import org.junit.Assert.assertEquals
@@ -21,13 +20,16 @@ import org.robolectric.annotation.Config
 /**
  * The trace screen, painted from a report it is handed.
  *
- * No recorder and no file behind it: the screen's job is to make a report readable, and
- * a test that had to produce the report by tapping would be testing the recorder twice
- * and this screen barely at all.
+ * No recorder and no file behind it: the screen's job is to make a report readable, and a
+ * test that had to produce the report by tapping would be testing the recorder twice and
+ * this screen barely at all.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w411dp-h891dp")
 class ObservabilityScreenTest {
+
+    @get:Rule
+    val compose = createComposeRule()
 
     /** The theme the screens are painted in, as the other screen tests do it. */
     @Composable
@@ -35,28 +37,25 @@ class ObservabilityScreenTest {
         MaterialTheme { Surface { content() } }
     }
 
-    @get:Rule
-    val compose = createComposeRule()
-
     private fun healthy() = Trace.Report(
         lines = listOf(
-            "12:00:01.020  +40ms    CHANGED state  at / · 1 rows · milk.txt  ← #1",
-            "12:00:00.980           TAP     Save  milk.txt",
+            "12:00:01.020  41 CHANGED state  at / · 1 rows · milk.txt",
+            "12:00:00.980  41 TAP     Save     milk.txt",
         ),
         waiting = emptyList(),
         failures = emptyList(),
         answered = 1,
-        total = 1,
+        taps = 1,
     )
 
     private fun stuck() = Trace.Report(
-        lines = listOf("12:00:00.980           TAP     Save  milk.txt"),
+        lines = listOf("12:00:00.980  42 TAP     Save     milk.txt"),
         waiting = listOf(
-            Trace.Broken(Trace.Act(1, System.currentTimeMillis(), "Save", "milk.txt"), 2_410),
+            Trace.Broken(42, System.currentTimeMillis(), "Save", "milk.txt", 2_410),
         ),
-        failures = listOf("FAIL confirm sync: GitHub refused the push: rejected"),
+        failures = listOf("FAIL sync: GitHub refused the push: rejected"),
         answered = 0,
-        total = 1,
+        taps = 1,
     )
 
     private fun show(report: Trace.Report, onBack: () -> Unit = {}, onClear: () -> Unit = {}) {
@@ -79,7 +78,6 @@ class ObservabilityScreenTest {
         show(healthy())
 
         compose.onNodeWithText("1 of 1 answered, nothing stuck.").assertIsDisplayed()
-        // And the log is there, newest first, saying what each line was.
         compose.onNodeWithText("CHANGED state", substring = true).assertIsDisplayed()
         compose.onNodeWithText("TAP", substring = true).assertIsDisplayed()
     }
@@ -94,7 +92,6 @@ class ObservabilityScreenTest {
             substring = true,
         ).assertIsDisplayed()
         compose.onNodeWithText("No answer yet").assertIsDisplayed()
-        // And the refusal keeps the app's words rather than a class name.
         compose.onNodeWithText("GitHub refused the push", substring = true).assertIsDisplayed()
     }
 
@@ -111,12 +108,22 @@ class ObservabilityScreenTest {
     fun `an empty trace does not pretend to be healthy`() {
         show(Trace.Report(emptyList(), emptyList(), emptyList(), 0, 0))
 
-        // One node, not two: the summary and the empty-state body used to say the same
-        // sentence, which reads as a stutter and made this assertion ambiguous.
         compose.onAllNodesWithText("Nothing has happened yet.").assertCountEquals(1)
-        compose.onNodeWithText("Tap anything and it appears here.", substring = true).assertIsDisplayed()
-        // No Clear button: there is nothing to clear, and a control that does nothing
-        // is the kind of thing this app keeps having to fix.
+        compose.onNodeWithText("Tap anything and it appears here.", substring = true)
+            .assertIsDisplayed()
+        // No Share or Clear: there is nothing to hand over and nothing to clear, and a
+        // control that does nothing is the kind of thing this app keeps having to fix.
         compose.onNodeWithText("Share").assertDoesNotExist()
+        compose.onNodeWithText("Clear").assertDoesNotExist()
+    }
+
+    @Test
+    fun `there is no Save, because the log is already written`() {
+        // The whole point of the single-log design: a Save button would offer to write a
+        // second, worse copy of something that is already on disk.
+        show(healthy())
+
+        compose.onNodeWithText("Save").assertDoesNotExist()
+        compose.onNodeWithText("Share").assertIsDisplayed()
     }
 }

@@ -146,17 +146,17 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Copy the trace to Downloads", style = MaterialTheme.typography.bodyMedium)
+                        Text("Write the log to Downloads", style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            "Rewritten every few seconds while the app is open, so it can be " +
-                                "read without pressing anything.",
+                            "One line per thing that happened, appended as it happens, at " +
+                                "Download/${DownloadsSink.FOLDER}/${DownloadsSink.NAME}.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     Switch(
                         checked = viewModel.settings.liveTrace,
-                        onCheckedChange = { viewModel.settings.keepLiveTrace(it) },
+                        onCheckedChange = { viewModel.keepLog(it) },
                     )
                 }
             }

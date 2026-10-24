@@ -243,14 +243,41 @@ class AppViewModel @JvmOverloads constructor(
         // account's `.muffy/` — outside both histories, so a run can never appear as a
         // version, and in one folder with the settings.
         attachTrace()
-        Trace.note("app opened", "signed in as " + (activeLogin ?: "nobody"))
+        Trace.note("app-opened", versionLine)
         refresh()
     }
 
-    /** Points the trace's file at the active account, or nowhere when signed out. */
+    /**
+     * Turns the log's file on or off, now.
+     *
+     * A switch that only took effect at the next launch would have been a lie for a whole
+     * session — and the moment somebody wants it is the moment something is going wrong,
+     * which is not a good moment to be told to restart.
+     */
+    fun keepLog(on: Boolean) {
+        settings.keepLiveTrace(on)
+        attachTrace()
+        Trace.note(
+            "log-switched",
+            if (on) "writing to ${Trace.where() ?: "nowhere"}" else "off",
+        )
+    }
+
+
+    /**
+     * Points the log at Downloads.
+     *
+     * **Once, and not per account.** The log is about this phone's copy of the app, not
+     * about who is signed in: an account switch mid-session is exactly the kind of thing
+     * worth having in one stream rather than in two files. A release build attaches
+     * nothing at all, so nothing is ever written there.
+     */
     private fun attachTrace() {
-        val login = activeLogin
-        Trace.attach(login?.let { File(accounts.stateDir(it), "trace.txt") })
+        if (!settings.liveTrace) {
+            Trace.attach((null as Trace.Sink?))
+            return
+        }
+        Trace.attach(DownloadsSink(getApplication()))
     }
 
     // ---- reading the tree ---------------------------------------------------
@@ -623,6 +650,9 @@ class AppViewModel @JvmOverloads constructor(
         val ws = workspace ?: return
         val target = ws.relative(file) ?: return
         val key = ws.pathString(target)
+        // Named by the direction it was pressed: a switch's trace says what the person
+        // did, not what the app ended up believing.
+        Trace.tap(if (key in lockedPaths) "unlock" else "lock", file.name)
         val next = if (key in lockedPaths) lockedPaths - key else lockedPaths + key
         ws.setLocked(next)
         lockedPaths = next
@@ -642,6 +672,9 @@ class AppViewModel @JvmOverloads constructor(
         val ws = workspace ?: return
         val target = ws.relative(file) ?: return
         val key = ws.pathString(target)
+        // Named before the change, so the trace says which way the switch was pressed
+        // rather than what it ended up as.
+        Trace.tap(if (key in pins) "unpin" else "pin", file.name)
         val next = if (key in pins) pins - key else pins + key
         ws.setPins(next)
         pins = next
@@ -897,11 +930,13 @@ class AppViewModel @JvmOverloads constructor(
 
     /** Opens a file in the editor. */
     fun openEditor(file: File) {
+        Trace.tap("open file", file.name)
         editingPath = workspace?.relative(file)
         editorSession++
     }
 
     fun closeEditor() {
+        Trace.tap("close editor")
         editingPath = null
     }
 
@@ -929,6 +964,16 @@ class AppViewModel @JvmOverloads constructor(
         // row and the editor both show a lock, and a message per attempt would be
         // the app saying the same thing over the screen that already says it.
         if (isLocked(file)) return
+        // **The tap is recorded here, after the refusals and before the work.** Save is
+        // the element people report on — "I pressed Save and nothing appeared in the
+        // history" — and until this line the most important action in the app left no
+        // trace at all. It is named as the button is rather than as the method is,
+        // because a report is read by somebody holding the phone.
+        //
+        // After the guards, because a tap the screen never allows is not a tap: a locked
+        // file has Save greyed out, and recording an intent for it would put a broken
+        // sequence in every trace, from a button nobody could press.
+        Trace.tap("Save", file.name)
         val keep = settings.historyLength
         val h = history
         val g = git
@@ -1355,11 +1400,9 @@ class AppViewModel @JvmOverloads constructor(
     fun switchTo(login: String) {
         credentials.activeLogin = login
         activeLogin = login
-        // The trace follows the account: what is written from here on belongs to the
-        // account being looked at, and a person switching accounts should not find the
-        // other one's history in their trace.
-        attachTrace()
-        Trace.note("switched account", login)
+        // One log, not one per account: a switch is a thing that happened in this
+        // session, and splitting the stream would lose the line before it.
+        Trace.note("switched-account", login)
         path = emptyList()
         editingPath = null
         historyPath = null
@@ -1406,12 +1449,14 @@ class AppViewModel @JvmOverloads constructor(
 
     /** Opens the history of a file, or of a folder and everything in it. */
     fun openHistory(file: File) {
+        Trace.tap("history", file.name)
         historyPath = workspace?.relative(file)
         historyIsFolder = file.isDirectory
         historyGeneration++
     }
 
     fun closeHistory() {
+        Trace.tap("close history")
         historyPath = null
         historyIsFolder = false
     }

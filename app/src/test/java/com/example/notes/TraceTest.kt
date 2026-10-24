@@ -3,245 +3,353 @@ package com.example.notes
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.io.File
 
 /**
- * The recorder, tested as a thing that decides rather than a thing that stores.
+ * The log, tested as something a shell can answer questions with.
  *
- * The question this suite exists for is the one an audit asks: *did the tap reach
- * anything?* So nearly every test here is a pair — the same trace read two ways, once
- * with an answer and once without — because a recorder that called everything healthy
- * and one that called everything broken would each pass a suite that only ever looked
- * at one case.
+ * The format was chosen so that "which taps never got an answer" is a `grep` rather than
+ * a judgement, so nearly every test here asserts on the **text that is written**, not on
+ * an object in memory. A recorder that paired correctly in memory and wrote something
+ * unparseable would pass a test that only looked at its own state, and fail the person
+ * reading the file.
  */
 class TraceTest {
+
+    private lateinit var dir: File
+    private lateinit var file: File
 
     @Before
     fun fresh() {
         Trace.resetForTest()
+        Trace.staleMs = 2_000
+        dir = File(System.getProperty("java.io.tmpdir"), "trace-${System.nanoTime()}")
+        file = File(dir, "trace.log")
+        Trace.attach(file)
     }
 
     @After
     fun tidy() {
         Trace.resetForTest()
-        Trace.attach(null)
+        Trace.attach((null as Trace.Sink?))
         Trace.staleMs = 2_000
+        dir.deleteRecursively()
     }
 
-    /** An hour from now, so nothing looks stale by accident. */
-    private fun soon() = System.currentTimeMillis() + 60_000
+    /** The file, once the writer thread has caught up. */
+    private fun written(): List<String> {
+        val until = System.currentTimeMillis() + 5_000
+        while (System.currentTimeMillis() < until) {
+            if (file.isFile) {
+                val lines = file.readLines().filter { it.isNotBlank() }
+                // The last line is written by whatever was last emitted; give the writer
+                // a moment to have it.
+                if (lines.isNotEmpty()) return lines
+            }
+            Thread.sleep(20)
+        }
+        return emptyList()
+    }
+
+    /** Waits for the file to hold at least [n] lines. */
+    private fun writtenAtLeast(n: Int): List<String> {
+        val until = System.currentTimeMillis() + 5_000
+        while (System.currentTimeMillis() < until) {
+            val lines = if (file.isFile) file.readLines().filter { it.isNotBlank() } else emptyList()
+            if (lines.size >= n) return lines
+            Thread.sleep(20)
+        }
+        return if (file.isFile) file.readLines().filter { it.isNotBlank() } else emptyList()
+    }
+
+    // ---- the columns --------------------------------------------------------
 
     @Test
-    fun `a tap the app answered is not a broken sequence`() {
-        Trace.tap("Save", "milk.txt")
-        Trace.changed("at / · 1 rows · milk.txt")
+    fun `a line is time, id, kind, name, detail`() {
+        val id = Trace.tap("Save", "milk.txt")
+        val line = writtenAtLeast(1).first()
 
-        val report = Trace.report()
-        assertEquals("nothing is waiting", 0, report.waiting.size)
-        assertEquals("one act, one answer", 1, report.answered)
-        assertTrue("and it is healthy: ${report.summary}", report.isHealthy)
+        val fields = line.split(Regex("\\s+"))
+        assertTrue("the time is first: $line", Regex("""^\d\d:\d\d:\d\d\.\d\d\d""").containsMatchIn(line))
+        assertEquals("the id is second, which is what a shell counts", id.toString(), fields[1])
+        assertEquals("the kind is third", "TAP", fields[2])
+        assertEquals("the name is fourth", "Save", fields[3])
+        assertTrue("and the detail is the tail, spaces and all", line.contains("milk.txt"))
     }
 
     @Test
-    fun `a tap nobody answered is named, and says how long it has waited`() {
-        // The falsification of the test above: the identical tap, with nothing after it.
-        // If this came back healthy, the pairing would be decorative.
-        Trace.tap("Save", "milk.txt")
+    fun `a name with spaces becomes a slug, so the columns stay columns`() {
+        Trace.tap("confirm delete chosen", "3 items")
+        val line = writtenAtLeast(1).first()
 
-        val report = Trace.report()
-        assertEquals("one act is waiting", 1, report.waiting.size)
-        assertEquals("and it is the tap", "Save", report.waiting.first().act.what)
-        assertEquals("with the row it was about", "milk.txt", report.waiting.first().act.detail)
-        assertEquals("and nothing answered", 0, report.answered)
-        assertFalse("so the screen must not say healthy", report.isHealthy)
+        assertTrue("no spaces in the name field: $line", line.contains("confirm-delete-chosen"))
+        assertEquals("the detail keeps its own spelling", "3 items", line.substringAfter("  "))
     }
 
     @Test
-    fun `waiting is not broken until it has waited`() {
-        // A tap that is half a second old is not a bug yet: every real action in this
-        // app takes a moment, and flagging them all as broken would make the flag
-        // worthless.
-        Trace.tap("Save")
-        Trace.staleMs = 2_000
+    fun `an answer quotes the id of the tap it answers`() {
+        val id = Trace.tap("Save", "milk.txt")
+        Trace.changed("at / · 1 rows")
 
-        assertTrue("nothing is broken yet", Trace.broken().isEmpty())
-        // The same trace, read later, is broken — and that is the only thing that
-        // changed.
-        val later = Trace.report(System.currentTimeMillis() + 5_000)
-        assertEquals("after five seconds it is", 1, later.waiting.count { it.waitedMs > 2_000 })
+        val lines = writtenAtLeast(2)
+        assertEquals("two lines", 2, lines.size)
+        assertTrue("the answer leads with the same id: ${lines[1]}", lines[1].contains(" $id CHANGED"))
+    }
+
+    @Test
+    fun `a fact that answers nothing carries id zero`() {
+        // Zero is not a tap, so a `uniq -c` pass over the ids cannot mistake a note for a
+        // promise the app failed to keep.
+        Trace.note("app-opened", "Muffy Codes 91")
+        val line = writtenAtLeast(1).first()
+
+        assertTrue("id zero: $line", line.split(Regex("\\s+"))[1] == "0")
+        assertTrue("and the kind says it answers nothing", line.contains("NOTE"))
+    }
+
+    // ---- the pairing --------------------------------------------------------
+
+    @Test
+    fun `a tap whose id appears once is a tap with no answer`() {
+        // The whole design, stated as a test: two taps, one answered. A shell finds the
+        // unanswered one by counting ids; so does this.
+        val answeredId = Trace.tap("Save", "milk.txt")
+        val orphanId = Trace.tap("Sync", "testrepo")
+        Trace.changed("at /")
+
+        val lines = writtenAtLeast(3)
+        val ids = lines.mapNotNull { line ->
+            val fields = line.split(Regex("\\s+"))
+            if (fields.size > 2 && fields[2] == "TAP") fields[1].toIntOrNull() else null
+        }
+        val counts = lines.flatMap { line ->
+            val fields = line.split(Regex("\\s+"))
+            if (fields.size > 1) listOfNotNull(fields[1].toIntOrNull()) else emptyList()
+        }.groupingBy { it }.eachCount()
+
+        assertEquals("both taps are in the log", listOf(answeredId, orphanId), ids)
+        assertEquals("the answered one appears twice", 2, counts[answeredId])
+        assertEquals("the orphan appears once, which is the finding", 1, counts[orphanId])
+        assertEquals("and the app agrees", listOf(orphanId), Trace.broken().map { it.id })
+    }
+
+    @Test
+    fun `an older tap stays unanswered when a newer one is served`() {
+        val older = Trace.tap("Save")
+        val newer = Trace.tap("close-editor")
+        Trace.changed("screen browser")
+
+        val broken = Trace.report().waiting
+        assertEquals("one is still waiting", 1, broken.size)
+        assertEquals("and it is the older one", older, broken.first().id)
+        assertTrue("the newer one was answered", newer != older)
     }
 
     @Test
     fun `words answer a tap the way a change does`() {
-        // Every message the app raises goes through `Trace.said`, so a tap answered by
-        // a sentence ("Signed in as muffy") must not read as unanswered.
-        Trace.tap("add account")
+        Trace.tap("add-account")
         Trace.said("Signed in as muffy")
 
-        val report = Trace.report()
-        assertEquals("answered", 0, report.waiting.size)
-        assertEquals("and by words", 1, report.answered)
+        assertEquals("answered by words", 0, Trace.report().waiting.size)
     }
 
     @Test
-    fun `a failure answers the tap and keeps the app's own words`() {
-        Trace.tap("confirm sync", "testrepo")
-        Trace.failure("GitHub did not accept this phone's key. Sign in again and try once more.")
+    fun `a refusal answers the tap and keeps the app's own sentence`() {
+        Trace.tap("sync", "testrepo")
+        Trace.failure("GitHub did not accept this phone's key. Sign in again.", "sync")
 
         val report = Trace.report()
         assertEquals("the tap was answered", 0, report.waiting.size)
         assertEquals("in red", 1, report.failures.size)
         assertTrue(
-            "with the sentence the person needs: ${report.failures}",
+            "with the sentence a person can act on: ${report.failures}",
             report.failures.first().contains("did not accept this phone's key"),
         )
-        assertFalse("and the screen must not call that healthy", report.isHealthy)
+        assertFalse("so the screen must not call that healthy", report.isHealthy)
     }
 
     @Test
-    fun `an older tap stays unanswered when a newer one is served`() {
-        // Two taps in a row with one answer. The older one got nothing, and saying so
-        // is the point: the newer answer belongs to the newer tap, and pretending
-        // otherwise would hide exactly the missing reaction being looked for.
+    fun `waiting is not broken until it has waited`() {
         Trace.tap("Save")
-        Trace.tap("close editor")
-        Trace.changed("screen browser dialog None")
+        Trace.staleMs = 2_000
 
-        val report = Trace.report()
-        assertEquals("one is still waiting", 1, report.waiting.size)
-        assertEquals("and it is the older one", "Save", report.waiting.first().act.what)
-        assertEquals("the newer one was answered", 1, report.answered)
+        assertTrue("nothing is broken yet", Trace.broken().isEmpty())
+        // The same tap, read later, is broken — and the clock is the only thing that
+        // changed, which is why the waiting time is part of the finding.
+        val later = Trace.report(System.currentTimeMillis() + 5_000)
+        assertEquals("after five seconds it is", 1, later.waiting.count { it.waitedMs > 2_000 })
+        assertTrue("and it says how long", later.waiting.first().line.contains("2410 ms") ||
+            later.waiting.first().line.contains("no change and no message after 5"))
     }
 
     @Test
-    fun `a broken sequence is not forgotten when older lines fall out of the buffer`() {
-        // The falsification of the whole design: the ring is bounded, and the oldest
-        // events are dropped first. If an unanswered tap lived only in that ring, the
-        // act of using the app would erase the evidence of the thing that broke it —
-        // and the report would look better the longer a person waited.
-        // -1, so that even an answer in the same millisecond counts as waited-for: the
-        // subject here is what survives the ring, not the clock.
+    fun `an unanswered tap outlives the screen's ring`() {
+        // The ring is bounded and the oldest events fall out first. If a broken sequence
+        // lived only in that ring, using the app would erase the evidence of what broke
+        // it — and the report would look better the longer a person waited.
         Trace.staleMs = -1
-        Trace.tap("Save", "the one that broke")
+        val id = Trace.tap("Save", "the one that broke")
         repeat(Trace.EVENTS + 50) { Trace.note("noise", "line $it") }
 
         val broken = Trace.broken()
         assertEquals("still exactly one", 1, broken.size)
-        assertEquals("and still the same tap", "Save", broken.first().act.what)
+        assertEquals("and still the same tap", id, broken.first().id)
         assertTrue(
-            "even though its first line has fallen out of the log",
-            Trace.report().lines.none { it.contains("TAP     Save") },
+            "even though its own line has fallen out of the ring",
+            Trace.report().lines.none { it.contains("Save") },
         )
     }
 
-    @Test
-    fun `the log is capped and the newest lines are the ones kept`() {
-        repeat(Trace.EVENTS + 100) { Trace.note("line", "number $it") }
-
-        val lines = Trace.report().lines
-        assertTrue("no more than the cap", lines.size <= Trace.EVENTS)
-        assertTrue(
-            "the newest is first: ${lines.first()}",
-            lines.first().contains("number ${Trace.EVENTS + 99}"),
-        )
-    }
+    // ---- the checkpoint -----------------------------------------------------
 
     @Test
-    fun `every line says what it was and when it happened`() {
-        Trace.tap("open file", "milk.txt")
-        Trace.changed("at / · editing milk.txt")
-
-        val lines = Trace.report().lines
-        assertEquals("two lines", 2, lines.size)
-        assertTrue("the answer first: ${lines[0]}", lines[0].contains("CHANGED"))
-        assertTrue("naming what changed", lines[0].contains("editing milk.txt"))
-        assertTrue("the tap second: ${lines[1]}", lines[1].contains("TAP"))
-        assertTrue("with the row", lines[1].contains("milk.txt"))
-        assertTrue(
-            "and how long the answer took: ${lines[0]}",
-            Regex("""\+\d+ms""").containsMatchIn(lines[0]),
-        )
-    }
-
-    @Test
-    fun `the durable copy is written, and is capped`() {
-        val dir = File(System.getProperty("java.io.tmpdir"), "trace-test-" + System.nanoTime())
-        val file = File(dir, "trace.txt")
-        Trace.attach(file)
+    fun `a report is a line in the same stream, with the person's own words`() {
         Trace.tap("Save", "milk.txt")
-        Trace.changed("at /")
+        Trace.checkpoint("I pressed Save and nothing appeared in the history")
 
-        // The writer is on its own thread, so the file answers a moment later.
-        val deadline = System.currentTimeMillis() + 5_000
-        while (System.currentTimeMillis() < deadline && !file.isFile) Thread.sleep(20)
-        assertTrue("the trace has a durable copy", file.isFile)
-        assertTrue("with the tap in it", file.readText().contains("Save"))
+        val lines = writtenAtLeast(2)
+        val report = lines.last()
+        assertTrue("it is a REPORT line: $report", report.contains("REPORT"))
+        assertTrue(
+            "carrying the sentence as written, spaces and all: $report",
+            report.contains("I pressed Save and nothing appeared in the history"),
+        )
+        // And it sits after the taps, because a log is ordered: those lines are the
+        // context, and nothing had to be captured for them to be.
+        assertTrue("after the taps", lines.indexOfFirst { it.contains("TAP") } < lines.lastIndex)
+    }
 
-        // A trace that grows without a ceiling fills a phone. Rather than writing tens
-        // of thousands of lines through the recorder to get there, the file is put in
-        // the state a long session leaves it in — past the limit — and one more line is
-        // recorded, which is the line that finds it.
+    @Test
+    fun `a report with no words still marks the place`() {
+        Trace.checkpoint("")
+
+        val line = writtenAtLeast(1).first()
+        assertTrue("the checkpoint exists: $line", line.contains("REPORT"))
+        assertTrue(
+            "and says it was a report rather than looking like an empty line",
+            line.contains("a problem was reported"),
+        )
+    }
+
+    @Test
+    fun `a checkpoint does not answer the tap it was written about`() {
+        // The falsification of a tempting mistake: writing a report is not the app
+        // responding to the thing that went wrong. If it consumed the waiting tap, the
+        // finding would be erased by the very act of reporting it.
+        val id = Trace.tap("Save", "milk.txt")
+        Trace.checkpoint("Save does nothing")
+
+        assertEquals("still waiting", listOf(id), Trace.broken().map { it.id })
+    }
+
+    // ---- the file -----------------------------------------------------------
+
+    @Test
+    fun `the log is appended to, never rewritten`() {
+        Trace.note("first", "one")
+        val before = writtenAtLeast(1).first()
+        Trace.note("second", "two")
+
+        val after = writtenAtLeast(2)
+        assertEquals("the first line is still there, unchanged", before, after.first { it.contains("first") })
+        assertTrue("and the second came after it", after.indexOfFirst { it.contains("second") } > after.indexOfFirst { it.contains("first") })
+    }
+
+    @Test
+    fun `the log is trimmed when it grows, and says where`() {
+        // Rather than writing thousands of lines through the recorder to get there, the
+        // file is put in the state a long session leaves it in and one more line is
+        // recorded — which is the line that finds it.
         val filler = buildString {
             var i = 0
-            while (length < Trace.FILE_LIMIT + 8_192) appendLine("12:00:00.000  NOTE    filler  line ${i++}")
+            while (length < Trace.LOG_LIMIT + 8_192) appendLine("12:00:00.000    0 NOTE    filler  line ${i++}")
         }
+        file.parentFile?.mkdirs()
         file.writeText(filler)
-        assertTrue("the file is over the limit to begin with", file.length() > Trace.FILE_LIMIT)
+        assertTrue("the file is over the limit to begin with", file.length() > Trace.LOG_LIMIT)
 
         Trace.note("after", "the trim")
-        // Waited for on the thing being asserted, not on a proxy: the writer truncates
-        // and then writes, so a read that lands between the two sees a file that is
-        // short enough and has no marker in it yet.
-        val marker = "… earlier lines were dropped …"
+
         val until = System.currentTimeMillis() + 10_000
-        while (System.currentTimeMillis() < until && !file.readText().startsWith(marker)) {
+        while (System.currentTimeMillis() < until && !file.readText().startsWith("… the oldest")) {
             Thread.sleep(25)
         }
-        assertTrue("the file stays bounded: ${file.length()}", file.length() <= Trace.FILE_LIMIT)
+        assertTrue("it stays bounded: ${file.length()}", file.length() <= Trace.LOG_LIMIT)
         assertTrue(
-            "and says some lines went: ${file.readText().take(60)}",
-            file.readText().startsWith(marker),
+            "and the boundary says so, so a reader knows the log has a start: " +
+                file.readText().take(60),
+            file.readText().startsWith("… the oldest lines were dropped"),
         )
-        dir.deleteRecursively()
+        assertTrue("and the line that caused it survived", file.readText().contains("after"))
     }
 
     @Test
-    fun `tracing cannot break the app it is watching`() {
-        // A file that cannot be opened: the "parent" is a plain file, so `mkdirs` fails
-        // and the write fails with it. The recorder must swallow that — a trace that
-        // throws is worse than no trace, because it takes the app down while reporting.
-        val parent = File(System.getProperty("java.io.tmpdir"), "not-a-dir-" + System.nanoTime())
+    fun `a log that cannot be written does not break the app`() {
+        // A file whose parent is a plain file: `mkdirs` fails, every append fails. A
+        // recorder that threw would take the app down while reporting on it.
+        val parent = File(System.getProperty("java.io.tmpdir"), "not-a-dir-${System.nanoTime()}")
         parent.writeText("I am a file, not a folder")
-        Trace.attach(File(parent, "trace.txt"))
+        Trace.attach(File(parent, "trace.log"))
 
         Trace.tap("Save")
         Trace.changed("at /")
         Trace.failure("something refused")
-        Trace.note("a note")
+        Trace.checkpoint("it does not work")
 
         val report = Trace.report()
-        assertEquals("the trace still works", 1, report.answered)
+        assertEquals("the ring still works", 1, report.answered)
         assertEquals("and still knows about the failure", 1, report.failures.size)
-        Trace.attach(null)
         parent.delete()
     }
 
     @Test
-    fun `clearing starts again`() {
+    fun `clearing the screen keeps the file`() {
         Trace.tap("Save")
         Trace.changed("at /")
-        Trace.tap("another")
+        writtenAtLeast(2)
+
+        Trace.clearScreen()
+
+        assertTrue("the screen is empty", Trace.report().lines.isEmpty())
+        // The file is the evidence. A Clear that deleted it would be the one control in
+        // the app that destroys the record of what went wrong.
+        val kept = if (file.isFile) file.readText() else ""
+        assertTrue("the file still has the tap: $kept", kept.contains("TAP"))
+    }
+
+    @Test
+    fun `clearing everything wipes the log too`() {
+        Trace.tap("Save")
+        Trace.changed("at /")
+        writtenAtLeast(2)
 
         Trace.clear()
 
-        val report = Trace.report()
-        assertEquals("no acts", 0, report.total)
-        assertEquals("nothing waiting", 0, report.waiting.size)
-        assertTrue("no lines", report.lines.isEmpty())
-        assertTrue("and it says so rather than claiming health", report.isHealthy)
-        assertEquals("with the words for an empty trace", "Nothing has happened yet.", report.summary)
+        val now = if (file.isFile) file.readText() else ""
+        assertFalse("nothing of the old session: $now", now.contains("Save"))
+    }
+
+    @Test
+    fun `where says where the log is`() {
+        assertNotNull("a file sink can name itself", Trace.where())
+        Trace.attach((null as Trace.Sink?))
+        assertEquals("and no sink means nowhere", null, Trace.where())
+    }
+
+    @Test
+    fun `nothing is written when no sink is attached`() {
+        // The release build's case: no sink, so no file, no directory, nothing on disk.
+        Trace.attach((null as Trace.Sink?))
+        Trace.tap("Save")
+        Trace.changed("at /")
+        Trace.checkpoint("this must go nowhere")
+
+        assertFalse("no file was made", file.exists())
+        // The ring still works, because the trace screen is part of the app.
+        assertTrue("but the screen still shows it", Trace.report().lines.isNotEmpty())
     }
 }

@@ -21,8 +21,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -758,29 +756,32 @@ fun ReportButton(onReport: () -> Unit) {
 }
 
 /**
- * Says what went wrong, on top of the app's own frozen record.
+ * Says what went wrong, as a line in the app's log.
  *
- * The record is shown, not hidden behind the send: a person who can see that the app
- * already noticed "Save — no change and no message after 2410 ms" will say less and say
- * it about the right thing. And a report nobody can read before sending is a report
- * that will arrive describing the wrong screen.
+ * **Nothing is captured here.** The log has been appended to since the app opened, so
+ * the moment the person writes their sentence the file already holds everything that led
+ * to it — the taps, what answered them, what was refused. All the button adds is a
+ * `REPORT` line with their words, which is why the file and the report are one document
+ * rather than two that have to be kept in step.
+ *
+ * What the window *shows* is only so the person knows the app already noticed: if a tap
+ * is sitting there unanswered, they will describe the right thing.
  */
 @Composable
 fun ReportDialog(
-    frozen: Trace.Frozen,
+    waiting: List<Trace.Broken>,
+    failures: List<String>,
     onDismiss: () -> Unit,
     onSend: (String) -> Unit,
 ) {
-    var note by remember(frozen.at) { mutableStateOf("") }
+    var note by remember { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Report a problem") },
-        text = {
-            ReportBody(frozen = frozen, note = note, onNote = { note = it })
-        },
+        text = { ReportBody(waiting = waiting, failures = failures, note = note, onNote = { note = it }) },
         confirmButton = {
-            TextButton(onClick = { onSend(note) }) { Text("Send") }
+            TextButton(onClick = { onSend(note) }) { Text("Write it down") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
@@ -791,20 +792,17 @@ fun ReportDialog(
  *
  * Split out because a dialog is a platform window: mounting one in a test asks whether
  * Robolectric settles, which is a question about the harness, not about this app. The
- * part with a decision in it — what the app already noticed, in the app's own words,
- * and what the person types — is ordinary content and can be tested as such.
+ * part with a decision in it — what the app already noticed, in the app's own words, and
+ * what the person types — is ordinary content and can be tested as such.
  */
 @Composable
 fun ReportBody(
-    frozen: Trace.Frozen,
+    waiting: List<Trace.Broken>,
+    failures: List<String>,
     note: String,
     onNote: (String) -> Unit,
 ) {
-    val stuck = frozen.stuck()
-    // **No scroll here, on purpose.** What the window shows is what the app already
-    // noticed — at most a handful of lines — not the log; the log goes in the file,
-    // where it belongs. A scrollable inside a dialog also asks for infinite height in a
-    // slot that gives it one, which measures forever.
+    val stuck = waiting.filter { it.waitedMs > Trace.staleMs }
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
             "What happened, and what you were trying to do?",
@@ -820,22 +818,19 @@ fun ReportBody(
 
         HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
-        // The frozen finding, in the same words the trace screen uses. If the
-        // app already noticed, say so here — it is the difference between a
-        // report that points at something and one that describes a mood.
         if (stuck.isEmpty()) {
             Text(
-                "The app was answering everything when you pressed this.",
+                "Every tap so far was answered.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
             Text(
-                "The app had already noticed these:",
+                "These have no answer, and are already in the log:",
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.error,
             )
-            stuck.forEach {
+            stuck.take(6).forEach {
                 Text(
                     "· ${it.line}",
                     style = MaterialTheme.typography.bodySmall,
@@ -844,14 +839,14 @@ fun ReportBody(
                 )
             }
         }
-        if (frozen.report.failures.isNotEmpty()) {
+        if (failures.isNotEmpty()) {
             Text(
                 "And these were refused:",
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(top = 12.dp),
             )
-            frozen.report.failures.take(5).forEach {
+            failures.take(4).forEach {
                 Text(
                     "· $it",
                     style = MaterialTheme.typography.bodySmall,
@@ -860,8 +855,8 @@ fun ReportBody(
             }
         }
         Text(
-            "The whole record goes with it — ${frozen.report.lines.size} lines of " +
-                "what the app did, taken at the moment you pressed this.",
+            "Your sentence goes into the same log the app has been writing since it " +
+                "opened, so the lines above it are what happened.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 12.dp),
