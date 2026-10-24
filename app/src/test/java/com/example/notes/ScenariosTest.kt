@@ -214,7 +214,7 @@ class ScenariosTest {
         ) {
             before()
             then("A file is written in the project's own folder, not inside the repository.") {
-                scene.file("shopping-list.txt", "milk, bread")
+                scene.file("shopping_list.txt", "milk, bread")
             }
             after()
             result(

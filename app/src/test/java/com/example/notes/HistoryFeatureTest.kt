@@ -365,13 +365,13 @@ class HistoryFeatureTest : FeatureTest() {
         scene.open(Workspace.PROJECTS, "groceries")
         val before = scene.headId()
 
-        scene.file("shopping-list.txt", "milk, bread")
+        scene.file("shopping_list.txt", "milk, bread")
 
         assertTrue(
             "the account's history took it",
             scene.headId() != before,
         )
-        val note = File(scene.workspace!!.accountDir, "projects/groceries/shopping-list.txt")
+        val note = File(scene.workspace!!.accountDir, "projects/groceries/shopping_list.txt")
         assertTrue("the note is where it was written", note.isFile)
 
         // And the project's own repository does not hold it: it is not code.
@@ -380,8 +380,8 @@ class HistoryFeatureTest : FeatureTest() {
             val status = git.status().call()
             assertFalse(
                 "the note is not staged into the repository",
-                status.added.any { it.contains("shopping-list") } ||
-                    status.untracked.any { it.contains("shopping-list") },
+                status.added.any { it.contains("shopping_list") } ||
+                    status.untracked.any { it.contains("shopping_list") },
             )
         }
     }

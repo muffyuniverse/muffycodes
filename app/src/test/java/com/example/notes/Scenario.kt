@@ -147,7 +147,10 @@ class Scenario(
 
     /** Makes a file in the folder that is open and waits for it to be there. */
     fun file(name: String, text: String = ""): File {
-        val made = Workspace.withDefaultExtension(name)
+        // The name the app will actually use: it puts every name into one shape,
+        // so a harness that looked for `shopping-list.txt` would wait forever for a
+        // file the app had correctly called `shopping_list.txt`.
+        val made = Workspace.cleanName(Workspace.withDefaultExtension(name), "untitled")
         val before = headId()
         viewModel.createFile(name)
         await("\"$made\" to be made") { viewModel.entries.any { it.name == made } }
@@ -167,11 +170,12 @@ class Scenario(
     /** Makes a folder in the folder that is open. */
     fun folder(name: String): File {
         require(!name.contains("/")) { "a folder is made in the folder that is open, not at a path" }
+        val made = Workspace.cleanName(name, "folder")
         val before = headId()
         viewModel.createFolder(name)
-        await("\"$name\" to be made") { viewModel.entries.any { it.name == name } }
-        awaitRecorded(before, "\"$name\" being made")
-        return File(viewModel.currentDir!!, name)
+        await("\"$made\" to be made") { viewModel.entries.any { it.name == made } }
+        awaitRecorded(before, "\"$made\" being made")
+        return File(viewModel.currentDir!!, made)
     }
 
     /**

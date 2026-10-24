@@ -234,7 +234,7 @@ class FilesFeatureTest : FeatureTest() {
     fun `a file inside a project but outside the worktree is a local file`() {
         scene.project("Shopping")
         scene.open(Workspace.PROJECTS, "Shopping")
-        val local = scene.file("shopping-list.txt", "milk")
+        val local = scene.file("shopping_list.txt", "milk")
 
         assertTrue("it is beside the worktree", local.parentFile!!.name == "Shopping")
         assertEquals("it belongs to the project", "Shopping", scene.workspace!!.projectOf(local))
