@@ -1376,7 +1376,11 @@ class AppViewModel @JvmOverloads constructor(
             for (child in here.listFiles() ?: emptyArray()) {
                 if (ws.isHidden(child.name)) continue
                 val name = if (prefix.isEmpty()) child.name else "$prefix/${child.name}"
-                if (child.isDirectory) collect(child, name) else onDisk += name
+                // A folder that is still there is not a folder that was deleted, so
+                // its name counts as present exactly as a file's does. Collecting
+                // only files made every existing folder look gone.
+                onDisk += name
+                if (child.isDirectory) collect(child, name)
             }
         }
         collect(dir, "")

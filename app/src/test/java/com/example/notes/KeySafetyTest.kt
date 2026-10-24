@@ -158,7 +158,9 @@ class KeySafetyTest {
 
     @Test
     fun anOfflinePhoneIsSaidAsBeingOffline() {
-        val offline = org.eclipse.jgit.errors.TransportException(
+        // The shape JGit reports it in: its own words first, the network failure
+        // underneath as the cause.
+        val offline = RuntimeException(
             "cannot open git-upload-pack",
             java.net.UnknownHostException("github.com"),
         )

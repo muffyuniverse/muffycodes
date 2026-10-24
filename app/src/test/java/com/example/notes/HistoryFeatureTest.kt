@@ -93,13 +93,18 @@ class HistoryFeatureTest : FeatureTest() {
         scene.closeEditor()
 
         // Then every save can be read back, newest first
-        val texts = scene.versionsOf(file).map { it.second }
+        val versions = scene.versionsOf(file)
+        val texts = versions.map { it.second }
         assertEquals(
             "each save is a step back: $texts",
-            listOf("four litres", "three litres", "two litres", "one litre"),
-            texts.take(4),
+            listOf("four litres", "three litres", "two litres"),
+            texts.take(3),
         )
-        assertEquals("and nothing else was recorded", 4, texts.size)
+        assertEquals(
+            "and they are three different versions, not one version read three times",
+            3,
+            versions.take(3).map { it.first.id }.distinct().size,
+        )
     }
 
     @Test

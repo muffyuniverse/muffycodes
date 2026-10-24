@@ -78,6 +78,12 @@ object Secrets {
             "non-fast-forward" in chain || "rejected" in chain ->
                 "GitHub refused the push: $said"
 
+            // An `Error` rather than an `Exception`: its message is often a
+            // resolution failure with no verb in it, so the kind is part of the
+            // sentence. `catch (Exception)` used to let these out of the worker with
+            // no project, no file and no action named.
+            error !is Exception -> "$said ($kind)"
+
             said.isNotEmpty() -> scrub(said)
             error !is Exception -> "$fallback ($kind)"
             else -> fallback
