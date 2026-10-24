@@ -60,11 +60,12 @@ class HistoryFeatureTest : FeatureTest() {
         // *log*, and an unanswered tap is the one thing the log exists to find.
         scene.folder("letters")
         scene.await("a version") { scene.versionsOfFolder("letters").isNotEmpty() }
-        scene.openHistory(File(scene.workspace!!.accountDir, "letters"))
 
         // The ring is shared by every test in this JVM, so the taps another one left
-        // waiting would be indistinguishable from this one's.
+        // waiting would be indistinguishable from this one's. Reset after the history is
+        // open, because opening it is itself a tap.
         Trace.resetForTest()
+        // `versionsOfFolder` leaves the history open, which is what restoring acts on.
         scene.restore(scene.versionsOfFolder("letters").first().first.id)
         Trace.awaitWrites()
 
