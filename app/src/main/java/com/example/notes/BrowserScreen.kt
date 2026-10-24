@@ -93,6 +93,10 @@ fun BrowserScreen(
 ) {
     val projects = viewModel.atProjects
     val here = viewModel.path
+    // **The add menu belongs to the folder, so it closes when the folder does.**
+    // Held here rather than inside the button, because the thing that has to close
+    // it is a tap somewhere else on the screen.
+    var adding by remember(here) { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -143,7 +147,12 @@ fun BrowserScreen(
                             Icon(Icons.Filled.Search, contentDescription = "Search this project")
                         }
                     }
-                    IconButton(onClick = onOpenSettings) {
+                    IconButton(onClick = {
+                        // An outside action runs *after* the add menu has closed, so
+                        // the menu is never left standing over the next screen.
+                        adding = false
+                        onOpenSettings()
+                    }) {
                         Icon(Icons.Filled.Settings, contentDescription = "Settings")
                     }
                 },
@@ -159,7 +168,6 @@ fun BrowserScreen(
                 }
             } else {
                 // A folder gets the two things a folder gets (§3).
-                var adding by remember { mutableStateOf(false) }
                 Column(horizontalAlignment = Alignment.End) {
                     if (adding) {
                         // Putting something in from Downloads sits beside making
@@ -184,54 +192,75 @@ fun BrowserScreen(
                         }
                     }
                     FloatingActionButton(onClick = { adding = !adding }) {
-                        Icon(Icons.Filled.Add, contentDescription = "Add")
+                        Icon(
+                            Icons.Filled.Add,
+                            contentDescription = if (adding) "Close the add menu" else "Add",
+                        )
                     }
                 }
             }
         },
     ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            ProjectSlimRow(viewModel, onRowSync)
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                ProjectSlimRow(viewModel, onRowSync)
 
-            // What can be done with what is chosen. It appears only when
-            // something is chosen, because it is a mode: a long press on a row
-            // enters it, and the cross leaves it.
-            if (viewModel.selected.isNotEmpty()) {
-                SelectionBar(
-                    count = viewModel.selected.size,
-                    onMove = onMoveSelected,
-                    onDelete = onDeleteSelected,
-                    onClear = { viewModel.clearSelection() },
-                )
-            }
+                // What can be done with what is chosen. It appears only when
+                // something is chosen, because it is a mode: a long press on a row
+                // enters it, and the cross leaves it.
+                if (viewModel.selected.isNotEmpty()) {
+                    SelectionBar(
+                        count = viewModel.selected.size,
+                        onMove = onMoveSelected,
+                        onDelete = onDeleteSelected,
+                        onClear = { viewModel.clearSelection() },
+                    )
+                }
 
-            if (viewModel.showSearch) {
-                OutlinedTextField(
-                    value = viewModel.query,
-                    onValueChange = { viewModel.query = it },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-                    placeholder = { Text("Search in ${viewModel.currentProject.orEmpty()}") },
-                    singleLine = true,
-                    trailingIcon = {
-                        if (viewModel.isSearching) {
-                            IconButton(onClick = { viewModel.query = "" }) {
-                                Icon(Icons.Filled.Clear, contentDescription = "Clear")
+                if (viewModel.showSearch) {
+                    OutlinedTextField(
+                        value = viewModel.query,
+                        onValueChange = { viewModel.query = it },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                        placeholder = { Text("Search in ${viewModel.currentProject.orEmpty()}") },
+                        singleLine = true,
+                        trailingIcon = {
+                            if (viewModel.isSearching) {
+                                IconButton(onClick = { viewModel.query = "" }) {
+                                    Icon(Icons.Filled.Clear, contentDescription = "Clear")
+                                }
                             }
-                        }
-                    },
-                )
-            }
+                        },
+                    )
+                }
 
-            if (viewModel.workspace == null) {
-                EmptyState(
-                    title = "Sign in to begin",
-                    text = "Your account is the root of everything here: its projects, " +
-                        "their repositories, and the files you keep beside them.",
+                if (viewModel.workspace == null) {
+                    EmptyState(
+                        title = "Sign in to begin",
+                        text = "Your account is the root of everything here: its projects, " +
+                            "their repositories, and the files you keep beside them.",
+                    )
+                } else if (projects) {
+                    ProjectList(viewModel, onRowSync, onRowRename, onRowDelete)
+                } else {
+                    EntryList(viewModel, actions)
+                }
+            }
+            // **A tap outside the add menu closes it and does nothing else.** Without
+            // this the menu stayed open while the tap went through to whatever was under
+            // it — a row opened, a folder was entered, and the menu was still there over
+            // the next screen, so the outside action happened *and* the menu had to be
+            // dismissed afterwards. An invisible pane over everything but the button: the
+            // first tap belongs to the menu, the second does what it looks like it does.
+            if (adding) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) { adding = false },
                 )
-            } else if (projects) {
-                ProjectList(viewModel, onRowSync, onRowRename, onRowDelete)
-            } else {
-                EntryList(viewModel, actions)
             }
         }
     }
@@ -375,7 +404,17 @@ private fun EntryList(viewModel: AppViewModel, actions: BrowserActions) {
         )
         return
     }
-    LazyColumn(modifier = Modifier.fillMaxSize()) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            // Choosing is a mode, and a tap on the space between rows leaves it —
+            // the same way a long press entered it. Tapping a *row* while choosing
+            // still toggles that row.
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) { if (viewModel.selected.isNotEmpty()) viewModel.clearSelection() },
+    ) {
         items(entries) { entry ->
             val ws = viewModel.workspace
             val path = ws?.relative(entry.file)?.let { ws.pathString(it) }
@@ -527,13 +566,19 @@ private fun EntryRow(
                         actions.onHistory(entry)
                     },
                 )
-                DropdownMenuItem(
-                    text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
-                    onClick = {
-                        menu = false
-                        actions.onDelete(entry)
-                    },
-                )
+                // A locked file is read-only in every direction, so the menu does
+                // not offer the one act that cannot be undone. The model refuses it
+                // as well: a screen that hides a command is not the same as an app
+                // that refuses it.
+                if (!locked) {
+                    DropdownMenuItem(
+                        text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                        onClick = {
+                            menu = false
+                            actions.onDelete(entry)
+                        },
+                    )
+                }
             }
         }
     }

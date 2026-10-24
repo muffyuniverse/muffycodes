@@ -440,10 +440,8 @@ class AppViewModel @JvmOverloads constructor(
      */
     fun renameTo(file: File, newName: String): File? {
         val ws = workspace ?: return null
-        if (isLocked(file)) {
-            message = "${file.name} is locked, so it cannot be renamed"
-            return null
-        }
+        // Silent, like saving: a locked file says so on its row and in the editor.
+        if (isLocked(file)) return null
         val wasEditing = editingPath != null && editingPath == ws.relative(file)
         val result = ws.rename(file, newName)
         // The editor and the history point at a path, not at a file object, so a
@@ -495,6 +493,12 @@ class AppViewModel @JvmOverloads constructor(
 
     fun delete(file: File): Boolean {
         val ws = workspace ?: return false
+        // A lock is read-only in every direction: not written, not renamed, not
+        // deleted. Only the screen was refusing, which is the same as not refusing.
+        if (isLocked(file)) {
+            message = "${file.name} is locked, so it was not deleted"
+            return false
+        }
         val wasFolder = file.isDirectory
         val name = file.name
         val result = ws.delete(file)
@@ -526,7 +530,8 @@ class AppViewModel @JvmOverloads constructor(
         val next = if (key in lockedPaths) lockedPaths - key else lockedPaths + key
         ws.setLocked(next)
         lockedPaths = next
-        message = if (key in next) "Locked ${file.name}" else "Unlocked ${file.name}"
+        // No message. The row's icon changes, which is the whole answer to "is it
+        // locked?" — and a snackbar per tap said the same thing over the list.
     }
 
     /** True when [file] may not be written. */
@@ -640,6 +645,14 @@ class AppViewModel @JvmOverloads constructor(
         val files = selectedFiles()
         if (files.isEmpty()) {
             message = "Nothing is selected"
+            return false
+        }
+        // **One locked file stops all of it.** Deleting the rest and leaving that
+        // one behind reads as a delete that worked, and the person finds out later
+        // which half happened.
+        val locked = files.firstOrNull { isLocked(it) }
+        if (locked != null) {
+            message = "${locked.name} is locked, so nothing was deleted"
             return false
         }
         // A folder that is already going takes its children with it, and deleting
@@ -816,30 +829,38 @@ class AppViewModel @JvmOverloads constructor(
         // A locked file can be read and nothing else. The screen greys Save out, and
         // that is not enough for the same reason: a lock that only the screen honours
         // is a lock the next screen will not.
-        if (isLocked(file)) {
-            message = "${file.name} is locked, so it cannot be changed"
-            return
-        }
-        ws.write(file, text)
+        // A locked file can be read and nothing else. Refused without a word: the
+        // row and the editor both show a lock, and a message per attempt would be
+        // the app saying the same thing over the screen that already says it.
+        if (isLocked(file)) return
         val keep = settings.historyLength
         val h = history
         val g = git
         val name = file.name
         // A file inside a project's *repository* is versioned by that project, and
         // everything else — including a note kept in the project's folder beside it
-        // — by the account. The commit happens on every pause in typing, which is
-        // what the change history is; sync is then only the push.
+        // — by the account. Every save is its own version; sync is then only the push.
         val project = if (ws.inWorktree(file)) ws.projectOf(file) else null
         val login = activeLogin
+        // **The write is part of the commit, not something done before it.** Both
+        // happen on the app's one worker, in the order the saves were made, so each
+        // save commits the text it was given. Writing on the calling thread and
+        // committing later meant two saves in a row left the file holding the second
+        // text before the first commit ran: the first commit took the newer text and
+        // the second found nothing to commit, so the intermediate version vanished
+        // and the history could not be walked back through it.
         onWorker {
+            ws.write(file, text)
             if (saveDebounceMs > 0) Thread.sleep(saveDebounceMs)
             if (login != null && accounts.exists(login)) {
                 if (project != null) g?.commit(project, "Edited $name")
                 else h?.commit("Edited $name", keep)
             }
-            main.post { refreshChanges() }
+            main.post {
+                refresh()
+                refreshChanges()
+            }
         }
-        refresh()
     }
 
     // ---- the project actions ------------------------------------------------
@@ -863,9 +884,17 @@ class AppViewModel @JvmOverloads constructor(
             val result = g.sync(project, said)
             main.post {
                 busy = false
+                // **A failed sync says what failed, and records nothing.** The
+                // history claiming "Synced" over a push GitHub refused is how a
+                // project came to look synced while the phone and GitHub were
+                // different.
                 message = result.message
                 refreshChanges()
-                record(if (said.isEmpty()) "Synced $project" else "Synced $project: $said")
+                if (result.success) {
+                    record(if (said.isEmpty()) "Synced $project" else "Synced $project: $said")
+                } else {
+                    lastSyncError = result.message
+                }
             }
         }
     }
@@ -883,9 +912,17 @@ class AppViewModel @JvmOverloads constructor(
                 busy = false
                 message = result.message
                 refresh()
+                // The row's count comes from the working tree, which has just been
+                // replaced wholesale; reading it once, afterwards, is the only way
+                // the number can be right.
+                refreshChanges()
             }
         }
     }
+
+    /** What went wrong the last time a sync was asked for, for a screen that asks. */
+    var lastSyncError: String? by mutableStateOf(null)
+        private set
 
     /**
      * Makes a project: the repository on GitHub first, seeded with its licence,
@@ -1365,44 +1402,115 @@ class AppViewModel @JvmOverloads constructor(
                 hist?.pathsIn(base.ifEmpty { null }, commit.id).orEmpty()
             }
             for (full in held) {
-                val name = if (base.isEmpty()) full else full.removePrefix("$base/")
-                if (name.isEmpty() || name in onDisk) continue
+                val rest = if (base.isEmpty()) full else full.removePrefix("$base/")
+                if (rest.isEmpty()) continue
                 // **Direct children only.** Restoring is bringing back a row that
-                // used to be in *this* folder; a file from a folder inside it was
-                // never a row here, and offering it would put it back in a folder
-                // that may not exist any more.
-                if ('/' in name) continue
+                // used to be in *this* folder; something from a folder inside it was
+                // never a row here. A folder is one row: `letters` rather than each
+                // of the files it held, because a person who deleted a folder did one
+                // thing.
+                val name = rest.substringBefore('/')
+                val isFolder = rest != name
+                if (name in onDisk) continue
                 // The app's own markers are in the history and are not a person's
                 // files: `.gitkeep` exists so that an empty folder has a version, and
                 // offering it back as a deleted file would be the app talking to
                 // itself.
                 if (ws.isHidden(name)) continue
-                found.putIfAbsent(name, commit.id)
+                val already = found[name]
+                // A file and a folder can share a name across versions; what is on
+                // disk decides which one is missing, and the newest version that has
+                // it decides what to bring back.
+                if (already == null) {
+                    found[name] = Gone(name, commit.id, isFolder)
+                } else if (!isFolder && already.isFolder) {
+                    found[name] = Gone(name, commit.id, false)
+                }
             }
         }
-        return found.map { (name, revision) -> Gone(name, revision) }
-            .sortedBy { it.name.lowercase() }
+        return found.values.sortedBy { it.name.lowercase() }
     }
 
-    /** Brings a deleted file back, byte for byte, from [revisionId]. */
+    /**
+     * Brings a deleted file — or a whole folder — back, byte for byte, from
+     * [Gone.revision].
+     *
+     * **Byte for byte, not as text.** A picture put back from a text reading is not
+     * the picture, so the bytes come out of the object database exactly as they went
+     * in. A folder is put back with every file it held at that version.
+     *
+     * **It says what happened either way.** This used to answer false without a
+     * word, and the dialog ignored the answer: picking a name and watching nothing
+     * happen is indistinguishable from a broken screen.
+     */
     fun restoreDeleted(dir: File, gone: Gone): Boolean {
         val ws = workspace ?: return false
-        val path = ws.relative(dir) ?: return false
-        val inRepo = (if (ws.inWorktree(dir)) path.drop(3) else path) + gone.name.split("/")
-        val into = ws.fileAt(path + gone.name.split("/"))
-        val bytes = if (ws.inWorktree(dir)) {
-            val project = ws.projectOf(dir) ?: return false
-            git?.bytesAt(project, inRepo.joinToString("/"), gone.revision)
+        val path = ws.relative(dir) ?: run {
+            message = "${dir.name} is not part of this account any more"
+            return false
+        }
+        val inside = ws.inWorktree(dir)
+        val project = if (inside) ws.projectOf(dir) else null
+        if (inside && project == null) {
+            message = "${dir.name} has no repository, so there is nothing to bring back from"
+            return false
+        }
+        val repoBase = if (inside) path.drop(3) else path
+        val under = repoBase + gone.name.split("/")
+        fun bytesAt(name: String): ByteArray? = if (inside) {
+            git?.bytesAt(project!!, name, gone.revision)
         } else {
-            history?.bytesAt(inRepo.joinToString("/"), gone.revision)
-        } ?: return false
-        into.parentFile?.mkdirs()
-        into.writeBytes(bytes)
-        val what = "Brought ${gone.name} back"
+            history?.bytesAt(name, gone.revision)
+        }
+
+        val written = mutableListOf<File>()
+        if (gone.isFolder) {
+            // Every file the folder held at that version. An empty folder was never
+            // in git, so it cannot be brought back — and an empty folder is not a
+            // thing anyone lost.
+            val prefix = under.joinToString("/")
+            val held = if (inside) {
+                git?.paths(project!!, prefix, gone.revision).orEmpty()
+            } else {
+                history?.pathsIn(prefix, gone.revision).orEmpty()
+            }
+            for (name in held) {
+                val bytes = bytesAt(name) ?: continue
+                val target = ws.fileAt(path + gone.name.split("/") +
+                    name.removePrefix("$prefix/").split("/"))
+                target.parentFile?.mkdirs()
+                target.writeBytes(bytes)
+                written += target
+            }
+        } else {
+            val bytes = bytesAt(under.joinToString("/"))
+            if (bytes == null) {
+                message = "${gone.name} is not in that version any more"
+                return false
+            }
+            val target = ws.fileAt(path + gone.name.split("/"))
+            target.parentFile?.mkdirs()
+            target.writeBytes(bytes)
+            written += target
+        }
+        if (written.isEmpty()) {
+            message = "Nothing of ${gone.name} was left in that version"
+            return false
+        }
+        val what = if (gone.isFolder) {
+            "Brought ${gone.name}/ back"
+        } else {
+            "Brought ${gone.name} back"
+        }
         message = what
         refresh()
         record(what)
-        commitProjectOf(into, what)
+        // Each side of the boundary is told, exactly as for a move: the repository
+        // that now holds these files is the one that has to record them.
+        written.mapNotNull { file ->
+            val owning = ws.projectOf(file) ?: return@mapNotNull null
+            if (ws.inWorktree(file)) owning else null
+        }.distinct().forEach { commitProject(it, what) }
         historyGeneration++
         return true
     }

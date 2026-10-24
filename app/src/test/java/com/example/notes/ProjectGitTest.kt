@@ -152,6 +152,108 @@ class ProjectGitTest {
     }
 
     @Test
+    fun aSyncPushesTheBranchGitHubActuallyHas() {
+        // Given a time-shaped failure: the phone said "synced", and GitHub's default
+        // branch never moved, because the push went to `main` while the repository
+        // answers to `master` — leaving a second branch on GitHub that nobody is
+        // looking at, and a history there as long and as old as it ever was.
+        val masterBare = File(root, "master-push.git")
+        org.eclipse.jgit.api.Git.init()
+            .setDirectory(masterBare)
+            .setBare(true)
+            .setInitialBranch("master")
+            .call()
+            .close()
+        val seed = File(root, "seed-push")
+        org.eclipse.jgit.api.Git.cloneRepository()
+            .setURI(masterBare.absolutePath)
+            .setDirectory(seed)
+            .call()
+            .use { clone ->
+                File(seed, "FromGitHub.txt").writeText("on github")
+                clone.add().addFilepattern(".").call()
+                clone.commit().setMessage("seed").setAuthor(author.ident())
+                    .setCommitter(author.ident()).call()
+                clone.push().setRemote("origin")
+                    .add("refs/heads/master:refs/heads/master").call()
+            }
+
+        workspace.createProjectFolders("Shopping").getOrThrow()
+        val git = gitFor()
+        val repo = git.open("Shopping") ?: run {
+            git.init("Shopping").getOrThrow()
+            git.open("Shopping")!!
+        }
+        repo.use { open -> GitService.setRemoteUrl(open, masterBare.absolutePath) }
+        File(workspace.repoOf("Shopping"), "Milk.txt").writeText("milk")
+
+        val result = git.sync("Shopping")
+
+        assertTrue(result.message, result.success)
+        org.eclipse.jgit.storage.file.FileRepositoryBuilder().setGitDir(masterBare).build().use { remote ->
+            val branch = repo.use { GitService.currentBranch(it) }
+            val tip = remote.resolve("refs/heads/$branch")
+            assertNotNull("the branch GitHub has was moved", tip)
+            assertTrue(
+                "and the file went with it",
+                GitService.filesUnder(remote, null, tip!!.name).any { it.first == "Milk.txt" },
+            )
+            // The branch the phone is on must be the one GitHub shows: a second
+            // branch would make every future sync a report about a tree nobody reads.
+            assertTrue(
+                "no second branch was created",
+                remote.exactRef("refs/heads/master") != null,
+            )
+        }
+    }
+
+    @Test
+    fun replacingAProjectBringsThePhoneOntoGitHubsBranch() {
+        // Replacing the files is the visible half. The other half is the branch
+        // name: a phone left on `main` after taking a `master` repository pushes a
+        // branch GitHub does not show, so the next sync is a silent no-op as far as
+        // anybody reading GitHub is concerned.
+        val masterBare = File(root, "master-replace.git")
+        org.eclipse.jgit.api.Git.init()
+            .setDirectory(masterBare)
+            .setBare(true)
+            .setInitialBranch("master")
+            .call()
+            .close()
+        val seed = File(root, "seed-replace")
+        org.eclipse.jgit.api.Git.cloneRepository()
+            .setURI(masterBare.absolutePath)
+            .setDirectory(seed)
+            .call()
+            .use { clone ->
+                File(seed, "FromGitHub.txt").writeText("on github")
+                clone.add().addFilepattern(".").call()
+                clone.commit().setMessage("seed").setAuthor(author.ident())
+                    .setCommitter(author.ident()).call()
+                clone.push().setRemote("origin")
+                    .add("refs/heads/master:refs/heads/master").call()
+            }
+
+        workspace.createProjectFolders("Shopping").getOrThrow()
+        val git = gitFor()
+        val repo = git.open("Shopping") ?: run {
+            git.init("Shopping").getOrThrow()
+            git.open("Shopping")!!
+        }
+        repo.use { open -> GitService.setRemoteUrl(open, masterBare.absolutePath) }
+        assertEquals("the phone starts on its own branch", "main", repo.use { GitService.currentBranch(it) })
+
+        val replaced = git.replaceWithRemote("Shopping")
+        assertTrue(replaced.message, replaced.success)
+
+        assertEquals(
+            "and now it is on the one GitHub has",
+            "master",
+            git.open("Shopping")!!.use { GitService.currentBranch(it) },
+        )
+    }
+
+    @Test
     fun replacingAProjectGitHubHasNothingOnSaysSo() {
         // A project this phone made and never synced: there is no remote branch at
         // all. That is not an exception, it is an answer — and the answer has to say

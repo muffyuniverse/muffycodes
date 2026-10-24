@@ -25,12 +25,19 @@ data class Entry(
 }
 
 /**
- * A file that a folder's history holds and the folder itself no longer does.
+ * Something a folder's history holds and the folder itself no longer does.
  *
- * [name] is the path from the folder shown, so a restore puts it back where it
+ * [name] is the name as the folder showed it, so a restore puts it back where it
  * was; [revision] is the version it is read from — the newest one that had it.
+ * A folder is offered as one row rather than as every file it held, because a
+ * person deleting a folder thinks of it as one thing and bringing back five
+ * separate names is not the same act.
  */
-data class Gone(val name: String, val revision: String)
+data class Gone(
+    val name: String,
+    val revision: String,
+    val isFolder: Boolean = false,
+)
 
 /**
  * The tree of one account, as it is on disk.

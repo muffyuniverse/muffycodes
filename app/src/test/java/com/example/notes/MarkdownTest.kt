@@ -29,6 +29,71 @@ class MarkdownTest {
     }
 
     @Test
+    fun `a picture on its own line is a picture, with its words and its address`() {
+        val blocks = Markdown.parse("before\n\n![a cat](cat.png)\n\nafter")
+        assertEquals(
+            listOf(
+                Markdown.Block.Paragraph("before"),
+                Markdown.Block.Image("a cat", "cat.png"),
+                Markdown.Block.Paragraph("after"),
+            ),
+            blocks,
+        )
+    }
+
+    @Test
+    fun `a title after the address is not part of the address`() {
+        val blocks = Markdown.parse("![a cat](pictures/cat.png \"The cat\")")
+        assertEquals(listOf(Markdown.Block.Image("a cat", "pictures/cat.png")), blocks)
+    }
+
+    @Test
+    fun `a picture with no words falls back to the file's name`() {
+        // Alt text is what a screen reader says and what is shown when the picture
+        // cannot be read, so an empty one would leave a person with nothing at all.
+        val blocks = Markdown.parse("![](pictures/cat.png)")
+        assertEquals(listOf(Markdown.Block.Image("cat.png", "pictures/cat.png")), blocks)
+    }
+
+    @Test
+    fun `a picture inside a sentence is left as it was written`() {
+        // The falsification: a parser that turned every `![` into a picture would
+        // swallow the sentence around it. This reader draws whole-line pictures only,
+        // and shows the rest exactly as the author typed it.
+        val blocks = Markdown.parse("see ![a cat](cat.png) here")
+        assertEquals(listOf(Markdown.Block.Paragraph("see ![a cat](cat.png) here")), blocks)
+    }
+
+    @Test
+    fun `a picture is looked for beside the document, and an address is not a file`() {
+        val folder = java.io.File(System.getProperty("java.io.tmpdir"), "md-${System.nanoTime()}")
+        folder.mkdirs()
+        try {
+            assertEquals(
+                java.io.File(folder, "cat.png"),
+                resolvePicture("cat.png", folder),
+            )
+            assertEquals(
+                "a path with spaces is a path",
+                java.io.File(folder, "my cat.png"),
+                resolvePicture("my%20cat.png", folder),
+            )
+            assertEquals(
+                "nothing is fetched over the network",
+                null,
+                resolvePicture("https://example.com/cat.png", folder),
+            )
+            assertEquals(
+                "and with nowhere to look there is no picture",
+                null,
+                resolvePicture("cat.png", null),
+            )
+        } finally {
+            folder.deleteRecursively()
+        }
+    }
+
+    @Test
     fun `a paragraph is the lines that belong together`() {
         val blocks = Markdown.parse("one\nline\n\nand another")
         assertEquals(

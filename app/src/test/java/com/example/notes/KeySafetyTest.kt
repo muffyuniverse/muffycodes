@@ -143,6 +143,52 @@ class KeySafetyTest {
     }
 
     @Test
+    fun aRefusedKeyIsSaidInWordsAndNotAsAnException() {
+        // Every sync that failed with "not authorized" and nothing else sent a person
+        // looking for a broken app. The key is the thing to fix, so the key is what
+        // the message has to be about.
+        val refused = org.eclipse.jgit.errors.TransportException(
+            "https://$token@github.com/a/b.git: not authorized",
+        )
+        val said = Secrets.explain(refused, "Push failed")
+        assertFalse("the key is not in the message", said.contains(token))
+        assertTrue("it says the key was refused: $said", said.contains("did not accept this phone's key"))
+        assertTrue("and what to do: $said", said.contains("Sign in again"))
+    }
+
+    @Test
+    fun anOfflinePhoneIsSaidAsBeingOffline() {
+        val offline = org.eclipse.jgit.errors.TransportException(
+            "cannot open git-upload-pack",
+            java.net.UnknownHostException("github.com"),
+        )
+        val said = Secrets.explain(offline, "Push failed")
+        assertTrue("it names the network: $said", said.contains("Could not reach GitHub"))
+        assertFalse("and does not pretend a file went: $said", said.contains("Pushed"))
+    }
+
+    @Test
+    fun anErrorRatherThanAnExceptionStillSaysWhatItSaw() {
+        // What a phone actually threw: a class JGit needs that the runtime cannot
+        // resolve arrives as an Error, and `catch (Exception)` let it out of the
+        // worker with no project, no file and no action in it.
+        val notResolved = NoClassDefFoundError("Failed resolution of: Lorg/eclipse/jgit/Foo;")
+        val said = Secrets.explain(notResolved, "Push failed")
+        assertTrue("it keeps what it saw: $said", said.contains("Failed resolution"))
+        assertTrue("and says what kind of failure it was: $said", said.contains("NoClassDefFoundError"))
+    }
+
+    @Test
+    fun aFailureWithNothingToAddKeepsTheAppsOwnWords() {
+        // The falsification of all of the above: a failure that is not one of the
+        // four known shapes must not be swallowed into a friendly sentence that says
+        // nothing. JGit's own words are what a person can search for.
+        val odd = RuntimeException("Cannot lock /some/path")
+        assertEquals("Cannot lock /some/path", Secrets.explain(odd, "Push failed"))
+        assertEquals("Push failed", Secrets.explain(RuntimeException(), "Push failed"))
+    }
+
+    @Test
     fun aMessageFromAGitExceptionIsScrubbedBeforeItIsShown() {
         // The shape of a JGit exception: it repeats the address it failed on.
         val exception = RuntimeException("https://$token@github.com/a/b.git: not authorized")

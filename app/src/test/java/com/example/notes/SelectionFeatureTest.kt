@@ -171,6 +171,56 @@ class SelectionFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `a locked file cannot be deleted`() {
+        // A lock that stopped writing but allowed deleting would be a lock on the
+        // small act and not the large one: the file would go, and its versions with
+        // it would be all that was left.
+        val file = scene.file("milk.txt", "two litres")
+        scene.viewModel.toggleLocked(file)
+
+        assertFalse("the model refuses it", scene.viewModel.delete(file))
+
+        assertTrue("and the file is still there", file.isFile)
+        assertTrue(
+            "and it said why: ${scene.viewModel.message}",
+            scene.viewModel.message?.contains("locked") == true,
+        )
+    }
+
+    @Test
+    fun `an unlocked file deletes as it always did`() {
+        // The falsification: a "locked" state that quietly refused everything would
+        // pass the test above by never deleting anything at all.
+        val file = scene.file("milk.txt", "two litres")
+        scene.viewModel.toggleLocked(file)
+        scene.viewModel.toggleLocked(file)
+
+        assertTrue("it deletes", scene.viewModel.delete(file))
+
+        assertFalse("and it is gone", file.exists())
+    }
+
+    @Test
+    fun `one locked file stops the delete of several`() {
+        // Deleting the rest and leaving one behind reads as a delete that worked,
+        // and the person finds out later which half of it happened.
+        val milk = scene.file("milk.txt", "two litres")
+        val bread = scene.file("bread.txt", "a loaf")
+        scene.viewModel.toggleLocked(bread)
+        scene.viewModel.toggleSelected(milk)
+        scene.viewModel.toggleSelected(bread)
+
+        assertFalse("nothing is deleted", scene.viewModel.deleteSelected())
+
+        assertTrue("not even the unlocked one", milk.isFile)
+        assertTrue("and the locked one is where it was", bread.isFile)
+        assertTrue(
+            "and it said which: ${scene.viewModel.message}",
+            scene.viewModel.message?.contains("bread.txt") == true,
+        )
+    }
+
+    @Test
     fun `a lock is remembered, and it is not part of the file`() {
         // The lock lives in `.muffy`, so it changes nothing in the file and makes no
         // commit. Locking a note and then syncing must not carry the lock to GitHub,

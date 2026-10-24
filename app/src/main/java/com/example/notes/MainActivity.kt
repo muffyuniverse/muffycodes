@@ -144,6 +144,16 @@ private fun AppRoot(viewModel: AppViewModel) {
     BackHandler(enabled = !showSettings && historyPath == null && editing != null) {
         viewModel.closeEditor()
     }
+    // **Back stops the choosing first.** Being in the middle of choosing several
+    // things is a mode, and a mode is what back leaves first; going up a folder
+    // instead would take the rows away from under the selection.
+    BackHandler(
+        enabled = !showSettings && historyPath == null && editing == null &&
+            viewModel.selected.isNotEmpty()
+    ) {
+        viewModel.clearSelection()
+    }
+
     BackHandler(
         enabled = !showSettings && historyPath == null && editing == null &&
             viewModel.canGoUp
@@ -426,9 +436,12 @@ private fun Dialogs(
             viewModel = viewModel,
             folder = pending.folder,
             onDismiss = dismiss,
+            // The answer is not swallowed. `restoreDeleted` says what happened —
+            // including why nothing did — and the message goes to the snackbar; a
+            // tap that closes a window and changes nothing is the worst of both.
             onPick = { gone ->
                 dismiss()
-                if (!viewModel.restoreDeleted(pending.folder, gone)) Unit
+                viewModel.restoreDeleted(pending.folder, gone)
             },
         )
 
@@ -487,7 +500,9 @@ private fun RestoreDeletedDialog(
                     else -> LazyColumn {
                         items(found) { gone ->
                             Text(
-                                text = gone.name,
+                                // A folder is one row: a trailing slash is what says
+                                // that picking it brings back everything inside.
+                                text = if (gone.isFolder) gone.name + "/" else gone.name,
                                 style = MaterialTheme.typography.bodyMedium,
                                 modifier = Modifier
                                     .fillMaxWidth()

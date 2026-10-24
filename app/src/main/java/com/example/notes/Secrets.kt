@@ -43,6 +43,47 @@ object Secrets {
         }
     }
 
+    /**
+     * A network or repository failure, as the sentence a person needs.
+     *
+     * The raw chain is the app's problem, not the reader's. What they can act on is
+     * *which* of the four things went wrong: the key was refused, the phone is not
+     * on a network, GitHub is not there, or the repository has no branch to talk
+     * about. Everything else keeps JGit's own words, because a message that says
+     * something specific is better than one that says "Sync failed" — a failure that
+     * does not say what it saw is the thing this app keeps fixing.
+     */
+    fun explain(error: Throwable, fallback: String): String {
+        val chain = generateSequence(error as Throwable?) { it.cause }
+            .mapNotNull { it?.message }
+            .joinToString(" ")
+            .lowercase()
+        val kind = error.javaClass.simpleName
+        val said = scrub(error.message ?: "").trim()
+        return when {
+            // "not authorized", "Authentication is required but no
+            // CredentialsProvider has been registered", a 401, a 403 on push.
+            listOf(
+                "not authorized", "authentication is required", "authentication failed",
+                "invalid credentials", "401", "403", "permission denied",
+            ).any { it in chain } ->
+                "GitHub did not accept this phone's key. Sign in again and try once more."
+
+            listOf(
+                "unknownhost", "unable to resolve host", "connection", "timed out",
+                "network is unreachable", "ssl", "broken pipe", "handshake",
+            ).any { it in chain } ->
+                "Could not reach GitHub. The phone may be offline — nothing was changed here."
+
+            "non-fast-forward" in chain || "rejected" in chain ->
+                "GitHub refused the push: $said"
+
+            said.isNotEmpty() -> scrub(said)
+            error !is Exception -> "$fallback ($kind)"
+            else -> fallback
+        }
+    }
+
     /** [url] with any credentials removed from its address. */
     fun stripCredentials(url: String): String =
         URL_USER_INFO.replace(url) { it.groupValues[1] }

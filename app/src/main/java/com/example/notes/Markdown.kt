@@ -10,6 +10,11 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
@@ -21,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import java.io.File
 
 /**
  * A Markdown reader for the editor's **view** mode.
@@ -48,6 +54,14 @@ object Markdown {
         data class Code(val language: String, val text: String) : Block
         data class Quote(val text: String) : Block
         data object Rule : Block
+        /**
+         * A picture that stands on its own line: `![a cat](cat.png)`.
+         *
+         * [alt] is what a screen reader says and what is shown when the file cannot
+         * be read, so a picture that is missing is still a sentence about a picture
+         * rather than a gap.
+         */
+        data class Image(val alt: String, val source: String) : Block
     }
 
     /**
@@ -123,6 +137,17 @@ object Markdown {
                 continue
             }
 
+            // A picture on its own line. Inline images are left exactly as written,
+            // because a picture inside a paragraph is a layout this reader does not
+            // do — and showing the words the author typed is never wrong.
+            val picture = image(trimmed)
+            if (picture != null) {
+                flush()
+                blocks += picture
+                i++
+                continue
+            }
+
             val entry = item(line)
             if (entry != null) {
                 flush()
@@ -137,6 +162,28 @@ object Markdown {
         }
         flush()
         return blocks
+    }
+
+    /**
+     * `![alt](address)` as a whole line, or null.
+     *
+     * The parentheses are matched to the *last* `)` on the line so that a path or
+     * address with a bracket in it still reads as one picture rather than a picture
+     * plus a loose bracket.
+     */
+    private fun image(line: String): Block.Image? {
+        if (!line.startsWith("![")) return null
+        val close = line.indexOf(']', 2)
+        if (close < 0) return null
+        if (close + 1 >= line.length || line[close + 1] != '(') return null
+        if (!line.endsWith(")")) return null
+        val alt = line.substring(2, close)
+        var source = line.substring(close + 2, line.length - 1).trim()
+        // `![a](cat.png "A cat")` — the title is not the address.
+        val quoted = source.indexOf('"')
+        if (quoted > 0 && source.endsWith("\"")) source = source.substring(0, quoted).trim()
+        if (source.isEmpty()) return null
+        return Block.Image(alt.ifBlank { source.substringAfterLast('/') }, source)
     }
 
     /** `# Title` … `###### Title`, or null when the line is not a heading. */
@@ -327,7 +374,16 @@ object Markdown {
  * text are otherwise the same thing on a phone.
  */
 @Composable
-fun MarkdownBody(text: String, modifier: Modifier = Modifier) {
+fun MarkdownBody(
+    text: String,
+    modifier: Modifier = Modifier,
+    /**
+     * The folder the document lives in, so a relative `![](cat.png)` means the
+     * picture beside the file. Null means there is nowhere to look, and the reader
+     * says so instead of drawing an empty frame.
+     */
+    baseDir: File? = null,
+) {
     val blocks = Markdown.parse(text)
     val link = MaterialTheme.colorScheme.primary
     Column(modifier = modifier) {
@@ -383,7 +439,84 @@ fun MarkdownBody(text: String, modifier: Modifier = Modifier) {
                 Markdown.Block.Rule -> HorizontalDivider(
                     modifier = Modifier.padding(vertical = 10.dp),
                 )
+
+                is Markdown.Block.Image -> MarkdownPicture(
+                    alt = block.alt,
+                    source = block.source,
+                    baseDir = baseDir,
+                )
             }
         }
     }
+}
+
+/**
+ * A picture in a Markdown document, read off this phone.
+ *
+ * **The address is resolved against the document, not against the app.** `![](cat.png)`
+ * means the `cat.png` beside the file the person is reading, which is the only
+ * reading that makes sense on a phone where there is no web server.
+ *
+ * **A picture that cannot be read says so, in words the author wrote.** The alt text
+ * and the address are shown instead of an empty frame: an image that silently fails
+ * to appear is a bug the reader cannot tell from a broken screen, and an `http`
+ * address is not something this app fetches at all — saying that is more honest than
+ * a blank space where a picture was promised.
+ */
+@Composable
+private fun MarkdownPicture(alt: String, source: String, baseDir: File?) {
+    var image by remember(source, baseDir) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    var missing by remember(source, baseDir) { mutableStateOf(false) }
+    val file = remember(source, baseDir) { resolvePicture(source, baseDir) }
+
+    LaunchedEffect(file) {
+        if (file == null || !file.isFile) {
+            missing = true
+            return@LaunchedEffect
+        }
+        val decoded = Pictures.decode(file)
+        if (decoded == null) missing = true else image = decoded
+    }
+
+    val bitmap = image
+    when {
+        bitmap != null -> androidx.compose.foundation.Image(
+            bitmap = bitmap,
+            contentDescription = alt,
+            contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 6.dp),
+        )
+
+        missing -> Text(
+            text = "$alt — \"$source\" could not be read here",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(vertical = 6.dp),
+        )
+
+        else -> Text(
+            text = alt,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(vertical = 6.dp),
+        )
+    }
+}
+
+/**
+ * Where a document's picture lives: beside the document, unless it says otherwise.
+ *
+ * An `http` address answers null on purpose. Nothing in this app opens a socket to
+ * draw a paragraph, and a reader that quietly did would turn opening a note into a
+ * network request.
+ */
+internal fun resolvePicture(source: String, baseDir: File?): File? {
+    if (source.startsWith("http://") || source.startsWith("https://")) return null
+    if (source.startsWith("file://")) return File(source.removePrefix("file://"))
+    val plain = source.replace("%20", " ")
+    val named = File(plain)
+    if (named.isAbsolute) return named
+    return baseDir?.let { File(it, plain) }
 }

@@ -77,6 +77,119 @@ class HistoryFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `every save in one editing session is its own version`() {
+        // What the phone reported: several saves inside the same editor window, and
+        // the history showing the file as it was when it was opened. The write used
+        // to happen when Save was pressed and the commit later, so two saves in a row
+        // left the file holding the second text before the first commit ran: the
+        // first commit took the newer text and the second found nothing to commit.
+        val file = scene.file("milk.txt", "one litre")
+        scene.openEditor(file)
+
+        // When the same window is saved three times
+        scene.saveAsVersion("two litres")
+        scene.saveAsVersion("three litres")
+        scene.saveAsVersion("four litres")
+        scene.closeEditor()
+
+        // Then every save can be read back, newest first
+        val texts = scene.versionsOf(file).map { it.second }
+        assertEquals(
+            "each save is a step back: $texts",
+            listOf("four litres", "three litres", "two litres", "one litre"),
+            texts.take(4),
+        )
+        assertEquals("and nothing else was recorded", 4, texts.size)
+    }
+
+    @Test
+    fun `a save that changes nothing is not a version`() {
+        // The falsification of the test above: a history that grew whatever happened
+        // would pass that one and fail this one. Saving the same text twice is a
+        // commit with nothing in it, and a list of them is a history nobody can read.
+        val file = scene.file("milk.txt", "one litre")
+        scene.openEditor(file)
+        scene.saveAsVersion("two litres")
+        val before = scene.versionsOf(file).size
+
+        scene.viewModel.saveEditor("two litres")
+        scene.closeEditor()
+        scene.await("the save to have been considered", 20_000) {
+            scene.versionsOf(file).size == before
+        }
+
+        assertEquals("no version was added", before, scene.versionsOf(file).size)
+    }
+
+    @Test
+    fun `the versions come from the repository, so a commit made by git is a version too`() {
+        // "Do you calculate everything off git history, or some other storage?" Git:
+        // the screen reads the repository. A commit written by JGit with no screen
+        // anywhere near it must appear in the list, which is what tells the two apart.
+        val file = scene.file("milk.txt", "one litre")
+        val account = scene.workspace!!.accountDir
+        org.eclipse.jgit.api.Git.open(account).use { git ->
+            file.writeText("written straight to git")
+            GitService.commitAll(git.repository, "A commit from outside the app", AppViewModel.DEFAULT_AUTHOR)
+        }
+
+        val texts = scene.versionsOf(file).map { it.second }
+
+        assertEquals("the outside commit is the newest version", "written straight to git", texts.first())
+        assertTrue("and the app's own save is still below it", texts.contains("one litre"))
+    }
+
+    @Test
+    fun `a folder deleted with everything in it comes back as a folder`() {
+        // Deleting a folder is one act, so bringing it back is one row — and putting
+        // back one file at a time from a list of five names is not the same thing.
+        scene.folder("letters")
+        scene.open("letters")
+        scene.file("milk.txt", "two litres")
+        scene.folder("inner")
+        scene.open("letters", "inner")
+        scene.file("notes.txt", "the inner one")
+        scene.open()
+        val letters = File(scene.workspace!!.accountDir, "letters")
+
+        scene.viewModel.delete(letters)
+        scene.await("the folder to go", 20_000) { !letters.exists() }
+
+        val gone = scene.viewModel.deletedIn(scene.workspace!!.accountDir)
+        val offered = gone.firstOrNull { it.name == "letters" }
+        assertTrue("the folder is offered back: $gone", offered != null)
+        assertTrue("and it is offered as a folder", offered!!.isFolder)
+
+        assertTrue(
+            "bringing it back works",
+            scene.viewModel.restoreDeleted(scene.workspace!!.accountDir, offered),
+        )
+        assertTrue("the folder is there", letters.isDirectory)
+        assertEquals("with its file", "two litres", File(letters, "milk.txt").readText())
+        assertEquals(
+            "and the one that was inside a folder inside it",
+            "the inner one",
+            File(letters, "inner/notes.txt").readText(),
+        )
+    }
+
+    @Test
+    fun `a file that is still there is not offered back`() {
+        // The falsification of the restore list: a list that offered everything the
+        // history ever held would "work" while putting files back that never went
+        // anywhere, and overwriting what is on disk with an older reading of it.
+        val kept = scene.file("kept.txt", "still here")
+        scene.viewModel.delete(kept)
+        scene.await("the file to go", 20_000) { !kept.exists() }
+        scene.viewModel.restoreDeleted(scene.workspace!!.accountDir, scene.viewModel.deletedIn(scene.workspace!!.accountDir).first { it.name == "kept.txt" })
+        assertTrue("it is back", kept.isFile)
+
+        val gone = scene.viewModel.deletedIn(scene.workspace!!.accountDir)
+
+        assertTrue("and it is not offered again: $gone", gone.none { it.name == "kept.txt" })
+    }
+
+    @Test
     fun `a local file's older version can be brought back`() {
         val file = scene.file("milk.txt")
         scene.openEditor(file)

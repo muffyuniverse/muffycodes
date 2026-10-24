@@ -226,6 +226,65 @@ class EditorScreenTest {
     }
 
     @Test
+    fun `a picture written in a note is drawn where the note says`() {
+        // The reported bug: a `.md` file with `![](cat.png)` beside it showed the
+        // address instead of the picture. A picture in a note is the one part of a
+        // Markdown file that a reader cannot get from the text alone.
+        val picture = scene.file("cat.png")
+        picture.writeBytes(ONE_PIXEL_PNG)
+        val note = scene.file("notes.md", "# A cat\n\n![a cat](cat.png)\n")
+
+        scene.viewModel.openEditor(note)
+        compose.setContent {
+            Frame {
+                EditorScreen(
+                    viewModel = scene.viewModel,
+                    file = note,
+                    onBack = {},
+                    onOpenHistory = {},
+                )
+            }
+        }
+        // Into view mode, which is where a note is read rather than typed.
+        compose.onNodeWithText("Edit").performClick()
+
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithContentDescription("a cat").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithContentDescription("a cat").assertIsDisplayed()
+        // The address is not left lying on the page as if it were the picture.
+        compose.onNodeWithText("cat.png", substring = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun `a note whose picture is not there says so in words`() {
+        // The falsification: a reader that drew nothing for a missing picture would
+        // leave a gap that looks like a broken screen, and the person would have no
+        // idea which picture they meant. The alt text and the address are shown.
+        val note = scene.file("notes.md", "![a cat](missing.png)\n")
+
+        scene.viewModel.openEditor(note)
+        compose.setContent {
+            Frame {
+                EditorScreen(
+                    viewModel = scene.viewModel,
+                    file = note,
+                    onBack = {},
+                    onOpenHistory = {},
+                )
+            }
+        }
+        compose.onNodeWithText("Edit").performClick()
+
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("could not be read here", substring = true)
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText("a cat", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("missing.png", substring = true).assertIsDisplayed()
+    }
+
+    @Test
     fun `Save has nothing to do until something is typed`() {
         val file = scene.file("milk.txt", "two litres")
 

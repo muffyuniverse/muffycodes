@@ -292,7 +292,13 @@ fun EditorScreen(
                         .verticalScroll(rememberScrollState())
                         .padding(16.dp)
                     if (isMarkdown(file)) {
-                        MarkdownBody(text = text, modifier = scrolling)
+                        // The document's own folder, so a picture written beside the
+                        // note is the picture that appears.
+                        MarkdownBody(
+                            text = text,
+                            modifier = scrolling,
+                            baseDir = file.parentFile,
+                        )
                     } else {
                         Text(
                             text = text,

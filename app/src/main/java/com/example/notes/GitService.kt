@@ -32,6 +32,17 @@ import java.io.File
  */
 object GitService {
 
+    /**
+     * How many versions a reader may return.
+     *
+     * Not a limit on the history: how far back a person can go is the setting in
+     * §14 and nothing else. This is only the ceiling that stops a corrupted
+     * repository from filling memory — high enough that a reader never becomes the
+     * thing that decides how long the history is, which is how a shortened history
+     * came to look unshortened.
+     */
+    const val READ_ALL = 10_000
+
     /** A commit in the history. */
     data class CommitInfo(
         val id: String,
@@ -108,7 +119,7 @@ object GitService {
                         .call()
                 }
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             repo.close()
             throw e
         }
@@ -149,7 +160,7 @@ object GitService {
                 }
             }
             RemoteResult("Cloned ${Secrets.scrub(remoteUrl)}", true)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             RemoteResult(Secrets.scrub(e.message ?: "Could not clone"), false)
         }
     }
@@ -266,6 +277,21 @@ object GitService {
                         false,
                     )
 
+                // **The branch is renamed to GitHub's.** Replacing the files is the
+                // visible half; the other half is that the phone and GitHub must
+                // agree about which branch this project is. A phone left on `main`
+                // after taking a `master` repository would push a branch GitHub does
+                // not show, and the history on GitHub would stay as long — and as
+                // old — as it was.
+                if (remote != branch) {
+                    val exists = repo.exactRef("refs/heads/$remote") != null
+                    git.checkout()
+                        .setName(remote)
+                        .setCreateBranch(!exists)
+                        .setStartPoint("refs/remotes/origin/$remote")
+                        .call()
+                }
+
                 git.reset()
                     .setMode(ResetCommand.ResetType.HARD)
                     .setRef("refs/remotes/origin/$remote")
@@ -277,7 +303,7 @@ object GitService {
                 (status.untracked + status.untrackedFolders + status.missing)
                     .forEach { path -> File(repo.workTree, path).deleteRecursively() }
             }
-            RemoteResult("Replaced with what GitHub has", true)
+            RemoteResult("Replaced with what GitHub has ($remote)", true)
         } catch (e: Throwable) {
             // `Throwable`, not `Exception`: what JGit can throw on a phone includes
             // errors rather than exceptions, and an error that escapes here ends the
@@ -328,7 +354,8 @@ object GitService {
     fun log(
         repo: Repository,
         path: String?,
-        limit: Int = 100,
+        /** A ceiling for the caller; [READ_ALL] by default. */
+        limit: Int = READ_ALL,
     ): List<CommitInfo> {
         val commits = Git(repo).use { git ->
             val command = git.log()
@@ -451,7 +478,7 @@ object GitService {
                     if (treeWalk.getFileMode(0) == FileMode.GITLINK) continue
                     val loader = try {
                         repo.open(treeWalk.getObjectId(0))
-                    } catch (e: Exception) {
+                    } catch (e: Throwable) {
                         continue
                     }
                     found.add(full to String(loader.bytes, Charsets.UTF_8))
@@ -471,7 +498,8 @@ object GitService {
     fun versionsOf(
         repo: Repository,
         path: String,
-        limit: Int = 50,
+        /** A ceiling for the screen; [READ_ALL] for the ordinary case. */
+        limit: Int = READ_ALL,
     ): List<Pair<CommitInfo, String?>> {
         val walk = RevWalk(repo)
         try {
@@ -597,12 +625,18 @@ object GitService {
     /** Pushes the current branch to the remote. */
     fun push(repo: Repository, token: String?, force: Boolean = false): RemoteResult {
         return try {
-            val branch = currentBranch(repo)
+            val local = currentBranch(repo)
+            // **Push to the branch GitHub calls this project.** Sending
+            // `refs/heads/main` to a repository whose default is `master` leaves the
+            // branch GitHub shows — and the history a person reads there — untouched,
+            // while a second branch quietly collects the commits. That is also why a
+            // shortened history could look unshortened on GitHub.
+            val onto = remoteBranch(repo, local) ?: local
             Git(repo).use { git ->
                 val command = git.push()
                     .setRemote("origin")
                     .setForce(force)
-                    .setRefSpecs(RefSpec("refs/heads/$branch:refs/heads/$branch"))
+                    .setRefSpecs(RefSpec("refs/heads/$local:refs/heads/$onto"))
                 credentials(token)?.let { command.setCredentialsProvider(it) }
                 val results = command.call()
                 val updates = results.flatMap { it.remoteUpdates }
@@ -620,8 +654,8 @@ object GitService {
                     if (ok) "Pushed" else "Nothing was pushed"
                 }), ok)
             }
-        } catch (e: Exception) {
-            RemoteResult(Secrets.scrub(e.message ?: "Push failed"), false)
+        } catch (e: Throwable) {
+            RemoteResult(explain(e, "Push failed"), false)
         }
     }
 
@@ -638,7 +672,7 @@ object GitService {
                     success = ok,
                 )
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             RemoteResult(Secrets.scrub(e.message ?: "Pull failed"), false)
         }
     }
@@ -647,7 +681,7 @@ object GitService {
     fun currentBranch(repo: Repository): String {
         val branch = try {
             repo.branch
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             null
         }
         return branch?.removePrefix("refs/heads/") ?: "main"
@@ -660,7 +694,7 @@ object GitService {
                 git.branchList().setListMode(ListBranchCommand.ListMode.ALL).call()
                     .map { it.name.removePrefix("refs/heads/") }
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             emptyList()
         }
     }

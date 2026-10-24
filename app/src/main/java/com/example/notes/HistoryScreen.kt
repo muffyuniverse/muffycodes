@@ -1,14 +1,13 @@
 package com.example.notes
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -27,25 +26,28 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
 
 /**
  * The versions of one file, one at a time.
  *
- * This used to be a list with a Restore button on every row, then a viewer with two
- * arrows. Both were wrong in opposite directions: the buttons made choosing one act
- * among several, and the arrows made every version except the current one invisible.
+ * This has been a list with a Restore button on every row, a viewer with two arrows,
+ * and a list again. It is now **a page per version**: one version fills the screen,
+ * a swipe turns to the next, and the one row above it carries the day, the time,
+ * its name in git and the two arrows at the corners. That is what stepping through
+ * a history is — the thing itself, whole — without a list of rows that all say the
+ * same sentence.
  *
- * **It is a list again, and a row says only what identifies a version** — the day,
- * the time and its name in git. The messages were the app narrating itself, the same
- * sentence on every row; the one message worth the width is the note typed when a
+ * The messages were the app narrating itself ("Edited milk.txt"), the same sentence
+ * on every version; the one message worth the width is the note typed when a
  * project was pushed, and that is the only one shown.
  *
  * **The newest version is what is on disk.** Every change is committed as it
@@ -87,8 +89,14 @@ fun HistoryScreen(
             loading = false
         }
     }
-    var at by remember(viewModel.historyPath) { mutableStateOf(0) }
-    val index = at.coerceIn(0, maxOf(versions.lastIndex, 0))
+    // The page *is* the chosen version. There is no second copy of that fact:
+    // every way of turning the page — a swipe, an arrow — moves this one.
+    val pager = rememberPagerState(pageCount = { versions.size })
+    val scope = rememberCoroutineScope()
+    // A restored version is a new version at the top, so the page that was open is
+    // no longer the same version; the newest is what the screen goes back to.
+    LaunchedEffect(viewModel.historyGeneration) { pager.scrollToPage(0) }
+    val index = pager.currentPage.coerceIn(0, maxOf(versions.lastIndex, 0))
     val shown = versions.getOrNull(index)
     val kind = viewModel.historyKind
     val isFolder = viewModel.historyIsFolder
@@ -112,7 +120,7 @@ fun HistoryScreen(
                         Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         if (versions.isNotEmpty()) {
                             Text(
-                                text = "version ${versions.size - index} of ${versions.size}",
+                                text = "${index + 1} of ${versions.size} · newest first",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -163,92 +171,109 @@ fun HistoryScreen(
                 return@Scaffold
             }
 
-            val content = shown.second
-
-            // ---- every version, as a list ------------------------------------
+            // ---- one version at a time ---------------------------------------
             //
-            // **A list, not two arrows.** Stepping through versions one at a time
-            // answers "what came before this" and hides everything else: a person
-            // looking for the version from last Tuesday has to press `<` and read
-            // until they find it. Every version is a row, and a row says only what
-            // identifies it — the day, the time and its name in git. The messages
-            // were the app narrating itself ("Edited milk.txt"), the same sentence on
-            // every row, and the note typed at a sync where there is one.
-            Column(
+            // **A swipe, and two arrows at the corners.** One version fills the
+            // screen; `<` is the one before it and `>` the one after, which is the
+            // gesture a person already makes on a phone. The list this replaced
+            // showed every version at once, which read like a file manager rather
+            // than like turning back a page.
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 168.dp)
-                    .verticalScroll(rememberScrollState()),
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                versions.forEachIndexed { position, (version, _) ->
-                    val chosen = position == index
-                    val note = version.message.lineSequence().first().trim()
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                if (chosen) MaterialTheme.colorScheme.secondaryContainer
-                                else Color.Transparent,
-                            )
-                            .clickable { at = position }
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = DateFormat.getDateTimeInstance(
-                                DateFormat.MEDIUM,
-                                DateFormat.SHORT,
-                            ).format(Date(version.timestamp)),
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text(
-                            text = version.shortId + if (note.isNotEmpty() && !appVoice(note)) {
-                                "  ·  $note"
-                            } else {
-                                ""
-                            },
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    HorizontalDivider()
+                // `<` is the page before this one, which in a newest-first history
+                // is a *newer* version — and `>` is the page after, which is older.
+                // That is the direction a swipe goes, so the arrows and the gesture
+                // agree instead of being two mental models of the same list.
+                TextButton(
+                    enabled = index > 0,
+                    onClick = {
+                        scope.launch { pager.animateScrollToPage(index - 1) }
+                    },
+                ) {
+                    Text("<", style = MaterialTheme.typography.titleLarge)
+                }
+                Column(
+                    modifier = Modifier.weight(1f),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(
+                        text = DateFormat.getDateTimeInstance(
+                            DateFormat.MEDIUM,
+                            DateFormat.SHORT,
+                        ).format(Date(shown.first.timestamp)),
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    val note = shown.first.message.lineSequence().first().trim()
+                    Text(
+                        text = shown.first.shortId + if (note.isNotEmpty() && !appVoice(note)) {
+                            "  ·  $note"
+                        } else {
+                            ""
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                TextButton(
+                    enabled = index < versions.lastIndex,
+                    onClick = {
+                        scope.launch { pager.animateScrollToPage(index + 1) }
+                    },
+                ) {
+                    Text(">", style = MaterialTheme.typography.titleLarge)
                 }
             }
-
             HorizontalDivider()
 
             // ---- what that version was ---------------------------------------
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
-                    .padding(16.dp),
-            ) {
-                when {
-                    isFolder -> Text(
-                        text = content?.takeIf { it.isNotBlank() }
-                            ?: "This version of the folder was empty.",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
+            //
+            // The page is the version, so turning it is turning the history. The
+            // pager is bound to `pager.currentPage` and to nothing else: an effect
+            // that wrote the page back from state it also read is how a screen ends
+            // up fighting the finger that is swiping it.
+            HorizontalPager(
+                state = pager,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+            ) { page ->
+                val version = versions.getOrNull(page)
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(16.dp),
+                ) {
+                    when {
+                        version == null -> Unit
 
-                    // A picture or a file of an unknown kind has no text to show.
-                    // Saying so is better than a screen of replacement characters
-                    // that looks like corruption.
-                    kind != EntryKind.TEXT -> Text(
-                        text = "This is not a text file, so a version of it cannot be " +
-                            "read here. It can still be put back.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                        isFolder -> Text(
+                            text = version.second?.takeIf { it.isNotBlank() }
+                                ?: "This version of the folder was empty.",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
 
-                    else -> Text(
-                        text = content.orEmpty(),
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
+                        // A picture or a file of an unknown kind has no text to
+                        // show. Saying so is better than a screen of replacement
+                        // characters that looks like corruption.
+                        kind != EntryKind.TEXT -> Text(
+                            text = "This is not a text file, so a version of it cannot be " +
+                                "read here. It can still be put back.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+
+                        else -> Text(
+                            text = version.second.orEmpty(),
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                    }
                 }
             }
 
