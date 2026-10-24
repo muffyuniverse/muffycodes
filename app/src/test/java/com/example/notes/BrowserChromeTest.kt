@@ -217,6 +217,33 @@ class BrowserChromeTest {
     }
 
     @Test
+    fun `the place window does not offer the app's own folders`() {
+        // Reported from the live log: "move and clone allow to choose hidden folders at
+        // the account root". `.muffy/` is where every flag lives and both acts refuse it,
+        // so listing it could only end in a refusal after the person had picked it.
+        val root = scene.workspace!!.accountDir
+        java.io.File(root, ".muffy").mkdirs()
+        java.io.File(root, "ordinary").mkdirs()
+
+        compose.setContent {
+            MaterialTheme {
+                PlaceDialog(
+                    title = "Move milk.txt",
+                    root = root,
+                    forbidden = emptyList(),
+                    canChoose = { true },
+                    onDismiss = {},
+                    onPick = {},
+                )
+            }
+        }
+
+        compose.waitForIdle()
+        assertTrue("a folder that can be moved into is offered", there("ordinary/"))
+        assertFalse("the app's own bookkeeping is not", there(".muffy/"))
+    }
+
+    @Test
     fun `the account root offers nothing to add`() {
         scene.signedIn()
         scene.open()
@@ -228,6 +255,21 @@ class BrowserChromeTest {
         // Wait for the row to be painted before reading the absence as a decision.
         compose.waitForIdle()
         assertFalse("no Add at the account root", thereIcon("Add"))
+    }
+
+    @Test
+    fun `a row does not call itself local`() {
+        // Reported from the live log: "still have 'local' word under filenames ... 'local'
+        // under GitHub/ is strange either way". At a project's root every row but the
+        // clone is local by definition, so the word marked everything and said something
+        // false about the one row that is not.
+        scene.signedIn()
+        scene.project("groceries")
+        scene.open(Workspace.PROJECTS, "groceries")
+        scene.folder("notes")
+
+        compose.waitUntil(20_000) { there("notes/") }
+        assertFalse("no row is labelled local", there("local"))
     }
 
     @Test

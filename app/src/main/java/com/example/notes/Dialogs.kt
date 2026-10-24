@@ -531,10 +531,20 @@ fun PlaceDialog(
     var chosen by remember(start) { mutableStateOf<java.io.File?>(null) }
     var hint by remember(start) { mutableStateOf<String?>(null) }
 
-    /** The folders this one holds that may be moved into. */
+    /**
+     * The folders this one holds that may be moved into.
+     *
+     * **Hidden folders are not listed, and not walked into.** A name starting with `.`
+     * is the app's own bookkeeping — `.muffy/` holds every flag, `.git/` is the clone's —
+     * and both acts refuse them, so offering one could only end in a refusal after the
+     * person had picked it. Worse, walking into `.muffy/` shows the app's flags as a list
+     * of folders to file notes into. Reported from the live log: "move and clone allow to
+     * choose hidden folders at the account root".
+     */
     fun children(dir: java.io.File): List<java.io.File> =
         (dir.listFiles() ?: emptyArray())
             .filter { it.isDirectory }
+            .filter { !it.name.startsWith(".") }
             .filter { child -> !forbidden.any { it.name == child.name && it.parentFile == child.parentFile } }
             .filter { child -> forbidden.none { it.canonicalFile == child.canonicalFile } }
             .filter { child -> forbidden.none { f -> f.isDirectory && child.path.startsWith(f.path + java.io.File.separator) } }

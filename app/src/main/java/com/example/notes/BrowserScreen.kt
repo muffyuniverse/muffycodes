@@ -452,7 +452,6 @@ private fun EntryList(viewModel: AppViewModel, actions: BrowserActions) {
                 locked = viewModel.isLocked(entry.file),
                 selected = viewModel.isSelected(entry.file),
                 choosing = viewModel.selected.isNotEmpty(),
-                local = !viewModel.inWorktree && viewModel.currentProject != null,
                 // `projects/` at the root and `repo/` inside a project are the app's
                 // own folders: they can be opened, and nothing else. Renaming,
                 // moving or deleting one is how the account's tree stops being the
@@ -476,7 +475,6 @@ private fun EntryRow(
     locked: Boolean,
     selected: Boolean,
     choosing: Boolean,
-    local: Boolean,
     system: Boolean,
     actions: BrowserActions,
     onOpen: () -> Unit,
@@ -522,15 +520,6 @@ private fun EntryRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (local) {
-                Text(
-                    // Not a type — a fact about where the file lives, which no
-                    // extension can tell you.
-                    text = "local",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
         }
         if (!choosing && !system && entry.kind == EntryKind.TEXT) {
             // The lock sits to the left of the menu, and only where it can mean
