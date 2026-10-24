@@ -50,6 +50,14 @@ class Scenario(
     val app: Application = RuntimeEnvironment.getApplication(),
     /** True when the account signed in should be the test account. */
     signIn: Boolean = true,
+    /**
+     * The GitHub that signing in asks who a key belongs to.
+     *
+     * Null leaves the app's own choice alone, which is what every scenario but the
+     * sign-in ones wants. A test that needs GitHub to *refuse* a key passes one
+     * that does, because the real code path is the one that has to say no.
+     */
+    signInGitHub: (() -> GitHub)? = null,
 ) {
 
     /** Everything this scenario makes lives here and goes away with it. */
@@ -70,6 +78,7 @@ class Scenario(
         // A person types slowly; a test does not. The history is committed at
         // once so that what is being tested is the behaviour, not the pause.
         saveDebounceMs = 0,
+        signInGitHub = signInGitHub ?: { HttpGitHub() },
     )
 
     val login: String get() = AppViewModel.TEST_ACCOUNT

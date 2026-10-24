@@ -42,6 +42,16 @@ class AppViewModel @JvmOverloads constructor(
      * be tested: a rule that cannot be asked about is a rule nobody has checked.
      */
     private val testAccountsAllowed: Boolean = BuildConfig.DEBUG,
+    /**
+     * The GitHub that signing in asks who a key belongs to.
+     *
+     * A seam, not a mock: production leaves it alone and gets [HttpGitHub]. It is
+     * here because the failure half of signing in — a key GitHub refuses — had no
+     * way to happen in a test, so the code that shows the refusal was never run.
+     * The one thing that must never be substituted is the answer a *release* build
+     * gives, and that is asserted separately.
+     */
+    private val signInGitHub: () -> GitHub = { HttpGitHub() },
 ) : AndroidViewModel(app) {
 
     /** The accounts on this phone. */
@@ -690,7 +700,7 @@ class AppViewModel @JvmOverloads constructor(
      */
     fun signInWithToken(token: String, name: String, email: String, onDone: (Boolean) -> Unit) {
         worker.execute {
-            val result = HttpGitHub().whoami(token)
+            val result = signInGitHub().whoami(token)
             val login = result.value
             main.post {
                 if (login == null) {

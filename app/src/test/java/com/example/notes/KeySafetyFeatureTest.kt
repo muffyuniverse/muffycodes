@@ -63,6 +63,25 @@ class KeySafetyFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `the app is allowed to reach the network at all`() {
+        // The tests above prove the app *would* talk to GitHub rather than to a
+        // folder. None of them could catch the app not being *permitted* to: the
+        // folder-backed GitHub never opens a socket, so every test passed while the
+        // shipped APK had no INTERNET permission and could not sign in, list
+        // repositories, clone or push. Signing in simply did nothing, because the
+        // SecurityException became an error message nobody had asked the UI to show.
+        //
+        // Read from the manifest that actually ships, not from a constant that could
+        // drift from it.
+        val manifest = File("src/main/AndroidManifest.xml").readText()
+
+        assertTrue(
+            "the manifest declares INTERNET, so git can reach GitHub",
+            manifest.contains("android.permission.INTERNET"),
+        )
+    }
+
+    @Test
     fun `a signed-in account with a key talks to GitHub`() {
         scene.viewModel.signIn("muffyuniverse", "a-key", "Muffy World", "muffy@example.com")
 

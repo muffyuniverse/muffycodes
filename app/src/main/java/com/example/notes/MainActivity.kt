@@ -19,12 +19,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import java.io.File
+import kotlinx.coroutines.flow.filterNotNull
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -93,12 +95,21 @@ private fun AppRoot(viewModel: AppViewModel) {
     }
 
     // Every message the view model raises is shown once, then dropped.
-    val message = viewModel.message
-    LaunchedEffect(message) {
-        if (message != null) {
-            viewModel.message = null
-            snackbar.showSnackbar(message)
-        }
+    //
+    // Collected rather than keyed on, because keying was a trap: `LaunchedEffect`
+    // is cancelled when its key changes, and clearing `message` inside it changes
+    // the key — so the `showSnackbar` that was suspended in flight was cancelled by
+    // the very clearing that was meant to consume it, and the message vanished. A
+    // failed sign-in raised at the same moment as anything else was exactly the
+    // case that lost its explanation. Collecting keeps the clearing local: the
+    // collector sees null next, ignores it, and goes on.
+    LaunchedEffect(Unit) {
+        snapshotFlow { viewModel.message }
+            .filterNotNull()
+            .collect { text ->
+                viewModel.message = null
+                snackbar.showSnackbar(text)
+            }
     }
 
     val editing = viewModel.editingFile
@@ -239,14 +250,35 @@ private fun Dialogs(
     when (pending) {
         Pending.None -> Unit
 
-        Pending.SignIn -> SignInDialog(
-            onDismiss = dismiss,
-            // The login is whatever GitHub says it is, not what was typed, and
-            // the question goes to GitHub off the main thread.
-            onSignIn = { _, token, name, email ->
-                viewModel.signInWithToken(token, name, email) { }
-            },
-        )
+        Pending.SignIn -> {
+            // The dialog owns the wait, so the answer lands where the person is
+            // looking. A refusal keeps the dialog open with the reason in it; a
+            // success is the only thing that dismisses.
+            var signingIn by remember { mutableStateOf(false) }
+            var error by remember { mutableStateOf<String?>(null) }
+            SignInDialog(
+                onDismiss = dismiss,
+                signingIn = signingIn,
+                error = error,
+                // The login is whatever GitHub says it is, not what was typed, and
+                // the question goes to GitHub off the main thread.
+                onSignIn = { _, token, name, email ->
+                    signingIn = true
+                    error = null
+                    viewModel.signInWithToken(token, name, email) { ok ->
+                        signingIn = false
+                        if (ok) {
+                            dismiss()
+                        } else {
+                            // The view model has already put the reason in
+                            // `message`; read it here so the dialog can show it
+                            // rather than a snackbar behind the dialog.
+                            error = viewModel.message ?: "That key did not work"
+                        }
+                    }
+                },
+            )
+        }
 
         Pending.EditIdentity -> {
             val account = viewModel.account ?: return

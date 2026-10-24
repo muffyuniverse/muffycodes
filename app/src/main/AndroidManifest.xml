@@ -1,6 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!--
+        Every account feature is a call to GitHub — signing in, listing the
+        account's repositories, creating, renaming and deleting one, and cloning
+        and pushing a project. Without this the requests do not fail politely:
+        `URL.openConnection()` throws a SecurityException on the first byte, and
+        because the network layer turns any exception into an error message the
+        app looked as though it were simply ignoring the button.
+
+        It is not a "nice to have" for this app; it is the whole of §5. Nothing is
+        sent until a key is entered, and the key is only ever attached to GitHub
+        itself, so there is nothing here to be careful of beyond the usual: an app
+        with no permission to reach the network is an app whose git cannot work.
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"

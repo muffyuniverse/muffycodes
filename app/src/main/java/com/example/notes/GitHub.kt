@@ -309,7 +309,15 @@ class DiskGitHub(
     /** Where one repository lives on disk. */
     fun repoDir(name: String): File = File(ownerDir, "$name.git")
 
-    override fun whoami(token: String): GitHubResult<String> = GitHubResult(value = owner)
+    override fun whoami(token: String): GitHubResult<String> =
+        // A key is required, exactly as GitHub requires one. Returning the owner
+        // regardless made this seam unable to say no, so nothing ever exercised the
+        // half of signing in that reports a refusal.
+        if (token.isBlank()) {
+            GitHubResult(error = "Bad credentials", status = 401)
+        } else {
+            GitHubResult(value = owner)
+        }
 
     override fun listRepos(token: String): GitHubResult<List<Repo>> {
         val dirs = ownerDir.listFiles()

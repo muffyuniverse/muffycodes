@@ -7,9 +7,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -395,6 +397,8 @@ fun NewProjectDialog(
 @Composable
 fun SignInDialog(
     onDismiss: () -> Unit,
+    signingIn: Boolean = false,
+    error: String? = null,
     onSignIn: (login: String, token: String, name: String, email: String) -> Unit,
 ) {
     var token by remember { mutableStateOf("") }
@@ -429,18 +433,46 @@ fun SignInDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // A sign-in is a network round trip, and the dialog used to close
+                // the instant it was asked — so a refusal arrived at a screen that
+                // was already gone, as a snackbar nobody was looking for, and the
+                // whole thing read as "the button does nothing". The dialog stays
+                // now, says what it is doing, and says why it failed.
+                if (signingIn) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp))
+                        Text(
+                            "Checking the key with GitHub…",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+                if (error != null) {
+                    Text(
+                        error,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
             }
         },
         confirmButton = {
             TextButton(
-                enabled = token.isNotBlank(),
+                enabled = token.isNotBlank() && !signingIn,
                 onClick = {
+                    // Asked, not dismissed. The dialog closes when the answer is
+                    // yes, and stays on a no so the reason can be read — and the key
+                    // can be corrected rather than retyped.
                     onSignIn("", token.trim(), name.trim(), email.trim())
-                    onDismiss()
                 },
-            ) { Text("Sign in") }
+            ) { Text(if (signingIn) "Signing in…" else "Sign in") }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !signingIn) { Text("Cancel") }
+        },
     )
 }
 

@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.robolectric.RuntimeEnvironment
 import java.io.File
 
 /**
@@ -18,6 +19,36 @@ class AccountsFeatureTest : FeatureTest() {
 
     /** This feature is about making accounts, so it starts with none. */
     override val signIn: Boolean get() = false
+
+    @Test
+    fun `a key GitHub refuses is reported, and no account is kept`() {
+        // The half of signing in that used to be untestable, and therefore was never
+        // run: `whoami` always said yes. A refused key must say so out loud — the
+        // dialog keeps itself open and shows the reason — and must not leave an
+        // account behind that cannot reach anything.
+        val phone = Scenario(
+            RuntimeEnvironment.getApplication(),
+            signIn = false,
+            signInGitHub = { DiskGitHub(File(scene.root, "refusing"), "dev") },
+        )
+        try {
+            var answered: Boolean? = null
+            var sawMessage: String? = null
+
+            phone.viewModel.signInWithToken("", "not-a-real-key", "", "") { ok ->
+                answered = ok
+                sawMessage = phone.viewModel.message
+            }
+            phone.await("the answer to arrive") { answered != null }
+
+            assertEquals("the key was refused", false, answered)
+            assertEquals("and it said so", "Bad credentials", sawMessage)
+            assertNull("no account was kept", phone.viewModel.account)
+            assertEquals("nobody is signed in", null, phone.viewModel.activeLogin)
+        } finally {
+            phone.close()
+        }
+    }
 
     @Test
     fun `with nobody signed in there is nothing to show and nothing to make`() {
