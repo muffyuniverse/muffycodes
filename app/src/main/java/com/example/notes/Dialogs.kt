@@ -772,82 +772,99 @@ fun ReportDialog(
     onSend: (String) -> Unit,
 ) {
     var note by remember(frozen.at) { mutableStateOf("") }
-    val stuck = frozen.stuck()
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Report a problem") },
         text = {
-            // **No scroll here, on purpose.** What the window shows is what the app
-            // already noticed — at most a handful of lines — not the log; the log goes
-            // in the file, where it belongs. A scrollable inside a dialog also asks for
-            // infinite height in a slot that gives it one, which measures forever.
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    "What happened, and what you were trying to do?",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                OutlinedTextField(
-                    value = note,
-                    onValueChange = { note = it },
-                    label = { Text("What went wrong?") },
-                    minLines = 3,
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                )
-
-                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-
-                // The frozen finding, in the same words the trace screen uses. If the
-                // app already noticed, say so here — it is the difference between a
-                // report that points at something and one that describes a mood.
-                if (stuck.isEmpty()) {
-                    Text(
-                        "The app was answering everything when you pressed this.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    Text(
-                        "The app had already noticed these:",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                    stuck.forEach {
-                        Text(
-                            "· ${it.line}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
-                    }
-                }
-                if (frozen.report.failures.isNotEmpty()) {
-                    Text(
-                        "And these were refused:",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(top = 12.dp),
-                    )
-                    frozen.report.failures.take(5).forEach {
-                        Text(
-                            "· $it",
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(top = 2.dp),
-                        )
-                    }
-                }
-                Text(
-                    "The whole record goes with it — ${frozen.report.lines.size} lines of " +
-                        "what the app did, taken at the moment you pressed this.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 12.dp),
-                )
-            }
+            ReportBody(frozen = frozen, note = note, onNote = { note = it })
         },
         confirmButton = {
             TextButton(onClick = { onSend(note) }) { Text("Send") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+/**
+ * What the window says, without the window.
+ *
+ * Split out because a dialog is a platform window: mounting one in a test asks whether
+ * Robolectric settles, which is a question about the harness, not about this app. The
+ * part with a decision in it — what the app already noticed, in the app's own words,
+ * and what the person types — is ordinary content and can be tested as such.
+ */
+@Composable
+fun ReportBody(
+    frozen: Trace.Frozen,
+    note: String,
+    onNote: (String) -> Unit,
+) {
+    val stuck = frozen.stuck()
+    // **No scroll here, on purpose.** What the window shows is what the app already
+    // noticed — at most a handful of lines — not the log; the log goes in the file,
+    // where it belongs. A scrollable inside a dialog also asks for infinite height in a
+    // slot that gives it one, which measures forever.
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            "What happened, and what you were trying to do?",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        OutlinedTextField(
+            value = note,
+            onValueChange = onNote,
+            label = { Text("What went wrong?") },
+            minLines = 3,
+            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+        )
+
+        HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+        // The frozen finding, in the same words the trace screen uses. If the
+        // app already noticed, say so here — it is the difference between a
+        // report that points at something and one that describes a mood.
+        if (stuck.isEmpty()) {
+            Text(
+                "The app was answering everything when you pressed this.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            Text(
+                "The app had already noticed these:",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.error,
+            )
+            stuck.forEach {
+                Text(
+                    "· ${it.line}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+        }
+        if (frozen.report.failures.isNotEmpty()) {
+            Text(
+                "And these were refused:",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(top = 12.dp),
+            )
+            frozen.report.failures.take(5).forEach {
+                Text(
+                    "· $it",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+        }
+        Text(
+            "The whole record goes with it — ${frozen.report.lines.size} lines of " +
+                "what the app did, taken at the moment you pressed this.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 12.dp),
+        )
+    }
 }

@@ -193,13 +193,16 @@ class ReportTest {
 
     @Test
     fun `the window shows what the app already noticed`() {
+        // The window's content, not the window: a platform dialog never goes idle under
+        // Robolectric, and mounting one would be a test of the harness. The part with a
+        // decision in it is what is shown, and that is ordinary content.
         Trace.staleMs = -1
         Trace.tap("Save", "milk.txt")
         val frozen = Trace.freeze()
 
         compose.setContent {
             Frame {
-                ReportDialog(frozen = frozen, onDismiss = {}, onSend = {})
+                ReportBody(frozen = frozen, note = "", onNote = {})
             }
         }
 
@@ -208,21 +211,41 @@ class ReportTest {
     }
 
     @Test
-    fun `what is typed is what is sent`() {
-        var sent: String? = null
-        // Frozen once, outside the composition: a `freeze()` called from inside a
-        // composable would take a new snapshot on every recomposition, which is
-        // precisely the thing `Frozen` exists to prevent.
+    fun `the window says the app was answering when nothing was stuck`() {
+        // The falsification: the same window, with a healthy trace. If it still said
+        // "had already noticed these" the section would be decoration, and a person
+        // would learn to ignore it.
+        Trace.tap("Save")
+        Trace.changed("at /")
+        val frozen = Trace.freeze()
+
+        compose.setContent {
+            Frame {
+                ReportBody(frozen = frozen, note = "", onNote = {})
+            }
+        }
+
+        compose.onNodeWithText("The app was answering everything when you pressed this.")
+            .assertIsDisplayed()
+        compose.onNodeWithText("The app had already noticed these:").assertDoesNotExist()
+    }
+
+    @Test
+    fun `what is typed is what is carried into the report`() {
+        var typed = ""
         val frozen = Trace.freeze()
         compose.setContent {
             Frame {
-                ReportDialog(frozen = frozen, onDismiss = {}, onSend = { sent = it })
+                ReportBody(frozen = frozen, note = typed, onNote = { typed = it })
             }
         }
 
         compose.onNodeWithText("What went wrong?").performTextReplacement("sync fails on testrepo")
-        compose.onNodeWithText("Send").performClick()
 
-        assertEquals("the words travel with the report", "sync fails on testrepo", sent)
+        // The field's own words, through the callback and back out through the report:
+        // the window and the shipping text must agree about what was said.
+        assertEquals("the field took it", "sync fails on testrepo", typed)
+        val text = Trace.reportText(frozen, typed)
+        assertTrue("and the report carries it: $text", text.contains("sync fails on testrepo"))
     }
 }
