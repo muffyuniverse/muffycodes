@@ -28,6 +28,7 @@ import org.robolectric.annotation.Config
 class ObservabilityScreenTest {
 
     /** The theme the screens are painted in, as the other screen tests do it. */
+    @Composable
     private fun Frame(content: @Composable () -> Unit) {
         MaterialTheme { Surface { content() } }
     }
