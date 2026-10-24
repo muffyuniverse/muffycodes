@@ -267,6 +267,7 @@ class BrowserChromeTest {
         scene.project("groceries")
         scene.open(Workspace.PROJECTS, "groceries")
         scene.folder("notes")
+        browser()
 
         compose.waitUntil(20_000) { there("notes/") }
         assertFalse("no row is labelled local", there("local"))
