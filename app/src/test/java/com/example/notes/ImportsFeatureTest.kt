@@ -144,8 +144,8 @@ class ImportsFeatureTest {
 
         val report = Imports.filesInto(context, listOf(uri), dir).getOrThrow()
 
-        assertEquals("untitled.png", dir.listFiles()!!.single().name)
-        assertEquals("and it says so", listOf("!!!.png" to "untitled.png"), report.renamed)
+        assertEquals("imported.png", dir.listFiles()!!.single().name)
+        assertEquals("and it says so", listOf("!!!.png" to "imported.png"), report.renamed)
     }
 
     @Test
