@@ -335,9 +335,9 @@ class TraceTest {
 
     @Test
     fun `where says where the log is`() {
-        assertNotNull("a file sink can name itself", Trace.where())
+        assertNotNull("a file sink can name itself", Trace.where)
         Trace.attach((null as Trace.Sink?))
-        assertEquals("and no sink means nowhere", null, Trace.where())
+        assertEquals("and no sink means nowhere", null, Trace.where)
     }
 
     @Test

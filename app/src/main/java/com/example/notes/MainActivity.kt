@@ -337,7 +337,9 @@ private fun AppRoot(viewModel: AppViewModel) {
                 // context, because a log is ordered — nothing has to be captured,
                 // frozen, slugged, filed or sent for the report to exist and be found.
                 Trace.checkpoint(note)
-                viewModel.message = "Written down. The log is at ${Trace.where() ?: "the app's folder"}"
+                // Read out once, so the sentence carries no nested quote.
+                val where = Trace.where ?: "the app's own folder"
+                viewModel.message = "Written down. The log is at $where"
             },
         )
     }
@@ -680,7 +682,7 @@ private fun shareTrace(context: android.content.Context) {
         type = "text/plain"
         putExtra(android.content.Intent.EXTRA_SUBJECT, "Muffy Codes — what the app did")
         putExtra(android.content.Intent.EXTRA_TEXT, Trace.dump())
-        Trace.where()?.let { putExtra(android.content.Intent.EXTRA_TEXT, Trace.dump() + "\n\nOn this phone: $it\n") }
+        Trace.where?.let { putExtra(android.content.Intent.EXTRA_TEXT, Trace.dump() + "\n\nOn this phone: $it\n") }
     }
     try {
         context.startActivity(

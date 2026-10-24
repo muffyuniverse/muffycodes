@@ -259,7 +259,7 @@ class AppViewModel @JvmOverloads constructor(
         attachTrace()
         Trace.note(
             "log-switched",
-            if (on) "writing to ${Trace.where() ?: "nowhere"}" else "off",
+            if (on) "writing to " + (Trace.where ?: "nowhere") else "off",
         )
     }
 
