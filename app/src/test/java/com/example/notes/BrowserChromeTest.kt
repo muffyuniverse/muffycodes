@@ -175,12 +175,13 @@ class BrowserChromeTest {
         compose.waitForIdle()
         assertFalse("nothing is there yet", there("Shopping"))
 
-        scene.project("Shopping")
+        // Made on disk and refreshed directly, not through the clone. A project arriving
+        // over the network is a worker and a post and a frame; what this test is about is
+        // whether *the screen* is watching the thing that changed, so the change is made
+        // synchronously and the assertion is about the redraw alone.
+        scene.workspace!!.createProjectFolders("Shopping")
+        scene.viewModel.refresh()
 
-        // The row has to reach the screen with no navigation in between. `waitForIdle`
-        // before asking drains what the app posted from its worker, so the assertion is
-        // about the screen catching up rather than about a frame that never ran.
-        compose.waitForIdle()
         compose.waitUntil(20_000) { there("Shopping") }
         assertTrue("the row appeared without going anywhere", there("Shopping"))
     }

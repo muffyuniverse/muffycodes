@@ -414,16 +414,20 @@ class HistoryFeatureTest : FeatureTest() {
         }
         assertEquals("and the restore is its own version", 3, scene.versionsOf(file).size)
         // And the restore is a change waiting to leave: committed to the project at once
-        // (so the history holds it) and not yet pushed (so the row says what to send).
-        // Counted as a difference, because the two saves before it are unsent as well — the
-        // number is "everything not on GitHub yet", which is the whole point of counting it.
-        val unsentBefore = scene.viewModel.changesOf("shopping")
+        // (so the history holds it) and not yet pushed, which is what the row counts.
+        //
+        // Asserted on the counter itself rather than on the row, because the row's number
+        // arrives through a recount posted to the UI thread and this test has no frame to
+        // run it in. The row is checked where it can be: CopyFeatureTest and
+        // ProjectsFeatureTest both assert the count after a change lands.
+        val unsentBefore = scene.workspace!!.unsentCount("shopping")
+        assertTrue("the two saves are already waiting to be sent", unsentBefore >= 2)
         scene.await("the restore to be committed", 20_000) {
-            scene.viewModel.changesOf("shopping") > unsentBefore
+            scene.workspace!!.unsentCount("shopping") > unsentBefore
         }
         assertTrue(
             "the restore is one more thing to send",
-            scene.viewModel.changesOf("shopping") > unsentBefore,
+            scene.workspace!!.unsentCount("shopping") > unsentBefore,
         )
     }
 
