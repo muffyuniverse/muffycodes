@@ -1,10 +1,13 @@
 package com.example.notes
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -18,7 +21,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -28,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import java.text.DateFormat
@@ -36,15 +39,14 @@ import java.util.Date
 /**
  * The versions of one file, one at a time.
  *
- * This used to be a list with a Restore button on every row, and a version was
- * something you read a one-line preview of. What a person actually does with a
- * history is **step through it**: back a version, back another, forward again,
- * and stop where the file was right. So the screen is a viewer with two arrows,
- * and nothing else in the app carries state while it is open.
+ * This used to be a list with a Restore button on every row, then a viewer with two
+ * arrows. Both were wrong in opposite directions: the buttons made choosing one act
+ * among several, and the arrows made every version except the current one invisible.
  *
- * **Both arrows move one version.** `<` is older, `>` is newer — the same way a
- * page is turned — and the count says where you are, so the newest version is
- * "version 5 of 5" even though it is stored first.
+ * **It is a list again, and a row says only what identifies a version** — the day,
+ * the time and its name in git. The messages were the app narrating itself, the same
+ * sentence on every row; the one message worth the width is the note typed when a
+ * project was pushed, and that is the only one shown.
  *
  * **The newest version is what is on disk.** Every change is committed as it
  * happens ([AppViewModel.saveEditor] and friends), so there is no separate
@@ -161,56 +163,61 @@ fun HistoryScreen(
                 return@Scaffold
             }
 
-            val (commit, content) = shown
+            val content = shown.second
 
-            // ---- the two arrows ---------------------------------------------
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            // ---- every version, as a list ------------------------------------
+            //
+            // **A list, not two arrows.** Stepping through versions one at a time
+            // answers "what came before this" and hides everything else: a person
+            // looking for the version from last Tuesday has to press `<` and read
+            // until they find it. Every version is a row, and a row says only what
+            // identifies it — the day, the time and its name in git. The messages
+            // were the app narrating itself ("Edited milk.txt"), the same sentence on
+            // every row, and the note typed at a sync where there is one.
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 168.dp)
+                    .verticalScroll(rememberScrollState()),
             ) {
-                TextButton(
-                    // An older version: stored later in the newest-first list.
-                    enabled = index < versions.lastIndex,
-                    onClick = { at = index + 1 },
-                ) {
-                    Text("<", style = MaterialTheme.typography.titleLarge)
-                }
-                Column(modifier = Modifier.weight(1f)) {
-                    // **When, and which version — and nothing else.** The message
-                    // was the app narrating itself ("Edited milk.txt", "Created
-                    // shop/"), which every version of the same file repeats and which
-                    // says nothing a person picking a version needs. What they need is
-                    // how long ago the version was and its name in git.
-                    Text(
-                        text = DateFormat.getDateTimeInstance(
-                            DateFormat.MEDIUM,
-                            DateFormat.SHORT,
-                        ).format(Date(commit.timestamp)),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    // The one message worth showing is the person's own: the note
-                    // typed when this was pushed. Everything else is the app's voice,
-                    // and it is left out.
-                    val note = commit.message.lineSequence().first().trim()
-                    Text(
-                        text = commit.shortId + if (note.isNotEmpty() && !appVoice(note)) {
-                            "  ·  $note"
-                        } else {
-                            ""
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                TextButton(
-                    enabled = index > 0,
-                    onClick = { at = index - 1 },
-                ) {
-                    Text(">", style = MaterialTheme.typography.titleLarge)
+                versions.forEachIndexed { position, (version, _) ->
+                    val chosen = position == index
+                    val note = version.message.lineSequence().first().trim()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                if (chosen) MaterialTheme.colorScheme.secondaryContainer
+                                else Color.Transparent,
+                            )
+                            .clickable { at = position }
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = DateFormat.getDateTimeInstance(
+                                DateFormat.MEDIUM,
+                                DateFormat.SHORT,
+                            ).format(Date(version.timestamp)),
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            text = version.shortId + if (note.isNotEmpty() && !appVoice(note)) {
+                                "  ·  $note"
+                            } else {
+                                ""
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    HorizontalDivider()
                 }
             }
+
             HorizontalDivider()
 
             // ---- what that version was ---------------------------------------

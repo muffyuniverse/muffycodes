@@ -275,9 +275,9 @@ class ScenariosTest {
             }
             after()
             result(
-                "Each save is one version, and < and > step between them — from the newest, " +
-                    "which is what is on disk, back to the first. The preview is read-only: " +
-                    "the file changes only when Restore is pressed.",
+                "Each save is one version, and every version is a row — the day, the time " +
+                    "and its name in git, so the one wanted can be seen rather than stepped " +
+                    "to. The preview is read-only: the file changes only when Select is pressed.",
             )
         }
     }
@@ -409,7 +409,7 @@ class ScenariosTest {
             after()
             result(
                 "The history of a file inside a project comes from that project's repository, " +
-                    "so what is on GitHub and what the arrows show are the same thing.",
+                    "so what is on GitHub and what this list shows are the same thing.",
             )
         }
     }
