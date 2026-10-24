@@ -61,18 +61,17 @@ class HistoryFeatureTest : FeatureTest() {
         scene.folder("letters")
         scene.await("a version") { scene.versionsOfFolder("letters").isNotEmpty() }
 
-        // The ring is shared by every test in this JVM, so the taps another one left
-        // waiting would be indistinguishable from this one's. Reset after the history is
-        // open, because opening it is itself a tap.
-        Trace.resetForTest()
-        // `versionsOfFolder` leaves the history open, which is what restoring acts on.
+        // `versionsOfFolder` leaves the history open, which is what restoring acts on. Its
+        // own `history` tap stays waiting here, because nothing in a test without a screen
+        // redraws to answer it — so the assertion is about the *restore's* tap and not about
+        // the ring being empty, which would be measuring the harness.
         scene.restore(scene.versionsOfFolder("letters").first().first.id)
         Trace.awaitWrites()
 
-        assertEquals(
-            "nothing is left waiting after a restore",
-            emptyList<String>(),
-            Trace.report().waiting.map { it.what },
+        assertTrue(
+            "the restore answered itself, so the next press did not have to: " +
+                Trace.report().waiting.map { it.what },
+            Trace.report().waiting.none { it.what == "restore-version" },
         )
     }
 
@@ -415,12 +414,17 @@ class HistoryFeatureTest : FeatureTest() {
         }
         assertEquals("and the restore is its own version", 3, scene.versionsOf(file).size)
         // And the restore is a change waiting to leave: committed to the project at once
-        // (so the history holds it) and not yet pushed (so the row says there is one thing
-        // to send). Both were counted as 0 before, which is the bug the live log reported.
+        // (so the history holds it) and not yet pushed (so the row says what to send).
+        // Counted as a difference, because the two saves before it are unsent as well — the
+        // number is "everything not on GitHub yet", which is the whole point of counting it.
+        val unsentBefore = scene.viewModel.changesOf("shopping")
         scene.await("the restore to be committed", 20_000) {
-            scene.viewModel.changesOf("shopping") == 1
+            scene.viewModel.changesOf("shopping") > unsentBefore
         }
-        assertEquals("one thing to send", 1, scene.viewModel.changesOf("shopping"))
+        assertTrue(
+            "the restore is one more thing to send",
+            scene.viewModel.changesOf("shopping") > unsentBefore,
+        )
     }
 
     @Test

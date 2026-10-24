@@ -177,6 +177,10 @@ class BrowserChromeTest {
 
         scene.project("Shopping")
 
+        // The row has to reach the screen with no navigation in between. `waitForIdle`
+        // before asking drains what the app posted from its worker, so the assertion is
+        // about the screen catching up rather than about a frame that never ran.
+        compose.waitForIdle()
         compose.waitUntil(20_000) { there("Shopping") }
         assertTrue("the row appeared without going anywhere", there("Shopping"))
     }
