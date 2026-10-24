@@ -665,7 +665,7 @@ fun SyncDialog(
             Column {
                 Text(
                     if (changes > 0) {
-                        "The changes are already committed on this phone. Say what they " +
+                        "These changes will be committed, then pushed. Say what they " +
                             "were for, and it becomes the message GitHub shows."
                     } else {
                         "Nothing is waiting. Syncing only pushes what is already here."

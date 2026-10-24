@@ -93,16 +93,27 @@ class ProjectGit(
      *
      * Returns the new commit's id, or null when there was nothing to commit.
      */
-    fun commit(project: String, what: String): String? {
-        val repo = open(project) ?: return null
+    fun commit(project: String, what: String): String? = commitOutcome(project, what).id
+
+    /**
+     * Commits everything that changed, and says **which of three things happened**.
+     *
+     * The old body answered "no id" both for "there was nothing to commit" and for
+     * "the commit could not be written", and the caller treated both as success. On a
+     * phone that had a stale `index.lock`, every save after it was refused by JGit,
+     * reported as nothing-to-do, and the editor greyed Save out as though the work had
+     * been recorded — while the history, correctly, showed nothing new. That is the
+     * bug the trace was built to catch, and the shape of the return type is half its
+     * cause.
+     */
+    fun commitOutcome(project: String, what: String): GitService.CommitOutcome {
+        val repo = open(project) ?: return GitService.CommitOutcome.failed(
+            "This project has no repository yet"
+        )
         return repo.use {
-            try {
-                val id = GitService.commitAll(it, what, authorProvider())
-                if (id != null) prune(it)
-                id
-            } catch (e: Throwable) {
-                null
-            }
+            val outcome = GitService.commitEverything(it, what, authorProvider())
+            if (outcome.written) prune(it)
+            outcome
         }
     }
 
@@ -118,15 +129,35 @@ class ProjectGit(
                 // by another app. It stays because a push that silently leaves a
                 // change behind is worse than a commit nobody asked for.
                 val changed = GitService.changedPaths(it)
+                // **The trace names what was waiting.** "10 changed" on a row is a
+                // number nobody can act on; the names are what says whether it is real
+                // work or something the app left behind. One line per sync, so it costs
+                // nothing and turns a mystery into a list.
                 if (changed.isNotEmpty()) {
+                    Trace.note(
+                        "changes waiting",
+                        "$project: ${changed.size} — " +
+                            changed.take(12).joinToString(", ") +
+                            (if (changed.size > 12) " +${changed.size - 12} more" else ""),
+                    )
                     // The person's words when they gave any, the names otherwise: a
                     // commit made here is still a change that has to be explained,
                     // and their sentence explains it better than the app can.
-                    GitService.commitAll(
+                    val made = GitService.commitEverything(
                         it,
                         note.trim().ifBlank { CommitMessage.sync(changed) },
                         authorProvider(),
                     )
+                    // **Nothing is pushed over a commit that did not happen.** Pushing
+                    // now would send a tree that is missing exactly the work the person
+                    // was trying to save, and report the sync as done.
+                    if (!made.ok) {
+                        return GitService.RemoteResult(
+                            "Nothing was pushed, because the changes could not be committed: " +
+                                made.error,
+                            false,
+                        )
+                    }
                 }
                 // The sync's own message, on its own commit, so that the push carries
                 // a reason to GitHub rather than only a list of files.

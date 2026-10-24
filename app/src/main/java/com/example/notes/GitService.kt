@@ -181,8 +181,90 @@ object GitService {
     }
 
     /**
+     * What became of an attempt to write a change into a repository.
+     *
+     * Three outcomes, not two. Returning `String?` — an id, or null — made "there was
+     * nothing to commit" and "the commit could not be written" the same answer, and
+     * the caller treated both as success. That is how a save refused by a stale git
+     * lock went into the editor as saved, greyed Save out, and left no version behind:
+     * the history was right, and the app had said nothing at all.
+     */
+    data class CommitOutcome(val id: String?, val error: String?) {
+        /** True when nothing went wrong — whether or not there was anything to do. */
+        val ok: Boolean get() = error == null
+
+        /** True when a new version was actually written. */
+        val written: Boolean get() = id != null
+
+        companion object {
+            fun wrote(id: String) = CommitOutcome(id, null)
+            val nothing = CommitOutcome(null, null)
+            fun failed(said: String) = CommitOutcome(null, said)
+        }
+    }
+
+    /**
+     * True when JGit could not take a lock it needs in order to write.
+     *
+     * What is thrown is usually `JGitInternalException("Exception caught during
+     * execution of add command")` with a `LockFailedException` underneath, and the
+     * sentence about the lock is the marker that survives every wrapper JGit adds.
+     */
+    fun isLockFailure(error: Throwable): Boolean =
+        generateSequence(error as Throwable?) { it.cause }.any {
+            it is org.eclipse.jgit.errors.LockFailedException ||
+                it.message.orEmpty().contains("cannot lock", ignoreCase = true) ||
+                it.message.orEmpty().contains("lock file", ignoreCase = true)
+        }
+
+    /**
+     * Runs [block], clearing a lock a killed process left behind and trying once more.
+     *
+     * **Why this is safe without asking.** Every write in this app is made on one
+     * worker thread, in order, so when a command fails on a lock there is no command of
+     * ours holding one: what is on disk is the corpse of a process Android killed
+     * mid-write. git tells a person to delete that file and try again, which is
+     * reasonable in a terminal and unreasonable on a phone — nobody can reach
+     * `/data/user/0/…` to do it. Until it is deleted *every* write in that project
+     * fails, forever, and a save says nothing.
+     *
+     * [inFlight] is what keeps this honest if writes ever do run concurrently: a lock
+     * is only cleared when the app is not in the middle of using it.
+     */
+    fun <T> retryingLock(
+        repo: Repository,
+        inFlight: Boolean = false,
+        block: () -> T,
+    ): T {
+        return try {
+            block()
+        } catch (t: Throwable) {
+            if (inFlight || !isLockFailure(t)) throw t
+            if (!clearStaleLock(repo)) throw t
+            block()
+        }
+    }
+
+    /**
+     * Deletes a lock file nothing can be holding, and says whether the way is clear.
+     *
+     * `index.lock` is the one JGit takes for every command that writes a working
+     * tree's index — add, commit, reset, checkout. Ref locks are left alone: they are
+     * rarer, and a wrong guess about one of those loses a reference.
+     */
+    fun clearStaleLock(repo: Repository): Boolean = try {
+        val lock = File(repo.directory, "index.lock")
+        !lock.exists() || lock.delete()
+    } catch (e: Throwable) {
+        false
+    }
+
+    /**
      * Stages every change in the working tree, including deletions, and commits
      * it. Returns the new commit id, or null when there was nothing to commit.
+     *
+     * **Prefer [commitEverything],** which can also say that it failed. This signature
+     * is still here for the callers whose only question is the id.
      */
     fun commitAll(
         repo: Repository,
@@ -190,20 +272,38 @@ object GitService {
         author: GitAuthor,
     ): String? {
         return Git(repo).use { git ->
-            stageEverything(git)
-            val status = git.status().call()
+            // A lock left by a killed process is cleared, not reported.
+            retryingLock(repo) { stageEverything(git) }
+            val status = retryingLock(repo) { git.status().call() }
             if (status.isClean) {
                 null
             } else {
-                val commit = git.commit()
-                    .setMessage(message.trim().ifEmpty { "Update files" })
-                    .setAuthor(author.ident())
-                    .setCommitter(author.ident())
-                    .setAllowEmpty(false)
-                    .call()
+                val commit = retryingLock(repo) {
+                    git.commit()
+                        .setMessage(message.trim().ifEmpty { "Update files" })
+                        .setAuthor(author.ident())
+                        .setCommitter(author.ident())
+                        .setAllowEmpty(false)
+                        .call()
+                }
                 commit.name
             }
         }
+    }
+
+    /**
+     * [commitAll], answering with all three outcomes instead of folding a failure into
+     * "nothing to do".
+     */
+    fun commitEverything(
+        repo: Repository,
+        message: String,
+        author: GitAuthor,
+    ): CommitOutcome = try {
+        val id = commitAll(repo, message, author)
+        if (id == null) CommitOutcome.nothing else CommitOutcome.wrote(id)
+    } catch (e: Throwable) {
+        CommitOutcome.failed(Secrets.explain(e, "That change could not be saved"))
     }
 
     /**

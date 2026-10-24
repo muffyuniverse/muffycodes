@@ -81,6 +81,108 @@ class ProjectGitTest {
     }
 
     @Test
+    fun `a lock left by a killed app does not lose the change`() {
+        // The reported failure, exactly: a phone killed mid-write leaves `.git/index.lock`
+        // behind, and every write after it is refused with "Cannot lock … ensure that no
+        // other process has an open file handle". On a phone nobody can delete that file,
+        // so before this the project was dead: nothing could be saved to it again.
+        workspace.createProjectFolders("Shopping").getOrThrow()
+        val git = gitFor()
+        git.init("Shopping").getOrThrow()
+        val repo = git.open("Shopping")!!
+        File(workspace.repoOf("Shopping"), "Milk.txt").writeText("milk")
+        assertTrue("the first commit lands", git.commit("Shopping", "Added Milk.txt") != null)
+        repo.close()
+
+        // What the corpse of a killed process looks like.
+        val lock = File(workspace.repoOf("Shopping"), ".git/index.lock")
+        lock.writeText("")
+
+        File(workspace.repoOf("Shopping"), "Milk.txt").writeText("two litres")
+        val outcome = git.commitOutcome("Shopping", "Edited Milk.txt")
+
+        assertTrue("the change is written despite the lock: ${outcome.error}", outcome.ok)
+        assertTrue("and it became a version", outcome.written)
+        assertFalse("and the corpse is gone", lock.exists())
+        assertEquals(
+            "with the text that was saved",
+            "two litres",
+            File(workspace.repoOf("Shopping"), "Milk.txt").readText(),
+        )
+    }
+
+    @Test
+    fun `a lock that really is held is said, not swallowed`() {
+        // The falsification: a lock that cannot be cleared (something is genuinely
+        // holding it) must come back as a failure with words. The old signature returned
+        // null for both "nothing to commit" and "could not commit", and the caller read
+        // both as success — which is how a save went into the editor as saved while the
+        // history stayed empty.
+        workspace.createProjectFolders("Shopping").getOrThrow()
+        val git = gitFor()
+        git.init("Shopping").getOrThrow()
+        File(workspace.repoOf("Shopping"), "Milk.txt").writeText("milk")
+
+        // A lock that is a non-empty directory cannot be deleted by `File.delete`, which
+        // is this phone's way of saying "somebody really is holding it".
+        val lock = File(workspace.repoOf("Shopping"), ".git/index.lock")
+        lock.mkdirs()
+        File(lock, "held").writeText("by something")
+
+        File(workspace.repoOf("Shopping"), "Milk.txt").writeText("two litres")
+        val outcome = git.commitOutcome("Shopping", "Edited Milk.txt")
+
+        assertFalse("the commit did not happen", outcome.written)
+        assertFalse("and it is a failure, not silence", outcome.ok)
+        assertTrue(
+            "in words a person can act on: ${outcome.error}",
+            outcome.error!!.contains("locked by another copy of the app"),
+        )
+        lock.deleteRecursively()
+    }
+
+    @Test
+    fun `a lock that really is held stops the sync from pushing over it`() {
+        // A push over a commit that did not happen would send a tree missing exactly the
+        // work the person was trying to save, and report the sync as done.
+        workspace.createProjectFolders("Shopping").getOrThrow()
+        val git = gitFor()
+        val repo = git.open("Shopping") ?: run {
+            git.init("Shopping").getOrThrow()
+            git.open("Shopping")!!
+        }
+        repo.use { GitService.setRemoteUrl(it, bare.absolutePath) }
+        File(workspace.repoOf("Shopping"), "Milk.txt").writeText("milk")
+        assertTrue("the first sync lands", git.sync("Shopping").success)
+
+        val lock = File(workspace.repoOf("Shopping"), ".git/index.lock")
+        lock.mkdirs()
+        File(lock, "held").writeText("by something")
+        File(workspace.repoOf("Shopping"), "Milk.txt").writeText("two litres")
+
+        val result = git.sync("Shopping", "Two litres")
+
+        assertFalse("the sync did not report success", result.success)
+        assertTrue(
+            "and said why: ${result.message}",
+            result.message.contains("Nothing was pushed"),
+        )
+        org.eclipse.jgit.storage.file.FileRepositoryBuilder().setGitDir(bare).build().use { remote ->
+            val tip = org.eclipse.jgit.revwalk.RevWalk(remote).use { walk ->
+                walk.parseCommit(remote.resolve("refs/heads/main"))
+            }
+            assertEquals(
+                "and GitHub still holds the old text",
+                "milk",
+                org.eclipse.jgit.treewalk.TreeWalk.forPath(remote, "Milk.txt", tip.tree).use {
+                    String(remote.open(it.getObjectId(0)).bytes, Charsets.UTF_8)
+                },
+            )
+        }
+        lock.deleteRecursively()
+    }
+
+    @Test
     fun aSyncWithNothingToSayMakesNoEmptyCommit() {
         // A marker is a landmark, not a habit: pressing sync with no note, and
         // nothing waiting, must not add one commit per press.

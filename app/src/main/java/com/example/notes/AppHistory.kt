@@ -70,28 +70,44 @@ class AppHistory(
      * Commits whatever changed, with [message]. Returns the new commit's id, or
      * null when nothing had changed.
      */
-    fun commit(message: String, keep: Int = 0): String? {
-        // An account can be removed while a commit is still on its way to this
-        // method. Opening the history would then make the folder again, and the
-        // account would come back from the dead.
-        if (!accountDir.isDirectory) return null
+    fun commit(message: String, keep: Int = 0): String? = commitOutcome(message, keep).id
+
+    /**
+     * Commits, and says which of three things happened.
+     *
+     * The account's history is where a note beside `repo/` is versioned, so a save
+     * refused here is the same silent loss as one refused in a project: see
+     * [GitService.CommitOutcome].
+     */
+    fun commitOutcome(message: String, keep: Int = 0): GitService.CommitOutcome {
+        // An account can be removed while a commit is still on its way to this method.
+        // Opening the history would then make the folder again, and the account would
+        // come back from the dead.
+        if (!accountDir.isDirectory) {
+            return GitService.CommitOutcome.failed("The account's folder is not there any more")
+        }
         val repo = try {
             open()
         } catch (e: Throwable) {
             lastError = e.message
-            return null
+            return GitService.CommitOutcome.failed(
+                Secrets.explain(e, "The history could not be opened")
+            )
         }
         return repo.use {
-            val id = try {
-                GitService.commitAll(it, message, authorProvider())
+            val outcome = try {
+                GitService.commitEverything(it, message, authorProvider())
             } catch (e: Throwable) {
                 lastError = Secrets.describe(e)
-                null
-            } ?: return@use null
-            pruneIfNeeded(it, keep)
-            id
+                GitService.CommitOutcome.failed(
+                    Secrets.explain(e, "That change could not be written to the history")
+                )
+            }
+            if (outcome.written) pruneIfNeeded(it, keep)
+            outcome
         }
     }
+
 
     /** Applies the retention setting, if one is set. */
     fun pruneIfNeeded(repo: Repository, keep: Int) {

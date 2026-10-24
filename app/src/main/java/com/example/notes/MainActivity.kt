@@ -91,9 +91,20 @@ private sealed interface Pending {
 @Composable
 private fun AppRoot(viewModel: AppViewModel) {
     var showSettings by remember { mutableStateOf(false) }
+    var showTrace by remember { mutableStateOf(false) }
     var pending by remember { mutableStateOf<Pending>(Pending.None) }
 
     val snackbar = remember { SnackbarHostState() }
+
+    // The trace screen shows a snapshot, re-taken while it is open: a report that
+    // stopped updating would freeze the very thing being watched for not reacting.
+    var traceReport by remember { mutableStateOf(Trace.report()) }
+    LaunchedEffect(showTrace) {
+        while (showTrace) {
+            traceReport = Trace.report()
+            kotlinx.coroutines.delay(1_000)
+        }
+}
 
     // The settings screen holds the field where a key is typed. While it is up,
     // the window refuses to be screenshotted or appear in the app switcher.
@@ -137,7 +148,20 @@ private fun AppRoot(viewModel: AppViewModel) {
         androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree(),
     ) { uri -> if (uri != null) viewModel.importFolder(uri) }
 
+    BackHandler(enabled = showTrace) { showTrace = false }
     BackHandler(enabled = showSettings) { showSettings = false }
+
+    // **The trace answers taps that never reach the view model.** Cancel, opening a
+    // menu, choosing a row: those change what is on the screen without changing the
+    // folder, so `refresh()` cannot see them. Watching the two pieces of screen state
+    // that this composable owns is what keeps "every element leaves a trace" from
+    // being a claim with a hole in it where the local controls are.
+    LaunchedEffect(pending, showSettings, showTrace) {
+        Trace.changed(
+            "screen " + (if (showTrace) "trace" else if (showSettings) "settings" else "browser") +
+                " dialog " + pending.javaClass.simpleName,
+        )
+    }
     BackHandler(enabled = !showSettings && historyPath != null) {
         viewModel.closeHistory()
     }
@@ -161,29 +185,43 @@ private fun AppRoot(viewModel: AppViewModel) {
         viewModel.up()
     }
 
+    // **Every row's control names itself in the trace**, with the row's own name, so a
+    // report reads like the screen it came from: "history milk.txt", "lock milk.txt".
     val actions = BrowserActions(
         onOpen = { entry ->
+            tap(if (entry.isFolder) "open folder" else "open file", entry.name)
             when (entry.kind) {
                 EntryKind.FOLDER -> viewModel.openChild(entry.name)
                 else -> viewModel.openEditor(entry.file)
             }
         },
-        onRename = { entry -> pending = Pending.RenameEntry(entry) },
-        onMove = { entry -> pending = Pending.MoveEntry(entry) },
-        onDelete = { entry -> pending = Pending.DeleteEntry(entry) },
-        onTogglePin = { entry -> viewModel.togglePinned(entry.file) },
-        onToggleLock = { entry -> viewModel.toggleLocked(entry.file) },
-        onHistory = { entry -> viewModel.openHistory(entry.file) },
-        onSelect = { entry -> viewModel.toggleSelected(entry.file) },
+        onRename = { entry -> tap("rename", entry.name); pending = Pending.RenameEntry(entry) },
+        onMove = { entry -> tap("move", entry.name); pending = Pending.MoveEntry(entry) },
+        onDelete = { entry -> tap("delete", entry.name); pending = Pending.DeleteEntry(entry) },
+        onTogglePin = { entry -> tap("pin", entry.name); viewModel.togglePinned(entry.file) },
+        onToggleLock = { entry -> tap("lock", entry.name); viewModel.toggleLocked(entry.file) },
+        onHistory = { entry -> tap("history", entry.name); viewModel.openHistory(entry.file) },
+        onSelect = { entry -> tap("select", entry.name); viewModel.toggleSelected(entry.file) },
     )
 
     when {
+        showTrace -> ObservabilityScreen(
+            report = traceReport,
+            onBack = { showTrace = false },
+            onShare = { shareTrace(context) },
+            onClear = {
+                Trace.clear()
+                traceReport = Trace.report()
+            },
+        )
+
         showSettings -> SettingsScreen(
             viewModel = viewModel,
             onBack = { showSettings = false },
-            onSignIn = { pending = Pending.SignIn },
-            onRemoveAccount = { pending = Pending.RemoveAccount },
-            onTestAccount = { viewModel.signInAsTestAccount() },
+            onSignIn = { tap("add account"); pending = Pending.SignIn },
+            onRemoveAccount = { tap("remove account"); pending = Pending.RemoveAccount },
+            onTestAccount = { tap("use test account"); viewModel.signInAsTestAccount() },
+            onOpenTrace = { showTrace = true },
         )
 
         // History is checked *before* the editor, and the order is the whole of a
@@ -193,7 +231,7 @@ private fun AppRoot(viewModel: AppViewModel) {
         historyPath != null -> HistoryScreen(
             viewModel = viewModel,
             title = historyPath.last(),
-            onBack = { viewModel.closeHistory() },
+            onBack = { tap("history back", historyPath.last()); viewModel.closeHistory() },
             // Select puts the version back and returns to the file: one act, and
             // the person is looking at the result of it.
             onSelect = { viewModel.closeHistory() },
@@ -202,33 +240,37 @@ private fun AppRoot(viewModel: AppViewModel) {
         editing != null -> EditorScreen(
             viewModel = viewModel,
             file = editing,
-            onBack = { viewModel.closeEditor() },
+            onBack = { tap("close editor", editing.name); viewModel.closeEditor() },
             // No delete here: deleting is a thing done to a row in the folder, where
             // the row and its neighbours are visible and a mistake is one undo away.
             // A three-dot menu inside the editor put the most destructive command in
             // the app beside Save.
-            onOpenHistory = { viewModel.editingFile?.let { viewModel.openHistory(it) } },
+            onOpenHistory = {
+                        tap("history from editor", editing.name)
+                        viewModel.editingFile?.let { viewModel.openHistory(it) }
+                    },
         )
 
         else -> androidx.compose.foundation.layout.Box {
             BrowserScreen(
                 viewModel = viewModel,
                 username = viewModel.account?.login,
-                onOpenSettings = { showSettings = true },
+                onOpenSettings = { tap("settings"); showSettings = true },
                 actions = actions,
-                onAddProject = { pending = Pending.AddProject },
-                onRowSync = { project -> pending = Pending.SyncProject(project) },
-                onRowRename = { project -> pending = Pending.RenameProject(project) },
-                onRowDelete = { project -> pending = Pending.DeleteProject(project) },
-                onCreateFile = { viewModel.currentDir?.let { pending = Pending.NewFile(it) } },
-                onCreateFolder = { viewModel.currentDir?.let { pending = Pending.NewFolder(it) } },
-                onUploadFiles = { pickFiles.launch(arrayOf("*/*")) },
-                onUploadFolder = { pickFolder.launch(null) },
+                onAddProject = { tap("add project"); pending = Pending.AddProject },
+                onRowSync = { project -> tap("sync", project); pending = Pending.SyncProject(project) },
+                onRowRename = { project -> tap("rename project", project); pending = Pending.RenameProject(project) },
+                onRowDelete = { project -> tap("delete project", project); pending = Pending.DeleteProject(project) },
+                onCreateFile = { tap("new file"); viewModel.currentDir?.let { pending = Pending.NewFile(it) } },
+                onCreateFolder = { tap("new folder"); viewModel.currentDir?.let { pending = Pending.NewFolder(it) } },
+                onUploadFiles = { tap("upload files"); pickFiles.launch(arrayOf("*/*")) },
+                onUploadFolder = { tap("upload folder"); pickFolder.launch(null) },
                 onRestoreDeleted = {
+                        tap("restore deleted")
                     viewModel.currentDir?.let { pending = Pending.RestoreDeleted(it) }
                 },
-                onMoveSelected = { pending = Pending.MoveSelected },
-                onDeleteSelected = { pending = Pending.DeleteSelected },
+                onMoveSelected = { tap("move selected"); pending = Pending.MoveSelected },
+                onDeleteSelected = { tap("delete selected"); pending = Pending.DeleteSelected },
             )
             // At the bottom, and **clear of the add button**. It used to sit at the
             // bottom centre with 16dp of margin, which is exactly where the button
@@ -240,7 +282,7 @@ private fun AppRoot(viewModel: AppViewModel) {
                 snackbar,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(start = 16.dp, end = 16.dp, bottom = 88.dp),
+                    .padding(start = 16.dp, end = 16.dp, bottom = 104.dp),
             )
         }
     }
@@ -300,7 +342,10 @@ private fun Dialogs(
             RemoveAccountDialog(
                 login = account.login,
                 onDismiss = dismiss,
-                onRemove = { deleteCopies -> viewModel.removeAccount(account.login, deleteCopies) },
+                onRemove = { deleteCopies ->
+                      Trace.tap("remove account", account.login + if (deleteCopies) " with copies" else "")
+                      viewModel.removeAccount(account.login, deleteCopies)
+                  },
             )
         }
 
@@ -345,13 +390,19 @@ private fun Dialogs(
             initial = pending.project,
             confirm = "Rename",
             onDismiss = dismiss,
-            onConfirm = { name -> viewModel.renameProject(pending.project, name) },
+            onConfirm = { name ->
+                      Trace.tap("rename project", pending.project)
+                      viewModel.renameProject(pending.project, name)
+                  },
         )
 
         is Pending.DeleteProject -> DeleteProjectDialog(
             project = pending.project,
             onDismiss = dismiss,
-            onDelete = { everywhere -> viewModel.deleteProject(pending.project, everywhere) },
+            onDelete = { everywhere ->
+                      Trace.tap("delete project", pending.project + if (everywhere) " everywhere" else " here")
+                      viewModel.deleteProject(pending.project, everywhere)
+                  },
         )
 
         is Pending.RenameEntry -> PromptDialog(
@@ -360,7 +411,10 @@ private fun Dialogs(
             initial = pending.entry.name,
             confirm = "Rename",
             onDismiss = dismiss,
-            onConfirm = { name -> if (!viewModel.rename(pending.entry.file, name)) Unit },
+            onConfirm = { name ->
+                      Trace.tap("confirm rename", "${pending.entry.name} → $name")
+                      viewModel.rename(pending.entry.file, name)
+                  },
         )
 
         is Pending.NewFile -> PromptDialog(
@@ -369,7 +423,10 @@ private fun Dialogs(
             initial = "new.",
             confirm = "Create",
             onDismiss = dismiss,
-            onConfirm = { name -> if (!viewModel.createFile(name)) Unit },
+            onConfirm = { name ->
+                      Trace.tap("confirm new file", name)
+                      viewModel.createFile(name)
+                  },
         )
 
         is Pending.NewFolder -> PromptDialog(
@@ -378,7 +435,10 @@ private fun Dialogs(
             initial = "New folder",
             confirm = "Create",
             onDismiss = dismiss,
-            onConfirm = { name -> if (!viewModel.createFolder(name)) Unit },
+            onConfirm = { name ->
+                      Trace.tap("confirm new folder", name)
+                      viewModel.createFolder(name)
+                  },
         )
 
         is Pending.MoveEntry -> MoveDialog(
@@ -388,8 +448,9 @@ private fun Dialogs(
             canChoose = { viewModel.canHoldFiles(it) },
             onDismiss = dismiss,
             onMove = { target ->
+                Trace.tap("move ${pending.entry.name}", "into ${target.name}/")
                 dismiss()
-                if (!viewModel.move(pending.entry.file, target)) Unit
+                viewModel.move(pending.entry.file, target)
             },
         )
 
@@ -403,8 +464,9 @@ private fun Dialogs(
             canChoose = { viewModel.canHoldFiles(it) },
             onDismiss = dismiss,
             onMove = { target ->
+                Trace.tap("move chosen", "into ${target.name}/")
                 dismiss()
-                if (!viewModel.moveSelected(target)) Unit
+                viewModel.moveSelected(target)
             },
         )
 
@@ -417,8 +479,9 @@ private fun Dialogs(
             destructive = true,
             onDismiss = dismiss,
             onConfirm = {
+                Trace.tap("confirm delete chosen", "${viewModel.selected.size} items")
                 dismiss()
-                if (!viewModel.deleteSelected()) Unit
+                viewModel.deleteSelected()
             },
         )
 
@@ -427,6 +490,7 @@ private fun Dialogs(
             changes = viewModel.changesOf(pending.project),
             onDismiss = dismiss,
             onSync = { note ->
+                Trace.tap("confirm sync", pending.project)
                 dismiss()
                 viewModel.sync(pending.project, note)
             },
@@ -440,6 +504,7 @@ private fun Dialogs(
             // including why nothing did — and the message goes to the snackbar; a
             // tap that closes a window and changes nothing is the worst of both.
             onPick = { gone ->
+                Trace.tap("restore deleted", "${pending.folder.name}/$gone.name")
                 dismiss()
                 viewModel.restoreDeleted(pending.folder, gone)
             },
@@ -456,7 +521,10 @@ private fun Dialogs(
             confirm = "Delete",
             destructive = true,
             onDismiss = dismiss,
-            onConfirm = { if (!viewModel.delete(pending.entry.file)) Unit },
+            onConfirm = {
+                Trace.tap("confirm delete", pending.entry.name)
+                viewModel.delete(pending.entry.file)
+            },
         )
 
         is Pending.ReplaceProject -> ConfirmDialog(
@@ -531,6 +599,44 @@ private fun NewProjectUI(viewModel: AppViewModel, dismiss: () -> Unit) {
         onCreate = { name, licence -> viewModel.createProject(name, licence) },
     )
 }
+
+/**
+ * Records what a person did, before doing it.
+ *
+ * Named for the element rather than for the code path — "Save", "sync testrepo" —
+ * because the report is read by someone holding the phone, working out which thing on
+ * which screen did not answer. A trace that said `saveEditor` would be a stack trace
+ * with extra steps.
+ */
+private fun tap(what: String, detail: String = "") {
+    Trace.tap(what, detail)
+}
+
+/**
+ * Hands the trace to another app.
+ *
+ * Plain text through the system's share sheet, deliberately: it needs no permission, no
+ * file provider and no storage, and it lands wherever the person wants — a chat, a note,
+ * their own email. A trace that can only be read on the phone it came from is a trace
+ * nobody can hand to anybody.
+ */
+private fun shareTrace(context: android.content.Context) {
+    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(android.content.Intent.EXTRA_SUBJECT, "Muffy Codes — what the app did")
+        putExtra(android.content.Intent.EXTRA_TEXT, Trace.dump())
+    }
+    try {
+        context.startActivity(
+            android.content.Intent.createChooser(send, "Share the trace")
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    } catch (t: Throwable) {
+        // No app on the phone can take text. Saying nothing is right: the trace is
+        // still on the screen, which is where the person was looking.
+    }
+}
+
 
 /** The activity behind a compose context, however it is wrapped. */
 private tailrec fun Context.findActivity(): Activity? = when (this) {

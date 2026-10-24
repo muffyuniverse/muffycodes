@@ -81,7 +81,11 @@ class AppViewModel @JvmOverloads constructor(
             try {
                 task()
             } catch (t: Throwable) {
-                val said = Secrets.scrub(t.message ?: "That change could not be finished")
+                // The last resort: something on the worker got past every catch of
+                // its own. It is named in the trace as a failure, so the one class of
+                // bug that used to close the app in silence leaves a mark.
+                val said = Secrets.explain(t, "That change could not be finished")
+                Trace.failure(said)
                 main.post { message = said }
             }
         }
@@ -119,8 +123,23 @@ class AppViewModel @JvmOverloads constructor(
     /** True while the search field is showing. */
     var showSearch: Boolean by mutableStateOf(false)
 
-    /** A message to show once: the result of a sync, a deletion, an error. */
-    var message: String? by mutableStateOf(null)
+    /**
+     * A message to show once: the result of a sync, a deletion, an error.
+     *
+     * **Every message is also a trace line,** which is why this is a property with a
+     * setter rather than a plain state object: a sentence is the app's answer to
+     * something a person did, and an intent answered by words is not a broken
+     * sequence. Writing `Trace.said(...)` beside forty assignments would have been
+     * forty chances to forget one.
+     */
+    var message: String?
+        get() = messageState
+        set(value) {
+            messageState = value
+            if (value != null) Trace.said(value)
+        }
+
+    private var messageState: String? by mutableStateOf(null)
 
     /** The number of unsynced changes of each project, from `git status`. */
     var changesByProject: Map<String, Int> by mutableStateOf(emptyMap())
@@ -220,7 +239,18 @@ class AppViewModel @JvmOverloads constructor(
         get() = workspace?.let { ws -> AppHistory(ws.accountDir) { author } }
 
     init {
+        // The trace's durable copy lives beside everything else the app owns, in the
+        // account's `.muffy/` — outside both histories, so a run can never appear as a
+        // version, and in one folder with the settings.
+        attachTrace()
+        Trace.note("app opened", "signed in as " + (activeLogin ?: "nobody"))
         refresh()
+    }
+
+    /** Points the trace's file at the active account, or nowhere when signed out. */
+    private fun attachTrace() {
+        val login = activeLogin
+        Trace.attach(login?.let { File(accounts.stateDir(it), "trace.txt") })
     }
 
     // ---- reading the tree ---------------------------------------------------
@@ -273,6 +303,7 @@ class AppViewModel @JvmOverloads constructor(
             pins = emptySet()
             return
         }
+        val before = stateSignature()
         // The folders the app owns exist from the moment the account is shown, so
         // that an empty account and a new one look the same.
         ws.ensure()
@@ -284,6 +315,47 @@ class AppViewModel @JvmOverloads constructor(
         // otherwise be acted on again by the next press.
         selected = selected.filterTo(mutableSetOf()) { ws.fileAt(it.split("/")).exists() }
         refreshChanges()
+        // **One funnel for "the screen changed".** Every change this app makes ends in
+        // `refresh()`, so this is the one place that can answer a tap without forty
+        // call sites having to remember to. A change that leaves the signature alone
+        // is not reported, because a tap answered by "nothing looks different" is not
+        // an answer.
+        val after = stateSignature()
+        if (after != before) Trace.changed(after)
+    }
+
+    /**
+     * What the screen looks like, in one line.
+     *
+     * Deliberately made of what a person can *see*: where they are, what the rows say,
+     * which are locked or pinned, what is selected, whether anything is being worked
+     * on, and the count on every project row. Two states with the same signature are
+     * the same screen, which is what makes it usable as the answer to a tap.
+     */
+    fun stateSignature(): String = buildString {
+        append("at ").append(if (path.isEmpty()) "/" else path.joinToString("/"))
+        append(" · ").append(entries.size).append(" rows")
+        val shown = entries.take(40)
+        for (e in shown) {
+            append(" · ").append(e.name)
+            if (e.isFolder) append('/')
+            val rel = if (path.isEmpty()) e.name else path.joinToString("/") + "/" + e.name
+            if (rel in lockedPaths) append('L')
+            if (rel in pins) append('P')
+        }
+        if (entries.size > shown.size) append(" · +").append(entries.size - shown.size)
+        if (selected.isNotEmpty()) {
+            append(" · selected ").append(selected.size)
+            append(": ").append(selected.sorted().joinToString(","))
+        }
+        editingPath?.let { append(" · editing ").append(it.joinToString("/")) }
+        historyPath?.let { append(" · history ").append(it.joinToString("/")) }
+        if (busy) append(" · busy")
+        if (changesByProject.isNotEmpty()) {
+            append(" · changed ")
+            append(changesByProject.entries.sortedBy { it.key }.joinToString(",") { "${it.key}=${it.value}" })
+        }
+        if (query.isNotEmpty()) append(" · search ").append(query)
     }
 
     /** Recounts the unsynced changes of every project, behind the UI. */
@@ -852,13 +924,28 @@ class AppViewModel @JvmOverloads constructor(
         onWorker {
             ws.write(file, text)
             if (saveDebounceMs > 0) Thread.sleep(saveDebounceMs)
+            // **The text is on disk and its version may not be,** and those are two
+            // different promises. A commit that could not be written used to look
+            // exactly like a commit with nothing to do: no id, no message, the editor
+            // greying Save out, and a history with nothing new in it. The person's work
+            // was safe in the file and invisible in the history, which is the failure
+            // this app's design is about.
+            var refused: String? = null
             if (login != null && accounts.exists(login)) {
-                if (project != null) g?.commit(project, "Edited $name")
-                else h?.commit("Edited $name", keep)
+                val outcome = if (project != null) {
+                    g?.commitOutcome(project, "Edited $name")
+                } else {
+                    h?.commitOutcome("Edited $name", keep)
+                }
+                if (outcome != null && !outcome.ok) refused = outcome.error
             }
             main.post {
                 refresh()
                 refreshChanges()
+                if (refused != null) {
+                    message = "Saved to the file, but not to its history: $refused"
+                }
+            }
             }
         }
     }
@@ -1245,6 +1332,11 @@ class AppViewModel @JvmOverloads constructor(
     fun switchTo(login: String) {
         credentials.activeLogin = login
         activeLogin = login
+        // The trace follows the account: what is written from here on belongs to the
+        // account being looked at, and a person switching accounts should not find the
+        // other one's history in their trace.
+        attachTrace()
+        Trace.note("switched account", login)
         path = emptyList()
         editingPath = null
         historyPath = null

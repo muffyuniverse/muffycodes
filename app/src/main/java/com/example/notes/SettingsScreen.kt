@@ -121,6 +121,18 @@ fun SettingsScreen(
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
+            // ---- what the app did ----
+            //
+            // Here rather than behind a long press, because the moment a person wants
+            // it is the moment something did not work, and hunting for the screen that
+            // explains it is the last thing they should have to do.
+            TextButton(onClick = onOpenTrace) { Text("What the app did") }
+            Text(
+                "Every tap, what answered it, and anything that never got an answer.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
             // ---- the appearance (§10) ----
             Row(
                 modifier = Modifier.fillMaxWidth(),

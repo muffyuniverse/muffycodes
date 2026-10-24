@@ -79,6 +79,13 @@ object Secrets {
             ).any { it in chain } ->
                 "Could not reach GitHub. The phone may be offline — nothing was changed here."
 
+            // A lock that survived a clear-and-retry: something really is holding the
+            // repository open, and saying "cannot lock /data/user/0/…" to a person is
+            // telling them to fix something they cannot reach.
+            "cannot lock" in chain || "lock file" in chain ->
+                "This project was locked by another copy of the app, so nothing was " +
+                    "changed. Close the app completely and try again."
+
             "non-fast-forward" in chain || "rejected" in chain ->
                 "GitHub refused the push: $said"
 
