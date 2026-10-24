@@ -4,11 +4,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performImeAction
+import androidx.compose.ui.test.performTextReplacement
 import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -70,6 +77,53 @@ class EditorScreenTest {
                 )
             }
         }
+    }
+
+    @Test
+    fun `Save keeps what was typed, and back leaves it as it was`() {
+        // The pair the top row promises. Save is a button because saving is
+        // something a person does, and back is back: what was typed and not saved
+        // does not reach the file.
+        val file = scene.file("milk.txt", "two litres")
+
+        editorFor(file)
+        compose.onNodeWithText("two litres").performTextReplacement("three litres")
+        compose.onNodeWithText("Save").performClick()
+
+        assertEquals("saved", "three litres", file.readText())
+
+        compose.onNodeWithText("three litres").performTextReplacement("four litres")
+        compose.onNodeWithContentDescription("Back without saving").performClick()
+
+        assertEquals("and the unsaved change went with it", "three litres", file.readText())
+        assertTrue("with a note saying so", scene.viewModel.message == "Left without saving")
+    }
+
+    @Test
+    fun `Save has nothing to do until something is typed`() {
+        val file = scene.file("milk.txt", "two litres")
+
+        editorFor(file)
+
+        compose.onNodeWithText("Save").assertIsNotEnabled()
+    }
+
+    @Test
+    fun `the name can be changed where it stands`() {
+        // No separate Rename window: the name is the title, and the title is the
+        // field. Typing a new one and finishing renames the file.
+        val file = scene.file("milk.txt", "two litres")
+
+        editorFor(file)
+        compose.onNodeWithText("milk.txt").performTextReplacement("Shopping List")
+        compose.onNodeWithText("Shopping List").performImeAction()
+
+        val dir = scene.viewModel.currentDir!!
+        assertTrue(
+            "under the app's one name shape",
+            File(dir, "shopping_list.txt").isFile,
+        )
+        assertFalse("and not under the old one", File(dir, "milk.txt").exists())
     }
 
     @Test
