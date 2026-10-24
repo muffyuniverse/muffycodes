@@ -175,12 +175,15 @@ class BrowserChromeTest {
         compose.waitForIdle()
         assertFalse("nothing is there yet", there("Shopping"))
 
-        // Made on disk and refreshed directly, not through the clone. A project arriving
-        // over the network is a worker and a post and a frame; what this test is about is
-        // whether *the screen* is watching the thing that changed, so the change is made
-        // synchronously and the assertion is about the redraw alone.
-        scene.workspace!!.createProjectFolders("Shopping")
-        scene.viewModel.refresh()
+        // Made on disk and refreshed **inside the compose runtime**, not through the clone.
+        // A project arriving over the network is a worker and a post and a frame; what this
+        // test is about is whether the screen is watching the thing that changed. The write
+        // goes through `runOnUiThread` so the snapshot apply this harness listens for is the
+        // one a real frame would do.
+        compose.runOnUiThread {
+            scene.workspace!!.createProjectFolders("Shopping")
+            scene.viewModel.refresh()
+        }
 
         compose.waitUntil(20_000) { there("Shopping") }
         assertTrue("the row appeared without going anywhere", there("Shopping"))
