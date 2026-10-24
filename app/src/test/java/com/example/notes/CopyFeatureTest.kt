@@ -219,7 +219,12 @@ class CopyFeatureTest : FeatureTest() {
             File(scene.workspace!!.repoOf("groceries"), "shopping.txt").isFile,
         )
         assertTrue("and the original is where it was", beside.isFile)
-        assertEquals("the count it reports to Sync", 0, scene.viewModel.changesOf("groceries"))
+        // **Waited for, not read once.** `changesOf` is computed on the worker after a
+        // commit; asking immediately after the commit landed reads the previous count,
+        // which is the one thing a copy into a worktree is supposed to have cleared.
+        scene.await("the project to report nothing left to send", 30_000) {
+            scene.viewModel.changesOf("groceries") == 0
+        }
     }
 
     @Test

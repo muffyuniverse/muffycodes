@@ -163,6 +163,10 @@ class BrowserChromeTest {
         val file = scene.worktreeFile("milk.txt", "two litres")
         scene.viewModel.toggleLocked(file)
         scene.viewModel.refresh()
+        // **The premise, asserted.** Without this the test can only say "the menu offered
+        // Rename", which is true both when the menu is wrong and when the file was never
+        // locked — and those want different fixes.
+        assertTrue("the file really is locked before the menu is opened", scene.viewModel.isLocked(file))
         browser()
 
         // When its menu is opened

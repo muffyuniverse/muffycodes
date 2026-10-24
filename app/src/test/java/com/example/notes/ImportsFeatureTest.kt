@@ -95,7 +95,9 @@ class ImportsFeatureTest {
         val dir = File(context.cacheDir, "names2-${System.nanoTime()}").apply { mkdirs() }
         File(dir, "journal").writeText("one")
 
-        assertEquals("journal_2", Imports.freeName(dir, "journal").name)
+        // A name with no extension is numbered with no invented extension either, and
+        // with the one separator every other free name uses.
+        assertEquals("journal 2", Imports.freeName(dir, "journal").name)
     }
 
     @Test
