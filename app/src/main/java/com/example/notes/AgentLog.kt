@@ -51,6 +51,14 @@ class AgentLog private constructor(
         const val CONCLUDE = "CONCLUDE"
         const val NOTE = "NOTE"
 
+        /**
+         * The tools that end a turn.
+         *
+         * Named here rather than imported from [AgentTools], because the record has to be
+         * readable — and sealable — without a workspace, a repository or a model behind it.
+         */
+        val TERMINATING = setOf("ask", "conclude", "wait")
+
         /** A result's first line: the call worked. */
         const val SUCCESS = "0"
 
@@ -267,15 +275,26 @@ class AgentLog private constructor(
         }
     }
 
-    /** The calls in [rows] with no answer after them. */
+    /**
+     * The calls in [rows] with no answer after them.
+     *
+     * **A terminating call is never dangling.** `ask`, `conclude` and `wait` end the turn, so
+     * they have no result by design — the conversation ends there rather than waiting for one.
+     * Sealing them would put a `1 the app was closed` after a question the person may be
+     * answering right now, which is both wrong and confusing to read.
+     */
     fun dangling(rows: List<Row>): List<Row> {
         val out = mutableListOf<Row>()
         var pending: Row? = null
         for (row in rows) {
             when (row.kind) {
                 CALL -> {
-                    pending?.let { out.add(it) }
-                    pending = row
+                    if (row.name in TERMINATING) {
+                        pending = null
+                    } else {
+                        pending?.let { out.add(it) }
+                        pending = row
+                    }
                 }
 
                 GOT -> pending = null
@@ -284,6 +303,7 @@ class AgentLog private constructor(
         pending?.let { out.add(it) }
         return out
     }
+
 
     /**
      * Truncates the session at a burst boundary, keeping the newest conversations that fit.

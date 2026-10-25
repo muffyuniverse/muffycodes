@@ -92,9 +92,19 @@ class EditorScreenTest {
 
         editorFor(file)
         compose.onNodeWithText("two litres").performTextReplacement("three litres")
+        // **The tap is recorded before the work starts**, so its absence can be measured — a
+        // check for "nothing is waiting" run too early would pass on a save that never happened.
+        val tapsBefore = Trace.report().taps
         compose.onNodeWithText("Save").performClick()
         // Saving writes on the app's worker, so the file answers a moment later.
         compose.waitUntil(10_000) { file.readText() == "three litres" }
+        // **Asked of the tap, not of the ring's text.** "A save answers itself" means the tap
+        // stops waiting — a save that could not commit answers too, with a failure, which is
+        // why the app's own sentence is asserted separately. What must be true first is that
+        // the save was a tap at all, and that nothing is left holding it.
+        assertTrue("the save was recorded as a tap", Trace.report().taps > tapsBefore)
+        compose.waitUntil(10_000) { Trace.report().waiting.none { it.what == "save" } }
+        assertEquals("and the app said so", "Saved milk.txt", scene.viewModel.message)
 
         assertEquals("saved", "three litres", file.readText())
 
@@ -103,16 +113,6 @@ class EditorScreenTest {
 
         assertEquals("and the unsaved change went with it", "three litres", file.readText())
         assertTrue("with a note saying so", scene.viewModel.message == "Left without saving")
-        // **A save says it happened.** It changes the file and its history, and neither
-        // is on the screen — the file's name is the same afterwards — so nothing the app
-        // draws can answer it, and the log showed `save milk.txt` waiting for ever while
-        // the next back press spent it.
-        // **Asked of the tap, not of the ring's text.** What "a save answers itself" means is
-        // that the tap stops waiting — and a save that could not commit answers too, with a
-        // failure, which is why the message is asserted separately below. Reading the ring for
-        // a sentence measured the wording; this measures the guarantee.
-        compose.waitUntil(10_000) { Trace.report().waiting.none { it.what == "save" } }
-        assertEquals("and the app said so", "Saved milk.txt", scene.viewModel.message)
     }
 
     @Test

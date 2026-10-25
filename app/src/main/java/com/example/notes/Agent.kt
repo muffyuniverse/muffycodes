@@ -70,6 +70,7 @@ class Agent(
         var idle = 0
         var requests = 0
         while (requests < MAX_REQUESTS) {
+            if (idle >= AgentTools.IDLE_CALLS) return tooIdle()
             requests++
             val request = build()
             val reply = door.turn(request).getOrElse { problem ->
@@ -108,7 +109,6 @@ class Agent(
                     Trace.note("agent", "$project call ${call.tool} #$id")
                 }
                 idle++
-                if (idle >= AgentTools.IDLE_CALLS) return tooIdle()
                 continue
             }
 
@@ -162,7 +162,6 @@ class Agent(
             } else {
                 idle = 0
             }
-            if (idle >= AgentTools.IDLE_CALLS) return tooIdle()
         }
         log.note("stopped", "$MAX_REQUESTS requests in one turn")
         return End.Stopped("it made $MAX_REQUESTS requests without ending the turn")

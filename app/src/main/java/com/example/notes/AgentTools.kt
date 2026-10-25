@@ -196,6 +196,7 @@ class AgentTools(
     private fun edit(args: JSONObject): String {
         val file = resolve(args.optString("path"))
             .getOrElse { return refusal(it.message ?: "that path cannot be changed") }
+        mayWrite(file)?.let { return refusal(it) }
         if (!file.isFile) return refusal("There is no file at ${rel(file)}")
         val before = ws.read(file)
         val find = args.optString("find", "")
@@ -218,9 +219,7 @@ class AgentTools(
             .getOrElse { return refusal(it.message ?: "that path cannot be made") }
         if (file.exists()) return refusal("There is already something at ${rel(file)}")
         val parent = file.parentFile ?: return refusal("That path has no folder in it")
-        if (!insideWorktreeOrAgent(file)) {
-            return refusal("You may only write inside GitHub/ or agent/")
-        }
+        mayWrite(file)?.let { return refusal(it) }
         if (!parent.isDirectory) {
             // Folders are made by the funnel too, so a locked ancestor is refused rather than
             // quietly written around.
@@ -250,6 +249,7 @@ class AgentTools(
     private fun delete(args: JSONObject): String {
         val file = resolve(args.optString("path"))
             .getOrElse { return refusal(it.message ?: "that path cannot be deleted") }
+        mayWrite(file)?.let { return refusal(it) }
         if (!file.exists()) return refusal("There is nothing at ${rel(file)}")
         val wasFolder = file.isDirectory
         val removed = ws.delete(file)
@@ -267,13 +267,12 @@ class AgentTools(
     private fun move(args: JSONObject): String {
         val file = resolve(args.optString("path"))
             .getOrElse { return refusal(it.message ?: "that path cannot be moved") }
+        mayWrite(file)?.let { return refusal(it) }
         if (!file.exists()) return refusal("There is nothing at ${rel(file)}")
         val into = resolve(args.optString("into", file.parentFile?.let { rel(it) } ?: "GitHub"))
             .getOrElse { return refusal(it.message ?: "that folder cannot be used") }
         if (!into.isDirectory) return refusal("${rel(into)} is not a folder")
-        if (!insideWorktreeOrAgent(into)) {
-            return refusal("You may only write inside GitHub/ or agent/")
-        }
+        mayWrite(File(into, file.name))?.let { return refusal(it) }
         val name = args.optString("name", "").trim()
         val moved = if (name.isEmpty()) {
             ws.move(file, into)
@@ -324,6 +323,7 @@ class AgentTools(
         val file = resolve(args.optString("path"))
             .getOrElse { return refusal(it.message ?: "that path cannot be restored") }
         val revision = args.optString("revision").trim()
+        mayWrite(file)?.let { return refusal(it) }
         if (revision.length < 7) return refusal("Give the version id that history showed you")
         if (ws.isLocked(file)) return refusal("${rel(file)} is locked, so it is read-only")
         val restored = git.restore(project, rel(file), revision)
@@ -409,6 +409,20 @@ class AgentTools(
             return Result.failure(IllegalArgumentException("That path is outside this project"))
         }
         return Result.success(target)
+    }
+
+    /**
+     * Why [file] may not be written, or null when it may.
+     *
+     * One sentence for every writing tool, in one place, for the same reason the lock lives in
+     * the funnel: a rule each tool remembers is a rule one tool forgets. `project_prompt.txt`
+     * is the case that matters — the agent may read the instructions it is given and may not
+     * rewrite them, which is the difference between following a brief and editing it.
+     */
+    private fun mayWrite(file: File): String? = if (insideWorktreeOrAgent(file)) {
+        null
+    } else {
+        "You may only write inside GitHub/ or agent/, and ${rel(file)} is neither"
     }
 
     /** True for the two places the agent may write: `GitHub/` and `agent/`. */

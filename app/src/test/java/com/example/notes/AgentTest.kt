@@ -261,8 +261,18 @@ class AgentTest {
         val end = agent(door).burst("do two things at once")
 
         assertTrue("the turn went on", end is Agent.End.Concluded)
-        val refusals = gotRows().filter { it.body.contains("terminating tool") }
-        assertEquals("one refusal per call", 2, refusals.size)
+        // **One sentence, for the call that broke the rule.** The other call in the reply was
+        // run and answered, because the model's mistake is not a reason to throw its work away.
+        assertEquals("both calls were answered", 2, gotRows().size)
+        assertEquals(
+            "and only the terminating one was refused",
+            1,
+            gotRows().count { it.body.contains("terminating tool") },
+        )
+        assertTrue(
+            "the other one really ran",
+            gotRows().any { it.body.contains("two litres") },
+        )
         assertEquals("and it was told alone the second time", 1, callRows().count {
             it.name == "conclude" && it.detail.contains("really done")
         })

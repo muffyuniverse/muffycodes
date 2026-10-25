@@ -144,7 +144,9 @@ class AgentLogTest {
         log.call("tree", "{}")
         // Opening alone does nothing: a screen that drew the box must not have edited the
         // evidence. The seal belongs to the start of a session.
-        assertEquals("opening writes nothing", 0, AgentLog.open(project).beginSession().let { it })
+        val before = sessionLines()
+        AgentLog.open(project)
+        assertEquals("opening writes nothing", before, sessionLines())
 
         log.call("read", "{}")
         val sealed = AgentLog.open(project)
