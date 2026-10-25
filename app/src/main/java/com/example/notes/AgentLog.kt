@@ -22,7 +22,16 @@ class AgentLog private constructor(
     val context: File,
 ) {
 
-    private val guard = Any()
+    /**
+     * The lock this record's file is protected by — **shared by every instance over the file.**
+     *
+     * A per-instance lock excludes nothing that matters: two `AgentLog` objects over one project
+     * can both read the file, both see it unchanged since they opened, and both take the same next
+     * id, so two different rows would share a number and every diff of the two files would lie.
+     * Two writers over one project is the app's normal state — the screen's worker resetting a
+     * context while the runner's worker appends a poll's rows — so the lock belongs to the file.
+     */
+    private val guard: Any get() = lockFor(session)
 
     /** The id the next row gets. Shared by both files, so a row's id means one thing. */
     private var next = 1
@@ -107,6 +116,18 @@ class AgentLog private constructor(
          * two spaces followed by anything is the detail, always.
          */
         private val ROW = Regex("""^(\d\d:\d\d:\d\d\.\d\d\d) +(\d+) +(\S+) +(\S+)  (.*)$""")
+
+        /**
+         * One lock per record file, for the whole process.
+         *
+         * Keyed by the file rather than by the project so two `AgentLog`s from two threads share
+         * it — and never removed, because a lock that is dropped while somebody holds it is worse
+         * than a map that keeps a few strings.
+         */
+        private val locks = java.util.concurrent.ConcurrentHashMap<String, Any>()
+
+        private fun lockFor(session: File): Any =
+            locks.computeIfAbsent(session.absolutePath) { Any() }
 
         /** Opens the record of the project in [projectDir], making the folder on first use. */
         fun open(projectDir: File): AgentLog {

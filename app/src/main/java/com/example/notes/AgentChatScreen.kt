@@ -210,6 +210,7 @@ fun AgentChatScreen(
                                         caption = line.caption,
                                         body = line.body,
                                         failed = line.failed,
+                                        size = line.bytes,
                                     )
                                     if (expanded && line.detail.isNotBlank()) {
                                         Text(

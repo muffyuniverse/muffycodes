@@ -173,6 +173,43 @@ class ContextBudgetTest {
         )
     }
 
+    // ---- bytes are the fact, tokens are the estimate -----------------------
+
+    @Test
+    fun `bytes are exact, and are what a person is shown`() {
+        // The one number this file can be sure of. A token needs the model's vocabulary, which this
+        // app may not have for the model it is pointed at — so tokens stay an estimate and bytes
+        // are the measurement.
+        assertEquals("ascii", 4L, ContextBudget.bytes("abcd"))
+        assertEquals("utf-8, not code units: an emoji is four bytes", 4L, ContextBudget.bytes("\uD83D\uDE00"))
+        assertEquals("and a CJK character is three", 3L, ContextBudget.bytes("\u4E2D"))
+        assertEquals("a label a person reads", "412 B", ContextBudget.sizeLabel(412))
+        assertEquals("thousands", "9.3k", ContextBudget.sizeLabel(9_300))
+        assertEquals("without a pointless zero", "9k", ContextBudget.sizeLabel(9_000))
+        assertEquals("millions", "1.2M", ContextBudget.sizeLabel(1_200_000))
+    }
+
+    @Test
+    fun `the estimate is built on the same bytes, so the two never disagree`() {
+        val text = "a row with some words in it, and a number 42"
+        assertEquals(
+            "tokens is bytes over four, rounded up",
+            (ContextBudget.bytes(text) + 3) / 4,
+            ContextBudget.tokens(text),
+        )
+    }
+
+    @Test
+    fun `the estimate under-counts for text that is not Latin, and that is the known bound`() {
+        // Honest about the direction: four bytes a token is right for English and code, and wrong
+        // for CJK where a character is a token or less. The app may therefore trim late for a
+        // Chinese context rather than early — the opposite of the claim the Latin case supports.
+        val cjk = "\u4E2D".repeat(100)
+        assertEquals("300 bytes", 300L, ContextBudget.bytes(cjk))
+        assertEquals("estimated at 75 tokens", 75L, ContextBudget.tokens(cjk))
+        assertTrue("while a real tokenizer would count ~100", ContextBudget.tokens(cjk) < 100)
+    }
+
     @Test
     fun `a count reads as a scale, not a quantity`() {
         assertEquals("96k", ContextBudget.short(96_000))

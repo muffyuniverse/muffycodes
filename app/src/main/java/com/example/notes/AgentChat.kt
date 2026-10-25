@@ -21,10 +21,19 @@ object AgentChat {
     const val WAIT = "wait"
 
     /** One line as the box draws it. [detail] is what tapping the turn adds. */
+    /**
+     * One drawn line.
+     *
+     * [bytes] is the row's own size, and it exists for a person: when a context is being cleared
+     * up, "which of these is the expensive one" is a question a screen can answer at a glance.
+     * It is exact — the row's line as it stands in the file — and it is bytes rather than tokens
+     * because bytes are a fact and a token count from this app is an estimate.
+     */
     data class Line(
         val caption: String,
         val body: String,
         val failed: Boolean = false,
+        val bytes: Long = 0,
         val detail: String = "",
     )
 
@@ -133,8 +142,11 @@ object AgentChat {
         val out = mutableListOf<Line>()
         val pending = ArrayDeque<AgentLog.Row>()
         for (row in rows) {
+            // A row's size, exact, so a person can see which lines are the expensive ones — the
+            // question that matters when a context is being cleared up.
+            val size = ContextBudget.bytes(row.line)
             if (row.broken) {
-                out.add(Line("unreadable", oneLine(row.detail, 120)))
+                out.add(Line("unreadable", oneLine(row.detail, 120), bytes = size))
                 continue
             }
             when (row.kind) {
@@ -147,34 +159,63 @@ object AgentChat {
                         // the app was reopened, answering a call from the conversation before.
                         // Drawn where it stands, so an interrupted turn is visible rather than
                         // silently missing its answer.
-                        out.add(Line(row.name, summary(row.body), failed(row.body), row.body))
+                        out.add(
+                            Line(
+                                caption = row.name,
+                                body = summary(row.body),
+                                failed = failed(row.body),
+                                bytes = size,
+                                detail = row.body,
+                            ),
+                        )
                     } else {
                         out.add(callLine(call, row))
                     }
                 }
 
-                AgentLog.ASK -> out.add(Line("asked", row.body, detail = row.body))
-                AgentLog.CONCLUDE -> out.add(Line("concluded", row.body, detail = row.body))
+                AgentLog.ASK -> out.add(
+                    Line("asked", row.body, bytes = size, detail = row.body),
+                )
+                AgentLog.CONCLUDE -> out.add(
+                    Line("concluded", row.body, bytes = size, detail = row.body),
+                )
                 AgentLog.NOTE -> when (row.name) {
                     // The idle note belongs to the collapsed idle line, not to a turn.
                     "idle" -> Unit
                     "agent", "reason" -> out.add(
-                        Line(row.name, oneLine(row.body, 200), detail = row.body)
+                        Line(row.name, oneLine(row.body, 200), bytes = size, detail = row.body),
                     )
                     // Anything else the app or the agent noted about the turn: "stopped"
                     // and its reason, most of all. It is the only thing a failed turn has to
                     // say, so it is drawn rather than hidden.
-                    else -> out.add(Line(row.name, oneLine(row.body, 200), detail = row.body))
+                    else -> out.add(
+                        Line(row.name, oneLine(row.body, 200), bytes = size, detail = row.body),
+                    )
                 }
 
-                else -> out.add(Line(row.kind.lowercase(), oneLine(row.body, 120), detail = row.body))
+                else -> out.add(
+                    Line(
+                        row.kind.lowercase(),
+                        oneLine(row.body, 120),
+                        bytes = size,
+                        detail = row.body,
+                    ),
+                )
             }
         }
         for (call in pending) {
             // A terminating call is drawn from its own ASK/CONCLUDE row, and `wait` from the
             // idle line, so a call still waiting here is one the turn never got to answer.
             if (call.name in AgentLog.TERMINATING) continue
-            out.add(Line(call.name, "no answer yet", failed = true, detail = call.body))
+            out.add(
+                Line(
+                    call.name,
+                    "no answer yet",
+                    failed = true,
+                    bytes = ContextBudget.bytes(call.line),
+                    detail = call.body,
+                ),
+            )
         }
         return out
     }
@@ -185,6 +226,10 @@ object AgentChat {
         caption = call.name,
         body = summary(got.body),
         failed = failed(got.body),
+        // **The pair's size, and the call's was the one that could be huge.** A call carries the
+        // model's arguments — a whole file's text, when it used `edit` to write one — so the row a
+        // person most needs the size of is often the one with no visible body at all.
+        bytes = ContextBudget.bytes(call.line) + ContextBudget.bytes(got.line),
         detail = "called with ${call.body}\n\n${got.body}",
     )
 

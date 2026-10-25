@@ -176,6 +176,9 @@ class Agent(
 
         /** Why a turn was cut short by the person stopping the agent. */
         const val BY_OPERATOR = "the agent was stopped"
+
+        /** How many rows the clear-up line names. Five is enough to make a dent; more is a list. */
+        const val BIGGEST_ROWS = 5
     }
 
     /**
@@ -215,7 +218,7 @@ class Agent(
         // array — and a provider's cache matches the longest common prefix, so the warning would
         // invalidate the whole conversation on every request of the turn it appeared in. That is
         // the 50× cost §2.4 is about, paid by the feature meant to prevent it.
-        val opening = measure(layers.message, log.contextRows(), AgentTools.specs())
+        val opening = readOpening(layers, log.contextRows(), AgentTools.specs())
         try {
             return loop(layers, opening, operator, progress)
         } finally {
@@ -228,7 +231,7 @@ class Agent(
 
     private fun loop(
         layers: AgentPrompt.Layers,
-        opening: Long,
+        opening: Opening,
         operator: String?,
         progress: () -> Unit,
     ): End {
@@ -243,6 +246,10 @@ class Agent(
 
         var idle = 0
         var requests = 0
+        // Watched only when the warning was actually shown: the count is a file read, and the only
+        // turn that cares is the one where the app is asking for a clear-up.
+        val watching = limits.triggerAt > 0 && opening.size > limits.triggerAt
+        var clearedUp = false
         while (requests < maxRequests) {
             // Before the request: nothing is sent for a turn that has been called off.
             cut()?.let { return finish(cutShort(it, emptyList())) }
@@ -250,7 +257,7 @@ class Agent(
             requests++
             // The boundary the box counts turns by, and the app's own row, not the model's.
             log.sessionOnly(AgentLog.TURN, "turn", "$requests")
-            val request = build(layers, opening)
+            val request = build(layers, opening, clearedUp)
             // **The shape of the request, once per turn the person started.** Which model, which
             // pinned endpoint, how big the conversation had grown: the three things needed to
             // explain a refusal or a bill, and nowhere else on the trace. Not traced for a poll —
@@ -285,7 +292,12 @@ class Agent(
                 ending != null -> return finish(leave(ending, reply))
 
                 else -> {
-                    if (work(reply.calls)) idle = 0 else idle++
+                    // **Measured, not asked.** Whether the clear-up happened is the context
+                    // getting shorter on disk, not the model saying that it did.
+                    val rowsBefore = if (watching) log.contextRows().size else 0
+                    val moved = work(reply.calls)
+                    if (watching && log.contextRows().size < rowsBefore) clearedUp = true
+                    if (moved) idle = 0 else idle++
                     progress()
                 }
             }
@@ -455,6 +467,52 @@ class Agent(
     /** Runs one call and returns its body with its `0` or `1` already on the front. */
     private fun runTool(call: Call): String = tools.run(call)
 
+    /**
+     * What the turn began with.
+     *
+     * [biggest] is here rather than re-derived per request for the same reason [size] is: the line
+     * that carries them is part of the system message, and a list that changed as tool results
+     * arrived would cost a full re-read of the conversation on every request. A list that goes
+     * slightly stale within one turn is the cheaper wrong.
+     */
+    private data class Opening(val size: Long, val biggest: List<RowCost>)
+
+    /**
+     * One row and what it costs, for the index the clear-up line carries.
+     *
+     * [line] is the row's position in `context.log` counted from one, which is the handle the
+     * `read` tool takes: `read agent/context.log from 7 lines 1` returns exactly this row's text,
+     * and that text is what the `edit` tool removes. The [id] is the row's stable label — it
+     * survives trims and never changes meaning — but it is not something a tool can act on, which
+     * is why both are given.
+     */
+    private data class RowCost(
+        val id: Int,
+        val kind: String,
+        val name: String,
+        val tokens: Long,
+        val line: Int,
+    )
+
+    /**
+     * Reads the turn's opening size and the rows taking the most room.
+     *
+     * **The sizes are the app's estimate, in the unit the limit is in** — a list in bytes beside a
+     * limit in tokens would be two numbers a model has to convert before it can act, and it would
+     * convert wrong. The exact bytes are what a *person* is shown, where they can check it.
+     */
+    private fun readOpening(layers: AgentPrompt.Layers, rows: List<AgentLog.Row>, tools: List<ToolSpec>): Opening {
+        val costs = rows
+            .withIndex()
+            .map { (index, row) ->
+                RowCost(row.id, row.kind, row.name, ContextBudget.tokens(row.line), index + 1)
+            }
+            .filter { it.tokens > 0 }
+            .sortedByDescending { it.tokens }
+            .take(BIGGEST_ROWS)
+        return Opening(measure(layers.message, rows, tools), costs)
+    }
+
     /** How many files in the project are different from what was committed. */
     private fun changedFiles(): Int = try {
         git.changes(project).total
@@ -469,7 +527,7 @@ class Agent(
      * edit real: he deletes a row from `context.log`, and the next request genuinely does not
      * contain it. A cached transcript would keep sending what he threw away.
      */
-    private fun build(layers: AgentPrompt.Layers, opening: Long): Request {
+    private fun build(layers: AgentPrompt.Layers, opening: Opening, clearedUp: Boolean): Request {
         val tools = AgentTools.specs()
         var rows = log.contextRows()
         val size = measure(layers.message, rows, tools)
@@ -500,12 +558,18 @@ class Agent(
         // was about, and telling the model it is over a limit it was just brought under would be a
         // message from before the app acted.
         val trigger = limits.triggerAt
-        val line = if (trigger > 0 && opening > trigger && !trimmed) {
+        // **The stop condition, and the only thing the target is checked against.** The app does
+        // not gate a clear-up on a size — the estimate is its own, and a refusal on arithmetic is
+        // a refusal for the wrong reason. What it does is *stop asking*: once an edit in this turn
+        // took the context under the target, the rest of the turn is not nagged, which is what
+        // keeps a model from deleting rows that matter to satisfy a sentence that is already true.
+        val done = clearedUp && size <= trigger
+        val line = if (trigger > 0 && opening.size > trigger && !trimmed && !done) {
             Trace.note(
                 "agent-clear-up",
-                "$project · ${ContextBudget.short(opening)} over ${ContextBudget.short(trigger)}",
+                "$project · ${ContextBudget.short(opening.size)} over ${ContextBudget.short(trigger)}",
             )
-            clearUpLine(opening, trigger, ceiling = limits.trigger.ceiling)
+            clearUpLine(opening.size, trigger, limits.trigger.ceiling, opening.biggest)
         } else {
             null
         }
@@ -541,23 +605,38 @@ class Agent(
      * app's, not the agent's, so the row that says it is a trace note and not a record row: the
      * model reads this, the evidence does not pretend the agent wrote it.
      */
-    private fun clearUpLine(size: Long, trigger: Long, ceiling: Long): String = buildString {
-        append("Your context was about ${ContextBudget.short(size)} tokens when this turn began. ")
-        append("The limit is ${ContextBudget.short(trigger)} tokens, and this endpoint takes ")
-        append("${ContextBudget.short(ceiling)} tokens of input. ")
-        append("Clear up your context: edit agent/context.log and remove the rows that do not ")
-        append("relate to your current task. Keep the newest task, and remove a call together ")
-        append("with its result. ")
-        // **A target, and it is a floor rather than a ceiling.** "Cut it down" is advice; "cut it
-        // to at least this" is a number the next turn can measure, which is what makes the request
-        // repeat until it is true. Cutting **past** the target is wanted rather than tolerated:
-        // rows that do not serve the current task have no place in the context at any size, and a
-        // model told to stop exactly at a number keeps the near-irrelevant rows that come before
-        // it.
-        append("Compaction target: get it to ${ContextBudget.short(trigger)} tokens or less — cut ")
-        append("at least to that, and further if the rows do not serve the current task. ")
-        append("Anything not related to what you are doing now can go.")
-    }
+    private fun clearUpLine(size: Long, trigger: Long, ceiling: Long, biggest: List<RowCost>): String =
+        buildString {
+            append("Your context was about ${ContextBudget.short(size)} tokens when this turn began. ")
+            append("The limit is ${ContextBudget.short(trigger)} tokens, and this endpoint takes ")
+            append("${ContextBudget.short(ceiling)} tokens of input. ")
+            append("Clear up your context: edit agent/context.log and remove the rows that do not ")
+            append("relate to your current task. Keep the newest task, and remove a call together ")
+            append("with its result. ")
+            // **A target, and it is a floor rather than a ceiling.** "Cut it down" is advice; "cut
+            // it to at least this" is a number the next turn can measure, which is what makes the
+            // request repeat until it is true. Cutting **past** the target is wanted rather than
+            // tolerated: rows that do not serve the current task have no place in the context at
+            // any size, and a model told to stop exactly at a number keeps the near-irrelevant
+            // ones that come before it.
+            append("Compaction target: get it to ${ContextBudget.short(trigger)} tokens or less — ")
+            append("cut at least to that, and further if the rows do not serve the current task. ")
+            append("Anything not related to what you are doing now can go.")
+            if (biggest.isNotEmpty()) {
+                // **The index, because the file cannot be read in one go.** A `read` of a large
+                // context stops at the tool's own limit, so a model deciding what to remove either
+                // pages through it — a request per 20k characters — or guesses. Naming the biggest
+                // rows costs a line and saves the paging: `read from N lines 1` is one request for
+                // the exact text of the row that matters most.
+                append("\nThe rows taking the most room — `read agent/context.log from <line> `")
+                append("`lines 1` shows one: ")
+                append(biggest.joinToString("; ") {
+                    "line ${it.line}: #${it.id} ${it.kind} ${it.name}, about " +
+                        "${ContextBudget.short(it.tokens)} tokens"
+                })
+                append(". Remove the ones that do not serve the task, editing out the whole line.")
+            }
+        }
 
     /**
      * The request as the files stand right now.
@@ -579,7 +658,7 @@ class Agent(
 
     fun request(): Request {
         val layers = AgentPrompt.read(accountDir, tools.projectDir)
-        return build(layers, measure(layers.message, log.contextRows(), AgentTools.specs()))
+        return build(layers, readOpening(layers, log.contextRows(), AgentTools.specs()), clearedUp = false)
     }
 
     /**

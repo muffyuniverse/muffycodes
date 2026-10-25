@@ -81,7 +81,22 @@ object ContextBudget {
      *
      * The number is therefore a *policy* number, not a bill. Every place it is shown says so.
      */
-    fun tokens(text: String): Long = (text.toByteArray().size + BYTES_PER_TOKEN - 1) / BYTES_PER_TOKEN
+    fun tokens(text: String): Long = (bytes(text) + BYTES_PER_TOKEN - 1) / BYTES_PER_TOKEN
+
+    /**
+     * A text's exact size in bytes.
+     *
+     * **The exact number, and the only exact one this file offers.** A token needs the model's own
+     * vocabulary — a tokenizer is per-model, this app may be pointed at any of them, and shipping
+     * or downloading one to count bytes would be a second failure mode in the path that has to
+     * work on a train. Bytes are free to compute, verifiable with `wc -c`, and they *rank* rows
+     * exactly as tokens do: the conversion is near-linear, so "which row is biggest" has the same
+     * answer in either unit while only one of them is a fact.
+     *
+     * So bytes are what a person is shown and what the file is measured in, and [tokens] is the
+     * estimate that exists only to be compared with an operator's token limit.
+     */
+    fun bytes(text: String): Long = text.toByteArray().size.toLong()
 
     /** Four bytes per token: the estimate's own constant, named so the arithmetic reads. */
     const val BYTES_PER_TOKEN = 4L
@@ -169,6 +184,27 @@ object ContextBudget {
      * are the app's own estimate, and the design's own sentence reads "this pin allows 105k" for
      * 104,858. A truncation would print 104k there and disagree with the document.
      */
+    /**
+     * A size a person reads, in **bytes**: `412 B`, `9.3k`, `1.2M`.
+     *
+     * The exact unit, shown where somebody could check it with `wc -c` — a row's caption in the
+     * box, for instance. The prompt uses [short] and its tokens instead, because the limit a model
+     * is working against is in tokens and making it convert is making it convert wrong.
+     */
+    fun sizeLabel(bytes: Long): String = when {
+        bytes < 1_000L -> "$bytes B"
+        bytes < 1_000_000L -> "${tenths(bytes, 1_000L)}k"
+        else -> "${tenths(bytes, 1_000_000L)}M"
+    }
+
+    /** A byte count over [unit], to one decimal place, without a trailing `.0`. */
+    private fun tenths(bytes: Long, unit: Long): String {
+        val scaled = bytes * 10 / unit
+        val whole = scaled / 10
+        val part = scaled % 10
+        return if (part == 0L) "$whole" else "$whole.$part"
+    }
+
     fun short(tokens: Long): String = when {
         tokens <= 0L -> "off"
         tokens >= 1_000L -> "${(tokens + 500L) / 1_000L}k"

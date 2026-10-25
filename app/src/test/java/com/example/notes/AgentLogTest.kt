@@ -312,6 +312,86 @@ class AgentLogTest {
     }
 
     @Test
+    fun `ids keep counting after a trim drops the early rows`() {
+        // **The question the whole audit rests on.** The session is trimmed from the *oldest* end,
+        // so the highest id survives in the file and the counter resumes above it. If the trim had
+        // ever taken the newest rows, the next row would be numbered over a number that used to
+        // mean something else.
+        for (i in 1..6) {
+            log.told("task $i")
+            log.note("agent", "working on $i")
+        }
+        val before = log.rows().maxOf { it.id }
+
+        // A limit small enough that the trim really drops rows.
+        val dropped = log.trimSession(limit = 400)
+        assertTrue("the trim happened: dropped $dropped", dropped > 0)
+        val after = log.rows()
+        assertTrue("and it took the oldest", after.none { it.body == "task 1" })
+
+        val fresh = AgentLog.open(project)
+        fresh.told("the next thing")
+
+        val ids = log.rows().map { it.id }
+        assertEquals("no id appears twice after a trim", ids.size, ids.toSet().size)
+        assertTrue(
+            "and the newest row is above everything that came before: $ids",
+            log.rows().last().id > before,
+        )
+    }
+
+    @Test
+    fun `a trim in one file does not let the other file's numbering start again`() {
+        // The context and the session are trimmed by different rules at different times, so the
+        // counter has to be above the highest id in **either** file — otherwise a context trimmed
+        // down to one row would hand out its own old numbers again while the session still
+        // remembered them.
+        for (i in 1..4) {
+            log.told("task $i")
+            log.note("agent", "work $i")
+        }
+        val before = log.rows().maxOf { it.id }
+        log.trimContext(budget = 1)
+        assertTrue("the context is nearly empty", log.contextRows().size <= 2)
+
+        AgentLog.open(project).told("after the context was trimmed")
+
+        val all = log.rows().map { it.id }
+        assertEquals("still one id per row", all.size, all.toSet().size)
+        assertTrue("and still counting upward", log.rows().last().id > before)
+    }
+
+    @Test
+    fun `two writers at once never hand out the same number`() {
+        // **Two `AgentLog` objects, two threads.** The guard inside the class is per instance, so
+        // two of them over one project do not exclude each other: both can look at the file, both
+        // see it unchanged since they opened, and both take the same next id. The counter has to be
+        // checked against the file under a lock the *file* owns, not the object.
+        val threads = 4
+        val each = 25
+        val start = java.util.concurrent.CountDownLatch(1)
+        val done = java.util.concurrent.CountDownLatch(threads)
+        repeat(threads) { t ->
+            Thread {
+                start.await()
+                val writer = AgentLog.open(project)
+                repeat(each) { writer.note("writer-$t", "row $it") }
+                done.countDown()
+            }.start()
+        }
+        start.countDown()
+        done.await(30, java.util.concurrent.TimeUnit.SECONDS)
+
+        val ids = log.rows().map { it.id }
+        assertEquals("every row written", threads * each, ids.size)
+        assertEquals(
+            "and every id distinct: ${ids.sorted().take(8)}…",
+            ids.size,
+            ids.toSet().size,
+        )
+    }
+
+    @Test
     fun `a second writer does not reuse the first writer's ids`() {
         // Two `AgentLog` objects for one project is not hypothetical: the box reads while a poll
         // writes. A counter held in memory would hand both writers the same number, and every

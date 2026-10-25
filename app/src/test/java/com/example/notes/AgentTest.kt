@@ -921,6 +921,36 @@ class AgentTest {
     }
 
     @Test
+    fun `the clear-up index names a line a read can open, and the biggest rows first`() {
+        // **How the agent actually chooses.** A `read` of a large context stops at the tool's own
+        // limit, so a model deciding what to remove either pages through it — a request per twenty
+        // thousand characters — or guesses. The index gives the line number the read tool takes and
+        // the row's id as a stable label, ordered by what each costs.
+        log.told("a small task")
+        log.note("agent", "short note")
+        // One big row: a result carrying a file's worth of text.
+        log.call("read", """{"path":"GitHub/milk.txt"}""")
+        log.got("read", "0\n" + "x".repeat(4_000))
+        val limits = ContextBudget.Limits.of(triggerAsked = 100, hardAsked = 0, ceiling = 100_000)
+        val door = ScriptedDoor(Reply("", listOf(call("conclude", """{"text":"done"}"""))))
+
+        agent(door, limits).burst("clear up please")
+
+        val sent = door.asked.first().system
+        val index = sent.substringAfter("The rows taking the most room")
+        assertTrue("the biggest row is named first: $index", index.contains("#4 GOT read"))
+        assertTrue("with its line to read", index.contains("line 4:"))
+        assertTrue("and its size", index.contains("tokens"))
+        assertTrue("and it says how to look", sent.contains("read agent/context.log from <line>"))
+
+        // The line number is the row's own position, so a read of it returns that row.
+        val context = File(ws.projectsDir, "shopping/${AgentLog.DIR}/${AgentLog.CONTEXT}")
+        val fourth = context.readLines()[3]
+        assertTrue("the row at that line is the big one: $fourth", fourth.contains("GOT"))
+        assertTrue("and the id in the index is on it", fourth.contains(" 4 "))
+    }
+
+    @Test
     fun `a clear-up is judged by its rules, and the next turn is what measures`() {
         // **Nothing verifies a size.** The design's check is structural — whole rows, calls with
         // their results, never the newest task — and the number is the *next turn's* business,
