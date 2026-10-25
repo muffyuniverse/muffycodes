@@ -19,6 +19,8 @@
 AppThemeTest        app/src/main/java/com/example/notes/AppTheme.kt
 KeySafetyTest      app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/Secrets.kt app/src/main/java/com/example/notes/GitHub.kt app/src/main/java/com/example/notes/ProjectGit.kt
 WorkspaceTest       app/src/main/java/com/example/notes/Workspace.kt
+ModelConfigTest     app/src/main/java/com/example/notes/ModelConfig.kt
+ModelCatalogueTest  app/src/main/java/com/example/notes/ModelCatalogue.kt app/src/main/java/com/example/notes/Secrets.kt
 AppHistoryTest      app/src/main/java/com/example/notes/AppHistory.kt app/src/main/java/com/example/notes/HistoryPrune.kt
 ProjectGitTest      app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitService.kt
 AccountStoreTest    app/src/main/java/com/example/notes/AccountStore.kt
