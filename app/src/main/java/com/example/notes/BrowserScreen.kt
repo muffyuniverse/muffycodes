@@ -67,16 +67,23 @@ class BrowserActions(
     val onToggleLock: (Entry) -> Unit,
     val onHistory: (Entry) -> Unit,
     val onSelect: (Entry) -> Unit,
+    /**
+     * Adds this row to the project's `.gitignore`, so it stops being synced.
+     *
+     * **A row action, because the file is where the thought happens.** Someone looking at
+     * `build/` or `secrets.env` in the list is someone who has just decided it should not go to
+     * GitHub, and sending them to open `.gitignore` by hand — find it, type the path, spell it
+     * right — is how a mistake becomes a commit.
+     */
+    val onIgnore: (Entry) -> Unit = {},
 )
 
 /**
- * The folder the app is showing: the account's root, the projects list, or any
- * folder inside them.
+ * The folder the app is showing: the account's root, or any folder inside a project.
  *
- * When the path is `projects`, this is the **Projects screen** (§6): one row per
- * project, each with its unsynced count, a `⋮` menu and the add button. Anywhere
- * else it is an ordinary folder listing (§3): what you made, and nothing the app
- * made.
+ * **The account's root is the Projects screen** (§6): one row per project, each with its unsynced
+ * count, a `⋮` menu and the add button. There is no `projects/` level to walk into. Anywhere else
+ * it is an ordinary folder listing (§3): what you made, and nothing the app made.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -132,10 +139,9 @@ fun BrowserScreen(
                             overflow = TextOverflow.Ellipsis,
                         )
                         val small = when {
-                            here.isEmpty() -> ""
-                            here.size == 1 -> "the account's folders"
-                            here.size == 2 -> "project"
-                            else -> here.drop(1).dropLast(1).joinToString(" › ")
+                            here.isEmpty() -> "your projects"
+                            here.size == 1 -> "project"
+                            else -> here.dropLast(1).joinToString(" › ")
                         }
                         if (small.isNotEmpty()) {
                             Text(
@@ -184,15 +190,11 @@ fun BrowserScreen(
                 // Nothing can be made until there is an account to make it in.
                 Spacer(Modifier.size(0.dp))
             } else if (projects) {
+                // **The account root *is* the list of projects**, so the button that makes one
+                // lives here — there is no `projects/` row to open first.
                 FloatingActionButton(onClick = onAddProject) {
                     Icon(Icons.Filled.Add, contentDescription = "New project or pull one in")
                 }
-            } else if (viewModel.path.isEmpty()) {
-                // **The account root is not a folder to put things in.** It holds
-                // `projects/` and the app's own state, both of which it made; a file
-                // made here would sit beside the projects rather than in one, and this
-                // level is meant to be a fixed, app-owned list.
-                Spacer(Modifier.size(0.dp))
             } else {
                 // A folder gets the two things a folder gets (§3).
                 Column(horizontalAlignment = Alignment.End) {
@@ -413,8 +415,8 @@ private fun ProjectList(
     if (names.isEmpty()) {
         EmptyState(
             title = "No projects yet",
-            text = "The add button makes one on GitHub and pulls it in, " +
-                "or brings in a repository you already have."
+            text = "The add button makes one on GitHub, brings in a repository you already " +
+                "have, or makes one that stays on this phone."
         )
         return
     }
@@ -430,17 +432,20 @@ private fun ProjectList(
                 ) {
                     Column(
                         modifier = Modifier.weight(1f)
-                            .combinedClickable(onClick = {
-                                viewModel.open(listOf(Workspace.PROJECTS, name))
-                            }),
+                            .combinedClickable(onClick = { viewModel.open(listOf(name)) }),
                     ) {
                         Text(name, style = MaterialTheme.typography.bodyLarge)
                         Text(
-                            // The same words as the row inside the project: what
-                            // GitHub does not have yet, which is the only reason a
-                            // person opens this screen.
-                            text = viewModel.changesOf(name).let {
-                                if (it > 0) "$it to send" else "up to date"
+                            // The same words as the row inside the project: what GitHub does not
+                            // have yet, which is the only reason a person opens this screen. A
+                            // local project has no GitHub to be up to date *with*, so it says the
+                            // fact rather than a number that would be a lie.
+                            text = if (viewModel.isLocalProject(name)) {
+                                "local · this phone only"
+                            } else {
+                                viewModel.changesOf(name).let {
+                                    if (it > 0) "$it to send" else "up to date"
+                                }
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -462,13 +467,17 @@ private fun ProjectList(
                                     onChat(name)
                                 },
                             )
-                            DropdownMenuItem(
-                                text = { Text("Sync") },
-                                onClick = {
-                                    menu = false
-                                    onSync(name)
-                                },
-                            )
+                            // **Not offered on a local project.** It has no remote, so the item
+                            // could only say no — the rule a locked file's Rename already follows.
+                            if (!viewModel.isLocalProject(name)) {
+                                DropdownMenuItem(
+                                    text = { Text("Sync") },
+                                    onClick = {
+                                        menu = false
+                                        onSync(name)
+                                    },
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text("Rename…") },
                                 onClick = {
@@ -531,7 +540,7 @@ private fun EntryList(viewModel: AppViewModel, actions: BrowserActions) {
                 locked = viewModel.isLockedHere(entry.file),
                 selected = viewModel.isSelected(entry.file),
                 choosing = viewModel.selected.isNotEmpty(),
-                // `projects/` at the root and `repo/` inside a project are the app's
+                // A hidden folder and the record's `agent/` are the app's
                 // own folders: they can be opened, and nothing else. Renaming,
                 // moving or deleting one is how the account's tree stops being the
                 // tree the app thinks it is.
@@ -664,6 +673,15 @@ private fun EntryRow(
                     onClick = {
                         menu = false
                         actions.onCopy(entry)
+                    },
+                )
+                // **A folder too.** Ignoring a folder ignores everything below it, which is what a
+                // person means when they say "not this one" about a build directory.
+                DropdownMenuItem(
+                    text = { Text("Add to .gitignore") },
+                    onClick = {
+                        menu = false
+                        actions.onIgnore(entry)
                     },
                 )
                 if (!locked) {

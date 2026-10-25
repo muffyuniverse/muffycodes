@@ -121,7 +121,7 @@ class BrowserChromeTest {
         scene.project("groceries")
         // Written through the harness, which needs the screen to be *inside* the project
         // before it can say which worktree to put the file in.
-        scene.open(Workspace.PROJECTS, "groceries", Workspace.REPO)
+        scene.open("groceries")
         val file = scene.worktreeFile("milk.txt", "two litres")
         scene.viewModel.refreshChanges()
         scene.await("the new file to be counted") { scene.viewModel.changesOf("groceries") > 0 }
@@ -147,13 +147,13 @@ class BrowserChromeTest {
 
         // The project's own folder: the wrapper. Nothing of the project is on screen,
         // so nothing can be said about what syncing it would send.
-        scene.open(Workspace.PROJECTS, "groceries")
+        scene.open("groceries")
         browser()
         awaitText("up to date", present = false)
         assertFalse("no sync row in the wrapper", there("Sync"))
 
         // Inside the worktree, where the files are.
-        scene.open(Workspace.PROJECTS, "groceries", Workspace.REPO)
+        scene.open("groceries")
         compose.waitUntil(20_000) { there("up to date") }
         assertTrue("the row is there with the worktree", there("up to date"))
     }
@@ -162,7 +162,7 @@ class BrowserChromeTest {
     fun `sync cannot be pressed when nothing has changed`() {
         scene.signedIn()
         scene.project("groceries")
-        scene.open(Workspace.PROJECTS, "groceries", Workspace.REPO)
+        scene.open("groceries")
         browser()
 
         awaitText("up to date")
@@ -173,7 +173,7 @@ class BrowserChromeTest {
     fun `sync is a pressable button when something has changed, and it carries no number`() {
         scene.signedIn()
         scene.project("groceries")
-        scene.open(Workspace.PROJECTS, "groceries", Workspace.REPO)
+        scene.open("groceries")
         scene.worktreeFile("milk.txt", "two litres")
         scene.viewModel.refreshChanges()
         scene.await("the change to be counted", 20_000) {
@@ -195,7 +195,7 @@ class BrowserChromeTest {
         // changes". The first fix recorded a flag, so any number of changes read as one.
         scene.signedIn()
         scene.project("groceries")
-        scene.open(Workspace.PROJECTS, "groceries", Workspace.REPO)
+        scene.open("groceries")
         val ws = scene.workspace!!
         val worktree = ws.repoOf("groceries")
         // Three saves, through the app's own path — a save is the change, and it is what
@@ -228,13 +228,13 @@ class BrowserChromeTest {
         // clone's README and LICENSE, and `onAllNodesWithContentDescription("More")[0]`
         // is the *first row's* menu — which was the unlocked README, so the test was
         // reading a menu for a file it had not locked and concluding the lock leaked.
-        scene.open(Workspace.PROJECTS, "groceries", Workspace.REPO)
+        scene.open("groceries")
         val only = scene.folder("only")
         // Written through the model, because `worktreeFile` puts a file at the root of the
         // worktree and the folder that is open is one level below it.
         val file = File(only, "milk.txt")
         scene.workspace!!.write(file, "two litres")
-        scene.open(Workspace.PROJECTS, "groceries", Workspace.REPO, "only")
+        scene.open("groceries", "only")
         scene.viewModel.toggleLocked(file)
         scene.viewModel.refresh()
         // **The premise, asserted.** Without this the test can only say "the menu offered
@@ -329,7 +329,7 @@ class BrowserChromeTest {
         // false about the one row that is not.
         scene.signedIn()
         scene.project("groceries")
-        scene.open(Workspace.PROJECTS, "groceries")
+        scene.open("groceries")
         scene.folder("notes")
         browser()
 
@@ -343,10 +343,10 @@ class BrowserChromeTest {
         // one and break the app.
         scene.signedIn()
         scene.project("groceries")
-        scene.open(Workspace.PROJECTS, "groceries")
+        scene.open("groceries")
         browser()
 
-        awaitText(Workspace.REPO)
+        awaitText("letters")
         assertTrue("a real folder keeps its Add", thereIcon("Add"))
     }
 }

@@ -68,6 +68,7 @@ private sealed interface Pending {
     data object ModelKey : Pending
     data object AddProject : Pending
     data object NewProject : Pending
+    data object NewLocalProject : Pending
     data object RemoveAccount : Pending
     data class RenameProject(val project: String) : Pending
     data class DeleteProject(val project: String) : Pending
@@ -325,6 +326,8 @@ private fun AppRoot(viewModel: AppViewModel) {
         onToggleLock = { entry -> viewModel.toggleLocked(entry.file) },
         onHistory = { entry -> viewModel.openHistory(entry.file) },
         onSelect = { entry -> viewModel.toggleSelected(entry.file) },
+        // The act records its own tap: it is the view model that knows the path git will match.
+        onIgnore = { entry -> viewModel.ignoreInGit(entry.file) },
     )
 
     when {
@@ -557,6 +560,11 @@ private fun Dialogs(
                     dismiss()
                     newProject()
                 },
+                  onNewLocalProject = {
+                      dismiss()
+                      tap("new local project")
+                      pending = Pending.NewLocalProject
+                  },
                 onPick = { repo ->
                     dismiss()
                     if (repo.name in viewModel.projectNames) {
@@ -570,6 +578,14 @@ private fun Dialogs(
         }
 
         Pending.NewProject -> NewProjectUI(viewModel, dismiss)
+
+        Pending.NewLocalProject -> NewProjectDialog(
+            // No licence list is asked for: a local project has no repository to seed.
+            licences = emptyList(),
+            local = true,
+            onDismiss = dismiss,
+            onCreate = { name, _ -> viewModel.createLocalProject(name) },
+        )
 
         is Pending.RenameProject -> PromptDialog(
             title = "Rename ${pending.project}",

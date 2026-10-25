@@ -203,7 +203,7 @@ class CopyFeatureTest : FeatureTest() {
     fun `a copy into a project's worktree is recorded by the project, and the account is not told`() {
         // Given a project with a worktree, and a file beside it
         scene.project("groceries")
-        scene.open(Workspace.PROJECTS, "groceries")
+        scene.open("groceries")
         val beside = aFile("shopping.txt", "milk, bread")
         val before = scene.commitCount("groceries")
 
@@ -244,10 +244,10 @@ class CopyFeatureTest : FeatureTest() {
         // only that a commit happened would pass even if the copy were never tracked —
         // and a file that exists but is never committed is precisely what "no history"
         // means.
-        scene.await("the account to record the copy", 30_000) { scene.headId() != before }
-        val tracks = scene.accountHistory().tracked()
+        scene.await("the project to record the copy", 30_000) { scene.headId() != before }
+        val tracks = scene.trackedFiles()
         assertTrue(
-            "the copy is in a version of the account's history: $tracks",
+            "the copy is in a version of the project's history: $tracks",
             tracks.any { it.endsWith("drafts/milk.txt") },
         )
         assertTrue(

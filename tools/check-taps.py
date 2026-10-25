@@ -46,11 +46,11 @@ VOCABULARY = {
     # a row's own switches
     "lock", "unlock", "pin", "unpin", "select", "unselect",
     # what a row's menu offers, and what the selection bar offers
-    "move", "copy", "delete", "rename",
+    "move", "copy", "delete", "rename", "add to gitignore",
     # making things
     "new file", "new folder", "upload files", "upload folder", "restore deleted",
     # projects
-    "add project", "sync", "rename project", "delete project",
+    "add project", "new local project", "sync", "rename project", "delete project",
     # the account
     "add account", "remove account", "use test account",
     # the log itself

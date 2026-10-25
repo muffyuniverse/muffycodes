@@ -31,7 +31,7 @@ class AgentTest {
         account = File(System.getProperty("java.io.tmpdir"), "agent-${System.nanoTime()}")
         ws = Workspace(account)
         ws.ensure()
-        val projectDir = File(ws.projectsDir, "shopping")
+        val projectDir = File(ws.accountDir, "shopping")
         ws.repoOf("shopping").mkdirs()
         ws.write(File(ws.repoOf("shopping"), "milk.txt"), "two litres")
         git = ProjectGit(ws, { null }, { author })
@@ -56,7 +56,7 @@ class AgentTest {
 
     private fun model() = ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high")
 
-    private fun rows() = AgentLog.open(File(ws.projectsDir, "shopping")).rows()
+    private fun rows() = AgentLog.open(File(ws.accountDir, "shopping")).rows()
 
     private fun callRows() = rows().filter { it.kind == AgentLog.CALL }
 
@@ -94,7 +94,7 @@ class AgentTest {
 
     @Test
     fun `the project's own instructions are in the request and are not overwritten`() {
-        val projectDir = File(ws.projectsDir, "shopping")
+        val projectDir = File(ws.accountDir, "shopping")
         val file = File(projectDir, AgentPrompt.PROJECT_FILE)
         file.writeText("Always answer in one sentence.")
 
@@ -114,7 +114,7 @@ class AgentTest {
     @Test
     fun `a read is answered and recorded as a call and its result`() {
         val door = ScriptedDoor(
-            Reply("", listOf(call("read", """{"path":"GitHub/milk.txt"}"""))),
+            Reply("", listOf(call("read", """{"path":"milk.txt"}"""))),
             Reply("", listOf(call("conclude", """{"text":"read it"}"""))),
         )
 
@@ -130,7 +130,7 @@ class AgentTest {
     fun `a path that leaves the project is refused, and the file is not touched`() {
         // The agent asks to go one folder up, which is where another project's work is. The
         // refusal is a sentence; the thing that must also be true is that nothing happened.
-        val outside = File(ws.projectsDir, "groceries/notes.txt")
+        val outside = File(ws.accountDir, "groceries/notes.txt")
         outside.parentFile.mkdirs()
         outside.writeText("somebody else's work")
 
@@ -161,7 +161,7 @@ class AgentTest {
             Reply(
                 "",
                 listOf(
-                    call("edit", """{"path":"GitHub/milk.txt","find":"two","replace":"three"}""")
+                    call("edit", """{"path":"milk.txt","find":"two","replace":"three"}""")
                 ),
             ),
             Reply("", listOf(call("conclude", """{"text":"could not"}"""))),
@@ -179,7 +179,7 @@ class AgentTest {
             Reply(
                 "",
                 listOf(
-                    call("edit", """{"path":"GitHub/milk.txt","find":"two","replace":"three"}""")
+                    call("edit", """{"path":"milk.txt","find":"two","replace":"three"}""")
                 ),
             ),
             Reply("", listOf(call("conclude", """{"text":"done"}"""))),
@@ -214,7 +214,7 @@ class AgentTest {
         assertTrue("refused", gotRows().first().body.startsWith(AgentLog.FAILURE))
         assertTrue(
             "and the person's file is as it was",
-            File(ws.projectsDir, "shopping/project_prompt.txt").readText()
+            File(ws.accountDir, "shopping/project_prompt.txt").readText()
                 .contains("Nothing written here yet"),
         )
     }
@@ -231,9 +231,9 @@ class AgentTest {
         // answers has no calls to check — and an invariant that holds because there is nothing
         // to hold it against is not a test.
         val door = ScriptedDoor(
-            Reply("", listOf(call("tree", """{"path":"GitHub"}"""))),
+            Reply("", listOf(call("tree", """{"path":""}"""))),
             Reply("", listOf(call("ask", """{"question":"Fix the README too?"}"""))),
-            Reply("", listOf(call("read", """{"path":"GitHub/README.md"}"""))),
+            Reply("", listOf(call("read", """{"path":"README.md"}"""))),
             Reply("", listOf(call("conclude", """{"text":"Fixed."}"""))),
         )
         val agent = agent(door)
@@ -283,7 +283,7 @@ class AgentTest {
                 "",
                 listOf(
                     call("conclude", """{"text":"done"}""", id="c1"),
-                    call("read", """{"path":"GitHub/milk.txt"}""", id="c2"),
+                    call("read", """{"path":"milk.txt"}""", id="c2"),
                 ),
             ),
             Reply("", listOf(call("conclude", """{"text":"now really done"}"""))),
@@ -341,7 +341,7 @@ class AgentTest {
         // The guard is on *unproductive* calls, not on turns: an idle agent waits for ever by
         // design, and a turn limit would stop every healthy session.
         val replies = List(AgentTools.IDLE_CALLS + 2) {
-            Reply("", listOf(call("tree", """{"path":"GitHub"}""")))
+            Reply("", listOf(call("tree", """{"path":""}""")))
         }
         val door = ScriptedDoor(*replies.toTypedArray())
 
@@ -521,11 +521,11 @@ class AgentTest {
         ws.write(File(ws.repoOf("shopping"), "README.md"), "the readme")
         ws.write(File(ws.repoOf("shopping"), "notes.md"), "notes")
 
-        val body = tool("tree", """{"path":"GitHub","name":"\\.md$"}""")
+        val body = tool("tree", """{"path":"","name":"\\.md$"}""")
 
         assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
-        assertTrue("the readme is in the answer: $body", body.contains("GitHub/README.md"))
-        assertTrue("and so are the notes: $body", body.contains("GitHub/notes.md"))
+        assertTrue("the readme is in the answer: $body", body.contains("README.md"))
+        assertTrue("and so are the notes: $body", body.contains("notes.md"))
         assertFalse("but not the file that did not match: $body", body.contains("milk.txt"))
     }
 
@@ -533,20 +533,20 @@ class AgentTest {
     fun `tree with grep answers with the line that matched, and where it is`() {
         ws.write(File(ws.repoOf("shopping"), "README.md"), "one line\ntwo litres\n")
 
-        val body = tool("tree", """{"path":"GitHub","grep":"litres"}""")
+        val body = tool("tree", """{"path":"","grep":"litres"}""")
 
         assertTrue(
             "the file, the line number and the line: $body",
-            body.contains("GitHub/README.md:2: two litres"),
+            body.contains("README.md:2: two litres"),
         )
-        assertTrue("and the other file's own line: $body", body.contains("GitHub/milk.txt:1: two litres"))
+        assertTrue("and the other file's own line: $body", body.contains("milk.txt:1: two litres"))
     }
 
     @Test
     fun `read with grep answers with numbered lines and leaves the rest out`() {
         ws.write(File(ws.repoOf("shopping"), "milk.txt"), "first\ntwo litres\nthird\n")
 
-        val body = tool("read", """{"path":"GitHub/milk.txt","grep":"litres"}""")
+        val body = tool("read", """{"path":"milk.txt","grep":"litres"}""")
 
         assertTrue("the line and its number: $body", body.contains("2: two litres"))
         assertFalse("and not the lines that did not match: $body", body.contains("first"))
@@ -569,7 +569,7 @@ class AgentTest {
     fun `a pattern that is not a regular expression is refused, and says so about the pattern`() {
         // **A model writing `[` is making a mistake about a regular expression.** The answer it
         // needs is that sentence; "that tool could not be run" would say nothing about what to fix.
-        val body = tool("read", """{"path":"GitHub/milk.txt","grep":"["}""")
+        val body = tool("read", """{"path":"milk.txt","grep":"["}""")
 
         assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
         assertTrue("about the pattern: $body", body.contains("pattern"))
@@ -587,7 +587,7 @@ class AgentTest {
     @Test
     fun `forgetting a pair takes it out of the context and leaves the text on the record`() {
         log.told("task one")
-        val call = log.call("read", """{"path":"GitHub/milk.txt"}""")
+        val call = log.call("read", """{"path":"milk.txt"}""")
         val got = log.got("read", "0\ntwo litres")
         log.told("task two")
 
@@ -665,7 +665,7 @@ class AgentTest {
     @Test
     fun `a row that is already out is told so rather than quietly skipped`() {
         log.told("a task")
-        val call = log.call("read", """{"path":"GitHub/milk.txt"}""")
+        val call = log.call("read", """{"path":"milk.txt"}""")
         val got = log.got("read", "0\ntwo litres")
         forget(call, got)
 
@@ -707,8 +707,8 @@ class AgentTest {
         // model two turns where there was one, and the calls would look unprompted.
         log.told("do it")
         log.note("agent", "I will look first.")
-        log.call("tree", """{"path":"GitHub"}""")
-        log.got("tree", "0\nGitHub/milk.txt")
+        log.call("tree", """{"path":""}""")
+        log.got("tree", "0\nmilk.txt")
 
         val messages = agent(ScriptedDoor()).messages(log.contextRows())
 
@@ -721,10 +721,10 @@ class AgentTest {
     @Test
     fun `a tool result is matched to its own call`() {
         log.told("do two")
-        log.call("read", """{"path":"GitHub/milk.txt"}""")
-        log.call("tree", """{"path":"GitHub"}""")
+        log.call("read", """{"path":"milk.txt"}""")
+        log.call("tree", """{"path":""}""")
         log.got("read", "0\nfile contents")
-        log.got("tree", "0\nGitHub/milk.txt")
+        log.got("tree", "0\nmilk.txt")
 
         val messages = agent(ScriptedDoor()).messages(log.contextRows())
         val toolMessages = messages.filter { it.role == "tool" }
@@ -748,7 +748,7 @@ class AgentTest {
     @Test
     fun `the record holds the operator, the calls, their answers and the ending`() {
         val door = ScriptedDoor(
-            Reply("", listOf(call("tree", """{"path":"GitHub"}"""))),
+            Reply("", listOf(call("tree", """{"path":""}"""))),
             Reply("", listOf(call("conclude", """{"text":"there is one file"}"""))),
         )
 
@@ -766,8 +766,8 @@ class AgentTest {
         // The property the whole "an id that appears once" query rests on, asserted from the
         // other side: a turn that ended cannot leave a call unanswered.
         val door = ScriptedDoor(
-            Reply("", listOf(call("tree", """{"path":"GitHub"}"""))),
-            Reply("", listOf(call("read", """{"path":"GitHub/milk.txt"}"""))),
+            Reply("", listOf(call("tree", """{"path":""}"""))),
+            Reply("", listOf(call("read", """{"path":"milk.txt"}"""))),
             Reply("", listOf(call("conclude", """{"text":"done"}"""))),
         )
 
@@ -775,7 +775,7 @@ class AgentTest {
 
         assertTrue(
             "nothing dangles",
-            AgentLog.open(File(ws.projectsDir, "shopping")).dangling(rows()).isEmpty(),
+            AgentLog.open(File(ws.accountDir, "shopping")).dangling(rows()).isEmpty(),
         )
     }
 
@@ -806,7 +806,7 @@ class AgentTest {
         })
         assertFalse(
             "and nowhere in the project's files",
-            File(ws.projectsDir, "shopping").walkTopDown().filter { it.isFile }
+            File(ws.accountDir, "shopping").walkTopDown().filter { it.isFile }
                 .any { it.name != "session.log" &&
                     it.readText().contains("only file") },
         )
@@ -821,7 +821,7 @@ class AgentTest {
         git.commit("shopping", "big")
 
         val door = ScriptedDoor(
-            Reply("", listOf(call("read", """{"path":"GitHub/big.txt"}"""))),
+            Reply("", listOf(call("read", """{"path":"big.txt"}"""))),
             Reply("", listOf(call("conclude", """{"text":"read what I could"}"""))),
         )
 
@@ -845,7 +845,7 @@ class AgentTest {
         // request would answer one turn under two different briefs; a layer cached across turns
         // would never see the edit at all. The door does the editing, because that is the only
         // way to change the file *while* the agent is working.
-        val projectDir = File(ws.projectsDir, "shopping")
+        val projectDir = File(ws.accountDir, "shopping")
         val brief = File(projectDir, AgentPrompt.PROJECT_FILE)
         brief.writeText("Answer in one sentence.")
 
@@ -856,7 +856,7 @@ class AgentTest {
                 if (asked.size == 1) brief.writeText("Answer in three sentences.")
                 return Result.success(
                     if (asked.size == 1) {
-                        Reply("", listOf(Call("c1", "tree", """{"path":"GitHub"}""")))
+                        Reply("", listOf(Call("c1", "tree", """{"path":""}""")))
                     } else {
                         Reply("", listOf(Call("c2", "conclude", """{"text":"done"}""")))
                     },
@@ -906,7 +906,7 @@ class AgentTest {
         // "you are over" teaches nothing. And the line goes at the *end* of the system message, so
         // the instructions above it are still the same bytes: that is the difference between a
         // warning that costs a line and one that costs a re-read of everything.
-        val dir = File(ws.projectsDir, "shopping")
+        val dir = File(ws.accountDir, "shopping")
         val prompt = AgentPrompt.read(account, dir).message
         val limits = ContextBudget.Limits.of(triggerAsked = 1, hardAsked = 0, ceiling = 100_000)
         val door = ScriptedDoor(Reply("", listOf(call("conclude", """{"text":"done"}"""))))
@@ -942,7 +942,7 @@ class AgentTest {
                 // The person types while this request is out.
                 if (asked.size == 1) speak = true
                 return Result.success(
-                    Reply("", listOf(Call("c${asked.size}", "tree", """{"path":"GitHub"}"""))),
+                    Reply("", listOf(Call("c${asked.size}", "tree", """{"path":""}"""))),
                 )
             }
         }
@@ -991,7 +991,7 @@ class AgentTest {
         // stop — not as an interruption — and the session goes off.
         val door = object : Door {
             override fun turn(request: Request): Result<Reply> =
-                Result.success(Reply("", listOf(Call("c1", "tree", """{"path":"GitHub"}"""))))
+                Result.success(Reply("", listOf(Call("c1", "tree", """{"path":""}"""))))
         }
         val agent = Agent(
             account, "shopping", ws, git, log, door, model(),
@@ -1055,8 +1055,8 @@ class AgentTest {
         // is the turn where a re-read is most expensive.
         val limits = ContextBudget.Limits.of(triggerAsked = 1, hardAsked = 0, ceiling = 100_000)
         val door = ScriptedDoor(
-            Reply("", listOf(call("c1", "tree", """{"path":"GitHub"}"""))),
-            Reply("", listOf(call("c2", "read", """{"path":"GitHub/milk.txt"}"""))),
+            Reply("", listOf(call("c1", "tree", """{"path":""}"""))),
+            Reply("", listOf(call("c2", "read", """{"path":"milk.txt"}"""))),
             Reply("", listOf(Call("c3", "conclude", """{"text":"done"}"""))),
         )
 
@@ -1098,7 +1098,7 @@ class AgentTest {
         log.told("a small task")
         log.note("agent", "short note")
         // One big row: a result carrying a file's worth of text.
-        log.call("read", """{"path":"GitHub/milk.txt"}""")
+        log.call("read", """{"path":"milk.txt"}""")
         log.got("read", "0\n" + "x".repeat(4_000))
         val limits = ContextBudget.Limits.of(triggerAsked = 100, hardAsked = 0, ceiling = 100_000)
         val door = ScriptedDoor(Reply("", listOf(call("conclude", """{"text":"done"}"""))))
@@ -1113,7 +1113,7 @@ class AgentTest {
         assertTrue("and it says how to look", sent.contains("read agent/session.log from <line>"))
 
         // The line number is the row's position in the record, so a read of it returns that row.
-        val context = File(ws.projectsDir, "shopping/${AgentLog.DIR}/${AgentLog.SESSION}")
+        val context = File(ws.accountDir, "shopping/${AgentLog.DIR}/${AgentLog.SESSION}")
         val fourth = context.readLines()[3]
         assertTrue("the row at that line is the big one: $fourth", fourth.contains("GOT"))
         assertTrue("and the id in the index is on it", fourth.contains(" 4 "))
@@ -1251,7 +1251,7 @@ class AgentTest {
     fun `an edit to the project layer leaves the instructions above it as they were`() {
         // The cache is a prefix match. ① first and ② after it is what makes editing the project's
         // brief cost a re-read of the brief rather than of everything the app was told.
-        val dir = File(ws.projectsDir, "shopping")
+        val dir = File(ws.accountDir, "shopping")
         val brief = File(dir, AgentPrompt.PROJECT_FILE)
         brief.writeText("Old brief.")
         val before = agent(ScriptedDoor()).request().system
@@ -1283,7 +1283,7 @@ class AgentTest {
     @Test
     fun `a reset leaves the next request with the new task and nothing before it`() {
         val door = ScriptedDoor(
-            Reply("", listOf(call("tree", """{"path":"GitHub"}"""))),
+            Reply("", listOf(call("tree", """{"path":""}"""))),
             Reply("", listOf(call("conclude", """{"text":"done"}"""))),
             Reply("", listOf(Call("c3", "conclude", """{"text":"done again"}"""))),
         )
@@ -1304,7 +1304,7 @@ class AgentTest {
         )
         assertTrue(
             "with nothing of the old conversation in it",
-            third.none { it.text.contains("GitHub") },
+            third.none { it.text.contains("milk") },
         )
         assertTrue(
             "while the evidence still has all of it",
@@ -1369,7 +1369,7 @@ class AgentTest {
                     "",
                     // A file each time, so the idle guard never fires: each call really changes
                     // the project, and the turn still does not end.
-                    listOf(Call("c${++n}", "create", """{"path":"GitHub/f$n.txt","text":"$n"}""")),
+                    listOf(Call("c${++n}", "create", """{"path":"f$n.txt","text":"$n"}""")),
                 ),
             )
         }
@@ -1390,7 +1390,7 @@ class AgentTest {
     @Test
     fun `the record's numbers are the tool's arguments, not the app's guesses`() {
         val door = ScriptedDoor(
-            Reply("", listOf(call("read", """{"path":"GitHub/milk.txt"}"""))),
+            Reply("", listOf(call("read", """{"path":"milk.txt"}"""))),
             Reply("", listOf(call("conclude", """{"text":"done"}"""))),
         )
 
@@ -1398,7 +1398,7 @@ class AgentTest {
 
         val call = callRows().first()
         assertEquals("the tool", "read", call.name)
-        assertEquals("and exactly what it was given", """{"path":"GitHub/milk.txt"}""", call.body)
+        assertEquals("and exactly what it was given", """{"path":"milk.txt"}""", call.body)
         assertTrue("as JSON, so a reader can parse it", JSONObject(call.body).has("path"))
     }
 }

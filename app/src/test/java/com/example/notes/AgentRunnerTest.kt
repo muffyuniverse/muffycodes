@@ -152,7 +152,7 @@ class AgentRunnerTest {
         runner.tick(1_000 + 3 * 60 * 60 * 1000L + 12 * 60_000L)
         settle(runner)
 
-        val log = AgentLog.open(File(ws.projectsDir, "shopping"))
+        val log = AgentLog.open(File(ws.accountDir, "shopping"))
         val gap = log.rows().single { it.name == "gap" }
         assertEquals(
             "how long, in words a person reads: ${gap.body}",
@@ -180,7 +180,7 @@ class AgentRunnerTest {
 
         assertTrue(
             "nothing to say",
-            AgentLog.open(File(ws.projectsDir, "shopping")).rows().none { it.name == "gap" },
+            AgentLog.open(File(ws.accountDir, "shopping")).rows().none { it.name == "gap" },
         )
     }
 
@@ -208,7 +208,7 @@ class AgentRunnerTest {
     fun `a project that is gone takes its session with it`() {
         on("shopping", now = 1_000)
         val runner = runner()
-        File(ws.projectsDir, "shopping").deleteRecursively()
+        File(ws.accountDir, "shopping").deleteRecursively()
 
         runner.tick(1_000 + AgentSession.POLL_MS)
 
@@ -284,7 +284,7 @@ class AgentRunnerTest {
                 }
         }
         val runner = runner(door)
-        val log = AgentLog.open(File(ws.projectsDir, "shopping"))
+        val log = AgentLog.open(File(ws.accountDir, "shopping"))
 
         runner.tick(1_000 + AgentSession.POLL_MS)
         settle(runner)
@@ -327,7 +327,7 @@ class AgentRunnerTest {
                 Result.failure(IllegalStateException("OpenRouter answered 503"))
         }
         val runner = runner(door)
-        val log = AgentLog.open(File(ws.projectsDir, "shopping"))
+        val log = AgentLog.open(File(ws.accountDir, "shopping"))
 
         runner.tick(1_000 + AgentSession.POLL_MS)
         settle(runner)

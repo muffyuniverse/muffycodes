@@ -41,12 +41,12 @@ class AgentChatTest {
                 told("first"),
                 turn(),
                 call("tree"),
-                got("tree", "0\nGitHub/milk.txt"),
+                got("tree", "0\nmilk.txt"),
                 row(AgentLog.CONCLUDE, "conclusion", "done"),
                 told("second"),
                 turn(),
                 call("tree"),
-                got("tree", "0\nGitHub/dairy.txt"),
+                got("tree", "0\ndairy.txt"),
                 row(AgentLog.CONCLUDE, "conclusion", "done again"),
             )
         )
@@ -70,7 +70,7 @@ class AgentChatTest {
                 told("look"),
                 turn(),
                 call("tree"),
-                got("tree", "0\nGitHub/"),
+                got("tree", "0\n"),
                 call("read"),
                 got("read", "0\nhello"),
                 row(AgentLog.CONCLUDE, "conclusion", "one file"),
@@ -93,7 +93,7 @@ class AgentChatTest {
             listOf(
                 told("look"),
                 call("tree"),
-                got("tree", "0\nGitHub/"),
+                got("tree", "0\n"),
                 row(AgentLog.CONCLUDE, "conclusion", "one file"),
             )
         )
@@ -107,8 +107,8 @@ class AgentChatTest {
     fun `a call and its result are one line`() {
         val lines = AgentChat.lines(
             listOf(
-                call("tree", """{"path":"GitHub"}"""),
-                got("tree", "0\nGitHub/\nGitHub/milk.txt"),
+                call("tree", """{"path":""}"""),
+                got("tree", "0\n\nmilk.txt"),
             )
         )
 
@@ -116,7 +116,7 @@ class AgentChatTest {
         assertEquals("named by the tool", "tree", lines[0].caption)
         assertEquals(
             "with the status and the one sentence that matters",
-            "0 · GitHub/ GitHub/milk.txt",
+            "0 · milk.txt",
             lines[0].body,
         )
         assertFalse("and it worked", lines[0].failed)
@@ -127,7 +127,7 @@ class AgentChatTest {
     fun `a refusal is marked, and says its reason`() {
         val lines = AgentChat.lines(
             listOf(
-                call("edit", """{"path":"GitHub/locked.txt"}"""),
+                call("edit", """{"path":"locked.txt"}"""),
                 got("edit", "1\n\"locked.txt\" is locked, so it cannot be changed"),
             )
         )
@@ -195,7 +195,7 @@ class AgentChatTest {
             told("look"),
             turn(),
             call("tree"),
-            got("tree", "0\nGitHub/"),
+            got("tree", "0\n"),
             turn(),
             call("wait"),
             got("wait", "0\nstill waiting"),

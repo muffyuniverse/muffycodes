@@ -25,7 +25,7 @@ class NamingFeatureTest : FeatureTest() {
      * The account's root always holds `projects/`, which the app makes, so asking
      * for the only entry would count it too.
      */
-    private fun made(): String = scene.names().filter { it != Workspace.PROJECTS }.single()
+    private fun made(): String = scene.names().single()
 
     @Test
     fun `a name typed with capitals and spaces is written the one way`() {

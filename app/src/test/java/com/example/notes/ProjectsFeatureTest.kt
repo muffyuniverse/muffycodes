@@ -55,7 +55,7 @@ class ProjectsFeatureTest : FeatureTest() {
     @Test
     fun `a project's row counts the changes waiting inside its worktree`() {
         scene.project("Shopping")
-        scene.open(Workspace.PROJECTS, "Shopping")
+        scene.open("Shopping")
         scene.worktreeFile("milk.txt", "two litres")
         scene.viewModel.refreshChanges()
         scene.await("the row to count the change", 20_000) {
@@ -68,7 +68,7 @@ class ProjectsFeatureTest : FeatureTest() {
     @Test
     fun `a file beside the worktree is not a change the project has to explain`() {
         scene.project("Shopping")
-        scene.open(Workspace.PROJECTS, "Shopping")
+        scene.open("Shopping")
         scene.file("local.txt", "not for GitHub")
         scene.viewModel.refreshChanges()
 
@@ -104,8 +104,8 @@ class ProjectsFeatureTest : FeatureTest() {
         scene.viewModel.renameProject("Shopping", "Groceries")
         scene.await("the rename to finish") { !scene.viewModel.busy }
 
-        assertFalse("the old folder is gone", File(scene.workspace!!.projectsDir, "Shopping").exists())
-        assertTrue("the new folder is there", File(scene.workspace!!.projectsDir, "Groceries").isDirectory)
+        assertFalse("the old folder is gone", File(scene.workspace!!.accountDir, "Shopping").exists())
+        assertTrue("the new folder is there", File(scene.workspace!!.accountDir, "Groceries").isDirectory)
         assertFalse("the old repository is gone", scene.remote("Shopping").exists())
         assertTrue("the new repository is there", scene.remote("Groceries").isDirectory)
     }
@@ -113,7 +113,7 @@ class ProjectsFeatureTest : FeatureTest() {
     @Test
     fun `renaming a project keeps the clone inside it`() {
         scene.project("Shopping")
-        scene.open(Workspace.PROJECTS, "Shopping")
+        scene.open("Shopping")
         scene.worktreeFile("milk.txt", "two litres")
 
         scene.viewModel.renameProject("Shopping", "Groceries")
@@ -132,7 +132,7 @@ class ProjectsFeatureTest : FeatureTest() {
         scene.viewModel.deleteProject("Shopping", everywhere = false)
         scene.await("the delete to finish") { !scene.viewModel.busy }
 
-        assertFalse("the folder is gone", File(scene.workspace!!.projectsDir, "Shopping").exists())
+        assertFalse("the folder is gone", File(scene.workspace!!.accountDir, "Shopping").exists())
         assertTrue("the repository is untouched", scene.remote("Shopping").isDirectory)
     }
 
@@ -143,7 +143,7 @@ class ProjectsFeatureTest : FeatureTest() {
         scene.viewModel.deleteProject("Shopping", everywhere = true)
         scene.await("the delete to finish") { !scene.viewModel.busy }
 
-        assertFalse("the folder is gone", File(scene.workspace!!.projectsDir, "Shopping").exists())
+        assertFalse("the folder is gone", File(scene.workspace!!.accountDir, "Shopping").exists())
         assertFalse("and the repository with it", scene.remote("Shopping").exists())
     }
 
@@ -158,7 +158,7 @@ class ProjectsFeatureTest : FeatureTest() {
         scene.viewModel.deleteProject("Shopping", everywhere = true)
         scene.await("the delete to finish") { !scene.viewModel.busy }
 
-        assertFalse("the folder is gone", File(scene.workspace!!.projectsDir, "Shopping").exists())
+        assertFalse("the folder is gone", File(scene.workspace!!.accountDir, "Shopping").exists())
         assertFalse(
             "and nothing complained about the missing repository",
             scene.viewModel.message.orEmpty().contains("no repository", ignoreCase = true),
@@ -225,4 +225,66 @@ class ProjectsFeatureTest : FeatureTest() {
 
         assertTrue("MIT is offered", licences.contains("mit"))
     }
+    // ---- a local project: a project with no remote ---------------------------
+
+    @Test
+    fun `a local project is a folder with its own history and nothing to push to`() {
+        // **A project, not a special case.** Work that does not belong to any repository still
+        // deserves versions and an agent; what it does not have is somewhere to send them. The
+        // test is here rather than in a file of its own because this is what a project is now —
+        // a folder with a history, optionally with a remote.
+        scene.viewModel.createLocalProject("scratch")
+        scene.await("the local project", 30_000) {
+            scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
+        }
+
+        val dir = scene.workspace!!.projectDir("scratch")
+        assertTrue("the folder is there", dir.isDirectory)
+        assertTrue("with a repository in it", File(dir, ".git").isDirectory)
+        assertTrue("and the app's lines in its ignore file", File(dir, ".gitignore").isFile)
+        assertTrue("and no remote at all", scene.viewModel.isLocalProject("scratch"))
+        assertEquals("its name is the one typed", listOf("scratch"), scene.viewModel.projectNames)
+    }
+
+    @Test
+    fun `sync on a local project says why it cannot, rather than doing nothing`() {
+        // The button is not offered, and the act refuses in words if it is asked anyway — a press
+        // that silently does nothing is the failure this app keeps fixing.
+        scene.viewModel.createLocalProject("scratch")
+        scene.await("the local project", 30_000) {
+            scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
+        }
+
+        scene.viewModel.sync("scratch")
+        scene.await("the refusal", 5_000) { scene.viewModel.message?.contains("no GitHub") == true }
+
+        assertTrue(
+            "and it says where the project lives: ${scene.viewModel.message}",
+            scene.viewModel.message.orEmpty().contains("this phone"),
+        )
+    }
+
+    @Test
+    fun `a local project keeps its versions like any other`() {
+        scene.viewModel.createLocalProject("scratch")
+        scene.await("the local project", 30_000) {
+            scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
+        }
+        scene.open("scratch")
+        val file = scene.file("note.txt", "first")
+        scene.await("the first version", 30_000) { scene.repo("scratch").tracked().contains("note.txt") }
+
+        scene.openEditor(file)
+        scene.saveEditor("second")
+        scene.await("the second version", 30_000) {
+            scene.versionsOf(file).size >= 2
+        }
+
+        assertEquals(
+            "both versions are there, newest first",
+            listOf("second", "first"),
+            scene.versionsOf(file).map { it.second },
+        )
+    }
+
 }

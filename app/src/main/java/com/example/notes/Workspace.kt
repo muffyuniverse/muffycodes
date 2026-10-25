@@ -42,86 +42,66 @@ data class Gone(
 /**
  * The tree of one account, as it is on disk.
  *
- * The account directory **is** the app's filesystem: `projects/` holds one
- * folder per project, and a project holds the `repo/` worktree beside whatever
- * local files and folders the user keeps there. Nothing is stored in an index
- * and nothing has an id — a thing's identity is its path, which is what makes
- * the repository on GitHub read like a person wrote it.
+ * The account directory **is** the app's filesystem: **one folder per project, at the root**,
+ * and each of those folders **is** the repository — its `.git`, its `.gitignore` and the person's
+ * files live together, so the thing on GitHub is the folder they are looking at. Nothing is stored
+ * in an index and nothing has an id — a thing's identity is its path, which is what makes the
+ * repository read like a person wrote it.
  *
  * Two rules decide what may be seen and touched:
  *
  * - **A name starting with `.` belongs to the app and is never shown.** That is
- *   where `.git`, `.gitignore` and the `.muffy` state live, so the rule covers
- *   all of them at once.
- * - **`projects` at the root and `repo` inside a project are structural** — the
- *   app made them, so they cannot be renamed, moved or deleted; everything
- *   inside them is the user's and is free.
+ *   where `.git` and the `.muffy` state live, so the rule covers all of them at once.
+ * - **`agent/` inside a project is the app's** — the record's folder, named in the
+ *   project's `.gitignore` by the app itself — so it cannot be renamed, moved or deleted,
+ *   and its `session.log` cannot be written by anyone but [AgentLog].
  */
 class Workspace(val accountDir: File) {
 
-    val projectsDir: File get() = File(accountDir, PROJECTS)
-
     val stateDir: File get() = File(accountDir, STATE_DIR)
 
+    /** The folder of one project. **This is the repository** — `.git` is in here. */
+    fun projectDir(project: String): File = File(accountDir, project)
+
     /**
-     * Makes the folders the app itself owns, so that the shape of an account is
-     * the same the moment it is signed in as it is after the first project.
+     * Makes the folder an account lives in, so that an empty account and a new one look the same.
+     *
+     * Nothing is created for a project here: a project's folder is made when it is made, and its
+     * repository is initialised by [ProjectGit] into that same folder.
      */
     fun ensure() {
-        projectsDir.mkdirs()
-        moveLegacyRepos()
+        accountDir.mkdirs()
     }
 
     /**
-     * Renames the old `repo/` worktree to `GitHub/`, once, per project.
+     * The two lines the app keeps in a project's `.gitignore`.
      *
-     * The folder was called `repo`, which is only obvious to somebody who already knows
-     * what a repository is. Its new name says the thing that matters to a person: **this
-     * is the part that lives on GitHub, and it is the only part that syncs.**
+     * **The record is the app's, and it is not shipped.** `agent/` holds what the model was sent and
+     * what it answered — every tool result, every file it read — so committing it would put a second
+     * copy of the person's work on somebody's server, in a shape they never chose. `.muffy/` is the
+     * same argument for the app's own flags.
      *
-     * Two things have to move with it, or a person loses state they cannot see:
-     * - the worktree itself, with `.git` inside it, which is what makes the rename safe
-     *   rather than a copy;
-     * - the pin and lock lists in `.muffy/`, which name files by path — a locked file
-     *   under `projects/x/repo/` would silently become unlocked.
-     *
-     * It runs from [ensure], which every account calls on open, so an old installation
-     * is migrated the first time it is used and never again: after the rename there is
-     * nothing left to find.
+     * Written as two lines the app owns rather than a whole file it owns: a person's `.gitignore` is
+     * theirs, with their own patterns in it, and a rewrite that dropped them would be the app
+     * silently un-ignoring a build directory. So the lines are appended when they are missing, and
+     * nothing else in the file is touched.
      */
-    private fun moveLegacyRepos() {
-        val projects = projectsDir.listFiles()?.filter { it.isDirectory } ?: return
-        var moved = false
-        for (project in projects) {
-            val old = File(project, LEGACY_REPO)
-            val new = File(project, REPO)
-            if (!old.isDirectory || new.exists()) continue
-            if (!old.renameTo(new)) continue
-            moved = true
+    fun ensureIgnore(projectDir: File) {
+        val file = File(projectDir, IGNORE)
+        val current = if (file.isFile) read(file) else ""
+        val missing = APP_IGNORES.filter { line ->
+            current.lineSequence().none { it.trim() == line }
         }
-        if (moved) rewriteFlagPaths()
-    }
-
-    /**
-     * Points every stored pin and lock at the new folder name.
-     *
-     * By path, not by text: a stored path is `projects/<project>/repo/<file>`, so the
-     * *third* segment is the one that changed. A blind text replace would also rewrite a
-     * file a person happens to have called `repo`.
-     */
-    private fun rewriteFlagPaths() {
-        for (name in listOf(PINS_FILE, LOCKED_FILE)) {
-            val current = readFlags(name)
-            if (current.isEmpty()) continue
-            val rewritten = current.map { path ->
-                val parts = path.split("/").toMutableList()
-                if (parts.size >= 3 && parts[0] == PROJECTS && parts[2] == LEGACY_REPO) {
-                    parts[2] = REPO
-                }
-                parts.joinToString("/")
-            }.toSet()
-            writeFlags(name, rewritten)
+        if (missing.isEmpty()) return
+        val text = buildString {
+            append(current)
+            if (current.isNotEmpty() && !current.endsWith("\n")) append("\n")
+            if (current.isEmpty()) {
+                appendLine("# The app's own bookkeeping: the agent's record and its flags. Not shipped.")
+            }
+            missing.forEach { appendLine(it) }
         }
+        put(file, text)
     }
 
     /** The folder's contents, hidden things left out: folders first, then names. */
@@ -138,11 +118,11 @@ class Workspace(val accountDir: File) {
      *
      * §3's rule is that everything the app made is invisible, and a hidden name is how that is
      * usually said. `model_conf.json` breaks that rule by living in the account's root, where the
-     * file tree looks — so it is named here and left out of the list, rather than being renamed
-     * to a dot and made unreachable to anyone who wants to read what their agent is set to.
+     * projects list is drawn — so it is named here and left out of the list, rather than being
+     * renamed to a dot and made unreachable to anyone who wants to read what their agent is set to.
      *
-     * Reading it is not affected, and neither is writing it through the forms: this decides
-     * only whether it appears as a row.
+     * **It lives at the root because it is the account's, not a project's:** the model is one
+     * conversation's setting for the whole phone, and a project does not bring its own.
      */
     fun isAppOwned(file: File): Boolean =
         file.parentFile?.canonicalFile == accountDir.canonicalFile && file.name in APP_FILES
@@ -172,8 +152,8 @@ class Workspace(val accountDir: File) {
      * **The record is readable and not writable, and that is a rule about the person too.** The
      * whole value of the file is that it is what happened and what the model is sent; a person who
      * can save over it has an agent whose memory is not evidence of anything. So the app refuses
-     * the save, as it already refuses to rename `projects/` and `GitHub/` — the app depends on this
-     * file the way it depends on those folders.
+     * the save, as it already refuses to rename `agent/` — the app depends on this file the way it
+     * depends on that folder.
      *
      * Three writers remain, and each is the app's own act, inside [AgentLog]: the turn appends
      * rows, the autotrim shortens the file, a reset marks every row `app`, and the agent's
@@ -186,62 +166,61 @@ class Workspace(val accountDir: File) {
      */
     fun isRecord(file: File): Boolean {
         val dir = file.parentFile?.canonicalFile ?: return false
-        if (dir.name != AgentLog.DIR || dir.parentFile?.parentFile?.name != PROJECTS) return false
+        if (dir.name != AgentLog.DIR) return false
+        if (dir.parentFile?.parentFile?.canonicalFile != accountDir.canonicalFile) return false
         return file.name == AgentLog.SESSION || file.name == AgentLog.CONTEXT
     }
 
     /**
-     * True for a folder the app depends on: `projects` at the account root and
-     * `repo` inside a project. Those cannot be renamed, moved or deleted.
+     * True for a folder the app depends on: a project's `agent/`.
+     *
+     * There is nothing structural at the account root any more. The two levels the app used to
+     * own — `projects/` at the root and a repository folder inside each project — are gone: the
+     * project *is* the folder, which is the whole of the consolidation.
      */
-    fun isStructural(file: File): Boolean = when {
-        file.parentFile?.canonicalFile == accountDir.canonicalFile -> file.name == PROJECTS
-        file.parentFile?.parentFile?.canonicalFile == projectsDir.canonicalFile -> file.name == REPO
-        else -> false
-    }
+    fun isStructural(file: File): Boolean =
+        file.isDirectory && file.name == AgentLog.DIR &&
+            file.parentFile?.parentFile?.canonicalFile == accountDir.canonicalFile
 
-    /** True when [file] is a project folder: a direct child of `projects/`. */
+    /** True when [file] is a project: a direct child folder of the account root. */
     fun isProjectFolder(file: File): Boolean =
-        file.isDirectory && file.parentFile?.canonicalFile == projectsDir.canonicalFile &&
+        file.isDirectory && file.parentFile?.canonicalFile == accountDir.canonicalFile &&
             !isHidden(file.name)
 
     /** The names of the projects on this phone, in display order. */
     fun projectNames(): List<String> =
-        (projectsDir.listFiles() ?: emptyArray())
+        (accountDir.listFiles() ?: emptyArray())
             .filter { isProjectFolder(it) }
             .map { it.name }
             .sortedBy { it.lowercase() }
 
-    /** The `repo` folder of a project. */
-    fun repoOf(project: String): File = File(File(projectsDir, project), REPO)
+    /** The folder of a project — which is also its repository. */
+    fun repoOf(project: String): File = projectDir(project)
 
     /**
-     * True when [file] is inside a project's repository — the part that is synced.
+     * True when [file] is inside a project — and now that means inside a repository.
      *
-     * This is where the two histories divide, and it is **not** the same as "belongs
-     * to a project": a note kept in the project's folder beside `repo/` is a local
-     * file, versioned by the account's own history. Telling the two apart by
-     * "belongs to a project" loses the change outright, because each history then
-     * trusts the other to have committed it and neither does.
+     * The two histories this used to divide are one: every file below a project is in that
+     * project's repository, and the only things outside a project are the app's own file at the
+     * root and its hidden state, which are nobody's history.
      */
-    fun inWorktree(file: File): Boolean {
-        val path = relative(file) ?: return false
-        return path.size >= 3 && path[0] == PROJECTS && path[2] == REPO
-    }
+    fun inWorktree(file: File): Boolean = projectOf(file) != null
 
     /** The project a path belongs to, or null when it is not inside one. */
     fun projectOf(file: File): String? {
         val path = relative(file) ?: return null
-        if (path.size < 2 || path[0] != PROJECTS) return null
-        return path[1]
+        return projectAt(path)
     }
 
     /**
      * The project this path is inside, including the project folder itself —
-     * or null when the path is outside `projects/`.
+     * or null when the path is at the root.
      */
-    fun projectAt(path: List<String>): String? =
-        if (path.size >= 2 && path[0] == PROJECTS) path[1] else null
+    fun projectAt(path: List<String>): String? {
+        val first = path.firstOrNull() ?: return null
+        val dir = File(accountDir, first)
+        return if (isProjectFolder(dir)) first else null
+    }
 
     /** The path of [file] from the account root, or null when it is not below it. */
     fun relative(file: File): List<String>? {
@@ -417,19 +396,18 @@ class Workspace(val accountDir: File) {
             return Result.failure(IllegalArgumentException("That is not a folder"))
         }
         // The destination is guarded as well as the source, because §3 says no
-        // command can target anything the app owns — and a move *into* `projects/`
-        // or `.muffy/` targets one just as surely as renaming it. Only the source
-        // was checked, so a file could be moved into the app's own bookkeeping and
-        // then be hidden from every screen at once: still on disk, unreachable.
+        // command can target anything the app owns — and a move *into* a hidden folder
+        // targets one just as surely as renaming it. Only the source was checked, so a file
+        // could be moved into the app's own bookkeeping and then be hidden from every screen
+        // at once: still on disk, unreachable.
         //
-        // `repo/` is the exception, and it is the whole point of §3's two crosses:
-        // "Move into the repository" is a move into a structural folder, on purpose.
-        // So the rule is about the folder this app files things under, not about
-        // every folder it made.
+        // There is no exception any more. There used to be one, for the repository folder,
+        // because "move into the repository" was a move a person wanted. The repository is the
+        // project now, so the rule is simply the rule.
         if (isHidden(into.name)) {
             return Result.failure(IllegalArgumentException("That folder belongs to the app"))
         }
-        if (isStructural(into) && into.name != REPO) {
+        if (isStructural(into)) {
             return Result.failure(IllegalArgumentException("That folder belongs to the app"))
         }
         if (file.isDirectory && (into.canonicalPath == file.canonicalPath ||
@@ -476,7 +454,7 @@ class Workspace(val accountDir: File) {
         if (isHidden(into.name)) {
             return Result.failure(IllegalArgumentException("That folder belongs to the app"))
         }
-        if (isStructural(into) && into.name != REPO) {
+        if (isStructural(into)) {
             return Result.failure(IllegalArgumentException("That folder belongs to the app"))
         }
         if (file.isDirectory && (into.canonicalPath == file.canonicalPath ||
@@ -704,11 +682,16 @@ class Workspace(val accountDir: File) {
     // ---- creating a project on disk ---------------------------------------
 
     /**
-     * Makes the folder structure of a project: the project folder and the
-     * `repo` worktree inside it. Returns the project folder.
+     * Makes a project's folder, and the two lines that keep the app's own things out of its
+     * repository. Returns the project folder.
+     *
+     * **The folder is the repository.** It used to be a folder holding a `repo/` worktree, which
+     * meant a person looking at their project saw a folder they did not make, inside which was the
+     * thing that actually synced. There is one folder now, and [ProjectGit] initialises a
+     * repository in it.
      */
     fun createProjectFolders(name: String): Result<File> {
-        projectsDir.mkdirs()
+        accountDir.mkdirs()
         // A project's folder is named after its repository, and is **not** put
         // through [cleanName]. The name of a repository is GitHub's, and one that
         // was pulled in already has it: renaming `muffyuniverse/muffycodes` to
@@ -717,12 +700,13 @@ class Workspace(val accountDir: File) {
         // makes *inside* a folder — files, folders, imports — not the folders that
         // stand for repositories.
         val safe = name
-        val folder = File(projectsDir, safe)
+        val folder = File(accountDir, safe)
         if (folder.exists()) {
             return Result.failure(IllegalArgumentException("There is already a \"$safe\" here"))
         }
         return try {
-            File(folder, REPO).mkdirs()
+            folder.mkdirs()
+            ensureIgnore(folder)
             Result.success(folder)
         } catch (e: Exception) {
             Result.failure(IllegalStateException("Could not make the project folder"))
@@ -788,20 +772,12 @@ class Workspace(val accountDir: File) {
             return "$stem $n$tail"
         }
 
-        const val PROJECTS = "projects"
-        /**
-         * The folder that syncs, inside a project.
-         *
-         * It is named for where its contents go, because that is the fact a person needs
-         * to know: everything here is on GitHub, nothing outside it is, and the Sync
-         * button lives here. It used to be `repo`, which names a concept rather than a
-         * place — see [moveLegacyRepos] for the rename.
-         */
-        const val REPO = "GitHub"
-
-        /** What [REPO] was called before the rename, and what is migrated from. */
-        const val LEGACY_REPO = "repo"
         const val STATE_DIR = ".muffy"
+
+        /** A project's ignore file, and the two lines the app keeps in it. */
+        const val IGNORE = ".gitignore"
+        val APP_IGNORES = listOf("agent/", ".muffy/")
+
         /**
          * The hidden marker that gives an empty folder a version.
          *

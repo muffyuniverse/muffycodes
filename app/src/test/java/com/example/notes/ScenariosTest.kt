@@ -152,7 +152,7 @@ class ScenariosTest {
     @Test
     fun aProjectIsMadeAndItsFolderAppears() {
         scene.signedIn()
-        scene.open(Workspace.PROJECTS)
+        scene.open()
 
         record(
             "04-a-new-project",
@@ -166,7 +166,7 @@ class ScenariosTest {
                     viewModel.projectNames.any { it.equals("groceries", true) }
                 }
                 scene.await("the making of it to finish", 60_000) { !viewModel.busy }
-                scene.open(Workspace.PROJECTS)
+                scene.open()
             }
             after()
             result(
@@ -180,7 +180,7 @@ class ScenariosTest {
     fun aProjectWithChangesWaitingToBeSynced() {
         scene.signedIn()
         scene.project("groceries")
-        scene.open(Workspace.PROJECTS, "groceries")
+        scene.open("groceries")
 
         record(
             "05-changes-waiting",
@@ -191,7 +191,7 @@ class ScenariosTest {
             then("Two files are written into the project's worktree and the list is reopened.") {
                 scene.worktreeFile("milk.txt", "two litres")
                 scene.worktreeFile("bread.txt", "one loaf")
-                scene.open(Workspace.PROJECTS)
+                scene.open()
                 viewModel.refreshChanges()
                 scene.await("the row to count the changes", 20_000) {
                     viewModel.changesOf("groceries") > 0
@@ -209,7 +209,7 @@ class ScenariosTest {
     fun aProjectFolderHoldingItsCodeAndAPrivateNote() {
         scene.signedIn()
         scene.project("groceries")
-        scene.open(Workspace.PROJECTS, "groceries")
+        scene.open("groceries")
 
         record(
             "06-a-local-note-beside-the-code",
@@ -232,7 +232,7 @@ class ScenariosTest {
     fun aFileInsideTheCodeAndWhatTheSyncDoesWithIt() {
         scene.signedIn()
         scene.project("groceries")
-        scene.open(Workspace.PROJECTS, "groceries")
+        scene.open("groceries")
 
         record(
             "07-after-a-sync",
@@ -388,7 +388,7 @@ class ScenariosTest {
     fun theHistoryOfAProjectThatWasNeverSynced() {
         scene.signedIn()
         scene.project("groceries")
-        scene.open(Workspace.PROJECTS, "groceries", Workspace.REPO)
+        scene.open("groceries")
         scene.worktreeFile("milk.txt", "two litres")
         scene.sync("groceries")
         val file = File(scene.workspace!!.repoOf("groceries"), "milk.txt")

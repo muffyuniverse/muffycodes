@@ -236,7 +236,7 @@ class FilesFeatureTest : FeatureTest() {
     @Test
     fun `a file inside a project but outside the worktree is a local file`() {
         scene.project("Shopping")
-        scene.open(Workspace.PROJECTS, "Shopping")
+        scene.open("Shopping")
         val local = scene.file("shopping_list.txt", "milk")
 
         assertTrue("it is beside the worktree", local.parentFile!!.name == "Shopping")
@@ -252,7 +252,7 @@ class FilesFeatureTest : FeatureTest() {
         // phone no longer has.
         val project = "Shopping"
         scene.project(project)
-        scene.open(Workspace.PROJECTS, project)
+        scene.open(project)
         val local = scene.file("milk.txt", "two litres")
         val repo = scene.workspace!!.repoOf(project)
         val inside = File(repo, "milk.txt")
@@ -280,7 +280,7 @@ class FilesFeatureTest : FeatureTest() {
         // told, not one.
         scene.project("shopping")
         scene.project("work")
-        scene.open(Workspace.PROJECTS, "shopping")
+        scene.open("shopping")
         val file = scene.file("milk.txt", "two litres")
         val shop = scene.workspace!!.repoOf("shopping")
         val office = scene.workspace!!.repoOf("work")

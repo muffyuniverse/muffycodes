@@ -6,10 +6,10 @@ import java.io.File
 /**
  * The git side of one project.
  *
- * A project's repository lives in its `GitHub/` folder and tracks exactly what is
- * there. Everything else in the project folder — the files the user keeps beside
- * the worktree — belongs to the account's own history instead
- * ([AppHistory]), so the two histories never overlap.
+ * A project's repository **is** the project's folder: it tracks exactly what is there, and the
+ * app's own `agent/` is named in `.gitignore` by the app so the record is never shipped. There is
+ * no second history to fall back on, which is what makes "where did this file's versions come
+ * from" a question with one answer.
  *
  * The class takes its secrets and identity as functions rather than reading
  * them itself: that keeps it free of Android dependencies and lets the JVM tests
@@ -32,8 +32,8 @@ class ProjectGit(
     private val keepProvider: () -> Int = { 0 },
 ) {
 
-    /** The worktree of a project. */
-    fun repoDir(project: String): File = workspace.repoOf(project)
+    /** The worktree of a project — **which is the project's own folder.** */
+    fun repoDir(project: String): File = workspace.projectDir(project)
 
     /** True when the project has a repository. */
     fun isRepository(project: String): Boolean = GitService.isRepository(repoDir(project))
@@ -53,6 +53,10 @@ class ProjectGit(
     fun init(project: String): Result<Unit> = try {
         val dir = repoDir(project)
         dir.mkdirs()
+        // **The app's own two lines first, so the first commit already ignores them.** Written
+        // after the commit they would show as a change to sync, which reads as the app having
+        // touched the person's repository on the day it was made.
+        workspace.ensureIgnore(dir)
         GitService.initOrOpen(dir, authorProvider()).close()
         Result.success(Unit)
     } catch (e: Throwable) {
@@ -219,7 +223,14 @@ class ProjectGit(
         return result
     }
 
-    /** Clones a remote into the project's `repo` folder. */
+    /**
+     * Clones a remote into the project's folder — which becomes the repository.
+     *
+     * The app's two ignore lines are added after a successful clone, because a repository pulled
+     * in was written by somebody who did not know this app would keep a record inside it. That is
+     * a change to the working tree, so it shows as something to send: honest, and the next sync
+     * carries it.
+     */
     fun cloneInto(project: String, remoteUrl: String): GitService.RemoteResult {
         val dir = repoDir(project)
         if (GitService.isRepository(dir)) {
@@ -228,6 +239,7 @@ class ProjectGit(
         val result = GitService.clone(remoteUrl, dir, authorProvider(), tokenProvider())
         if (result.success) {
             open(project)?.use { repo -> GitService.scrubRemoteUrls(repo) }
+            workspace.ensureIgnore(dir)
         }
         return result
     }
@@ -237,6 +249,16 @@ class ProjectGit(
         val repo = open(project) ?: return null
         return repo.use { GitService.remoteUrl(it) }
     }
+
+    /**
+     * True when this project has nowhere to push — **a local project**.
+     *
+     * A local project is a project like any other: its own folder, its own repository, its own
+     * versions, its own agent. What it does not have is a remote, so Sync is not a thing it can do
+     * and the row says `local` rather than `up to date`. That distinction matters: "up to date" is a
+     * claim about GitHub, and a folder that has never been to GitHub is not up to date with it.
+     */
+    fun isLocal(project: String): Boolean = remoteUrl(project).isNullOrBlank()
 
     /** The commits that touched a path inside the worktree, newest first. */
     fun log(

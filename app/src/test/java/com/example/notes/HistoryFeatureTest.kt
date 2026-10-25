@@ -7,27 +7,38 @@ import org.junit.Test
 import java.io.File
 
 /**
- * §4 of the design: **the account's whole tree has a history.**
+ * §4 of the design: **a project's tree has a history.**
  *
- * Every save and every change to the tree is committed into the account's own
- * repository, which has no remote and no key. That is what gives a local file the
- * back and forward arrows, and what lets a folder that was deleted come back.
+ * Every save and every change is committed into the project's own repository, which is the folder
+ * itself. That is what gives a file the back and forward arrows, and what lets a folder that was
+ * deleted come back — and there is no second history, so every question about a version has one
+ * answer.
+ *
+ * Files live inside projects now, so a test that wants history starts one. [start] is that.
  */
 class HistoryFeatureTest : FeatureTest() {
 
-    /** The commits of the account's own history, newest first. Nothing yet is [emptyList]. */
+    /** The commits of the open project's repository, newest first. Nothing yet is [emptyList]. */
     private fun log(): List<GitService.CommitInfo> {
-        val dir = scene.workspace!!.accountDir
-        if (!GitService.isRepository(dir)) return emptyList()
-        return try {
-            org.eclipse.jgit.api.Git.open(dir).use { GitService.log(it.repository, null) }
-        } catch (e: Exception) {
-            emptyList()
-        }
+        val project = scene.viewModel.currentProject ?: return emptyList()
+        return scene.repo(project).log(null)
+    }
+
+    /**
+     * A project to work in, opened.
+     *
+     * **Every history test needs one**, because a version belongs to a project: the account root is
+     * the list of projects and holds nothing of a person's that could have a history of its own.
+     */
+    private fun start(name: String = "work") {
+        scene.project(name)
+        scene.open(name)
     }
 
     @Test
     fun `an account with nothing in it has no history yet, and its first change starts one`() {
+        start()
+
         assertTrue("nothing has happened", log().isEmpty())
 
         scene.folder("letters")
@@ -38,6 +49,8 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `an empty folder still has a version, so it can come back`() {
+        start()
+
         scene.folder("empty")
         scene.await("a version") { scene.versionsOfFolder("empty").isNotEmpty() }
 
@@ -53,6 +66,8 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `a restore answers itself, so the next press does not have to`() {
+        start()
+
         // The live log, 23:42:26: `restore-version da4ffd1` and then `close-history` 15
         // milliseconds later — and the answer went to the close, which nobody had pressed.
         // A restore said nothing on purpose, because it changes the text on the screen the
@@ -77,6 +92,8 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `a change to the tree is committed`() {
+        start()
+
         val before = log().size
 
         scene.folder("letters")
@@ -87,6 +104,8 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `each save with a pause is a version of the file`() {
+        start()
+
         val file = scene.file("milk.txt")
         scene.openEditor(file)
         scene.saveAsVersion("one litre")
@@ -102,6 +121,8 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `every save in one editing session is its own version`() {
+        start()
+
         // What the phone reported: several saves inside the same editor window, and
         // the history showing the file as it was when it was opened. The write used
         // to happen when Save was pressed and the commit later, so two saves in a row
@@ -133,6 +154,8 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `a save that changes nothing is not a version`() {
+        start()
+
         // The falsification of the test above: a history that grew whatever happened
         // would pass that one and fail this one. Saving the same text twice is a
         // commit with nothing in it, and a list of them is a history nobody can read.
@@ -152,6 +175,8 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `the versions come from the repository, so a commit made by git is a version too`() {
+        start()
+
         // "Do you calculate everything off git history, or some other storage?" Git:
         // the screen reads the repository. A commit written by JGit with no screen
         // anywhere near it must appear in the list, which is what tells the two apart.
@@ -204,6 +229,8 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `a file that is still there is not offered back`() {
+        start()
+
         // The falsification of the restore list: a list that offered everything the
         // history ever held would "work" while putting files back that never went
         // anywhere, and overwriting what is on disk with an older reading of it.
@@ -220,6 +247,8 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `a local file's older version can be brought back`() {
+        start()
+
         val file = scene.file("milk.txt")
         scene.openEditor(file)
         scene.saveAsVersion("one litre")
@@ -235,6 +264,8 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `restoring a version adds it back and leaves the newer ones alone`() {
+        start()
+
         val file = scene.file("milk.txt")
         scene.openEditor(file)
         scene.saveAsVersion("one litre")
@@ -250,6 +281,8 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `a deleted file's version brings it back`() {
+        start()
+
         val file = scene.file("milk.txt", "one litre")
         scene.await("a version") { scene.versionsOf(file).isNotEmpty() }
         val version = scene.versionsOf(file).first().first.id
@@ -329,7 +362,7 @@ class HistoryFeatureTest : FeatureTest() {
 
         // The history knows the rename happened, and the version before it still
         // has the folder under its old name with its contents.
-        val versions = scene.accountHistory().log(null)
+        val versions = log()
         assertTrue("there is more than one version", versions.size >= 2)
         assertTrue(
             "some version mentions the old name",
@@ -365,7 +398,7 @@ class HistoryFeatureTest : FeatureTest() {
         // is wanted a second after the mistake, not after the next push — and the way
         // to know is to save twice and never sync at all.
         scene.project("shopping")
-        scene.open(Workspace.PROJECTS, "shopping")
+        scene.open("shopping")
         val ws = scene.workspace!!
         val file = File(ws.repoOf("shopping"), "milk.txt")
         // Written through the editor, because the editor is what commits: writing
@@ -393,7 +426,7 @@ class HistoryFeatureTest : FeatureTest() {
         // until the next sync, and the version it was put back to was not in the
         // history it came from.
         scene.project("shopping")
-        scene.open(Workspace.PROJECTS, "shopping")
+        scene.open("shopping")
         val ws = scene.workspace!!
         val file = File(ws.repoOf("shopping"), "milk.txt")
         scene.viewModel.refresh()
@@ -470,7 +503,7 @@ class HistoryFeatureTest : FeatureTest() {
         // makes a file dropped in by another app show up at all.
         scene.folder("marker")
         scene.await("the picture to be recorded", 20_000) {
-            scene.appHistoryFiles().contains("pictures/dot.png")
+            scene.trackedFiles().contains("pictures/dot.png")
         }
         scene.viewModel.delete(picture)
         scene.await("the deletion to be recorded", 20_000) { !picture.exists() }
@@ -486,7 +519,7 @@ class HistoryFeatureTest : FeatureTest() {
     @Test
     fun `a deleted file inside a project comes back from that project's history`() {
         scene.project("shopping")
-        scene.open(Workspace.PROJECTS, "shopping")
+        scene.open("shopping")
         val ws = scene.workspace!!
         val file = File(ws.repoOf("shopping"), "milk.txt")
         scene.viewModel.refresh()
@@ -496,7 +529,7 @@ class HistoryFeatureTest : FeatureTest() {
         scene.viewModel.delete(file)
         scene.await("the deletion", 20_000) { !file.exists() }
 
-        scene.open(Workspace.PROJECTS, "shopping", Workspace.REPO)
+        scene.open("shopping")
         val offered = scene.viewModel.deletedIn(scene.viewModel.currentDir!!)
             .firstOrNull { it.name == "milk.txt" }
         assertTrue("the worktree offers it back", offered != null)
@@ -590,104 +623,23 @@ class HistoryFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `a local note beside a project is versioned by the account, not lost`() {
-        // The two histories divide at the worktree folder, and the boundary is not "belongs to a
-        // project". A note kept in the project's own folder sits *beside* the
-        // repository: if both histories assume the other committed it, the change is
-        // committed nowhere and the note has no history at all — which is how this
-        // was found, by a scenario that suddenly could not record a file being made.
-        scene.project("groceries")
-        scene.open(Workspace.PROJECTS, "groceries")
-        val before = scene.headId()
-
-        scene.file("shopping_list.txt", "milk, bread")
-
-        assertTrue(
-            "the account's history took it",
-            scene.headId() != before,
-        )
-        val note = File(scene.workspace!!.accountDir, "projects/groceries/shopping_list.txt")
-        assertTrue("the note is where it was written", note.isFile)
-
-        // And the project's own repository does not hold it: it is not code.
-        val projectRepo = File(scene.workspace!!.accountDir, "projects/groceries/${Workspace.REPO}")
-        org.eclipse.jgit.api.Git.open(projectRepo).use { git ->
-            val status = git.status().call()
-            assertFalse(
-                "the note is not staged into the repository",
-                status.added.any { it.contains("shopping_list") } ||
-                    status.untracked.any { it.contains("shopping_list") },
-            )
+    fun `a local project's history has no remote, and needs no key`() {
+        // The merged shape makes this a statement about a **local project**: its folder is a
+        // repository, its versions are real, and there is nowhere to push to and no key involved.
+        scene.viewModel.createLocalProject("scratch")
+        scene.await("the local project", 30_000) {
+            scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
         }
-    }
-
-    @Test
-    fun `a project's changes go to the project's history, not the account's`() {
-        scene.project("Shopping")
-        scene.await("the project to be recorded") { log().isNotEmpty() }
-        val before = log().size
-
-        scene.open(Workspace.PROJECTS, "Shopping")
-        scene.worktreeFile("milk.txt", "two litres")
-        scene.sync("Shopping")
-
-        assertEquals("the account's history did not grow", before, log().size)
-        assertEquals("the project's did", 2, scene.remoteCommits("Shopping"))
-    }
-
-    @Test
-    fun `the repository folder is never copied into the account's history`() {
-        scene.project("Shopping")
-        scene.open(Workspace.PROJECTS, "Shopping")
-        scene.worktreeFile("milk.txt", "two litres")
-        scene.sync("Shopping")
-        scene.folder("something-else")
+        scene.open("scratch")
+        scene.file("note.txt", "mine")
         scene.await("a commit") { log().isNotEmpty() }
 
-        val tracked = scene.appHistoryFiles()
-        assertFalse(
-            "the worktree is not part of the account's history",
-            tracked.any { it.startsWith("projects/Shopping/${Workspace.REPO}/") },
-        )
-        assertEquals(
-            "and nothing of the repository leaked in beside it",
-            emptyList<String>(),
-            tracked.filter { it.contains("${Workspace.REPO}/") },
-        )
-    }
-
-    @Test
-    fun `a local file beside a project is in the account's history`() {
-        scene.project("Shopping")
-        scene.open(Workspace.PROJECTS, "Shopping")
-        scene.file("diary.txt", "private")
-        scene.await("the local file to be recorded", 20_000) {
-            scene.appHistoryFiles().contains("projects/Shopping/diary.txt")
-        }
-
-        assertTrue(
-            "the local file is tracked",
-            scene.appHistoryFiles().contains("projects/Shopping/diary.txt"),
-        )
-    }
-
-    @Test
-    fun `the history has no remote and needs no key`() {
-        scene.folder("something")
-        scene.await("the first commit") { log().isNotEmpty() }
-
-        // **No early return.** This used to read `if (!isRepository(..)) return`, which
-        // made the test pass in exactly the case it was written to catch: a history that
-        // is not a repository at all has no remotes either. The setup is now asserted,
-        // so the test can only pass by the thing under test being true.
-        assertTrue(
-            "the account keeps a history repository at all",
-            GitService.isRepository(scene.workspace!!.accountDir),
-        )
-        val remotes = org.eclipse.jgit.api.Git.open(scene.workspace!!.accountDir).use {
+        val repo = scene.workspace!!.projectDir("scratch")
+        assertTrue("the project is a repository", GitService.isRepository(repo))
+        val remotes = org.eclipse.jgit.api.Git.open(repo).use {
             it.repository.config.getSubsections("remote")
         }
         assertTrue("no remote is configured", remotes.isEmpty())
-        assertTrue("and it still has its own commits", remotes.isEmpty() && log().isNotEmpty())
+        assertTrue("and it still has its own commits", log().isNotEmpty())
     }
 }

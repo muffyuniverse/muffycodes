@@ -95,7 +95,7 @@ fun EditorScreen(
     // **The agent's record is the app's, and this screen says so rather than showing a Save that
     // will not work.** The two log files are what the conversation was and what the model sees; a
     // person saving over either one leaves an agent whose memory is not evidence of anything, so
-    // the app refuses — the same rule that stops `projects/` and `GitHub/` being renamed. What the
+    // the app refuses — the same rule that stops the record's `agent/` folder being renamed. What the
     // person keeps is Reset (the working context) and deleting the project, which takes the record
     // with it.
     val record = viewModel.isRecord(file)

@@ -87,7 +87,7 @@ class AgentChatScreenTest {
     @Test
     fun `the box draws what was asked, what the agent called, and what it answered`() {
         val door = ScriptedDoor(
-            Reply("", listOf(call("tree", """{"path":"GitHub"}"""))),
+            Reply("", listOf(call("tree", """{"path":""}"""))),
             Reply("", listOf(call("conclude", """{"text":"There is one file."}"""))),
         )
 
@@ -112,7 +112,7 @@ class AgentChatScreenTest {
     @Test
     fun `the record is what the box read, and it holds the app's turn boundaries`() {
         val door = ScriptedDoor(
-            Reply("", listOf(call("tree", """{"path":"GitHub"}"""))),
+            Reply("", listOf(call("tree", """{"path":""}"""))),
             Reply("", listOf(call("conclude", """{"text":"There is one file."}"""))),
         )
 
@@ -120,7 +120,7 @@ class AgentChatScreenTest {
         say("what is in the project")
         awaitTurns(2)
 
-        val log = AgentLog.open(File(scene.viewModel.workspace!!.projectsDir, "groceries"))
+        val log = AgentLog.open(File(scene.viewModel.workspace!!.accountDir, "groceries"))
         val kinds = log.rows().map { it.kind }
         assertTrue("the operator's words are on the record", kinds.contains(AgentLog.TOLD))
         assertTrue("so are the calls", kinds.count { it == AgentLog.CALL } >= 2)
@@ -142,7 +142,7 @@ class AgentChatScreenTest {
     @Test
     fun `the newest turn is where the box starts, and one press shows the one before`() {
         val door = ScriptedDoor(
-            Reply("", listOf(call("tree", """{"path":"GitHub"}"""))),
+            Reply("", listOf(call("tree", """{"path":""}"""))),
             Reply("", listOf(call("conclude", """{"text":"There is one file."}"""))),
         )
 
@@ -226,7 +226,7 @@ class AgentChatScreenTest {
         // conversation that grows the column — pushes the composer off the bottom, and the one control
         // a person needs is the one that disappears first. Forty calls is what an afternoon of work
         // looks like, and the Send button is still there.
-        val calls = (1..40).map { call("tree", """{"path":"GitHub/$it"}""") } + call("conclude", """{"text":"Done."}""")
+        val calls = (1..40).map { call("tree", """{"path":"$it"}""") } + call("conclude", """{"text":"Done."}""")
         chat(ScriptedDoor(Reply("", calls)))
 
         say("Look at everything.")

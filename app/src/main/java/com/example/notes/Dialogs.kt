@@ -290,6 +290,7 @@ fun AddProjectDialog(
     onDismiss: () -> Unit,
     onNewProject: () -> Unit,
     onPick: (Repo) -> Unit,
+    onNewLocalProject: () -> Unit = {},
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -302,7 +303,19 @@ fun AddProjectDialog(
                         .clickable(onClick = onNewProject)
                         .padding(vertical = 12.dp),
                 ) {
-                    Text("＋ New project…", style = MaterialTheme.typography.bodyLarge)
+                    Text("＋ New project on GitHub…", style = MaterialTheme.typography.bodyLarge)
+                }
+                // **The second kind of project, and the first one a person may want.** Work that
+                // does not belong to any repository still deserves versions and an agent; this is
+                // the folder that stays on the phone. It is offered above the list of GitHub
+                // repositories because it needs nothing from GitHub — not even a connection.
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onNewLocalProject)
+                        .padding(vertical = 12.dp),
+                ) {
+                    Text("＋ New local project…", style = MaterialTheme.typography.bodyLarge)
                 }
                 HorizontalDivider()
                 when {
@@ -357,13 +370,15 @@ fun NewProjectDialog(
     licences: List<Licence>,
     onDismiss: () -> Unit,
     onCreate: (name: String, licence: String) -> Unit,
+    /** **Local**: no repository on GitHub, no licence to seed, nothing to push to. */
+    local: Boolean = false,
 ) {
     var name by remember { mutableStateOf("") }
     var licence by remember { mutableStateOf("gpl-3.0") }
     var showLicences by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("New project") },
+        title = { Text(if (local) "New local project" else "New project") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
@@ -372,7 +387,19 @@ fun NewProjectDialog(
                     label = { Text("Name") },
                     singleLine = true,
                 )
-                Row(
+                // **No licence row for a local project**, because the licence is a file the
+                // repository on GitHub is seeded with. A folder that never leaves the phone has
+                // nothing to seed, and offering the choice would be asking a question whose answer
+                // changes nothing.
+                if (local) {
+                    Text(
+                        "This project stays on this phone. Its files keep their versions and the " +
+                            "agent can work in it, and nothing is ever sent to GitHub.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (!local) Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { showLicences = !showLicences },
@@ -380,7 +407,7 @@ fun NewProjectDialog(
                 ) {
                     Text("Licence: ${licence.ifBlank { "none" }}")
                 }
-                if (showLicences && licences.isNotEmpty()) {
+                if (!local && showLicences && licences.isNotEmpty()) {
                     Column(modifier = Modifier.heightIn(max = 200.dp)) {
                         LazyColumn {
                             items(licences) { item ->
@@ -518,8 +545,8 @@ fun PlaceDialog(
     start: java.io.File = root,
     /**
      * Whether a folder may be *chosen*. A folder that may not be chosen can still be
-     * looked inside — `projects/` holds every project's repository, and walking
-     * through it to reach one is the whole point of a browser.
+     * looked inside — a project holds everything, and walking through it to reach a
+     * folder inside is the whole point of a browser.
      */
     canChoose: (java.io.File) -> Boolean = { true },
     onDismiss: () -> Unit,

@@ -101,7 +101,7 @@ class RetentionFeatureTest : FeatureTest() {
     @Test
     fun `a project's history is shortened after the next sync`() {
         scene.project("Shopping")
-        scene.open(Workspace.PROJECTS, "Shopping")
+        scene.open("Shopping")
         repeat(5) { round ->
             scene.worktreeFile("file-$round.txt", "round $round")
             scene.sync("Shopping")
@@ -122,7 +122,7 @@ class RetentionFeatureTest : FeatureTest() {
     @Test
     fun `a project's files are untouched when its history is shortened`() {
         scene.project("Shopping")
-        scene.open(Workspace.PROJECTS, "Shopping")
+        scene.open("Shopping")
         repeat(4) { round ->
             scene.worktreeFile("file-$round.txt", "round $round")
             scene.sync("Shopping")

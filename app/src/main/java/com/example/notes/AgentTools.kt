@@ -25,9 +25,15 @@ class AgentTools(
 ) {
 
     /** The project's own folder: what the agent stands in. */
-    val projectDir: File get() = File(ws.projectsDir, project)
+    val projectDir: File get() = ws.projectDir(project)
 
-    /** The part of it that lives on GitHub. */
+    /**
+     * The part of it that lives on GitHub — **which is the project's folder itself.**
+     *
+     * There used to be two of these: the project's folder, and a `GitHub/` worktree inside it where
+     * the tracked files lived. The merge means they are one, so a tool that names "the files that
+     * sync" and a tool that names "the project" are naming the same folder.
+     */
     val worktree: File get() = ws.repoOf(project)
 
     companion object {
@@ -101,8 +107,8 @@ class AgentTools(
             ),
             spec(
                 "clone",
-                "Clone a GitHub repository into this project's GitHub folder. Refused when " +
-                    "there are changes that would be lost.",
+                "Clone a GitHub repository into this project's folder. Refused when there are " +
+                    "changes that would be lost.",
                 """{"url":"https://github.com/owner/repo"}""",
             ),
             spec(
@@ -174,7 +180,7 @@ class AgentTools(
     }
 
     private fun tree(args: JSONObject): String {
-        val root = resolve(args.optString("path", "GitHub"))
+        val root = resolve(args.optString("path", ""))
             .getOrElse { return refusal(it.message ?: "that path cannot be read") }
         if (!root.exists()) return refusal("There is nothing at " + rel(root))
         if (!root.isDirectory) return refusal("${rel(root)} is a file, not a folder")
@@ -438,7 +444,7 @@ class AgentTools(
             .getOrElse { return refusal(it.message ?: "that path cannot be moved") }
         mayWrite(file)?.let { return refusal(it) }
         if (!file.exists()) return refusal("There is nothing at ${rel(file)}")
-        val into = resolve(args.optString("into", file.parentFile?.let { rel(it) } ?: "GitHub"))
+        val into = resolve(args.optString("into", file.parentFile?.let { rel(it) } ?: ""))
             .getOrElse { return refusal(it.message ?: "that folder cannot be used") }
         if (!into.isDirectory) return refusal("${rel(into)} is not a folder")
         mayWrite(File(into, file.name))?.let { return refusal(it) }
@@ -472,7 +478,7 @@ class AgentTools(
             )
         }
         val result = git.cloneInto(project, url)
-        return if (result.success) success("cloned into GitHub/") else refusal(result.message)
+        return if (result.success) success("cloned into this project's folder") else refusal(result.message)
     }
 
     private fun history(args: JSONObject): String {
@@ -595,15 +601,23 @@ class AgentTools(
         ws.isRecord(file) ->
             "${rel(file)} is the record of what happened. You may read it and not change it"
         insideWorktreeOrAgent(file) -> null
-        else -> "You may only write inside GitHub/ or agent/, and ${rel(file)} is neither"
+        else -> "You may only write inside this project, and ${rel(file)} is outside it"
     }
 
 
-    /** True for the two places the agent may write: `GitHub/` and `agent/`. */
+    /**
+     * True when [file] is somewhere in the project the agent may write.
+     *
+     * **Everything in the project is writable except the record's own folder.** The app's
+     * `.gitignore` keeps `agent/` out of the repository, and the record inside it is [mayWrite]'s
+     * first refusal. Dot-names were never the agent's and still are not: `.git` is a folder whose
+     * contents would destroy the repository, and it is refused here rather than by each tool.
+     */
     private fun insideWorktreeOrAgent(file: File): Boolean {
         val path = rel(file)
-        return path == "GitHub" || path.startsWith("GitHub/") ||
-            path == "agent" || path.startsWith("agent/")
+        if (path.isEmpty()) return true
+        val first = path.substringBefore('/')
+        return !first.startsWith(".") && first != AgentLog.DIR
     }
 
     /** A version's time, in the one shape a row reads in. */

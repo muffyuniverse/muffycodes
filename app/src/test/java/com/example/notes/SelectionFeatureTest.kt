@@ -65,7 +65,7 @@ class SelectionFeatureTest : FeatureTest() {
         scene.file("milk.txt", "two litres")
         scene.file("bread.txt", "one loaf")
 
-        scene.open(Workspace.PROJECTS, "groceries", Workspace.REPO)
+        scene.open("groceries")
         val worktree = scene.viewModel.currentDir!!
         scene.open()
         chooseAll("milk.txt", "bread.txt")

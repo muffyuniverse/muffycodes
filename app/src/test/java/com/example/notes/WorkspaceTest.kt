@@ -24,7 +24,7 @@ class WorkspaceTest {
         root = File(System.getProperty("java.io.tmpdir"), "workspace-${System.nanoTime()}")
         workspace = Workspace(File(root, "muffyuniverse"))
         workspace.accountDir.mkdirs()
-        workspace.projectsDir.mkdirs()
+        workspace.accountDir.mkdirs()
     }
 
     @After
@@ -38,7 +38,7 @@ class WorkspaceTest {
     private val FIRST_ROW = "14:02:11.410    1 TOLD    in  operator  task\n"
 
     private fun record(): File {
-        val dir = File(workspace.projectsDir, "shopping")
+        val dir = File(workspace.accountDir, "shopping")
         val agent = File(dir, AgentLog.DIR)
         agent.mkdirs()
         File(dir, "project_prompt.txt").writeText("how to work")
@@ -59,7 +59,7 @@ class WorkspaceTest {
         assertFalse(
             "a file with the record's name somewhere else is not the record",
             run {
-                val elsewhere = File(workspace.projectsDir, "elsewhere")
+                val elsewhere = File(workspace.accountDir, "elsewhere")
                 elsewhere.mkdirs()
                 workspace.isRecord(File(elsewhere, AgentLog.SESSION).apply { writeText("x") })
             },
@@ -139,16 +139,17 @@ class WorkspaceTest {
     }
 
     @Test
-    fun theStructuralFoldersCannotBeTouched() {
-        val projects = workspace.projectsDir
-        assertTrue(workspace.isStructural(projects))
-        val project = File(projects, "Shopping").apply { mkdirs() }
-        val repo = File(project, Workspace.REPO).apply { mkdirs() }
-        assertTrue(workspace.isStructural(repo))
-        assertFalse(workspace.isStructural(project))
-        assertTrue(workspace.delete(projects).isFailure)
-        assertTrue(workspace.rename(projects, "other").isFailure)
-        assertTrue(projects.isDirectory)
+    fun theRecordsFolderCannotBeTouched() {
+        // **One thing is structural now.** The two folders the app used to own — `projects/` at the
+        // root and a repository folder inside each project — are gone, because the project *is* the
+        // folder. What is left is the record's own `agent/`, and it is refused the same way.
+        val project = workspace.createProjectFolders("Shopping").getOrThrow()
+        val records = File(project, AgentLog.DIR).apply { mkdirs() }
+        assertTrue("the record's folder is the app's", workspace.isStructural(records))
+        assertFalse("a project is not", workspace.isStructural(project))
+        assertTrue("and it cannot be deleted", workspace.delete(records).isFailure)
+        assertTrue("nor renamed", workspace.rename(records, "other").isFailure)
+        assertTrue("and it is still there", records.isDirectory)
     }
 
     @Test
@@ -161,29 +162,28 @@ class WorkspaceTest {
     }
 
     @Test
-    fun aFileCanBeMovedBesideTheWorktreeAndBackIn() {
+    fun aFileCanBeMovedBetweenTheFilesAndAFolderOfAProject() {
+        // The move that used to cross the worktree boundary — out of the repository and back — is
+        // now an ordinary move between two folders of one repository, and it must still work.
         val project = workspace.createProjectFolders("Shopping").getOrThrow()
-        val repo = File(project, Workspace.REPO)
-        val file = File(repo, "Milk.txt").apply { writeText("milk") }
+        val letters = File(project, "letters").apply { mkdirs() }
+        val file = File(project, "Milk.txt").apply { writeText("milk") }
 
-        // Out of the worktree: it becomes local, and GitHub stops hearing about it.
-        assertTrue(workspace.move(file, project).isSuccess)
+        assertTrue(workspace.move(file, letters).isSuccess)
+        assertTrue(File(letters, "Milk.txt").isFile)
+        assertFalse(File(project, "Milk.txt").exists())
+
+        assertTrue(workspace.move(File(letters, "Milk.txt"), project).isSuccess)
         assertTrue(File(project, "Milk.txt").isFile)
-        assertFalse(File(repo, "Milk.txt").exists())
-
-        // And back in.
-        assertTrue(workspace.move(File(project, "Milk.txt"), repo).isSuccess)
-        assertTrue(File(repo, "Milk.txt").isFile)
     }
 
     @Test
     fun theProjectOfAPathIsFound() {
         val project = workspace.createProjectFolders("Shopping").getOrThrow()
-        val repo = File(project, Workspace.REPO)
-        val file = File(repo, "Milk.txt")
+        val file = File(project, "Milk.txt")
         assertEquals("Shopping", workspace.projectOf(file))
-        assertEquals("Shopping", workspace.projectAt(listOf(Workspace.PROJECTS, "Shopping", Workspace.REPO)))
-        assertNull(workspace.projectAt(listOf("projects")))
+        assertEquals("one level, which is the whole of the merge", "Shopping", workspace.projectAt(listOf("Shopping")))
+        assertNull(workspace.projectAt(listOf("Milk.txt")))
         assertNull(workspace.projectAt(emptyList()))
     }
 
@@ -223,42 +223,39 @@ class WorkspaceTest {
     }
 
     @Test
-    fun anOldRepoFolderBecomesGitHubAndKeepsItsFiles() {
-        // An installation from before the rename: `projects/testrepo/repo/`, with a file
-        // and a lock on it stored by the old path.
-        val worktree = File(workspace.projectsDir, "testrepo/repo")
-        worktree.mkdirs()
-        File(worktree, "milk.txt").writeText("two litres")
-        File(worktree, ".git").mkdirs()
-        workspace.setLocked(setOf("projects/testrepo/repo/milk.txt"))
+    fun aProjectIsItsOwnRepositoryAndItsFilesAreTracked() {
+        // The merge, stated as a test: the folder a person sees *is* the repository, and the two
+        // lines the app keeps are already in its ignore file — so nothing of the app's is ever
+        // committed, and nothing of theirs is excluded by accident.
+        val project = workspace.createProjectFolders("Shopping").getOrThrow()
 
-        workspace.ensure()
-
-        val renamed = File(workspace.projectsDir, "testrepo/${Workspace.REPO}")
-        assertFalse("the old folder is gone", worktree.exists())
-        assertTrue("the new one is there", renamed.isDirectory)
-        assertEquals("with its files", "two litres", File(renamed, "milk.txt").readText())
-        assertTrue("and its repository", File(renamed, ".git").isDirectory)
+        assertEquals("the project is the repository folder", project, workspace.repoOf("Shopping"))
+        assertEquals("and it is at the account root", workspace.accountDir, project.parentFile)
         assertEquals(
-            "and the lock followed the file, rather than silently lifting",
-            setOf("projects/testrepo/${Workspace.REPO}/milk.txt"),
-            workspace.locked(),
+            "with the app's own two lines, and nothing else",
+            listOf("agent/", ".muffy/"),
+            File(project, ".gitignore").readLines().filter { it.isNotBlank() && !it.startsWith("#") },
         )
     }
 
     @Test
-    fun aProjectWithBothFoldersIsLeftAlone() {
-        // A half-finished migration, or a person's own `repo` folder beside the worktree:
-        // nothing is renamed over, because the destination already exists.
-        File(workspace.projectsDir, "testrepo/${Workspace.REPO}").mkdirs()
-        val old = File(workspace.projectsDir, "testrepo/repo")
-        old.mkdirs()
-        File(old, "keep.txt").writeText("mine")
+    fun aPersonsIgnoreFileKeepsItsOwnLines() {
+        // The app owns two lines of a file the person owns. A rewrite that dropped theirs would
+        // silently un-ignore a build directory, which is a change nobody asked for.
+        val project = workspace.createProjectFolders("Shopping").getOrThrow()
+        val ignore = File(project, ".gitignore")
+        ignore.writeText("build/\n*.apk\n")
 
-        workspace.ensure()
+        workspace.ensureIgnore(project)
 
-        assertTrue("the old folder stays where it is", old.isDirectory)
-        assertEquals("and so does its file", "mine", File(old, "keep.txt").readText())
+        val lines = ignore.readLines()
+        assertEquals("theirs first", "build/", lines[0])
+        assertEquals("and all of it", "*.apk", lines[1])
+        assertTrue("the app's lines were added", "agent/" in lines)
+        // A second pass is a no-op, so a sync does not show the ignore file changing forever.
+        val once = ignore.readText()
+        workspace.ensureIgnore(project)
+        assertEquals("asking twice changes nothing", once, ignore.readText())
     }
 
     @Test

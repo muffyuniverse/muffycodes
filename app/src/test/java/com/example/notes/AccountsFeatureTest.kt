@@ -86,14 +86,13 @@ class AccountsFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `signing in gives the account its projects folder straight away`() {
+    fun `signing in gives the account its own folder, and the list starts empty`() {
+        // **The account root is the projects list**, so signing in shows an empty list rather than
+        // a `projects/` folder to walk into. There is nothing between a person and their work.
         scene.signedIn()
 
-        assertTrue(
-            "projects is there",
-            File(scene.workspace!!.accountDir, Workspace.PROJECTS).isDirectory,
-        )
-        assertEquals(listOf("projects"), scene.names())
+        assertTrue("the account's folder is there", scene.workspace!!.accountDir.isDirectory)
+        assertEquals("and no project yet", emptyList<String>(), scene.names())
     }
 
     @Test

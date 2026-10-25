@@ -156,70 +156,48 @@ class Scenario(
     }
 
     /**
-     * Waits until the account's history has recorded one more thing.
+     * Waits until [file]'s project has recorded one more thing.
      *
-     * commits are queued, and a queue coalesces: six folders made in the same
-     * millisecond are one version, because the first queued commit sees all six.
-     * That is the app doing what it should — a burst of changes is one version —
-     * so a test that wants three versions has to let each one land first, exactly
-     * as a person's pauses would.
-     */
-    private fun awaitRecorded(before: String?, what: String) {
-        await("the history to record $what", 20_000) { headId() != before }
-    }
-
-    /**
-     * Waits for the history that **owns** [file] to have recorded one more thing.
+     * **One history answers**, so this is the same question for every file: the project the file is
+     * in owns its versions, and a file outside any project is the app's own and has no history.
      *
-     * A file inside a project's `GitHub/` is versioned by that project, and the account's own
-     * history then has nothing to record — so a harness that always watched the account's head
-     * waited twenty seconds for a version the app had correctly written somewhere else. The app
-     * decides which history by where the file is; the harness has to ask the same question.
+     * commits are queued, and a queue coalesces: six folders made in the same millisecond are one
+     * version, because the first queued commit sees all six. That is the app doing what it should —
+     * a burst of changes is one version — so a test that wants three versions has to let each one
+     * land first, exactly as a person's pauses would.
      */
     private fun awaitRecordedFor(file: File, before: String?, what: String) {
-        val project = projectOf(file)
-        if (project == null) {
-            awaitRecorded(before, what)
-            return
-        }
+        val project = projectOf(file) ?: return
         await("the project's history to record $what", 20_000) { projectHead(project) != before }
     }
 
-    /** The project whose worktree holds [file], or null when the account's history owns it. */
-    private fun projectOf(file: File): String? {
-        val ws = workspace ?: return null
-        return if (ws.inWorktree(file)) ws.projectOf(file) else null
-    }
+    /** The project whose folder holds [file], or null when it is not in one. */
+    private fun projectOf(file: File): String? = workspace?.projectOf(file)
 
-    /**
-     * The head of whichever history owns [file].
-     *
-     * The two cases are kept apart on purpose: `?:` on the whole chain would fall back to the
-     * account's head when a project simply has no commits yet — which is the bug this pair of
-     * helpers exists to avoid, restated one line up.
-     */
+    /** The newest commit of the repository that owns [file], or null when there is none. */
     private fun headOf(file: File): String? {
-        val project = projectOf(file) ?: return headId()
+        val project = projectOf(file) ?: return null
         return projectHead(project)
     }
 
-    /** The newest commit of a project's own history, or null when there is none. */
-    private fun projectHead(project: String): String? =
+    /** The newest commit of a project's repository, or null when there is none. */
+    fun projectHead(project: String): String? =
         ProjectGit(workspace!!, { null }, { AppViewModel.DEFAULT_AUTHOR })
             .log(project, limit = 1)
             .firstOrNull()
             ?.id
 
-    /** The newest commit of the account's own history, or null when there is none. */
-    fun headId(): String? = accountHistory().head()
+    /** The newest commit of the open project's repository, or null when there is none. */
+    fun headId(): String? =
+        (viewModel.currentProject ?: viewModel.projectNames.firstOrNull())?.let { projectHead(it) }
 
-    /** The account's own history, as the app sees it. */
-    fun accountHistory(): AppHistory =
-        AppHistory(workspace!!.accountDir) { AppViewModel.DEFAULT_AUTHOR }
+    /** A project's repository, read the way a test reads a history. */
+    fun repo(project: String): RepoHistory = RepoHistory(workspace!!.projectDir(project))
 
-    /** How many versions the account's own history holds. */
+    /** How many versions the open project's history holds. */
     fun historySize(): Int = try {
-        accountHistory().log(null).size
+        val project = viewModel.currentProject ?: viewModel.projectNames.firstOrNull()
+        project?.let { repo(it).log(null).size } ?: 0
     } catch (e: Exception) {
         0
     }
@@ -317,24 +295,19 @@ class Scenario(
     fun newestVersionText(file: File): String? {
         val ws = workspace ?: return null
         val path = ws.relative(file) ?: return null
-        return if (ws.inWorktree(file)) {
-            val project = ws.projectOf(file) ?: return null
-            try {
-                Git.open(ws.repoOf(project)).use { git ->
-                    git.repository.resolve("HEAD")?.let { head ->
-                        GitService.fileAt(
-                            git.repository,
-                            path.drop(3).joinToString("/"),
-                            head.name,
-                        )
-                    }
+        val project = ws.projectOf(file) ?: return null
+        return try {
+            Git.open(ws.repoOf(project)).use { git ->
+                git.repository.resolve("HEAD")?.let { head ->
+                    GitService.fileAt(
+                        git.repository,
+                        path.drop(1).joinToString("/"),
+                        head.name,
+                    )
                 }
-            } catch (e: Exception) {
-                null
             }
-        } else {
-            val key = ws.pathString(path)
-            accountHistory().head()?.let { head -> accountHistory().fileAt(key, head) }
+        } catch (e: Exception) {
+            null
         }
     }
 
@@ -373,7 +346,8 @@ class Scenario(
 
     /** The versions of a folder, newest first, each with what was inside it. */
     fun versionsOfFolder(name: String): List<Pair<GitService.CommitInfo, String?>> {
-        val folder = File(workspace!!.accountDir, name)
+        val project = viewModel.currentProject ?: error("not inside a project")
+        val folder = File(workspace!!.projectDir(project), name)
         viewModel.openHistory(folder)
         return viewModel.versions()
     }
@@ -388,8 +362,16 @@ class Scenario(
         viewModel.closeHistory()
     }
 
-    /** Every path the account's own history tracks, read from its newest version. */
-    fun appHistoryFiles(): List<String> = accountHistory().tracked()
+    /**
+     * Every path the open project's newest version holds.
+     *
+     * The account's own history is gone — the projects are the folders, so everything a test wants
+     * to ask about is in one of them. Paths are project-relative, which is what git records.
+     */
+    fun trackedFiles(): List<String> =
+        (viewModel.currentProject ?: viewModel.projectNames.firstOrNull())
+            ?.let { repo(it).tracked() }
+            .orEmpty()
 
     /** The account's workspace, which every scenario has once it is signed in. */
     val workspace: Workspace? get() = viewModel.workspace
@@ -520,15 +502,8 @@ class Scenario(
                 appendLine("      the repository could not be read: ${e.message}")
             }
         }
-        try {
-            val hist = accountHistory()
-            appendLine("    history: ${hist.log(null, 6).joinToString { it.message.take(30) }}")
-            appendLine("    history error: ${hist.lastError}")
-            appendLine("    history holds: ${hist.tracked().take(12)}")
-            appendLine("    history error after reading: ${hist.lastError}")
-        } catch (e: Exception) {
-            appendLine("    history could not be read: ${e.message}")
-        }
+        // The commits of each project are printed above, from its own repository, so there is no
+        // second history left to print: what a person needs to see is already there.
     }
 
     @After

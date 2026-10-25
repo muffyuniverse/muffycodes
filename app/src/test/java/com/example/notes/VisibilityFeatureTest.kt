@@ -17,11 +17,13 @@ class VisibilityFeatureTest : FeatureTest() {
 
     @Test
     fun `the root shows projects and the files a person made, and nothing the app made`() {
-        // Written straight to disk, the way another app or a cable would.
+        // Written straight to disk, the way another app or a cable would. The root is the projects
+        // list now, so what it shows is exactly what is on disk there.
         File(scene.workspace!!.accountDir, "notes.txt").writeText("mine")
+        File(scene.workspace!!.accountDir, "Shopping").mkdirs()
         scene.viewModel.refresh()
 
-        assertEquals(listOf("projects", "notes.txt"), scene.names())
+        assertEquals(listOf("Shopping", "notes.txt"), scene.names())
     }
 
     @Test
@@ -34,14 +36,16 @@ class VisibilityFeatureTest : FeatureTest() {
         File(dir, "shown.txt").writeText("c")
         scene.viewModel.refresh()
 
-        assertEquals(listOf("projects", "shown.txt"), scene.names())
+        assertEquals(listOf("shown.txt"), scene.names())
     }
 
     @Test
-    fun `projects is a folder of the app's, and cannot be renamed, moved or deleted`() {
-        val projects = File(scene.workspace!!.accountDir, Workspace.PROJECTS)
+    fun `the record's folder is the app's, and cannot be renamed, moved or deleted`() {
+        val project = File(scene.workspace!!.accountDir, "Shopping").apply { mkdirs() }
+        val records = File(project, AgentLog.DIR).apply { mkdirs() }
 
-        assertTrue("projects is structural", scene.workspace!!.isStructural(projects))
+        assertTrue("agent/ is structural", scene.workspace!!.isStructural(records))
+        assertFalse("a project is not", scene.workspace!!.isStructural(project))
         assertFalse("a person's file is not", scene.workspace!!.isStructural(
             File(scene.workspace!!.accountDir, "notes.txt")
         ))
@@ -65,10 +69,10 @@ class VisibilityFeatureTest : FeatureTest() {
     @Test
     fun `everything else inside a project is a file a person made`() {
         scene.project("Shopping")
-        scene.open(Workspace.PROJECTS, "Shopping")
+        scene.open("Shopping")
         scene.folder("ideas")
 
-        val project = File(scene.workspace!!.projectsDir, "Shopping")
+        val project = File(scene.workspace!!.accountDir, "Shopping")
         assertTrue("the project's own folder", scene.workspace!!.isProjectFolder(project))
         assertFalse("a folder inside it is not", scene.workspace!!.isProjectFolder(
             File(project, "ideas")
@@ -82,7 +86,7 @@ class VisibilityFeatureTest : FeatureTest() {
         scene.file("apple.txt")
 
         // Called for in lowercase, because that is how the app writes a name it makes.
-        assertEquals(listOf("projects", "zebra", "apple.txt", "milk.txt"), scene.names())
+        assertEquals(listOf("zebra", "apple.txt", "milk.txt"), scene.names())
     }
 
     @Test
@@ -97,21 +101,22 @@ class VisibilityFeatureTest : FeatureTest() {
 
     @Test
     fun `a structural folder cannot be renamed or deleted either`() {
-        val projects = File(scene.workspace!!.accountDir, Workspace.PROJECTS)
+        val project = File(scene.workspace!!.accountDir, "Shopping").apply { mkdirs() }
+        val records = File(project, AgentLog.DIR).apply { mkdirs() }
 
-        assertTrue("renaming is refused", scene.viewModel.rename(projects, "elsewhere").not())
-        assertTrue("deleting is refused", scene.viewModel.delete(projects).not())
-        assertTrue("it is still there", projects.isDirectory)
+        assertTrue("renaming is refused", scene.viewModel.rename(records, "elsewhere").not())
+        assertTrue("deleting is refused", scene.viewModel.delete(records).not())
+        assertTrue("it is still there", records.isDirectory)
     }
 
     @Test
     fun `search covers a project whole tree, however deep`() {
         scene.project("Shopping")
-        scene.open(Workspace.PROJECTS, "Shopping")
+        scene.open("Shopping")
         scene.folder("letters")
-        scene.open(Workspace.PROJECTS, "Shopping", "letters")
+        scene.open("Shopping", "letters")
         scene.folder("2026")
-        scene.open(Workspace.PROJECTS, "Shopping", "letters", "2026")
+        scene.open("Shopping", "letters", "2026")
         scene.file("note.txt", "an appointment")
 
         scene.viewModel.query = "appointment"
@@ -125,7 +130,7 @@ class VisibilityFeatureTest : FeatureTest() {
     @Test
     fun `search offers nothing the app owns, and does find what it should`() {
         scene.project("Shopping")
-        scene.open(Workspace.PROJECTS, "Shopping")
+        scene.open("Shopping")
         scene.file("README-ish.txt", "index")
 
         scene.workspace!!.write(File(scene.workspace!!.repoOf("Shopping"), "muffy.txt"), "muffy")
@@ -156,17 +161,17 @@ class VisibilityFeatureTest : FeatureTest() {
     fun `search is scoped to the project that is open, because the list is the index`() {
         scene.project("Shopping")
         scene.folder("letters")
-        scene.open(Workspace.PROJECTS, "Shopping", "letters")
+        scene.open("Shopping", "letters")
         scene.file("note.txt", "an appointment")
-        scene.open(Workspace.PROJECTS, "Shopping")
+        scene.open("Shopping")
 
         // A second project, with a file that would match the same word. The test's
         // name is about *scoping*, and half of scoping is what must not be found.
         scene.project("Work")
-        scene.open(Workspace.PROJECTS, "Work")
+        scene.open("Work")
         scene.file("appointment-elsewhere.txt", "appointment")
 
-        scene.open(Workspace.PROJECTS, "Shopping")
+        scene.open("Shopping")
         scene.viewModel.query = "appointment"
 
         assertTrue(
@@ -192,7 +197,9 @@ class VisibilityFeatureTest : FeatureTest() {
         val ws = scene.workspace!!
         val target = scene.file("move_me.txt")
 
-        assertTrue("projects is structural", ws.isStructural(File(ws.accountDir, "projects")))
+        val project = File(ws.accountDir, "Shopping").apply { mkdirs() }
+        val records = File(project, AgentLog.DIR).apply { mkdirs() }
+        assertTrue("agent/ is structural", ws.isStructural(records))
         assertFalse("an ordinary file is not", ws.isStructural(target))
 
         val offered = (target.parentFile!!.listFiles() ?: emptyArray())
@@ -200,8 +207,8 @@ class VisibilityFeatureTest : FeatureTest() {
             .filterNot { ws.isHidden(it.name) || ws.isStructural(it) }
             .map { it.name }
 
-        assertFalse("projects/ is not a destination", offered.contains("projects"))
         assertFalse(".muffy is not a destination", offered.contains(".muffy"))
+        assertFalse("nor is the record's folder", offered.contains(AgentLog.DIR))
     }
 
     @Test
@@ -209,9 +216,12 @@ class VisibilityFeatureTest : FeatureTest() {
         // The picker is one guard; the command is the other. §3 promises both.
         val ws = scene.workspace!!
         val target = scene.file("move_me.txt")
-        val projects = File(ws.accountDir, "projects")
+        // The app's own folder inside a project: the record's. There is nothing structural at the
+        // root any more, because the root is the person's list of projects.
+        val project = File(ws.accountDir, "Shopping").apply { mkdirs() }
+        val records = File(project, AgentLog.DIR).apply { mkdirs() }
 
-        val refused = scene.viewModel.move(target, projects)
+        val refused = scene.viewModel.move(target, records)
 
         assertFalse("the command refused", refused)
         assertTrue("and the file is where it was", target.exists())

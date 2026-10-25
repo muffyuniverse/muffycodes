@@ -83,7 +83,7 @@ class AgentRunner(
      */
     private fun poll(session: AgentSession, now: Long) {
         val project = session.project
-        if (!File(ws.projectsDir, project).isDirectory) {
+        if (!ws.projectDir(project).isDirectory) {
             // A project that is gone takes its session with it, rather than polling a folder that
             // does not exist for ever.
             Trace.note("agent-gone", project)
@@ -99,7 +99,7 @@ class AgentRunner(
         val missed = session.missedBy(now)
         if (missed > 0) {
             try {
-                AgentLog.open(File(ws.projectsDir, project)).bookkeeping(
+                AgentLog.open(ws.projectDir(project)).bookkeeping(
                     AgentLog.NOTE,
                     "gap",
                     "the phone did not run the agent for ${howLong(missed)}",
@@ -120,7 +120,7 @@ class AgentRunner(
         val doorFor = door(active)
         worker.execute {
             val end = try {
-                val log = AgentLog.open(File(ws.projectsDir, project))
+                val log = AgentLog.open(ws.projectDir(project))
                 val agent = Agent(
                     ws.accountDir,
                     project,
@@ -154,7 +154,7 @@ class AgentRunner(
             var shown = rows
             if (session.retries > 0 && how !is Agent.End.Stopped) {
                 try {
-                    val record = AgentLog.open(File(ws.projectsDir, project))
+                    val record = AgentLog.open(ws.projectDir(project))
                     record.bookkeeping(
                         AgentLog.NOTE,
                         "retry",

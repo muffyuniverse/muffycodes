@@ -34,7 +34,7 @@ class ProjectGitTest {
         root = File(System.getProperty("java.io.tmpdir"), "projectgit-${System.nanoTime()}")
         workspace = Workspace(File(root, "muffyuniverse"))
         workspace.accountDir.mkdirs()
-        workspace.projectsDir.mkdirs()
+        workspace.accountDir.mkdirs()
 
         // A bare repository is what a push target really is.
         bare = File(root, "remote.git")
@@ -488,7 +488,7 @@ class ProjectGitTest {
         git.init("Shopping").getOrThrow()
         git.open("Shopping")?.use { GitService.setRemoteUrl(it, bare.absolutePath) }
 
-        File(File(workspace.projectsDir, "Shopping"), "ideas.txt").writeText("mine")
+        File(File(workspace.accountDir, "Shopping"), "ideas.txt").writeText("mine")
         assertTrue(git.sync("Shopping").success)
 
         // Local files beside the worktree are the account's history, not git's.

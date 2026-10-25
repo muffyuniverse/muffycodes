@@ -61,7 +61,7 @@ class AgentSessionFeatureTest : FeatureTest() {
     }
 
     private fun record(project: String): AgentLog =
-        AgentLog.open(File(scene.viewModel.workspace!!.projectsDir, project))
+        AgentLog.open(File(scene.viewModel.workspace!!.accountDir, project))
 
     /** Runs one tick at the session's own due time, and waits for the poll it may start. */
     /**
@@ -429,7 +429,7 @@ class AgentSessionFeatureTest : FeatureTest() {
         scene.await("the first turn") { door.asked.size == 1 }
         scene.await("the agent to be quiet") { !scene.viewModel.chatWorking }
 
-        File(scene.viewModel.workspace!!.projectsDir, "groceries/project_prompt.txt")
+        File(scene.viewModel.workspace!!.accountDir, "groceries/project_prompt.txt")
             .writeText("Always answer in French.")
         scene.viewModel.sendChat("second")
         scene.await("the second turn") { door.asked.size == 2 }
@@ -448,7 +448,7 @@ class AgentSessionFeatureTest : FeatureTest() {
     fun `resetting clears the working context, keeps the evidence, and says so`() {
         listening()
         val door = ScriptedDoor(
-            Reply("", listOf(Call("c1", "tree", """{"path":"GitHub"}"""))),
+            Reply("", listOf(Call("c1", "tree", """{"path":""}"""))),
             Reply("", listOf(Call("c2", "conclude", """{"text":"there is one file"}"""))),
             Reply("", listOf(Call("c3", "conclude", """{"text":"done again"}"""))),
         )
@@ -629,7 +629,7 @@ class AgentSessionFeatureTest : FeatureTest() {
         listening()
         scene.project("groceries")
         scene.viewModel.startAgent("groceries")
-        val project = File(scene.viewModel.workspace!!.projectsDir, "groceries")
+        val project = File(scene.viewModel.workspace!!.accountDir, "groceries")
         val due = scene.viewModel.sessionOf("groceries")!!.nextPollAt
 
         project.deleteRecursively()

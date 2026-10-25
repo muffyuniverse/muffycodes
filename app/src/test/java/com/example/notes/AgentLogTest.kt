@@ -63,8 +63,8 @@ class AgentLogTest {
         // **One file, so there is nothing to keep in step.** Every event is one row with one id,
         // and being in the context is a column rather than a second copy of the same line.
         log.told("rename milk.txt to dairy.txt")
-        log.call("tree", """{"path":"GitHub"}""")
-        log.got("tree", "0\nGitHub/\nGitHub/milk.txt")
+        log.call("tree", """{"path":""}""")
+        log.got("tree", "0\n\nmilk.txt")
 
         val rows = log.rows()
         assertEquals("three events", 3, rows.size)
@@ -193,7 +193,7 @@ class AgentLogTest {
 
     @Test
     fun `a body with newlines in it is one row, and comes back whole`() {
-        val listing = "GitHub/\nGitHub/milk.txt\nGitHub/notes.txt"
+        val listing = "milk.txt\nnotes.txt"
         log.got("tree", "0\n$listing")
 
         val rows = AgentLog.open(project).rows()
@@ -259,7 +259,7 @@ class AgentLogTest {
 
     @Test
     fun `opening twice does not seal the same call twice`() {
-        log.call("read", """{"path":"GitHub/a.txt"}""")
+        log.call("read", """{"path":"a.txt"}""")
         AgentLog.open(project).beginSession()
         val after = AgentLog.open(project)
         after.beginSession()
@@ -357,8 +357,8 @@ class AgentLogTest {
     @Test
     fun `a reset empties the context and deletes nothing`() {
         log.told("rename milk.txt")
-        log.call("tree", """{"path":"GitHub"}""")
-        log.got("tree", "0\nGitHub/milk.txt")
+        log.call("tree", """{"path":""}""")
+        log.got("tree", "0\nmilk.txt")
         log.note("agent", "found it")
         val evidence = sessionLines()
 
@@ -429,8 +429,8 @@ class AgentLogTest {
         val other = File(System.getProperty("java.io.tmpdir"), "agent-log-other-${System.nanoTime()}")
         other.mkdirs()
         val theirs = AgentLog.open(other)
-        log.call("tree", """{"path":"GitHub"}""")
-        theirs.call("tree", """{"path":"GitHub"}""")
+        log.call("tree", """{"path":""}""")
+        theirs.call("tree", """{"path":""}""")
 
         assertEquals("the same number in two projects", log.rows().last().id, theirs.rows().last().id)
         val mine = agentFor(log).messages(log.contextRows()).flatMap { it.calls }.map { it.id }
@@ -560,7 +560,7 @@ class AgentLogTest {
         // would put a tool result in the context with no call above it — a request every
         // endpoint refuses, written by the app's own repair.
         log.told("a task")
-        log.call("tree", """{"path":"GitHub"}""")
+        log.call("tree", """{"path":""}""")
         log.reset()
 
         val sealed = log.beginSession()
@@ -631,9 +631,9 @@ class AgentLogTest {
     @Test
     fun `what the agent forgot is exactly what it named, and nothing else`() {
         log.told("make the list")
-        val milkCall = log.call("read", """{"path":"GitHub/milk.txt"}""")
+        val milkCall = log.call("read", """{"path":"milk.txt"}""")
         val milkGot = log.got("read", "0\ntwo litres")
-        val eggCall = log.call("read", """{"path":"GitHub/eggs.txt"}""")
+        val eggCall = log.call("read", """{"path":"eggs.txt"}""")
         val eggGot = log.got("read", "0\na dozen")
         log.note("agent", "the eggs matter, the milk does not")
 
@@ -683,7 +683,7 @@ class AgentLogTest {
         // A reset empties the context, which is shape-identical to the agent forgetting everything.
         repeat(3) { i ->
             log.told("task $i")
-            log.call("read", """{"path":"GitHub/f$i.txt"}""")
+            log.call("read", """{"path":"f$i.txt"}""")
             log.got("read", "0\nline")
         }
         log.reset()
@@ -692,7 +692,7 @@ class AgentLogTest {
         assertTrue("his judgement is empty", log.thrownAway().isEmpty())
 
         // But a forget he makes *after* the reset is still his.
-        val call = log.call("read", """{"path":"GitHub/after.txt"}""")
+        val call = log.call("read", """{"path":"after.txt"}""")
         val got = log.got("read", "0\nnothing much")
         log.forget(setOf(call, got))
         assertEquals("one pair after the reset", listOf(call, got), log.thrownAway().map { it.id })
@@ -704,7 +704,7 @@ class AgentLogTest {
         // while the call was still unanswered. The next launch seals it as the app's own row — the
         // seal goes where its call is, which is `app`.
         log.told("make the list")
-        log.call("read", """{"path":"GitHub/milk.txt"}""")
+        log.call("read", """{"path":"milk.txt"}""")
         log.reset()
         log.beginSession()
 

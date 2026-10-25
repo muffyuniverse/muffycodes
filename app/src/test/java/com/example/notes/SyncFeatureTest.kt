@@ -19,7 +19,7 @@ class SyncFeatureTest : FeatureTest() {
     @Test
     fun `a sync commits what changed and puts it on the repository`() {
         scene.project("Shopping")
-        scene.open(Workspace.PROJECTS, "Shopping")
+        scene.open("Shopping")
         scene.worktreeFile("milk.txt", "two litres")
 
         scene.sync("Shopping")
@@ -31,7 +31,7 @@ class SyncFeatureTest : FeatureTest() {
     @Test
     fun `the commit message is the names of the files that changed`() {
         scene.project("Shopping")
-        scene.open(Workspace.PROJECTS, "Shopping")
+        scene.open("Shopping")
         scene.worktreeFile("milk.txt", "two litres")
         scene.worktreeFile("bread.txt", "one loaf")
 
@@ -48,7 +48,7 @@ class SyncFeatureTest : FeatureTest() {
     @Test
     fun `many changed files are named up to a point and then counted`() {
         scene.project("Shopping")
-        scene.open(Workspace.PROJECTS, "Shopping")
+        scene.open("Shopping")
         listOf("a", "b", "c", "d", "e").forEach { scene.worktreeFile("$it.txt", it) }
 
         scene.sync("Shopping")
@@ -75,7 +75,7 @@ class SyncFeatureTest : FeatureTest() {
     @Test
     fun `a local file beside the worktree is never pushed`() {
         scene.project("Shopping")
-        scene.open(Workspace.PROJECTS, "Shopping")
+        scene.open("Shopping")
         scene.file("diary.txt", "private")
         scene.worktreeFile("milk.txt", "two litres")
 
@@ -91,7 +91,7 @@ class SyncFeatureTest : FeatureTest() {
     @Test
     fun `a second sync after more work adds another commit`() {
         scene.project("Shopping")
-        scene.open(Workspace.PROJECTS, "Shopping")
+        scene.open("Shopping")
         scene.worktreeFile("milk.txt", "two litres")
         scene.sync("Shopping")
         val afterFirst = scene.remoteCommits("Shopping")
@@ -117,7 +117,7 @@ class SyncFeatureTest : FeatureTest() {
     @Test
     fun `pulling replaces the worktree with what the repository holds`() {
         scene.project("Shopping")
-        scene.open(Workspace.PROJECTS, "Shopping")
+        scene.open("Shopping")
         scene.worktreeFile("milk.txt", "two litres")
         scene.sync("Shopping")
 

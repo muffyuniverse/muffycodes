@@ -21,7 +21,6 @@ KeySafetyTest      app/src/main/java/com/example/notes/GitService.kt app/src/mai
 WorkspaceTest       app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AgentLog.kt
 ModelConfigTest     app/src/main/java/com/example/notes/ModelConfig.kt
 ModelCatalogueTest  app/src/main/java/com/example/notes/ModelCatalogue.kt app/src/main/java/com/example/notes/Secrets.kt
-AppHistoryTest      app/src/main/java/com/example/notes/AppHistory.kt app/src/main/java/com/example/notes/HistoryPrune.kt
 ProjectGitTest      app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitService.kt
 AccountStoreTest    app/src/main/java/com/example/notes/AccountStore.kt
 VisibilityFeatureTest  app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AppViewModel.kt
@@ -34,8 +33,8 @@ EditorScreenTest   app/src/main/java/com/example/notes/EditorScreen.kt app/src/m
 AccountsFeatureTest  app/src/main/java/com/example/notes/AccountStore.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/CredentialStore.kt app/src/main/java/com/example/notes/GitHub.kt
 ProjectsFeatureTest  app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitHub.kt app/src/main/java/com/example/notes/Workspace.kt
 SyncFeatureTest    app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/GitHub.kt
-HistoryFeatureTest app/src/main/java/com/example/notes/AppHistory.kt app/src/main/java/com/example/notes/HistoryPrune.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/GitService.kt
-RetentionFeatureTest  app/src/main/java/com/example/notes/SettingsStore.kt app/src/main/java/com/example/notes/HistoryPrune.kt app/src/main/java/com/example/notes/AppHistory.kt app/src/main/java/com/example/notes/ProjectGit.kt
+HistoryFeatureTest app/src/main/java/com/example/notes/HistoryPrune.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/GitService.kt
+RetentionFeatureTest  app/src/main/java/com/example/notes/SettingsStore.kt app/src/main/java/com/example/notes/HistoryPrune.kt app/src/main/java/com/example/notes/ProjectGit.kt
 ImportsFeatureTest app/src/main/java/com/example/notes/Imports.kt
 MarkdownTest        app/src/main/java/com/example/notes/Markdown.kt
 SelectionFeatureTest  app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/ProjectGit.kt
