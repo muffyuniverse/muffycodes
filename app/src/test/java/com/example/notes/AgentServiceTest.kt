@@ -5,7 +5,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
+import org.junit.runner.RunWith
 import org.robolectric.Robolectric
+import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 
 /**
@@ -17,14 +19,13 @@ import org.robolectric.RuntimeEnvironment
  * that the last one stopped ends it, that its clock ticks the same runner the screen ticks, and
  * that the standing notification says what the session strip says.
  */
+@RunWith(RobolectricTestRunner::class)
 class AgentServiceTest {
 
-    private val app = RuntimeEnvironment.getApplication()
+    /** Built per test: the runner is constructed before the class in a JUnit test otherwise. */
+    private val app: android.app.Application get() = RuntimeEnvironment.getApplication()
 
     private fun service() = Robolectric.buildService(AgentService::class.java).create()
-
-    private fun on(login: String, project: String): AgentSession =
-        AgentSession(project = project, state = AgentSession.State.IDLE, lastPollAt = 1_000)
 
     @Test
     fun `the manifest declares a special-use foreground service, and says why`() {
