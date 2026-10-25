@@ -142,7 +142,7 @@ class AgentLog private constructor(
         const val FAILURE = "1"
 
         /**
-         * `14:02:11.410    8 CALL  tree      {"path":"GitHub"}`
+         * `14:02:11.410    8 CALL  tree      {"path":"notes"}`
          *
          * The body is the only part that can hold a separator, and [LogFormat] escapes it — so
          * two spaces followed by anything is the detail, always.

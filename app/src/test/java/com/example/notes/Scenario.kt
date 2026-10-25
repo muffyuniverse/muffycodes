@@ -229,10 +229,13 @@ class Scenario(
         require(!name.contains("/")) { "a folder is made in the folder that is open, not at a path" }
         val made = Workspace.cleanName(name, "folder")
         val file = File(viewModel.currentDir!!, made)
-        val before = headOf(file)
         viewModel.createFolder(name)
         await("\"$made\" to be made") { viewModel.entries.any { it.name == made } }
-        awaitRecordedFor(file, before, "\"$made\" being made")
+        // **An empty folder is not a version, and cannot be.** Git stores content, so a folder
+        // with nothing in it is not a change to commit — the app is not failing to record one, and
+        // a helper that waited for a commit would wait for the test's whole timeout and then
+        // report the app as broken. The folder's first version arrives with the first thing put
+        // in it, which is the moment there is something to have a version *of*.
         return file
     }
 

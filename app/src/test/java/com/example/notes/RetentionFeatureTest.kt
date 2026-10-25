@@ -48,7 +48,9 @@ class RetentionFeatureTest : FeatureTest() {
     fun `shortening a history happens at the next change, not when it is set`() {
         scene.project("Shopping")
         scene.open("Shopping")
-        repeat(6) { scene.folder("folder_$it") }
+        // **A file, not a folder.** Six empty folders are zero versions, because git stores
+        // content and there is none: the test is about trimming a history, so it has to make one.
+        repeat(6) { scene.file("file_$it.txt", "round $it") }
         scene.await("six commits") { historySize() >= 6 }
         val before = historySize()
 
@@ -61,11 +63,11 @@ class RetentionFeatureTest : FeatureTest() {
     fun `after the next change the history keeps only the length it was given`() {
         scene.project("Shopping")
         scene.open("Shopping")
-        repeat(6) { scene.folder("folder_$it") }
+        repeat(6) { scene.file("file_$it.txt", "round $it") }
         scene.await("six commits") { historySize() >= 6 }
         scene.settings.keepHistory(3)
 
-        scene.folder("the_last_one")
+        scene.file("the_last_one.txt", "the last round")
         scene.await("the history to be shortened") { historySize() <= 3 }
 
         assertEquals("three versions are kept", 3, historySize())
@@ -75,14 +77,12 @@ class RetentionFeatureTest : FeatureTest() {
     fun `shortening the history does not touch a single file`() {
         scene.project("Shopping")
         scene.open("Shopping")
-        repeat(5) { scene.folder("folder_$it") }
-        scene.open("Shopping", "folder_2")
+        repeat(5) { scene.file("file_$it.txt", "round $it") }
         val file = scene.file("milk.txt", "two litres")
-        scene.open("Shopping")
         scene.await("the commits") { historySize() >= 5 }
 
         scene.settings.keepHistory(2)
-        scene.folder("after_the_shortening")
+        scene.file("after_the_shortening.txt", "the next change")
         scene.await("the history to be shortened") { historySize() <= 2 }
 
         assertEquals("the file is exactly as it was", "two litres", file.readText())
@@ -93,12 +93,12 @@ class RetentionFeatureTest : FeatureTest() {
     fun `a length longer than the history keeps the history it has`() {
         scene.project("Shopping")
         scene.open("Shopping")
-        scene.folder("one")
+        scene.file("one.txt", "first")
         scene.await("a commit") { historySize() >= 1 }
         val before = historySize()
 
         scene.settings.keepHistory(50)
-        scene.folder("two")
+        scene.file("two.txt", "second")
         scene.await("the next change") { historySize() > before }
 
         assertTrue("nothing was thrown away", historySize() >= before)

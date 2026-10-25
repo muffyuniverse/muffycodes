@@ -41,27 +41,51 @@ class HistoryFeatureTest : FeatureTest() {
 
         assertTrue("nothing has happened", log().isEmpty())
 
+        // **An empty folder is not a change.** Git stores content, so a folder with nothing in it
+        // has nothing to commit; what the app has recorded is still nothing.
         scene.folder("letters")
+        scene.await("the folder to be made") { scene.names().contains("letters") }
+        assertTrue("still nothing to have a version of", log().isEmpty())
+
+        scene.open("letters")
+        scene.file("one.txt", "first")
         scene.await("the first commit") { log().isNotEmpty() }
 
-        assertTrue("the first change is the first version", log().isNotEmpty())
+        assertTrue("the first thing in it is the first version", log().isNotEmpty())
     }
 
     @Test
-    fun `an empty folder still has a version, so it can come back`() {
+    fun `an empty folder has no version, and stops being empty the moment it has one`() {
+        // **This is a fact about git, not a gap in the app.** A folder is made of the files in it,
+        // so an empty one is not a change to commit and has no version to go back to. The app
+        // records nothing and says nothing, which is right; the alternative — putting a marker
+        // file in the person's repository so an empty folder leaves a trace — would be the app
+        // writing something they never asked for into the thing that goes to GitHub.
         start()
 
         scene.folder("empty")
-        scene.await("a version") { scene.versionsOfFolder("empty").isNotEmpty() }
+        scene.await("the folder to be made") { scene.names().contains("empty") }
+        assertTrue("no version, because there is nothing to have one of",
+            scene.versionsOfFolder("empty").isEmpty())
 
+        scene.open("empty")
+        scene.file("one.txt", "first")
+        scene.open()
+        scene.await("a version, now that there is something in it") {
+            scene.versionsOfFolder("empty").isNotEmpty()
+        }
+
+        // And from that version the folder *can* come back, which is the thing the old test was
+        // reaching for.
         val version = scene.versionsOfFolder("empty").first().first.id
-        val folder = File(scene.workspace!!.accountDir, "empty")
+        val folder = File(scene.workspace!!.projectDir("work"), "empty")
         scene.viewModel.delete(folder)
-        assertFalse("the empty folder is gone", folder.exists())
+        assertFalse("the folder is gone", folder.exists())
 
         scene.restore(version)
 
-        assertTrue("and an empty folder is still a folder", folder.isDirectory)
+        assertTrue("and it is back", folder.isDirectory)
+        assertEquals("with what gave it a version", "first", File(folder, "one.txt").readText())
     }
 
     @Test
@@ -74,6 +98,9 @@ class HistoryFeatureTest : FeatureTest() {
         // person is already looking at; but silence in the *screen* is not silence in the
         // *log*, and an unanswered tap is the one thing the log exists to find.
         scene.folder("letters")
+        scene.open("letters")
+        scene.file("one.txt", "first")
+        scene.open()
         scene.await("a version") { scene.versionsOfFolder("letters").isNotEmpty() }
 
         // `versionsOfFolder` leaves the history open, which is what restoring acts on. Its

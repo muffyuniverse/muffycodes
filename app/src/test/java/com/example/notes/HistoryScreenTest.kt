@@ -60,6 +60,10 @@ class HistoryScreenTest {
      * would be testing a history the app does not have.
      */
     private fun versions(): File {
+        // **A version belongs to a project.** The history is the project's repository now — there
+        // is no account-level history — so the file this screen is about lives in one.
+        scene.project("groceries")
+        scene.open("groceries")
         val file = scene.file("milk.txt", "one litre of milk")
         scene.openEditor(file)
         scene.saveAsVersion("three litres of milk")

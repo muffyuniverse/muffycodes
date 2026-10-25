@@ -400,7 +400,7 @@ class TraceTest {
         // pass: a press shows itself at once, and that is what pairing is for.
         Trace.tap("open-folder", "projects")
 
-        Trace.changed("at /projects · 1 rows · repo/")
+        Trace.changed("at / · 1 rows · groceries/")
 
         assertEquals("nothing is left waiting", emptyList<String>(), Trace.report().waiting.map { it.what })
         assertEquals("and the tap was answered", 1, Trace.report().answered)
