@@ -613,11 +613,14 @@ class AgentLogTest {
             log.thrownAway().isEmpty(),
         )
 
-        // But a clear he makes *after* the reset is still his.
+        // But a clear he makes *after* the reset is still his. The call's row names the file; the
+        // result's row is the one after it — a filter on the body would find only the call, because
+        // the result says what came back, not what was asked.
         log.call("read", """{"path":"GitHub/after.txt"}""")
         log.got("read", "0\nnothing much")
-        val pair = log.contextRows().filter { it.name == "read" && it.body.contains("after.txt") }
-        clearUpTo(log.contextRows().map { it.line } - pair.map { it.line }.toSet())
+        val lines = log.contextRows().map { it.line }
+        val call = lines.indexOfFirst { it.contains("after.txt") }
+        clearUpTo(lines.filterIndexed { i, _ -> i != call && i != call + 1 })
         assertEquals("one pair cleared after the reset", 2, log.thrownAway().size)
     }
 

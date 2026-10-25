@@ -7,6 +7,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -107,7 +108,9 @@ class SettingsScreenTest {
         var asked = 0
         settings(exempt = { false }, onAskBattery = { asked++ })
 
-        compose.onNodeWithText("Battery").assertIsDisplayed()
+        // The row is below the fold on a phone-shaped window, and a screen is not "not showing"
+        // something because it is further down the same page.
+        compose.onNodeWithText("Battery").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Not exempt · polls may fail").assertIsDisplayed()
         compose.onNodeWithText("Ask Android").performClick()
 
@@ -120,7 +123,7 @@ class SettingsScreenTest {
         // dismiss the dialog — so the row must not offer it once the phone already allows polls.
         settings(exempt = { true })
 
-        compose.onNodeWithText("Exempt · the agent can poll").assertIsDisplayed()
+        compose.onNodeWithText("Exempt · the agent can poll").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Ask Android").assertDoesNotExist()
     }
 
