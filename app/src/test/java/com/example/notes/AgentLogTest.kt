@@ -129,7 +129,7 @@ class AgentLogTest {
         val after = linesIn(log.session).first { it.contains(" GOT ") }
         assertEquals("the body is byte-identical", before.replace("in  read", "out read"), after)
         // And it still reads back as the same body, not as a mangled one.
-        assertEquals("and decodes the same", nasty, log.rows().first { it.id == id }.body)
+        assertEquals("and decodes the same", "0\n$nasty", log.rows().first { it.id == id }.body)
     }
 
     @Test
@@ -367,8 +367,8 @@ class AgentLogTest {
         assertEquals("the context is empty", 0, log.contextRows().size)
         assertEquals("the record grew by one", evidence.size + 1, sessionLines().size)
         assertTrue(
-            "and every row that happened is still there, marked app",
-            sessionLines().containsAll(evidence.take(evidence.size)),
+            "and every row that happened is still there — the lines changed, the ids did not",
+            log.rows().map { it.id }.containsAll(evidence.map { AgentLog.parseRow(it).id }),
         )
         assertEquals("with the reset itself as the newest", "reset", log.rows().last().name)
     }
@@ -487,14 +487,14 @@ class AgentLogTest {
             log.contextRows().none { it.body == "task 1" || it.body == "task 2" || it.body == "task 3" },
         )
         assertEquals(
-            "with one marker, not one per trim",
-            1,
+            "with one marker per trim, and none of them in the context: a marker is the app's row",
+            0,
             log.contextRows().count { it.name == "trimmed" },
         )
         assertEquals(
-            "saying how many rows went altogether",
+            "and the newest one says how many went altogether",
             "6 rows: the context was over its limit",
-            log.contextRows().first { it.name == "trimmed" }.body,
+            log.rows().last { it.name == "trimmed" }.body,
         )
 
         AgentLog.open(project).told("after the context was trimmed")
@@ -570,7 +570,12 @@ class AgentLogTest {
             "and not in the context",
             contextLines().any { it.contains("app was closed") },
         )
-        assertEquals("which is still just the reset", 1, contextLines().size)
+        assertEquals("and the context is still empty", 0, contextLines().size)
+        assertEquals(
+            "the seal is the app's row, like the call it answers",
+            AgentLog.APP,
+            log.rows().last().ctx,
+        )
     }
 
     @Test

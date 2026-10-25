@@ -64,11 +64,21 @@ class AgentSessionFeatureTest : FeatureTest() {
         AgentLog.open(File(scene.viewModel.workspace!!.projectsDir, project))
 
     /** Runs one tick at the session's own due time, and waits for the poll it may start. */
+    /**
+     * Polls [project] at its own due time, and waits for the *state*, not just the request.
+     *
+     * **Two conditions, because one of them is not enough.** Leaving the in-flight set says the
+     * turn is over; it does not say the screen has been told, and the screen's copy is updated by a
+     * post to the main thread. Waiting only for the request is a race the assertion then loses —
+     * which is what happened the moment the app did a little more work at the end of a poll.
+     */
     private fun tick(project: String) {
         val session = scene.viewModel.sessionOf(project) ?: return
-        scene.viewModel.tickAgents(session.nextPollAt)
+        val at = session.nextPollAt
+        scene.viewModel.tickAgents(at)
         scene.await("the poll to finish", 20_000) {
-            project !in scene.viewModel.agentPollingInFlight()
+            project !in scene.viewModel.agentPollingInFlight() &&
+                (scene.viewModel.sessionOf(project)?.lastPollAt ?: 0L) >= at
         }
     }
 
@@ -423,9 +433,14 @@ class AgentSessionFeatureTest : FeatureTest() {
         }
 
         assertEquals(
-            "the working context is the reset and nothing else",
-            listOf("reset"),
+            "the working context is empty: nothing is in, and the reset row is the app's",
+            emptyList<String>(),
             record("groceries").contextRows().map { it.name },
+        )
+        assertEquals(
+            "and the rows that were in are marked app, not thrown away",
+            record("groceries").rows().filter { it.ctx != AgentLog.APP },
+            emptyList<AgentLog.Row>(),
         )
         assertEquals(
             "and the evidence grew by exactly one row",
