@@ -52,6 +52,14 @@ class Agent(
          * ever cannot hold the worker, and it is high enough that real work never reaches it.
          */
         const val MAX_REQUESTS = 40
+
+        /**
+         * What `wait` answers, in the context and in the evidence.
+         *
+         * A constant on purpose: a number that changed ("3 changes since you last looked") would
+         * make every poll a different request, which is the one thing the poll cannot be.
+         */
+        const val WAITING = "0\nstill waiting"
     }
 
     /**
@@ -60,7 +68,16 @@ class Agent(
      * [operator] is the person's own words; they are written into the record first, so a turn
      * that fails still begins with what was asked.
      */
-    fun burst(operator: String): End {
+    fun burst(operator: String, progress: () -> Unit = {}): End {
+        val end = loop(operator, progress)
+        // **The last turn, drawn before the caller's own redraw.** Every row of the ending is
+        // written by now, so one refresh after it leaves the box showing the whole burst —
+        // including a refusal, which is a turn that produced nothing but a note.
+        progress()
+        return end
+    }
+
+    private fun loop(operator: String, progress: () -> Unit): End {
         // The seal belongs here, at the start of a session, and not to a read: no endpoint
         // accepts a conversation whose last assistant message calls a tool nobody answered.
         log.beginSession()
@@ -72,6 +89,8 @@ class Agent(
         while (requests < MAX_REQUESTS) {
             if (idle >= AgentTools.IDLE_CALLS) return tooIdle()
             requests++
+            // The boundary the box counts turns by, and the app's own row, not the model's.
+            log.sessionOnly(AgentLog.TURN, "turn", "$requests")
             val request = build()
             val reply = door.turn(request).getOrElse { problem ->
                 val said = Secrets.explain(problem, "The model could not be asked")
@@ -109,11 +128,11 @@ class Agent(
                     Trace.note("agent", "$project call ${call.tool} #$id")
                 }
                 idle++
+                progress()
                 continue
             }
 
             if (ending != null) {
-                log.call(ending.tool, ending.args)
                 val args = try {
                     org.json.JSONObject(ending.args.ifBlank { "{}" })
                 } catch (e: Exception) {
@@ -121,6 +140,7 @@ class Agent(
                 }
                 return when (ending.tool) {
                     "ask" -> {
+                        log.call(ending.tool, ending.args)
                         val question = args.optString("question", reply.text).trim()
                             .ifEmpty { "(a question with no words)" }
                         log.ask(question)
@@ -129,20 +149,14 @@ class Agent(
                     }
 
                     "conclude" -> {
+                        log.call(ending.tool, ending.args)
                         val said = args.optString("text", reply.text).trim()
                         log.conclude(said)
                         Trace.note("agent", "$project concluded: ${said.take(80)}")
                         End.Concluded(said)
                     }
 
-                    else -> {
-                        // `wait` writes only the session's copy of its own row: the repeated
-                        // poll belongs in the evidence, and a context that grew a timestamped
-                        // row every four minutes would never be the same request twice.
-                        log.note("idle", "waiting for the operator")
-                        Trace.note("agent", "$project idle")
-                        End.Waited
-                    }
+                    else -> waited(ending)
                 }
             }
 
@@ -162,9 +176,39 @@ class Agent(
             } else {
                 idle = 0
             }
+            progress()
         }
         log.note("stopped", "$MAX_REQUESTS requests in one turn")
         return End.Stopped("it made $MAX_REQUESTS requests without ending the turn")
+    }
+
+    /**
+     * `wait` ends the turn, and only its first pair reaches the context.
+     *
+     * The evidence keeps every poll — fifteen rows an hour, which is why that file's limit is
+     * generous — while the working context keeps the first call and its result and nothing after,
+     * because a context that grew a timestamped row every four minutes would never be the same
+     * request twice, and the poll is only cheap because it is a cache hit.
+     *
+     * **The result is written once, even though the tool never runs.** `wait` is terminating, so
+     * nothing answers it in the loop — and a context whose last assistant message calls a tool
+     * with no result is a request every endpoint refuses. The pair is what keeps the rebuilt
+     * conversation legal while the agent is idle.
+     */
+    private fun waited(call: Call): End {
+        val first = log.contextRows().none { it.kind == AgentLog.CALL && it.name == "wait" }
+        if (first) {
+            log.call(call.tool, call.args)
+            log.got(call.tool, WAITING)
+            log.note("idle", "waiting for the operator")
+        } else {
+            // Session only, both rows: the box still sees the poll, the model does not.
+            log.sessionOnly(AgentLog.CALL, call.tool, call.args)
+            log.sessionOnly(AgentLog.GOT, call.tool, WAITING)
+            log.sessionOnly(AgentLog.NOTE, "idle", "waiting for the operator")
+        }
+        Trace.note("agent", "$project idle")
+        return End.Waited
     }
 
     private fun tooIdle(): End {

@@ -147,6 +147,7 @@ private fun AppRoot(viewModel: AppViewModel) {
 
     val editing = viewModel.editingFile
     val historyPath = viewModel.historyPath
+    val chatProject = viewModel.chatProject
 
     // The picker is the system's, so the app never asks for storage permission: it
     // sees only what a person just pointed at, and only reads it.
@@ -213,13 +214,14 @@ private fun AppRoot(viewModel: AppViewModel) {
     // it — the file being opened was the one thing a reader most wanted a line about.
     // They are named here rather than read from `viewModel` because the editor is this
     // composable's screen the moment `editing` is set, whatever `pending` says.
-    LaunchedEffect(pending, showSettings, showTrace, editing, historyPath) {
+    LaunchedEffect(pending, showSettings, showTrace, editing, historyPath, chatProject) {
         Trace.changed(
             "screen " + when {
                 showTrace -> "trace"
                 showSettings -> "settings"
                 historyPath != null -> "history"
                 editing != null -> "editor"
+                chatProject != null -> "chat/$chatProject"
                 else -> "browser"
             } + " dialog " + pending.javaClass.simpleName,
         )
@@ -229,6 +231,13 @@ private fun AppRoot(viewModel: AppViewModel) {
     }
     BackHandler(enabled = !showSettings && historyPath == null && editing != null) {
         viewModel.closeEditor()
+    }
+    // The conversation is a screen of its own, so back leaves it before it moves the folder
+    // underneath it — the same rule as the editor and the history.
+    BackHandler(
+        enabled = !showSettings && historyPath == null && editing == null && chatProject != null
+    ) {
+        viewModel.closeChat()
     }
     // **Back stops the choosing first.** Being in the middle of choosing several
     // things is a mode, and a mode is what back leaves first; going up a folder
@@ -333,6 +342,12 @@ private fun AppRoot(viewModel: AppViewModel) {
                     onReport = openReport,
         )
 
+        // Before the browser: the conversation covers the folder it belongs to.
+        chatProject != null -> AgentChatScreen(
+            viewModel = viewModel,
+            onBack = { viewModel.closeChat() },
+        )
+
         else -> androidx.compose.foundation.layout.Box {
             BrowserScreen(
                 viewModel = viewModel,
@@ -341,6 +356,7 @@ private fun AppRoot(viewModel: AppViewModel) {
                 onReport = openReport,
                 actions = actions,
                 onAddProject = { tap("add project"); pending = Pending.AddProject },
+                onRowChat = { project -> viewModel.openChat(project) },
                 onRowSync = { project -> tap("sync", project); pending = Pending.SyncProject(project) },
                 onRowRename = { project -> tap("rename project", project); pending = Pending.RenameProject(project) },
                 onRowDelete = { project -> tap("delete project", project); pending = Pending.DeleteProject(project) },

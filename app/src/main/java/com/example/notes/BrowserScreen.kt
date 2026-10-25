@@ -86,6 +86,7 @@ fun BrowserScreen(
     onOpenSettings: () -> Unit,
     actions: BrowserActions,
     onAddProject: () -> Unit,
+    onRowChat: (String) -> Unit,
     onRowSync: (String) -> Unit,
     onRowRename: (String) -> Unit,
     onRowDelete: (String) -> Unit,
@@ -288,7 +289,7 @@ fun BrowserScreen(
                             "their repositories, and the files you keep beside them.",
                     )
                 } else if (projects) {
-                    ProjectList(viewModel, onRowSync, onRowRename, onRowDelete)
+                    ProjectList(viewModel, onRowChat, onRowSync, onRowRename, onRowDelete)
                 } else {
                     EntryList(viewModel, actions)
                 }
@@ -379,6 +380,7 @@ fun SlimRow(
 @Composable
 private fun ProjectList(
     viewModel: AppViewModel,
+    onChat: (String) -> Unit,
     onSync: (String) -> Unit,
     onRename: (String) -> Unit,
     onDelete: (String) -> Unit,
@@ -425,6 +427,17 @@ private fun ProjectList(
                             Icon(Icons.Filled.MoreVert, contentDescription = "More")
                         }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            // **The chat is a project's, not a file's.** It is the first thing
+                            // in this menu that is not about the repository's contents, and it
+                            // is on top because it is what a person comes here for once the
+                            // agent is on.
+                            DropdownMenuItem(
+                                text = { Text("Chat") },
+                                onClick = {
+                                    menu = false
+                                    onChat(name)
+                                },
+                            )
                             DropdownMenuItem(
                                 text = { Text("Sync") },
                                 onClick = {

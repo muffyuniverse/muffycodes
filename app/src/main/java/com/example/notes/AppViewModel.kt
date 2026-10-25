@@ -1691,6 +1691,159 @@ class AppViewModel @JvmOverloads constructor(
         }
     }
 
+    // ---- the agent's chat ---------------------------------------------------
+
+    /** The project whose conversation is on the screen, or null when none is. */
+    var chatProject: String? by mutableStateOf(null)
+        private set
+
+    /**
+     * The conversation as the record last had it.
+     *
+     * **Read, never remembered.** Every burst re-reads `agent/session.log` and hands the box a
+     * fresh [AgentChat.Box], so the screen and the evidence are the same object — an in-memory
+     * transcript beside the file would disagree the first time the app was closed mid-turn.
+     */
+    var chatBox: AgentChat.Box? by mutableStateOf(null)
+        private set
+
+    /** Bumped on every read, so a box that is byte-identical still redraws. */
+    var chatGeneration: Int by mutableStateOf(0)
+        private set
+
+    /** Which turn of the conversation the box is showing, from zero. */
+    var chatTurn: Int by mutableStateOf(0)
+        private set
+
+    /** True while a burst is running. */
+    var chatWorking: Boolean by mutableStateOf(false)
+        private set
+
+    /**
+     * Where the agent's requests go.
+     *
+     * Swappable for the same reason [catalogue] is: no test opens a socket, so the box has to be
+     * drivable by a script — and being able to say exactly what was sent is most of what makes a
+     * test of a chat worth writing.
+     */
+    var chatDoor: ((ActiveModel) -> Door)? = null
+
+    /** Opens [project]'s conversation and lands on its newest turn. */
+    fun openChat(project: String) {
+        Trace.tap("chat", project)
+        chatProject = project
+        chatBox = null
+        chatTurn = 0
+        readChat(follow = true)
+    }
+
+    fun closeChat() {
+        Trace.tap("close chat", chatProject.orEmpty())
+        chatProject = null
+        chatBox = null
+        chatTurn = 0
+        chatWorking = false
+    }
+
+    /**
+     * Reads the conversation again, off the main thread.
+     *
+     * [follow] decides what happens to the turn being looked at: a person who opened the chat or
+     * just spoke wants the end of the conversation, and a person reading turn 2 of 6 while the
+     * agent works does not want to be pulled forward.
+     */
+    fun readChat(follow: Boolean = false) {
+        val project = chatProject ?: return
+        val ws = workspace ?: return
+        val dir = File(ws.projectsDir, project)
+        onWorker {
+            val rows = try {
+                AgentLog.open(dir).rows()
+            } catch (t: Throwable) {
+                emptyList()
+            }
+            main.post { applyChat(rows, follow) }
+        }
+    }
+
+    fun chatTurnBy(delta: Int) {
+        val last = (chatBox?.turns?.lastIndex ?: 0)
+        val next = (chatTurn + delta).coerceIn(0, last)
+        if (next == chatTurn) return
+        Trace.tap(if (delta < 0) "previous turn" else "next turn", "${next + 1} of ${last + 1}")
+        chatTurn = next
+    }
+
+    fun chatLatestTurn() {
+        val last = (chatBox?.turns?.lastIndex ?: 0)
+        if (last == chatTurn) return
+        Trace.tap("latest turn", "${last + 1} of ${last + 1}")
+        chatTurn = last
+    }
+
+    /**
+     * Says something to the agent, and lets it work until it ends the turn.
+     *
+     * The burst runs on the app's one worker — the same worker as saves and commits — so two
+     * turns cannot overlap and a file cannot be written twice. [Agent.burst] reports each turn as
+     * it completes, and each report re-reads the record: the box fills in while the agent works
+     * instead of appearing all at once at the end.
+     */
+    fun sendChat(text: String) {
+        val said = text.trim()
+        if (said.isEmpty() || chatWorking) return
+        val project = chatProject ?: return
+        val ws = workspace ?: return
+        val g = git ?: return
+        Trace.tap("send", said.take(60))
+        chatWorking = true
+        val model = modelConfig.active
+        val door = (chatDoor ?: { active ->
+            OpenRouterDoor(
+                key = { activeLogin?.let { credentials.modelKey(it) } },
+                model = active.model,
+                provider = active.provider,
+                effort = active.effort,
+            )
+        })(model)
+        onWorker {
+            val dir = File(ws.projectsDir, project)
+            val log = AgentLog.open(dir)
+            val agent = Agent(ws.accountDir, project, ws, g, log, door, model)
+            val end = try {
+                agent.burst(said) {
+                    val rows = log.rows()
+                    main.post { applyChat(rows, follow = true) }
+                }
+            } catch (t: Throwable) {
+                Agent.End.Stopped(Secrets.explain(t, "The agent could not run"))
+            }
+            val rows = log.rows()
+            val answer = when (end) {
+                is Agent.End.Asked -> "The agent asked something"
+                is Agent.End.Concluded -> "The agent finished"
+                is Agent.End.Waited -> "The agent is waiting"
+                is Agent.End.Stopped -> end.why
+            }
+            main.post {
+                applyChat(rows, follow = true)
+                chatWorking = false
+                message = answer
+                refresh()
+                refreshChanges()
+            }
+        }
+    }
+
+    /** Hands a freshly read conversation to the screen, keeping the turn in range. */
+    private fun applyChat(rows: List<AgentLog.Row>, follow: Boolean) {
+        val box = AgentChat.box(rows)
+        val last = (box?.turns?.lastIndex ?: 0).coerceAtLeast(0)
+        chatBox = box
+        chatTurn = if (follow) last else chatTurn.coerceIn(0, last)
+        chatGeneration++
+    }
+
     // ---- accounts -----------------------------------------------------------
 
     /**

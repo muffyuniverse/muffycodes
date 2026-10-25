@@ -1,0 +1,170 @@
+package com.example.notes
+
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
+import java.io.File
+
+/**
+ * The box, through a whole turn that costs nothing.
+ *
+ * The door is scripted, so this is the one test in the suite that watches a conversation happen
+ * from the outside: what the person typed, what the agent called, what the app did with the
+ * result, and what the record says afterwards. Everything else about the box is [AgentChatTest]'s
+ * — the shapes are pinned there, and this pins the wiring.
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34], qualifiers = "w411dp-h891dp")
+class AgentChatScreenTest {
+
+    @get:Rule
+    val compose = createComposeRule()
+
+    @After
+    fun putThePhoneAway() {
+        scene.close()
+    }
+
+    private val scene: Scenario by lazy {
+        Scenario(RuntimeEnvironment.getApplication(), signIn = true)
+    }
+
+    private fun call(tool: String, args: String = "{}") = Call("call_$tool", tool, args)
+
+    /** Puts the box on the screen and opens the project's conversation. */
+    private fun chat(door: Door) {
+        scene.project("groceries")
+        scene.viewModel.chatDoor = { door }
+        compose.setContent {
+            MaterialTheme {
+                Surface {
+                    AgentChatScreen(viewModel = scene.viewModel, onBack = {})
+                }
+            }
+        }
+        scene.viewModel.openChat("groceries")
+        compose.waitUntil(20_000) { scene.viewModel.chatGeneration > 0 }
+    }
+
+    private fun say(text: String) {
+        compose.onNode(hasSetTextAction()).performTextInput(text)
+        compose.onNodeWithText("Send").performClick()
+    }
+
+    private fun awaitTurns(count: Int) {
+        compose.waitUntil(20_000) { scene.viewModel.chatBox?.turns?.size == count }
+        compose.waitForIdle()
+    }
+
+    @Test
+    fun `the box draws what was asked, what the agent called, and what it answered`() {
+        val door = ScriptedDoor(
+            Reply("", listOf(call("tree", """{"path":"GitHub"}"""))),
+            Reply("", listOf(call("conclude", """{"text":"There is one file."}"""))),
+        )
+
+        chat(door)
+        say("what is in the project")
+        awaitTurns(2)
+
+        compose.onNodeWithText("what is in the project", substring = true).assertExists()
+        compose.onNodeWithText("tree").assertExists()
+        compose.onNodeWithText("0 ·", substring = true).assertExists()
+        compose.onNodeWithText("concluded").assertExists()
+        compose.onNodeWithText("There is one file.", substring = true).assertExists()
+        compose.onNodeWithText("2 of 2").assertExists()
+    }
+
+    @Test
+    fun `the record is what the box read, and it holds the app's turn boundaries`() {
+        val door = ScriptedDoor(
+            Reply("", listOf(call("tree", """{"path":"GitHub"}"""))),
+            Reply("", listOf(call("conclude", """{"text":"There is one file."}"""))),
+        )
+
+        chat(door)
+        say("what is in the project")
+        awaitTurns(2)
+
+        val log = AgentLog.open(File(scene.viewModel.workspace!!.projectsDir, "groceries"))
+        val kinds = log.rows().map { it.kind }
+        assertTrue("the operator's words are on the record", kinds.contains(AgentLog.TOLD))
+        assertTrue("so are the calls", kinds.count { it == AgentLog.CALL } >= 2)
+        assertTrue("and their answers", kinds.contains(AgentLog.GOT))
+        assertTrue("and the ending", kinds.contains(AgentLog.CONCLUDE))
+        // The box counted two turns, so the record has to say where one request ended.
+        assertEquals(
+            "one boundary per request",
+            2,
+            log.rows().count { it.kind == AgentLog.TURN },
+        )
+        assertEquals(
+            "and the boundary never reaches the model",
+            0,
+            log.contextRows().count { it.kind == AgentLog.TURN },
+        )
+    }
+
+    @Test
+    fun `the newest turn is where the box starts, and one press shows the one before`() {
+        val door = ScriptedDoor(
+            Reply("", listOf(call("tree", """{"path":"GitHub"}"""))),
+            Reply("", listOf(call("conclude", """{"text":"There is one file."}"""))),
+        )
+
+        chat(door)
+        say("what is in the project")
+        awaitTurns(2)
+
+        // The navigator's ends are the ends: the last turn has nothing after it, so `›` and
+        // `»` are both spent, and the box opened on the newest turn rather than the first.
+        compose.onNodeWithText("2 of 2").assertExists()
+        compose.onNodeWithText("‹").assertIsEnabled()
+        compose.onNodeWithText("›").assertIsNotEnabled()
+        compose.onNodeWithText("»").assertIsNotEnabled()
+        compose.onNodeWithText("concluded").assertExists()
+
+        compose.onNodeWithText("‹").performClick()
+        compose.waitForIdle()
+
+        compose.onNodeWithText("1 of 2").assertExists()
+        compose.onNodeWithText("‹").assertIsNotEnabled()
+        compose.onNodeWithText("»").assertIsEnabled()
+        // The first turn is the call; the conclusion belongs to the second.
+        compose.onNodeWithText("tree").assertExists()
+    }
+
+    @Test
+    fun `an idle agent is one line, not a turn`() {
+        // A `wait` ends the burst, so one burst holds one poll. A conversation that holds many
+        // is what the four-minute timer will write — [AgentChatTest] pins the collapsing; this
+        // pins that a real poll reaches the box as the line it is meant to be.
+        val door = ScriptedDoor(Reply("", listOf(call("wait", "{}"))))
+
+        chat(door)
+        say("anything new?")
+        compose.waitUntil(20_000) {
+            scene.viewModel.chatBox?.idle?.contains("1 check") == true
+        }
+        compose.waitForIdle()
+
+        compose.onNodeWithText("anything new?", substring = true).assertExists()
+        compose.onNodeWithText("idle since", substring = true).assertExists()
+        compose.onNodeWithText("1 check", substring = true).assertExists()
+    }
+}

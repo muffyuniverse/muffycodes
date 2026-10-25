@@ -45,6 +45,20 @@ class AgentLog private constructor(
 
         /** The row kinds. Named once, so the box, the tools and the checks agree. */
         const val TOLD = "TOLD"
+
+        /**
+         * The app's own boundary: one request to the model starts here.
+         *
+         * The box counts turns — "3 of 6" — and a turn is a request, not a row. Nothing else in
+         * the record says where one request ended and the next began: a reply with two calls in
+         * it and two replies with one call each look exactly the same without this row.
+         *
+         * **Session only.** It is the app's bookkeeping, it carries a clock, and the model has no
+         * use for it — sending it would put a changing row in the one part of the request that
+         * has to be byte-identical between polls.
+         */
+        const val TURN = "TURN"
+
         const val CALL = "CALL"
         const val GOT = "GOT"
         const val ASK = "ASK"

@@ -334,6 +334,35 @@ class AgentTest {
 
         assertTrue("idle", end is Agent.End.Waited)
         assertEquals("one call row", 1, callRows().count { it.name == "wait" })
+
+        // **The context's last message is a call with a result.** `wait` never runs, so nothing
+        // in the loop answers it — and a conversation whose last assistant message calls a tool
+        // with no answer is refused by every endpoint. This is what makes an idle agent's next
+        // poll a legal request.
+        val inContext = log.contextRows().filter { it.name == "wait" }
+        assertEquals("the context holds the pair, in order", listOf(AgentLog.CALL, AgentLog.GOT), inContext.map { it.kind })
+        assertTrue("and the result says it is still waiting", inContext.last().body.startsWith("0"))
+    }
+
+    @Test
+    fun `a second poll is in the evidence and not in the context`() {
+        // The idle agent polls for ever; the context is asked to stay the same. Without this,
+        // every four minutes would add a timestamped row to the thing that is supposed to be
+        // byte-identical — which is the whole reason the poll is cheap.
+        val door = ScriptedDoor(
+            Reply("", listOf(call("wait", "{}"))),
+            Reply("", listOf(call("wait", "{}"))),
+        )
+        val agent = agent(door)
+        agent.burst("nothing for now")
+        agent.burst("still nothing")
+
+        assertEquals("the evidence keeps both polls", 2, callRows().count { it.name == "wait" })
+        assertEquals(
+            "the context keeps the first pair only",
+            2,
+            log.contextRows().count { it.name == "wait" },
+        )
     }
 
     // ---- the record as the model reads it -----------------------------------

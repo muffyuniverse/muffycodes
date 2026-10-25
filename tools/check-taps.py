@@ -63,6 +63,8 @@ VOCABULARY = {
     "theme", "dark", "light", "history limit",
     # the agent's model, which is a file the settings rows edit
     "reset model config", "set model key",
+    # the agent's conversation: one project's, and the turns inside it
+    "chat", "close chat", "send", "previous turn", "next turn", "latest turn", "turn",
 }
 
 # Names built from a value, so they cannot be a literal in the list.

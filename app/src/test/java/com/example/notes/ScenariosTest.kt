@@ -66,6 +66,7 @@ class ScenariosTest {
             onOpenSettings = {},
             actions = noActions(),
             onAddProject = {},
+            onRowChat = {},
             onRowSync = {},
             onRowRename = {},
             onRowDelete = {},

@@ -70,6 +70,7 @@ class BrowserChromeTest {
                             onSelect = {},
                         ),
                         onAddProject = {},
+                        onRowChat = {},
                         onRowSync = {},
                         onRowRename = {},
                         onRowDelete = {},

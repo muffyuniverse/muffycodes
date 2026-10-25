@@ -163,9 +163,17 @@ class Scenario(
         return if (ws.inWorktree(file)) ws.projectOf(file) else null
     }
 
-    /** The head of whichever history owns [file]. */
-    private fun headOf(file: File): String? =
-        projectOf(file)?.let { projectHead(it) } ?: headId()
+    /**
+     * The head of whichever history owns [file].
+     *
+     * The two cases are kept apart on purpose: `?:` on the whole chain would fall back to the
+     * account's head when a project simply has no commits yet — which is the bug this pair of
+     * helpers exists to avoid, restated one line up.
+     */
+    private fun headOf(file: File): String? {
+        val project = projectOf(file) ?: return headId()
+        return projectHead(project)
+    }
 
     /** The newest commit of a project's own history, or null when there is none. */
     private fun projectHead(project: String): String? =
