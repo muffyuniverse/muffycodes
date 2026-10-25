@@ -177,7 +177,15 @@ class Agent(
             requests++
             // The boundary the box counts turns by, and the app's own row, not the model's.
             log.sessionOnly(AgentLog.TURN, "turn", "$requests")
-            val reply = door.turn(build(layers)).getOrElse { return finish(blip(it)) }
+            val request = build(layers)
+            // **The shape of the request, once per turn the person started.** Which model, which
+            // pinned endpoint, how big the conversation had grown: the three things needed to
+            // explain a refusal or a bill, and nowhere else on the trace. Not traced for a poll —
+            // fifteen an hour of the same line would bury everything else.
+            if (operator != null && requests == 1) {
+                Trace.note("agent-request", "$project · ${request.shape}")
+            }
+            val reply = door.turn(request).getOrElse { return finish(blip(it)) }
             if (reply.text.isNotBlank()) log.note("agent", reply.text)
 
             val ending = reply.calls.firstOrNull { it.tool in AgentTools.TERMINATING }

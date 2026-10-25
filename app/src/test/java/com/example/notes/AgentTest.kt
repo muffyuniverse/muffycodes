@@ -675,6 +675,43 @@ class AgentTest {
     }
 
     @Test
+    fun `the instructions are a file too, and an edit reaches the next turn`() {
+        // ① is shipped as a default but it is the account's file from the first turn on, so a
+        // person can correct the app's own instructions — and the next turn is answered under
+        // the correction. Anything else would make the file a decoration.
+        val file = File(account, AgentPrompt.SYSTEM_FILE)
+        file.writeText("You are working inside a phone app. Answer in Latin.")
+        val first = ScriptedDoor(Reply("", listOf(Call("c1", "conclude", """{"text":"ok"}"""))))
+        agent(first).burst("go")
+        assertTrue("the edit is what was sent", first.asked.first().system.contains("in Latin"))
+
+        file.writeText("You are working inside a phone app. Answer in Greek.")
+        val second = ScriptedDoor(Reply("", listOf(Call("c2", "conclude", """{"text":"ok"}"""))))
+        agent(second).burst("go again")
+
+        assertTrue("and the next edit is too", second.asked.first().system.contains("in Greek"))
+        assertFalse("with the old one gone", second.asked.first().system.contains("in Latin"))
+    }
+
+    @Test
+    fun `the trace says which model and endpoint answered the turn`() {
+        val before = Trace.report().lines.toSet()
+        val door = ScriptedDoor(Reply("", listOf(call("conclude", """{"text":"done"}"""))))
+
+        agent(door).burst("go")
+
+        val added = Trace.report().lines.filterNot { it in before }
+        assertEquals(
+            "one line, naming both: $added",
+            1,
+            added.count {
+                it.contains("agent-request") && it.contains("deepseek/deepseek-v4.1-flash-1017") &&
+                    it.contains("deepseek")
+            },
+        )
+    }
+
+    @Test
     fun `an edit to the project layer leaves the instructions above it as they were`() {
         // The cache is a prefix match. ① first and ② after it is what makes editing the project's
         // brief cost a re-read of the brief rather than of everything the app was told.
