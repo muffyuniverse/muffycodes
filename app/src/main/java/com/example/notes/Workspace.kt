@@ -74,20 +74,25 @@ class Workspace(val accountDir: File) {
     }
 
     /**
-     * The two lines the app keeps in a project's `.gitignore`.
+     * The two lines that keep the app's own folders out of the project's repository.
      *
-     * **The record is the app's, and it is not shipped.** `agent/` holds what the model was sent and
-     * what it answered — every tool result, every file it read — so committing it would put a second
-     * copy of the person's work on somebody's server, in a shape they never chose. `.muffy/` is the
-     * same argument for the app's own flags.
+     * **They go in `.git/info/exclude`, not in the person's `.gitignore`.** That file is git's own
+     * per-clone list of things this working copy ignores, it is not part of any commit, and it
+     * cannot be pushed — which is exactly what these two lines are: a rule of *this phone's* app,
+     * not a fact about the person's repository. Writing them into `.gitignore` put the app's
+     * bookkeeping into the repository the person owns and, because a `.gitignore` is a tracked
+     * file, made a project that had just arrived say "1 changed" before anybody touched it.
      *
-     * Written as two lines the app owns rather than a whole file it owns: a person's `.gitignore` is
-     * theirs, with their own patterns in it, and a rewrite that dropped them would be the app
-     * silently un-ignoring a build directory. So the lines are appended when they are missing, and
-     * nothing else in the file is touched.
+     * A person's own "Add to `.gitignore`" is a different act and still writes `.gitignore`: that
+     * one is them telling GitHub to ignore something, and it belongs in the history.
+     *
+     * Nothing happens for a folder with no repository yet — there is nowhere to put the lines and
+     * nothing to exclude from until `ProjectGit` has made one.
      */
     fun ensureIgnore(projectDir: File) {
-        val file = File(projectDir, IGNORE)
+        val git = File(projectDir, ".git")
+        if (!git.isDirectory) return
+        val file = File(git, "info" + File.separator + "exclude")
         val current = if (file.isFile) read(file) else ""
         val missing = APP_IGNORES.filter { line ->
             current.lineSequence().none { it.trim() == line }
@@ -101,6 +106,7 @@ class Workspace(val accountDir: File) {
             }
             missing.forEach { appendLine(it) }
         }
+        file.parentFile?.mkdirs()
         put(file, text)
     }
 

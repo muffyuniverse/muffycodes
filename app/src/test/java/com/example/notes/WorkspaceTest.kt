@@ -244,38 +244,51 @@ class WorkspaceTest {
 
     @Test
     fun aProjectIsItsOwnRepositoryAndItsFilesAreTracked() {
-        // The merge, stated as a test: the folder a person sees *is* the repository, and the two
-        // lines the app keeps are already in its ignore file — so nothing of the app's is ever
-        // committed, and nothing of theirs is excluded by accident.
+        // The merge, stated as a test: the folder a person sees *is* the repository — and the
+        // app's two lines are in git's own exclude list, so nothing of the app's is ever committed
+        // and nothing of the person's is excluded by accident.
         val project = workspace.createProjectFolders("Shopping").getOrThrow()
+        File(project, ".git").mkdirs()
+        workspace.ensureIgnore(project)
 
         assertEquals("the project is the repository folder", project, workspace.repoOf("Shopping"))
         assertEquals("and it is at the account root", workspace.accountDir, project.parentFile)
         assertEquals(
-            "with the app's own two lines, and nothing else",
+            "the app's own two lines, and nothing else",
             listOf("agent/", ".muffy/"),
-            File(project, ".gitignore").readLines().filter { it.isNotBlank() && !it.startsWith("#") },
+            File(project, ".git/info/exclude")
+                .readLines()
+                .filter { it.isNotBlank() && !it.startsWith("#") },
         )
+        assertFalse("and no .gitignore was written for them", File(project, ".gitignore").exists())
     }
 
     @Test
-    fun aPersonsIgnoreFileKeepsItsOwnLines() {
-        // The app owns two lines of a file the person owns. A rewrite that dropped theirs would
-        // silently un-ignore a build directory, which is a change nobody asked for.
+    fun aPersonsIgnoreFileIsNeverTouchedByTheApp() {
+        // **The app's two lines are not in the person's `.gitignore`.** They are a rule of this
+        // phone's app, not a fact about their repository: they go in `.git/info/exclude`, which
+        // git never commits and cannot push. A `.gitignore` is a tracked file, so writing there
+        // put the app's bookkeeping into the repository and made a project that had just arrived
+        // say "1 changed" before anybody touched it.
         val project = workspace.createProjectFolders("Shopping").getOrThrow()
+        File(project, ".git").mkdirs()
         val ignore = File(project, ".gitignore")
         ignore.writeText("build/\n*.apk\n")
 
         workspace.ensureIgnore(project)
 
-        val lines = ignore.readLines()
-        assertEquals("theirs first", "build/", lines[0])
-        assertEquals("and all of it", "*.apk", lines[1])
-        assertTrue("the app's lines were added", "agent/" in lines)
-        // A second pass is a no-op, so a sync does not show the ignore file changing forever.
-        val once = ignore.readText()
+        assertEquals(
+            "the person's file is byte for byte what they wrote",
+            "build/\n*.apk\n",
+            ignore.readText(),
+        )
+        val exclude = File(project, ".git/info/exclude")
+        val lines = exclude.readLines()
+        assertTrue("the app's lines are git's own exclude list", "agent/" in lines)
+        // A second pass is a no-op, so nothing is rewritten on every open.
+        val once = exclude.readText()
         workspace.ensureIgnore(project)
-        assertEquals("asking twice changes nothing", once, ignore.readText())
+        assertEquals("asking twice changes nothing", once, exclude.readText())
     }
 
     @Test

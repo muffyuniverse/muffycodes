@@ -345,9 +345,14 @@ class BrowserChromeTest {
         scene.signedIn()
         scene.project("groceries")
         scene.open("groceries")
+        // A folder of the person's own, one level below the project, with something in it — an
+        // empty folder is not a version, and this test is about a place a person can add to.
+        scene.folder("letters")
+        scene.file("note.txt", "in here")
+        scene.open("groceries", "letters")
         browser()
 
-        awaitText("letters")
+        awaitText("note.txt")
         assertTrue("a real folder keeps its Add", thereIcon("Add"))
     }
 }

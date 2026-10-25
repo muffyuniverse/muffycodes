@@ -135,9 +135,11 @@ class HistoryFeatureTest : FeatureTest() {
         scene.file("letters.txt", "the first")
         scene.await("the change to be recorded") { log().size > before }
 
+        // The *making* is named; the save that gave it text comes after it and says `Saved`,
+        // because a save's message is one word by design.
         assertTrue(
-            "the file is named in the commit: ${log().first().message}",
-            log().first().message.contains("letters.txt"),
+            "the file is named in the commit that made it: ${log().map { it.message }}",
+            log().any { it.message.contains("letters.txt") },
         )
     }
 
@@ -334,6 +336,9 @@ class HistoryFeatureTest : FeatureTest() {
         scene.viewModel.delete(file)
         assertFalse("the file is gone", File(path).exists())
 
+        // The history is opened again, because a restore acts on the history that is open and the
+        // row this file used to be is gone.
+        scene.viewModel.openHistory(file)
         scene.restore(version)
 
         assertTrue("it is back", File(path).isFile)
@@ -358,6 +363,11 @@ class HistoryFeatureTest : FeatureTest() {
         scene.viewModel.delete(letters)
         assertFalse("the folder is gone", letters.exists())
 
+        // **The history is opened again after the deletion.** Restoring acts on the history that
+        // is open, and a folder that is gone has no row to press — so this is the state a person
+        // reaches through Restore deleted…, without the menu: the version is known, and the
+        // question is whether putting it back brings the folder with it.
+        scene.viewModel.openHistory(letters)
         scene.restore(version)
 
         assertTrue("the folder is back", letters.isDirectory)
@@ -445,7 +455,7 @@ class HistoryFeatureTest : FeatureTest() {
         // is wanted a second after the mistake, not after the next push — and the way
         // to know is to save twice and never sync at all.
         scene.project("shopping")
-        scene.openIn("shopping")
+        scene.open("shopping")
         val ws = scene.workspace!!
         val file = File(ws.repoOf("shopping"), "milk.txt")
         // Written through the editor, because the editor is what commits: writing
@@ -473,7 +483,7 @@ class HistoryFeatureTest : FeatureTest() {
         // until the next sync, and the version it was put back to was not in the
         // history it came from.
         scene.project("shopping")
-        scene.openIn("shopping")
+        scene.open("shopping")
         val ws = scene.workspace!!
         val file = File(ws.repoOf("shopping"), "milk.txt")
         scene.viewModel.refresh()
@@ -569,7 +579,7 @@ class HistoryFeatureTest : FeatureTest() {
     @Test
     fun `a deleted file inside a project comes back from that project's history`() {
         scene.project("shopping")
-        scene.openIn("shopping")
+        scene.open("shopping")
         val ws = scene.workspace!!
         val file = File(ws.repoOf("shopping"), "milk.txt")
         scene.viewModel.refresh()
@@ -579,7 +589,7 @@ class HistoryFeatureTest : FeatureTest() {
         scene.viewModel.delete(file)
         scene.await("the deletion", 20_000) { !file.exists() }
 
-        scene.openIn("shopping")
+        scene.open("shopping")
         val offered = scene.viewModel.deletedIn(scene.viewModel.currentDir!!)
             .firstOrNull { it.name == "milk.txt" }
         assertTrue("the worktree offers it back", offered != null)
@@ -593,8 +603,7 @@ class HistoryFeatureTest : FeatureTest() {
         // save." The save was queued on the worker and the history was read on the UI
         // thread, so the read happened first. Asking for the versions on the same
         // worker puts them in the order they were asked for.
-        scene.signedIn()
-        scene.open()
+        start()
         val file = scene.file("milk.txt", "one litre")
         scene.viewModel.openEditor(file)
         scene.viewModel.saveEditor("two litres")
@@ -683,7 +692,7 @@ class HistoryFeatureTest : FeatureTest() {
         scene.await("the local project", 30_000) {
             scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
         }
-        scene.openIn("scratch")
+        scene.open("scratch")
         scene.file("note.txt", "mine")
         scene.await("a commit") { log().isNotEmpty() }
 

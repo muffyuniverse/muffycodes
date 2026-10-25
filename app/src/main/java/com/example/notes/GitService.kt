@@ -126,6 +126,12 @@ object GitService {
             // a commit behind it.)
             if (repo.resolve("HEAD") == null) {
                 Git(repo).use { git ->
+                    // **Whatever is already on disk goes in the first commit.** The caller wrote
+                    // the app's `.gitignore` before asking for the repository, so that the first
+                    // commit already ignores `agent/` and `.muffy/` — and committing an *empty*
+                    // first commit instead left the ignore file untracked, which made a project
+                    // that had just been made say "1 changed" before anybody touched it.
+                    stageEverything(git)
                     git.commit()
                         .setMessage("Initial commit")
                         .setAuthor(author.ident())

@@ -77,7 +77,8 @@ class SyncFeatureTest : FeatureTest() {
         // The record holds what the model was sent and answered — every tool result, every file it
         // read — so shipping it would put a second copy of the person's work on somebody's server
         // in a shape they never chose. It is a file in the project's folder, which is the
-        // repository, so the only thing keeping it out is the line the app writes.
+        // repository, so the only thing keeping it out is the line the app writes into git's own
+        // exclude list.
         scene.project("Shopping")
         scene.open("Shopping")
         val records = File(scene.workspace!!.projectDir("Shopping"), AgentLog.DIR).apply { mkdirs() }

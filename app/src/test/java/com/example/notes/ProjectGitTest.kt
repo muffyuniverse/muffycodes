@@ -485,7 +485,8 @@ class ProjectGitTest {
     fun theAppsOwnFolderIsNeitherAChangeNorASync() {
         // **A project's folder is its repository**, so the only thing here that must not travel is
         // what the app put in it: `agent/` (the record) and `.muffy/` (its flags). The two lines
-        // `ensureIgnore` writes are what make that true, and this asks git rather than the app.
+        // `ensureIgnore` writes into `.git/info/exclude` are what make that true, and this asks git
+        // rather than the app — including that they are not a change to the repository.
         val project = workspace.createProjectFolders("Shopping").getOrThrow()
         val git = gitFor()
         git.init("Shopping").getOrThrow()

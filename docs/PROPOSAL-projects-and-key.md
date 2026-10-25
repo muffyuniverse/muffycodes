@@ -25,7 +25,7 @@ files/
       .gitignore                   invisible; github's, once a project is cloned into it
       Shopping/                    a PROJECT — and at the same time the REPOSITORY
         .git/                      the history, and what sync pushes
-        .gitignore                 invisible; keeps the app's own two folders out of git
+        .git/info/exclude          invisible; git's own local list — keeps the app's two folders out
         agent/                     invisible; the record — what the model was sent and answered
         LICENSE                    seeded by GitHub
         README.md                  seeded by GitHub
@@ -38,7 +38,7 @@ files/
 
 - **There is no `projects/` folder and no `repo/` folder.** The root of an account
   *is* its list of projects, and a project's folder *is* its repository: its
-  `.git`, its `.gitignore` and the person's files live together, so the thing on
+  `.git` and the person's files live together, so the thing on
   GitHub is the folder they are looking at.
 - **A project is a folder that holds a repository.** That is the definition, and it
   is enforced: a folder at the root with no `.git` is only a folder, and the app
@@ -46,9 +46,11 @@ files/
 - **A project's name is its repository's name.** Renaming renames the repository
   on GitHub too.
 - **The app's own things live inside the project and are kept out of git**:
-  `agent/` holds the record, `.muffy/` the flags. Two lines in the project's
-  `.gitignore` — written by the app, committed by the app — are what make that
-  true, so a project that has been running an agent still has nothing to send.
+  `agent/` holds the record, `.muffy/` the flags. Two lines in git's own
+  `.git/info/exclude` — the per-clone list that is never committed and cannot be
+  pushed — are what make that true. They are a rule of this phone's app, not a fact
+  about the person's repository, so the person's `.gitignore` is untouched and a
+  project that has been running an agent still has nothing to send.
 - **Files are pristine** — nothing is added to what you type. A file's identity
   is its path; renaming renames the file and git sees a rename.
 - **The extension is just the part of the name after the dot.** Default `.txt`.
@@ -79,7 +81,7 @@ files/
 |---|---|---|
 | your files and folders, anywhere in a project | **yes** | **yes** |
 | a project's folder — its row is the project list | yes | renamed with the project, never moved or deleted as a file |
-| `agent/` (the record), `.muffy/`, `.git/`, `.gitignore` | **no** | **no** |
+| `agent/` (the record), `.muffy/`, `.git/`, `.gitignore`, `.git/info/exclude` | **no** | **no** |
 | `LICENSE`, `README.md` | yes — GitHub created them, but they are files of yours to handle | yes |
 
 - Hidden things are hidden by **name and by rule**: the app's own files live
@@ -124,7 +126,7 @@ cover. One history per project, one answer to "where did this version come from"
 | | which history keeps it |
 |---|---|
 | every file and folder inside a project | **that project's repository** — the one sync pushes |
-| the app's own things: `agent/`, `.muffy/`, `.git/` | none — they are named in the project's `.gitignore` and are not the person's work |
+| the app's own things: `agent/`, `.muffy/`, `.git/` | none — they are in git's local exclude list and are not the person's work |
 | a project's own name | none — the folder is named after the repository, and renaming renames the repository on GitHub |
 
 ### When it commits
@@ -137,9 +139,9 @@ cover. One history per project, one answer to "where did this version come from"
   content, so there is nothing to commit until something is in it, and the app says
   nothing rather than inventing a marker file in the person's repository
 - **when a project arrives** — the clone is a repository already, so its history
-  starts with whatever the repository held. The app's own two `.gitignore` lines
-  are written after the clone (git will not clone into a non-empty folder) and are
-  committed by the app, so a project that has just arrived has nothing waiting
+  starts with whatever the repository held. The app's two exclude lines are written
+  after the clone (git will not clone into a non-empty folder) into a file that is
+  not part of the repository, so a project that has just arrived has nothing waiting
 
 A save's commit says one word — `Saved` — because the person never types it and
 every row of a file's history would otherwise repeat the same sentence; nothing on
@@ -331,7 +333,7 @@ the time Sync is pressed there is nothing left to decide about.
 The history's arrows move between **changes**, not between pushes: a version exists
 the moment you save, and an undo does not wait for a network. The app's own folders
 are not part of the push — they are not the person's work, and git is told so in the
-project's `.gitignore`.
+project's `.git/info/exclude`.
 
 **Online is required.** With no network, sync does nothing and says so plainly —
 nothing lands half-done, and the changed count stays as it was. A repository
