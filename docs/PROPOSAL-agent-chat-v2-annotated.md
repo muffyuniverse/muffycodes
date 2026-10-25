@@ -139,6 +139,7 @@ than have it read as a bug later.
   Tapping a turn expands it (the full body is in the log).
 - This screen renders **only** from `agent/session.log` (§2.7), so a chat you can see is a
   chat you can reconstruct from the file, and vice versa.
+  @ message command should be displayed as the finishing turn for the message box (not as one of the turn's calls)
 
 ### 1.4 The loop
 
@@ -175,6 +176,7 @@ service notification. It says what **needs you**: sessions that called `message`
 idle, sessions that stopped on an error, and sessions that are off. A session sitting in a
 `wait` is working as designed and is not mentioned — otherwise the notification fires every
 hour forever for a healthy agent, which is how a person learns to ignore notifications.
+@ good, so there will be a permanent bar that shows amount of active sessions and "operator input" needed notifications that notify when something wrong happened and then remind periodically untill they are resolved.
 
 ### 1.6 The three prompt layers, and what the context actually is
 
@@ -193,6 +195,7 @@ files/accounts/<login>/
 **The context sent with every request is ① + ② + ③ + a window of the session log** — the last
 turns, not the whole file. That distinction does work in §2.7: it is why `session.log` can be
 append-only and unbounded while the *context* stays bounded.
+@ dont understand why to send part of session log to the composite context when working context should already holds it. it is just that agent clears context records himself while session log is truncated by the app.
 
 Every layer is editable and lockable. A lock makes it **read-only** — to the agent and to the
 app (G5).
@@ -203,6 +206,7 @@ provider, both overridable with a number. §2.3 is why a fraction and not a numb
 
 Over the trigger: the system message says "compact" every turn until the context is under it.
 Over the hard limit: the app trims the oldest turns and says so in the log. Never silently.
+@ not just compact but rather clear up your context by editing out all the records that dont relate to your current task. and why limits are fractions? I context is payed per token not per fraction. set limit is clamped by selected model/provider limit on selection.
 
 ---
 
@@ -279,6 +283,7 @@ the project.
 Kept from your answer, exactly as you wrote it: **`wait` alone, or an immediate `1` with
 "do not use wait with other tools"** and the other tools' results in the body. And the check is
 free here, since these endpoints never emit two calls anyway.
+@ just let it wait untill the next message from user, no investigation (in same 4 min intervals, with message "continue waiting").
 
 ### 2.3 `hard < the model's context` cannot be checked once, because a provider changes it by 6×
 
@@ -339,6 +344,7 @@ Some honest limits that no grade removes:
   recent Androids, so grade A + reboot forces `specialUse`.
 
 → question 2. My recommendation: **grade B with `specialUse`**, no wake lock.
+@ must never stop untill operator removes it from background - operator should decide, not android.
 
 ### 2.5 "Agents are waiting" needs a definition, or the notification is noise
 
@@ -355,6 +361,7 @@ system. Then it gets muted, and the one notification that mattered is muted with
 | **stopped** | "shopping: the pinned provider refused (503), 3 retries" | the pin has no fallback, by design |
 | **off** | "shopping: the agent was turned off while a turn was open" | something ended a session you did not end |
 | *(in a `wait`, nothing to do)* | — silently, as designed | — |
+@ then we can give it instead of message command this ones: ask, conclude. so app can distinguish. and merge off into stopped, while waiting keep as idle status.
 
 And on cost, since the cap is gone: **the idle loop is cheap, and that is why your answer is
 defensible.** A wake every four minutes = 15 requests an hour; with a ~30k-token context that is
@@ -381,7 +388,8 @@ box is a viewer or a page.
   hand — which for a chat that renders *from* the log is a strange gap.
 
 Propose: `<` disabled at the first turn (a wrap makes "turn 3 of 7" lie), `»` disabled at the
-last, and **`»` at the last turn moves to the last turn of the previous burst** — labelled
+last, 
+@ and **`»` at the last turn moves to the last turn of the previous burst** — labelled - rejected. every turn shows its own turn sequence between user messages.
 "turn 4 of 4 · earlier burst". One button, no new control, and the whole history is reachable.
 → question 3.
 
@@ -421,6 +429,7 @@ a day, ~70 KB, which is nothing on disk, and grows without bound if you ever lea
 Resolution, and it is why §1.6 separates them: **the model's context is derived** — ① + ② + ③
 + the last N turns — so `session.log` can be append-only and complete while the *request* stays
 bounded. The token limit is on `context.md` and on N, never on the transcript.
+@ good, but session does need a limit, just a generous one.
 
 ### 2.8 Effort "moves down" has no down when the new ladder is above it
 
@@ -436,6 +445,7 @@ Also worth knowing: this model's ladder is `["max","high","low","none"]` and **`
 position on it** — so the slider's left end is not "minimal effort", it is "no reasoning at
 all". The label should say so, because a person sliding left for "cheap" gets a materially
 different agent.
+@ ok
 
 ### 2.9 Two restores, one word
 
@@ -444,6 +454,7 @@ config"** (a button) and **"restore version"** (a file's history) are different 
 same verb. And the agent's `restore` tool is the second one. Propose the button reads
 **"Reset the model config"**, and `check-taps.py` gains one word, so a future "restore" cannot
 mean two things.
+@ ok, config is restored from backup, not history so it is different.
 
 ### 2.10 What nobody has said yet: which project the agent reads *about*, and what it may read
 
@@ -457,6 +468,7 @@ and the session file are not where they appear to be:
 - **never**: another project's folder. Two projects, two agents, two diaries; an agent that can
   read `../shopping` is an agent whose "what did I do before" is somebody else's work.
   → question 4, because this one is a judgement call and not a consequence.
+  @ all files within project that are not system or locked.
 
 ---
 
@@ -502,7 +514,7 @@ Three things this buys, and one it does not:
 The cost of adopting this is one decision made once: the model call sits behind an interface
 from the first commit, with a scripted implementation beside the real one — the shape
 `DiskGitHub` already has, which is why the whole suite can run without a socket today.
-
+@ good
 ---
 
 ## 4. What I need answered
