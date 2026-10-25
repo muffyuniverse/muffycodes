@@ -232,8 +232,31 @@ class Workspace(val accountDir: File) {
         ""
     }
 
-    /** Writes text, replacing the file atomically so a crash cannot half-write it. */
-    fun write(file: File, text: String) {
+    /** Writes text, replacing the file atomically so a crash cannot half-write it.
+     *
+     * **A locked file is not written, and the refusal is here rather than at the call
+     * sites.** It used to be checked only by the screen's own code, which meant the rule
+     * held for exactly the callers that remembered it: the editor did, and a restore, an
+     * import or a promoted agent did not. A lock that only some writers honour is not a
+     * lock, it is a habit.
+     *
+     * Returns false when the write was refused, so a caller that must say something can.
+     */
+    fun write(file: File, text: String): Boolean {
+        if (isLocked(file)) return false
+        put(file, text)
+        return true
+    }
+
+    /**
+     * Writes without asking about locks.
+     *
+     * For the app's own bookkeeping and its own markers — the flag files in `.muffy` and
+     * the `.gitkeep` that gives an empty folder a version. Those are never the person's
+     * documents, and routing them through [write] would mean the app could lock itself
+     * out of remembering what is locked.
+     */
+    private fun put(file: File, text: String) {
         file.parentFile?.mkdirs()
         val temp = File(file.parentFile, ".${file.name}.tmp")
         temp.writeText(text)
@@ -246,7 +269,7 @@ class Workspace(val accountDir: File) {
 
     // ---- changing the tree -------------------------------------------------
 
-    /** Makes a folder. Fails when the name is taken or is not a legal name. */
+    /** Makes a folder. Fails when the name is taken, the name is illegal, or [dir] is locked. */
     /**
      * Puts a hidden marker in an empty folder.
      *
@@ -259,10 +282,11 @@ class Workspace(val accountDir: File) {
     fun markTrackable(folder: File) {
         if (!folder.isDirectory) return
         val filled = folder.listFiles()?.any { !isHidden(it.name) || it.name == KEEPER } == true
-        if (!filled) File(folder, KEEPER).writeText("")
+        if (!filled) put(File(folder, KEEPER), "")
     }
 
     fun createFolder(dir: File, name: String): Result<File> {
+        lockProblem(dir)?.let { return Result.failure(IllegalArgumentException(it)) }
         val safe = cleanName(name, "folder")
         nameProblem(safe)?.let { return Result.failure(IllegalArgumentException(it)) }
         val target = File(dir, safe)
@@ -277,8 +301,9 @@ class Workspace(val accountDir: File) {
         }
     }
 
-    /** Makes a file with some text in it. */
+    /** Makes a file with some text in it. Refused when [dir] is locked. */
     fun createFile(dir: File, name: String, text: String = ""): Result<File> {
+        lockProblem(dir)?.let { return Result.failure(IllegalArgumentException(it)) }
         val safe = cleanName(name, "untitled")
         nameProblem(safe)?.let { return Result.failure(IllegalArgumentException(it)) }
         val target = File(dir, safe)
@@ -339,6 +364,7 @@ class Workspace(val accountDir: File) {
      */
     fun move(file: File, into: File): Result<File> {
         touchedProblem(file)?.let { return Result.failure(IllegalArgumentException(it)) }
+        lockProblem(into)?.let { return Result.failure(IllegalArgumentException(it)) }
         if (!into.isDirectory) {
             return Result.failure(IllegalArgumentException("That is not a folder"))
         }
@@ -389,7 +415,13 @@ class Workspace(val accountDir: File) {
      * made from, forever.
      */
     fun copy(file: File, into: File): Result<File> {
-        touchedProblem(file)?.let { return Result.failure(IllegalArgumentException(it)) }
+        // **A copy is a read of the source, so a lock does not stop it.** That is the whole
+        // distinguishing line between a lock and a permission: copying a locked file is
+        // how a person works on a draft of something they froze, and the original is
+        // untouched either way. The destination is checked instead, because writing *into*
+        // a locked folder is a change to it.
+        coreProblem(file)?.let { return Result.failure(IllegalArgumentException(it)) }
+        lockProblem(into)?.let { return Result.failure(IllegalArgumentException(it)) }
         if (!into.isDirectory) {
             return Result.failure(IllegalArgumentException("That is not a folder"))
         }
@@ -449,8 +481,21 @@ class Workspace(val accountDir: File) {
         else -> null
     }
 
-    /** Why [file] cannot be renamed, moved or deleted, or null when it can. */
-    private fun touchedProblem(file: File): String? = when {
+    /** The locked paths. Read once and kept, because every write asks. */
+    private var lockedCache: Set<String>? = null
+
+    /**
+     * Why [file] cannot be renamed, moved or deleted, or null when it can.
+     *
+     * Three questions in order: is it there, does it belong to the app, and did the
+     * person lock it. The lock is last and is the one that can change without the file
+     * changing at all.
+     */
+    private fun touchedProblem(file: File): String? =
+        coreProblem(file) ?: lockProblem(file)
+
+    /** Why [file] cannot be handled at all, ignoring its lock. */
+    private fun coreProblem(file: File): String? = when {
         !file.exists() -> "That is no longer there"
         isHidden(file.name) -> "That belongs to the app"
         isStructural(file) -> "That folder belongs to the app"
@@ -483,16 +528,46 @@ class Workspace(val accountDir: File) {
      * in the text would be content the person did not write, and a marker in the
      * name would change the name the file has.
      */
-    fun locked(): Set<String> = readFlags(LOCKED_FILE)
+    fun locked(): Set<String> = lockedCache ?: readFlags(LOCKED_FILE).also { lockedCache = it }
 
     /** Replaces the locked paths. */
-    fun setLocked(paths: Set<String>) = writeFlags(LOCKED_FILE, paths)
-
-    /** True when [file] is locked against editing. */
-    fun isLocked(file: File): Boolean {
-        val path = relative(file) ?: return false
-        return pathString(path) in locked()
+    fun setLocked(paths: Set<String>) {
+        writeFlags(LOCKED_FILE, paths)
+        lockedCache = paths
     }
+
+    /**
+     * True when [file] is locked against editing.
+     *
+     * **A lock covers what is inside it, and the separator is what makes that exact.**
+     * Locking a folder has to protect its children — that is what locking a folder is
+     * for, and it was not true: the check compared one whole path, so a person could
+     * edit every file in a folder they had locked. The comparison is `locked + "/"`
+     * rather than a bare prefix, or locking `milk.txt` would also lock `milk.txt.bak`.
+     */
+    fun isLocked(file: File): Boolean {
+        val path = relative(file)?.let(::pathString) ?: return false
+        val locked = locked()
+        if (locked.isEmpty()) return false
+        if (path in locked) return true
+        return locked.any { it.isNotEmpty() && path.startsWith("$it/") }
+    }
+
+    /**
+     * True when [file] itself was locked, rather than sitting inside a locked folder.
+     *
+     * The row's lock icon answers "did I lock this?", which is a different question from
+     * "may this be written?": a folder's twenty files are all read-only, and twenty lock
+     * icons would say the person had done twenty things.
+     */
+    fun isLockedHere(file: File): Boolean {
+        val path = relative(file)?.let(::pathString) ?: return false
+        return path in locked()
+    }
+
+    /** Why [file] cannot be written because of a lock, or null when it can. */
+    fun lockProblem(file: File): String? =
+        if (isLocked(file)) "\"${file.name}\" is locked, so it cannot be changed" else null
 
     /**
      * Whether a project has work GitHub has not been sent since the last push.
@@ -569,7 +644,7 @@ class Workspace(val accountDir: File) {
         stateDir.mkdirs()
         val array = JSONArray()
         paths.sorted().forEach { array.put(it) }
-        write(File(stateDir, name), array.toString())
+        put(File(stateDir, name), array.toString())
     }
 
     // ---- creating a project on disk ---------------------------------------

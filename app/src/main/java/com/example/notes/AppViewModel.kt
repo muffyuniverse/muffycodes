@@ -723,12 +723,16 @@ class AppViewModel @JvmOverloads constructor(
         // locked?" — and a snackbar per tap said the same thing over the list.
     }
 
-    /** True when [file] may not be written. */
-    fun isLocked(file: File): Boolean {
-        val ws = workspace ?: return false
-        val target = ws.relative(file) ?: return false
-        return ws.pathString(target) in lockedPaths
-    }
+    /** True when [file] may not be written — itself, or because a folder above it is.
+     *
+     * The rule lives in [Workspace], which is where every write goes. This answers the
+     * screen's question from the same place rather than from its own copy, so the icon,
+     * the greyed Save and the funnel cannot disagree.
+     */
+    fun isLocked(file: File): Boolean = workspace?.isLocked(file) ?: false
+
+    /** True when [file] itself was locked, rather than sitting inside a locked folder. */
+    fun isLockedHere(file: File): Boolean = workspace?.isLockedHere(file) ?: false
 
     /** Pins or unpins a file or folder (§2: the flags live in `.muffy`). */
     fun togglePinned(file: File) {
@@ -1819,12 +1823,19 @@ class AppViewModel @JvmOverloads constructor(
         return true
     }
 
-    /** Puts an old version back into the file. */
-    fun restoreVersion(revisionId: String) {
-        Trace.tap("restore version", revisionId.take(7))
-        val ws = workspace ?: return
-        val target = historyPath ?: return
-        val project = ws.projectAt(target)
+      /** Puts an old version back into the file. */
+      fun restoreVersion(revisionId: String) {
+          Trace.tap("restore version", revisionId.take(7))
+          val ws = workspace ?: return
+          val target = historyPath ?: return
+          // A restore writes, so a lock refuses it. The history stays open and says so:
+          // the version list is exactly where a person finds out that they froze this file.
+          if (ws.lockProblem(ws.fileAt(target)) != null) {
+              Trace.failure("restore version", "locked")
+              message = "${target.last()} is locked, so nothing was put back"
+              return
+          }
+          val project = ws.projectAt(target)
         val insideWorktree = target.size >= 3 && target[2] == Workspace.REPO
         val text = ws.pathString(target)
         val ok = if (project != null && insideWorktree) {
@@ -1833,9 +1844,18 @@ class AppViewModel @JvmOverloads constructor(
             // Bringing a folder back means putting every file of that version
             // where it was. Nothing is removed: a restore only ever adds back.
             val files = history?.filesUnder(text, revisionId).orEmpty()
+            var refused = 0
             files.forEach { (path, body) ->
                 val restored = ws.fileAt(path.split("/"))
-                ws.write(restored, body)
+                if (!ws.write(restored, body)) refused++
+            }
+            // A restore that silently skipped the locked files of a folder would say it
+            // worked and leave the folder half put back — so the count is what decides,
+            // and a refusal is a refusal however many files went in.
+            if (refused > 0) {
+                Trace.failure("restore version", "$refused locked")
+                message = "$refused of them are locked, so nothing was put back"
+                return
             }
             files.isNotEmpty()
         } else {

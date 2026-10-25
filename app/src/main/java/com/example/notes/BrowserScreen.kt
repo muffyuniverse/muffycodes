@@ -488,7 +488,10 @@ private fun EntryList(viewModel: AppViewModel, actions: BrowserActions) {
             EntryRow(
                 entry = entry,
                 pinned = pinned,
-                locked = viewModel.isLocked(entry.file),
+                // The switch, not the rule: a file inside a locked folder is read-only
+                // but nobody locked *it*, and a folder of twenty lock icons would read as
+                // twenty things the person did.
+                locked = viewModel.isLockedHere(entry.file),
                 selected = viewModel.isSelected(entry.file),
                 choosing = viewModel.selected.isNotEmpty(),
                 // `projects/` at the root and `repo/` inside a project are the app's

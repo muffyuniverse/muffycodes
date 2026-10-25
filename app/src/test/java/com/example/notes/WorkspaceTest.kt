@@ -202,4 +202,100 @@ class WorkspaceTest {
     fun readingAMissingFileIsEmptyRatherThanACrash() {
         assertEquals("", workspace.read(File(workspace.accountDir, "gone.txt")))
     }
+
+    /**
+     * The lock, at the funnel rather than at the screens.
+     *
+     * Every test here goes through `Workspace` and never through the view model, because
+     * that is the claim: a lock holds for **any** caller. It used to hold only for the
+     * screens that remembered to ask, so the editor refused and a restore did not — and a
+     * lock that some writers honour is a habit, not a lock.
+     */
+    private fun lock(vararg paths: String) {
+        workspace.setLocked(paths.toSet())
+    }
+
+    @Test
+    fun aLockedFileIsNotWrittenByTheFunnel() {
+        val file = File(workspace.accountDir, "milk.txt")
+        workspace.write(file, "two litres")
+        lock("milk.txt")
+
+        assertFalse("the write is refused", workspace.write(file, "three litres"))
+        assertEquals("and the text did not change", "two litres", file.readText())
+    }
+
+    @Test
+    fun aLockOnAFolderCoversWhatIsInsideIt() {
+        // The bug this is for: locking a folder protected the folder and nothing in it, so
+        // the files a person had just frozen were all still editable.
+        val folder = File(workspace.accountDir, "drafts")
+        folder.mkdirs()
+        val inside = File(folder, "milk.txt")
+        workspace.write(inside, "two litres")
+        lock("drafts")
+
+        assertTrue("the file inside is locked", workspace.isLocked(inside))
+        assertFalse("so it is not written", workspace.write(inside, "three litres"))
+        assertEquals("and keeps its text", "two litres", inside.readText())
+        assertTrue("nor deleted", workspace.delete(inside).isFailure)
+        assertTrue("and it is still there", inside.isFile)
+        assertFalse(
+            "nothing new can be made inside it either",
+            workspace.createFile(folder, "butter").isSuccess,
+        )
+    }
+
+    @Test
+    fun aLockOnAFileDoesNotLockTheOneBesideItWithALongerName() {
+        // A prefix comparison without its separator: locking `milk.txt` would also lock
+        // `milk.txt.bak`, which is the kind of bug that reads as "the app is random".
+        val file = File(workspace.accountDir, "milk.txt")
+        val neighbour = File(workspace.accountDir, "milk.txt.bak")
+        workspace.write(file, "a")
+        workspace.write(neighbour, "b")
+        lock("milk.txt")
+
+        assertTrue("the file is locked", workspace.isLocked(file))
+        assertFalse("the one with the longer name is not", workspace.isLocked(neighbour))
+        assertTrue("and it can still be written", workspace.write(neighbour, "c"))
+    }
+
+    @Test
+    fun copyingALockedFileOutIsAllowedBecauseCopyingDoesNotChangeIt() {
+        // A lock is "read only", not "keep away": a copy is a read of the source, and the
+        // source is untouched. Writing *into* a locked folder is the change that is refused.
+        val folder = File(workspace.accountDir, "drafts")
+        folder.mkdirs()
+        val original = File(folder, "milk.txt")
+        workspace.write(original, "two litres")
+        val elsewhere = File(workspace.accountDir, "inbox")
+        elsewhere.mkdirs()
+        lock("drafts/milk.txt")
+
+        val copy = workspace.copy(original, elsewhere)
+
+        assertTrue("the copy is made", copy.isSuccess)
+        assertEquals("with the same text", "two litres", copy.getOrThrow().readText())
+
+        lock("inbox")
+        assertTrue(
+            "but copying into a locked folder is refused",
+            workspace.copy(original, elsewhere).isFailure,
+        )
+    }
+
+    @Test
+    fun theLockIsRememberedAcrossAWorkspaceThatHasNotReadItYet() {
+        // The flags live in `.muffy`, so a second Workspace over the same account sees the
+        // lock without being told: the cache is a cache, not the truth.
+        val file = File(workspace.accountDir, "milk.txt")
+        workspace.write(file, "two litres")
+        lock("milk.txt")
+
+        val other = Workspace(workspace.accountDir)
+
+        assertTrue("the lock is read from disk", other.isLocked(file))
+        assertFalse("and it refuses a write too", other.write(file, "three litres"))
+    }
 }
