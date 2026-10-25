@@ -94,7 +94,10 @@ class ModelConfigTest {
 
         val message = result.exceptionOrNull()?.message.orEmpty()
         assertTrue("it says which line: $message", message.startsWith("line "))
-        assertTrue("and keeps JSON's own words: $message", message.contains("line", "JSON"))
+        assertTrue(
+            "and keeps JSON's own words, which name what it found: $message",
+            message.contains("line") && message.contains("JSON", ignoreCase = true),
+        )
     }
 
     @Test
