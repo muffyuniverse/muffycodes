@@ -1859,10 +1859,6 @@ class AppViewModel @JvmOverloads constructor(
     /** The words that arrived during a turn, sent as the next one. */
     private var pendingChat: String? = null
 
-    private companion object {
-        /** The reason a turn is cut short by the operator's own words. */
-        const val INTERRUPTED = "the operator spoke"
-    }
 
     /**
      * Runs one turn on the worker and hands back what it wrote.
@@ -2577,6 +2573,10 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     companion object {
+
+        /** The reason a turn is cut short by the operator's own words. */
+        const val INTERRUPTED = "the operator spoke"
+
         /** The login of the test account a debug build can make. */
         const val TEST_ACCOUNT = "test-account"
 

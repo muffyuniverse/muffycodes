@@ -369,7 +369,7 @@ class Agent(
     private fun cutShort(why: String, calls: List<Call>): End {
         for (call in calls) {
             log.call(call.tool, call.args)
-            log.got(call.tool, "$FAILURE interrupted: $why")
+            log.got(call.tool, "${AgentLog.FAILURE} interrupted: $why")
         }
         log.note("stopped", why)
         // A person speaking is not a session stopping; a person stopping is.
