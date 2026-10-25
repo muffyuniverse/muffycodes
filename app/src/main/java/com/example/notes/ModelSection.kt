@@ -7,8 +7,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -223,8 +223,15 @@ private fun ModelPicker(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
-                    items(rows) { row ->
+                // A plain scrolling Column rather than a lazy list: there are at most a few
+                // rows, and a lazy list inside a dialog is measured against a height the
+                // dialog does not bound — which is how a list ends up drawing nothing.
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 360.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    rows.forEach { row ->
                         val picked = chosen == row || (chosen == null && row == current(what, active))
                         Column(
                             modifier = Modifier
@@ -406,8 +413,12 @@ private fun AddModelDialog(viewModel: AppViewModel, onDismiss: () -> Unit) {
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    LazyColumn(modifier = Modifier.heightIn(max = 240.dp)) {
-                        items(numbers) { endpoint ->
+                    Column(
+                        modifier = Modifier
+                            .heightIn(max = 240.dp)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        numbers.forEach { endpoint ->
                             val usable = endpoint.tools
                             Row(
                                 modifier = Modifier
