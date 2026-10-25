@@ -289,8 +289,11 @@ class ProjectsFeatureTest : FeatureTest() {
 
         scene.openEditor(file)
         scene.saveEditor("second")
-        scene.await("the second version", 30_000) {
-            scene.versionsOf(file).size >= 2
+        // **Waited for by its text, not by a count.** The file already has two versions (the empty
+        // one it was made as, and `first`), so "at least two" was true before the save had run and
+        // the assertion after it read the history too early.
+        scene.await("the second version to be recorded", 30_000) {
+            scene.versionsOf(file).any { it.second == "second" }
         }
 
         assertEquals(

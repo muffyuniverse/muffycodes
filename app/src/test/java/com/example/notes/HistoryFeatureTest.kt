@@ -75,10 +75,15 @@ class HistoryFeatureTest : FeatureTest() {
             scene.versionsOfFolder("empty").isEmpty())
 
         scene.openIn("empty")
-        scene.file("one.txt", "first")
+        val one = scene.file("one.txt", "first")
         scene.openIn()
         scene.await("a version, now that there is something in it") {
             scene.versionsOfFolder("empty").isNotEmpty()
+        }
+        // The text has to be the version that is restored, or this asks whether an empty file comes
+        // back empty — which it does, and which says nothing about restoring anything.
+        scene.await("the text to be a version") {
+            scene.versionsOf(one).any { it.second == "first" }
         }
 
         // And from that version the folder *can* come back, which is the thing the old test was
