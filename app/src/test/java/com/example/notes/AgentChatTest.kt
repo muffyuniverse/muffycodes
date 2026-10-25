@@ -23,7 +23,8 @@ class AgentChatTest {
         name: String,
         detail: String = "",
         time: String = "14:02:11.410",
-    ): AgentLog.Row = AgentLog.Row(time, next++, kind, name, detail)
+        ctx: String = AgentLog.IN,
+    ): AgentLog.Row = AgentLog.Row(time, next++, kind, ctx, name, detail)
 
     private fun told(text: String) = row(AgentLog.TOLD, "operator", text)
     private fun turn() = row(AgentLog.TURN, "turn")

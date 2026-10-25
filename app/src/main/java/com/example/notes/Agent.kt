@@ -546,7 +546,7 @@ class Agent(
             .filter { it.tokens > 0 }
             .sortedByDescending { it.tokens }
             .take(BIGGEST_ROWS)
-        return Opening(measure(layers.message, rows, tools), costs)
+        return Opening(measure(layers.message, log.contextRows(), tools), costs)
     }
 
     /** How many files in the project are different from what was committed. */

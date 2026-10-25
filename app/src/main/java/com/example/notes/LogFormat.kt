@@ -103,7 +103,7 @@ object LogFormat {
      * file had them.
      */
     fun flipCtx(line: String, ctx: String): String =
-        line.replaceFirst(HEAD) { m ->
+        HEAD.replaceFirst(line) { m ->
             val id = m.groupValues[2].padStart(4)
             val kind = m.groupValues[3].padEnd(7)
             "${m.groupValues[1]} $id $kind ${ctx.padEnd(3)} "

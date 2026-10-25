@@ -229,7 +229,6 @@ class AgentTools(
         // removal. It is not a file any more: the context is a column, and `forget` is the only way
         // to change it, so none of that has to be checked.
         if (!ws.write(file, text)) return refusal("${rel(file)} cannot be changed")
-        if (!changed) return refusal("${rel(file)} cannot be changed")
         return commit("Edited ${file.name}", "${rel(file)} changed")
     }
 
