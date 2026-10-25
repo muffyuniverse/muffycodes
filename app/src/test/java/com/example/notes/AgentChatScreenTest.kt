@@ -69,8 +69,17 @@ class AgentChatScreenTest {
         compose.onNodeWithText("Send").performClick()
     }
 
+    /**
+     * Waits for [count] turns **and for the burst to be over**.
+     *
+     * The last turn appears a moment before the turn ends — the agent still has to close it and
+     * say what happened — and a test that closed the phone in that gap would be racing the
+     * worker that is writing the record.
+     */
     private fun awaitTurns(count: Int) {
-        scene.await("$count turns") { scene.viewModel.chatBox?.turns?.size == count }
+        scene.await("$count turns") {
+            scene.viewModel.chatBox?.turns?.size == count && !scene.viewModel.chatWorking
+        }
         compose.waitForIdle()
     }
 
@@ -159,6 +168,40 @@ class AgentChatScreenTest {
     }
 
     @Test
+    fun `an answer to the agent's question carries the question into the next request`() {
+        // The seam, through the box: the person answers in the composer, and without the
+        // question in the next request their "yes" answers nothing. It is carried as the
+        // agent's own words — a terminating call is never run, so it has no result, and a
+        // call with no result is a request every endpoint refuses.
+        val door = ScriptedDoor(
+            Reply("", listOf(call("ask", """{"question":"Fix the README too?"}"""))),
+            Reply("", listOf(call("conclude", """{"text":"Fixed."}"""))),
+        )
+
+        chat(door)
+        say("look at the readme")
+        scene.await("the question") { door.asked.size == 1 }
+        compose.waitForIdle()
+        compose.onNodeWithText("Fix the README too?", substring = true).assertExists()
+
+        say("yes")
+        scene.await("the answer's turn") { door.asked.size == 2 && !scene.viewModel.chatWorking }
+
+        val messages = door.asked.last().messages
+        assertTrue(
+            "the question came back with it",
+            messages.any { it.role == "assistant" && it.text.contains("Fix the README too?") },
+        )
+        assertTrue(
+            "and the answer is what the model was told",
+            messages.any { it.role == "user" && it.text == "yes" },
+        )
+        val asked = messages.filter { it.role == "assistant" }.flatMap { it.calls }.map { it.id }
+        val answered = messages.filter { it.role == "tool" }.map { it.callId }
+        assertEquals("and nothing is left calling into the void", asked.toSet(), answered.toSet())
+    }
+
+    @Test
     fun `an idle agent is one line, not a turn`() {
         // A `wait` ends the burst, so one burst holds one poll. A conversation that holds many
         // is what the four-minute timer will write — [AgentChatTest] pins the collapsing; this
@@ -168,7 +211,8 @@ class AgentChatScreenTest {
         chat(door)
         say("anything new?")
         scene.await("the idle line") {
-            scene.viewModel.chatBox?.idle?.contains("1 check") == true
+            scene.viewModel.chatBox?.idle?.contains("1 check") == true &&
+                !scene.viewModel.chatWorking
         }
         compose.waitForIdle()
 

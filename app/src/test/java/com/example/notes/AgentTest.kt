@@ -217,6 +217,27 @@ class AgentTest {
     // ---- ending a turn ------------------------------------------------------
 
     @Test
+    fun `every call the model reads has an answer`() {
+        // **The invariant every endpoint enforces.** A tool call with no tool message after it
+        // is a refused request, and the agent would meet the refusal at the start of the next
+        // turn with no way back — which is what a terminating `ask` used to leave behind: its
+        // call row was written, nothing ever answered it, and the next request carried it.
+        val door = ScriptedDoor(
+            Reply("", listOf(call("ask", """{"question":"Fix the README too?"}"""))),
+            Reply("", listOf(call("conclude", """{"text":"Fixed."}"""))),
+        )
+        val agent = agent(door)
+        agent.burst("look at the readme")
+        agent.burst("yes")
+
+        val messages = agent.messages(log.contextRows())
+        val asked = messages.filter { it.role == "assistant" }.flatMap { it.calls }.map { it.id }
+        val answered = messages.filter { it.role == "tool" }.map { it.callId }
+        assertTrue("something was called", asked.isNotEmpty())
+        assertEquals("and each thing called was answered", asked.toSet(), answered.toSet())
+    }
+
+    @Test
     fun `ask ends the turn and the question is the seam the answer needs`() {
         // The bug this exists for: with the burst boundary in the way, a bare "yes" in the
         // next turn answers nothing, because the question was never in the request.

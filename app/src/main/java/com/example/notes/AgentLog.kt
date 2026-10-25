@@ -73,6 +73,17 @@ class AgentLog private constructor(
          */
         val TERMINATING = setOf("ask", "conclude", "wait")
 
+        /**
+         * The terminating tools that never get a result, because their words are their own row.
+         *
+         * `ask` and `conclude` end the turn and are never run, so nothing answers them — and a
+         * conversation carrying a tool call with no tool message is one every endpoint refuses.
+         * Their text is written as `ASK`/`CONCLUDE`, and that is what the model reads back.
+         * `wait` is not among them: its call is answered once, so the idle agent's context stays
+         * a legal conversation.
+         */
+        val SPEAKING = setOf("ask", "conclude")
+
         /** A result's first line: the call worked. */
         const val SUCCESS = "0"
 

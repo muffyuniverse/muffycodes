@@ -279,7 +279,14 @@ class Agent(
                     out.add(Msg.user(row.body))
                 }
 
-                AgentLog.CALL -> calls.add(Call(callId(row.id), row.name, row.body))
+                // **A speaking call is not part of the conversation.** `ask` and `conclude`
+                // are never run, so they never get a result — and a request whose assistant
+                // message calls a tool with no answer is refused by every endpoint. Their
+                // words are the ASK/CONCLUDE row, which is added below as the agent's own
+                // message; that is the seam an answer needs.
+                AgentLog.CALL -> if (row.name !in AgentLog.SPEAKING) {
+                    calls.add(Call(callId(row.id), row.name, row.body))
+                }
                 AgentLog.GOT -> {
                     flush()
                     val id = awaiting.removeFirstOrNull() ?: callId(row.id)
