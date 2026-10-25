@@ -93,11 +93,12 @@ class ModelConfigTest {
         val result = ModelConfigFile.parse(broken)
 
         val message = result.exceptionOrNull()?.message.orEmpty()
-        assertTrue("it says which line: $message", message.startsWith("line "))
-        assertTrue(
-            "and keeps JSON's own words, which name what it found: $message",
-            message.contains("line") && message.contains("JSON", ignoreCase = true),
-        )
+        // The list on the fourth line is closed by the wrong bracket on the fifth, so that is
+        // the line to name. Asserting the number rather than just the word is what proves the
+        // offset was converted: passing org.json's sentence through unchanged would mention a
+        // line in brackets, not as the prefix this app puts on it.
+        assertTrue("it says which line: $message", message.startsWith("line 5: "))
+        assertTrue("and keeps the parser's own words: $message", message.contains("Expected"))
     }
 
     @Test
@@ -186,12 +187,15 @@ class ModelConfigTest {
     @Test
     fun effortMovesDownToWhatTheModelSupports() {
         // The operator's rule: if the model does not declare the chosen effort, it moves down to
-        // one it does, and the operator can raise it again.
-        val ladder = listOf("max", "high", "low", "none")
+        // one it does, and the operator can raise it again. `max` is absent from this ladder —
+        // which is the case the rule is for, since the ladder is the model's, not the app's.
+        val ladder = listOf("high", "low", "none")
 
         assertEquals("max is not offered, so the next one down", "high",
             ModelConfigFile.effortFor(ladder, "max"))
         assertEquals("high is offered", "high", ModelConfigFile.effortFor(ladder, "high"))
+        assertEquals("and a rung that is between two of them", "low",
+            ModelConfigFile.effortFor(ladder, "medium"))
     }
 
     @Test
@@ -212,11 +216,12 @@ class ModelConfigTest {
 
     @Test
     fun anEffortNameThisAppHasNeverSeenIsStillPlacedBelowTheKnownOnes() {
-        // A model may add a name tomorrow; the app must place it rather than throw, and placing
-        // an unknown ladder rung *below* the known ones means a request for it falls to the
-        // lowest known effort instead of being sent through unexplained.
-        assertEquals(0, ModelConfigFile.effortRank("some_new_thing"))
-        assertEquals(-1, ModelConfigFile.effortRank("nonsense_after"))
+        // A model may add a name tomorrow; the app must place it rather than throw. An unknown
+        // rung ranks below every known one, so a request for it falls to the lowest effort the
+        // model does declare — which is the safe direction, since nothing is sent that the model
+        // has not said it understands.
+        assertEquals("unknown ranks below `none`", -1, ModelConfigFile.effortRank("some_new_thing"))
+        assertTrue(ModelConfigFile.effortRank("some_new_thing") < ModelConfigFile.effortRank("none"))
         assertEquals("low", ModelConfigFile.effortFor(listOf("high", "low"), "some_new_thing"))
     }
 

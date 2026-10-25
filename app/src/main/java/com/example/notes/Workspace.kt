@@ -128,10 +128,24 @@ class Workspace(val accountDir: File) {
     fun list(dir: File): List<Entry> {
         val children = dir.listFiles() ?: return emptyList()
         return children
-            .filter { !isHidden(it.name) }
+            .filter { !isHidden(it.name) && !isAppOwned(it) }
             .map { Entry(it.name, it, kindOf(it)) }
             .sortedWith(compareBy({ !it.isFolder }, { it.name.lowercase() }))
     }
+
+    /**
+     * True for a file the app keeps in a place a person browses: the model's config.
+     *
+     * §3's rule is that everything the app made is invisible, and a hidden name is how that is
+     * usually said. `model_conf.json` breaks that rule by living in the account's root, where the
+     * file tree looks — so it is named here and left out of the list, rather than being renamed
+     * to a dot and made unreachable to anyone who wants to read what their agent is set to.
+     *
+     * Reading it is not affected, and neither is writing it through the forms: this decides
+     * only whether it appears as a row.
+     */
+    fun isAppOwned(file: File): Boolean =
+        file.parentFile?.canonicalFile == accountDir.canonicalFile && file.name in APP_FILES
 
     /**
      * How a file is handled, from the part of its name after the last dot.
@@ -498,6 +512,7 @@ class Workspace(val accountDir: File) {
     private fun coreProblem(file: File): String? = when {
         !file.exists() -> "That is no longer there"
         isHidden(file.name) -> "That belongs to the app"
+        isAppOwned(file) -> "That belongs to the app"
         isStructural(file) -> "That folder belongs to the app"
         else -> null
     }
@@ -761,6 +776,9 @@ class Workspace(val accountDir: File) {
          * hidden by the same rule that hides everything else the app owns.
          */
         const val KEEPER = ".gitkeep"
+        /** The app's own files that live where a person browses, so they are not shown. */
+        val APP_FILES = setOf(ModelConfigFile.NAME)
+
         const val PINS_FILE = "pins.json"
         const val LOCKED_FILE = "locked.json"
 

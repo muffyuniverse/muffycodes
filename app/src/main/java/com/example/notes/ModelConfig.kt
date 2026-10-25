@@ -246,8 +246,15 @@ object ModelConfigFile {
      */
     private fun whereIn(text: String, error: JSONException): String {
         val message = error.message.orEmpty().ifBlank { "it is not valid JSON" }
-        val offset = Regex("""at character (\d+)""").find(message)
-            ?.groupValues?.getOrNull(1)?.toIntOrNull() ?: return message
+        // Two shapes, and both are `org.json`'s: an older "at character 58" and the newer
+        // "at 58 [character 59 line 4]". The character offset is the one that appears in both,
+        // so it is what the line is counted from — and a message that already names a line is
+        // passed through with its own words rather than re-derived.
+        val offset = Regex("""character (\d+)""").find(message)
+            ?.groupValues?.getOrNull(1)?.toIntOrNull()
+            ?: Regex("""\bat (\d+)""").find(message)
+                ?.groupValues?.getOrNull(1)?.toIntOrNull()
+            ?: return message
         val line = text.take(offset.coerceIn(0, text.length)).count { it == '\n' } + 1
         return "line $line: $message"
     }
