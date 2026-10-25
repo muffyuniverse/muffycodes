@@ -246,7 +246,7 @@ class HistoryFeatureTest : FeatureTest() {
         scene.file("milk.txt", "two litres")
         scene.folder("inner")
         scene.openIn("letters", "inner")
-        scene.file("notes.txt", "the inner one")
+        val inner = scene.file("notes.txt", "the inner one")
         scene.openIn()
         // **The save has to be in the history before the folder is deleted.** Commits happen on
         // the app's one worker, so a delete queued in the same breath takes everything waiting —
@@ -254,7 +254,7 @@ class HistoryFeatureTest : FeatureTest() {
         // the one that created `notes.txt` empty. That is the test racing the app, not the app
         // losing the text.
         scene.await("the inner file's text to be a version") {
-            scene.versionsOfFolder("letters").any { it.second?.contains("the inner one") == true }
+            scene.versionsOf(inner).any { it.second == "the inner one" }
         }
         val letters = File(scene.workspace!!.projectDir("work"), "letters")
 
