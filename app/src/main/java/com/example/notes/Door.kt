@@ -129,7 +129,16 @@ class OpenRouterDoor(
         )
     }
 
-    private fun send(request: Request, token: String): Reply {
+    /**
+     * The body this door sends — **a function of its own so a test can read it.**
+     *
+     * Three agreed rules live in these eight lines and nowhere else: the pin is a **tag** in
+     * `provider.only`, `allow_fallbacks` is false (no fallback, no autorouting), and reasoning is
+     * excluded because its tokens are thrown away. Every one of them is a field whose absence would
+     * look like the app working, so the assembled body is the thing worth pinning rather than the
+     * call that wraps it — and the call cannot be tested without a socket.
+     */
+    internal fun body(request: Request): JSONObject {
         val body = JSONObject()
             .put("model", request.model)
             .put("messages", messagesOf(request))
@@ -140,6 +149,11 @@ class OpenRouterDoor(
             .put("reasoning", JSONObject().put("exclude", true))
             .put("stream", false)
         if (request.effort.isNotBlank()) body.put("reasoning_effort", request.effort)
+        return body
+    }
+
+    private fun send(request: Request, token: String): Reply {
+        val body = body(request)
 
         var connection: HttpURLConnection? = null
         val text = try {

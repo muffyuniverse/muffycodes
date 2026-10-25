@@ -577,6 +577,34 @@ class AgentSessionFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `a session that was on gets its clock back without anybody pressing anything`() {
+        // **What a reboot leaves behind.** The service is sticky, so a killed process comes back —
+        // but a phone that was switched off does not restart it, and the app is the first thing that
+        // can. Opening the app reads the sessions off disk and asks for the clock; nothing is pressed,
+        // and the agent polls at its own due time.
+        listening()
+        scene.project("groceries")
+        scene.viewModel.startAgent("groceries")
+        val due = scene.viewModel.sessionOf("groceries")!!.nextPollAt
+        val door = ScriptedDoor(Reply("", listOf(Call("c1", "wait", "{}"))))
+
+        val reopened = scene.reopen()
+        reopened.chatDoor = { door }
+        reopened.tickAgents(due)
+
+        // The scenario's own wait, because the state comes back through a post to the main thread.
+        scene.await("the resumed poll", 20_000) {
+            (reopened.sessionOf("groceries")?.lastPollAt ?: 0L) >= due
+        }
+        assertEquals("one request, with nobody looking at a button", 1, door.asked.size)
+        assertEquals(
+            "and the session is waiting again",
+            AgentSession.Sub.WAITING,
+            reopened.sessionOf("groceries")?.sub,
+        )
+    }
+
+    @Test
     fun `a session survives the app being reopened`() {
         listening()
         scene.project("groceries")

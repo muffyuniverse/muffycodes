@@ -102,7 +102,7 @@ out clean.
 | tapping a turn adds the arguments and the whole result | r1 `@` | `AgentChatScreen` | `the box draws what was asked, what the agent called, and what it answered` | `TAP turn` |
 | a terminating turn is the agent's words, never a call | v2 `@` | `lines()` | `the ending is the agent's words, never a call` | — |
 | forty idle polls are one line | r3 §1.3 | `Box.idle` | `forty idle polls are one line`, `an idle agent is one line, not a turn` | — |
-| ¾ of the window, then scroll; the composer above the keyboard | r1 `@` | `heightIn(max = maxHeight * 0.75f)`, `imePadding` | `BrowserChromeTest` | — |
+| ¾ of the window, then scroll; the composer stays | r1 `@` | `heightIn(max = maxHeight * 0.75f)`, `imePadding` | `a long conversation leaves the line to speak in on the screen` — the composer is still displayed after forty calls. `imePadding` is the modifier that lifts it above the keyboard; a Robolectric test cannot raise a keyboard, so that half is decoration, not assertion | — |
 | a forgotten row is drawn struck through | r6 | `Line.forgotten` | `a row the model is not sent is still on the record` | — |
 | the row's size, in bytes, beside its caption | audit fix | `Line.bytes` → `ContextBudget.sizeLabel` | `bytes are exact, and are what a person is shown` | — |
 | the state line is the notification's words | r3 §1.6 | `AgentSession.label` | `the standing notification says what the strip says` | — |
@@ -123,7 +123,7 @@ out clean.
 | a `foregroundServiceType="specialUse"` service with its subtype | r3 §1.7, v2 `@` | `AndroidManifest`, `AgentService` | `the manifest declares a special-use foreground service, and says why` | — |
 | sticky, so the phone does not decide the session is over | v2 `@` | `onStartCommand` | `a service starts, ticks its own clock, and stops cleanly` | — |
 | it starts for a session that is on and stops when none is | r3 §1.7 | `apply`, `changed` | `starting is refused when there is nothing to run, and asked for when there is` | — |
-| a session already on disk gets its clock back | v2 `@` | `AppViewModel.applyService` | `Refresh` path: `AgentServiceTest` + `switching the agent on starts an idle session` | — |
+| a session already on disk gets its clock back | v2 `@` | `AppViewModel.applyService` | `a session that was on gets its clock back without anybody pressing anything` (a reopened app polls with nobody pressing), and `starting is refused when there is nothing to run, and asked for when there is` for the decision | — |
 | every agent can be switched off from settings | v1 `@` (assumed it existed) | `AppViewModel.stopAllAgents` | `one switch in settings stops every agent on the phone`, `every agent can be switched off from settings` | `TAP stop-all-agents` |
 | battery exemption asked once, from settings, with the reason | r5 §2.2 | `Battery`, `SettingsScreen` | `the battery row says what the system is doing, and offers the only fix` | `TAP battery`, `answered: exempt now` |
 | the phone's interference is visible, not silent | r5 §2.5 | `missedBy`, `AgentRunner` gap row | `a session the phone was not running is written down as a gap, and goes on`, `a poll that is a little late is not the phone stopping anything` | `agent-gap` |
@@ -132,14 +132,14 @@ out clean.
 
 | element | agreed | code | test | trace |
 |---|---|---|---|---|
-| `model_conf.json`, edited only by forms, committed | r3 §1.1 | `ModelConfigFile`, `ModelSection` | `ModelConfigTest`, `ModelSectionTest` | `TAP reset-model-config` |
-| a provider is a **tag**, and the request is `only` + no fallbacks | r3 §1.1 | `OpenRouterDoor.send` | `ModelConfigTest` (tag rules) | — |
-| no fallback, no autorouting, only the pin | v1 `@` | `OpenRouterDoor` | `ModelConfigTest` | — |
-| add model: fetch, then endpoints, tools required | r3 §1.1 | `AddModelDialog`, `ModelCatalogue` | `ModelCatalogueTest`, `ModelSectionTest` | — |
-| remove refuses the active model; reset writes the shipped copy | r3 §1.1 | `AppViewModel`, `ModelSection` | `ModelSectionTest` | `said: Back to the model the app ships` |
-| every missing number is `—`, never 0 | v1 `@` | `money`, `number`, `tokens`, `released` | `ModelCatalogueTest` | — |
-| the effort clamps down and the operator may raise it | v1 `@` | `ModelConfigFile.effortFor` | `ModelConfigTest` | `said: effort: … -> …` |
-| reasoning traces are not received | r1 | `Door` (`reasoning.exclude`) | `ModelConfigTest` | — |
+| `model_conf.json`, edited only by forms, committed | r3 §1.1 | `ModelConfigFile`, `ModelSection` | `ModelConfigTest`: `whatTheAppWritesIsWhatItCanRead`, `aFileThatWillNotParseIsRefusedWithItsLine` | `TAP reset-model-config` |
+| a provider is a **tag**, and the request is `only` + no fallbacks | r3 §1.1 | `OpenRouterDoor.send` | `aProviderTagThatEndsInASlashIsRefused`, `aProviderThatIsNotOneOfTheModelsIsRefused` | — |
+| no fallback, no autorouting, only the pin | v1 `@` | `OpenRouterDoor` | the two above, and `no fallback` in `Door`'s request body | — |
+| add model: fetch, then endpoints, tools required | r3 §1.1 | `AddModelDialog`, `ModelCatalogue` | `aProviderThatCannotCallToolsIsNotOneTheAgentCanUse`, `toolSupportIsReadPerEndpoint`, `aModelWithNothingInItsCatalogueCannotBeRead` | — |
+| remove refuses the active model; reset writes the shipped copy | r3 §1.1 | `AppViewModel`, `ModelSection` | `theActiveModelCannotBeRemovedAndTheChoiceSaysWhy`, `resetPutsBackTheModelTheAppShips` | `said: Back to the model the app ships` |
+| every missing number is `—`, never 0 | v1 `@` | `money`, `number`, `tokens`, `released` | `aQuietEndpointHasNoThroughputRatherThanZero`, `aModelWithNoIntelligenceIndexHasNoneRatherThanZero` | — |
+| the effort clamps down and the operator may raise it | v1 `@` | `ModelConfigFile.effortFor` | `effortMovesDownToWhatTheModelSupports`, `effortMovesUpWhenThereIsNothingBelow` | `said: effort: … -> …` |
+| reasoning traces are not received | r1 | `Door` (`reasoning.exclude`) | the request body in `Door`, asserted by `ModelConfigTest`'s round trip | — |
 | a key per account, in the encrypted store | v1 `@` | `CredentialStore`, `Secrets` | `KeySafetyTest`, `KeySafetyFeatureTest` | `TAP set-model-key` |
 | the answer timeout is the person's number | **brief** | `SettingsStore.timeoutMinutes` → `OpenRouterDoor` | `the timeout and the result length are the person's numbers, clamped to what works` | `TAP answer-timeout` |
 | one result's length is the person's number | **brief** | `SettingsStore.maxResult` → `AgentTools` | same | `TAP result-length` |

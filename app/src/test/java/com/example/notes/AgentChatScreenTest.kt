@@ -2,6 +2,7 @@ package com.example.notes
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasSetTextAction
@@ -219,4 +220,22 @@ class AgentChatScreenTest {
         compose.onNodeWithText("idle since", substring = true).assertExists()
         compose.onNodeWithText("1 check", substring = true).assertExists()
     }
+    @Test
+    fun `a long conversation leaves the line to speak in on the screen`() {
+        // **The box stops at three quarters of the window and scrolls.** The alternative — a
+        // conversation that grows the column — pushes the composer off the bottom, and the one control
+        // a person needs is the one that disappears first. Forty calls is what an afternoon of work
+        // looks like, and the Send button is still there.
+        val calls = (1..40).map { call("tree", """{"path":"GitHub/$it"}""") } + call("conclude", """{"text":"Done."}""")
+        chat(ScriptedDoor(Reply("", calls)))
+
+        say("Look at everything.")
+
+        // One request carries the forty calls, the next carries the conclusion: two turns.
+        awaitTurns(2)
+        compose.onNodeWithText("Send").assertIsDisplayed()
+        // And the navigator still says which turn of the conversation is on the screen.
+        compose.onNodeWithText("2 of 2").assertIsDisplayed()
+    }
+
 }

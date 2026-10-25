@@ -436,6 +436,40 @@ class AgentTest {
         assertEquals("and nothing of their file was rewritten", theirs, file.readText())
     }
 
+    // ---- what goes on the wire ------------------------------------------------
+
+    @Test
+    fun `the request names one provider tag, forbids fallbacks, and asks for no reasoning`() {
+        // **Three agreed rules in one body, and none of them is visible when it is wrong.** A base
+        // slug in `only` turns the pin back into autorouting inside one provider, `allow_fallbacks`
+        // true spends money on an endpoint nobody chose, and reasoning tokens are sent and thrown
+        // away. The body is a function of its own because the call around it needs a socket.
+        val door = OpenRouterDoor(
+            key = { "unused-by-this-test" },
+            model = "deepseek/deepseek-v4.1-flash-1017",
+            provider = "decart/fp4",
+            effort = "high",
+        )
+
+        val body = door.body(
+            Request(
+                model = "deepseek/deepseek-v4.1-flash-1017",
+                provider = "decart/fp4",
+                effort = "high",
+                system = "the instructions",
+                messages = listOf(Msg.user("a task")),
+                tools = AgentTools.specs(),
+            ),
+        )
+
+        assertEquals("the tag, never the base slug", "decart/fp4", body.getJSONObject("provider").getJSONArray("only").getString(0))
+        assertFalse("and nothing beside it", body.getJSONObject("provider").getBoolean("allow_fallbacks"))
+        assertTrue("reasoning is not requested back", body.getJSONObject("reasoning").getBoolean("exclude"))
+        assertEquals("the model's own way of saying effort", "high", body.getString("reasoning_effort"))
+        assertEquals("tool calling is the model's choice", "auto", body.getString("tool_choice"))
+        assertFalse("and the answer is not streamed", body.getBoolean("stream"))
+    }
+
     // ---- the agent's search: tree and read with grep -------------------------
 
     /** One call, answered the way the loop answers it. */
