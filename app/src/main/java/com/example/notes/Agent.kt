@@ -5,11 +5,11 @@ import java.io.File
 /**
  * One burst: the operator spoke, and the agent works until it ends the turn.
  *
- * **The request is built from the record, not from a list held in memory.** Everything the
- * model is sent is `context.log` mapped into messages — the instructions above it, the
- * operator's message at the end of it — so the conversation the model sees and the record a
- * person reads are the same object. An in-memory transcript beside a file is two truths, and
- * they disagree the first time the app is closed mid-turn.
+ * **The request is built from the record, not from a list held in memory.** Everything the model is
+ * sent is the record's `in` rows mapped into messages — the instructions above them — so the
+ * conversation the model sees and the file a person reads are the same object. An in-memory
+ * transcript beside a file is two truths, and they disagree the first time the app is closed
+ * mid-turn.
  *
  * The loop is synchronous on purpose. It runs on the app's one worker, which means a burst
  * cannot overlap another burst, and a file cannot be written twice from two turns. What it
@@ -250,7 +250,7 @@ class Agent(
         // array — and a provider's cache matches the longest common prefix, so the warning would
         // invalidate the whole conversation on every request of the turn it appeared in. That is
         // the 50× cost §2.4 is about, paid by the feature meant to prevent it.
-        val opening = readOpening(layers, log.contextRows(), AgentTools.specs())
+        val opening = readOpening(layers, log, AgentTools.specs())
         try {
             return loop(layers, opening, operator, progress)
         } finally {
@@ -288,7 +288,7 @@ class Agent(
             if (idle >= AgentTools.IDLE_CALLS) return finish(tooIdle())
             requests++
             // The boundary the box counts turns by, and the app's own row, not the model's.
-            log.sessionOnly(AgentLog.TURN, "turn", "$requests")
+            log.bookkeeping(AgentLog.TURN, "turn", "$requests")
             val request = build(layers, opening, clearedUp)
             // **The shape of the request, once per turn the person started.** Which model, which
             // pinned endpoint, how big the conversation had grown: the three things needed to
@@ -395,9 +395,9 @@ class Agent(
             log.note("idle", "waiting for the operator")
         } else {
             // Session only, both rows: the box still sees the poll, the model does not.
-            log.sessionOnly(AgentLog.CALL, call.tool, call.args)
-            log.sessionOnly(AgentLog.GOT, call.tool, WAITING)
-            log.sessionOnly(AgentLog.NOTE, "idle", "waiting for the operator")
+            log.bookkeeping(AgentLog.CALL, call.tool, call.args)
+            log.bookkeeping(AgentLog.GOT, call.tool, WAITING)
+            log.bookkeeping(AgentLog.NOTE, "idle", "waiting for the operator")
         }
         return End.Waited
     }
@@ -515,11 +515,10 @@ class Agent(
     /**
      * One row and what it costs, for the index the clear-up line carries.
      *
-     * [line] is the row's position in `context.log` counted from one, which is the handle the
-     * `read` tool takes: `read agent/context.log from 7 lines 1` returns exactly this row's text,
-     * and that text is what the `edit` tool removes. The [id] is the row's stable label — it
-     * survives trims and never changes meaning — but it is not something a tool can act on, which
-     * is why both are given.
+     * [line] is the row's position in `session.log` counted from one — the handle the `read` tool
+     * takes, so `read agent/session.log from 7 lines 1` returns exactly this row, with its ctx
+     * column and its id. [id] is the handle `forget` takes. Two tools, two handles on one row: one
+     * to look, one to act.
      */
     private data class RowCost(
         val id: Int,
@@ -536,11 +535,13 @@ class Agent(
      * limit in tokens would be two numbers a model has to convert before it can act, and it would
      * convert wrong. The exact bytes are what a *person* is shown, where they can check it.
      */
-    private fun readOpening(layers: AgentPrompt.Layers, rows: List<AgentLog.Row>, tools: List<ToolSpec>): Opening {
-        val costs = rows
-            .withIndex()
-            .map { (index, row) ->
-                RowCost(row.id, row.kind, row.name, ContextBudget.tokens(row.line), index + 1)
+    private fun readOpening(layers: AgentPrompt.Layers, log: AgentLog, tools: List<ToolSpec>): Opening {
+        // The file's own line numbers, because that is what `read` pages through: the context is a
+        // filtered view, so a row's position in it is not its position in the file.
+        val lineOf = log.rows().withIndex().associate { (index, row) -> row.id to index + 1 }
+        val costs = log.contextRows()
+            .map { row ->
+                RowCost(row.id, row.kind, row.name, ContextBudget.tokens(row.line), lineOf[row.id] ?: 0)
             }
             .filter { it.tokens > 0 }
             .sortedByDescending { it.tokens }
@@ -558,9 +559,9 @@ class Agent(
     /**
      * The request, rebuilt from the record every time.
      *
-     * Reading it back rather than keeping it in memory is what makes the agent's own clear-up
-     * edit real: he deletes a row from `context.log`, and the next request genuinely does not
-     * contain it. A cached transcript would keep sending what he threw away.
+     * Reading it back rather than keeping it in memory is what makes the agent's own compaction real:
+     * a row it forgot is `out` in the record, and the next request genuinely does not contain it. A
+     * cached transcript would keep sending what it threw away.
      */
     private fun build(layers: AgentPrompt.Layers, opening: Opening, clearedUp: Boolean): Request {
         val tools = AgentTools.specs()
@@ -645,8 +646,11 @@ class Agent(
             append("Your context was about ${ContextBudget.short(size)} tokens when this turn began. ")
             append("The limit is ${ContextBudget.short(trigger)} tokens, and this endpoint takes ")
             append("${ContextBudget.short(ceiling)} tokens of input. ")
-            append("Clear up your context: edit agent/context.log and remove the rows that do not ")
-            append("relate to your current task. Keep the newest task, and remove a call together ")
+            // **By id, and that is the whole command.** `forget` names rows; it cannot carry text,
+            // so compaction cannot change what the record says — which is what makes the context
+            // auditable afterwards rather than a claim the model made about it.
+            append("Clear up your context: call `forget` with the ids of the rows that do not ")
+            append("relate to your current task. Keep the newest task, and forget a call together ")
             append("with its result. ")
             // **A target, and it is a floor rather than a ceiling.** "Cut it down" is advice; "cut
             // it to at least this" is a number the next turn can measure, which is what makes the
@@ -663,13 +667,13 @@ class Agent(
                 // pages through it — a request per 20k characters — or guesses. Naming the biggest
                 // rows costs a line and saves the paging: `read from N lines 1` is one request for
                 // the exact text of the row that matters most.
-                append("\nThe rows taking the most room — `read agent/context.log from <line> `")
-                append("`lines 1` shows one: ")
+                append("\nThe rows taking the most room — `read agent/session.log from <line> `")
+                append("`lines 1` shows one, with its ctx column and its id: ")
                 append(biggest.joinToString("; ") {
                     "line ${it.line}: #${it.id} ${it.kind} ${it.name}, about " +
                         "${ContextBudget.short(it.tokens)} tokens"
                 })
-                append(". Remove the ones that do not serve the task, editing out the whole line.")
+                append(". Forget the ones that do not serve the task, by id.")
             }
         }
 
@@ -693,7 +697,7 @@ class Agent(
 
     fun request(): Request {
         val layers = AgentPrompt.read(accountDir, tools.projectDir)
-        return build(layers, readOpening(layers, log.contextRows(), AgentTools.specs()), clearedUp = false)
+        return build(layers, readOpening(layers, log, AgentTools.specs()), clearedUp = false)
     }
 
     /**

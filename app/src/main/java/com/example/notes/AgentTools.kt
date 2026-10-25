@@ -73,6 +73,11 @@ class AgentTools(
                 """{"path":"the file","find":"text to look for","replace":"what to put there"}""",
             ),
             spec(
+                "forget",
+                "Take rows out of your context when it is too big. The rows stay in the record.",
+                """{"ids":[12,13]}""",
+            ),
+            spec(
                 "create",
                 "Make a new file, with its folders if they do not exist.",
                 """{"path":"the file","text":"its contents"}""",
@@ -143,6 +148,7 @@ class AgentTools(
             "tree" -> tree(args)
             "read" -> read(args)
             "edit" -> edit(args)
+            "forget" -> forget(args)
             "create" -> create(args)
             "delete" -> delete(args)
             "move" -> move(args)
@@ -215,28 +221,45 @@ class AgentTools(
             before.replace(find, args.optString("replace"))
         }
         if (text == before) return success("${rel(file)} already said that, so nothing changed")
-        // **The context is the one file with rules about how it may change.** The model reads it,
-        // it is rebuilt into a request, and it is diffed against the evidence — so an edit to it
-        // is a clear-up or it is a refusal, never a quiet rewrite.
-        if (file.canonicalFile == log.context.canonicalFile) {
-            // A file that does not end in a newline has a last row this app reads as one still
-            // being written — it would vanish from the context without a word. Clear-up writes
-            // whole rows, so it ends with one.
-            if (text.isNotEmpty() && !text.endsWith("\n")) {
-                return refusal("End the context with a newline, or its last row is a half row")
-            }
-            // The row for this very call is already in the context, unanswered, because the record
-            // is written before a tool runs. It is named here so the pairing rule can excuse
-            // exactly that one row and no other.
-            val inFlight = log.rows().lastOrNull()
-                ?.takeIf { it.kind == AgentLog.CALL && it.name == "edit" }?.id
-            val problem = AgentLog.clearUpProblem(linesOf(before), linesOf(text), inFlight)
-            if (problem != null) return refusal(problem)
-        }
-        // **Through the funnel.** A locked file, a hidden name or a structural folder is refused
-        // by `write` itself, and the refusal is the whole answer.
+        // **Through the funnel.** A locked file, a hidden name, the record itself or a structural
+        // folder is refused by `write`, and the refusal is the whole answer.
+        //
+        // The context used to be the exception — a file the agent edited under its own rules, with a
+        // whole-row rule, a final-newline rule, and a line-by-line comparison to prove the edit was
+        // removal. It is not a file any more: the context is a column, and `forget` is the only way
+        // to change it, so none of that has to be checked.
         if (!ws.write(file, text)) return refusal("${rel(file)} cannot be changed")
+        if (!changed) return refusal("${rel(file)} cannot be changed")
         return commit("Edited ${file.name}", "${rel(file)} changed")
+    }
+
+    /**
+     * Takes rows out of the context, by id — **the agent's compaction, and the whole of it.**
+     *
+     * The alternative was editing the context file as text, which needed a rule about whole rows, a
+     * rule about final newlines, a line-by-line comparison to prove the edit was removal, and a
+     * check that a re-rendered row still said exactly what the file said. None of that is possible
+     * here, because no text is carried: [AgentLog.forgetProblem] decides whether the list is legal,
+     * and [AgentLog.forget] flips the named rows.
+     */
+    private fun forget(args: JSONObject): String {
+        val ids = mutableSetOf<Int>()
+        val raw = args.optJSONArray("ids")
+        if (raw != null) {
+            for (i in 0 until raw.length()) ids.add(raw.optInt(i, -1))
+        } else {
+            // A single id is accepted, because a model that forgets one row will write `"ids": 12`
+            // sooner or later — and a refusal there would be about the shape of the JSON rather
+            // than about the work.
+            args.optInt("ids", -1).takeIf { it > 0 }?.let { ids.add(it) }
+        }
+        ids.removeAll { it <= 0 }
+        val problem = AgentLog.forgetProblem(log.rows(), ids)
+        if (problem != null) return refusal(problem)
+        val gone = log.forget(ids)
+        val task = log.contextRows().lastOrNull { it.kind == AgentLog.TOLD }
+        val left = if (task == null) "" else " The task is still ${task.id}."
+        return success("forgot ${gone} row${if (gone == 1) "" else "s"}.$left")
     }
 
     private fun create(args: JSONObject): String {
@@ -445,27 +468,15 @@ class AgentTools(
      * rewrite them, which is the difference between following a brief and editing it.
      */
     private fun mayWrite(file: File): String? = when {
-        // The evidence is the app's, and the person's to read. An agent that could rewrite its
-        // own record could make a failure disappear, which is the one thing a record is for.
-        isSessionLog(file) ->
-            "${rel(file)} is the evidence of what happened. You may read it and not change it"
+        // **The record is not yours to change.** `forget` is the one thing you may do to the
+        // context, and it is a column and not a text edit; the evidence itself is the app's, so an
+        // agent cannot make a failure disappear from it. The same rule the person is under.
+        ws.isRecord(file) ->
+            "${rel(file)} is the record of what happened. You may read it and not change it"
         insideWorktreeOrAgent(file) -> null
         else -> "You may only write inside GitHub/ or agent/, and ${rel(file)} is neither"
     }
 
-    /** True for this project's `agent/session.log`, and not for a file that shares the name. */
-    private fun isSessionLog(file: File): Boolean =
-        file.name == AgentLog.SESSION && file.parentFile?.canonicalFile ==
-            File(projectDir, AgentLog.DIR).canonicalFile
-
-    /** [text] as its lines, for the clear-up check; no parsing, so the comparison is the file's. */
-    private fun linesOf(text: String): List<String> {
-        if (text.isEmpty()) return emptyList()
-        val lines = text.split("\n")
-        // Only the empty string after a final newline is dropped; a file written without one has
-        // a real row there, and a check that skipped it would pass a clear-up that lost it.
-        return if (text.endsWith("\n")) lines.dropLast(1) else lines
-    }
 
     /** True for the two places the agent may write: `GitHub/` and `agent/`. */
     private fun insideWorktreeOrAgent(file: File): Boolean {

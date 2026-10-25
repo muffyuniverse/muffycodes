@@ -44,7 +44,7 @@ object LogFormat {
      * The same row from a stamp that is already text.
      *
      * Needed by anything that **rewrites** a file it did not read through this class: the
-     * agent's session is truncated at a burst boundary, and a row that came back with a fresh
+     * agent's record is truncated at a burst boundary, and a row that came back with a fresh
      * timestamp would say the whole conversation happened at the moment it was trimmed.
      */
     fun row(stamp: String, id: Int, kind: String, name: String, detail: String): String =
@@ -63,27 +63,54 @@ object LogFormat {
         }
 
     /**
-     * The same line, from a detail that is **already escaped**.
+     * A **record** row: the same five columns with the record's own between kind and name.
      *
-     * For a row that came back out of a file: its detail column is the escaped form, and putting
-     * it through [escaped] a second time doubles every backslash. A trim that did that would
-     * rewrite the two characters backslash-n as four, and every trim would add two more — the
-     * file drifting one character at a time away from what was actually recorded.
+     * `stamp id kind ctx name  detail`. The four places that made a rewritten file dangerous are
+     * gone with the second file: a row is no longer re-rendered to say whether it is in the
+     * context, so nothing has to be escaped twice, no line has to end in a newline to be whole,
+     * and no edit has to be compared row by row. A row is taken out of the context by [flipCtx],
+     * which touches four characters and nothing else.
      */
-    fun rawRow(stamp: String, id: Int, kind: String, name: String, escapedDetail: String): String =
-        buildString {
-            append(stamp)
-            append(' ')
-            append(id.toString().padStart(4))
-            append(' ')
-            append(kind.padEnd(7))
-            append(' ')
-            append(name)
-            if (escapedDetail.isNotEmpty()) {
-                append("  ")
-                append(escapedDetail)
-            }
+    fun recordRow(
+        stamp: String,
+        id: Int,
+        kind: String,
+        ctx: String,
+        name: String,
+        detail: String,
+    ): String = buildString {
+        append(stamp)
+        append(' ')
+        append(id.toString().padStart(4))
+        append(' ')
+        append(kind.padEnd(7))
+        append(' ')
+        append(ctx.padEnd(3))
+        append(' ')
+        append(name)
+        if (detail.isNotEmpty()) {
+            append("  ")
+            append(escaped(detail))
         }
+    }
+
+    /**
+     * The same line with its ctx column changed, and **not one other byte moved.**
+     *
+     * Text surgery, deliberately: the alternative is re-rendering the row from its parsed parts,
+     * and that is where a detail containing a backslash drifts a little on every rewrite. The
+     * match stops at the fourth column, so the name and the body are carried over exactly as the
+     * file had them.
+     */
+    fun flipCtx(line: String, ctx: String): String =
+        line.replaceFirst(HEAD) { m ->
+            val id = m.groupValues[2].padStart(4)
+            val kind = m.groupValues[3].padEnd(7)
+            "${m.groupValues[1]} $id $kind ${ctx.padEnd(3)} "
+        }
+
+    /** The four fixed columns, ending at the space before the name. */
+    private val HEAD = Regex("""^(\d\d:\d\d:\d\d\.\d\d\d) +(\d+) +(\S+) +(\S+) +""")
 
     /** The body's one escaping rule: a newline and a backslash, in that order. */
     fun escaped(text: String): String = text.replace("\\", "\\\\").replace("\n", "\\n")

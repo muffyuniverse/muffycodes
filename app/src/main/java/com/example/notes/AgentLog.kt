@@ -3,23 +3,33 @@ package com.example.notes
 import java.io.File
 
 /**
- * The agent's record: two files, the same rows, one id.
+ * The agent's record: **one file, one row per event, one id, and a column that says whether the
+ * model is sent it.**
  *
- * `agent/session.log` is the evidence — every event, in order, and the app truncates it at a
- * generous size. `agent/context.log` is the working context — the same rows, minus the ones the
- * agent cleared out of it — and it is the only one of the two that is ever sent to the model.
+ * `agent/session.log` holds every event in order, and the app truncates it at a generous size.
+ * Each row's `ctx` column is `in` (the model is sent it), `out` (the agent decided it no longer
+ * matters) or `app` (it is the app's own bookkeeping, or a reset took it). The context is not a
+ * second file: it is the `in` rows, in order, and that is what a request is built from.
  *
- * **The rows are identical, and that is the design.** They share an id and they share their text,
- * so `diff` between the two files is exactly the agent's judgement about what did not matter:
- * a row that is in `session.log` and not in `context.log` is one he decided to forget. A second
- * format, or a second id sequence, would make that diff a reconciliation instead of a glance.
+ * **Three states instead of two files is what makes the audit exact.** The old design kept the
+ * context as a second file and called the difference between them the agent's judgement — which
+ * needed exceptions for every row the app wrote to only one of the two. Here the judgement is
+ * written down at the moment it is made, so "what did he decide to forget" is a column value and
+ * not a subtraction; and because a forget names ids rather than rewriting text, compaction cannot
+ * alter a single character of the evidence.
  *
- * The columns are [LogFormat]'s — the trace's own — because both files are read by the same
- * habits: `grep`, a shell, an eye on a phone.
+ * The columns are [LogFormat]'s — the trace's own — because the record is read by the same habits:
+ * `grep`, a shell, an eye on a phone.
  */
 class AgentLog private constructor(
+    /**
+     * **The record, and the only record.** It used to be two files — the evidence and the working
+     * context — with the context a materialised copy of "the rows that are in". A `ctx` column
+     * says the same thing in the row itself, so there is one truth instead of two files that had
+     * to be kept in step, and removing a row is a change to four characters rather than a rewrite
+     * of the whole conversation in text.
+     */
     val session: File,
-    val context: File,
 ) {
 
     /**
@@ -31,7 +41,9 @@ class AgentLog private constructor(
      * Two writers over one project is the app's normal state — the screen's worker resetting a
      * context while the runner's worker appends a poll's rows — so the lock belongs to the file.
      */
-    private val guard: Any get() = lockFor(session)
+    private val file: File get() = session
+
+    private val guard: Any get() = lockFor(file)
 
     /** The id the next row gets. Shared by both files, so a row's id means one thing. */
     private var next = 1
@@ -39,10 +51,10 @@ class AgentLog private constructor(
     /**
      * The session's length after this instance's own last append; `-1` until it writes.
      *
-     * **A counter in memory goes stale the moment another writer touches the file**, and two
-     * rows with one id is the one thing that breaks the audit this format is for — `session.log`
-     * minus `context.log` is only the agent's judgement if an id means one row. [nextId] compares
-     * the file against what this instance left and re-reads the highest id when they differ.
+     * **A counter in memory goes stale the moment another writer touches the file**, and two rows
+     * with one id is the one thing that breaks this record: an id is how a row is taken out of the
+     * context, so an id that meant two rows would forget the wrong one. [nextId] compares the file
+     * against what this instance left and re-reads the highest id when they differ.
      */
     private var seen = -1L
 
@@ -51,7 +63,26 @@ class AgentLog private constructor(
         /** The folder name under a project: `agent/`. */
         const val DIR = "agent"
         const val SESSION = "session.log"
+
+        /**
+         * The old second file's name, kept because a record written by an older build has one.
+         *
+         * Nothing reads it. It is named here so [open] can fold it in once and delete it, rather
+         * than leaving a file that says it is the context while nothing keeps it in step.
+         */
         const val CONTEXT = "context.log"
+
+        /** In the context: the rows the model is sent, in this order. */
+        const val IN = "in"
+
+        /** Out of the context, **because the agent decided so** — what [thrownAway] reports. */
+        const val OUT = "out"
+
+        /**
+         * Out of the context because the app put it there: a poll's repeats, a turn boundary, a
+         * trim, a reset. Bookkeeping rather than judgement, and the distinction the audit rests on.
+         */
+        const val APP = "app"
 
         /**
          * Generous, because this file keeps the repeated `wait` rows too.
@@ -115,7 +146,8 @@ class AgentLog private constructor(
          * The body is the only part that can hold a separator, and [LogFormat] escapes it — so
          * two spaces followed by anything is the detail, always.
          */
-        private val ROW = Regex("""^(\d\d:\d\d:\d\d\.\d\d\d) +(\d+) +(\S+) +(\S+)  (.*)$""")
+        private val ROW =
+            Regex("""^(\d\d:\d\d:\d\d\.\d\d\d) +(\d+) +(\S+) +(\S+) +(\S+)(?:  (.*))?$""")
 
         /**
          * One lock per record file, for the whole process.
@@ -133,7 +165,8 @@ class AgentLog private constructor(
         fun open(projectDir: File): AgentLog {
             val dir = File(projectDir, DIR)
             dir.mkdirs()
-            val log = AgentLog(File(dir, SESSION), File(dir, CONTEXT))
+            val log = AgentLog(File(dir, SESSION))
+            log.foldLegacyContext()
             log.load()
             return log
         }
@@ -148,136 +181,85 @@ class AgentLog private constructor(
         fun parseRow(line: String): Row = try {
             val match = ROW.matchEntire(line)
             if (match == null) {
-                Row("", 0, "?", "?", line, broken = true)
+                Row("", 0, "?", "?", "?", line, broken = true)
             } else {
                 Row(
                     time = match.groupValues[1],
                     id = match.groupValues[2].toInt(),
                     kind = match.groupValues[3],
-                    name = match.groupValues[4],
-                    detail = match.groupValues[5],
+                    ctx = match.groupValues[4],
+                    name = match.groupValues[5],
+                    detail = match.groupValues[6],
+                    raw = line,
                 )
             }
         } catch (t: Throwable) {
-            Row("", 0, "?", "?", line, broken = true)
+            Row("", 0, "?", "?", "?", line, broken = true)
         }
 
-        /**
-         * True when [row] is **the app's own**, rather than the agent's judgement.
-         *
-         * The audit this format is built for — `session.log` minus `context.log` is what the model
-         * decided did not matter — is only true if the app's own bookkeeping is excluded from the
-         * subtraction. There are five such rows, and each is written to one file on purpose:
-         *
-         * | row | where | why not in both |
-         * |---|---|---|
-         * | `TURN turn` | session only | the boundary the box counts turns by; the model is given a conversation, not request numbers |
-         * | `CALL/GOT wait` | session only after the first | the poll is the same request again; a row per poll would make every poll a different request |
-         * | `NOTE idle` | session only after the first | the same, in words |
-         * | `NOTE trimmed` | one file each | a row about a trim is about that file |
-         * | `NOTE retry` | session only | the ladder's count is the app's, and the poll that follows must be byte-identical |
-         *
-         * **A row the agent clears is still the agent's judgement even when it is one of these** —
-         * the `wait` pair in its first form, above all. That is the one decision the subtraction
-         * cannot show, and it is a bound worth stating rather than a fault worth hiding: what the
-         * audit answers is "what did he throw away", and the answer is exact for everything except
-         * a row the app wrote for itself.
-         */
-        fun byTheApp(row: Row): Boolean = when {
-            row.kind == TURN -> true
-            row.kind == NOTE && row.name == "trimmed" -> true
-            row.kind == NOTE && row.name == "retry" -> true
-            row.kind == NOTE && row.name == "idle" -> true
-            // The poll's repeats. The first pair is in both files, so it only reaches the
-            // subtraction when the agent cleared it — which is why this is a name test and not a
-            // count: a row that is in both is never subtracted in the first place.
-            row.name == "wait" -> true
-            // The app's repair of a call it outlived: a seal written into the file the call was in,
-            // so the evidence can hold one the context does not.
-            row.kind == GOT && row.body.startsWith(FAILURE) && row.body.contains("closed before") ->
-                true
+          /**
+           * Why [ids] is not something the agent may forget, or null when it may.
+           *
+           * **By id, not by text.** The agent names the rows it has decided it no longer needs, and
+           * this checks the three things that keep a context a conversation an endpoint accepts:
+           *
+           * 1. every id is **in** the context — an id it kept is not a removal, and an id already
+           *    out is not one either, so a stale list is told so rather than silently doing half;
+           * 2. the newest task stays: it is what the turn is for;
+           * 3. a call and its result go together, because a call with no answer is a request every
+           *    endpoint refuses and an answer with no call is a message it cannot place.
+           *
+           * **There is no fourth rule, and that is the point.** The old check compared the file's
+           * lines before and after to prove the edit was removal only — a comparison that needed
+           * escaping to round-trip, a newline rule, and an exception for the call in flight. A
+           * forget carries no text at all, so the only thing it can change is the ctx column of the
+           * rows it names. Text cannot be rewritten because text is not offered.
+           */
+          fun forgetProblem(rows: List<Row>, ids: Set<Int>): String? {
+              if (ids.isEmpty()) return "Name at least one row to forget"
+              val inContext = rows.filter { it.ctx == IN }
+              if (inContext.isEmpty()) return "Your context is already empty"
+              val named = inContext.filter { it.id in ids }
+              val unknown = ids - named.map { it.id }.toSet()
+              if (unknown.isNotEmpty()) {
+                  val out = rows.filter { it.id in unknown }
+                  return if (out.isEmpty()) {
+                      "There is no row ${unknown.sorted().joinToString(", ")}"
+                  } else {
+                      "Row ${out.map { it.id }.sorted().joinToString(", ")} is not in the context"
+                  }
+              }
+              val task = inContext.lastOrNull { it.kind == TOLD }
+              if (task != null && task.id in ids) {
+                  return "The newest task stays: it is what you are working on"
+              }
+              var open: Row? = null
+              for (row in inContext) {
+                  when (row.kind) {
+                      CALL -> {
+                          val left = open
+                          if (left != null && left.id in ids) {
+                              return "The call to ${left.name} has no result left: forget the pair"
+                          }
+                          open = row
+                      }
 
-            else -> false
-        }
+                      GOT -> {
+                          val call = open
+                          open = null
+                          if (call != null && (call.id in ids) != (row.id in ids)) {
+                              return "The call to ${call.name} and its result go together"
+                          }
+                      }
+                  }
+              }
+              // An unanswered call at the end is the one being made now: its result is written the
+              // moment this returns, so forgetting it would leave the conversation illegal.
+              val now = open
+              if (now != null && now.id in ids) return "That is the call you are making now"
+              return null
+          }
 
-        /**
-         * Why [after] is not a clear-up of [before], or null when it is.
-         *
-         * The agent shrinks its own context, and this is the whole of what it may do to it:
-         * **remove whole rows.** Not rewrite them, not add them, not leave half a question. That
-         * is what keeps the one auditable property of the two files true — `session.log` minus
-         * `context.log` is exactly what the agent decided did not matter — and it is what keeps
-         * the rebuilt conversation a request an endpoint will accept.
-         *
-         * Four rules, each with its own sentence, because a refusal that does not say which rule
-         * it broke teaches the model nothing:
-         * 1. every line still reads as a row;
-         * 2. what is left is the **same lines**, in the same order — removal, nothing else;
-         * 3. the newest task is still on the record — it is what the turn is for;
-         * 4. a call and its result stay together, because a call with no answer is a request
-         *    every endpoint refuses and an answer with no call is a message it cannot place.
-         *
-         * The lines are compared as text, not as rows re-rendered back into lines: "the same
-         * row" is a claim about the file's bytes, and a comparison that went through the parser
-         * twice could pass an edit that changed them.
-         */
-        fun clearUpProblem(
-            before: List<String>,
-            after: List<String>,
-            /**
-             * The call whose result is about to be written, and is therefore allowed to be the
-             * last row with nothing after it.
-             *
-             * **Asked for, not guessed.** The row for a call is appended before its tool runs, so
-             * the file the edit tool reads always ends with its own unanswered `CALL edit` — and
-             * the only way to tell that row from a call somebody deleted the result of is to be
-             * told which call is in flight. A rule that excused any trailing call would let a
-             * clear-up remove a result and keep its call, which is the exact pair the rule exists
-             * to protect.
-             */
-            inFlight: Int? = null,
-        ): String? {
-            if (after.isEmpty()) return "Your context cannot be emptied: it holds the task"
-            val rows = after.map { parseRow(it) }
-            if (rows.any { it.broken }) {
-                return "A line no longer reads as a row; keep the five columns exactly as they are"
-            }
-            var index = 0
-            for (line in after) {
-                while (index < before.size && before[index] != line) index++
-                if (index == before.size) {
-                    return "Clear-up removes rows. It does not change them or add new ones."
-                }
-                index++
-            }
-            val task = before.map { parseRow(it) }.lastOrNull { it.kind == TOLD }
-            if (task != null && rows.none { it.id == task.id && it.kind == TOLD }) {
-                return "The newest task stays: it is what you are working on"
-            }
-            val waiting = ArrayDeque<Row>()
-            for (row in rows) {
-                when (row.kind) {
-                    CALL -> if (row.name !in SPEAKING) waiting.addLast(row)
-                    GOT -> {
-                        if (waiting.isEmpty()) {
-                            return "A result with no call before it: remove the pair together"
-                        }
-                        waiting.removeFirst()
-                    }
-                }
-            }
-            // **The call being answered right now is not a dangling one.** The row for this very
-            // edit is already in the context — it is written before the tool runs, which is what
-            // makes a crash mid-call visible — and its result is written immediately afterwards.
-            // Counting it here made the clear-up edit impossible: every attempt was refused with
-            // "the call to edit has no result left", because the file always ended with the call
-            // whose result was about to be appended.
-            val left = waiting.firstOrNull { it.id != inFlight }
-            if (left != null) {
-                return "The call to ${left.name} has no result left: remove the pair together"
-            }
-            return null
-        }
 
         /**
          * Splits rows into bursts, oldest first.
@@ -327,8 +309,12 @@ class AgentLog private constructor(
         val time: String,
         val id: Int,
         val kind: String,
+        /** `in`, `out` or `app` — whether the model is sent this row, and whose decision that was. */
+        val ctx: String,
         val name: String,
         val detail: String,
+        /** The line exactly as the file holds it, so a rewrite never has to re-render one. */
+        val raw: String = "",
         /** True for a line that did not parse: shown as a row that could not be read. */
         val broken: Boolean = false,
     ) {
@@ -337,14 +323,23 @@ class AgentLog private constructor(
         val endsBurst: Boolean get() = kind == ASK || kind == CONCLUDE
 
         /**
-         * The row as it stands in the file.
+         * The row as it stands in the file — **verbatim**.
          *
-         * [detail] is the file's own column — already escaped — so this uses [LogFormat.rawRow]
-         * and not [LogFormat.row]: re-escaping a parsed row doubles a backslash every time the
-         * file is rewritten, which is a record that quietly stops matching what was recorded.
+         * A row that came out of the file is written back as the same characters, so a body
+         * containing a backslash cannot drift: there is no escaping step on this path at all. A row
+         * the app built in memory has no raw line yet, so it is rendered once, here.
          */
         val line: String
-            get() = if (broken) detail else LogFormat.rawRow(time, id, kind, name, detail)
+            get() = if (broken) detail else raw.ifEmpty {
+                LogFormat.recordRow(time, id, kind, ctx, name, detail)
+            }
+
+        /** This row with its ctx column changed, and every other byte the same. */
+        fun flipped(to: String): Row = if (ctx == to) {
+            this
+        } else {
+            copy(ctx = to, raw = if (raw.isEmpty()) "" else LogFormat.flipCtx(raw, to))
+        }
 
         /** The body as the agent wrote it, with its newlines back. */
         val body: String get() = LogFormat.unescaped(detail)
@@ -365,43 +360,41 @@ class AgentLog private constructor(
      */
     fun trimContext(budget: Long): Int {
         synchronized(guard) {
-            val rows = contextRows()
-            if (rows.isEmpty() || budget <= 0L) return 0
+            val all = rows()
+            val inContext = all.filter { it.ctx == IN }
+            if (inContext.isEmpty() || budget <= 0L) return 0
             // **One messagebox at a time** — the operator's own words for the autotrim: "yes,
             // autotrim is one messagebox at a time". Dropping as many bursts as half the limit
             // would allow removes a conversation the agent might still be working from, all at
             // once, and gives him no chance to have cleared it himself; one burst per request
             // keeps this the app's last resort rather than a compaction of its own.
-            val oldest = bursts(rows).firstOrNull() ?: return 0
+            val oldest = bursts(inContext).firstOrNull() ?: return 0
             // Nothing to drop, or nothing that may be: a context that is one conversation is a
             // conversation, and cutting it would leave a task with no task.
-            if (oldest.size >= rows.size) return 0
-            // **One marker, not one per trim.** A marker is a row the model never sees — `messages`
-            // renders only the agent's and the reason's notes — but it is a row the size counts, so
-            // a context trimmed often would fill with invisible rows it is then trimmed for. The
-            // old markers go and the new one carries the running total, which is the same fact in
-            // one row instead of n.
-            val previous = rows.filter { it.kind == NOTE && it.name == "trimmed" }
-            val keep = rows.drop(oldest.size).filterNot { it.kind == NOTE && it.name == "trimmed" }
-            val gone = droppedTotal(previous) + oldest.size
-            val marker = LogFormat.row(
-                System.currentTimeMillis(), nextId(), NOTE, "trimmed",
+            if (oldest.size >= inContext.size) return 0
+            val gone = droppedTotal(all) + oldest.size
+            val marker = LogFormat.recordRow(
+                LogFormat.stamp(System.currentTimeMillis()),
+                nextId(),
+                NOTE,
+                APP,
+                "trimmed",
                 "$gone rows: the context was over its limit",
             )
-            val text = (keep.map { it.line } + marker).joinToString("\n") + "\n"
+            // **Taken out, not taken away.** The rows the app trims stay in the record, marked
+            // `app` rather than `out` — the app's doing, not the agent's judgement — so a trim can
+            // never be read as something the model decided. And the marker is `app` too, so it does
+            // not count against the limit it is reporting on.
+            val ids = oldest.map { it.id }.toSet()
+            // **Every row, not just the context's.** The file is the record: rewriting it from the
+            // `in` rows alone would delete everything the agent forgot and everything the app had
+            // already taken out — the audit and the evidence, in one silent step.
+            val kept = all.map { if (it.id in ids) it.flipped(APP) else it }
             try {
-                val fresh = File(context.parentFile, context.name + ".new")
-                fresh.writeText(text)
-                if (!fresh.renameTo(context)) {
-                    context.writeText(text)
-                    fresh.delete()
-                }
+                rewrite(kept.map { it.line } + marker)
             } catch (t: Throwable) {
                 return 0
             }
-            // The marker only exists in the context: putting it in the evidence too would claim a
-            // row the agent never saw.
-            append(session, marker)
             seen = size()
             return oldest.size
         }
@@ -420,19 +413,16 @@ class AgentLog private constructor(
     // ---- the person's own operation ------------------------------------------
 
     /**
-     * Throws the working context away, and keeps the evidence.
+     * Empties the working context, and keeps everything that happened.
      *
-     * **The app's operation, not the agent's.** The agent's clear-up may only remove rows and may
-     * never remove the newest task — that is what [clearUpProblem] checks — because a context it
-     * can empty is a context it can quietly restart from. A reset is the person saying "the
-     * conversation starts from here", which is a different act, so it is a different door rather
-     * than a relaxation of his.
+     * **The person's operation, not the agent's.** The agent may forget rows but never the newest
+     * task — that is what [forgetProblem] checks — because a context it can empty is a context it
+     * can quietly restart from. A reset is the person saying "the conversation starts from here",
+     * which is a different act, so it is a different door rather than a relaxation of his.
      *
-     * `session.log` is untouched: it is the evidence of what happened, and a reset is a fact
-     * about the working context, not a way to make history disappear. The marker row is written
-     * to **both** files under one id, so `session.log` minus `context.log` still means exactly
-     * one thing — what the agent decided did not matter — with resetting listed as the app's own
-     * act rather than looking like a row he removed.
+     * Nothing is deleted: every row that was `in` becomes `app`, which is the truth — the app took
+     * it out, the agent did not judge it. So [thrownAway] still reports only what the model chose
+     * to drop, and a reset can never be misread as a decision.
      *
      * The marker's name is not one [Agent.messages] renders, so the model is not handed an
      * app-authored sentence: after a reset the next request is the instructions and the new task,
@@ -440,35 +430,58 @@ class AgentLog private constructor(
      */
     fun reset(): Int = synchronized(guard) {
         val id = nextId()
-        val line = LogFormat.row(
-            System.currentTimeMillis(), id, NOTE, "reset", "the working context was cleared",
+        val marker = LogFormat.recordRow(
+            LogFormat.stamp(System.currentTimeMillis()),
+            id,
+            NOTE,
+            APP,
+            "reset",
+            "the working context was cleared",
         )
-        append(session, line)
-        try {
-            val fresh = File(context.parentFile, context.name + ".new")
-            fresh.writeText("$line\n")
-            // Beside and renamed: a reader must see the old context or the new one, never a file
-            // that has been truncated and not yet refilled.
-            if (!fresh.renameTo(context)) {
-                context.writeText("$line\n")
-                fresh.delete()
-            }
-        } catch (t: Throwable) {
-            // The file is the failure. The session row still says a reset happened, which is the
-            // half that must not be lost quietly — and the next turn's seal keeps the context
-            // legal either way.
-        }
+        // **Marked, not erased.** Every row that was in stays in the record and reads `app`: the
+        // person's act is not the agent's judgement, and it is not a way to make history disappear
+        // either. After this the next request is the instructions and the new task.
+        val marked = rows().map { if (it.ctx == IN) it.flipped(APP) else it }
+        rewrite(marked.map { it.line } + marker)
         seen = size()
         id
     }
 
+    /**
+     * Folds a record written by an older build — two files — into the one file.
+     *
+     * The old `context.log` held exactly the rows that were in the context, so it says what the
+     * ctx column now says: read once, mark the rows it names `in` and the rest `app`, delete it.
+     * Without this an update would silently drop every session's working context, which is the one
+     * thing a record must not do quietly.
+     */
+    private fun foldLegacyContext() {
+        val old = File(file.parentFile, CONTEXT)
+        if (!old.isFile) return
+        try {
+            val inContext = old.readText().split("\n")
+                .filter { it.isNotBlank() }
+                .map { parseRow(it).id }
+                .toSet()
+            // A row the old context did not hold was either the app's own or already forgotten;
+            // `app` is the honest answer, because the old file cannot tell the two apart.
+            val marked = rows().map { it.flipped(if (it.id in inContext) IN else APP) }
+            rewrite(marked.map { it.line })
+            old.delete()
+            seen = size()
+        } catch (t: Throwable) {
+            // A record that cannot be folded is left as it is, and the old file is not deleted —
+            // so nothing is lost, and the next open tries again.
+        }
+    }
+
     // ---- writing ------------------------------------------------------------
 
-    /** The operator's words. Appended to both, because this is what a turn is for. */
-    fun told(text: String): Int = record(TOLD, "operator", text, both = true)
+    /** The operator's words, in the context: this is what a turn is for. */
+    fun told(text: String): Int = record(TOLD, "operator", text)
 
     /** A tool the agent called: the name, and its arguments as the model wrote them. */
-    fun call(tool: String, args: String): Int = record(CALL, tool, args, both = true)
+    fun call(tool: String, args: String): Int = record(CALL, tool, args)
 
     /**
      * The answer to a call. Its first line is `0` or `1`, always.
@@ -477,34 +490,88 @@ class AgentLog private constructor(
      * two happen at different times: the gap between them is how long the tool took, and a
      * session that stopped between them is exactly what a dangling call looks like.
      */
-    fun got(tool: String, body: String): Int = record(GOT, tool, body, both = true)
+    fun got(tool: String, body: String): Int = record(GOT, tool, body)
 
     /** The terminating question, and the terminating statement. */
-    fun ask(question: String): Int = record(ASK, "question", question, both = true)
-    fun conclude(text: String): Int = record(CONCLUDE, "conclusion", text, both = true)
+    fun ask(question: String): Int = record(ASK, "question", question)
+    fun conclude(text: String): Int = record(CONCLUDE, "conclusion", text)
 
     /** A row the agent or the app wants on the record without it being a tool. */
-    fun note(name: String, detail: String): Int = record(NOTE, name, detail, both = true)
+    fun note(name: String, detail: String): Int = record(NOTE, name, detail)
 
     /**
-     * A row that goes only to the session.
+     * A row the app writes for itself, and that the model is never sent.
      *
-     * For the repeated `wait` poll: the request is re-sent every four minutes, and the evidence
-     * keeps every one of them, while the context keeps only the first — because a context that
-     * grew by a timestamped row every four minutes would never be the same request twice, and
-     * the whole poll is cheap only because it is a cache hit.
+     * For the repeated `wait` poll above all: the request is re-sent every four minutes, and the
+     * record keeps every one of them, while the context keeps only the first — because a context
+     * that grew by a timestamped row every four minutes would never be the same request twice, and
+     * the whole poll is cheap only because it is a cache hit. The turn boundary and the reconnect
+     * line are here for the same reason: they are how the *app* counts, not what the model said.
      */
-    fun sessionOnly(kind: String, name: String, detail: String): Int =
-        record(kind, name, detail, both = false)
+    fun bookkeeping(kind: String, name: String, detail: String): Int =
+        record(kind, name, detail, ctx = APP)
 
-    private fun record(kind: String, name: String, detail: String, both: Boolean): Int {
+    private fun record(
+        kind: String,
+        name: String,
+        detail: String,
+        ctx: String = IN,
+    ): Int {
         synchronized(guard) {
             val id = nextId()
-            val line = LogFormat.row(System.currentTimeMillis(), id, kind, name, detail)
-            append(session, line)
-            if (both) append(context, line)
+            val line = LogFormat.recordRow(
+                LogFormat.stamp(System.currentTimeMillis()),
+                id,
+                kind,
+                ctx,
+                name,
+                detail,
+            )
+            append(line)
             seen = size()
             return id
+        }
+    }
+
+    /**
+     * Takes rows out of the context, by id — **the agent's compaction, and the whole of it.**
+     *
+     * One call, one atomic rewrite: the named rows get `out` in their ctx column and nothing else
+     * in the file moves. The caller has already asked [forgetProblem] whether this list is legal,
+     * so this is the doing rather than the deciding. Returns how many rows changed.
+     */
+    fun forget(ids: Set<Int>): Int = synchronized(guard) {
+        val rows = rows()
+        if (forgetProblem(rows, ids) != null) return 0
+        val marker = LogFormat.recordRow(
+            LogFormat.stamp(System.currentTimeMillis()),
+            nextId(),
+            NOTE,
+            APP,
+            "forgot",
+            ids.sorted().joinToString(","),
+        )
+        val changed = rows.map { if (it.id in ids) it.flipped(OUT) else it }
+        rewrite(changed.map { it.line } + marker)
+        seen = size()
+        ids.size
+    }
+
+    /**
+     * Writes the whole record, beside it and then over it.
+     *
+     * **Beside and renamed, as everything else here is.** A rewrite in place that stopped halfway
+     * would leave a record whose last row is half a row — and this file is the evidence, so a
+     * reader must see either the old one whole or the new one whole.
+     */
+    private fun rewrite(lines: List<String>) {
+        file.parentFile?.mkdirs()
+        val text = lines.joinToString("\n") + "\n"
+        val fresh = File(file.parentFile, file.name + ".new")
+        fresh.writeText(text)
+        if (!fresh.renameTo(file)) {
+            file.writeText(text)
+            fresh.delete()
         }
     }
 
@@ -527,12 +594,12 @@ class AgentLog private constructor(
     }
 
     private fun size(): Long = try {
-        if (session.isFile) session.length() else 0L
+        if (file.isFile) file.length() else 0L
     } catch (t: Throwable) {
         0L
     }
 
-    private fun append(file: File, line: String) {
+    private fun append(line: String) {
         try {
             file.parentFile?.mkdirs()
             file.appendText(line + "\n")
@@ -545,41 +612,36 @@ class AgentLog private constructor(
 
     // ---- reading ------------------------------------------------------------
 
-    /** Every row of the session, oldest first. The box renders from this. */
-    fun rows(): List<Row> = parse(session)
+    /** Every row of the record, oldest first. The box renders from this. */
+    fun rows(): List<Row> = parse(file)
 
-    /** The rows the agent's context holds, oldest first. This is what is sent. */
-    fun contextRows(): List<Row> = parse(context)
+    /**
+     * The rows the model is sent, in order — **the rows whose ctx is `in`.**
+     *
+     * A filter, not a second file. Every row is written once, and being in or out of the context is
+     * a property of the row: that is what makes the audit exact instead of a reconciliation.
+     */
+    fun contextRows(): List<Row> = rows().filter { it.ctx == IN }
 
     /**
      * **What the agent decided did not matter.**
      *
-     * The two files hold the same rows, and only `context.log` is sent, so subtracting one from the
-     * other is the agent's compaction as a fact rather than as a claim. That is the whole point of
-     * keeping both: compaction is normally the one part of an agent's memory nobody can check — a
-     * summary is written and its source is gone, so "I kept what mattered" can be neither proved
-     * nor disproved. Here nothing is rewritten, only removed, and the removed rows are still on the
-     * record. So a person can read what was dropped, and a drop that turned out to matter can be
-     * pointed at by name.
+     * Compaction is normally the one part of an agent's memory nobody can check: a summary is
+     * written and its source is gone, so "I kept what mattered" can be neither proved nor
+     * disproved. Here nothing is summarised and nothing is deleted — a forget marks rows `out`,
+     * and the rows stay on the record with their text — so this returns the judgement itself, in
+     * the order it was made, and a row that was dropped by mistake can still be read afterwards.
      *
-     * Three things are *not* this, and they are subtracted out. A row the app wrote for itself
-     * ([byTheApp]) — the turn boundary, the poll's repeats, the trim markers, the reconnect line —
-     * is bookkeeping, not judgement. A row the app's own trim removed is the app's doing, and the
-     * marker it left says how many. And a row that is simply **not in the context because it was
-     * written before a reset** is the person's act, recorded by the reset's own row in both files.
-     *
-     * Ordered as the evidence is, so the answer reads like the conversation it came from.
+     * Nothing has to be excused from it. The app's own rows are `app` from birth, a trim marks
+     * `app`, and a reset marks `app`: the three things that used to look like the agent's judgement
+     * are now impossible to confuse with it, because the column says whose act put the row there.
      */
     fun thrownAway(): List<Row> = synchronized(guard) {
-        val rows = rows()
-        // **A reset is not a judgement, and it looks exactly like one.** It empties the context, so
-        // every row before it is out of the context and would otherwise be read as the agent's
-        // clearing — the one thing the person's own act must never be mistaken for. The reset's row
-        // is in both files, so the boundary is on the record and needs no other marker.
-        val reset = rows.indexOfLast { it.kind == NOTE && it.name == "reset" }
-        val since = if (reset >= 0) reset + 1 else 0
-        val kept = contextRows().map { it.id }.toSet()
-        rows.drop(since).filter { it.id !in kept && !byTheApp(it) }
+        // **One comparison, and no exceptions.** A row is `out` because the agent said so; the
+        // app's own rows are `app`, and the person's reset marks the rows it took the same way. So
+        // what the agent decided does not matter is exactly the `out` rows — no diff, no
+        // subtraction, no marker to excuse, and nothing to misread after a reset.
+        rows().filter { it.ctx == OUT }
     }
 
     private fun parse(file: File): List<Row> {
@@ -635,14 +697,17 @@ class AgentLog private constructor(
     fun beginSession(): Int {
         synchronized(guard) {
             val pending = dangling(rows())
-            // **The seal follows the call into the file the call is in.** After a reset the
-            // evidence still holds a call the context no longer has, and sealing it into the
-            // context would put a tool result there with no call above it — a request every
-            // endpoint refuses, produced by the app's own repair.
+            // **The seal goes where its call is.** After a reset the call is still in the record
+            // and marked `app`, so its result is written `app` too: a result in the context with no
+            // call above it is a request every endpoint refuses, produced by the app's own repair.
             val inContext = dangling(contextRows()).map { it.id }.toSet()
             for (call in pending) {
                 val said = "$FAILURE the app was closed before this answered"
-                if (call.id in inContext) got(call.name, said) else sessionOnly(GOT, call.name, said)
+                if (call.id in inContext) {
+                    got(call.name, said)
+                } else {
+                    bookkeeping(GOT, call.name, said)
+                }
             }
             return pending.size
         }
@@ -706,21 +771,18 @@ class AgentLog private constructor(
             val (kept, dropped) =
                 keepNewest(rows, budget = limit / 2) { row -> row.line.length.toLong() + 1 }
             if (dropped == 0) return 0
-            val marker = LogFormat.row(
-                System.currentTimeMillis(), nextId(), NOTE, "trimmed",
+            val marker = LogFormat.recordRow(
+                LogFormat.stamp(System.currentTimeMillis()),
+                nextId(),
+                NOTE,
+                APP,
+                "trimmed",
                 "$dropped rows from before ${kept.firstOrNull()?.time ?: "now"}",
             )
             try {
-                val text = (listOf(marker) + kept.map { it.line }).joinToString("\n") + "\n"
-                // **Written beside the file and renamed over it.** The box reads this file
-                // while the app appends to it, so a trim that truncated in place would show a
-                // reader a log that starts correctly and ends in the middle of a row.
-                val next = File(session.parentFile, session.name + ".new")
-                next.writeText(text)
-                if (!next.renameTo(session)) {
-                    session.writeText(text)
-                    next.delete()
-                }
+                // The one place rows leave the record for good: this is the evidence's own limit,
+                // and the reason the audit has a horizon rather than a history.
+                rewrite(listOf(marker) + kept.map { it.line })
             } catch (t: Throwable) {
                 return 0
             }

@@ -996,6 +996,14 @@ class AppViewModel @JvmOverloads constructor(
      */
     fun isLocked(file: File): Boolean = workspace?.isLocked(file) ?: false
 
+    /**
+     * True for the agent's two files, which the app keeps and does not let a person save over.
+     *
+     * Asked here for the same reason [isLocked] is: the greyed Save and the funnel that refuses the
+     * write must be one answer, not two copies of a rule that can drift apart.
+     */
+    fun isRecord(file: File): Boolean = workspace?.isRecord(file) ?: false
+
     /** True when [file] itself was locked, rather than sitting inside a locked folder. */
     fun isLockedHere(file: File): Boolean = workspace?.isLockedHere(file) ?: false
 

@@ -1,17 +1,14 @@
-# The agent chat — fifth round: two files, one stream
+# The agent chat — sixth round: one record, one column
 
-Status: **round 5, agreed, and built.** The record below is that round unchanged; what the code
-now does, and the one place it does not yet match, is §4. This answers the clarification after
-round 4: the
-session log and the working context are **two files with the same structure, both fed by the
-same events**, and `wait` **is** re-sent every four minutes.
+Status: **built.** Round 5's two files are gone: there is one record, and whether the model is sent
+a row is a column on the row. This supersedes round 5 §0 and §4.2 — the audit no longer subtracts
+anything — and it keeps every rule of rounds 1–4 that is not about file layout.
 
-Rounds 1–4 are kept as `-v1/-v2/-v3/-v4-annotated`. Round 4 said "one file" and "an idle agent
-makes no request". Both were wrong. This is the corrected model.
+Round 5 is kept as `-v5-annotated`.
 
 ---
 
-## 0. The two files
+## 0. One record
 
 ```text
 files/accounts/<login>/
@@ -20,206 +17,94 @@ files/accounts/<login>/
   projects/shopping/
     project_prompt.txt         how to work in this project
     agent/
-      session.log              the evidence: every event, app-truncated at a generous limit
-      context.log              the working context: the same rows, minus what the agent cleared
+      session.log              every event, in order, and what the model is sent
     GitHub/                    the worktree; his edits become commits here
 ```
 
-**Same structure, same rows, one event written to both places.** A `CALL`, its `GOT`, a `TOLD`,
-a `NOTE` — each is appended to `session.log` *and* to `context.log`, in the same five columns as
-the trace (`time id kind name detail`).
-
-What differs is only **what is kept**:
-
-| | `session.log` | `context.log` |
-|---|---|---|
-| what is in it | every event | every event, minus what the agent cleared out |
-| who shrinks it | the app | the agent (its compaction edit), and the app at the hard limit |
-| how | whole messageboxes, oldest first, one at a time, at a generous limit | the agent edits unrelated rows out; the app trims at the hard limit |
-| fed to the model | no | **yes** — this is the context |
-| rendered by the box | yes | no |
-
-The request is ① + ② + **the rows in `context.log`**. Nothing else.
-
-**A property worth keeping deliberately:** `session.log` minus `context.log` is exactly the
-agent's judgement about what did not matter. Diff the two files and you see what he threw away.
-That is an auditable decision rather than a hidden one, and it is why the same-row rule is worth
-its cost.
-
----
-
-## 1. `wait`, which is re-sent every four minutes
-
-The agent calls `wait`; the turn ends there. Four minutes later the app **sends the request
-again**. That is a real request, and it happens every four minutes for as long as the agent is
-idle.
-
-**What differs is where the rows go.** The repeated `wait` call is appended to `session.log`
-every time — fifteen rows an hour, which is why that file's limit is generous and why the app is
-the one that truncates it. It is appended to `context.log` **once**, the first time. The
-identical repeats are not.
-
-So:
+One file, one row per event, five columns plus one:
 
 ```text
-session.log   … 13 CALL wait  {}          14:03:33
-                13 GOT  wait  0            14:03:33   (written when it ends)
-                14 CALL wait  {}          14:07:33
-                15 CALL wait  {}          14:11:33
-                16 CALL wait  {}          14:15:33
-                …fifteen an hour
-
-context.log   … 13 CALL wait  {}
-                13 GOT  wait  0 still waiting
-                ← and nothing more until the operator speaks
+14:02:11.410    1 TOLD    in  operator  rename milk.txt to dairy.txt
+14:02:18.902    2 CALL    in  tree      {"path":"GitHub"}
+14:02:18.955    3 GOT     in  tree      0 · GitHub/ GitHub/milk.txt
+14:06:11.007    4 CALL    app wait      {}
+14:11:03.418    5 CALL    in  forget    {"ids":[2,3]}
+14:11:03.421    6 GOT     in  forget    0 · forgot 2 rows. The task is still 1.
 ```
 
-**And the reason the rule exists is not tidy bookkeeping — it is the cache.** Each row carries a
-timestamp. If every poll appended `14:11:33 CALL wait`, the request would differ from the last
-one by that timestamp, and a provider's implicit cache matches on the longest common *prefix*:
-one differing row at the end costs nothing, but a context that grows by a row every four minutes
-means the request is never byte-identical, and the model's view of "where am I" drifts as
-identical lines pile up. Serving the same prefix with the same request is the cheapest thing
-this design can do. **Keeping the repeated `wait` out of `context.log` is what keeps the poll
-identical.**
-
-Therefore: **nothing in the request may carry a clock**, and the wait's result is a constant
-("`0` still waiting"), written once. The poll is the same bytes, a new HTTP request.
-
-### What that costs
-
-The idle poll is not free, and my round-4 "zero" was wrong. Fifteen polls an hour, ~30k-token
-context, all of it a prefix hit:
-
-| | per poll | per hour | per day |
-|---|---|---|---|
-| cached read, 30k | $0.00009 | $0.0014 | **3.2 ¢** |
-| the reply (a `wait` call, ~40 tokens out) | negligible | — | — |
-
-**About three cents a day per idle agent.** The 50× risk is unchanged: it is the *rewrite* of
-`context.log` that costs, not the poll. Appending is a hit; rewriting the middle is a full
-re-read. Which is why the prompt layers sit above the rows (§2.1) and the agent is told to clear
-out, not to annotate.
-
----
-
-## 2. What this fixes in the design
-
-### 2.1 Placement, unchanged and now more clearly earned
-
-① then ② then the rows. The agent's compaction edit rewrites only `context.log`, so the
-invalidation stops at the first record and never reaches the instructions. The app's trim removes
-whole messageboxes from the top of `context.log`, oldest first, one at a time, never the current
-one.
-
-And the rule that makes a compaction edit safe: **the agent may not remove the newest `TOLD`
-record** — the task it is working on. Everything else in `context.log` is his to delete.
-
-### 2.2 Being on
-
-A foreground service, `specialUse` with the declared subtype (`dataSync` is capped at six hours
-in any 24 on Android 15+, which is the system deciding for the operator).
-`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` with the reason spelled out, because in Doze the network
-is suspended for apps that are not exempt, and every poll would then fail against a pinned
-provider with no fallback.
-
-**No permanent wake lock**, decided. The poll is a request whose answer is a `wait` call; if Doze
-defers a poll while the screen is off, the agent is idle either way and nothing is lost. A wake
-lock held forever buys exact four-minute spacing on work that does not exist, and costs a night
-of battery. So the "exact vs late" setting does not exist: there is no correct choice for the
-operator to make.
-
-Two holes remain and must be visible rather than silent: a force-stop in the system settings,
-and OEM battery managers. The session's row says `stopped · the phone stopped the app`, and state
-is rebuilt from disk when the service starts, so a session resumes instead of dying quietly.
-
-### 2.3 States
-
-| state | meaning | notification |
+| ctx | meaning | who put it there |
 |---|---|---|
-| **idle** | polling in `wait` · concluded · reconnecting | none. Sub-labels: `waiting`, `finished`, `reconnecting (4 s)` |
-| **asked** | called `ask` | now, then every interval (default 1 h) until answered |
-| **stopped** | stopped by the operator · stopped by the phone | only for a cause the operator did not choose |
+| `in` | the model is sent this row | the turn, or the agent's own words |
+| `out` | the model is not sent it | **the agent, by `forget`** |
+| `app` | the model is not sent it | the app: a poll's repeats, a turn boundary, a trim, the reconnect line, a reset |
 
-`conclude` → idle, no notification. Retries are 1, 2, 4, 4… seconds until reconnect, so a network
-blip stays `idle · reconnecting` and never becomes something to resolve. The log records the
-first attempt and one line when it reconnects with the try count, not one line per attempt.
+**The request is ① + ② + the `in` rows.** Nothing else.
 
-### 2.4 One consequence to keep in mind, not to decide now
+## 1. Why one column instead of two files
 
-A `wait`ing agent is woken by the timer only to poll. Nothing in the design tells him the project
-changed — a sync pulling someone else's commits, an edit made in the app, a file changed by
-another device. His next turn after the operator speaks will see those changes if he looks.
+Round 5 kept the context as a second file and defined the audit as the difference between the two.
+That worked, and it cost a rule for every row the app wrote to only one of them — plus, because a
+removal was a *text edit*, four more: whole rows only, a final newline, a line-by-line comparison
+to prove nothing was rewritten, and an escaping path that had to round-trip exactly.
 
-That is consistent with everything else here: the agent is woken by the operator, and its job is
-the operator's instruction. Recorded so that it is a decision and not a surprise.
+A column deletes that class of problem:
 
----
+- **Removal is a set of ids.** `forget` carries no text, so compaction cannot change what the record
+  says — it is not that the app checks; the text is not offered.
+- **The judgement is stated, not inferred.** `out` *is* the agent's decision, written at the moment
+  it is made. No subtraction, and no exceptions to name: a row the app wrote is `app` from birth.
+- **A reset cannot be misread as a decision.** It marks `app`, so the person's act never appears in
+  the agent's judgement.
+- **Nothing is re-rendered.** A row carries its own line, and a flip rewrites four characters of the
+  ctx column; the name and the body are carried over byte for byte.
 
-## 3. What is left
+## 2. Compaction: `forget`
 
-Read, not decided:
+The agent calls `forget` with ids. The app refuses only three things:
 
-- `session.log`'s generous limit — the app truncates whole messageboxes, oldest first. Round 2's
-  figure was 512 KB keeping 256 KB for the trace; the session file is larger and should be told
-  when the format is written.
-- Whether `context.log`'s rows are the *same ids* as `session.log`'s. They should be, so the diff
-  is exact; an id that appears only in `session.log` is a row the agent cleared.
+1. an id that is **not in the context** — already out, or never there;
+2. **the newest task**;
+3. **half a pair** — a call without its result, or a result without its call.
 
-Everything else — the config, the forms, the picker with tags and `—`, the pin, the tools, the
-lock, the record format, the three states, the reminder ladder, the trim rules, the test scripts
-— is settled as written in the rounds this document corrects.
+It answers with what it did, and which task is still standing: `0 · forgot 2 rows. The task is
+still 1.` The forgotten rows stay in the record, marked `out`, with their text — so a drop that
+turned out to matter can still be read afterwards.
 
----
+**This is the audit, and it is the whole of it.** In every other agent design compaction is a
+summary: the model writes one and the source is gone, so "I kept what mattered" can be neither
+proved nor disproved, and a forgotten instruction is indistinguishable from an instruction that
+never arrived. Here the answer is a column: `thrownAway()` is the `out` rows, in order.
 
-## 4. State as built (checked against the code)
+## 3. What went with the second file
 
-Everything in this round is built and green except what §4.2 names. Where the code has answered a
-question §3 left open, the answer is given with what pins it.
+- `rawRow`, and the double-escaping hazard it existed to avoid.
+- The final-newline rule, the "same lines in the same order" comparison, and the in-flight-call
+  exception they needed.
+- `byTheApp` and the reset boundary — a table of exceptions that existed only to make a subtraction
+  mean what a column now says outright.
+- `Workspace.writeRecord`: the one door through which the agent's compaction used to reach a text
+  file. Nothing outside [AgentLog] writes the record now, so the person and the agent are under the
+  same rule — and that is checked once, in `Workspace.write`.
 
-### 4.1 The two questions in §3
+## 4. What did not change
 
-- **`session.log`'s limit** — 4 MB, keeping the newest 2 MB (`AgentLog.SESSION_LIMIT`): whole
-  messageboxes, oldest first, one trim per call, and **one marker row carrying the running total**
-  rather than one marker per trim. Each trim used to write its own marker; the model never sees
-  those rows, but the size counts them, so a context trimmed often filled with invisible rows and
-  was then trimmed for them. (`a trim in one file does not let the other file's numbering start
-  again` pins both halves.)
-- **Whether the two files hold the same ids** — they do, and it is not optional: one counter per
-  project, seeded from the higher id in *either* file, so an id never means two rows and never
-  goes backwards — including across a trim, because the session drops from the oldest end and the
-  highest id survives. Being per project rather than global is deliberate and safe: a request is
-  built from one project's record, so `call_<id>` is unique in the only scope an endpoint checks.
+- **The poll is the same bytes.** A repeated `wait` is written `app`, so it never enters the request;
+  nothing in the request carries a clock.
+- **Placement.** ① then ② then the rows, so a compaction edit invalidates the conversation and never
+  the instructions.
+- **The trim.** The app's own limit still drops the oldest whole messageboxes — the only place rows
+  leave the record for good, and therefore the audit's horizon: what the agent forgot survives until
+  the session's own size limit takes it, and not for ever.
+- **States, reminders, the ladder, the pin, the lock, the record's format and the tests**, as in the
+  rounds this document corrects.
 
-### 4.2 The one place the audit property leaks
+## 5. The record is the app's, and the person cannot save over it
 
-"Diff the two files and you see what he threw away" is true of the agent's clears. It is not yet
-*exactly* true of the app's own rows, because **each trim writes its marker into one file only** —
-the session's into `session.log`, the context's into `context.log`. So an id that appears only in
-`session.log` is either a row the agent cleared or the app's session marker, and an id only in
-`context.log` is the context's marker.
+`agent/session.log` opens in the editor as read-only text: Save is grey and a sentence says whose
+file it is. The person's levers stay **Reset** (empties the working context, keeps everything) and
+**deleting the project** (takes the record with it). A single log file cannot be renamed, moved or
+deleted on its own.
 
-Two ways out, not decided: write the marker to both files (an app act recorded once, in both), or
-define the audit as the diff *ignoring `NOTE trimmed`*. The second costs nothing and loses nothing;
-the first makes the files agree row for row.
-
-### 4.3 Still missing
-
-- **The battery-optimisation ask.** `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` is declared and
-  nothing asks for it: no screen fires `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`, so the
-  declaration buys nothing and §2.2's second hole is open on every phone for as long as Doze is
-  willing to suspend the network under a poll. (The manifest comment used to claim it was "asked
-  for in one place"; it now says what is true.)
-
-### 4.4 Corrections made while building, each now one rule in one place
-
-- The session file has **one lock per file**, not one per object: it has two writers by design (the
-  screen and the runner's worker), and a `put` that read the file, changed its key and wrote it
-  back silently undid the other writer. The record's file had the same fault and the same fix.
-- **The operator's stop is the ending's business, not each caller's.** The screen and the runner
-  each carried a copy of "a stop is not undone by a turn that was in flight", and the copies
-  disagreed — the runner let a harder ending overwrite the person's stop. It is now
-  `End.onto(session, now)`, and one test pins the case that told the copies apart.
-- An outage is **bracketed**: one `stopped` row at its first failure, and one `retry` row —
-  "reconnected after N tries" — when it comes back, in the session only, so the poll that follows
-  is byte-identical to what it would have been.
+This is the app refusing, not the system: a file manager on the phone can still edit the file, and
+nothing here pretends otherwise. What it buys is that the app never offers the person a way to make
+its own record mean nothing.

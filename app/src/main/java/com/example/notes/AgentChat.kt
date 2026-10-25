@@ -35,6 +35,8 @@ object AgentChat {
         val failed: Boolean = false,
         val bytes: Long = 0,
         val detail: String = "",
+        /** Out of the context: drawn struck through, so the conversation shows what it forgot. */
+        val forgotten: Boolean = false,
     )
 
     /**
@@ -145,8 +147,12 @@ object AgentChat {
             // A row's size, exact, so a person can see which lines are the expensive ones — the
             // question that matters when a context is being cleared up.
             val size = ContextBudget.bytes(row.line)
+            // **A row the agent forgot is still read here, and is marked.** The box shows the whole
+            // record — that is what makes the forgetting visible instead of something to take on
+            // trust — so the flag travels with the line and the row is drawn struck through.
+            val forgot = row.ctx == AgentLog.OUT
             if (row.broken) {
-                out.add(Line("unreadable", oneLine(row.detail, 120), bytes = size))
+                out.add(Line("unreadable", oneLine(row.detail, 120), bytes = size, forgotten = forgot))
                 continue
             }
             when (row.kind) {
@@ -166,6 +172,7 @@ object AgentChat {
                                 failed = failed(row.body),
                                 bytes = size,
                                 detail = row.body,
+                                forgotten = forgot,
                             ),
                         )
                     } else {
@@ -174,22 +181,36 @@ object AgentChat {
                 }
 
                 AgentLog.ASK -> out.add(
-                    Line("asked", row.body, bytes = size, detail = row.body),
+                    Line("asked", row.body, bytes = size, detail = row.body, forgotten = forgot),
                 )
                 AgentLog.CONCLUDE -> out.add(
-                    Line("concluded", row.body, bytes = size, detail = row.body),
+                    Line(
+                        "concluded", row.body, bytes = size, detail = row.body, forgotten = forgot,
+                    ),
                 )
                 AgentLog.NOTE -> when (row.name) {
                     // The idle note belongs to the collapsed idle line, not to a turn.
                     "idle" -> Unit
                     "agent", "reason" -> out.add(
-                        Line(row.name, oneLine(row.body, 200), bytes = size, detail = row.body),
+                        Line(
+                            row.name,
+                            oneLine(row.body, 200),
+                            bytes = size,
+                            detail = row.body,
+                            forgotten = forgot,
+                        ),
                     )
                     // Anything else the app or the agent noted about the turn: "stopped"
                     // and its reason, most of all. It is the only thing a failed turn has to
                     // say, so it is drawn rather than hidden.
                     else -> out.add(
-                        Line(row.name, oneLine(row.body, 200), bytes = size, detail = row.body),
+                        Line(
+                            row.name,
+                            oneLine(row.body, 200),
+                            bytes = size,
+                            detail = row.body,
+                            forgotten = forgot,
+                        ),
                     )
                 }
 
@@ -199,6 +220,7 @@ object AgentChat {
                         oneLine(row.body, 120),
                         bytes = size,
                         detail = row.body,
+                        forgotten = forgot,
                     ),
                 )
             }
@@ -231,6 +253,9 @@ object AgentChat {
         // person most needs the size of is often the one with no visible body at all.
         bytes = ContextBudget.bytes(call.line) + ContextBudget.bytes(got.line),
         detail = "called with ${call.body}\n\n${got.body}",
+        // The pair is forgotten together or not at all — that is a rule the tool enforces — so
+        // either row's state is the pair's.
+        forgotten = call.ctx == AgentLog.OUT || got.ctx == AgentLog.OUT,
     )
 
     /** The first line is `0` or `1`; the rest is the one sentence worth showing beside it. */

@@ -137,7 +137,7 @@ class AgentRunner(
             if (session.retries > 0 && how !is Agent.End.Stopped) {
                 try {
                     val record = AgentLog.open(File(ws.projectsDir, project))
-                    record.sessionOnly(
+                    record.bookkeeping(
                         AgentLog.NOTE,
                         "retry",
                         "reconnected after ${session.retries} " +

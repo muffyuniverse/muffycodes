@@ -11,8 +11,8 @@ import java.io.File
  * with everything else — and both are written **only when they are missing**, because a default
  * that overwrites an edit is a default that loses work.
  *
- * The third layer is not a file this class writes: it is `agent/context.log`, and it belongs to
- * the agent (see [AgentLog]).
+ * The third layer is not a file this class writes: it is the `in` rows of the record, and they
+ * belong to the agent (see [AgentLog]).
  */
 object AgentPrompt {
 
@@ -34,8 +34,9 @@ object AgentPrompt {
         WHERE YOU ARE
         The project folder holds:
           GitHub/        the files that live on GitHub. This is the only part that syncs.
-          agent/         your own record. session.log is the evidence; context.log is your
-                         context, and you may edit it.
+          agent/         your own record: every event in order, with the column that says whether
+                         you are sent it (in), you forgot it (out), or the app wrote it (app).
+                         Read it. Do not change it.
           project_prompt.txt  how to work in this project. Read it. It is short.
         You cannot see or change anything outside this project, another project included.
 
@@ -59,16 +60,15 @@ object AgentPrompt {
         HOW TO BEHAVE
           - Read before you write. Guess only when reading is impossible.
           - Change as little as the task needs. A rename is not a rewrite.
-          - Your record is the memory of this project. agent/context.log is what is sent every
-            turn: when it fills up, clear it up by removing rows that no longer matter to the
-            task - whole rows, a call together with its result, never the newest task, and never
-            a row rewritten or added. agent/session.log is the evidence: read it, do not change
-            it. Do not annotate.
+          - Your record is the memory of this project. The rows marked in are what you are sent
+            every turn. When they fill up, call `forget` with the ids of the rows that no longer
+            matter to the task - a call together with its result, and never the newest task.
+            Nothing is lost: a forgotten row stays in the record, marked out. Do not annotate.
           - If the last thing you were told is missing, say so and ask. Silence is worse.
 
         FILES YOU MAY WRITE
-        Anything inside GitHub/, and agent/context.log. Nothing else: agent/session.log is
-        yours to read, not to write.
+          Anything inside GitHub/. Nothing else: agent/ is the record, and it is yours to read,
+          not to write. `forget` is the one thing you may do to your context, and it names ids.
     """.trimIndent()
 
     /** ② — the project's own instructions, empty until somebody writes them. */

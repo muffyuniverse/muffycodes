@@ -10,10 +10,10 @@ import java.io.File
 /**
  * The agent's record, tested as a file.
  *
- * Every claim here is about **what the two files hold**, not about an object in memory: the
- * whole design rests on `session.log` minus `context.log` being the agent's own judgement, and
- * that is a property of the text. A recorder with a tidy API and two files that had drifted
- * apart would pass any test that only asked it questions about itself.
+ * Every claim here is about **what the file holds**, not about an object in memory: the whole
+ * design rests on the `ctx` column being the agent's own judgement — `out` is what it decided to
+ * forget — and that is a property of the text. A recorder with a tidy API and a file that had
+ * drifted from what it reported would pass any test that only asked it questions about itself.
  */
 class AgentLogTest {
 
@@ -38,7 +38,7 @@ class AgentLogTest {
      */
     private fun sessionLines(): List<String> = linesIn(File(project, "agent/session.log"))
 
-    private fun contextLines(): List<String> = linesIn(File(project, "agent/context.log"))
+    private fun contextLines(): List<String> = log.contextRows().map { it.line }
 
     /** A bare agent, for the one test that asks how rows become a conversation. */
     private fun agentFor(record: AgentLog): Agent {
@@ -59,26 +59,26 @@ class AgentLogTest {
         if (file.isFile) file.readLines().filter { it.isNotBlank() } else emptyList()
 
     @Test
-    fun `a turn is written to both files, with the same ids`() {
-        // The property the diff depends on: one event, one id, two files.
+    fun `a turn is written once, and the ctx column says what the model is sent`() {
+        // **One file, so there is nothing to keep in step.** Every event is one row with one id,
+        // and being in the context is a column rather than a second copy of the same line.
         log.told("rename milk.txt to dairy.txt")
         log.call("tree", """{"path":"GitHub"}""")
         log.got("tree", "0\nGitHub/\nGitHub/milk.txt")
 
-        val session = sessionLines()
-        val context = contextLines()
-
-        assertEquals("three events", 3, session.size)
-        assertEquals("the same three in the context", session, context)
-        assertTrue("in the order they happened", session[0].contains("TOLD"))
-        assertTrue("with the operator's words", session[0].endsWith("rename milk.txt to dairy.txt"))
+        val rows = log.rows()
+        assertEquals("three events", 3, rows.size)
+        assertTrue("all three are in the context", rows.all { it.ctx == AgentLog.IN })
+        assertTrue("in the order they happened", rows[0].kind == AgentLog.TOLD)
+        assertEquals("with the operator's words", "rename milk.txt to dairy.txt", rows[0].body)
+        assertEquals("and the context is exactly those rows", rows, log.contextRows())
     }
 
     @Test
-    fun `the ids are one sequence across both files`() {
-        // Reading the id back out of the file rather than trusting the return value: an id
-        // counter that restarted at 1 on every open would make the two files' ids collide, and
-        // the diff would stop meaning what it is for.
+    fun `the ids are one sequence over the whole record`() {
+        // Reading the id back out of the file rather than trusting the return value: an id counter
+        // that restarted at 1 on every open would make two rows share a number, and a forget would
+        // then remove the wrong one.
         log.told("first")
         val second = log.note("note", "second")
 
@@ -90,27 +90,81 @@ class AgentLogTest {
     }
 
     @Test
-    fun `a row the agent cleared is in the session and not in the context`() {
-        // This is the diff's whole purpose, so it is asserted as a diff.
+    fun `a forgotten row stays in the file and leaves the context`() {
+        // The audit in one assertion: the row is still readable, with its text, and the only thing
+        // that changed about it is the column that says whether the model is sent it.
         log.told("a task")
         log.note("note", "this mattered")
-        log.note("note", "this did not")
-        val kept = linesIn(log.context).filter { it.contains("this mattered") }
-        val dropped = linesIn(log.context).filter { it.contains("this did not") }
-        assertEquals("one is in the context", 1, kept.size)
-        assertEquals("both were written", 1, dropped.size)
+        val gone = log.note("note", "this did not")
 
-        // The agent's clear-up edit, simulated the way he does it: rewrite the context without
-        // the row, leaving the session untouched.
-        val rows = log.contextRows().filterNot { it.detail.contains("this did not") }
-        log.context.writeText(rows.joinToString("\n") { it.line } + "\n")
+        log.forget(setOf(gone))
 
-        assertEquals("the session still has it", 1, linesIn(log.session).count {
-            it.contains("this did not")
-        })
-        assertEquals("and the context does not", 0, linesIn(log.context).count {
-            it.contains("this did not")
-        })
+        assertEquals(
+            "the text is still in the file",
+            1,
+            linesIn(log.session).count { it.contains("this did not") },
+        )
+        assertTrue("but not in the context", log.contextRows().none { it.id == gone })
+        assertEquals("and it is the only thing he decided to lose", listOf(gone), log.thrownAway().map { it.id })
+        assertTrue(
+            "the row he kept is still in",
+            log.contextRows().any { it.body == "this mattered" },
+        )
+    }
+
+    // ---- flipping the column, and nothing else -------------------------------
+
+    @Test
+    fun `forgetting changes four characters and not one other byte`() {
+        // **The mechanism the whole design leans on.** A row is taken out of the context by
+        // rewriting its ctx column in place; the name and the body are carried over from the file
+        // exactly as they were. The body here is chosen to be hostile: backslashes, a literal
+        // backslash-n that is not a newline, real newlines (escaped in the file), and a quote.
+        val nasty = "a\\b and \\n literally, then a real\nnewline, and a \"quote\""
+        val id = log.got("read", "0\n$nasty")
+        val before = linesIn(log.session).last()
+
+        log.forget(setOf(id))
+
+        val after = linesIn(log.session).first { it.contains(" GOT ") }
+        assertEquals("the body is byte-identical", before.replace("in  read", "out read"), after)
+        // And it still reads back as the same body, not as a mangled one.
+        assertEquals("and decodes the same", nasty, log.rows().first { it.id == id }.body)
+    }
+
+    @Test
+    fun `the columns stay aligned after a flip, so the file still greps and parses`() {
+        log.told("a task")
+        val id = log.note("agent", "a note")
+        log.forget(setOf(id))
+
+        val line = linesIn(log.session).first { it.contains("a note") }
+        // `14:02:11.410    2 NOTE    out agent    a note` — id padded to four, kind to seven,
+        // ctx to three, so every column starts where it started before.
+        assertTrue("ctx is the fourth column: $line", line.contains("NOTE    out "))
+        assertEquals("and the row parses", id, AgentLog.parseRow(line).id)
+        assertEquals("with its own name", "agent", AgentLog.parseRow(line).name)
+    }
+
+    @Test
+    fun `an old build's context file is folded in once and deleted`() {
+        // An update must not silently lose a session's working context. The old second file says
+        // what the new column says, so it is read once: the rows it holds become `in`, the rest
+        // `app`, and the file is removed so nothing has to keep it in step.
+        log.told("the first thing")
+        val second = log.told("the second thing")
+        val old = File(project, "agent/${AgentLog.CONTEXT}")
+        old.writeText(linesIn(log.session).first() + "\n")
+
+        val reopened = AgentLog.open(project)
+
+        assertEquals(
+            "only the row the old context held is in",
+            listOf(second - 1),
+            reopened.contextRows().map { it.id },
+        )
+        assertFalse("and the old file is gone", old.exists())
+        assertEquals("while the record keeps both rows", 2, reopened.rows().size)
     }
 
     @Test
@@ -277,7 +331,7 @@ class AgentLogTest {
     // ---- resetting the working context --------------------------------------
 
     @Test
-    fun `a reset clears the working context and leaves the evidence alone`() {
+    fun `a reset empties the context and deletes nothing`() {
         log.told("rename milk.txt")
         log.call("tree", """{"path":"GitHub"}""")
         log.got("tree", "0\nGitHub/milk.txt")
@@ -286,32 +340,29 @@ class AgentLogTest {
 
         log.reset()
 
-        assertEquals(
-            "the context is one row: the reset",
-            1,
-            contextLines().size,
-        )
-        assertTrue("and that row says so", contextLines().first().contains("reset"))
-        assertEquals("the evidence grew by one", evidence.size + 1, sessionLines().size)
+        assertEquals("the context is empty", 0, log.contextRows().size)
+        assertEquals("the record grew by one", evidence.size + 1, sessionLines().size)
         assertTrue(
-            "and everything that happened is still in it",
-            sessionLines().containsAll(evidence),
+            "and every row that happened is still there, marked app",
+            sessionLines().containsAll(evidence.take(evidence.size)),
         )
+        assertEquals("with the reset itself as the newest", "reset", log.rows().last().name)
     }
 
     @Test
-    fun `a reset is one row in both files, under one id`() {
-        // The audit is `session.log` minus `context.log`. If a reset were a row only the session
-        // had, it would read as a row the agent removed — the app's act disguised as his.
+    fun `a reset is the app's act, and is never read as the agent's`() {
+        // **The one thing the audit must never confuse.** A reset empties the context, so a naive
+        // reading would see the agent forgetting everything; the rows are marked `app` instead, and
+        // the marker row is `app` too, so the judgement stays empty.
         log.told("a task")
         log.reset()
 
-        val lastSession = AgentLog.parseRow(sessionLines().last())
-        val only = AgentLog.parseRow(contextLines().last())
-
-        assertEquals("one id", lastSession.id, only.id)
-        assertEquals("one line, so the diff is exact", lastSession.line, only.line)
-        assertEquals("and it is the app's own row", "reset", only.name)
+        assertTrue("nothing was judged", log.thrownAway().isEmpty())
+        assertEquals(
+            "and the rows say whose act it was",
+            setOf(AgentLog.APP),
+            log.rows().map { it.ctx }.toSet(),
+        )
     }
 
     @Test
@@ -516,7 +567,12 @@ class AgentLogTest {
             listOf("task 2", "task 3", "task 4"),
             log.contextRows().filter { it.kind == AgentLog.TOLD }.map { it.body },
         )
-        assertTrue("the marker says how many", log.contextRows().any { it.name == "trimmed" })
+        assertTrue(
+            // The marker is the app's own row, so the model is not told about it: what the model
+            // sees is simply a shorter context, which is the truth.
+            "the marker says how many, and is the app's",
+            log.rows().any { it.name == "trimmed" && it.ctx == AgentLog.APP },
+        )
         assertEquals(
             "while the evidence keeps them all",
             4,
@@ -537,69 +593,61 @@ class AgentLogTest {
         assertEquals("and the task is still there", 2, log.contextRows().size)
     }
 
-    // ---- the audit: session minus context is his judgement -------------------
-
-    /**
-     * The agent's clear-up, done the way the `edit` tool does it: the context file is rewritten with
-     * exactly the rows that were kept. Not a helper on the production class, because the production
-     * class does not offer one — the tool goes through the workspace write funnel, which is the
-     * thing being bypassed here on purpose.
-     */
-    private fun clearUpTo(keep: List<String>) {
-        val file = File(project, "agent/context.log")
-        file.writeText(keep.joinToString("\n") + "\n")
-    }
+    // ---- the audit: the `out` column is his judgement ------------------------
 
     @Test
-    fun `what the agent cleared is exactly what the two files disagree about`() {
+    fun `what the agent forgot is exactly what it named, and nothing else`() {
         log.told("make the list")
-        log.call("read", """{"path":"GitHub/milk.txt"}""")
-        log.got("read", "0\ntwo litres")
-        log.call("read", """{"path":"GitHub/eggs.txt"}""")
-        log.got("read", "0\na dozen")
+        val milkCall = log.call("read", """{"path":"GitHub/milk.txt"}""")
+        val milkGot = log.got("read", "0\ntwo litres")
+        val eggCall = log.call("read", """{"path":"GitHub/eggs.txt"}""")
+        val eggGot = log.got("read", "0\na dozen")
         log.note("agent", "the eggs matter, the milk does not")
 
-        // The agent clears the milk pair, exactly as the tool lets it: whole rows, by text. The
-        // call's row is the one whose text names the file; the result's row is the one after it.
-        val lines = log.contextRows().map { it.line }
-        val milk = lines.indexOfFirst { it.contains("milk") }
-        clearUpTo(lines.filterIndexed { i, _ -> i != milk && i != milk + 1 })
+        log.forget(setOf(milkCall, milkGot))
 
-        val thrown = log.thrownAway()
-        assertEquals("one pair", 2, thrown.size)
-        assertTrue("the call", thrown.any { it.name == "read" && it.kind == AgentLog.CALL })
-        assertTrue("and its result", thrown.any { it.kind == AgentLog.GOT && it.body.contains("litres") })
+        assertEquals(
+            "the pair it named",
+            listOf(milkCall, milkGot),
+            log.thrownAway().map { it.id },
+        )
         assertTrue(
-            "and nothing he kept",
-            thrown.none { it.body.contains("eggs") || it.body == "make the list" },
+            "and nothing it kept",
+            log.rows().none { it.id in setOf(eggCall, eggGot) && it.ctx == AgentLog.OUT },
         )
     }
 
     @Test
-    fun `the app's own rows are not called his judgement`() {
-        // **The rows that would be misread.** Each is written to one file on purpose, so a plain
-        // subtraction reports them as the agent's clearing — and the audit is only worth having if
-        // it is exact about whose decision each row was.
+    fun `the app's own rows are never called his judgement`() {
+        // **The rows a subtraction would have misread.** Each is written for the app's own reasons,
+        // so a plain "in the file but not in the context" reading would report them as the agent's
+        // clearing — and the audit is only worth having if it is exact about whose decision it was.
         log.told("make the list")
-        log.sessionOnly(AgentLog.TURN, "turn", "1")
+        log.bookkeeping(AgentLog.TURN, "turn", "1")
         log.call("wait", "{}")
         log.got("wait", "0 still waiting")
         log.note("idle", "waiting for the operator")
-        // The poll, again: session only, by design.
-        log.sessionOnly(AgentLog.CALL, "wait", "{}")
-        log.sessionOnly(AgentLog.GOT, "wait", "0 still waiting")
-        log.sessionOnly(AgentLog.NOTE, "idle", "waiting for the operator")
-        log.sessionOnly(AgentLog.NOTE, "retry", "reconnected after 3 tries")
+        // The poll, again: the app's own, by design.
+        log.bookkeeping(AgentLog.CALL, "wait", "{}")
+        log.bookkeeping(AgentLog.GOT, "wait", "0 still waiting")
+        log.bookkeeping(AgentLog.NOTE, "idle", "waiting for the operator")
+        log.bookkeeping(AgentLog.NOTE, "retry", "reconnected after 3 tries")
         log.trimContext(budget = 1)
 
-        val thrown = log.thrownAway().map { it.line }
-        assertTrue("nothing here is his: $thrown", thrown.isEmpty())
+        assertTrue(
+            "nothing here is his: ${log.rows().filter { it.ctx == AgentLog.OUT }.map { it.body }}",
+            log.thrownAway().isEmpty(),
+        )
+        assertEquals(
+            "and the app's rows say so",
+            setOf(AgentLog.IN, AgentLog.APP),
+            log.rows().map { it.ctx }.toSet(),
+        )
     }
 
     @Test
     fun `a reset is the person's act, so nothing before it is read as his clearing`() {
-        // A reset empties the context, which is *shape-identical* to the agent clearing everything.
-        // The reset's own row is in both files, so the boundary is on the record.
+        // A reset empties the context, which is shape-identical to the agent forgetting everything.
         repeat(3) { i ->
             log.told("task $i")
             log.call("read", """{"path":"GitHub/f$i.txt"}""")
@@ -608,27 +656,20 @@ class AgentLogTest {
         log.reset()
         log.told("the new task")
 
-        assertTrue(
-            "his clearing is empty: ${log.thrownAway().map { it.body }}",
-            log.thrownAway().isEmpty(),
-        )
+        assertTrue("his judgement is empty", log.thrownAway().isEmpty())
 
-        // But a clear he makes *after* the reset is still his. The call's row names the file; the
-        // result's row is the one after it — a filter on the body would find only the call, because
-        // the result says what came back, not what was asked.
-        log.call("read", """{"path":"GitHub/after.txt"}""")
-        log.got("read", "0\nnothing much")
-        val lines = log.contextRows().map { it.line }
-        val call = lines.indexOfFirst { it.contains("after.txt") }
-        clearUpTo(lines.filterIndexed { i, _ -> i != call && i != call + 1 })
-        assertEquals("one pair cleared after the reset", 2, log.thrownAway().size)
+        // But a forget he makes *after* the reset is still his.
+        val call = log.call("read", """{"path":"GitHub/after.txt"}""")
+        val got = log.got("read", "0\nnothing much")
+        log.forget(setOf(call, got))
+        assertEquals("one pair after the reset", listOf(call, got), log.thrownAway().map { it.id })
     }
 
     @Test
     fun `a seal the app wrote is not the agent's clearing either`() {
         // The one way a dangling call ends up outside the context: a reset took the context away
-        // while the call was still unanswered. The next launch seals it — into the session, because
-        // that is the file the call is in — and the seal is the app's repair, not a decision.
+        // while the call was still unanswered. The next launch seals it as the app's own row — the
+        // seal goes where its call is, which is `app`.
         log.told("make the list")
         log.call("read", """{"path":"GitHub/milk.txt"}""")
         log.reset()
@@ -638,21 +679,24 @@ class AgentLogTest {
             "a seal was written",
             log.rows().any { it.kind == AgentLog.GOT && it.body.contains("closed before") },
         )
-        val thrown = log.thrownAway().map { it.line }
-        assertTrue("and it is the app's: $thrown", thrown.isEmpty())
+        assertTrue("and it is the app's, not his", log.thrownAway().isEmpty())
     }
 
     @Test
-    fun `the session keeps a row the context does not want`() {
-        // The repeated poll is real evidence and is not sent: fifteen of them an hour would make
-        // the request differ from itself, and the poll is only cheap while it is a cache hit.
+    fun `a row the model is not sent is still on the record`() {
+        // The repeated poll is real evidence and is not sent: fifteen of them an hour would make the
+        // request differ from itself, and the poll is only cheap while it is a cache hit.
         log.told("a task")
         val contextBefore = contextLines().size
 
-        log.sessionOnly(AgentLog.CALL, "wait", "{}")
+        val poll = log.bookkeeping(AgentLog.CALL, "wait", "{}")
 
-        assertEquals("the session keeps it", contextBefore + 1, sessionLines().size)
+        assertEquals("the record keeps it", contextBefore + 1, sessionLines().size)
         assertEquals("the context does not", contextBefore, contextLines().size)
-        assertFalse("and it is not a row the box has to explain", log.rows().isEmpty())
+        assertEquals(
+            "and it is marked as the app's, not as the agent's",
+            AgentLog.APP,
+            log.rows().first { it.id == poll }.ctx,
+        )
     }
 }

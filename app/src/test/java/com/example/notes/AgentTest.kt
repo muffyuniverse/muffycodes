@@ -144,7 +144,7 @@ class AgentTest {
         val got = gotRows().first()
         assertTrue("refused: ${got.body}", got.body.startsWith(AgentLog.FAILURE))
         assertTrue("and it says why", got.body.contains("up out of the project"))
-        assertFalse("the other project's text is not in the record", log.context.readText()
+        assertFalse("the other project's text is not in the record", log.session.readText()
             .contains("somebody else's work"))
     }
 
@@ -396,173 +396,128 @@ class AgentTest {
         )
     }
 
-    // ---- the agent's own clear-up -------------------------------------------
+    // ---- the agent's own compaction: forget, by id ---------------------------
 
     private fun tools() = AgentTools(ws, "shopping", git, log)
 
-    /** Writes [text] into the context as the agent's `edit` would, and answers the result. */
-    private fun clearUp(text: String): String = tools().run(
-        Call(
-            "c9",
-            "edit",
-            JSONObject().put("path", "agent/context.log").put("text", text).toString(),
-        )
+    /** Calls `forget` the way the loop does, and answers the result. */
+    private fun forget(vararg ids: Int): String = tools().run(
+        Call("c9", "forget", JSONObject().put("ids", org.json.JSONArray(ids.toList())).toString()),
     )
 
-    /** The context as the agent reads it: the rows' own lines, and nothing else. */
-    private fun contextText(): String = log.contextRows().joinToString("\n") { it.line } + "\n"
-
     @Test
-    fun `clearing up the context drops rows from it and leaves them in the evidence`() {
+    fun `forgetting a pair takes it out of the context and leaves the text on the record`() {
         log.told("task one")
-        log.call("tree", "{}")
-        log.got("tree", "0\nnothing")
+        val call = log.call("read", """{"path":"GitHub/milk.txt"}""")
+        val got = log.got("read", "0\ntwo litres")
         log.told("task two")
-        log.call("read", "{}")
-        log.got("read", "0\nhello")
 
-        // Forget the first conversation, keep the task being worked on.
-        val rows = log.contextRows()
-        val kept = rows.dropWhile { it.kind != AgentLog.TOLD || it.body != "task two" }
+        val answer = forget(call, got)
 
-        val answer = clearUp(kept.joinToString("\n") { it.line } + "\n")
-
-        assertTrue("it worked: $answer", answer.startsWith(AgentLog.SUCCESS))
-        assertEquals("the context kept the task and what followed", 3, log.contextRows().size)
-        assertEquals("the evidence kept everything", 6, log.rows().size)
+        assertTrue("accepted: $answer", answer.startsWith(AgentLog.SUCCESS))
+        assertTrue("the body says what went: $answer", answer.contains("forgot 2 rows"))
+        assertTrue(
+            "and it says the task is still there, by id: $answer",
+            answer.contains("The task is still"),
+        )
+        assertTrue(
+            "the rows are out of the context",
+            log.contextRows().none { it.id == call || it.id == got },
+        )
         assertEquals(
-            "and the difference is exactly what he forgot",
-            3,
-            log.rows().size - log.contextRows().size,
+            "and still on the record, marked out",
+            setOf(AgentLog.OUT),
+            log.rows().filter { it.id == call || it.id == got }.map { it.ctx }.toSet(),
+        )
+        assertEquals(
+            "exactly the two of them are his judgement",
+            listOf(call, got),
+            log.thrownAway().map { it.id },
         )
     }
 
     @Test
-    fun `the newest task cannot be cleared away`() {
+    fun `a forget cannot carry text, so the record cannot be rewritten`() {
+        // **The class of bug that is now impossible.** Compaction used to be an `edit`, and the app
+        // had to prove the new text was the old text minus some lines — with rules about whole rows,
+        // final newlines and escaping. A forget names ids, so there is no text to change.
+        log.told("a task")
+        val answer = tools().run(
+            Call("c9", "edit", JSONObject().put("path", "agent/session.log")
+                .put("text", "").toString()),
+        )
+
+        assertTrue("the edit is refused: $answer", answer.startsWith(AgentLog.FAILURE))
+        assertTrue("and it says whose file it is: $answer", answer.contains("record"))
+    }
+
+    @Test
+    fun `the newest task cannot be forgotten`() {
         log.told("task one")
         log.call("tree", "{}")
         log.got("tree", "0\nnothing")
-        log.told("task two")
+        val task = log.told("task two")
 
-        // Everything except the newest task: a clear-up that forgets what it is doing.
-        val answer = clearUp(log.contextRows().filter { it.body != "task two" }
-            .joinToString("\n") { it.line } + "\n")
+        val answer = forget(task)
 
         assertTrue("refused: $answer", answer.startsWith(AgentLog.FAILURE))
         assertTrue("and it says which rule: $answer", answer.contains("newest task"))
+        assertTrue("the row is still in", log.contextRows().any { it.id == task })
     }
 
     @Test
-    fun `a call and its result are cleared away together`() {
+    fun `a call and its result are forgotten together`() {
         log.told("a task")
-        log.call("tree", "{}")
-        log.got("tree", "0\nnothing")
+        val call = log.call("tree", "{}")
+        val got = log.got("tree", "0\nnothing")
 
-        // The call kept and the result dropped: a request whose assistant calls a tool nobody
-        // answered, which every endpoint refuses.
-        val answer = clearUp(log.contextRows().filter { it.kind != AgentLog.GOT }
-            .joinToString("\n") { it.line } + "\n")
+        val onlyCall = forget(call)
+        assertTrue("the call alone is refused: $onlyCall", onlyCall.startsWith(AgentLog.FAILURE))
+        assertTrue("and it says so: $onlyCall", onlyCall.contains("pair"))
 
-        assertTrue("refused: $answer", answer.startsWith(AgentLog.FAILURE))
-        assertTrue("and it names the pair: $answer", answer.contains("pair"))
+        val onlyGot = forget(got)
+        assertTrue("and the result alone: $onlyGot", onlyGot.startsWith(AgentLog.FAILURE))
+
+        val both = forget(call, got)
+        assertTrue("together they may go: $both", both.startsWith(AgentLog.SUCCESS))
+        assertTrue("and they did", log.contextRows().none { it.id == call || it.id == got })
     }
 
     @Test
-    fun `the call whose result is about to be written is not a dangling one`() {
-        // **The clear-up edit was impossible before this.** The row for a call is appended before
-        // the tool runs — that is what makes a crash mid-call visible in the record — so the file
-        // the edit tool reads always ends with its own unanswered `CALL edit`. The pairing rule
-        // counted that as a broken pair, so every real clear-up was refused with "the call to edit
-        // has no result left", and the only tests that passed were the ones that wrote the file by
-        // hand.
+    fun `a row that is already out is told so rather than quietly skipped`() {
+        log.told("a task")
+        val call = log.call("read", """{"path":"GitHub/milk.txt"}""")
+        val got = log.got("read", "0\ntwo litres")
+        forget(call, got)
+
+        val again = forget(call, got)
+
+        assertTrue("refused: $again", again.startsWith(AgentLog.FAILURE))
+        assertTrue("and the reason names the row: $again", again.contains("not in the context"))
+    }
+
+    @Test
+    fun `the call being made now cannot be forgotten`() {
+        // The row for a call is written before the tool runs, so `forget`'s own CALL is in the
+        // context and unanswered while it decides. Forgetting it would leave a call with no result,
+        // which every endpoint refuses — and the answer says which row it is rather than pretending
+        // the list was fine.
         log.told("a task")
         log.note("agent", "a note that can go")
-        log.told("another task")
-        // The call in flight, exactly as the loop writes it.
-        val inFlight = log.call("edit", """{"path":"agent/context.log"}""")
+        val inFlight = log.call("forget", """{"ids":[]}""")
 
-        val after = log.rows()
-            .filterNot { it.body == "a note that can go" }
-            .map { it.line }
-
-        assertEquals(
-            "the edit is a legal clear-up",
-            null,
-            AgentLog.clearUpProblem(log.rows().map { it.line }, after, inFlight),
-        )
-        assertTrue(
-            "and without being told which call is in flight, that last row is still a broken pair",
-            AgentLog.clearUpProblem(log.rows().map { it.line }, after) != null,
-        )
-    }
-
-    @Test
-    fun `but a call earlier in the file still has to keep its result`() {
-        // The rule the exemption was narrowed to protect: only the call being answered now may be
-        // unanswered. A whole pair may go; a result on its own may not, and neither may a call.
-        log.told("a task")
-        log.call("tree", """{"path":"GitHub"}""")
-        log.got("tree", "0\nGitHub/milk.txt")
-        log.told("another task")
-        log.call("read", """{"path":"GitHub/milk.txt"}""")
-        log.got("read", "0\ntwo litres")
-        val before = log.rows().map { it.line }
-
-        val pairGone = log.rows()
-            .filterNot { it.kind == AgentLog.CALL && it.name == "tree" }
-            .filterNot { it.kind == AgentLog.GOT && it.name == "tree" }
-            .map { it.line }
-        assertEquals(
-            "a whole pair may be removed",
-            null,
-            AgentLog.clearUpProblem(before, pairGone),
-        )
-
-        val callLeft = log.rows()
-            .filterNot { it.kind == AgentLog.GOT && it.name == "read" }
-            .map { it.line }
-        assertTrue(
-            "but a call whose result was removed is still refused",
-            AgentLog.clearUpProblem(before, callLeft) != null,
-        )
-
-        val resultLeft = log.rows()
-            .filterNot { it.kind == AgentLog.CALL && it.name == "read" }
-            .map { it.line }
-        assertTrue(
-            "and so is a result whose call was removed",
-            AgentLog.clearUpProblem(before, resultLeft) != null,
-        )
-    }
-
-    @Test
-    fun `clear-up removes rows and does not rewrite or add them`() {
-        log.told("a task")
-        val changed = contextText().replace("a task", "a different task")
-
-        val answer = clearUp(changed)
+        val answer = forget(inFlight)
 
         assertTrue("refused: $answer", answer.startsWith(AgentLog.FAILURE))
-        assertTrue("and it says why: $answer", answer.contains("does not change them"))
+        assertTrue("and it says why: $answer", answer.contains("making now"))
     }
 
     @Test
-    fun `the evidence is not the agent's to write`() {
+    fun `a forget that names nothing is a refusal, not an empty success`() {
         log.told("a task")
-        val before = File(log.session.path).readText()
-
-        val answer = tools().run(
-            Call(
-                "c8",
-                "edit",
-                JSONObject().put("path", "agent/session.log").put("text", "")
-                    .toString(),
-            )
-        )
-
+        val answer = tools().run(Call("c9", "forget", """{"ids":[]}"""))
         assertTrue("refused: $answer", answer.startsWith(AgentLog.FAILURE))
-        assertTrue("and it says what the file is: $answer", answer.contains("evidence"))
-        assertEquals("which is untouched", before, File(log.session.path).readText())
+        assertTrue("and it asks for a row: $answer", answer.contains("at least one row"))
     }
 
     // ---- the record as the model reads it -----------------------------------
@@ -673,7 +628,7 @@ class AgentTest {
         assertFalse(
             "and nowhere in the project's files",
             File(ws.projectsDir, "shopping").walkTopDown().filter { it.isFile }
-                .any { it.name != "session.log" && it.name != "context.log" &&
+                .any { it.name != "session.log" &&
                     it.readText().contains("only file") },
         )
     }
@@ -976,10 +931,10 @@ class AgentTest {
         assertTrue("the biggest row is named first: $index", index.contains("#4 GOT read"))
         assertTrue("with its line to read", index.contains("line 4:"))
         assertTrue("and its size", index.contains("tokens"))
-        assertTrue("and it says how to look", sent.contains("read agent/context.log from <line>"))
+        assertTrue("and it says how to look", sent.contains("read agent/session.log from <line>"))
 
-        // The line number is the row's own position, so a read of it returns that row.
-        val context = File(ws.projectsDir, "shopping/${AgentLog.DIR}/${AgentLog.CONTEXT}")
+        // The line number is the row's position in the record, so a read of it returns that row.
+        val context = File(ws.projectsDir, "shopping/${AgentLog.DIR}/${AgentLog.SESSION}")
         val fourth = context.readLines()[3]
         assertTrue("the row at that line is the big one: $fourth", fourth.contains("GOT"))
         assertTrue("and the id in the index is on it", fourth.contains(" 4 "))
@@ -995,21 +950,12 @@ class AgentTest {
         log.told("task one")
         log.note("agent", "working on the first thing")
         log.told("task two")
-        val before = agent(ScriptedDoor()).size()
-
-        val context = File(ws.projectsDir, "shopping/${AgentLog.DIR}/${AgentLog.CONTEXT}")
-        val lines = context.readLines()
-        // The first conversation, whole: its task and its note.
-        val cut = lines.take(2).joinToString("\n") + "\n"
-        context.writeText(lines.drop(2).joinToString("\n", postfix = "\n"))
-        val after = agent(ScriptedDoor()).size()
-        context.writeText(lines.joinToString("\n", postfix = "\n"))
-
-        val trigger = after + (before - after) / 2
-        val limits = ContextBudget.Limits.of(triggerAsked = trigger, hardAsked = 0, ceiling = 1_000_000)
+        // A trigger of one token, so the turn is told about the target whatever the measurement —
+        // the assertion is about the rule, not about the app's arithmetic.
+        val limits = ContextBudget.Limits.of(triggerAsked = 1, hardAsked = 0, ceiling = 1_000_000)
+        val first = log.rows().first { it.kind == AgentLog.TOLD }
         val door = ScriptedDoor(
-            Reply("", listOf(call("edit", JSONObject().put("path", "agent/${AgentLog.CONTEXT}")
-                .put("find", cut).put("replace", "").toString()))),
+            Reply("", listOf(call("forget", """{"ids":[${first.id}]}"""))),
             Reply("", listOf(Call("c2", "conclude", """{"text":"cleared up"}"""))),
             Reply("", listOf(Call("c3", "conclude", """{"text":"done"}"""))),
         )
@@ -1021,11 +967,19 @@ class AgentTest {
             door.asked.first().system.contains("Compaction target"),
         )
         val got = log.rows().first { it.kind == AgentLog.GOT }
-        assertTrue("the agent's own edit was accepted: ${got.body}", got.body.startsWith(AgentLog.SUCCESS))
-        assertTrue("the row is gone", log.contextRows().none { it.body == "task one" })
+        assertTrue(
+            "the agent's own forget was accepted: ${got.body}",
+            got.body.startsWith(AgentLog.SUCCESS),
+        )
+        assertTrue("the row is out of the context", log.contextRows().none { it.id == first.id })
+        assertEquals(
+            "and it is still on the record, marked out",
+            AgentLog.OUT,
+            log.rows().first { it.id == first.id }.ctx,
+        )
         assertTrue(
             "and the app trimmed nothing itself",
-            log.contextRows().none { it.name == "trimmed" },
+            log.rows().none { it.name == "trimmed" },
         )
 
         // **A trigger above what the context now costs**, so the assertion is about the rule and
@@ -1133,15 +1087,14 @@ class AgentTest {
     }
 
     @Test
-    fun `the working context is read from its file, not remembered`() {
-        // A row put there by somebody else — the agent's own edit tool, or a person with a shell.
-        // If the loop kept a transcript in memory this would be the request that never noticed.
-        val dir = File(ws.projectsDir, "shopping")
+    fun `the working context is read from the record, not remembered`() {
+        // A row taken out of the context by somebody else — a reset, a trim, or a person with a
+        // shell. If the loop kept a transcript in memory this is the request that never notices.
         log.told("first")
         val door = ScriptedDoor(Reply("", listOf(Call("c1", "conclude", """{"text":"done"}"""))))
         val agent = agent(door)
 
-        File(dir, "${AgentLog.DIR}/${AgentLog.CONTEXT}").writeText("")
+        log.reset()
         agent.burst("second")
 
         val sent = door.asked.first().messages.map { it.text }
@@ -1185,7 +1138,7 @@ class AgentTest {
         // What a reset can leave behind: the evidence answers a call the context no longer has.
         // A tool message the model cannot place is a request every endpoint refuses.
         log.told("do it")
-        log.sessionOnly(AgentLog.GOT, "tree", "0\nleft over from before the reset")
+        log.bookkeeping(AgentLog.GOT, "tree", "0\nleft over from before the reset")
         log.note("agent", "Carrying on.")
 
         val messages = agent(ScriptedDoor()).messages(log.contextRows())

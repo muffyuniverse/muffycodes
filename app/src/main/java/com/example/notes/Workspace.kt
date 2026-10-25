@@ -166,6 +166,31 @@ class Workspace(val accountDir: File) {
     fun isHidden(name: String): Boolean = name.startsWith(".")
 
     /**
+     * True for the agent's record, `<project>/agent/session.log` — and for the second file an older
+     * build wrote, `context.log`, until [AgentLog] folds it in.
+     *
+     * **The record is readable and not writable, and that is a rule about the person too.** The
+     * whole value of the file is that it is what happened and what the model is sent; a person who
+     * can save over it has an agent whose memory is not evidence of anything. So the app refuses
+     * the save, as it already refuses to rename `projects/` and `GitHub/` — the app depends on this
+     * file the way it depends on those folders.
+     *
+     * Three writers remain, and each is the app's own act, inside [AgentLog]: the turn appends
+     * rows, the autotrim shortens the file, a reset marks every row `app`, and the agent's
+     * compaction flips named rows to `out`. None of them goes through this class. What a person
+     * can still do is [delete] the project, which takes the record with it — the one lever they had
+     * before, kept.
+     *
+     * **This is the app refusing, not the system.** Any file manager on the phone can edit these
+     * files; nothing here pretends otherwise.
+     */
+    fun isRecord(file: File): Boolean {
+        val dir = file.parentFile?.canonicalFile ?: return false
+        if (dir.name != AgentLog.DIR || dir.parentFile?.parentFile?.name != PROJECTS) return false
+        return file.name == AgentLog.SESSION || file.name == AgentLog.CONTEXT
+    }
+
+    /**
      * True for a folder the app depends on: `projects` at the account root and
      * `repo` inside a project. Those cannot be renamed, moved or deleted.
      */
@@ -256,8 +281,17 @@ class Workspace(val accountDir: File) {
      *
      * Returns false when the write was refused, so a caller that must say something can.
      */
+    /**
+     * Writes a file, unless it is locked or it is the agent's record.
+     *
+     * **There is no second door, and that is the simplification.** The record used to need one,
+     * because the agent's compaction was a text edit of the context file. Compaction is now a list
+     * of ids applied by [AgentLog] itself, so nothing outside that class writes the record at all —
+     * not the person, not the agent's tools, and not a caller who thought of a reason.
+     */
     fun write(file: File, text: String): Boolean {
         if (isLocked(file)) return false
+        if (isRecord(file)) return false
         put(file, text)
         return true
     }
@@ -514,6 +548,9 @@ class Workspace(val accountDir: File) {
         isHidden(file.name) -> "That belongs to the app"
         isAppOwned(file) -> "That belongs to the app"
         isStructural(file) -> "That folder belongs to the app"
+        // The record is not the person's to move, rename or delete — the same rule that stops them
+        // saving over it. Deleting the project still takes it, which is the lever they keep.
+        isRecord(file) -> "That is the agent's record"
         else -> null
     }
 

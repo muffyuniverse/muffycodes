@@ -32,6 +32,69 @@ class WorkspaceTest {
         root.deleteRecursively()
     }
 
+    // ---- the agent's record is kept, not editable -----------------------------
+
+    /** One row of the record, in the columns the app writes. */
+    private val FIRST_ROW = "14:02:11.410    1 TOLD    in  operator  task\n"
+
+    private fun record(): File {
+        val dir = File(workspace.projectsDir, "shopping")
+        val agent = File(dir, AgentLog.DIR)
+        agent.mkdirs()
+        File(dir, "project_prompt.txt").writeText("how to work")
+        return File(agent, AgentLog.SESSION).apply { writeText(FIRST_ROW) }
+    }
+
+    @Test
+    fun `the record is one file, and a file of that name elsewhere is not it`() {
+        val session = record()
+        val prompt = File(session.parentFile.parentFile, "project_prompt.txt")
+        // A record written by an older build: its second file is still the app's, so a person
+        // cannot edit it while the update folds it in.
+        val legacy = File(session.parentFile, AgentLog.CONTEXT).apply { writeText(FIRST_ROW) }
+
+        assertTrue("the record", workspace.isRecord(session))
+        assertTrue("and an old build's context, until it is folded in", workspace.isRecord(legacy))
+        assertFalse("the project's own instructions are the person's", workspace.isRecord(prompt))
+        assertFalse(
+            "a file with the record's name somewhere else is not the record",
+            run {
+                val elsewhere = File(workspace.projectsDir, "elsewhere")
+                elsewhere.mkdirs()
+                workspace.isRecord(File(elsewhere, AgentLog.SESSION).apply { writeText("x") })
+            },
+        )
+    }
+
+    @Test
+    fun `nobody writes the record through this class, and there is no second door`() {
+        // **The refusal is the app's, not the system's** — a file manager can edit these files, and
+        // nothing here pretends otherwise. What it stops is the app itself offering a Save that
+        // destroys the agent's memory. There used to be a `writeRecord` door for the agent's
+        // clear-up; compaction is now a list of ids applied by AgentLog itself, so the door was
+        // removed rather than left open for the next caller who thought of a reason.
+        val context = record()
+        val text = FIRST_ROW.replace("task", "something else")
+
+        assertFalse("the person's funnel refuses", workspace.write(context, text))
+        assertEquals("and the file is untouched", FIRST_ROW, context.readText())
+        assertFalse("and there is no other door", workspace.write(context, text))
+    }
+
+    @Test
+    fun `the record cannot be renamed or deleted one file at a time`() {
+        // Deleting the project still takes it, which is the lever a person keeps; a single log file
+        // is not theirs to remove, or the record ends at the first convenient moment.
+        val context = record()
+        val deleted = workspace.delete(context)
+        assertTrue("delete is refused: $deleted", deleted.isFailure)
+        assertTrue("and it is still there", context.isFile)
+
+        val renamed = workspace.rename(context, "notes.log")
+        assertTrue("rename is refused: $renamed", renamed.isFailure)
+        assertTrue("and it still has its name", context.isFile)
+    }
+
     @Test
     fun hiddenThingsAreNeverListed() {
         val dir = workspace.accountDir

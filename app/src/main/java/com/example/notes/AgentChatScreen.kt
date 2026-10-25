@@ -211,6 +211,7 @@ fun AgentChatScreen(
                                         body = line.body,
                                         failed = line.failed,
                                         size = line.bytes,
+                                        forgotten = line.forgotten,
                                     )
                                     if (expanded && line.detail.isNotBlank()) {
                                         Text(
@@ -301,7 +302,13 @@ private fun Navigator(
  * the app's token count is an estimate — and it is the file's own measurement, so `wc -c` agrees.
  */
 @Composable
-private fun Line(caption: String, body: String, failed: Boolean = false, size: Long = 0) {
+private fun Line(
+    caption: String,
+    body: String,
+    failed: Boolean = false,
+    size: Long = 0,
+    forgotten: Boolean = false,
+) {
     Row(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.width(80.dp)) {
             Text(
@@ -324,10 +331,13 @@ private fun Line(caption: String, body: String, failed: Boolean = false, size: L
         Text(
             body,
             style = MaterialTheme.typography.bodyMedium,
-            color = if (failed) {
-                MaterialTheme.colorScheme.error
-            } else {
-                MaterialTheme.colorScheme.onSurface
+            // **Struck through, not hidden.** A row the agent forgot is still read here: that is
+            // what makes the forgetting auditable rather than something the app asks you to trust.
+            textDecoration = if (forgotten) TextDecoration.LineThrough else null,
+            color = when {
+                failed -> MaterialTheme.colorScheme.error
+                forgotten -> MaterialTheme.colorScheme.onSurfaceVariant
+                else -> MaterialTheme.colorScheme.onSurface
             },
             modifier = Modifier.weight(1f),
         )

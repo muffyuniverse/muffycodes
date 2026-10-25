@@ -92,6 +92,14 @@ fun EditorScreen(
 ) {
     val kind = viewModel.workspace?.kindOf(file) ?: EntryKind.TEXT
     val locked = viewModel.isLocked(file)
+    // **The agent's record is the app's, and this screen says so rather than showing a Save that
+    // will not work.** The two log files are what the conversation was and what the model sees; a
+    // person saving over either one leaves an agent whose memory is not evidence of anything, so
+    // the app refuses — the same rule that stops `projects/` and `GitHub/` being renamed. What the
+    // person keeps is Reset (the working context) and deleting the project, which takes the record
+    // with it.
+    val record = viewModel.isRecord(file)
+    val readOnly = locked || record
     // Keyed on the *session*, not on the file: renaming the file you are writing
     // changes its path, and resetting the text on that would throw away everything
     // typed so far. Opening another file starts a new session and resets both.
@@ -100,9 +108,9 @@ fun EditorScreen(
     // What is on disk, so that Save can say whether there is anything to save.
     var saved by remember(session) { mutableStateOf(text) }
     var name by remember(session) { mutableStateOf(file.name) }
-    // A locked file is read-only, so it opens in View. Every other text file opens
+    // A locked or kept file is read-only, so it opens in View. Every other text file opens
     // ready to be written, which is what opening a note is for.
-    var writing by remember(session) { mutableStateOf(!locked) }
+    var writing by remember(session) { mutableStateOf(!readOnly) }
     var focused by remember { mutableStateOf(false) }
     val focus = LocalFocusManager.current
 
@@ -184,9 +192,9 @@ fun EditorScreen(
                         // a rename, and a locked file is one this app does not touch.
                         BasicTextField(
                             value = name,
-                            onValueChange = { if (!locked) name = it },
+                            onValueChange = { if (!readOnly) name = it },
                             singleLine = true,
-                            readOnly = locked,
+                            readOnly = readOnly,
                             textStyle = MaterialTheme.typography.titleMedium.copy(
                                 color = MaterialTheme.colorScheme.onSurface,
                             ),
@@ -235,7 +243,7 @@ fun EditorScreen(
                 if (kind == EntryKind.TEXT) {
                     FilterChip(
                         selected = writing,
-                        enabled = !locked,
+                        enabled = !readOnly,
                         onClick = {
                             if (writing) {
                                 // Leaving the editor's way of writing does not throw
@@ -260,7 +268,7 @@ fun EditorScreen(
                         commitName()
                         focus.clearFocus()
                     },
-                    enabled = kind == EntryKind.TEXT && !locked && text != saved,
+                    enabled = kind == EntryKind.TEXT && !readOnly && text != saved,
                 ) { Text("Save") }
             }
             HorizontalDivider()
@@ -273,7 +281,7 @@ fun EditorScreen(
                 EntryKind.IMAGE -> Picture(file = file, padding = content)
                 EntryKind.UNKNOWN -> CannotEdit(file = file, padding = content)
 
-                else -> if (writing && !locked) {
+                else -> if (writing && !readOnly) {
                     TextField(
                         value = text,
                         onValueChange = { text = it },
@@ -286,6 +294,20 @@ fun EditorScreen(
                         placeholder = { Text("Start writing…") },
                     )
                 } else {
+                    // **Why this cannot be written, before the text it applies to.** A Save that is
+                    // greyed with no sentence beside it reads as a broken screen; the sentence says
+                    // whose file it is and which acts remain.
+                    if (record) {
+                        Text(
+                            "The agent's record. The app keeps this file — it is what the " +
+                                "conversation was, and what the model is sent — so it is read here " +
+                                "and never saved over. Reset clears the working context; deleting " +
+                                "the project takes both files.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                    }
                     // Reading. A `.md` file is shown as the thing it describes,
                     // because the markdown is not what its author wanted read; every
                     // other text is shown exactly as it is.
