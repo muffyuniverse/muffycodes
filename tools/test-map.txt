@@ -63,3 +63,4 @@ CopyFeatureTest  app/src/main/java/com/example/notes/AppViewModel.kt
 ModelSectionTest    app/src/main/java/com/example/notes/ModelSection.kt app/src/main/java/com/example/notes/AppViewModel.kt
 AgentLogTest  app/src/main/java/com/example/notes/AgentLog.kt app/src/main/java/com/example/notes/LogFormat.kt
 TraceTest  app/src/main/java/com/example/notes/LogFormat.kt
+AgentTest  app/src/main/java/com/example/notes/Agent.kt app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Door.kt app/src/main/java/com/example/notes/AgentPrompt.kt

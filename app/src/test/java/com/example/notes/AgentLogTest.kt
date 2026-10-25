@@ -159,7 +159,7 @@ class AgentLogTest {
             "that says what happened: ${rows.last().body}",
             rows.last().body.contains("closed before this answered"),
         )
-        assertTrue("and nothing is dangling now", reopened.dangling(rows).isEmpty())
+        assertTrue("and nothing is dangling now", sealed.dangling(rows).isEmpty())
     }
 
     @Test

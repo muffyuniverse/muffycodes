@@ -298,6 +298,11 @@ class ProjectGit(
         return repo.use {
             try {
                 GitService.restore(it, path, revisionId)
+                // **A version put back is work GitHub has not seen**, exactly like a save. The
+                // commit itself is made by the caller; what has to happen here is the count, or
+                // the restore leaves a project reading `changed 0` with Sync greyed out while
+                // the file on disk is different from the one on GitHub.
+                workspace.markUnsent(project)
                 Result.success(Unit)
             } catch (e: Throwable) {
                 Result.failure(e)
