@@ -338,10 +338,17 @@ class AgentLog private constructor(
             // Nothing to drop, or nothing that may be: a context that is one conversation is a
             // conversation, and cutting it would leave a task with no task.
             if (oldest.size >= rows.size) return 0
-            val keep = rows.drop(oldest.size)
+            // **One marker, not one per trim.** A marker is a row the model never sees — `messages`
+            // renders only the agent's and the reason's notes — but it is a row the size counts, so
+            // a context trimmed often would fill with invisible rows it is then trimmed for. The
+            // old markers go and the new one carries the running total, which is the same fact in
+            // one row instead of n.
+            val previous = rows.filter { it.kind == NOTE && it.name == "trimmed" }
+            val keep = rows.drop(oldest.size).filterNot { it.kind == NOTE && it.name == "trimmed" }
+            val gone = droppedTotal(previous) + oldest.size
             val marker = LogFormat.row(
                 System.currentTimeMillis(), nextId(), NOTE, "trimmed",
-                "${oldest.size} rows: the context was over its limit",
+                "$gone rows: the context was over its limit",
             )
             val text = (keep.map { it.line } + marker).joinToString("\n") + "\n"
             try {
@@ -361,6 +368,16 @@ class AgentLog private constructor(
             return oldest.size
         }
     }
+
+    /**
+     * How many rows the trim markers in [rows] between them say were dropped.
+     *
+     * The marker's body starts with the number, so this reads it back rather than keeping a counter
+     * somewhere — the file is the record, and a count that lived only in memory would start again
+     * from zero when the app opened.
+     */
+    private fun droppedTotal(rows: List<Row>): Int =
+        rows.sumOf { it.body.trim().substringBefore(' ').toIntOrNull() ?: 0 }
 
     // ---- the person's own operation ------------------------------------------
 

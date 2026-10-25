@@ -40,6 +40,21 @@ class AgentLogTest {
 
     private fun contextLines(): List<String> = linesIn(File(project, "agent/context.log"))
 
+    /** A bare agent, for the one test that asks how rows become a conversation. */
+    private fun agentFor(record: AgentLog): Agent {
+        val dir = record.session.parentFile.parentFile
+        val workspace = Workspace(dir.parentFile.parentFile)
+        return Agent(
+            accountDir = workspace.accountDir,
+            project = dir.name,
+            ws = workspace,
+            git = ProjectGit(workspace, { null }, { GitAuthor("M", "m@example.com") }),
+            log = record,
+            door = ScriptedDoor(),
+            model = ActiveModel("m", "p", "high"),
+        )
+    }
+
     private fun linesIn(file: File): List<String> =
         if (file.isFile) file.readLines().filter { it.isNotBlank() } else emptyList()
 
@@ -312,6 +327,44 @@ class AgentLogTest {
     }
 
     @Test
+    fun `each project numbers its own rows from one`() {
+        // **One monotonic line per project, and the number's meaning is local to it.** A project is
+        // the unit of everything else here — its own folder, its own repository, its own agent and
+        // its own two files — so a shared counter across projects would need a store that outlives
+        // any of them and would make "row 7" mean nothing until you said which project.
+        val other = File(System.getProperty("java.io.tmpdir"), "agent-log-other-${System.nanoTime()}")
+        other.mkdirs()
+        val theirs = AgentLog.open(other)
+
+        log.told("here")
+        theirs.told("there")
+
+        assertEquals("each starts at one", 1, log.rows().first().id)
+        assertEquals("and so does the other", 1, theirs.rows().first().id)
+        assertEquals("with its own counting after that", 2, log.told("here again"))
+        assertEquals("from its own one", 2, theirs.told("there again"))
+    }
+
+    @Test
+    fun `a call's wire id is the row's, so two projects never share a tool call id`() {
+        // The rebuilt conversation names a call `call_<row id>`. Ids are per project, so a call id
+        // is unique within a request — which is the only scope an endpoint checks — and two
+        // projects' conversations can never be mixed into one request to begin with: a request is
+        // built from one project's record.
+        val other = File(System.getProperty("java.io.tmpdir"), "agent-log-other-${System.nanoTime()}")
+        other.mkdirs()
+        val theirs = AgentLog.open(other)
+        log.call("tree", """{"path":"GitHub"}""")
+        theirs.call("tree", """{"path":"GitHub"}""")
+
+        assertEquals("the same number in two projects", log.rows().last().id, theirs.rows().last().id)
+        val mine = agentFor(log).messages(log.contextRows()).flatMap { it.calls }.map { it.id }
+        val all = agentFor(theirs).messages(theirs.contextRows()).flatMap { it.calls }.map { it.id }
+        assertEquals("and each conversation uses it for its own call", mine, all)
+        assertEquals("which is legitimate: one request never spans two projects", 1, mine.size)
+    }
+
+    @Test
     fun `ids keep counting after a trim drops the early rows`() {
         // **The question the whole audit rests on.** The session is trimmed from the *oldest* end,
         // so the highest id survives in the file and the counter resumes above it. If the trim had
@@ -355,8 +408,18 @@ class AgentLogTest {
         // rule being relied on here, not a detail of it.
         repeat(3) { log.trimContext(budget = 1) }
         assertTrue(
-            "the context is a task and a marker: ${log.contextRows().map { it.body }}",
-            log.contextRows().size <= 2,
+            "only the newest task is left: ${log.contextRows().map { it.body }}",
+            log.contextRows().none { it.body == "task 1" || it.body == "task 2" || it.body == "task 3" },
+        )
+        assertEquals(
+            "with one marker, not one per trim",
+            1,
+            log.contextRows().count { it.name == "trimmed" },
+        )
+        assertEquals(
+            "saying how many rows went altogether",
+            "6 rows: the context was over its limit",
+            log.contextRows().first { it.name == "trimmed" }.body,
         )
 
         AgentLog.open(project).told("after the context was trimmed")
