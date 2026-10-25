@@ -199,7 +199,8 @@ class AgentRunnerTest {
         assertEquals("by the person", AgentSession.StopReason.BY_OPERATOR, session.reason)
         assertTrue(
             "and the trace records the press",
-            Trace.report().lines.any { it.contains("TAP") && it.contains("stop agent") },
+            // The trace spells a press with the name slugged: `stop agent` is `stop-agent` there.
+            Trace.report().lines.any { it.contains("TAP") && it.contains("stop-agent") },
         )
     }
 
