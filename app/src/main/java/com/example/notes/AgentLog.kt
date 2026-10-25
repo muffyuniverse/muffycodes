@@ -356,7 +356,12 @@ class AgentLog private constructor(
             if (size <= limit) return 0
             val rows = rows()
             if (rows.isEmpty()) return 0
-            val (kept, dropped) = keepNewest(rows) { row -> row.line.length.toLong() + 1 }
+            // **The budget is named, not implied.** A trailing lambda binds to the last
+            // parameter, so `keepNewest(rows) { … }` left the budget at its default and the trim
+            // dropped nothing at all — the same "a limit that does nothing" as before, one
+            // parameter to the left.
+            val (kept, dropped) =
+                keepNewest(rows, budget = limit / 2) { row -> row.line.length.toLong() + 1 }
             if (dropped == 0) return 0
             val marker = LogFormat.row(
                 System.currentTimeMillis(), next++, NOTE, "trimmed",
