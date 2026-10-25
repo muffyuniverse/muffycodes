@@ -498,31 +498,40 @@ class AgentTest {
 
     @Test
     fun `but a call earlier in the file still has to keep its result`() {
-        // The rule that was being protected is still the rule: only the newest call may be
-        // unanswered, because only the newest one is the one being answered.
+        // The rule the exemption was narrowed to protect: only the call being answered now may be
+        // unanswered. A whole pair may go; a result on its own may not, and neither may a call.
         log.told("a task")
         log.call("tree", """{"path":"GitHub"}""")
         log.got("tree", "0\nGitHub/milk.txt")
         log.told("another task")
         log.call("read", """{"path":"GitHub/milk.txt"}""")
+        log.got("read", "0\ntwo litres")
+        val before = log.rows().map { it.line }
 
-        val after = log.rows()
+        val pairGone = log.rows()
             .filterNot { it.kind == AgentLog.CALL && it.name == "tree" }
             .filterNot { it.kind == AgentLog.GOT && it.name == "tree" }
             .map { it.line }
-
         assertEquals(
-            "that pair was whole, so removing it is allowed",
+            "a whole pair may be removed",
             null,
-            AgentLog.clearUpProblem(log.rows().map { it.line }, after),
+            AgentLog.clearUpProblem(before, pairGone),
         )
 
-        val broken = log.rows()
-            .filterNot { it.kind == AgentLog.GOT && it.name == "tree" }
+        val callLeft = log.rows()
+            .filterNot { it.kind == AgentLog.GOT && it.name == "read" }
             .map { it.line }
         assertTrue(
-            "but a result removed on its own is still refused",
-            AgentLog.clearUpProblem(log.rows().map { it.line }, broken) != null,
+            "but a call whose result was removed is still refused",
+            AgentLog.clearUpProblem(before, callLeft) != null,
+        )
+
+        val resultLeft = log.rows()
+            .filterNot { it.kind == AgentLog.CALL && it.name == "read" }
+            .map { it.line }
+        assertTrue(
+            "and so is a result whose call was removed",
+            AgentLog.clearUpProblem(before, resultLeft) != null,
         )
     }
 
@@ -825,7 +834,10 @@ class AgentTest {
         // The person is done speaking: the next turn is a normal one.
         speak = false
         agent.burst("never mind, do the other thing")
-        val second = door.asked.last().messages
+        // **The next burst's first request**, not its last: this door keeps answering with a
+        // command, so the second burst loops until the idle guard and its last request is the
+        // twentieth.
+        val second = door.asked[1].messages
         val tool = second.indexOfFirst { it.role == "tool" }
         val words = second.indexOfLast { it.role == "user" }
         assertEquals("the words are last", second.lastIndex, words)
