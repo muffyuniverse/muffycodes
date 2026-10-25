@@ -197,7 +197,7 @@ private fun AppRoot(viewModel: AppViewModel) {
     val askBattery = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult(),
     ) {
-        Trace.answered(openingBattery, Battery.said(this))
+        Trace.answered(openingBattery, Battery.said(context))
         batteryAsked++
     }
     val pickFolder = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -336,7 +336,7 @@ private fun AppRoot(viewModel: AppViewModel) {
         showSettings -> SettingsScreen(
             viewModel = viewModel,
             batteryAsked = batteryAsked,
-            onAskBattery = { openingBattery = tap("battery"); askBattery.launch(Battery.intent(this)) },
+            onAskBattery = { openingBattery = tap("battery"); askBattery.launch(Battery.intent(context)) },
             onBack = { showSettings = false },
             onSignIn = { tap("add account"); pending = Pending.SignIn },
             onSetKey = { tap("set model key"); pending = Pending.ModelKey },
