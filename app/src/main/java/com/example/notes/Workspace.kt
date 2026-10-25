@@ -531,10 +531,7 @@ class Workspace(val accountDir: File) {
     fun locked(): Set<String> = lockedCache ?: readFlags(LOCKED_FILE).also { lockedCache = it }
 
     /** Replaces the locked paths. */
-    fun setLocked(paths: Set<String>) {
-        writeFlags(LOCKED_FILE, paths)
-        lockedCache = paths
-    }
+    fun setLocked(paths: Set<String>) = writeFlags(LOCKED_FILE, paths)
 
     /**
      * True when [file] is locked against editing.
@@ -645,6 +642,11 @@ class Workspace(val accountDir: File) {
         val array = JSONArray()
         paths.sorted().forEach { array.put(it) }
         put(File(stateDir, name), array.toString())
+        // **The cache is updated where the file is written, or a rewrite lifts a lock.**
+        // `rewriteFlagPaths` moved every locked path to the new folder name after the
+        // `repo` → `GitHub` migration, and the cache kept the old paths: the lock read as
+        // gone, on a file nobody had unlocked. One writer, one cache.
+        if (name == LOCKED_FILE) lockedCache = paths
     }
 
     // ---- creating a project on disk ---------------------------------------
