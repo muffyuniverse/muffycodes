@@ -208,6 +208,19 @@ class AgentTools(
             before.replace(find, args.optString("replace"))
         }
         if (text == before) return success("${rel(file)} already said that, so nothing changed")
+        // **The context is the one file with rules about how it may change.** The model reads it,
+        // it is rebuilt into a request, and it is diffed against the evidence — so an edit to it
+        // is a clear-up or it is a refusal, never a quiet rewrite.
+        if (file.canonicalFile == log.context.canonicalFile) {
+            // A file that does not end in a newline has a last row this app reads as one still
+            // being written — it would vanish from the context without a word. Clear-up writes
+            // whole rows, so it ends with one.
+            if (text.isNotEmpty() && !text.endsWith("\n")) {
+                return refusal("End the context with a newline, or its last row is a half row")
+            }
+            val problem = AgentLog.clearUpProblem(rowsOf(before), rowsOf(text))
+            if (problem != null) return refusal(problem)
+        }
         // **Through the funnel.** A locked file, a hidden name or a structural folder is refused
         // by `write` itself, and the refusal is the whole answer.
         if (!ws.write(file, text)) return refusal("${rel(file)} cannot be changed")
@@ -419,10 +432,28 @@ class AgentTools(
      * is the case that matters — the agent may read the instructions it is given and may not
      * rewrite them, which is the difference between following a brief and editing it.
      */
-    private fun mayWrite(file: File): String? = if (insideWorktreeOrAgent(file)) {
-        null
-    } else {
-        "You may only write inside GitHub/ or agent/, and ${rel(file)} is neither"
+    private fun mayWrite(file: File): String? = when {
+        // The evidence is the app's, and the person's to read. An agent that could rewrite its
+        // own record could make a failure disappear, which is the one thing a record is for.
+        isSessionLog(file) ->
+            "${rel(file)} is the evidence of what happened. You may read it and not change it"
+        insideWorktreeOrAgent(file) -> null
+        else -> "You may only write inside GitHub/ or agent/, and ${rel(file)} is neither"
+    }
+
+    /** True for this project's `agent/session.log`, and not for a file that shares the name. */
+    private fun isSessionLog(file: File): Boolean =
+        file.name == AgentLog.SESSION && file.parentFile?.canonicalFile ==
+            File(projectDir, AgentLog.DIR).canonicalFile
+
+    /** [text] as rows, for the clear-up check; a line that does not parse becomes a broken row. */
+    private fun rowsOf(text: String): List<AgentLog.Row> {
+        if (text.isEmpty()) return emptyList()
+        val lines = text.split("\n")
+        // Only the empty string after a final newline is dropped; a file written without one has
+        // a real row there, and a check that skipped it would pass a clear-up that lost it.
+        val complete = if (text.endsWith("\n")) lines.dropLast(1) else lines
+        return complete.map { AgentLog.parseRow(it) }
     }
 
     /** True for the two places the agent may write: `GitHub/` and `agent/`. */

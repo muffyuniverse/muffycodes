@@ -108,6 +108,59 @@ class AgentLog private constructor(
         }
 
         /**
+         * Why [after] is not a clear-up of [before], or null when it is.
+         *
+         * The agent shrinks its own context, and this is the whole of what it may do to it:
+         * **remove whole rows.** Not rewrite them, not add them, not leave half a question. That
+         * is what keeps the one auditable property of the two files true — `session.log` minus
+         * `context.log` is exactly what the agent decided did not matter — and it is what keeps
+         * the rebuilt conversation a request an endpoint will accept.
+         *
+         * Four rules, each with its own sentence, because a refusal that does not say which rule
+         * it broke teaches the model nothing:
+         * 1. every line still reads as a row;
+         * 2. what is left is a subset of what was there, in the same order;
+         * 3. the newest task is still on the record — it is what the turn is for;
+         * 4. a call and its result stay together, because a call with no answer is a request
+         *    every endpoint refuses and an answer with no call is a message it cannot place.
+         */
+        fun clearUpProblem(before: List<Row>, after: List<Row>): String? {
+            if (after.isEmpty()) return "Your context cannot be emptied: it holds the task"
+            if (after.any { it.broken }) {
+                return "A line no longer reads as a row; keep the five columns exactly as they are"
+            }
+            var index = 0
+            for (row in after) {
+                while (index < before.size && before[index].line != row.line) index++
+                if (index == before.size) {
+                    return "Clear-up removes rows. It does not change them or add new ones."
+                }
+                index++
+            }
+            val task = before.lastOrNull { it.kind == TOLD }
+            if (task != null && after.none { it.id == task.id && it.kind == TOLD }) {
+                return "The newest task stays: it is what you are working on"
+            }
+            val waiting = ArrayDeque<Row>()
+            for (row in after) {
+                when (row.kind) {
+                    CALL -> if (row.name !in SPEAKING) waiting.addLast(row)
+                    GOT -> {
+                        if (waiting.isEmpty()) {
+                            return "A result with no call before it: remove the pair together"
+                        }
+                        waiting.removeFirst()
+                    }
+                }
+            }
+            val left = waiting.firstOrNull()
+            if (left != null) {
+                return "The call to ${left.name} has no result left: remove the pair together"
+            }
+            return null
+        }
+
+        /**
          * Splits rows into bursts, oldest first.
          *
          * A burst is one conversation: an operator's message starts it, and a terminating row
@@ -250,7 +303,14 @@ class AgentLog private constructor(
         return text.split("\n").dropLast(1).map { parseRow(it) }
     }
 
-    private fun parseRow(line: String): Row = try {
+    /**
+     * One line as a row.
+     *
+     * Not private: the clear-up check reads a file the agent is about to write and has to ask the
+     * same question this file asks of its own lines — otherwise a row the app cannot read and a
+     * row the checker cannot read are two different rows.
+     */
+    fun parseRow(line: String): Row = try {
         val match = ROW.matchEntire(line)
         if (match == null) {
             Row("", 0, "?", "?", line, broken = true)

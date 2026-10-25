@@ -391,6 +391,104 @@ class AgentTest {
         )
     }
 
+    // ---- the agent's own clear-up -------------------------------------------
+
+    private fun tools() = AgentTools(ws, "shopping", git, log)
+
+    /** Writes [text] into the context as the agent's `edit` would, and answers the result. */
+    private fun clearUp(text: String): String = tools().run(
+        Call(
+            "c9",
+            "edit",
+            JSONObject().put("path", "agent/context.log").put("text", text).toString(),
+        )
+    )
+
+    /** The context as the agent reads it: the rows' own lines, and nothing else. */
+    private fun contextText(): String = log.contextRows().joinToString("\n") { it.line } + "\n"
+
+    @Test
+    fun `clearing up the context drops rows from it and leaves them in the evidence`() {
+        log.told("task one")
+        log.call("tree", "{}")
+        log.got("tree", "0\nnothing")
+        log.told("task two")
+        log.call("read", "{}")
+        log.got("read", "0\nhello")
+
+        // Forget the first conversation, keep the task being worked on.
+        val rows = log.contextRows()
+        val kept = rows.dropWhile { it.kind != AgentLog.TOLD || it.body != "task two" }
+
+        val answer = clearUp(kept.joinToString("\n") { it.line } + "\n")
+
+        assertTrue("it worked: $answer", answer.startsWith(AgentLog.SUCCESS))
+        assertEquals("the context kept the task and what followed", 3, log.contextRows().size)
+        assertEquals("the evidence kept everything", 6, log.rows().size)
+        assertEquals(
+            "and the difference is exactly what he forgot",
+            3,
+            log.rows().size - log.contextRows().size,
+        )
+    }
+
+    @Test
+    fun `the newest task cannot be cleared away`() {
+        log.told("task one")
+        log.call("tree", "{}")
+        log.got("tree", "0\nnothing")
+        log.told("task two")
+
+        // Everything except the newest task: a clear-up that forgets what it is doing.
+        val answer = clearUp(log.contextRows().filter { it.body != "task two" }
+            .joinToString("\n") { it.line } + "\n")
+
+        assertTrue("refused: $answer", answer.startsWith(AgentLog.FAILURE))
+        assertTrue("and it says which rule: $answer", answer.contains("newest task"))
+    }
+
+    @Test
+    fun `a call and its result are cleared away together`() {
+        log.told("a task")
+        log.call("tree", "{}")
+        log.got("tree", "0\nnothing")
+
+        // The call kept and the result dropped: a request whose assistant calls a tool nobody
+        // answered, which every endpoint refuses.
+        val answer = clearUp(log.contextRows().filter { it.kind != AgentLog.GOT }
+            .joinToString("\n") { it.line } + "\n")
+
+        assertTrue("refused: $answer", answer.startsWith(AgentLog.FAILURE))
+        assertTrue("and it names the pair: $answer", answer.contains("pair"))
+    }
+
+    @Test
+    fun `clear-up removes rows and does not rewrite or add them`() {
+        log.told("a task")
+        val changed = contextText().replace("a task", "a different task")
+
+        val answer = clearUp(changed)
+
+        assertTrue("refused: $answer", answer.startsWith(AgentLog.FAILURE))
+        assertTrue("and it says why: $answer", answer.contains("does not change them"))
+    }
+
+    @Test
+    fun `the evidence is not the agent's to write`() {
+        val answer = tools().run(
+            Call(
+                "c8",
+                "edit",
+                JSONObject().put("path", "agent/session.log").put("text", "")
+                    .toString(),
+            )
+        )
+
+        assertTrue("refused: $answer", answer.startsWith(AgentLog.FAILURE))
+        assertTrue("and it says what the file is: $answer", answer.contains("evidence"))
+        assertTrue("which is still there", File(log.session.path).length() > 0)
+    }
+
     // ---- the record as the model reads it -----------------------------------
 
     @Test
