@@ -123,6 +123,15 @@ android {
             // Robolectric needs the manifest and the resources of the app, so
             // that a screen can be built the same way the phone builds it.
             isIncludeAndroidResources = true
+
+            // **A screen test needs room, and the default is half a gigabyte.**
+            // Robolectric loads a phone's framework, and a Compose screen holds the
+            // whole runtime; one class that draws several screens reached the
+            // default limit and failed with `OutOfMemoryError` inside Compose's own
+            // bookkeeping — reported as four unrelated tests dying, which reads like
+            // a logic bug and is not one. The runner has sixteen gigabytes, and a
+            // test JVM that has to page is slower than one that does not.
+            all { it.maxHeapSize = "1g" }
         }
     }
     packaging {
