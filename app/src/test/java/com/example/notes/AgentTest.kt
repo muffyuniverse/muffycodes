@@ -473,7 +473,7 @@ class AgentTest {
 
         val onlyCall = forget(call)
         assertTrue("the call alone is refused: $onlyCall", onlyCall.startsWith(AgentLog.FAILURE))
-        assertTrue("and it says so: $onlyCall", onlyCall.contains("pair"))
+        assertTrue("and it names the pair, not the ids: $onlyCall", onlyCall.contains("go together"))
 
         val onlyGot = forget(got)
         assertTrue("and the result alone: $onlyGot", onlyGot.startsWith(AgentLog.FAILURE))
