@@ -181,8 +181,14 @@ class Agent(
      */
     private fun turn(operator: String?, progress: () -> Unit): End {
         val layers = AgentPrompt.read(accountDir, tools.projectDir)
+        // **Measured once, at the start of the turn.** The warning names a size, and a size that
+        // changed with every request would change the *system* message — the first thing in the
+        // array — and a provider's cache matches the longest common prefix, so the warning would
+        // invalidate the whole conversation on every request of the turn it appeared in. That is
+        // the 50× cost §2.4 is about, paid by the feature meant to prevent it.
+        val opening = measure(layers.message, log.contextRows(), AgentTools.specs())
         try {
-            return loop(layers, operator, progress)
+            return loop(layers, opening, operator, progress)
         } finally {
             // The evidence is the app's to keep to size, and a turn boundary is the only place a
             // trim cannot cut a conversation in half.
@@ -191,7 +197,12 @@ class Agent(
         }
     }
 
-    private fun loop(layers: AgentPrompt.Layers, operator: String?, progress: () -> Unit): End {
+    private fun loop(
+        layers: AgentPrompt.Layers,
+        opening: Long,
+        operator: String?,
+        progress: () -> Unit,
+    ): End {
         // The seal belongs here, at the start of a session, and not to a read: no endpoint
         // accepts a conversation whose last assistant message calls a tool nobody answered. A
         // poll continues a session, so it does not seal anything.
@@ -208,7 +219,7 @@ class Agent(
             requests++
             // The boundary the box counts turns by, and the app's own row, not the model's.
             log.sessionOnly(AgentLog.TURN, "turn", "$requests")
-            val request = build(layers)
+            val request = build(layers, opening)
             // **The shape of the request, once per turn the person started.** Which model, which
             // pinned endpoint, how big the conversation had grown: the three things needed to
             // explain a refusal or a bill, and nowhere else on the trace. Not traced for a poll —
@@ -401,10 +412,14 @@ class Agent(
      * edit real: he deletes a row from `context.log`, and the next request genuinely does not
      * contain it. A cached transcript would keep sending what he threw away.
      */
-    private fun build(layers: AgentPrompt.Layers): Request {
+    private fun build(layers: AgentPrompt.Layers, opening: Long): Request {
         val tools = AgentTools.specs()
         var rows = log.contextRows()
-        var size = measure(layers.message, rows, tools)
+        val size = measure(layers.message, rows, tools)
+        // **Said by the trim, not inferred from two measurements.** Rows grow between requests as
+        // tool results arrive, so "the size changed" is true of every turn and would have silenced
+        // the warning whenever the app's own limit happened to be configured at all.
+        var trimmed = false
 
         // **The hard limit is applied once per request, not until it stops hurting.** A loop that
         // re-measured and re-trimmed would trim, write its marker, re-measure, trim the marker,
@@ -416,23 +431,25 @@ class Agent(
         if (hard > 0 && size > hard) {
             val dropped = log.trimContext(maxOf(hard / 2, 1L))
             if (dropped > 0) {
+                trimmed = true
                 Trace.note("agent-trim", "$project · $dropped rows, over ${ContextBudget.short(hard)}")
                 // Read back from the file: what is sent has to be what was left, or the trim is a
                 // note about the app's intentions rather than a change to the request.
                 rows = log.contextRows()
-                size = measure(layers.message, rows, tools)
             }
         }
 
-        // The warning names the size, so it is measured after the trim — a request told it is over
-        // 100k when 60k of that has just been removed is a message from before the app acted.
+        // **The same line for every request of this turn**, from the size the turn began at — and
+        // none at all when the app has just trimmed: the context is no longer the one the warning
+        // was about, and telling the model it is over a limit it was just brought under would be a
+        // message from before the app acted.
         val trigger = limits.triggerAt
-        val line = if (trigger > 0 && size > trigger) {
+        val line = if (trigger > 0 && opening > trigger && !trimmed) {
             Trace.note(
                 "agent-clear-up",
-                "$project · ${ContextBudget.short(size)} over ${ContextBudget.short(trigger)}",
+                "$project · ${ContextBudget.short(opening)} over ${ContextBudget.short(trigger)}",
             )
-            clearUpLine(size, trigger)
+            clearUpLine(opening, trigger, ceiling = limits.trigger.ceiling)
         } else {
             null
         }
@@ -468,11 +485,19 @@ class Agent(
      * app's, not the agent's, so the row that says it is a trace note and not a record row: the
      * model reads this, the evidence does not pretend the agent wrote it.
      */
-    private fun clearUpLine(size: Long, trigger: Long): String =
-        "Your context is about ${ContextBudget.short(size)} tokens and your limit is " +
-            "${ContextBudget.short(trigger)}. Clear up your context: edit agent/context.log and " +
-            "remove the rows that do not relate to your current task. Keep the newest task, and " +
-            "remove a call together with its result."
+    private fun clearUpLine(size: Long, trigger: Long, ceiling: Long): String = buildString {
+        append("Your context was about ${ContextBudget.short(size)} tokens when this turn began. ")
+        append("From ${ContextBudget.short(trigger)} tokens I start asking you to clear up, and ")
+        append("this endpoint takes ${ContextBudget.short(ceiling)} tokens of input. ")
+        append("Clear up your context: edit agent/context.log and remove the rows that do not ")
+        append("relate to your current task. Keep the newest task, and remove a call together ")
+        append("with its result. ")
+        // **No target, and no verification.** There is no size to reach and nothing checks what
+        // was removed: the design asked for a clear-up of what does not matter, and a number to
+        // hit would make a model delete rows that do — which is the compaction the annotations
+        // rejected by name. The next turn is what notices anything.
+        append("There is no size to reach: remove what this task does not need, and keep the rest.")
+    }
 
     /**
      * The request as the files stand right now.
@@ -480,7 +505,22 @@ class Agent(
      * The same composition [loop] makes, spelled once, for anything that asks what the agent
      * would be sent — a check on a phone, and the tests that prove nothing is remembered.
      */
-    fun request(): Request = build(AgentPrompt.read(accountDir, tools.projectDir))
+    /**
+     * What the request would cost right now, estimated — the number the limits are compared with.
+     *
+     * Public because it is a question a person can have ("how full is it?") and because a test that
+     * had to re-derive it would be measuring its own arithmetic rather than the app's.
+     */
+    fun size(): Long = measure(
+        AgentPrompt.read(accountDir, tools.projectDir).message,
+        log.contextRows(),
+        AgentTools.specs(),
+    )
+
+    fun request(): Request {
+        val layers = AgentPrompt.read(accountDir, tools.projectDir)
+        return build(layers, measure(layers.message, log.contextRows(), AgentTools.specs()))
+    }
 
     /**
      * The record, as the model reads it.
