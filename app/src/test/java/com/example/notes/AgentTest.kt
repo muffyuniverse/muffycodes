@@ -717,7 +717,7 @@ class AgentTest {
         // size is an estimate and a test that spelled it would be testing arithmetic rather than
         // the sentence. What matters is that each is present and says which it is.
         assertTrue("the size it was over", sent.contains("tokens when this turn began"))
-        assertTrue("where the asking starts", sent.contains("I start asking you to clear up"))
+        assertTrue("the limit the target comes from", sent.contains("The limit is"))
         assertTrue("and the wall behind it", sent.contains("takes 100k tokens of input"))
         assertTrue("the instructions are still the prefix", sent.startsWith(prompt.trim()))
         assertTrue(
@@ -727,22 +727,77 @@ class AgentTest {
     }
 
     @Test
-    fun `the clear-up line asks for no size, and nothing checks one`() {
-        // **The difference between a clear-up and a compaction.** A number to reach would have a
-        // model deleting rows that matter to hit it — which is the thing the annotations rejected
-        // by name ("not 'compact' — clear out the records that do not relate"). So the sentence
-        // says so out loud, and the app verifies the *rules* (whole rows, pairs, newest task),
-        // never a size.
-        val limits = ContextBudget.Limits.of(triggerAsked = 1, hardAsked = 0, ceiling = 100_000)
-        val door = ScriptedDoor(Reply("", listOf(call("conclude", """{"text":"done"}"""))))
-
-        Agent(account, "shopping", ws, git, log, door, model(), limits = limits).burst("go")
-
-        val sent = door.asked.first().system.lowercase()
-        assertTrue("it says there is nothing to reach", sent.contains("there is no size to reach"))
-        for (bad in listOf("reduce to", "must be below", "get under", "target", "achieve")) {
-            assertFalse("and never asks for a $bad: $sent", sent.contains(bad))
+    fun `the operator's words cut a turn short, and its calls are answered anyway`() {
+        // v1's C8, as corrected by the operator: a message cannot be sent *beside* a request in
+        // flight, so the request is abandoned, **the calls it carried get their result anyway**
+        // (`1 interrupted`) because a call with no answer is an illegal conversation, and the
+        // person's words become the next turn — tool results first, then the message.
+        var speak = false
+        val door = object : Door {
+            val asked = mutableListOf<Request>()
+            override fun turn(request: Request): Result<Reply> {
+                asked.add(request)
+                // The person types while this request is out.
+                if (asked.size == 1) speak = true
+                return Result.success(
+                    Reply("", listOf(Call("c${asked.size}", "tree", """{"path":"GitHub"}"""))),
+                )
+            }
         }
+        val agent = Agent(
+            account, "shopping", ws, git, log, door, model(),
+            cut = { if (speak) "the operator spoke" else null },
+        )
+
+        val end = agent.burst("look around")
+
+        assertTrue("cut short, not stopped: $end", end is Agent.End.Interrupted)
+        val calls = callRows()
+        assertEquals("the command the reply carried is on the record", 1, calls.size)
+        assertEquals("and the next request is not sent", 1, door.asked.size)
+        val answered = log.rows().first { it.kind == AgentLog.GOT }
+        assertTrue(
+            "with an answer that says it was interrupted: ${answered.body}",
+            answered.body.startsWith(AgentLog.FAILURE) && answered.body.contains("interrupted"),
+        )
+        // The record stays a conversation: every call has a result after it.
+        assertTrue("every call is answered", log.dangling(log.rows()).isEmpty())
+
+        agent.burst("never mind, do the other thing")
+        val second = door.asked.last().messages
+        assertEquals(
+            "the interrupted answer comes before the new words",
+            "tool",
+            second[second.lastIndex - 1].role,
+        )
+        assertEquals("and the words are last", "user", second.last().role)
+    }
+
+    @Test
+    fun `stopping mid-turn is a stop, and answering 'what' does not undo it`() {
+        // The other half of the same mechanism: the operator pressed stop, so the turn ends as a
+        // stop — not as an interruption — and the session goes off.
+        val door = object : Door {
+            override fun turn(request: Request): Result<Reply> =
+                Result.success(Reply("", listOf(Call("c1", "tree", """{"path":"GitHub"}"""))))
+        }
+        val agent = Agent(
+            account, "shopping", ws, git, log, door, model(),
+            cut = { Agent.BY_OPERATOR },
+        )
+
+        val end = agent.burst("go")
+
+        assertTrue("a stop: $end", end is Agent.End.Stopped)
+        assertEquals(
+            "with the reason the session needs",
+            AgentSession.StopReason.BY_OPERATOR,
+            (end as Agent.End.Stopped).reason,
+        )
+        assertFalse("and not something to retry", end.retryable)
+        assertEquals("the session stays stopped", AgentSession.State.STOPPED, end.after(
+            AgentSession("shopping", state = AgentSession.State.IDLE), 1_000,
+        ).state)
     }
 
     @Test
@@ -770,32 +825,48 @@ class AgentTest {
     }
 
     @Test
-    fun `a clear-up is not verified against a number, and the next turn decides`() {
-        // The agent removes a whole row, the context is now under the trigger, and the **next**
-        // turn says nothing. Nothing looks at what was removed in between: no "still too big", no
-        // second demand inside the same turn, and no trim — the app's own limit is off, so the
-        // only thing that acted was the agent.
-        for (i in 1..3) {
-            log.told("task $i")
-            log.note("agent", "note $i, long enough to be worth something in this estimate")
-        }
+    fun `the clear-up names a target to reach, and may be cut past it`() {
+        // The operator's correction: "target compaction should be 'at least to' — so that agent on
+        // compaction must cut at least to 'target' size with more if information is not directly
+        // related to his current task". A floor, not a ceiling: exactly at the target is the least
+        // that counts, and cutting further is what is wanted when rows do not serve the task.
+        val limits = ContextBudget.Limits.of(triggerAsked = 1, hardAsked = 0, ceiling = 100_000)
+        val door = ScriptedDoor(Reply("", listOf(call("conclude", """{"text":"done"}"""))))
+
+        Agent(account, "shopping", ws, git, log, door, model(), limits = limits).burst("go")
+
+        val sent = door.asked.first().system
+        assertTrue("a target, named: $sent", sent.contains("Compaction target"))
+        assertTrue("as a floor", sent.contains("at least to that"))
+        assertTrue("with cutting further wanted", sent.contains("further if the rows do not serve"))
+        assertFalse("and no longer an empty 'there is no size'", sent.contains("no size to reach"))
+    }
+
+    @Test
+    fun `a clear-up is judged by its rules, and the next turn is what measures`() {
+        // **Nothing verifies a size.** The design's check is structural — whole rows, calls with
+        // their results, never the newest task — and the number is the *next turn's* business,
+        // because the estimate is the app's and a refusal on it would be a refusal on arithmetic.
+        // So: the agent removes one row with its own edit tool, the app trims nothing, and the
+        // turn after that says nothing at all.
+        log.told("task one")
+        log.note("agent", "working on the first thing")
+        log.told("task two")
         val before = agent(ScriptedDoor()).size()
 
-        // A whole line, and its pair with it — the rules the clear-up check enforces, so the edit
-        // is accepted rather than refused for changing a row instead of removing one.
         val context = File(ws.projectsDir, "shopping/${AgentLog.DIR}/${AgentLog.CONTEXT}")
         val lines = context.readLines()
-        val removed = lines.first() + "\n" + lines[1] + "\n"
+        // The first conversation, whole: its task and its note.
+        val cut = lines.take(2).joinToString("\n") + "\n"
         context.writeText(lines.drop(2).joinToString("\n", postfix = "\n"))
         val after = agent(ScriptedDoor()).size()
         context.writeText(lines.joinToString("\n", postfix = "\n"))
 
-        // A trigger between the two: over before the clear-up, under after it.
         val trigger = after + (before - after) / 2
         val limits = ContextBudget.Limits.of(triggerAsked = trigger, hardAsked = 0, ceiling = 1_000_000)
         val door = ScriptedDoor(
             Reply("", listOf(call("edit", JSONObject().put("path", "agent/${AgentLog.CONTEXT}")
-                .put("find", removed).put("replace", "").toString()))),
+                .put("find", cut).put("replace", "").toString()))),
             Reply("", listOf(Call("c2", "conclude", """{"text":"cleared up"}"""))),
             Reply("", listOf(Call("c3", "conclude", """{"text":"done"}"""))),
         )
@@ -804,21 +875,20 @@ class AgentTest {
         agent.burst("clear it up")
         assertTrue(
             "the first turn was told: ${door.asked.first().system.takeLast(200)}",
-            door.asked.first().system.contains("Clear up your context"),
+            door.asked.first().system.contains("Compaction target"),
         )
         val got = log.rows().first { it.kind == AgentLog.GOT }
-        assertTrue("the agent's edit was accepted: ${got.body}", got.body.startsWith(AgentLog.SUCCESS))
-        assertTrue("the row is gone", log.contextRows().none { it.body.startsWith("task 1") })
+        assertTrue("the agent's own edit was accepted: ${got.body}", got.body.startsWith(AgentLog.SUCCESS))
+        assertTrue("the row is gone", log.contextRows().none { it.body == "task one" })
         assertTrue(
-            "and the app trimmed nothing on its own",
+            "and the app trimmed nothing itself",
             log.contextRows().none { it.name == "trimmed" },
         )
 
         agent.burst("again")
-        assertTrue("the second turn happened", door.asked.size >= 2)
         assertFalse(
-            "now under the trigger it says nothing: ${door.asked.last().system.takeLast(200)}",
-            door.asked.last().system.contains("Clear up your context"),
+            "under the target, the next turn says nothing: ${door.asked.last().system.takeLast(200)}",
+            door.asked.last().system.contains("Compaction target"),
         )
     }
 

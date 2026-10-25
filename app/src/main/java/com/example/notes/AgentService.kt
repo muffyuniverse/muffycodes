@@ -79,13 +79,20 @@ class AgentService : Service() {
         }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // **Not sticky.** A service the system restarts after a force-stop would be the app
-        // overruling the person who stopped it. Android's own restart of a killed foreground
-        // service is a different thing and arrives here as a fresh start with the state read
-        // from disk, which is why the runner reads `.muffy/agents.json` rather than a field.
-        return START_NOT_STICKY
-    }
+    /**
+     * **Sticky, because the operator said the phone must not decide.**
+     *
+     * v1's own words were "set up max resiliency for the app and its processes", and v2's "must
+     * never stop until operator removes it from background — operator should decide, not android".
+     * A not-sticky service is exactly the opposite: the system reclaims it under memory pressure
+     * and the session dies quietly. Sticky means Android restarts it, and the state is rebuilt from
+     * `.muffy/agents.json` rather than from a field, so a restart resumes the session instead of
+     * losing it.
+     *
+     * A force-stop still wins — the person used the system's own switch — and that is the
+     * `stopped · the phone stopped the app` state, not a silent restart.
+     */
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
     override fun onBind(intent: Intent?): IBinder? = null
 

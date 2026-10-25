@@ -41,6 +41,16 @@ class Agent(
         hardAsked = 0,
         ceiling = ContextBudget.UNKNOWN_CEILING,
     ),
+    /**
+     * Why the turn should stop now, or null to go on.
+     *
+     * **A turn is cut short, never raced.** The app has one worker and one record, so a second
+     * request cannot be sent beside the first; what can happen "immediately" is that the request in
+     * flight is abandoned the moment it returns and the operator's words are the next turn
+     * (v1 C8). Checked between requests and again before a reply is acted on, so a command is never
+     * obeyed after the person said to stop.
+     */
+    private val cut: () -> String? = { null },
 ) {
 
     private val tools = AgentTools(ws, project, git, log, maxResult)
@@ -55,6 +65,15 @@ class Agent(
 
         /** Idle until the person speaks. */
         data object Waited : End()
+
+        /**
+         * The person spoke while the agent was working, so the turn was abandoned.
+         *
+         * **Not a stop.** The session goes on — the words that interrupted it are the next turn —
+         * and the only thing that changed is that this request's commands did not run. Treating it
+         * as a stop would switch the agent off every time somebody typed a second sentence.
+         */
+        data class Interrupted(val why: String) : End()
 
         /**
          * The turn could not go on, and the reason is in the record.
@@ -79,6 +98,7 @@ class Agent(
                 is Asked -> "asked"
                 is Concluded -> "concluded"
                 Waited -> "idle"
+                is Interrupted -> "interrupted"
                 is Stopped -> "stopped"
             }
 
@@ -93,16 +113,10 @@ class Agent(
                 is Asked -> question
                 is Concluded -> said
                 Waited -> Agent.WAITING
+                is Interrupted -> why
                 is Stopped -> why
             }
 
-        /**
-         * The sentence the box shows a person after a turn.
-         *
-         * Not the trace's: a trace is read later by somebody reconstructing what happened, and a
-         * sentence on the screen is read now by the person who asked. Two audiences, two strings,
-         * and each one defined once — here, on the type that knows the difference.
-         */
         /**
          * The session's own state, moved on by this ending.
          *
@@ -115,6 +129,10 @@ class Agent(
             is Asked -> session.asked(now)
             is Concluded -> session.concluded()
             Waited -> session.waited(now)
+            // **The person speaking does not change the session.** The agent is still on and the
+            // words that interrupted it are the next turn; a stop is the only thing here that
+            // switches anything off.
+            is Interrupted -> session
             is Stopped -> if (retryable) {
                 session.copy(lastWords = why).failed(now)
             } else {
@@ -122,10 +140,18 @@ class Agent(
             }
         }
 
+        /**
+         * The sentence the box shows a person after a turn.
+         *
+         * Not the trace's: a trace is read later by somebody reconstructing what happened, and a
+         * sentence on the screen is read now by the person who asked. Two audiences, two strings,
+         * and each one defined once — here, on the type that knows the difference.
+         */
         fun plainly(): String = when (this) {
             is Asked -> "The agent asked something"
             is Concluded -> "The agent finished"
             Waited -> "The agent is waiting"
+            is Interrupted -> "The agent was cut short by what you said"
             is Stopped -> why
         }
     }
@@ -146,7 +172,10 @@ class Agent(
          * A constant on purpose: a number that changed ("3 changes since you last looked") would
          * make every poll a different request, which is the one thing the poll cannot be.
          */
-        const val WAITING = "0\nstill waiting"
+        const val WAITING = "0\ncontinue waiting"
+
+        /** Why a turn was cut short by the person stopping the agent. */
+        const val BY_OPERATOR = "the agent was stopped"
     }
 
     /**
@@ -215,6 +244,8 @@ class Agent(
         var idle = 0
         var requests = 0
         while (requests < maxRequests) {
+            // Before the request: nothing is sent for a turn that has been called off.
+            cut()?.let { return finish(cutShort(it, emptyList())) }
             if (idle >= AgentTools.IDLE_CALLS) return finish(tooIdle())
             requests++
             // The boundary the box counts turns by, and the app's own row, not the model's.
@@ -228,6 +259,10 @@ class Agent(
                 Trace.note("agent-request", "$project · ${request.shape}")
             }
             val reply = door.turn(request).getOrElse { return finish(blip(it)) }
+            // After the reply, before it is obeyed: a request already on the wire cannot be
+            // un-sent, but its commands must not run once the person has spoken or stopped.
+            cut()?.let { return finish(cutShort(it, reply.calls)) }
+
             if (reply.text.isNotBlank()) log.note("agent", reply.text)
 
             val ending = reply.calls.firstOrNull { it.tool in AgentTools.TERMINATING }
@@ -321,6 +356,28 @@ class Agent(
             log.sessionOnly(AgentLog.NOTE, "idle", "waiting for the operator")
         }
         return End.Waited
+    }
+
+    /**
+     * The turn was called off, and its calls are answered anyway.
+     *
+     * **A call with no result is an illegal conversation**, so every call the abandoned reply
+     * carried is closed with `1 interrupted` — the operator's own correction: "the tool that was
+     * running gets its result anyway (1 interrupted)". The next request, which carries the
+     * person's words, is then a legal one with the interrupted results above it in order.
+     */
+    private fun cutShort(why: String, calls: List<Call>): End {
+        for (call in calls) {
+            log.call(call.tool, call.args)
+            log.got(call.tool, "$FAILURE interrupted: $why")
+        }
+        log.note("stopped", why)
+        // A person speaking is not a session stopping; a person stopping is.
+        return if (why == BY_OPERATOR) {
+            End.Stopped(why, reason = AgentSession.StopReason.BY_OPERATOR)
+        } else {
+            End.Interrupted(why)
+        }
     }
 
     /** The model answered with prose and no call: nothing to do, and nothing to ask again. */
@@ -421,15 +478,14 @@ class Agent(
         // the warning whenever the app's own limit happened to be configured at all.
         var trimmed = false
 
-        // **The hard limit is applied once per request, not until it stops hurting.** A loop that
-        // re-measured and re-trimmed would trim, write its marker, re-measure, trim the marker,
-        // and keep going — and with a limit below what the instructions alone cost it would never
-        // converge. One trim, one line saying how many rows went, and the next request decides
-        // again. The limit is the operator's; an impossible one is honoured once rather than
-        // fought.
+        // **One messagebox per request, and never in a loop.** The record's trim removes the oldest
+        // conversation and says how many rows went; the next request measures again. A loop that
+        // re-trimmed until the size fitted would empty the context against a limit below what the
+        // instructions alone cost, and could never converge — an impossible limit is honoured once
+        // per request rather than fought.
         val hard = limits.hardAt
         if (hard > 0 && size > hard) {
-            val dropped = log.trimContext(maxOf(hard / 2, 1L))
+            val dropped = log.trimContext(hard)
             if (dropped > 0) {
                 trimmed = true
                 Trace.note("agent-trim", "$project · $dropped rows, over ${ContextBudget.short(hard)}")
@@ -487,16 +543,20 @@ class Agent(
      */
     private fun clearUpLine(size: Long, trigger: Long, ceiling: Long): String = buildString {
         append("Your context was about ${ContextBudget.short(size)} tokens when this turn began. ")
-        append("From ${ContextBudget.short(trigger)} tokens I start asking you to clear up, and ")
-        append("this endpoint takes ${ContextBudget.short(ceiling)} tokens of input. ")
+        append("The limit is ${ContextBudget.short(trigger)} tokens, and this endpoint takes ")
+        append("${ContextBudget.short(ceiling)} tokens of input. ")
         append("Clear up your context: edit agent/context.log and remove the rows that do not ")
         append("relate to your current task. Keep the newest task, and remove a call together ")
         append("with its result. ")
-        // **No target, and no verification.** There is no size to reach and nothing checks what
-        // was removed: the design asked for a clear-up of what does not matter, and a number to
-        // hit would make a model delete rows that do — which is the compaction the annotations
-        // rejected by name. The next turn is what notices anything.
-        append("There is no size to reach: remove what this task does not need, and keep the rest.")
+        // **A target, and it is a floor rather than a ceiling.** "Cut it down" is advice; "cut it
+        // to at least this" is a number the next turn can measure, which is what makes the request
+        // repeat until it is true. Cutting **past** the target is wanted rather than tolerated:
+        // rows that do not serve the current task have no place in the context at any size, and a
+        // model told to stop exactly at a number keeps the near-irrelevant rows that come before
+        // it.
+        append("Compaction target: get it to ${ContextBudget.short(trigger)} tokens or less — cut ")
+        append("at least to that, and further if the rows do not serve the current task. ")
+        append("Anything not related to what you are doing now can go.")
     }
 
     /**

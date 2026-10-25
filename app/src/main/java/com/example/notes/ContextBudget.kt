@@ -120,6 +120,20 @@ object ContextBudget {
      */
     data class Limits(val trigger: Limit, val hard: Limit) {
 
+        init {
+            // **The hard limit is a reserved option, "much higher than trigger but below max
+            // context length for the selected model"** — the operator's words, and both halves are
+            // enforceable here. Above the endpoint's own window it is not a limit at all (the
+            // request is refused before anything is trimmed), so it is clamped by the same ceiling
+            // the trigger is. Below the trigger it is not reserved, it is the normal path, and the
+            // agent never gets the turn the design promises it — so it is not offered there: the
+            // numbers are ordered, and a hard limit under the trigger is raised to it.
+            require(hard.inForce == 0L || hard.inForce >= trigger.inForce) {
+                "the hard limit is a last resort below the trigger, so it cannot be smaller"
+            }
+        }
+
+
         /** The trigger in force, resolved from the ceiling when the operator left it at zero. */
         val triggerAt: Long get() = if (trigger.inForce == 0L) trigger.ceiling / 4 else trigger.inForce
 
@@ -127,9 +141,24 @@ object ContextBudget {
         val hardAt: Long get() = hard.inForce
 
         companion object {
-            /** Both from the operator's stored numbers and one pin's ceiling. */
-            fun of(triggerAsked: Long, hardAsked: Long, ceiling: Long): Limits =
-                Limits(Limit(triggerAsked, ceiling), Limit(hardAsked, ceiling))
+            /**
+             * Both from the operator's stored numbers and one pin's ceiling.
+             *
+             * **The clamp is `min(asked, ceiling)` for each, and the order is repaired rather than
+             * refused**: a hard limit typed below the trigger is raised to the trigger, because the
+             * alternative is an app whose last resort fires first and whose agent is never asked to
+             * clear up at all. What is repaired is the effective number; what was typed stays in
+             * [Limit.asked], which is what makes the screen able to say so.
+             */
+            fun of(triggerAsked: Long, hardAsked: Long, ceiling: Long): Limits {
+                val trigger = Limit(triggerAsked, ceiling)
+                val hard = if (hardAsked <= 0L) {
+                    Limit(0, ceiling)
+                } else {
+                    Limit(maxOf(hardAsked, trigger.inForce), ceiling)
+                }
+                return Limits(trigger, hard)
+            }
         }
     }
 

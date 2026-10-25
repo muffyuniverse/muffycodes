@@ -351,6 +351,45 @@ class AgentLogTest {
     }
 
     @Test
+    fun `the autotrim removes one messagebox at a time`() {
+        // The operator's own words: "yes, autotrim is one messagebox at a time". Dropping as much
+        // as would fit would take conversations the agent might still be working from, all at
+        // once, and give him no chance to clear it himself first.
+        for (i in 1..4) {
+            log.told("task $i")
+            log.note("agent", "work on $i")
+        }
+
+        val dropped = log.trimContext(budget = 1)
+
+        assertEquals("one conversation's rows", 2, dropped)
+        assertEquals(
+            "and the oldest is the one that went",
+            listOf("task 2", "task 3", "task 4"),
+            log.contextRows().filter { it.kind == AgentLog.TOLD }.map { it.body },
+        )
+        assertTrue("the marker says how many", log.contextRows().any { it.name == "trimmed" })
+        assertEquals(
+            "while the evidence keeps them all",
+            4,
+            log.rows().count { it.kind == AgentLog.TOLD },
+        )
+    }
+
+    @Test
+    fun `the autotrim will not empty a context of one conversation`() {
+        // A context that is one conversation is a context in use: cutting it leaves a task with no
+        // task, which is the one row the design says may never be removed.
+        log.told("the only task")
+        log.note("agent", "working")
+
+        val dropped = log.trimContext(budget = 1)
+
+        assertEquals("nothing is dropped", 0, dropped)
+        assertEquals("and the task is still there", 2, log.contextRows().size)
+    }
+
+    @Test
     fun `the session keeps a row the context does not want`() {
         // The repeated poll is real evidence and is not sent: fifteen of them an hour would make
         // the request differ from itself, and the poll is only cheap while it is a cache hit.

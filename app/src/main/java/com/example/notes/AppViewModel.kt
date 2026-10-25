@@ -1811,16 +1811,33 @@ class AppViewModel @JvmOverloads constructor(
      */
     fun sendChat(text: String) {
         val said = text.trim()
-        if (said.isEmpty() || chatWorking) return
+        if (said.isEmpty()) return
         val project = chatProject ?: return
-        val ws = workspace ?: return
-        val g = git ?: return
+        if (workspace == null || git == null) return
         Trace.tap("send", said.take(60))
+        // **A message during a turn cuts it short instead of being dropped.** v1's C8: the person
+        // is the highest priority in the conversation, so the request in flight is abandoned, the
+        // calls it carried are answered `1 interrupted`, and these words are the next turn — in
+        // that order, because a tool result may not follow a user message. The old behaviour,
+        // returning early, made the app look as though it had not heard them.
+        if (chatWorking) {
+            pendingChat = said
+            interrupt = INTERRUPTED
+            Trace.note("agent", "$project: the operator spoke during a turn")
+            return
+        }
         chatWorking = true
         // **Speaking to a stopped agent turns it on again**, because the person is the switch:
         // there is no other control they would have used, and a message that vanished into a
         // stopped session would look like the app ignoring them.
         sessionOf(project)?.let { if (!it.running) putSession(it.waited(System.currentTimeMillis())) }
+        speak(project, said)
+    }
+
+    /** One turn said out loud, and what to do when it ends. */
+    private fun speak(project: String, said: String) {
+        chatWorking = true
+        interrupt = null
         runTurn(project, said) { rows, end ->
             applyChat(rows, follow = true)
             chatWorking = false
@@ -1828,7 +1845,23 @@ class AppViewModel @JvmOverloads constructor(
             applyEnd(project, end, System.currentTimeMillis())
             refresh()
             refreshChanges()
+            // The words that interrupted this turn, sent as the turn they were waiting for. Not
+            // before the results were written: the record has to be legal in between.
+            val next = pendingChat
+            pendingChat = null
+            if (next != null && end is Agent.End.Interrupted) speak(project, next)
         }
+    }
+
+    /** What to tell the loop when the person speaks mid-turn, or stops the agent. */
+    private var interrupt: String? = null
+
+    /** The words that arrived during a turn, sent as the next one. */
+    private var pendingChat: String? = null
+
+    private companion object {
+        /** The reason a turn is cut short by the operator's own words. */
+        const val INTERRUPTED = "the operator spoke"
     }
 
     /**
@@ -1853,7 +1886,13 @@ class AppViewModel @JvmOverloads constructor(
         )
         onWorker {
             val log = AgentLog.open(File(ws.projectsDir, project))
-            val agent = Agent(ws.accountDir, project, ws, g, log, door, model, limits = limits)
+            val agent = Agent(
+                ws.accountDir, project, ws, g, log, door, model,
+                limits = limits,
+                // Read at every boundary rather than captured: the person may speak or stop while
+                // this turn is waiting for an answer, and the loop has to see that when it comes.
+                cut = { interrupt },
+            )
             val end = try {
                 if (said == null) {
                     agent.poll()
@@ -1955,6 +1994,14 @@ class AppViewModel @JvmOverloads constructor(
     fun stopAgent(project: String) {
         val session = sessionOf(project) ?: return
         Trace.tap("stop agent", project)
+        // **The request in flight is abandoned** (v1: "in-flight generations are cancelled in that
+        // case, right order"). The loop is told at its next boundary; the calls the reply carried
+        // are answered `1 interrupted` so the record stays a conversation, and the session is
+        // already stopped so the ending cannot switch it back on.
+        if (chatWorking || project in agentPollingInFlight()) {
+            interrupt = Agent.BY_OPERATOR
+            pendingChat = null
+        }
         putSession(session.stopped(AgentSession.StopReason.BY_OPERATOR))
         Trace.said("the agent is off for $project")
     }
@@ -2036,7 +2083,17 @@ class AppViewModel @JvmOverloads constructor(
      */
     private fun applyEnd(project: String, end: Agent.End, now: Long) {
         val current = sessionOf(project) ?: return
-        val next = end.after(current, now)
+        // **A stop is not undone by the turn that was running when it happened.** The same guard as
+        // the runner's, because a burst and a poll can both be in flight when the person presses
+        // stop — and one of them finishing is not the person changing their mind.
+        val next = if (current.state == AgentSession.State.STOPPED &&
+            current.reason == AgentSession.StopReason.BY_OPERATOR &&
+            end !is Agent.End.Interrupted
+        ) {
+            current
+        } else {
+            end.after(current, now)
+        }
         if (next != current) putSession(next)
     }
 

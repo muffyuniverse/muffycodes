@@ -287,19 +287,21 @@ class AgentLog private constructor(
         synchronized(guard) {
             val rows = contextRows()
             if (rows.isEmpty() || budget <= 0L) return 0
-            // **The budget is tokens and the rows are measured in tokens**, by the same estimate
-            // the caller used to decide it was over. Measuring bytes against a token budget here
-            // would keep four times what it was asked to — the limit would look enforced and be
-            // four times its number.
-            val (kept, dropped) = keepNewest(rows, budget = budget) { row ->
-                ContextBudget.tokens(row.line)
-            }
-            if (dropped == 0) return 0
+            // **One messagebox at a time** — the operator's own words for the autotrim: "yes,
+            // autotrim is one messagebox at a time". Dropping as many bursts as half the limit
+            // would allow removes a conversation the agent might still be working from, all at
+            // once, and gives him no chance to have cleared it himself; one burst per request
+            // keeps this the app's last resort rather than a compaction of its own.
+            val oldest = bursts(rows).firstOrNull() ?: return 0
+            // Nothing to drop, or nothing that may be: a context that is one conversation is a
+            // conversation, and cutting it would leave a task with no task.
+            if (oldest.size >= rows.size) return 0
+            val keep = rows.drop(oldest.size)
             val marker = LogFormat.row(
                 System.currentTimeMillis(), nextId(), NOTE, "trimmed",
-                "$dropped rows: the context was over its limit",
+                "${oldest.size} rows: the context was over its limit",
             )
-            val text = (kept.map { it.line } + marker).joinToString("\n") + "\n"
+            val text = (keep.map { it.line } + marker).joinToString("\n") + "\n"
             try {
                 val fresh = File(context.parentFile, context.name + ".new")
                 fresh.writeText(text)
@@ -314,7 +316,7 @@ class AgentLog private constructor(
             // row the agent never saw.
             append(session, marker)
             seen = size()
-            return dropped
+            return oldest.size
         }
     }
 

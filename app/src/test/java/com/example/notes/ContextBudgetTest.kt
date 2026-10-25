@@ -100,6 +100,35 @@ class ContextBudgetTest {
         )
     }
 
+    // ---- the hard limit is the reserved one --------------------------------
+
+    @Test
+    fun `a hard limit under the trigger is raised to it`() {
+        // v1: "hard limit is reserved option and much higher than trigger". Below the trigger it is
+        // not the last resort, it is the normal path — the app would trim before the agent was ever
+        // asked, which is the contradiction the section is about.
+        val limits = ContextBudget.Limits.of(triggerAsked = 50_000, hardAsked = 10_000, ceiling = 917_504)
+
+        assertEquals("the agent is asked first", 50_000L, limits.triggerAt)
+        assertEquals("and the app's trim waits for it", 50_000L, limits.hardAt)
+        assertEquals("with what was typed still on record", 10_000L, limits.hard.asked)
+    }
+
+    @Test
+    fun `a hard limit above the endpoint's window is no limit at all`() {
+        // "below max context length for selected model": above it the request is refused before
+        // anything is trimmed, so the number is clamped by the same ceiling the trigger uses.
+        val limits = ContextBudget.Limits.of(
+            triggerAsked = 50_000,
+            hardAsked = 900_000,
+            ceiling = ContextBudget.ceiling("cloudflare"),
+        )
+
+        assertEquals("held to what the pin takes", 104_858L, limits.hardAt)
+        assertTrue("and the row can say it was clamped", limits.hard.clamped)
+        assertEquals("while the typed number survives", 900_000L, limits.hard.asked)
+    }
+
     // ---- what zero means, and it means two different things ------------------
 
     @Test

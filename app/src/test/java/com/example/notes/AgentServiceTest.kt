@@ -59,9 +59,12 @@ class AgentServiceTest {
         // With no account there is nothing to poll, which is the point: the service must not need
         // a signed-in person to exist, or to stop.
         assertNull("no binder: nothing binds to this", service.onBind(Intent()))
+        // **Sticky, not not-sticky.** The operator's own words: the phone must never decide that
+        // the agent is finished. A reclaimed process is restarted by the system, and the session
+        // is read back off disk.
         assertEquals(
-            "and it does not ask to be restarted",
-            android.app.Service.START_NOT_STICKY,
+            "and it asks to be restarted",
+            android.app.Service.START_STICKY,
             service.onStartCommand(Intent(), 0, 1),
         )
         controller.destroy()

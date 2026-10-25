@@ -126,12 +126,30 @@ class AgentRunner(
             // **The tick's clock, not the wall's.** The whole point of `now` being a parameter is
             // that a session's timing is one number; mixing a test's clock with the phone's made
             // the retry ladder land an hour away from where the state machine had put it.
-            put(how.after(sessionOf(project) ?: session, now))
+            val current = sessionOf(project) ?: session
+            put(guarded(current, how.after(current, now)))
             synchronized(inFlight) { inFlight -= project }
             polled(project, rows, how)
             changed(sessions.read())
         }
     }
+
+    /**
+     * A stopped session is not switched back on by the turn that was running when it stopped.
+     *
+     * The operator's "must never stop until operator removes it" cuts both ways: they stopped it,
+     * and a reply that arrives a second later — a poll's answer, a `wait`, a question — must not
+     * undo that. Only the person turns a session back on, by speaking or by pressing start.
+     */
+    private fun guarded(current: AgentSession, next: AgentSession): AgentSession =
+        if (current.state == AgentSession.State.STOPPED &&
+            current.reason == AgentSession.StopReason.BY_OPERATOR &&
+            next.state != AgentSession.State.STOPPED
+        ) {
+            current
+        } else {
+            next
+        }
 
     /** Writes a session to its file and says what changed. */
     private fun put(session: AgentSession) {
