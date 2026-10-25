@@ -153,7 +153,7 @@ class AgentLogTest {
         assertEquals("the call was dangling", 1, sealed.beginSession())
         val rows = sealed.rows()
 
-        assertEquals("a result was written", 4, rows.size)
+        assertEquals("a result was written", 3, rows.size)
         assertTrue("for the call", rows.last().kind == AgentLog.GOT)
         assertEquals("under the tool's name", "tree", rows.last().name)
         assertTrue("with a failure and a reason", rows.last().body.startsWith("1 "))

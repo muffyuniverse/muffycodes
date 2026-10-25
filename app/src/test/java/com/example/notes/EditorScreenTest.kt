@@ -105,9 +105,12 @@ class EditorScreenTest {
         // another test in this JVM may have left waiting.
         assertTrue("the save was recorded as a tap", Trace.report().taps > tapsBefore)
         compose.waitUntil(10_000) { scene.viewModel.message == "Saved milk.txt" }
+        val report = Trace.report()
         assertTrue(
-            "and the log answered a tap for it",
-            Trace.report().answered > answeredBefore,
+            "the log answered a tap for it: answered ${report.answered} (was " +
+                "$answeredBefore), waiting ${report.waiting.map { it.what }}, " +
+                "newest ${report.lines.take(5)}",
+            report.answered > answeredBefore,
         )
 
         assertEquals("saved", "three litres", file.readText())
