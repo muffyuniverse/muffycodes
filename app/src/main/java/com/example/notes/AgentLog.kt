@@ -283,15 +283,16 @@ class AgentLog private constructor(
      * and the model is told the context was shortened rather than finding it mysteriously smaller.
      * The marker's name is not one [Agent.messages] renders.
      */
-    fun trimContext(budget: Long, cost: (Row) -> Long = { 0L }): Int {
+    fun trimContext(budget: Long): Int {
         synchronized(guard) {
             val rows = contextRows()
             if (rows.isEmpty() || budget <= 0L) return 0
+            // **The budget is tokens and the rows are measured in tokens**, by the same estimate
+            // the caller used to decide it was over. Measuring bytes against a token budget here
+            // would keep four times what it was asked to — the limit would look enforced and be
+            // four times its number.
             val (kept, dropped) = keepNewest(rows, budget = budget) { row ->
-                // A row's own length is what the request pays for; [cost] lets a caller add the
-                // constant overhead each row carries on the wire. Bytes here by default, because
-                // the estimate is the app's and this is the file it is estimating.
-                row.line.length.toLong() + cost(row)
+                ContextBudget.tokens(row.line)
             }
             if (dropped == 0) return 0
             val marker = LogFormat.row(

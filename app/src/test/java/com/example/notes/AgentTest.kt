@@ -739,7 +739,9 @@ class AgentTest {
             log.told("task $i")
             log.note("agent", "working on $i")
         }
-        val limits = ContextBudget.Limits.of(triggerAsked = 0, hardAsked = 1, ceiling = 100_000)
+        // A small but real limit: the app trims to half of it, so the numbers have to leave room
+        // for the newest conversation and still drop the old ones.
+        val limits = ContextBudget.Limits.of(triggerAsked = 0, hardAsked = 220, ceiling = 100_000)
         val door = ScriptedDoor(Reply("", listOf(call("conclude", """{"text":"done"}"""))))
         val before = Trace.report().lines.toSet()
 

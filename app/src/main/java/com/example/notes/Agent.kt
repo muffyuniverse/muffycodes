@@ -394,7 +394,10 @@ class Agent(
             tools.sumOf { ContextBudget.tokens(it.description, it.parameters.toString()) }
         val hard = limits.hardAt
         if (hard > 0 && size > hard) {
-            val dropped = log.trimContext(hard / 2)
+            // Half the limit, so the next turn's rows do not immediately undo the trim — and at
+            // least one token, so a limit small enough to halve to nothing still trims something
+            // rather than reporting a trim that dropped nothing.
+            val dropped = log.trimContext(maxOf(hard / 2, 1L))
             if (dropped > 0) {
                 Trace.note("agent-trim", "$project · $dropped rows, over ${ContextBudget.short(hard)}")
                 // Rebuilt from the trimmed file, not from the rows in hand: what is sent has to be
