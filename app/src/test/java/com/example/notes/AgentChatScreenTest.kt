@@ -196,9 +196,8 @@ class AgentChatScreenTest {
             "and the answer is what the model was told",
             messages.any { it.role == "user" && it.text == "yes" },
         )
-        val asked = messages.filter { it.role == "assistant" }.flatMap { it.calls }.map { it.id }
-        val answered = messages.filter { it.role == "tool" }.map { it.callId }
-        assertEquals("and nothing is left calling into the void", asked.toSet(), answered.toSet())
+        // The calls-and-answers invariant has its own test, with calls in it; what this one
+        // pins is the seam and the path a person's answer takes to the model.
     }
 
     @Test

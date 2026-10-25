@@ -222,8 +222,13 @@ class AgentTest {
         // is a refused request, and the agent would meet the refusal at the start of the next
         // turn with no way back — which is what a terminating `ask` used to leave behind: its
         // call row was written, nothing ever answered it, and the next request carried it.
+        // One real call in each burst, because a conversation made only of questions and
+        // answers has no calls to check — and an invariant that holds because there is nothing
+        // to hold it against is not a test.
         val door = ScriptedDoor(
+            Reply("", listOf(call("tree", """{"path":"GitHub"}"""))),
             Reply("", listOf(call("ask", """{"question":"Fix the README too?"}"""))),
+            Reply("", listOf(call("read", """{"path":"GitHub/README.md"}"""))),
             Reply("", listOf(call("conclude", """{"text":"Fixed."}"""))),
         )
         val agent = agent(door)
