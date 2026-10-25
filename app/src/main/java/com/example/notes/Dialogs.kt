@@ -708,10 +708,10 @@ fun PlaceDialog(
 /**
  * Asks what a sync was for.
  *
- * A project's history is the app narrating files — "Edited milk.txt" — which is the
- * right message for an undo step and the wrong one for the history on GitHub, where
- * the question is why a push happened. So the push asks, and what is typed becomes
- * the sync's own commit.
+ * A project's history is the app narrating files — a save says nothing but "Saved" —
+ * which is the right message for an undo step and the wrong one for the history on
+ * GitHub, where the question is why a push happened. So the push asks, and what is
+ * typed becomes the sync's own commit.
  */
 @Composable
 fun SyncDialog(

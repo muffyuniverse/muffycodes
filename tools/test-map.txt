@@ -24,7 +24,7 @@ ModelCatalogueTest  app/src/main/java/com/example/notes/ModelCatalogue.kt app/sr
 ProjectGitTest      app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitService.kt
 AccountStoreTest    app/src/main/java/com/example/notes/AccountStore.kt
 VisibilityFeatureTest  app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AppViewModel.kt
-FilesFeatureTest   app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AppViewModel.kt
+FilesFeatureTest   app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/CommitMessage.kt
 TraceTest          app/src/main/java/com/example/notes/Trace.kt
 ReportTest         app/src/main/java/com/example/notes/DownloadsSink.kt app/src/main/java/com/example/notes/Trace.kt app/src/main/java/com/example/notes/Dialogs.kt
 ObservabilityScreenTest  app/src/main/java/com/example/notes/ObservabilityScreen.kt app/src/main/java/com/example/notes/Trace.kt

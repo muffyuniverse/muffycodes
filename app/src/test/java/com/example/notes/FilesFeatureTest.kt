@@ -32,6 +32,26 @@ class FilesFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `a save is committed with one word, not a sentence naming the file`() {
+        // The person never types this message, every version of a file would carry the
+        // same sentence, and nothing on the screen shows it (`appVoice`). So it is not
+        // *disabled* — the version it records is the thing Restore brings back — but it
+        // says as little as an honest message can. `Edited milk.txt` on every save was
+        // the app narrating itself into a history nobody reads it in.
+        val project = "Shopping"
+        scene.project(project)
+        scene.open(project)
+        val file = scene.file("milk.txt", "two litres")
+
+        scene.viewModel.openEditor(file)
+        scene.viewModel.saveEditor("three litres")
+        scene.await("the save to settle") { !scene.viewModel.busy }
+
+        val newest = scene.repo(project).log(null).first()
+        assertEquals("one word", CommitMessage.SAVE, newest.message.trim())
+    }
+
+    @Test
     fun `a file is ordinary text on disk, with nothing added to it`() {
         val file = scene.file("milk.txt", "two litres")
 

@@ -326,8 +326,8 @@ object GitService {
      *
      * This is the **sync's own commit**: the tree is already what it is, and the
      * message is the person's answer to "what did you change?". Every other commit in
-     * a project is the app narrating a file ("Edited milk.txt"), which is the right
-     * message for an undo step and the wrong one for the history on GitHub — there,
+     * a project is the app narrating a file ("Saved", "Created Drafts/"), which is the
+     * right message for an undo step and the wrong one for the history on GitHub — there,
      * the question is why a push happened. An empty commit is normally noise, and a
      * design that made one per change would be nothing but; one per sync is a
      * landmark.

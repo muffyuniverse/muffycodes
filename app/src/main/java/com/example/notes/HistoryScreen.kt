@@ -292,11 +292,15 @@ fun HistoryScreen(
  * of one file those repeat, and they are the same sentence for every row. The one
  * message that is not the app's is the note typed when a project was pushed, so
  * that is the one worth the width.
+ *
+ * Compared **word by word**, not by prefix: a save is committed with exactly one
+ * word ([CommitMessage.SAVE]), and `"Saved".startsWith("Saved ")` is false — a prefix
+ * test would have printed "Saved" on every row as though somebody had typed it.
  */
 internal fun appVoice(message: String): Boolean {
-    val verbs = listOf(
-        "Edited ", "Created ", "Deleted ", "Renamed ", "Moved ", "Imported ",
-        "Restored ", "Brought ", "Synced ",
+    val verbs = setOf(
+        "Edited", "Created", "Deleted", "Renamed", "Moved", "Imported",
+        "Restored", "Brought", "Synced", "Saved",
     )
-    return verbs.any { message.startsWith(it) }
+    return message.trim().substringBefore(' ') in verbs
 }

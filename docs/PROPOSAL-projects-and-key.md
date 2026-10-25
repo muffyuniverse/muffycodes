@@ -135,9 +135,12 @@ twice and the two histories never fight.
 - **when the tree changes** — creating, renaming, moving, importing or deleting a
   file or a folder
 
-Each commit message is written from what happened, in the same plain style as
-sync's: `Edited ideas.txt`, `Created Drafts/`, `Moved Shopping-list.txt into
-Drafts/`, `Deleted Drafts/`. Empty commits are never made.
+A save's commit says one word — `Saved` — because the person never types it and
+every row of a file's history would otherwise repeat the same sentence; nothing
+on the screen shows it (`appVoice`). A change to the tree says what happened, in
+the same plain style as sync's: `Created Drafts/`, `Moved Shopping-list.txt into
+Drafts/`, `Deleted Drafts/`. Empty commits are never made. The one message a
+history ever *shows* is the note typed when syncing.
 
 ### What it buys you
 

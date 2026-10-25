@@ -1474,7 +1474,7 @@ class AppViewModel @JvmOverloads constructor(
             // this app's design is about.
             var refused: String? = null
             if (login != null && accounts.exists(login)) {
-                val outcome = project?.let { g?.commitOutcome(it, "Edited $name") }
+                val outcome = project?.let { g?.commitOutcome(it, CommitMessage.SAVE) }
                 if (outcome != null && !outcome.ok) refused = outcome.error
             }
             // **The save answers itself here, and not after the hop to the screen.** A save
@@ -1512,9 +1512,9 @@ class AppViewModel @JvmOverloads constructor(
      * [note] is the message the person typed in the window the Sync button opens.
      * It is written as the sync's **own** commit — a commit whose tree is what was
      * already committed, whose message is theirs. Without it the only messages in a
-     * project's history would be the app's own ("Edited milk.txt"), and the answer to
-     * "why was this pushed" would be a list of file names. A blank note means "just
-     * push", which is what a project with nothing waiting gets.
+     * project's history would be the app's own ("Saved", "Created Drafts/"), and the
+     * answer to "why was this pushed" would be a list of file names. A blank note means
+     * "just push", which is what a project with nothing waiting gets.
      */
     @JvmOverloads
     fun sync(project: String, note: String? = null) {

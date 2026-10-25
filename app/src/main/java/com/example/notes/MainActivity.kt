@@ -467,6 +467,7 @@ private fun AppRoot(viewModel: AppViewModel) {
         pending = pending,
         dismiss = { pending = Pending.None },
         newProject = { pending = Pending.NewProject },
+        newLocalProject = { pending = Pending.NewLocalProject },
         askReplace = { project -> pending = Pending.ReplaceProject(project) },
     )
 }
@@ -478,6 +479,7 @@ private fun Dialogs(
     pending: Pending,
     dismiss: () -> Unit,
     newProject: () -> Unit,
+    newLocalProject: () -> Unit,
     askReplace: (String) -> Unit,
 ) {
     when (pending) {
@@ -560,11 +562,11 @@ private fun Dialogs(
                     dismiss()
                     newProject()
                 },
-                  onNewLocalProject = {
-                      dismiss()
-                      tap("new local project")
-                      pending = Pending.NewLocalProject
-                  },
+                onNewLocalProject = {
+                    dismiss()
+                    tap("new local project")
+                    newLocalProject()
+                },
                 onPick = { repo ->
                     dismiss()
                     if (repo.name in viewModel.projectNames) {

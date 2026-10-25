@@ -184,6 +184,12 @@ class MarkdownTest {
     fun `the app's own commit messages are told apart from a person's`() {
         assertTrue(appVoice("Edited milk.txt"))
         assertTrue(appVoice("Moved a into b/"))
+        // **A save's message is one word and still the app's.** A prefix test on
+        // "Saved " would have missed it and printed "Saved" on every row of every
+        // history as though a person had typed it.
+        assertTrue(appVoice(CommitMessage.SAVE))
         assertFalse(appVoice("Added the recipes for the week"))
     }
+
+
 }
