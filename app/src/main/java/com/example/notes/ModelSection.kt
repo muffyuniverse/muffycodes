@@ -88,21 +88,30 @@ fun ModelSection(
         TextButton(onClick = { viewModel.resetModelConfig() }) { Text("Reset") }
     }
 
+    // **Read the revision, not only the getter.** `modelKeyState` is a plain property, so Compose
+    // has no reason to re-run this block when a dialog writes a key — and the row kept saying "No key
+    // yet" after the key had been kept, which looks exactly like a key that did not take.
+    val saved = viewModel.modelKeySaved
+    val keyState = remember(saved) { viewModel.modelKeyState }
+    val hasKey = keyState == KeyState.READABLE
     Text(
-        text = if (viewModel.hasModelKey) {
-            "An OpenRouter key is kept on this phone for this account."
-        } else {
-            "No OpenRouter key yet, so the model list cannot be read and the agent cannot talk."
+        text = when (keyState) {
+            KeyState.READABLE -> "An OpenRouter key is kept on this phone for this account."
+            KeyState.LOCKED ->
+                "A key is kept for this account. This phone has to be unlocked before the model " +
+                    "list or the agent can read it."
+            KeyState.NONE ->
+                "No OpenRouter key yet, so the model list cannot be read and the agent cannot talk."
         },
         style = MaterialTheme.typography.bodySmall,
-        color = if (viewModel.hasModelKey) {
+        color = if (hasKey) {
             MaterialTheme.colorScheme.onSurfaceVariant
         } else {
             MaterialTheme.colorScheme.error
         },
     )
     TextButton(onClick = onSetKey) {
-        Text(if (viewModel.hasModelKey) "Change the OpenRouter key" else "Set the OpenRouter key")
+        Text(if (keyState == KeyState.NONE) "Set the OpenRouter key" else "Change the OpenRouter key")
     }
 
     if (picking != null) {

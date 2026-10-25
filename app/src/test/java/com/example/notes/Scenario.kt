@@ -13,8 +13,13 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import java.io.File
 
-/** The keys of the accounts, in memory: a test has no keystore and needs none. */
-class MemoryCredentials : Credentials {
+/**
+ * The keys of the accounts, in memory: a test has no keystore and needs none.
+ *
+ * Open, so a test can be the store in a state the real one reaches and this one does not — a key
+ * that cannot be read back, or a locked phone.
+ */
+open class MemoryCredentials : Credentials {
     private val tokens = LinkedHashMap<String, String>()
     override var activeLogin: String? = null
 
@@ -60,6 +65,14 @@ class Scenario(
     /** True when the account signed in should be the test account. */
     signIn: Boolean = true,
     /**
+     * Where the keys live, when a test needs a store that behaves badly on purpose.
+     *
+     * Null is the ordinary in-memory store. A test passes its own to make a save that cannot be
+     * read back, or a phone whose screen is locked — the two states the real store can be in and
+     * the in-memory one never is.
+     */
+    store: MemoryCredentials? = null,
+    /**
      * The GitHub that signing in asks who a key belongs to.
      *
      * Null leaves the app's own choice alone, which is what every scenario but the
@@ -75,7 +88,7 @@ class Scenario(
         mkdirs()
     }
 
-    val credentials = MemoryCredentials()
+    val credentials = store ?: MemoryCredentials()
 
     val settings = SettingsStore(app, "settings-${System.nanoTime()}")
 

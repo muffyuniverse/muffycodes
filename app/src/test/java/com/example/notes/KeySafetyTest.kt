@@ -227,4 +227,52 @@ class KeySafetyTest {
         assertFalse(shown.contains(token))
         assertTrue(shown.contains("not authorized"))
     }
+    // ---- a locked phone is not a dead key -------------------------------------
+
+    // **These are shapes, not the Android classes themselves.** A plain JVM test cannot construct a
+    // stub from `android.jar` (its constructor is the mock that throws), and the store on a real phone
+    // reports a locked key either as `UserNotAuthenticatedException` or as the keystore's own words in
+    // a `KeyStoreException`. Both are here as text and as the one JDK class that really is thrown
+    // when a ciphertext will not open.
+    @Test
+    fun `a locked phone is not evidence the key is gone`() {
+        // **The failure this is here for.** The store's own key is created with
+        // `setUnlockedDeviceRequired`, so on a locked phone decryption throws — and the agent polls
+        // with the screen off, which is exactly when it happens. One `catch (e: Exception)` used to
+        // treat that as "the key is dead", delete it, and answer "No OpenRouter key on this account
+        // yet" for ever after. A person then sets the key again, and it works until the next poll
+        // with the screen off.
+        val locked = IllegalStateException(
+            "UserNotAuthenticatedException: Key user not authenticated",
+        )
+
+        assertFalse("a locked phone is not a dead key", KeyVerdict.isDead(locked))
+        assertTrue("and it is the locked case", KeyVerdict.isLocked(locked))
+    }
+
+    @Test
+    fun `a key that cannot be opened is dead, however deeply the failure is wrapped`() {
+        val wrapped = IllegalStateException(
+            "could not decrypt",
+            javax.crypto.AEADBadTagException("mac check in GCM failed"),
+        )
+        assertTrue("the bytes did not open", KeyVerdict.isDead(wrapped))
+
+        assertTrue(
+            "and an invalidated keystore entry is dead too",
+            KeyVerdict.isDead(IllegalStateException("KeyPermanentlyInvalidatedException: gone")),
+        )
+    }
+
+    @Test
+    fun `a failure nobody recognises is not a reason to throw a key away`() {
+        // The destructive answer has to be earned. A store that says "something went wrong" leaves
+        // the bytes where they are: a person who types the key again overwrites them anyway, and a
+        // person who does not has not lost anything.
+        val odd = IllegalStateException("keystore busy")
+
+        assertFalse("not dead", KeyVerdict.isDead(odd))
+        assertFalse("not locked either", KeyVerdict.isLocked(odd))
+    }
+
 }

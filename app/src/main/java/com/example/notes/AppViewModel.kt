@@ -667,18 +667,61 @@ class AppViewModel @JvmOverloads constructor(
         Trace.said("Back to the model the app ships")
     }
 
-    /** The OpenRouter key of the active account, when there is one. */
-    val hasModelKey: Boolean
-        get() = activeLogin?.let { credentials.modelKey(it) } != null
+    /**
+     * What the phone can say about the active account's OpenRouter key.
+     *
+     * `LOCKED` is not "no key": the bytes are there and the store's own key is only usable while the
+     * phone is unlocked. Saying "no key yet" for that would send a person to type a key they already
+     * have, on the one screen they cannot use while locked.
+     */
+    val modelKeyState: KeyState
+        get() = activeLogin?.let { credentials.modelKeyState(it) } ?: KeyState.NONE
 
-    /** Keeps the OpenRouter key of the active account. */
-    fun saveModelKey(key: String) {
-        val login = activeLogin ?: return
+    /** The OpenRouter key of the active account, when there is one that can be read now. */
+    val hasModelKey: Boolean
+        get() = modelKeyState == KeyState.READABLE
+
+    /**
+     * Keeps the OpenRouter key of the active account — **and reads it back before saying so**.
+     *
+     * "Kept" is a claim about this phone, and the only way to know it is true is to open the door it
+     * was put behind. The old version said it on the strength of the write alone, so a keystore that
+     * refused the key (a locked phone is enough) was reported as success, and the person was left
+     * with a key that saved twice and never worked — reported, correctly, as *the key isn't passing
+     * through*.
+     *
+     * @return null when the key is kept, or the sentence to show when it is not.
+     */
+    fun saveModelKey(key: String): String? {
+        val login = activeLogin
+            ?: return "There is no account signed in on this phone, so there is nobody to keep a key for."
         val trimmed = key.trim()
-        if (trimmed.isEmpty()) return
+        if (trimmed.isEmpty()) return "The key is empty, so nothing was kept."
         credentials.setModelKey(login, trimmed)
-        Trace.said("The OpenRouter key is kept on this phone")
         modelKeySaved++
+        return when (credentials.modelKeyState(login)) {
+            KeyState.READABLE -> {
+                Trace.note("key-kept", "the OpenRouter key reads back")
+                Trace.said("The OpenRouter key is kept on this phone")
+                null
+            }
+
+            KeyState.LOCKED -> {
+                // Stored, and it will work the moment the phone is unlocked. Saying "kept" without
+                // saying this is what made a working key look like a broken one.
+                Trace.note("key-kept", "stored, and this phone has to be unlocked to read it")
+                Trace.said("The key is kept. This phone has to be unlocked before the agent can read it.")
+                null
+            }
+
+            KeyState.NONE -> {
+                Trace.note("key-not-kept", "saved, and it could not be read back")
+                Trace.said("The key was stored and could not be read back, so it will not work.")
+                "The key was stored, and this phone could not read it back, so nothing here can " +
+                    "use it. The bytes have been left in place: try Keep it again. If it keeps " +
+                    "happening, the key belongs to a different account than the one signed in."
+            }
+        }
     }
 
     /** Bumped when a key is saved, so a screen showing "no key" can notice. */
@@ -2146,6 +2189,7 @@ class AppViewModel @JvmOverloads constructor(
     private fun doorFor(model: ActiveModel): Door = (chatDoor ?: { active ->
         OpenRouterDoor(
             key = { activeLogin?.let { credentials.modelKey(it) } },
+            keyState = { activeLogin?.let { credentials.modelKeyState(it) } ?: KeyState.NONE },
             model = active.model,
             provider = active.provider,
             effort = active.effort,

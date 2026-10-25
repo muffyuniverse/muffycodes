@@ -45,8 +45,82 @@ interface Credentials {
      */
     fun modelKey(login: String): String?
 
+    /**
+     * What the phone can say about the key of [login], without printing it.
+     *
+     * **Three answers, and the difference between the last two is the whole point.** A key that is
+     * *there* but cannot be read right now — because the phone is locked, and the store's own key is
+     * only usable while it is unlocked — is not the same thing as a key that is not there. Collapsing
+     * them made the app delete a good key on the first locked poll and then say, for ever after, that
+     * there had never been one.
+     */
+    fun modelKeyState(login: String): KeyState =
+        if (modelKey(login) != null) KeyState.READABLE else KeyState.NONE
+
     /** Keeps [key] for [login]. */
     fun setModelKey(login: String, key: String)
+}
+
+/** The three things a store can say about a stored key. */
+enum class KeyState {
+    /** Nothing is stored for this account. */
+    NONE,
+
+    /** Stored, and readable now. */
+    READABLE,
+
+    /** Stored, but the phone must be unlocked before it can be read. */
+    LOCKED,
+}
+
+/**
+ * When a stored key is **gone** rather than merely unreadable.
+ *
+ * A ciphertext that will not open *with the key that encrypted it* is dead: the keystore entry was
+ * invalidated (a lock-screen change, a restore onto another phone) or the bytes were damaged.
+ * Nothing can bring it back, so keeping it would mean a row that says a key is stored and an agent
+ * that can never use it.
+ *
+ * Everything else is kept. A locked phone is the ordinary case, not a failure — the agent polls with
+ * the screen off, which is exactly when the store refuses — and an error nobody recognises is not
+ * evidence of death either. **The destructive answer has to be earned**: deleting a credential
+ * because of an exception whose meaning is unknown is how a person loses a key they typed a minute
+ * ago.
+ */
+object KeyVerdict {
+
+    /** True when [error] means the ciphertext can never be opened again. */
+    fun isDead(error: Throwable): Boolean = chain(error).any { e ->
+        // `AEADBadTagException` is a `BadPaddingException`; both mean the bytes did not open.
+        e is javax.crypto.AEADBadTagException ||
+            e is javax.crypto.BadPaddingException ||
+            e is android.security.keystore.KeyPermanentlyInvalidatedException
+    } || chain(error).any { e ->
+        // The class name arrives as one word when the failure is reported as text.
+        val said = message(e)
+        "permanently invalidated" in said || "permanentlyinvalidated" in said
+    }
+
+    /** True when [error] means the phone has to be unlocked first. */
+    fun isLocked(error: Throwable): Boolean = chain(error).any { e ->
+        e is android.security.keystore.UserNotAuthenticatedException ||
+            message(e).let { m ->
+                "not authenticated" in m || "device is locked" in m || "device locked" in m
+            }
+    }
+
+    private fun chain(error: Throwable): List<Throwable> {
+        val out = mutableListOf<Throwable>()
+        var e: Throwable? = error
+        while (e != null && out.size < 8) {
+            out.add(e)
+            e = e.cause
+        }
+        return out
+    }
+
+    private fun message(e: Throwable): String =
+        (e.javaClass.simpleName + " " + (e.message ?: "")).lowercase()
 }
 
 /**
@@ -109,17 +183,40 @@ class CredentialStore(context: Context) : Credentials {
         if (activeLogin == login) activeLogin = null
     }
 
-    override fun modelKey(login: String): String? {
-        val stored = prefs.getString(modelKeyKey(login), null) ?: return null
+    override fun modelKey(login: String): String? = opened(login).text
+
+    override fun modelKeyState(login: String): KeyState = opened(login).state
+
+    /**
+     * Reads the stored key, and **decides what a failure means before it decides what to do**.
+     *
+     * The old version had one `catch (e: Exception)` that deleted the key and returned null, which
+     * made three unrelated things look the same: the phone being locked (ordinary — the agent polls
+     * with the screen off), the key being dead (real, and only then should the bytes go), and a
+     * failure nobody understands (not evidence of anything). It also meant the app *destroyed* a key
+     * on the strength of the locked case, which is the worst of the three.
+     */
+    private fun opened(login: String): Opened {
+        val stored = prefs.getString(modelKeyKey(login), null) ?: return Opened(null, KeyState.NONE)
         return try {
-            decrypt(stored)
+            Opened(decrypt(stored), KeyState.READABLE)
         } catch (e: Exception) {
-            // Same rule as the GitHub token: a key the keystore can no longer open is
-            // dropped rather than kept in a state that fails on every use.
-            prefs.edit().remove(modelKeyKey(login)).apply()
-            null
+            if (KeyVerdict.isDead(e)) {
+                // It cannot come back, so it is dropped — the same rule as the GitHub token.
+                prefs.edit().remove(modelKeyKey(login)).apply()
+                Opened(null, KeyState.NONE)
+            } else if (KeyVerdict.isLocked(e)) {
+                // Kept. It opens as soon as the phone does.
+                Opened(null, KeyState.LOCKED)
+            } else {
+                // Kept as well: an unrecognised failure is not proof the key is gone, and a person
+                // who types it again overwrites the bytes anyway.
+                Opened(null, KeyState.NONE)
+            }
         }
     }
+
+    private data class Opened(val text: String?, val state: KeyState)
 
     override fun setModelKey(login: String, key: String) {
         prefs.edit().putString(modelKeyKey(login), encrypt(key)).apply()

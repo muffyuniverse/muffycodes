@@ -436,6 +436,46 @@ class AgentTest {
         assertEquals("and nothing of their file was rewritten", theirs, file.readText())
     }
 
+    // ---- what the door says when it has no key --------------------------------
+
+    @Test
+    fun `a locked phone is said as locked, not as an account with no key`() {
+        // The agent polls with the screen off, and the store's key is only usable while the phone is
+        // unlocked — so "no key" is the wrong sentence for the ordinary case, and it sends a person
+        // to type a key they already have. The door has to say which of the two it is, because it is
+        // the only thing that knows.
+        val locked = OpenRouterDoor(
+            key = { null },
+            model = "deepseek/deepseek-v4.1-flash-1017",
+            provider = "decart/fp4",
+            effort = "high",
+            keyState = { KeyState.LOCKED },
+        )
+        val missing = OpenRouterDoor(
+            key = { null },
+            model = "deepseek/deepseek-v4.1-flash-1017",
+            provider = "decart/fp4",
+            effort = "high",
+            keyState = { KeyState.NONE },
+        )
+        val request = Request(
+            model = "deepseek/deepseek-v4.1-flash-1017",
+            provider = "decart/fp4",
+            effort = "high",
+            system = "",
+            messages = emptyList(),
+            tools = emptyList(),
+        )
+
+        val lockedWords = locked.turn(request).exceptionOrNull()?.message.orEmpty()
+        val missingWords = missing.turn(request).exceptionOrNull()?.message.orEmpty()
+
+        assertTrue("it says the phone is locked: $lockedWords", "locked" in lockedWords)
+        assertTrue("and that the key is kept: $lockedWords", "unlock" in lockedWords)
+        assertFalse("it does not claim the account has no key", "No OpenRouter key" in lockedWords)
+        assertTrue("while an account with none is told so: $missingWords", "No OpenRouter key" in missingWords)
+    }
+
     // ---- what goes on the wire ------------------------------------------------
 
     @Test

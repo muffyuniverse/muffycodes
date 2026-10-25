@@ -117,11 +117,29 @@ class OpenRouterDoor(
     private val provider: String,
     private val effort: String,
     private val timeoutMs: Int = 120_000,
+    /**
+     * What the store can say about the key, for the sentence when there is no token.
+     *
+     * Defaulted from [key] so the two cannot disagree in a test that only supplies a key, and
+     * supplied for real by the wiring, which asks the store once per request.
+     */
+    private val keyState: () -> KeyState =
+        { if (key() != null) KeyState.READABLE else KeyState.NONE },
 ) : Door {
 
     override fun turn(request: Request): Result<Reply> = try {
-        val token = key()
-            ?: throw IllegalStateException("No OpenRouter key on this account yet")
+        val token = key() ?: throw IllegalStateException(
+            // **A locked phone is not a missing key.** The agent polls with the screen off, and the
+            // store's own key is only usable while it is unlocked — so the ordinary case is a key
+            // that exists and cannot be read right now. Said as "no key", it sent a person to type
+            // one they already had.
+            when (keyState()) {
+                KeyState.LOCKED ->
+                    "This phone is locked, so the OpenRouter key cannot be read. It is kept: " +
+                        "unlock the phone and the agent will use it."
+                else -> "No OpenRouter key on this account yet"
+            },
+        )
         Result.success(send(request, token))
     } catch (e: Exception) {
         Result.failure(

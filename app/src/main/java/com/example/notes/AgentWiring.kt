@@ -26,6 +26,7 @@ object AgentWiring {
         door: (ActiveModel) -> Door = { active ->
             OpenRouterDoor(
                 key = { credentials.activeLogin?.let { credentials.modelKey(it) } },
+                keyState = { credentials.activeLogin?.let { credentials.modelKeyState(it) } ?: KeyState.NONE },
                 model = active.model,
                 provider = active.provider,
                 effort = active.effort,

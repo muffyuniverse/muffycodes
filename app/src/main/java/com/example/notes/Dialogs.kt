@@ -891,19 +891,22 @@ fun ReportBody(
 }
 
 /**
- * Asks for the OpenRouter key: the second credential, behind the same door as the first.
+ * The screen the OpenRouter key is typed on — **and it stays open when the key does not take.**
  *
- * The screen it opens on refuses screenshots (the same `FLAG_SECURE` the sign-in dialog gets),
- * the field is a password field, and the value is encrypted with the same keystore key. It is a
- * separate key from the GitHub token so that revoking one does not revoke the other, and it is
- * kept per account because it is the identity the agent acts as.
+ * A save is a write and a read back, and the read back can fail on a phone that is doing nothing
+ * wrong (a locked screen is enough). The dialog used to dismiss itself the instant the button was
+ * pressed, so that refusal arrived at a screen that was already gone, as a snackbar nobody was
+ * looking for — which reads exactly like a key that was accepted. It closes only on an answer.
+ *
+ * @param keep the save itself: null when the key is kept, or the sentence to show when it is not.
  */
 @Composable
 fun ModelKeyDialog(
     onDismiss: () -> Unit,
-    onSave: (String) -> Unit,
+    keep: (String) -> String?,
 ) {
     var key by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("OpenRouter key") },
@@ -923,14 +926,21 @@ fun ModelKeyDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                if (error != null) {
+                    Text(
+                        error!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
             }
         },
         confirmButton = {
             TextButton(
                 enabled = key.isNotBlank(),
                 onClick = {
-                    onSave(key.trim())
-                    onDismiss()
+                    val refused = keep(key.trim())
+                    if (refused == null) onDismiss() else error = refused
                 },
             ) { Text("Keep it") }
         },

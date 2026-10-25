@@ -4,6 +4,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import org.junit.After
@@ -260,4 +263,81 @@ class ModelSectionTest {
             ),
         )
     }
+    @Test
+    fun `a key kept while the screen is up changes the row`() {
+        // **The reported failure.** The row is drawn from a plain property, so Compose had no reason
+        // to read it again after a dialog wrote — and a person who had just kept their key saw the
+        // screen still saying "No OpenRouter key yet", twice, and reported that the key was not
+        // passing through.
+        scene.viewModel.catalogue = scripted()
+        compose.setContent { Section() }
+        compose.onNodeWithText("No OpenRouter key yet", substring = true).assertIsDisplayed()
+
+        compose.runOnIdle { scene.viewModel.saveModelKey("sk-or-v1-test-key-not-a-real-one") }
+        compose.waitForIdle()
+
+        compose.onNodeWithText("An OpenRouter key is kept", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Change the OpenRouter key").assertIsDisplayed()
+    }
+
+    @Test
+    fun `a key that is stored and cannot be read now does not read as no key at all`() {
+        // A locked phone is the ordinary case: the agent polls with the screen off, and the store's
+        // own key is only usable while the phone is unlocked. Said as "no key yet", it sends a person
+        // to type one they already have.
+        val locked = Scenario(RuntimeEnvironment.getApplication(), signIn = true, store = LockedStore())
+        try {
+            locked.viewModel.catalogue = scripted()
+            compose.setContent {
+                MaterialTheme { Surface { ModelSection(viewModel = locked.viewModel, onSetKey = {}) } }
+            }
+
+            compose.onNodeWithText("A key is kept for this account", substring = true).assertIsDisplayed()
+            compose.onNodeWithText("No OpenRouter key yet", substring = true).assertDoesNotExist()
+        } finally {
+            locked.close()
+        }
+    }
+
+    @Test
+    fun `a key that cannot be read back keeps the dialog open with the reason`() {
+        // The dialog used to dismiss itself the instant the button was pressed, so a refused key
+        // arrived as a snackbar at a screen that was already gone — which reads exactly like a key
+        // that was accepted. It closes on an answer now, and a refusal is an answer.
+        val forgetful = Scenario(RuntimeEnvironment.getApplication(), signIn = true, store = ForgetfulStore())
+        try {
+            compose.setContent {
+                MaterialTheme {
+                    ModelKeyDialog(
+                        onDismiss = {},
+                        keep = { key -> forgetful.viewModel.saveModelKey(key) },
+                    )
+                }
+            }
+
+            compose.onNode(hasSetTextAction()).performTextInput("sk-or-v1-test-key-not-a-real-one")
+            compose.onNodeWithText("Keep it").performClick()
+            compose.waitForIdle()
+
+            compose.onNodeWithText("could not read it back", substring = true).assertIsDisplayed()
+            compose.onNodeWithText("Keep it").assertIsDisplayed()
+        } finally {
+            forgetful.close()
+        }
+    }
+}
+
+/** A store that takes a key and cannot give it back: a phone whose screen is locked, or a keystore
+ *  that refused the write. */
+private class ForgetfulStore : MemoryCredentials() {
+    override fun setModelKey(login: String, key: String) = Unit
+    override fun modelKey(login: String): String? = null
+    override fun modelKeyState(login: String): KeyState = KeyState.NONE
+}
+
+/** A store that has the key and will not open it until the phone is unlocked. */
+private class LockedStore : MemoryCredentials() {
+    override fun setModelKey(login: String, key: String) = Unit
+    override fun modelKey(login: String): String? = null
+    override fun modelKeyState(login: String): KeyState = KeyState.LOCKED
 }

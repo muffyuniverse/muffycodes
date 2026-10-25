@@ -17,7 +17,7 @@
 # dependencies honestly.
 
 AppThemeTest        app/src/main/java/com/example/notes/AppTheme.kt
-KeySafetyTest      app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/Secrets.kt app/src/main/java/com/example/notes/GitHub.kt app/src/main/java/com/example/notes/ProjectGit.kt
+KeySafetyTest      app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/Secrets.kt app/src/main/java/com/example/notes/GitHub.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/CredentialStore.kt
 WorkspaceTest       app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AgentLog.kt
 ModelConfigTest     app/src/main/java/com/example/notes/ModelConfig.kt
 ModelCatalogueTest  app/src/main/java/com/example/notes/ModelCatalogue.kt app/src/main/java/com/example/notes/Secrets.kt

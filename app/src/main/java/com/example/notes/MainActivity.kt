@@ -481,9 +481,11 @@ private fun Dialogs(
         Pending.None -> Unit
 
         Pending.ModelKey -> {
+            // The dialog owns the refusal, like the sign-in one: a key that could not be read back
+            // keeps the screen open and says so where the person is already looking.
             ModelKeyDialog(
                 onDismiss = dismiss,
-                onSave = { key -> viewModel.saveModelKey(key) },
+                keep = { key -> viewModel.saveModelKey(key) },
             )
         }
 
