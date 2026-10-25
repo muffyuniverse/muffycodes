@@ -260,6 +260,27 @@ fun SettingsScreen(
                 value = settings.historyLength,
                 onValueChange = { settings.keepHistory(it) },
             )
+            Spacer(Modifier.height(16.dp))
+
+            // ---- how often an agent that needs a person says so ----
+            // The poll is the agent working; this is the app asking somebody to look at it.
+            // It stops the moment the thing is dealt with, which is why the number is an
+            // interval and not a count: a reminder that arrives while the question is still
+            // the newest thing on the screen is noise.
+            Text("Agent reminders", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "When an agent needs you — it asked something, or it stopped on its own — " +
+                    "it says so, and repeats at this interval until you deal with it. " +
+                    "Empty says it once and never again.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            LengthField(
+                label = "Remind me every (minutes)",
+                value = settings.remindMinutes,
+                placeholder = "once",
+                onValueChange = { settings.keepRemind(it) },
+            )
             Spacer(Modifier.height(24.dp))
 
             // ---- the agent's model ----
@@ -367,7 +388,12 @@ private fun Swatch(theme: AppTheme, selected: Boolean, onClick: () -> Unit) {
  * still waiting for them.
  */
 @Composable
-private fun LengthField(label: String, value: Int, onValueChange: (Int) -> Unit) {
+private fun LengthField(
+    label: String,
+    value: Int,
+    placeholder: String = "all of it",
+    onValueChange: (Int) -> Unit,
+) {
     var text by remember(value) { mutableStateOf(SettingsStore.showLength(value)) }
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = LocalFocusManager.current
@@ -380,7 +406,7 @@ private fun LengthField(label: String, value: Int, onValueChange: (Int) -> Unit)
             }
         },
         label = { Text(label) },
-        placeholder = { Text("all of it") },
+        placeholder = { Text(placeholder) },
         singleLine = true,
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
         keyboardActions = KeyboardActions(

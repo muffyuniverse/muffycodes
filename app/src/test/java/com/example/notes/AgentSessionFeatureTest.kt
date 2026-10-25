@@ -215,6 +215,40 @@ class AgentSessionFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `the reminder interval is the setting's, not the design's`() {
+        // The default is one hour, and the field exists so a person can want something else.
+        // A reminder that ignored the setting would pass every test written with the default.
+        listening()
+        scene.project("groceries")
+        val door = ScriptedDoor(
+            Reply("", listOf(Call("c1", "ask", """{"question":"Which branch?"}"""))),
+        )
+        openChat("groceries", door)
+        scene.settings.keepRemind(5)
+        scene.viewModel.startAgent("groceries")
+        scene.viewModel.sendChat("do it")
+        scene.await("the question") {
+            scene.viewModel.sessionOf("groceries")?.state == AgentSession.State.ASKED
+        }
+        val askedAt = scene.viewModel.sessionOf("groceries")!!.askedAt
+
+        scene.viewModel.tickAgents(askedAt + 4 * 60_000)
+        assertEquals("four minutes is not five", 1, notices.size)
+
+        scene.viewModel.tickAgents(askedAt + 5 * 60_000)
+        assertEquals("and five is", 2, notices.size)
+        assertEquals(
+            "the first reminder is the first",
+            "1st reminder · groceries: the agent asked something",
+            notices.last(),
+        )
+        assertTrue(
+            "and the press is on the record",
+            Trace.report().lines.any { it.contains("TAP") && it.contains("remind-me") },
+        )
+    }
+
+    @Test
     fun `an agent in ask is not polled, however long the person takes`() {
         listening()
         scene.project("groceries")
