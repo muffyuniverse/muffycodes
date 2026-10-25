@@ -156,8 +156,15 @@ data class AgentSession(
     /** How long until the next poll, for a label; never negative. */
     fun untilPoll(at: Long): Long = (nextPollAt - at).coerceAtLeast(0)
 
-    /** A poll was sent at [at]. */
-    fun polled(at: Long): AgentSession = copy(sub = Sub.WAITING, lastPollAt = at, retries = 0)
+    /**
+     * A poll was sent at [at].
+     *
+     * **The retry count survives it.** Clearing the count here — which is what this did — meant
+     * every attempt started again at one second, so the ladder never backed off and a provider
+     * that refused for ever would be retried every second for ever. Only a turn that *succeeds*
+     * clears the ladder, which is what `waited` and `asked` do.
+     */
+    fun polled(at: Long): AgentSession = copy(lastPollAt = at)
 
     /** A poll could not be sent, or was refused: the ladder decides when to try again. */
     fun failed(at: Long): AgentSession {

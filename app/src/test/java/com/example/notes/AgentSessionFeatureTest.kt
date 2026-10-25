@@ -48,6 +48,18 @@ class AgentSessionFeatureTest : FeatureTest() {
         scene.viewModel.agentNotifier = { notices += it.notice().orEmpty() }
     }
 
+    /**
+     * Opens the conversation before speaking.
+     *
+     * `sendChat` is the composer's action, so it needs the chat to be open — the same rule the
+     * screen has. A test that called it with no conversation open would be exercising a path the
+     * app cannot reach.
+     */
+    private fun openChat(project: String, door: Door) {
+        scene.viewModel.chatDoor = { door }
+        scene.viewModel.openChat(project)
+    }
+
     private fun record(project: String): AgentLog =
         AgentLog.open(File(scene.viewModel.workspace!!.projectsDir, project))
 
@@ -108,7 +120,7 @@ class AgentSessionFeatureTest : FeatureTest() {
         listening()
         scene.project("groceries")
         val door = WaitDoor()
-        scene.viewModel.chatDoor = { door }
+        openChat("groceries", door)
         scene.viewModel.startAgent("groceries")
         scene.viewModel.sendChat("keep an eye on it")
         scene.await("the first turn") { door.asked.isNotEmpty() }
@@ -134,7 +146,7 @@ class AgentSessionFeatureTest : FeatureTest() {
         listening()
         scene.project("groceries")
         val door = WaitDoor()
-        scene.viewModel.chatDoor = { door }
+        openChat("groceries", door)
         scene.viewModel.startAgent("groceries")
         scene.viewModel.sendChat("keep an eye on it")
         scene.await("the first turn") { door.asked.isNotEmpty() }
@@ -163,7 +175,7 @@ class AgentSessionFeatureTest : FeatureTest() {
         val door = ScriptedDoor(
             Reply("", listOf(Call("c1", "ask", """{"question":"Which branch?"}"""))),
         )
-        scene.viewModel.chatDoor = { door }
+        openChat("groceries", door)
         scene.viewModel.startAgent("groceries")
         scene.viewModel.sendChat("do it")
         scene.await("the question") {
@@ -209,7 +221,7 @@ class AgentSessionFeatureTest : FeatureTest() {
         val door = ScriptedDoor(
             Reply("", listOf(Call("c1", "ask", """{"question":"Which branch?"}"""))),
         )
-        scene.viewModel.chatDoor = { door }
+        openChat("groceries", door)
         scene.viewModel.startAgent("groceries")
         scene.viewModel.sendChat("do it")
         scene.await("the question") {
@@ -251,13 +263,19 @@ class AgentSessionFeatureTest : FeatureTest() {
         // afterwards is the provider's own sentence rather than the app's guess at it.
         listening()
         scene.project("groceries")
-        scene.viewModel.chatDoor = { FlakyDoor(times = 100) }
+        // **One door, not a new one per poll.** A lambda that built a door on every call would
+        // reset its own attempt count, and a failure count that resets is not a failure count.
+        val broken = FlakyDoor(times = Int.MAX_VALUE)
+        scene.viewModel.chatDoor = { broken }
         scene.viewModel.startAgent("groceries")
 
         var last = ""
-        repeat(AgentSession.MAX_RETRIES + 4) {
-            if (scene.viewModel.sessionOf("groceries")?.state == AgentSession.State.STOPPED) return@repeat
+        var ticks = 0
+        while (scene.viewModel.sessionOf("groceries")?.state != AgentSession.State.STOPPED &&
+            ticks < AgentSession.MAX_RETRIES + 4
+        ) {
             tick("groceries")
+            ticks++
             last = scene.viewModel.sessionOf("groceries")?.label().orEmpty()
         }
 
@@ -272,7 +290,8 @@ class AgentSessionFeatureTest : FeatureTest() {
     fun `one dropped poll reconnects instead of ending the session`() {
         listening()
         scene.project("groceries")
-        scene.viewModel.chatDoor = { FlakyDoor(times = 1) }
+        val flaky = FlakyDoor(times = 1)
+        scene.viewModel.chatDoor = { flaky }
         scene.viewModel.startAgent("groceries")
 
         tick("groceries")
@@ -299,7 +318,7 @@ class AgentSessionFeatureTest : FeatureTest() {
         val door = ScriptedDoor(
             Reply("", listOf(Call("c1", "conclude", """{"text":"done"}"""))),
         )
-        scene.viewModel.chatDoor = { door }
+        openChat("groceries", door)
         scene.viewModel.startAgent("groceries")
         scene.viewModel.stopAgent("groceries")
 
