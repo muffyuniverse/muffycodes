@@ -1987,6 +1987,8 @@ class AppViewModel @JvmOverloads constructor(
      * one is closed, so its thread goes with it.
      */
     private fun makeRunner(): AgentRunner? {
+        val ws = workspace ?: return null
+        if (git == null) return null
         runner?.close()
         val fresh = AgentWiring.runnerFor(
             app = getApplication(),
@@ -2002,7 +2004,7 @@ class AppViewModel @JvmOverloads constructor(
                     // rows come from the record the same way every other refresh gets them: one
                     // path from the file to the screen rather than two.
                     chatProject?.let { project ->
-                        val dir = File(workspaceOf(project).absolutePath)
+                        val dir = File(ws.projectsDir, project)
                         if (dir.isDirectory) applyChat(AgentLog.open(dir).rows(), follow = true)
                     }
                 }
