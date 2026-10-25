@@ -95,16 +95,20 @@ class EditorScreenTest {
         // **The tap is recorded before the work starts**, so its absence can be measured — a
         // check for "nothing is waiting" run too early would pass on a save that never happened.
         val tapsBefore = Trace.report().taps
+        val answeredBefore = Trace.report().answered
         compose.onNodeWithText("Save").performClick()
         // Saving writes on the app's worker, so the file answers a moment later.
         compose.waitUntil(10_000) { file.readText() == "three litres" }
-        // **Asked of the tap, not of the ring's text.** "A save answers itself" means the tap
-        // stops waiting — a save that could not commit answers too, with a failure, which is
-        // why the app's own sentence is asserted separately. What must be true first is that
-        // the save was a tap at all, and that nothing is left holding it.
+        // **Waited for the app's own sentence, and its answer.** The message and the log row are
+        // written together, so waiting for the message waits for the answer — and the answered
+        // counter is monotone, unlike a count of lines in a shared ring or a set of taps that
+        // another test in this JVM may have left waiting.
         assertTrue("the save was recorded as a tap", Trace.report().taps > tapsBefore)
-        compose.waitUntil(10_000) { Trace.report().waiting.none { it.what == "save" } }
-        assertEquals("and the app said so", "Saved milk.txt", scene.viewModel.message)
+        compose.waitUntil(10_000) { scene.viewModel.message == "Saved milk.txt" }
+        assertTrue(
+            "and the log answered a tap for it",
+            Trace.report().answered > answeredBefore,
+        )
 
         assertEquals("saved", "three litres", file.readText())
 

@@ -318,9 +318,9 @@ class AgentTest {
 
         assertTrue("stopped", end is Agent.End.Stopped)
         assertEquals(
-            "after the guard's number of calls",
+            "the guard's number of calls, then no request",
             AgentTools.IDLE_CALLS,
-            door.asked.size + 1,
+            door.asked.size,
         )
         assertTrue("and it says why", rows().any { it.name == "stopped" })
     }

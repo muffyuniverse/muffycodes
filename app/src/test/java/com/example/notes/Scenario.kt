@@ -140,6 +140,40 @@ class Scenario(
         await("the history to record $what", 20_000) { headId() != before }
     }
 
+    /**
+     * Waits for the history that **owns** [file] to have recorded one more thing.
+     *
+     * A file inside a project's `GitHub/` is versioned by that project, and the account's own
+     * history then has nothing to record — so a harness that always watched the account's head
+     * waited twenty seconds for a version the app had correctly written somewhere else. The app
+     * decides which history by where the file is; the harness has to ask the same question.
+     */
+    private fun awaitRecordedFor(file: File, before: String?, what: String) {
+        val project = projectOf(file)
+        if (project == null) {
+            awaitRecorded(before, what)
+            return
+        }
+        await("the project's history to record $what", 20_000) { projectHead(project) != before }
+    }
+
+    /** The project whose worktree holds [file], or null when the account's history owns it. */
+    private fun projectOf(file: File): String? {
+        val ws = workspace ?: return null
+        return if (ws.inWorktree(file)) ws.projectOf(file) else null
+    }
+
+    /** The head of whichever history owns [file]. */
+    private fun headOf(file: File): String? =
+        projectOf(file)?.let { projectHead(it) } ?: headId()
+
+    /** The newest commit of a project's own history, or null when there is none. */
+    private fun projectHead(project: String): String? =
+        ProjectGit(workspace!!, { null }, { AppViewModel.DEFAULT_AUTHOR })
+            .log(project, limit = 1)
+            .firstOrNull()
+            ?.id
+
     /** The newest commit of the account's own history, or null when there is none. */
     fun headId(): String? = accountHistory().head()
 
@@ -160,17 +194,17 @@ class Scenario(
         // so a harness that looked for `shopping-list.txt` would wait forever for a
         // file the app had correctly called `shopping_list.txt`.
         val made = Workspace.cleanName(Workspace.withDefaultExtension(name), "untitled")
-        val before = headId()
+        val file = File(viewModel.currentDir!!, made)
+        val before = headOf(file)
         viewModel.createFile(name)
         await("\"$made\" to be made") { viewModel.entries.any { it.name == made } }
-        val file = File(viewModel.currentDir!!, made)
-        awaitRecorded(before, "\"$made\" being made")
+        awaitRecordedFor(file, before, "\"$made\" being made")
         if (text.isNotEmpty()) {
-            val textBefore = headId()
+            val textBefore = headOf(file)
             viewModel.openEditor(file)
             viewModel.saveEditor(text)
             await("\"$made\" to hold $text") { viewModel.textOf(file) == text }
-            awaitRecorded(textBefore, "\"$made\" being written")
+            awaitRecordedFor(file, textBefore, "\"$made\" being written")
             viewModel.closeEditor()
         }
         return file
@@ -180,11 +214,12 @@ class Scenario(
     fun folder(name: String): File {
         require(!name.contains("/")) { "a folder is made in the folder that is open, not at a path" }
         val made = Workspace.cleanName(name, "folder")
-        val before = headId()
+        val file = File(viewModel.currentDir!!, made)
+        val before = headOf(file)
         viewModel.createFolder(name)
         await("\"$made\" to be made") { viewModel.entries.any { it.name == made } }
-        awaitRecorded(before, "\"$made\" being made")
-        return File(viewModel.currentDir!!, made)
+        awaitRecordedFor(file, before, "\"$made\" being made")
+        return file
     }
 
     /**

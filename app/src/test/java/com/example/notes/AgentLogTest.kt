@@ -148,12 +148,12 @@ class AgentLogTest {
         AgentLog.open(project)
         assertEquals("opening writes nothing", before, sessionLines())
 
-        log.call("read", "{}")
+        // Nothing has been sealed yet, so the call is still waiting for its result.
         val sealed = AgentLog.open(project)
-        assertEquals("one call was dangling", 1, sealed.beginSession())
+        assertEquals("the call was dangling", 1, sealed.beginSession())
         val rows = sealed.rows()
 
-        assertEquals("a result was written for each call", 6, rows.size)
+        assertEquals("a result was written", 4, rows.size)
         assertTrue("for the call", rows.last().kind == AgentLog.GOT)
         assertEquals("under the tool's name", "tree", rows.last().name)
         assertTrue("with a failure and a reason", rows.last().body.startsWith("1 "))
