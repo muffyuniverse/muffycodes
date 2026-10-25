@@ -229,13 +229,18 @@ class FilesFeatureTest : FeatureTest() {
 
     @Test
     fun `deleting a folder takes everything in it`() {
+        // **Inside a project.** A folder at the root *is* a project — that is the whole layout —
+        // so a plain folder there is a state the app never makes: the root's Add offers a project,
+        // not a folder. The nesting this test is about lives inside one.
+        scene.project("shopping")
+        scene.open("shopping")
         scene.folder("letters")
-        scene.open("letters")
+        scene.open("shopping", "letters")
         scene.file("one.txt", "1")
         scene.folder("deeper")
-        scene.open("letters", "deeper")
+        scene.open("shopping", "letters", "deeper")
         scene.file("two.txt", "2")
-        scene.open()
+        scene.open("shopping")
 
         val letters = File(scene.viewModel.currentDir!!, "letters")
         assertTrue(scene.viewModel.delete(letters))
