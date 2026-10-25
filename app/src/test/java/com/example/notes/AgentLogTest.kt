@@ -351,8 +351,13 @@ class AgentLogTest {
             log.note("agent", "work $i")
         }
         val before = log.rows().maxOf { it.id }
-        log.trimContext(budget = 1)
-        assertTrue("the context is nearly empty", log.contextRows().size <= 2)
+        // One messagebox removed per request, so four conversations take four trims — which is the
+        // rule being relied on here, not a detail of it.
+        repeat(3) { log.trimContext(budget = 1) }
+        assertTrue(
+            "the context is a task and a marker: ${log.contextRows().map { it.body }}",
+            log.contextRows().size <= 2,
+        )
 
         AgentLog.open(project).told("after the context was trimmed")
 
