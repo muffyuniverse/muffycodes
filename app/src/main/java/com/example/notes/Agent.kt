@@ -24,6 +24,11 @@ class Agent(
     private val door: Door,
     private val model: ActiveModel,
     maxResult: Int = AgentTools.MAX_RESULT,
+    /**
+     * The backstop from [MAX_REQUESTS], overridable so a test can reach it in three requests
+     * instead of forty. The policy is the constant; this is only who is asking.
+     */
+    private val maxRequests: Int = MAX_REQUESTS,
 ) {
 
     private val tools = AgentTools(ws, project, git, log, maxResult)
@@ -55,6 +60,43 @@ class Agent(
             val retryable: Boolean = false,
             val reason: AgentSession.StopReason = AgentSession.StopReason.ERROR,
         ) : End()
+
+        /** The one word the trace uses for this ending. */
+        val word: String
+            get() = when (this) {
+                is Asked -> "asked"
+                is Concluded -> "concluded"
+                Waited -> "idle"
+                is Stopped -> "stopped"
+            }
+
+        /**
+         * What follows the word: the question, the conclusion, or why it stopped.
+         *
+         * Named `detail`, not `reason`: [Stopped.reason] is the session's own vocabulary for
+         * why it stopped, and a property in the parent with that name would hide it.
+         */
+        val detail: String
+            get() = when (this) {
+                is Asked -> question
+                is Concluded -> said
+                Waited -> Agent.WAITING
+                is Stopped -> why
+            }
+
+        /**
+         * The sentence the box shows a person after a turn.
+         *
+         * Not the trace's: a trace is read later by somebody reconstructing what happened, and a
+         * sentence on the screen is read now by the person who asked. Two audiences, two strings,
+         * and each one defined once — here, on the type that knows the difference.
+         */
+        fun plainly(): String = when (this) {
+            is Asked -> "The agent asked something"
+            is Concluded -> "The agent finished"
+            Waited -> "The agent is waiting"
+            is Stopped -> why
+        }
     }
 
     companion object {
@@ -130,7 +172,7 @@ class Agent(
 
         var idle = 0
         var requests = 0
-        while (requests < MAX_REQUESTS) {
+        while (requests < maxRequests) {
             if (idle >= AgentTools.IDLE_CALLS) return finish(tooIdle())
             requests++
             // The boundary the box counts turns by, and the app's own row, not the model's.
@@ -256,7 +298,7 @@ class Agent(
     }
 
     private fun overBudget(): End {
-        val said = "it made $MAX_REQUESTS requests without ending the turn"
+        val said = "it made $maxRequests requests without ending the turn"
         log.note("stopped", said)
         return End.Stopped(said, reason = AgentSession.StopReason.LOOP)
     }
@@ -268,13 +310,7 @@ class Agent(
      * added and be invisible on the screen that exists to show what the app is doing.
      */
     private fun finish(end: End): End {
-        val (what, said) = when (end) {
-            is End.Asked -> "asked" to end.question
-            is End.Concluded -> "concluded" to end.said
-            End.Waited -> "idle" to WAITING
-            is End.Stopped -> "stopped" to end.why
-        }
-        Trace.note("agent", "$project $what: ${said.take(80)}")
+        Trace.note("agent", "$project ${end.word}: ${end.detail.take(80)}")
         return end
     }
 

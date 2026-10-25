@@ -63,7 +63,7 @@ CopyFeatureTest  app/src/main/java/com/example/notes/AppViewModel.kt
 ModelSectionTest    app/src/main/java/com/example/notes/ModelSection.kt app/src/main/java/com/example/notes/AppViewModel.kt
 AgentLogTest  app/src/main/java/com/example/notes/AgentLog.kt app/src/main/java/com/example/notes/LogFormat.kt
 TraceTest  app/src/main/java/com/example/notes/LogFormat.kt
-AgentTest  app/src/main/java/com/example/notes/Agent.kt app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Door.kt app/src/main/java/com/example/notes/AgentPrompt.kt
+AgentTest  app/src/main/java/com/example/notes/Agent.kt app/src/main/java/com/example/notes/AgentPrompt.kt app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Door.kt app/src/main/java/com/example/notes/AgentPrompt.kt
 AgentChatTest  app/src/main/java/com/example/notes/AgentChat.kt app/src/main/java/com/example/notes/AgentLog.kt
 AgentChatScreenTest  app/src/main/java/com/example/notes/AgentChatScreen.kt app/src/main/java/com/example/notes/AgentChat.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/BrowserScreen.kt
 AgentSessionTest  app/src/main/java/com/example/notes/AgentSession.kt

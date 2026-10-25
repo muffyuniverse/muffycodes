@@ -785,6 +785,37 @@ class AgentTest {
     }
 
     @Test
+    fun `a turn that never ends stops at the request budget`() {
+        // **The backstop, not a policy.** The idle guard is the policy — calls that change
+        // nothing — and this is the one thing above it: a model that changes something every time
+        // and never ends the turn cannot hold the app's only worker for ever. Reaching it here
+        // costs three requests because the budget is a parameter; the constant is still forty.
+        var n = 0
+        val door = object : Door {
+            override fun turn(request: Request): Result<Reply> = Result.success(
+                Reply(
+                    "",
+                    // A file each time, so the idle guard never fires: each call really changes
+                    // the project, and the turn still does not end.
+                    listOf(Call("c${++n}", "create", """{"path":"GitHub/f$n.txt","text":"$n"}""")),
+                ),
+            )
+        }
+
+        val end = Agent(account, "shopping", ws, git, log, door, model(), maxRequests = 3)
+            .burst("go on then")
+
+        assertTrue("it stopped: $end", end is Agent.End.Stopped)
+        assertEquals("because of the budget", AgentSession.StopReason.LOOP, (end as Agent.End.Stopped).reason)
+        assertEquals("after exactly three requests", 3, n)
+        assertEquals("and the record says so", true, rows().any { it.body.contains("3 requests") })
+        assertTrue(
+            "and the box is told by the one sentence the ending has",
+            end.plainly().contains("3 requests"),
+        )
+    }
+
+    @Test
     fun `the record's numbers are the tool's arguments, not the app's guesses`() {
         val door = ScriptedDoor(
             Reply("", listOf(call("read", """{"path":"GitHub/milk.txt"}"""))),

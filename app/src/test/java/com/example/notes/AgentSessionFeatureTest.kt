@@ -445,6 +445,56 @@ class AgentSessionFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `an agent that answers with words and no call stops, and a person turns it back on`() {
+        // The loop's fourth ending, seen from the person's side: it stops itself, the strip says
+        // so, and speaking is the switch — because there is no other control they would have used.
+        listening()
+        val door = ScriptedDoor(
+            Reply("I think the milk is fine.", emptyList()),
+            Reply("", listOf(Call("c2", "conclude", """{"text":"done"}"""))),
+        )
+        openChat("groceries", door)
+        scene.viewModel.startAgent("groceries")
+
+        scene.viewModel.sendChat("is the milk still good?")
+        scene.await("the turn to stop") {
+            scene.viewModel.sessionOf("groceries")?.state == AgentSession.State.STOPPED
+        }
+
+        val session = scene.viewModel.sessionOf("groceries")!!
+        assertEquals("it stops itself", AgentSession.StopReason.LOOP, session.reason)
+        assertEquals("and is silent, because nobody chose it", true, session.needsYou)
+        assertTrue("and the strip says somebody is needed", AgentSession.strip(scene.viewModel.agentSessions).contains("needs you"))
+        assertTrue(
+            "with the model's own words as the reason: ${session.lastWords}",
+            session.lastWords.contains("no tool call"),
+        )
+
+        scene.viewModel.sendChat("try again")
+        scene.await("the second turn") { door.asked.size == 2 }
+
+        assertTrue("the person is the switch", scene.viewModel.sessionOf("groceries")?.running == true)
+    }
+
+    @Test
+    fun `a concluded turn is idle and finished, not waiting`() {
+        listening()
+        val door = ScriptedDoor(Reply("", listOf(Call("c1", "conclude", """{"text":"done"}"""))))
+        openChat("groceries", door)
+        scene.viewModel.startAgent("groceries")
+        scene.viewModel.sendChat("do the thing")
+        scene.await("the turn") { door.asked.isNotEmpty() }
+        scene.await("the agent to be quiet") { !scene.viewModel.chatWorking }
+
+        val session = scene.viewModel.sessionOf("groceries")!!
+        assertEquals("finished", AgentSession.Sub.FINISHED, session.sub)
+        assertEquals("and idle", AgentSession.State.IDLE, session.state)
+        assertEquals("which reads as itself", "idle · finished", session.label())
+        assertEquals("and nobody is needed", false, session.needsYou)
+        assertEquals("and the sentence is the ending's own", "The agent finished", scene.viewModel.message)
+    }
+
+    @Test
     fun `a session survives the app being reopened`() {
         listening()
         scene.project("groceries")

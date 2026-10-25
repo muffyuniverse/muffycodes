@@ -1813,35 +1813,50 @@ class AppViewModel @JvmOverloads constructor(
         // there is no other control they would have used, and a message that vanished into a
         // stopped session would look like the app ignoring them.
         sessionOf(project)?.let { if (!it.running) putSession(it.waited(System.currentTimeMillis())) }
+        runTurn(project, said) { rows, end ->
+            applyChat(rows, follow = true)
+            chatWorking = false
+            message = end.plainly()
+            applyEnd(project, end, System.currentTimeMillis())
+            refresh()
+            refreshChanges()
+        }
+    }
+
+    /**
+     * Runs one turn on the worker and hands back what it wrote.
+     *
+     * **A burst and a poll differ by one thing** — whether the person said something — and two
+     * copies of everything else (the record opened fresh, the model read once, a throw turned into
+     * an ending) is two copies to drift. What is deliberately not shared is what genuinely
+     * differs: a poll redraws nothing mid-turn, because nobody is waiting to read it.
+     */
+    private fun runTurn(project: String, said: String?, then: (List<AgentLog.Row>, Agent.End) -> Unit) {
+        val ws = workspace ?: return
+        val g = git ?: return
         val model = modelConfig.active
         val door = doorFor(model)
         onWorker {
-            val dir = File(ws.projectsDir, project)
-            val log = AgentLog.open(dir)
+            val log = AgentLog.open(File(ws.projectsDir, project))
             val agent = Agent(ws.accountDir, project, ws, g, log, door, model)
             val end = try {
-                agent.burst(said) {
-                    val rows = log.rows()
-                    main.post { applyChat(rows, follow = true) }
+                if (said == null) {
+                    agent.poll()
+                } else {
+                    agent.burst(said) {
+                        val rows = log.rows()
+                        main.post { applyChat(rows, follow = true) }
+                    }
                 }
             } catch (t: Throwable) {
-                Agent.End.Stopped(Secrets.explain(t, "The agent could not run"))
+                // **A burst that threw is a wall; a poll that threw is a blip.** The transport's
+                // own failures already come back as a retryable Stopped from inside the loop, so
+                // what escapes to here is the turn's own machinery — the record, a tool, a bug —
+                // and retrying that every four seconds would hide it.
+                Agent.End.Stopped(Secrets.explain(t, "The agent could not run"), retryable = said == null)
             }
             val rows = log.rows()
-            val answer = when (end) {
-                is Agent.End.Asked -> "The agent asked something"
-                is Agent.End.Concluded -> "The agent finished"
-                is Agent.End.Waited -> "The agent is waiting"
-                is Agent.End.Stopped -> end.why
-            }
-            main.post {
-                applyChat(rows, follow = true)
-                chatWorking = false
-                message = answer
-                applyEnd(project, end, System.currentTimeMillis())
-                refresh()
-                refreshChanges()
-            }
+            main.post { then(rows, end) }
         }
     }
 
@@ -1961,23 +1976,10 @@ class AppViewModel @JvmOverloads constructor(
         polling += project
         putSession(session.polled(now))
         Trace.note("agent-poll", "$project · ${session.label(now)}")
-        val model = modelConfig.active
-        val door = doorFor(model)
-        onWorker {
-            val dir = File(ws.projectsDir, project)
-            val log = AgentLog.open(dir)
-            val agent = Agent(ws.accountDir, project, ws, g, log, door, model)
-            val end = try {
-                agent.poll()
-            } catch (t: Throwable) {
-                Agent.End.Stopped(Secrets.explain(t, "The poll could not run"), retryable = true)
-            }
-            val rows = log.rows()
-            main.post {
-                polling.remove(project)
-                if (chatProject == project) applyChat(rows, follow = true)
-                applyEnd(project, end, System.currentTimeMillis())
-            }
+        runTurn(project, said = null) { rows, end ->
+            polling.remove(project)
+            if (chatProject == project) applyChat(rows, follow = true)
+            applyEnd(project, end, System.currentTimeMillis())
         }
     }
 

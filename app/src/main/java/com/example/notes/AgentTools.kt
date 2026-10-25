@@ -34,8 +34,15 @@ class AgentTools(
         /** Enough for a file, a listing or a diff; past this a result is truncated and says so. */
         const val MAX_RESULT = 20_000
 
-        /** The tools that end a turn. They are called alone; anything beside them is refused. */
-        val TERMINATING = setOf("ask", "conclude", "wait")
+        /**
+         * The tools that end a turn. They are called alone; anything beside them is refused.
+         *
+         * **The record's set, not a second copy of it.** `AgentLog` owns this vocabulary because
+         * it has to read and seal a record with no workspace, repository or model behind it — and
+         * two sets with the same three names is a set that drifts the day one of them gains a
+         * fourth.
+         */
+        val TERMINATING = AgentLog.TERMINATING
 
         /** The tools that change a file. */
         val WRITING = setOf("edit", "create", "delete", "move", "clone", "restore")
