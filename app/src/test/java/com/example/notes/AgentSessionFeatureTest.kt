@@ -592,9 +592,13 @@ class AgentSessionFeatureTest : FeatureTest() {
         reopened.chatDoor = { door }
         reopened.tickAgents(due)
 
-        // The scenario's own wait, because the state comes back through a post to the main thread.
-        scene.await("the resumed poll", 20_000) {
-            (reopened.sessionOf("groceries")?.lastPollAt ?: 0L) >= due
+        // **Wait for the request, not for the claim.** A poll writes `lastPollAt` *before* the
+        // request goes out — that is what makes two tickers safe — so waiting on the timestamp
+        // returns the instant the claim is written and then reads the door a moment too early. The
+        // signal that the turn is over is the in-flight set, and it is cleared after the screen was
+        // told.
+        scene.await("the resumed poll to finish", 20_000) {
+            door.asked.size == 1 && reopened.agentPollingInFlight().isEmpty()
         }
         assertEquals("one request, with nobody looking at a button", 1, door.asked.size)
         assertEquals(
