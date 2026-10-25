@@ -42,6 +42,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -777,6 +778,43 @@ fun ReportButton(onReport: () -> Unit) {
                 drawLine(ink, Offset(w * 0.28f, y), Offset(w * 0.08f, y - h * 0.06f), stroke)
                 drawLine(ink, Offset(w * 0.72f, y), Offset(w * 0.92f, y - h * 0.06f), stroke)
             }
+        }
+    }
+}
+
+/**
+ * The agent's door into a project: a speech bubble, drawn rather than imported.
+ *
+ * `Icons.Filled.Chat` is in material-icons-extended, which this app does not carry — the whole set
+ * ships in the APK, and one glyph is not worth that. A rounded rectangle with a tail is the same
+ * drawing at every size and answers to the theme like any other icon.
+ */
+@Composable
+fun ChatButton(onClick: () -> Unit) {
+    val ink = MaterialTheme.colorScheme.onSurfaceVariant
+    IconButton(onClick = onClick) {
+        Canvas(
+            modifier = Modifier
+                .size(22.dp)
+                // On the drawing, because that is what a screen reader announces for the button.
+                .semantics { contentDescription = "Chat with the agent" },
+        ) {
+            val w = size.width
+            val h = size.height
+            val stroke = w * 0.085f
+            // The bubble: a rounded body with two square corners where the tail comes off, which is
+            // why this is a path rather than `drawRoundRect`.
+            val body = Path().apply {
+                moveTo(w * 0.06f, h * 0.14f)
+                lineTo(w * 0.94f, h * 0.14f)
+                lineTo(w * 0.94f, h * 0.66f)
+                lineTo(w * 0.40f, h * 0.66f)
+                lineTo(w * 0.20f, h * 0.88f)
+                lineTo(w * 0.20f, h * 0.66f)
+                lineTo(w * 0.06f, h * 0.66f)
+                close()
+            }
+            drawPath(body, color = ink, style = Stroke(width = stroke))
         }
     }
 }

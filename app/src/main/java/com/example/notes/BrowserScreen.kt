@@ -154,6 +154,14 @@ fun BrowserScreen(
                     // wrong, and hunting for it then is the worst possible time.
                     ReportButton(onReport)
                     if (viewModel.currentProject != null) {
+                        // **The chat is where the agent is, so it is where the project is.** It
+                        // used to be reachable only from the overflow menu of a project's row on
+                        // the *list* — so a person already inside the project, looking at its
+                        // files, had no way to reach the agent working on them. Reported from the
+                        // live log: "where is chat icon within the project?"
+                        ChatButton(
+                            onClick = { adding = false; viewModel.currentProject?.let(onRowChat) },
+                        )
                         // Search is scoped to the project (§7): it exists because a
                         // project's tree nests and what you remember is a name.
                         IconButton(onClick = { viewModel.showSearch = !viewModel.showSearch }) {
