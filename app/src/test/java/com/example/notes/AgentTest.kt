@@ -148,7 +148,9 @@ class AgentTest {
         // Wave 1's promise, seen from the agent's side: the lock is in the funnel, so this
         // refusal is not something the tools were taught.
         val locked = File(ws.repoOf("shopping"), "milk.txt")
-        ws.setLocked(locked, true)
+        // Locked the way the screen does it: by path, through the funnel that owns the list.
+        val path = ws.relative(locked) ?: error("the file is not in the account")
+        ws.setLocked(setOf(ws.pathString(path)))
 
         val door = ScriptedDoor(
             Reply(
