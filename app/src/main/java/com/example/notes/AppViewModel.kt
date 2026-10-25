@@ -1337,7 +1337,11 @@ class AppViewModel @JvmOverloads constructor(
         // After the guards, because a tap the screen never allows is not a tap: a locked
         // file has Save greyed out, and recording an intent for it would put a broken
         // sequence in every trace, from a button nobody could press.
-        Trace.tap("save", file.name)
+        // **By id.** The answer is written after a write, a commit and a redraw, and by then
+        // the newest tap waiting may be somebody else's — which is what the log showed: an
+        // answer labelled "Saved milk.txt" attached to an `open-file` tap, and the save itself
+        // still waiting. A save knows which press it is answering.
+        val tap = Trace.tap("save", file.name)
         val keep = settings.historyLength
         val h = history
         val g = git
@@ -1386,7 +1390,11 @@ class AppViewModel @JvmOverloads constructor(
             } else {
                 "Saved $name"
             }
-            if (refused != null) Trace.failure(answer, "save") else Trace.said(answer)
+            if (refused != null) {
+                Trace.failed(tap, answer, "save")
+            } else {
+                Trace.answered(tap, answer)
+            }
             main.post {
                 refresh()
                 refreshChanges()

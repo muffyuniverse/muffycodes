@@ -95,7 +95,6 @@ class EditorScreenTest {
         // **The tap is recorded before the work starts**, so its absence can be measured — a
         // check for "nothing is waiting" run too early would pass on a save that never happened.
         val tapsBefore = Trace.report().taps
-        val answeredBefore = Trace.report().answered
         compose.onNodeWithText("Save").performClick()
         // Saving writes on the app's worker, so the file answers a moment later.
         compose.waitUntil(10_000) { file.readText() == "three litres" }
@@ -105,12 +104,13 @@ class EditorScreenTest {
         // another test in this JVM may have left waiting.
         assertTrue("the save was recorded as a tap", Trace.report().taps > tapsBefore)
         compose.waitUntil(10_000) { scene.viewModel.message == "Saved milk.txt" }
+        // **The save's own row, near the top.** It is written by the same code that answers the
+        // tap by id, one line before the message this test has just waited for — so its
+        // presence here is the answer's, not a neighbour's.
         val report = Trace.report()
         assertTrue(
-            "the log answered a tap for it: answered ${report.answered} (was " +
-                "$answeredBefore), waiting ${report.waiting.map { it.what }}, " +
-                "newest ${report.lines.take(5)}",
-            report.answered > answeredBefore,
+            "the log says the save was answered: newest ${report.lines.take(3)}",
+            report.lines.take(3).any { it.contains("SAID") && it.contains("Saved milk.txt") },
         )
 
         assertEquals("saved", "three litres", file.readText())

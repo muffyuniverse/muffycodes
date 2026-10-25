@@ -256,6 +256,16 @@ object Trace {
     fun answered(id: Int, text: String) = answer(Kind.SAID, "said", text, to = id)
 
     /**
+     * The same, as a failure.
+     *
+     * A press whose work could not be finished still needs its answer, and it needs it by id
+     * for the same reason: the work took a worker, a commit and a redraw, and by the time it
+     * ends the newest tap waiting may well be somebody else's.
+     */
+    fun failed(id: Int, said: String, what: String = "failed") =
+        answer(Kind.FAIL, slug(what), said, to = id)
+
+    /**
      * The app's visible state changed — which answers a tap **only if the tap is what
      * caused it.**
      *
