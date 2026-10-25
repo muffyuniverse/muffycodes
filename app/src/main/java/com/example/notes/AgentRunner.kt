@@ -75,7 +75,12 @@ class AgentRunner(
         changed(sessions.read())
     }
 
-    /** Sends one poll, on the worker, and keeps the session in step with how it ended. */
+    /**
+     * Sends one poll, on the worker, and keeps the session in step with how it ended.
+     *
+     * [now] is the tick that decided the poll was due, and the ending is dated by it: a session
+     * whose timing came from two clocks would back off to a time the state machine never chose.
+     */
     private fun poll(session: AgentSession, now: Long) {
         val project = session.project
         if (!File(ws.projectsDir, project).isDirectory) {
@@ -118,7 +123,10 @@ class AgentRunner(
                     emptyList()
             }
             val (how, rows) = end
-            put(how.after(sessionOf(project) ?: session, System.currentTimeMillis()))
+            // **The tick's clock, not the wall's.** The whole point of `now` being a parameter is
+            // that a session's timing is one number; mixing a test's clock with the phone's made
+            // the retry ladder land an hour away from where the state machine had put it.
+            put(how.after(sessionOf(project) ?: session, now))
             synchronized(inFlight) { inFlight -= project }
             polled(project, rows, how)
             changed(sessions.read())

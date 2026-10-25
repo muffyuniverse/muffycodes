@@ -209,15 +209,21 @@ class AgentRunnerTest {
         settings.keepRemind(5)
         val runner = runner()
 
+        // The question itself was announced when it was asked; what the runner adds is the
+        // ladder behind it. So the first repeat is one interval later, and the second is two.
         runner.tick(2_000 + 4 * 60_000)
-        assertEquals("four minutes is not five", 1, notices.size)
+        assertEquals("four minutes is not five", 0, notices.size)
 
         runner.tick(2_000 + 5 * 60_000)
-        assertEquals("five is", 2, notices.size)
+        assertEquals("five is", 1, notices.size)
+        assertEquals("and it says which one it is", "1st", notices.last().notice()!!.take(3))
+
+        runner.tick(2_000 + 10 * 60_000)
+        assertEquals("the ladder continues while nobody answers", 2, notices.size)
 
         // Answering it — the session stops needing anybody — ends the ladder.
         val asked = runner.sessions().single()
-        AgentSessions(ws.accountDir).put(asked.waited(2_000 + 6 * 60_000))
+        AgentSessions(ws.accountDir).put(asked.waited(2_000 + 11 * 60_000))
         runner.tick(2_000 + 20 * 60_000)
 
         assertEquals("nothing more once dealt with", 2, notices.size)
