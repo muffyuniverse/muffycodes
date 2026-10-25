@@ -98,16 +98,6 @@ class AgentSessions(private val accountDir: File) {
         JSONObject()
     }
 
-    companion object {
-        /**
-         * One lock per file, for the whole process — the same rule as the record's, for the same
-         * reason: two objects over one file are two writers, not two owners.
-         */
-        private val locks = java.util.concurrent.ConcurrentHashMap<String, Any>()
-
-        private fun lockFor(file: File): Any = locks.computeIfAbsent(file.absolutePath) { Any() }
-    }
-
     private fun write(root: JSONObject) {
         try {
             stateDir.mkdirs()
@@ -146,5 +136,13 @@ class AgentSessions(private val accountDir: File) {
     companion object {
         /** The file's name, under `.muffy/`. */
         const val AGENTS = "agents.json"
+
+        /**
+         * One lock per file, for the whole process — the same rule as the record's, for the same
+         * reason: two objects over one file are two writers, not two owners.
+         */
+        private val locks = java.util.concurrent.ConcurrentHashMap<String, Any>()
+
+        private fun lockFor(file: File): Any = locks.computeIfAbsent(file.absolutePath) { Any() }
     }
 }

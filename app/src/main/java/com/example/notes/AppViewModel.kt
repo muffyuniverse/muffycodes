@@ -2079,17 +2079,7 @@ class AppViewModel @JvmOverloads constructor(
      */
     private fun applyEnd(project: String, end: Agent.End, now: Long) {
         val current = sessionOf(project) ?: return
-        // **A stop is not undone by the turn that was running when it happened.** The same guard as
-        // the runner's, because a burst and a poll can both be in flight when the person presses
-        // stop — and one of them finishing is not the person changing their mind.
-        val next = if (current.state == AgentSession.State.STOPPED &&
-            current.reason == AgentSession.StopReason.BY_OPERATOR &&
-            end !is Agent.End.Interrupted
-        ) {
-            current
-        } else {
-            end.after(current, now)
-        }
+        val next = end.onto(current, now)
         if (next != current) putSession(next)
     }
 

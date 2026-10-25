@@ -879,6 +879,41 @@ class AgentTest {
     }
 
     @Test
+    fun `an operator's stop is not rewritten by a harder ending`() {
+        // **The two copies of this rule disagreed, and this is the case that told them apart.** The
+        // screen kept the operator's stop against every ending; the runner kept it only against an
+        // ending that left the session running — so a provider refusing the key a second after the
+        // person pressed stop replaced "I stopped it" with the app's own reason, and the session
+        // started asking to be resolved. The person's word wins, and there is now one rule saying so.
+        val stopped = AgentSession(
+            project = "shopping",
+            state = AgentSession.State.STOPPED,
+            reason = AgentSession.StopReason.BY_OPERATOR,
+            lastWords = "the key was refused",
+        )
+        val wall = Agent.End.Stopped(
+            "OpenRouter answered 401",
+            reason = AgentSession.StopReason.PIN_REFUSED,
+        )
+
+        assertEquals(
+            "the operator's reason, not the provider's",
+            AgentSession.StopReason.BY_OPERATOR,
+            wall.onto(stopped, now = 5_000).reason,
+        )
+        assertEquals(
+            "and it is still the furthest thing from needing the person",
+            false,
+            wall.onto(stopped, now = 5_000).needsYou,
+        )
+        assertEquals(
+            "while an ending that arrives at a running session is obeyed",
+            AgentSession.State.IDLE,
+            Agent.End.Waited.onto(AgentSession("shopping"), now = 5_000).state,
+        )
+    }
+
+    @Test
     fun `the system message is the same bytes on every request of one turn`() {
         // **The cache, and the reason the line is measured once.** The system message is the first
         // message in the array, so a size that changed per request would break the prefix the poll

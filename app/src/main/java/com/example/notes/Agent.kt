@@ -135,6 +135,28 @@ class Agent(
          * transition one of them forgets. A blip reconnects on the session's ladder; a wall stops
          * and keeps the provider's words, because those are what the stopped label shows.
          */
+        /**
+         * The session this ending leaves — **with the operator's stop standing over it.**
+         *
+         * **One rule, one place, because it was two and they disagreed.** The screen and the runner
+         * each carried a copy, and the copies were not the same: the screen kept the operator's stop
+         * against every ending, while the runner kept it only against an ending that left the session
+         * running — so a hard stop arriving a second later (a provider refusing the key) replaced the
+         * operator's "I stopped it" with the app's reason. A session the person switched off must not
+         * change its story because a reply landed after they did it.
+         *
+         * The rule is the operator's own: it must never stop until they remove it, and it must never
+         * be restarted by anything but them either.
+         */
+        fun onto(session: AgentSession, now: Long): AgentSession =
+            if (session.state == AgentSession.State.STOPPED &&
+                session.reason == AgentSession.StopReason.BY_OPERATOR
+            ) {
+                session
+            } else {
+                after(session, now)
+            }
+
         fun after(session: AgentSession, now: Long): AgentSession = when (this) {
             is Asked -> session.asked(now)
             is Concluded -> session.concluded()
