@@ -292,20 +292,35 @@ private fun Navigator(
     }
 }
 
-/** One line: the caption in a narrow column, the body beside it. */
+/**
+ * One line: the caption and the row's size in a narrow column, the body beside it.
+ *
+ * **The size is bytes, and it is there for the clear-up.** A person looking at a context that is
+ * over its limit needs to know which rows are the expensive ones, and a number beside each caption
+ * answers that without opening anything. Bytes rather than tokens because bytes are the fact and
+ * the app's token count is an estimate — and it is the file's own measurement, so `wc -c` agrees.
+ */
 @Composable
-private fun Line(caption: String, body: String, failed: Boolean = false) {
+private fun Line(caption: String, body: String, failed: Boolean = false, size: Long = 0) {
     Row(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            caption,
-            style = MaterialTheme.typography.labelMedium,
-            color = if (failed) {
-                MaterialTheme.colorScheme.error
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
-            modifier = Modifier.width(80.dp),
-        )
+        Column(modifier = Modifier.width(80.dp)) {
+            Text(
+                caption,
+                style = MaterialTheme.typography.labelMedium,
+                color = if (failed) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+            if (size > 0) {
+                Text(
+                    ContextBudget.sizeLabel(size),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         Text(
             body,
             style = MaterialTheme.typography.bodyMedium,
