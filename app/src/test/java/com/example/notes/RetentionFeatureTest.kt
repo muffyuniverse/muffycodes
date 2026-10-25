@@ -6,8 +6,11 @@ import org.junit.Test
 import java.io.File
 
 /**
- * §14 of the design: **two lengths, one for each history, applied at the next
- * change.**
+ * §14 of the design: **one length, applied at the next change.**
+ *
+ * A project's history is the only history there is — the account level one is gone, because every
+ * folder under the account is a project — so "which history" is no longer a question this file has
+ * to answer.
  *
  * Shortening a history throws away the oldest end of it and nothing else. Not one
  * byte of the working copy changes, and nothing is pruned while the number is
@@ -15,20 +18,15 @@ import java.io.File
  */
 class RetentionFeatureTest : FeatureTest() {
 
-    private fun historySize(): Int {
-        val dir = scene.workspace!!.accountDir
-        if (!GitService.isRepository(dir)) return 0
-        return try {
-            org.eclipse.jgit.api.Git.open(dir).use { GitService.log(it.repository, null).size }
-        } catch (e: Exception) {
-            0
-        }
-    }
+    /** The length of the open project's history — the one history a change goes into. */
+    private fun historySize(): Int =
+        (scene.viewModel.currentProject ?: scene.viewModel.projectNames.firstOrNull())
+            ?.let { scene.repo(it).log(null).size }
+            ?: 0
 
     @Test
     fun `an empty length keeps everything`() {
         assertEquals("zero means all of it", 0, scene.settings.historyLength)
-        assertEquals("and the same for a project", 0, scene.settings.historyLength)
     }
 
     @Test
@@ -47,7 +45,9 @@ class RetentionFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `shortening the account's history happens at the next change, not when it is set`() {
+    fun `shortening a history happens at the next change, not when it is set`() {
+        scene.project("Shopping")
+        scene.open("Shopping")
         repeat(6) { scene.folder("folder_$it") }
         scene.await("six commits") { historySize() >= 6 }
         val before = historySize()
@@ -58,7 +58,9 @@ class RetentionFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `after the next change the account's history keeps only the length it was given`() {
+    fun `after the next change the history keeps only the length it was given`() {
+        scene.project("Shopping")
+        scene.open("Shopping")
         repeat(6) { scene.folder("folder_$it") }
         scene.await("six commits") { historySize() >= 6 }
         scene.settings.keepHistory(3)
@@ -71,10 +73,12 @@ class RetentionFeatureTest : FeatureTest() {
 
     @Test
     fun `shortening the history does not touch a single file`() {
+        scene.project("Shopping")
+        scene.open("Shopping")
         repeat(5) { scene.folder("folder_$it") }
-        scene.open("folder_2")
+        scene.open("Shopping", "folder_2")
         val file = scene.file("milk.txt", "two litres")
-        scene.open()
+        scene.open("Shopping")
         scene.await("the commits") { historySize() >= 5 }
 
         scene.settings.keepHistory(2)
@@ -87,6 +91,8 @@ class RetentionFeatureTest : FeatureTest() {
 
     @Test
     fun `a length longer than the history keeps the history it has`() {
+        scene.project("Shopping")
+        scene.open("Shopping")
         scene.folder("one")
         scene.await("a commit") { historySize() >= 1 }
         val before = historySize()

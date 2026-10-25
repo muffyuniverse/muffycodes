@@ -52,18 +52,25 @@ class VisibilityFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `a project's repo folder is the worktree and is not a thing to move`() {
+    fun `the record's folder in a project is structural and is not a thing to move`() {
+        // **The project's own folder is the person's.** It used to hold a repository folder the
+        // app owned, and that was the structural thing here; it is gone, because a project *is*
+        // the repository. What the app still owns inside a project is the record.
         scene.project("Shopping")
-        val repo = scene.workspace!!.repoOf("Shopping")
+        val records = File(scene.workspace!!.projectDir("Shopping"), AgentLog.DIR).apply { mkdirs() }
 
-        assertTrue("the worktree is structural", scene.workspace!!.isStructural(repo))
+        assertTrue("the record's folder is the app's", scene.workspace!!.isStructural(records))
+        assertFalse(
+            "and the project's folder is not",
+            scene.workspace!!.isStructural(scene.workspace!!.projectDir("Shopping")),
+        )
 
         // The name of this test says "not a thing to move", so the move is what it has
         // to try: the flag alone would still pass if delete and move stopped asking.
         val elsewhere = File(scene.workspace!!.accountDir, "elsewhere").apply { mkdirs() }
-        val refused = scene.workspace!!.move(repo, elsewhere)
+        val refused = scene.workspace!!.move(records, elsewhere)
         assertTrue("and moving it is refused", refused.isFailure)
-        assertTrue("with the worktree still where it was", repo.isDirectory)
+        assertTrue("with the record still where it was", records.isDirectory)
     }
 
     @Test

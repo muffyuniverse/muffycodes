@@ -250,11 +250,12 @@ class Scenario(
     }
 
     /**
-     * Writes a file **inside the project's worktree**, which is what goes to GitHub.
+     * Writes a file into **the project's working tree**, which is the project's folder.
      *
-     * A file written beside the worktree — in the project's own folder — is the
-     * local kind, and stays on the phone. The two are the whole point of the
-     * project shape, so the harness writes the one the caller asked for.
+     * The two used to be different places — a project folder holding a `GitHub/` worktree — so this
+     * helper exists to say which one a test means. They are one folder now, and the name stays
+     * because "the working tree" is still the thing that goes to GitHub: a file written here is a
+     * change the project has to explain.
      */
     fun worktreeFile(name: String, text: String): File {
         val ws = viewModel.workspace!!
@@ -286,11 +287,10 @@ class Scenario(
     }
 
     /**
-     * The text of [file] in the newest version of whichever history owns it.
+     * The text of [file] in the newest version of its project's history.
      *
-     * A file inside a project's worktree is versioned by that project, so reading
-     * the account's history for it would always answer "no versions" — and a test
-     * waiting for one would fail for a reason that is not the app's.
+     * There is one history per project and no account-level one, so a file in a project is read
+     * from that project's repository and a file outside every project has no versions at all.
      */
     fun newestVersionText(file: File): String? {
         val ws = workspace ?: return null
@@ -368,8 +368,8 @@ class Scenario(
      * The account's own history is gone — the projects are the folders, so everything a test wants
      * to ask about is in one of them. Paths are project-relative, which is what git records.
      */
-    fun trackedFiles(): List<String> =
-        (viewModel.currentProject ?: viewModel.projectNames.firstOrNull())
+    fun trackedFiles(project: String? = null): List<String> =
+        (project ?: viewModel.currentProject ?: viewModel.projectNames.firstOrNull())
             ?.let { repo(it).tracked() }
             .orEmpty()
 

@@ -11,8 +11,9 @@ import org.junit.Test
 import java.io.File
 
 /**
- * The tree rules of §2 and §3: what may be seen, what may be touched, how a file
- * is classified, and the moves across the worktree boundary.
+ * The tree rules of §2 and §3: what may be seen, what may be touched, how a file is
+ * classified, and the one structural folder that is left — a project's `agent/`, because the
+ * account root is the projects list and a project's folder is its repository.
  */
 class WorkspaceTest {
 
@@ -102,7 +103,11 @@ class WorkspaceTest {
         File(dir, ".gitignore").writeText("x")
         File(dir, ".muffy").mkdirs()
         val names = workspace.list(dir).map { it.name }
-        assertEquals(listOf("projects", "visible.txt"), names)
+        // **The root is the projects list**, so nothing is there that the app made: a project's
+        // folder is a person's, and `projects/` — the folder this app used to put them in — is
+        // gone. `.gitignore`, `.muffy` and everything else starting with a dot is the app's and
+        // is never listed.
+        assertEquals(listOf("visible.txt"), names)
     }
 
     @Test
@@ -111,7 +116,7 @@ class WorkspaceTest {
         File(dir, "zebra.txt").writeText("")
         File(dir, "Alpha").mkdirs()
         val names = workspace.list(dir).map { it.name }
-        assertEquals(listOf("Alpha", "projects", "zebra.txt"), names)
+        assertEquals(listOf("Alpha", "zebra.txt"), names)
     }
 
     @Test

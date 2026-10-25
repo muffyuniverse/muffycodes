@@ -55,11 +55,10 @@ class SelectionFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `a move of several into a project's repository is recorded in both histories`() {
-        // The boundary, with more than one file crossing it. The project's repository
-        // has to gain both files, and the account's history has to record that they
-        // left the account's own tree — one side alone leaves a copy that this phone
-        // no longer has, or a file that GitHub never learns about.
+    fun `a move of several into a project is recorded by that project`() {
+        // The crossing, with more than one file making it. The project's repository has to gain
+        // both files and commit them — a file that arrived but was never committed is a change
+        // GitHub never learns about, which is what the project's row counts as "to send".
         scene.project("groceries")
         scene.open()
         scene.file("milk.txt", "two litres")
@@ -70,7 +69,7 @@ class SelectionFeatureTest : FeatureTest() {
         scene.open()
         chooseAll("milk.txt", "bread.txt")
 
-        assertTrue("moved into the worktree", scene.viewModel.moveSelected(worktree))
+        assertTrue("moved into the project", scene.viewModel.moveSelected(worktree))
         // The commit happens on the worker, so the repository has not answered yet:
         // what is asked for is the project's own answer, not the app's opinion of
         // what it just did.

@@ -135,7 +135,7 @@ class ScenariosTest {
         record(
             "03-account-root",
             "The first thing after signing in.",
-            "an account with nothing in it yet, and the one folder the app made for it.",
+            "an account with nothing in it yet — no projects, and nothing the app made.",
         ) {
             before()
             then("The test account is signed in; this is the root of what it can see.") {
@@ -143,7 +143,7 @@ class ScenariosTest {
             }
             after()
             result(
-                "The root holds the projects folder and nothing else. Everything the app " +
+                "The root is the list of projects, and it is empty. Everything the app " +
                     "keeps for itself is hidden, so a person never sees bookkeeping.",
             )
         }
@@ -206,24 +206,29 @@ class ScenariosTest {
     }
 
     @Test
-    fun aProjectFolderHoldingItsCodeAndAPrivateNote() {
+    fun aProjectFolderHoldingItsCodeAndItsRecord() {
         scene.signedIn()
         scene.project("groceries")
         scene.open("groceries")
 
         record(
-            "06-a-local-note-beside-the-code",
-            "A note kept beside the project without being sent.",
-            "a project holding its code repository and a private file next to it.",
+            "06-a-project-holding-its-code-and-its-record",
+            "A project holding its code and the agent's record.",
+            "one folder: the repository that goes to GitHub, and what the agent was sent and answered.",
         ) {
             before()
-            then("A file is written in the project's own folder, not inside the repository.") {
-                scene.file("shopping_list.txt", "milk, bread")
+            then("A file is written in the project, and the agent's record is written beside it.") {
+                scene.worktreeFile("shopping_list.txt", "milk, bread")
+                val records = File(scene.workspace!!.projectDir("groceries"), AgentLog.DIR)
+                records.mkdirs()
+                File(records, AgentLog.SESSION).writeText("what the model was sent")
+                scene.viewModel.refresh()
             }
             after()
             result(
-                "The folder holds both: the repository that goes to GitHub, and the note " +
-                    "that stays on the phone. Which is which is visible, not hidden.",
+                "The folder is the repository — the file is a change the project will send — " +
+                    "and the app's own folder, the record, is not one: it is named in the " +
+                    "project's .gitignore, and no list will ever offer it.",
             )
         }
     }
@@ -255,6 +260,11 @@ class ScenariosTest {
     @Test
     fun whatAFileUsedToSay() {
         scene.signedIn()
+        // **A version belongs to a project**, because a project's folder is the repository. A
+        // note at the account root has no history at all, so the note in this scenario lives in
+        // one.
+        scene.project("groceries")
+        scene.open("groceries")
         val file = scene.file("milk.txt")
         scene.openEditor(file)
         scene.saveAsVersion("one litre")
@@ -322,7 +332,8 @@ class ScenariosTest {
     @Test
     fun theHistoryWithSelectOnTheRight() {
         scene.signedIn()
-        scene.open()
+        scene.project("groceries")
+        scene.open("groceries")
         val file = scene.file("milk.txt")
         scene.openEditor(file)
         scene.saveAsVersion("one litre")
@@ -354,11 +365,13 @@ class ScenariosTest {
     @Test
     fun theHistoryOfAFolderThatWasDeleted() {
         scene.signedIn()
+        scene.project("groceries")
+        scene.open("groceries")
         scene.folder("letters")
-        scene.open("letters")
+        scene.open("groceries", "letters")
         scene.file("one.txt", "the first")
-        scene.open()
-        val folder = File(scene.workspace!!.accountDir, "letters")
+        scene.open("groceries")
+        val folder = File(scene.workspace!!.projectDir("groceries"), "letters")
 
         scenario(
             compose, "09-a-deleted-folder-that-can-come-back",
@@ -379,7 +392,7 @@ class ScenariosTest {
             after()
             result(
                 "The folder and the files that were in it can be brought back, because " +
-                    "the account's whole tree has a history, not only the projects.",
+                    "the project's whole tree has a history, not only the files it was born with.",
             )
         }
     }

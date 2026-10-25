@@ -26,9 +26,9 @@ import java.io.File
  * What the browser offers, and where — the chrome around the files.
  *
  * These are the four things a person pointed at while using the app, each of which was a
- * control in a place that did not make sense: Sync one level above the worktree it syncs,
- * a Sync button that would do nothing, an Add button on a level that holds nothing a
- * person may add to, and a project that opened itself.
+ * control in a place that did not make sense: Sync one level up from the files it syncs, a
+ * Sync button that would do nothing, an Add button on a level that holds nothing a person
+ * may add to, and a project that opened itself.
  *
  * They are painted rather than asked of the view model because *where a control appears*
  * is not a fact the view model holds. The bug was never "sync returned the wrong thing";
@@ -141,21 +141,20 @@ class BrowserChromeTest {
     }
 
     @Test
-    fun `the sync row appears inside the repo and not one level above it`() {
+    fun `the sync row appears inside a project and not at the root`() {
         scene.signedIn()
         scene.project("groceries")
 
-        // The project's own folder: the wrapper. Nothing of the project is on screen,
-        // so nothing can be said about what syncing it would send.
-        scene.open("groceries")
+        // The root is the projects list: the sync of one project said from there would be a
+        // sentence about a repository nobody is looking at.
         browser()
         awaitText("up to date", present = false)
-        assertFalse("no sync row in the wrapper", there("Sync"))
+        assertFalse("no sync row at the root", there("Sync"))
 
-        // Inside the worktree, where the files are.
+        // Inside the project, where its files are.
         scene.open("groceries")
         compose.waitUntil(20_000) { there("up to date") }
-        assertTrue("the row is there with the worktree", there("up to date"))
+        assertTrue("the row is there with the project", there("up to date"))
     }
 
     @Test
@@ -310,12 +309,14 @@ class BrowserChromeTest {
     @Test
     fun `the account root offers nothing to add`() {
         scene.signedIn()
+        scene.project("groceries")
         scene.open()
         browser()
 
-        // The root holds `projects/` and the app's own state. Both are the app's, so an
-        // Add button there would promise something it cannot do.
-        awaitText("projects")
+        // The root is the list of projects. A project is made by adding one — from GitHub,
+        // or on this phone — not by making a file to stand beside the projects, which nothing
+        // on this screen would show. So no Add button here is a decision, not an omission.
+        awaitText("groceries")
         // Wait for the row to be painted before reading the absence as a decision.
         compose.waitForIdle()
         assertFalse("no Add at the account root", thereIcon("Add"))

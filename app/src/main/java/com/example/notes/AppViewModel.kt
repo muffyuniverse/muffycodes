@@ -1672,15 +1672,11 @@ class AppViewModel @JvmOverloads constructor(
             }
             val url = created.value?.cloneUrl?.takeIf { it.isNotBlank() }
                 ?: api.cloneUrlFor(login, clean)
-            val folders = ws.createProjectFolders(clean)
-            if (folders.isFailure) {
-                main.post {
-                    busy = false
-                    message = folders.exceptionOrNull()?.message ?: "Could not make the project"
-                    onDone(false)
-                }
-                return@onWorker
-            }
+            // **No folder is made first.** `createProjectFolders` makes the project's folder,
+            // and git refuses to clone into a folder that already holds anything — so making it
+            // here meant every project made on GitHub arrived as an empty folder, an error in the
+            // snackbar and no repository, which is to say no history at all. The clone makes the
+            // folder; `cloneInto` writes the app's two ignore lines into it afterwards.
             val clone = ProjectGit(
                 ws,
                 { credentials.token(login) },
@@ -1831,19 +1827,14 @@ class AppViewModel @JvmOverloads constructor(
         }
         busy = true
         onWorker {
-            val folders = ws.createProjectFolders(repo.name)
-            val result = if (folders.isFailure) {
-                GitService.RemoteResult(
-                    folders.exceptionOrNull()?.message ?: "Could not make the project", false
-                )
-            } else {
-                ProjectGit(
-                    ws,
-                    { credentials.token(login) },
-                    { accounts.account(login)?.author() ?: DEFAULT_AUTHOR },
-                    { settings.historyLength },
-                ).cloneInto(repo.name, repo.cloneUrl)
-            }
+            // As in `createProject`: the clone makes the folder. Making it first is what
+            // stopped every pull-in, because git will not clone into a non-empty folder.
+            val result = ProjectGit(
+                ws,
+                { credentials.token(login) },
+                { accounts.account(login)?.author() ?: DEFAULT_AUTHOR },
+                { settings.historyLength },
+            ).cloneInto(repo.name, repo.cloneUrl)
             main.post {
                 busy = false
                 message = result.message

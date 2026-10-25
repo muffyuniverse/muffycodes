@@ -482,17 +482,23 @@ class ProjectGitTest {
     }
 
     @Test
-    fun aLocalFileBesideTheWorktreeIsNotSynced() {
-        workspace.createProjectFolders("Shopping").getOrThrow()
+    fun theAppsOwnFolderIsNeitherAChangeNorASync() {
+        // **A project's folder is its repository**, so the only thing here that must not travel is
+        // what the app put in it: `agent/` (the record) and `.muffy/` (its flags). The two lines
+        // `ensureIgnore` writes are what make that true, and this asks git rather than the app.
+        val project = workspace.createProjectFolders("Shopping").getOrThrow()
         val git = gitFor()
         git.init("Shopping").getOrThrow()
         git.open("Shopping")?.use { GitService.setRemoteUrl(it, bare.absolutePath) }
 
-        File(File(workspace.accountDir, "Shopping"), "ideas.txt").writeText("mine")
+        val records = File(project, AgentLog.DIR).apply { mkdirs() }
+        File(records, "session.log").writeText("what the model was sent")
+        val flags = File(project, ".muffy").apply { mkdirs() }
+        File(flags, "pins").writeText("[]")
+
         assertTrue(git.sync("Shopping").success)
 
-        // Local files beside the worktree are the account's history, not git's.
-        assertEquals(0, git.changes("Shopping").total)
-        assertTrue(git.log("Shopping", "ideas.txt").isEmpty())
+        assertEquals("nothing to send", 0, git.changes("Shopping").total)
+        assertTrue(git.log("Shopping", "${AgentLog.DIR}/session.log").isEmpty())
     }
 }

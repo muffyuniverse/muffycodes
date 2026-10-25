@@ -254,46 +254,6 @@ class FilesFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `a file inside a project but outside the worktree is a local file`() {
-        scene.project("Shopping")
-        scene.open("Shopping")
-        val local = scene.file("shopping_list.txt", "milk")
-
-        assertTrue("it is beside the worktree", local.parentFile!!.name == "Shopping")
-        assertEquals("it belongs to the project", "Shopping", scene.workspace!!.projectOf(local))
-        assertFalse("but not to the repository", scene.viewModel.inWorktree)
-    }
-
-    @Test
-    fun `a file can be taken into the repository and out of it again`() {
-        // One Move does both directions now, and it has to record both sides: a
-        // file taken into a worktree must be *tracked* there, and a file taken out
-        // must have its removal recorded, or GitHub goes on holding a copy this
-        // phone no longer has.
-        val project = "Shopping"
-        scene.project(project)
-        scene.open(project)
-        val local = scene.file("milk.txt", "two litres")
-        val repo = scene.workspace!!.repoOf(project)
-        val inside = File(repo, "milk.txt")
-
-        assertTrue("into the repository", scene.viewModel.move(local, repo))
-        assertTrue("the file is in the worktree", inside.isFile)
-        assertFalse("and no longer beside it", local.exists())
-        assertTrue(
-            "and the project tracks it",
-            scene.awaitCommits(project, 2) { paths -> paths.contains("milk.txt") },
-        )
-
-        assertTrue("out of the repository", scene.viewModel.move(inside, repo.parentFile!!))
-        assertTrue("back beside the worktree", File(local.parentFile, "milk.txt").isFile)
-        assertTrue(
-            "and the project recorded the removal",
-            scene.awaitCommits(project, 3) { paths -> !paths.contains("milk.txt") },
-        )
-    }
-
-    @Test
     fun `a file moved into another project is tracked by that one and not the first`() {
         // The crosses are not always into the project you are standing in: a file
         // can go from one repository to another, and then two histories have to be
@@ -302,19 +262,18 @@ class FilesFeatureTest : FeatureTest() {
         scene.project("work")
         scene.open("shopping")
         val file = scene.file("milk.txt", "two litres")
-        val shop = scene.workspace!!.repoOf("shopping")
-        val office = scene.workspace!!.repoOf("work")
+        val office = scene.workspace!!.projectDir("work")
 
-        assertTrue("into the worktree", scene.viewModel.move(file, shop))
-        // Waited for here, because a commit takes everything that is waiting: two
-        // moves in the same millisecond would be one version, and the first project
-        // would never have seen the file at all.
+        // **One move, two projects.** The file is committed by the project it was made in, and
+        // the folder it goes to is another project's repository — so one act has to be recorded
+        // twice, once on each side. Waiting for the first before the second is what keeps the
+        // second from coalescing into the first, because a commit takes everything waiting.
         assertTrue(
             "the first project tracks it",
             scene.awaitCommits("shopping", 2) { paths -> paths.contains("milk.txt") },
         )
 
-        assertTrue("and across", scene.viewModel.move(File(shop, "milk.txt"), office))
+        assertTrue("and across", scene.viewModel.move(file, office))
 
         assertTrue(
             "the second project has it",

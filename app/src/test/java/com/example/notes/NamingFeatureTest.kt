@@ -22,7 +22,7 @@ class NamingFeatureTest : FeatureTest() {
     /**
      * The only thing in the folder that a person put there.
      *
-     * The account's root always holds `projects/`, which the app makes, so asking
+     * The account's root is the projects list, and it holds nothing the app made, so asking
      * for the only entry would count it too.
      */
     private fun made(): String = scene.names().single()

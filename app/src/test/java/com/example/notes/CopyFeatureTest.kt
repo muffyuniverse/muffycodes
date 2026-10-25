@@ -200,24 +200,23 @@ class CopyFeatureTest : FeatureTest() {
     // ---- where it lands -----------------------------------------------------
 
     @Test
-    fun `a copy into a project's worktree is recorded by the project, and the account is not told`() {
-        // Given a project with a worktree, and a file beside it
+    fun `a copy into a project is recorded by that project, with the version that holds it`() {
+        // Given a project, and a file outside it at the account's root
         scene.project("groceries")
-        scene.open("groceries")
         val beside = aFile("shopping.txt", "milk, bread")
-        val before = scene.commitCount("groceries")
+        val into = scene.workspace!!.repoOf("groceries")
+        scene.await("the making of the file to be recorded", 30_000) { !scene.viewModel.busy }
 
-        // When the file is copied into the worktree
-        scene.viewModel.copy(beside, scene.workspace!!.repoOf("groceries"))
+        // When the file is copied into the project
+        scene.viewModel.copy(beside, into)
         scene.await("the project to record the arrival", 30_000) {
-            scene.commitCount("groceries") > before
+            scene.repo("groceries").log(null).isNotEmpty() &&
+                scene.trackedFiles("groceries").any { it.endsWith("shopping.txt") }
         }
 
-        // Then the project has it, and the original stayed outside
-        assertTrue(
-            "the worktree holds the copy",
-            File(scene.workspace!!.repoOf("groceries"), "shopping.txt").isFile,
-        )
+        // Then the project's own history holds the copy — a file that existed but was never
+        // committed is exactly what "no version" means — and the original stayed outside.
+        assertTrue("the project holds the copy", File(into, "shopping.txt").isFile)
         assertTrue("and the original is where it was", beside.isFile)
         // **Committed and still to send, both at once.** The copy is a change like any
         // other: it is committed to the project's own history the moment it lands, and that
@@ -227,33 +226,6 @@ class CopyFeatureTest : FeatureTest() {
         scene.await("the copy to be waiting to be sent", 30_000) {
             scene.viewModel.changesOf("groceries") == 1
         }
-    }
-
-    @Test
-    fun `a copy that stays on this phone records the account's history`() {
-        // Given a file and a folder, both outside any project
-        val original = aFile("milk.txt", "two litres")
-        val into = aFolder("drafts")
-        scene.await("the making of both to be recorded", 30_000) { !scene.viewModel.busy }
-        val before = scene.headId()
-
-        // When it is copied
-        scene.viewModel.copy(original, into)
-
-        // Then the account's history has a version that *contains* the copy. Asserting
-        // only that a commit happened would pass even if the copy were never tracked —
-        // and a file that exists but is never committed is precisely what "no history"
-        // means.
-        scene.await("the project to record the copy", 30_000) { scene.headId() != before }
-        val tracks = scene.trackedFiles()
-        assertTrue(
-            "the copy is in a version of the project's history: $tracks",
-            tracks.any { it.endsWith("drafts/milk.txt") },
-        )
-        assertTrue(
-            "and so is the file it came from, which was never removed",
-            tracks.any { it.endsWith("milk.txt") && !it.endsWith("drafts/milk.txt") },
-        )
     }
 
     // ---- what a lock means --------------------------------------------------

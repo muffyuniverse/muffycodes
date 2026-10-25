@@ -421,7 +421,7 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `a version put back inside a project becomes a version of that project`() {
-        // A restore is a change like any other. Recording only the account's history
+        // A restore is a change like any other. Recording it only somewhere else
         // left the worktree modified and uncommitted: the file said "1 changed"
         // until the next sync, and the version it was put back to was not in the
         // history it came from.

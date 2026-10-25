@@ -73,19 +73,24 @@ class SyncFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `a local file beside the worktree is never pushed`() {
+    fun `the agent's record is never pushed, and the work beside it is`() {
+        // The record holds what the model was sent and answered — every tool result, every file it
+        // read — so shipping it would put a second copy of the person's work on somebody's server
+        // in a shape they never chose. It is a file in the project's folder, which is the
+        // repository, so the only thing keeping it out is the line the app writes.
         scene.project("Shopping")
         scene.open("Shopping")
-        scene.file("diary.txt", "private")
+        val records = File(scene.workspace!!.projectDir("Shopping"), AgentLog.DIR).apply { mkdirs() }
+        File(records, "session.log").writeText("what the model was sent")
         scene.worktreeFile("milk.txt", "two litres")
 
         scene.sync("Shopping")
 
         assertFalse(
-            "the diary stayed on the phone",
-            scene.remoteFiles("Shopping").contains("diary.txt"),
+            "the record stayed on the phone",
+            scene.remoteFiles("Shopping").any { it.startsWith(AgentLog.DIR) },
         )
-        assertTrue("the worktree file went up", scene.remoteFiles("Shopping").contains("milk.txt"))
+        assertTrue("the work went up", scene.remoteFiles("Shopping").contains("milk.txt"))
     }
 
     @Test

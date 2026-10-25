@@ -10,9 +10,9 @@ import java.io.File
 /**
  * §6 and §7 of the design: **the Projects screen, and what a project is.**
  *
- * A project is a folder holding a `repo/` worktree and whatever a person keeps
- * beside it. The row says the account, the project, how many changes are waiting,
- * and carries one button that is always in the same place.
+ * A project is **a folder that is its own repository** — `.git`, the clone's files and
+ * whatever the person makes there, all in one place. The row says the project, how many
+ * changes are waiting, and carries one button that is always in the same place.
  */
 class ProjectsFeatureTest : FeatureTest() {
 
@@ -66,13 +66,22 @@ class ProjectsFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `a file beside the worktree is not a change the project has to explain`() {
+    fun `the app's own folder is not a change the project has to explain`() {
+        // **Everything in a project is in its repository now**, so the only thing that can be
+        // there without being a change is what the app put there itself. It writes the two lines
+        // that keep `agent/` and `.muffy/` out of git, and this is what those lines buy: a
+        // project that has been running an agent still says "nothing waiting".
         scene.project("Shopping")
         scene.open("Shopping")
-        scene.file("local.txt", "not for GitHub")
+        val records = File(scene.workspace!!.projectDir("Shopping"), AgentLog.DIR).apply { mkdirs() }
+        File(records, "session.log").writeText("a record of a conversation")
         scene.viewModel.refreshChanges()
 
-        assertEquals("nothing waiting", 0, scene.viewModel.changesOf("Shopping"))
+        assertEquals(
+            "the record is not a change to send",
+            0,
+            scene.viewModel.changesOf("Shopping"),
+        )
     }
 
     @Test
