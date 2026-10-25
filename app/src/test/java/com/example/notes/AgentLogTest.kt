@@ -30,13 +30,18 @@ class AgentLogTest {
         log = AgentLog.open(project)
     }
 
-    private fun sessionLines(): List<String> =
-        AgentLog.open(project).session.readLines().filter { it.isNotBlank() }
+    /**
+     * The two files, read as files rather than through the record.
+     *
+     * A helper that opened the record to measure it would be measuring something it could have
+     * changed — which is exactly the mistake this class exists to catch in the app.
+     */
+    private fun sessionLines(): List<String> = linesIn(File(project, "agent/session.log"))
 
-    private fun contextLines(): List<String> =
-        AgentLog.open(project).context.readLines().filter { it.isNotBlank() }
+    private fun contextLines(): List<String> = linesIn(File(project, "agent/context.log"))
 
-    private fun linesIn(file: File): List<String> = file.readLines().filter { it.isNotBlank() }
+    private fun linesIn(file: File): List<String> =
+        if (file.isFile) file.readLines().filter { it.isNotBlank() } else emptyList()
 
     @Test
     fun `a turn is written to both files, with the same ids`() {
@@ -137,11 +142,16 @@ class AgentLogTest {
         // meets the refusal at the start of a session has no way back.
         log.told("do the thing")
         log.call("tree", "{}")
+        // Opening alone does nothing: a screen that drew the box must not have edited the
+        // evidence. The seal belongs to the start of a session.
+        assertEquals("opening writes nothing", 0, AgentLog.open(project).beginSession().let { it })
 
-        val reopened = AgentLog.open(project)
-        val rows = reopened.rows()
+        log.call("read", "{}")
+        val sealed = AgentLog.open(project)
+        assertEquals("one call was dangling", 1, sealed.beginSession())
+        val rows = sealed.rows()
 
-        assertEquals("a result was written", 4, rows.size)
+        assertEquals("a result was written for each call", 6, rows.size)
         assertTrue("for the call", rows.last().kind == AgentLog.GOT)
         assertEquals("under the tool's name", "tree", rows.last().name)
         assertTrue("with a failure and a reason", rows.last().body.startsWith("1 "))
@@ -155,10 +165,11 @@ class AgentLogTest {
     @Test
     fun `opening twice does not seal the same call twice`() {
         log.call("read", """{"path":"GitHub/a.txt"}""")
-        AgentLog.open(project)
-        val after = AgentLog.open(project).rows()
+        AgentLog.open(project).beginSession()
+        val after = AgentLog.open(project)
+        after.beginSession()
 
-        assertEquals("one seal, not two", 2, after.size)
+        assertEquals("one seal, not two", 2, after.rows().size)
     }
 
     @Test

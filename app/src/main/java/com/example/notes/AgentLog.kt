@@ -232,26 +232,38 @@ class AgentLog private constructor(
     // ---- opening ------------------------------------------------------------
 
     /**
-     * Reads what is there, numbers the next row, and seals a call that was never answered.
+     * Reads what is there and numbers the next row.
      *
-     * **A dangling call is sealed on open.** The app can be closed, killed, or lose its network
-     * between a call and its result, and the model's next request must not carry a call with no
-     * answer: every endpoint refuses that, and an agent that meets a refusal at the start of a
-     * session has no way back. The seal says so in words, so the record explains itself.
+     * **Nothing is written here.** Opening the record is something the box does to draw a
+     * screen, and a screen that repaired the file while reading it would be a screen with a
+     * side effect on evidence. Sealing belongs to [beginSession].
      */
     private fun load() {
         synchronized(guard) {
-            val rows = rows()
-            val contextRows = contextRows()
             val highest = maxOf(
-                rows.maxOfOrNull { it.id } ?: 0,
-                contextRows.maxOfOrNull { it.id } ?: 0,
+                rows().maxOfOrNull { it.id } ?: 0,
+                contextRows().maxOfOrNull { it.id } ?: 0,
             )
             next = highest + 1
-            val pending = dangling(rows)
+        }
+    }
+
+    /**
+     * Seals a call that was never answered, and says how many.
+     *
+     * **A dangling call must be sealed before a session's first request.** The app can be
+     * closed, killed, or lose its network between a call and its result, and no endpoint will
+     * accept a conversation whose last assistant message calls a tool with no answer: the
+     * agent would meet a refusal at the very start and have no way back. The seal says what
+     * happened in words, so the record explains itself rather than looking truncated.
+     */
+    fun beginSession(): Int {
+        synchronized(guard) {
+            val pending = dangling(rows())
             for (call in pending) {
                 got(call.name, "$FAILURE the app was closed before this answered")
             }
+            return pending.size
         }
     }
 
@@ -294,7 +306,16 @@ class AgentLog private constructor(
                 "$dropped rows from before ${kept.firstOrNull()?.time ?: "now"}",
             )
             try {
-                session.writeText((listOf(marker) + kept.map { it.line }).joinToString("\n") + "\n")
+                val text = (listOf(marker) + kept.map { it.line }).joinToString("\n") + "\n"
+                // **Written beside the file and renamed over it.** The box reads this file
+                // while the app appends to it, so a trim that truncated in place would show a
+                // reader a log that starts correctly and ends in the middle of a row.
+                val next = File(session.parentFile, session.name + ".new")
+                next.writeText(text)
+                if (!next.renameTo(session)) {
+                    session.writeText(text)
+                    next.delete()
+                }
             } catch (t: Throwable) {
                 return 0
             }
