@@ -174,7 +174,11 @@ class AgentSessionTest {
         assertEquals("21st", AgentSession.ordinal(21))
         assertEquals("111th", AgentSession.ordinal(111))
 
-        val second = session().asked(at = 0).reminded().reminded()
+        // **Counted in reminders, not in notifications.** The sentence that comes with the
+        // question is not a reminder; the first repeat is the first one.
+        val first = session().asked(at = 0).reminded()
+        assertEquals("1st reminder · shopping: the agent asked something", first.notice())
+        val second = first.reminded()
         assertEquals(
             "2nd reminder · shopping: the agent asked something",
             second.notice(),

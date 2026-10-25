@@ -298,7 +298,10 @@ data class AgentSession(
             State.STOPPED -> "$project: stopped, ${stopWords(this)}"
             State.IDLE -> return null
         }
-        return if (reminders <= 0) said else "${ordinal(reminders + 1)} reminder · $said"
+        // **`reminders` is how many reminders have been sent, so the first one is the first.**
+        // Counting the notice that came with the question as "1st" made the very first repeat
+        // read "2nd reminder", which is the app being off by one about its own words.
+        return if (reminders <= 0) said else "${ordinal(reminders)} reminder · $said"
     }
 
     private fun stopWords(s: AgentSession): String = when (s.reason) {

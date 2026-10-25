@@ -43,7 +43,7 @@ class AgentSessionsTest {
         assertEquals("asked", read.state, AgentSession.State.ASKED)
         assertEquals("and its clock came with it", 1_700_000_000_000, read.askedAt)
         assertEquals("and how many reminders were spent", 2, read.reminders)
-        assertEquals("so the next one is the third", "3rd reminder · shopping: the agent asked something", read.notice())
+        assertEquals("so the next one is the second", "2nd reminder · shopping: the agent asked something", read.notice())
     }
 
     @Test

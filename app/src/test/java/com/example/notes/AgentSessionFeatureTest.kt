@@ -188,7 +188,7 @@ class AgentSessionFeatureTest : FeatureTest() {
         scene.viewModel.tickAgents(askedAt + AgentSession.REMIND_MS)
         assertEquals(
             "then the second sentence says which one it is",
-            "2nd reminder · groceries: the agent asked something",
+            "1st reminder · groceries: the agent asked something",
             notices.last(),
         )
         assertTrue(
