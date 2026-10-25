@@ -468,6 +468,61 @@ class AgentTest {
     }
 
     @Test
+    fun `the call whose result is about to be written is not a dangling one`() {
+        // **The clear-up edit was impossible before this.** The row for a call is appended before
+        // the tool runs — that is what makes a crash mid-call visible in the record — so the file
+        // the edit tool reads always ends with its own unanswered `CALL edit`. The pairing rule
+        // counted that as a broken pair, so every real clear-up was refused with "the call to edit
+        // has no result left", and the only tests that passed were the ones that wrote the file by
+        // hand.
+        log.told("a task")
+        log.note("agent", "a note that can go")
+        log.told("another task")
+        // The call in flight, exactly as the loop writes it.
+        log.call("edit", """{"path":"agent/context.log"}""")
+
+        val after = log.rows()
+            .filterNot { it.body == "a note that can go" }
+            .map { it.line }
+
+        assertEquals(
+            "the edit is a legal clear-up",
+            null,
+            AgentLog.clearUpProblem(log.rows().map { it.line }, after),
+        )
+    }
+
+    @Test
+    fun `but a call earlier in the file still has to keep its result`() {
+        // The rule that was being protected is still the rule: only the newest call may be
+        // unanswered, because only the newest one is the one being answered.
+        log.told("a task")
+        log.call("tree", """{"path":"GitHub"}""")
+        log.got("tree", "0\nGitHub/milk.txt")
+        log.told("another task")
+        log.call("read", """{"path":"GitHub/milk.txt"}""")
+
+        val after = log.rows()
+            .filterNot { it.kind == AgentLog.CALL && it.name == "tree" }
+            .filterNot { it.kind == AgentLog.GOT && it.name == "tree" }
+            .map { it.line }
+
+        assertEquals(
+            "that pair was whole, so removing it is allowed",
+            null,
+            AgentLog.clearUpProblem(log.rows().map { it.line }, after),
+        )
+
+        val broken = log.rows()
+            .filterNot { it.kind == AgentLog.GOT && it.name == "tree" }
+            .map { it.line }
+        assertTrue(
+            "but a result removed on its own is still refused",
+            AgentLog.clearUpProblem(log.rows().map { it.line }, broken) != null,
+        )
+    }
+
+    @Test
     fun `clear-up removes rows and does not rewrite or add them`() {
         log.told("a task")
         val changed = contextText().replace("a task", "a different task")
@@ -763,6 +818,8 @@ class AgentTest {
         // The record stays a conversation: every call has a result after it.
         assertTrue("every call is answered", log.dangling(log.rows()).isEmpty())
 
+        // The person is done speaking: the next turn is a normal one.
+        speak = false
         agent.burst("never mind, do the other thing")
         val second = door.asked.last().messages
         assertEquals(
@@ -913,9 +970,10 @@ class AgentTest {
             log.told("task $i")
             log.note("agent", "working on $i")
         }
-        // A small but real limit: the app trims to half of it, so the numbers have to leave room
-        // for the newest conversation and still drop the old ones.
-        val limits = ContextBudget.Limits.of(triggerAsked = 0, hardAsked = 220, ceiling = 100_000)
+        // A small but real pair of numbers: the trigger is what the agent is asked at, and the
+        // hard limit sits above it, because the app's trim is the last resort and never the first
+        // thing that happens. The content is a few hundred tokens, so both are crossed.
+        val limits = ContextBudget.Limits.of(triggerAsked = 100, hardAsked = 140, ceiling = 100_000)
         val door = ScriptedDoor(Reply("", listOf(call("conclude", """{"text":"done"}"""))))
         val before = Trace.report().lines.toSet()
 

@@ -192,7 +192,14 @@ class AgentLog private constructor(
                     }
                 }
             }
-            val left = waiting.firstOrNull()
+            // **The call being answered right now is not a dangling one.** The row for this very
+            // edit is already in the context — it is written before the tool runs, which is what
+            // makes a crash mid-call visible — and its result is written immediately afterwards.
+            // Counting it here made the clear-up edit impossible: every attempt was refused with
+            // "the call to edit has no result left", because the file always ended with the call
+            // whose result was about to be appended.
+            val newest = rows.lastOrNull()?.id
+            val left = waiting.firstOrNull { it.id != newest }
             if (left != null) {
                 return "The call to ${left.name} has no result left: remove the pair together"
             }
