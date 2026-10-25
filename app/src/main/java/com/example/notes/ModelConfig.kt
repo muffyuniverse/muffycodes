@@ -250,6 +250,12 @@ object ModelConfigFile {
         // "at 58 [character 59 line 4]". The character offset is the one that appears in both,
         // so it is what the line is counted from — and a message that already names a line is
         // passed through with its own words rather than re-derived.
+        // **Its own line wins when it has one.** `org.json` sometimes reports
+        // "at 97 [character 0 line 5]" — a character offset of zero with the line it really
+        // means in brackets — so counting from the offset put the mistake on line 1 of a file
+        // whose fifth line is the broken one. The bracket form is the parser's own answer.
+        Regex("""line (\d+)""").find(message)?.groupValues?.getOrNull(1)?.toIntOrNull()
+            ?.let { return "line $it: $message" }
         val offset = Regex("""character (\d+)""").find(message)
             ?.groupValues?.getOrNull(1)?.toIntOrNull()
             ?: Regex("""\bat (\d+)""").find(message)

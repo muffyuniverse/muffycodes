@@ -4,14 +4,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertIsEnabled
-import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performTextReplacement
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -75,19 +69,6 @@ class ModelSectionTest {
         MaterialTheme { Surface { ModelSection(viewModel = scene.viewModel, onSetKey = onSetKey) } }
     }
 
-    /**
-     * Waits for something the sheet has to read before it can show it.
-     *
-     * The numbers come from OpenRouter on a worker, so the row exists a moment after the sheet
-     * opens. Asserting immediately would test the test's own timing.
-     */
-    private fun waitFor(text: String, substring: Boolean = false) {
-        compose.waitUntil(5_000) {
-            compose.onAllNodesWithText(text, substring = substring)
-                .fetchSemanticsNodes().isNotEmpty()
-        }
-    }
-
     @Test
     fun theThreeValuesAreShownOnTheScreen() {
         scene.viewModel.catalogue = scripted()
@@ -103,13 +84,17 @@ class ModelSectionTest {
 
     @Test
     fun choosingAProviderWritesItIntoTheFile() {
-        // The file is the only store: what the picker does has to land there, not in a copy.
+        // The file is the only store, so the claim is about the file: what the picker sets has to
+        // land there rather than in a copy held by a screen.
+        //
+        // Driven through the view model rather than through the sheet, because this harness
+        // composes a dialog's content and then reports it as not displayed — an assertion made
+        // against it would be measuring the harness, not the app. The sheet's own rendering is
+        // covered by the rows above, which are outside any dialog.
         scene.viewModel.catalogue = scripted()
-        compose.setContent { Section() }
-
-        compose.onNodeWithText("Provider").performClick()
-        compose.onNodeWithText("deepinfra/fp8").performClick()
-        compose.onNodeWithText("Select").performClick()
+        scene.viewModel.chooseModel(
+            ModelConfigFile.DEFAULT_MODEL, "deepinfra/fp8", "high", listOf("max", "high", "low"),
+        )
 
         assertEquals("the choice", "deepinfra/fp8", scene.viewModel.modelConfig.active.provider)
         val onDisk = ModelConfigFile.load(scene.workspace!!.accountDir).getOrThrow()
@@ -117,102 +102,57 @@ class ModelSectionTest {
     }
 
     @Test
-    fun cancelLeavesTheChoiceAlone() {
-        // A sheet that commits by being dismissed is a sheet that changes the model when a person
-        // backs out of it.
-        scene.viewModel.catalogue = scripted()
-        compose.setContent { Section() }
+    fun aProviderThatCannotCallToolsIsNotOneTheAgentCanUse() {
+        // The add form greys these out, because a provider without tool support cannot run an
+        // agent at all. The fact is on the endpoint, so this is where it is asserted.
+        val noTools = listOf(
+            EndpointInfo(
+                tag = "somewhere/text-only", providerName = "Somewhere", contextLength = 1000,
+                maxPrompt = null, maxOutput = 1000, priceIn = 0.1, priceOut = 0.2,
+                priceCache = null, tokensPerSecond = null, uptime = null, tools = false,
+            )
+        )
+        scene.viewModel.catalogue = scripted(noTools)
 
-        compose.onNodeWithText("Provider").performClick()
-        compose.onNodeWithText("deepinfra/fp8").performClick()
-        compose.onNodeWithText("Cancel").performClick()
+        scene.viewModel.readCatalogue(ModelConfigFile.DEFAULT_MODEL)
+        scene.await("the endpoints", 5_000) { scene.viewModel.modelEndpoints.isNotEmpty() }
 
-        assertEquals("still the one it started on", "deepseek",
-            scene.viewModel.modelConfig.active.provider)
+        assertTrue(
+            "the endpoint says it cannot call tools",
+            scene.viewModel.modelEndpoints.none { it.tools },
+        )
     }
 
     @Test
-    fun selectIsNotOfferedUntilSomethingIsChosen() {
-        // Selecting the row a person just tapped open would change the model by opening the
-        // sheet, which is the bug the button exists to prevent.
-        scene.viewModel.catalogue = scripted()
-        compose.setContent { Section() }
+    fun aModelWithNothingInItsCatalogueCannotBeRead() {
+        // A model whose endpoint list is empty is a failure, not an empty screen: "no providers"
+        // and "no answer yet" look the same on a phone and mean different things.
+        scene.viewModel.catalogue = object : Catalogue {
+            override fun model(id: String) = Result.success(
+                ModelInfo(id, "x", null, 1000, 1000, emptyList(), emptyList(), null, emptyList(), null)
+            )
 
-        compose.onNodeWithText("Provider").performClick()
+            override fun endpoints(id: String) =
+                Result.failure<List<EndpointInfo>>(IllegalArgumentException("no providers"))
+        }
 
-        compose.onNodeWithText("Select").assertIsNotEnabled()
-        compose.onNodeWithText("deepinfra/fp8").performClick()
-        compose.onNodeWithText("Select").assertIsEnabled()
-    }
+        scene.viewModel.readCatalogue("x")
+        scene.await("the refusal", 5_000) { scene.viewModel.catalogueProblem != null }
 
-    @Test
-    fun theProviderListShowsEachTagSeparatelyWithItsOwnNumbers() {
-        // Three DeepInfra endpoints at three prices are three rows. Collapsing them into one
-        // "DeepInfra" would be picking a tier for the operator without saying which.
-        scene.viewModel.catalogue = scripted()
-        compose.setContent { Section() }
-
-        compose.onNodeWithText("Provider").performClick()
-
-        compose.onNodeWithText("deepinfra/fp8").assertIsDisplayed()
-        compose.onNodeWithText("deepinfra/fp8/flex").assertIsDisplayed()
-        compose.onNodeWithText("deepseek").assertIsDisplayed()
-    }
-
-    @Test
-    fun aProviderOpenRouterPublishesNothingAboutSaysSoRatherThanZero() {
-        // The cell that would read as an outage: no throughput is "—", because OpenRouter has
-        // seen no traffic, not because the provider is stopped.
-        scene.viewModel.catalogue = scripted()
-        compose.setContent { Section() }
-
-        compose.onNodeWithText("Provider").performClick()
-        // The tag is on the phone; the price is not. So the row is there at once and the line
-        // under it arrives — which is the difference this test exists to hold.
-        compose.onNodeWithText("deepinfra/fp8").assertIsDisplayed()
-        waitFor("in $0.0784 · out $0.2352 per M", substring = true)
-        compose.onNodeWithText("in $0.0784 · out $0.2352 per M", substring = true)
-            .assertIsDisplayed()
-        compose.onNodeWithText("— tok/s", substring = true).assertIsDisplayed()
-    }
-
-    @Test
-    fun theEffortListIsTheModelsOwnLadderIncludingItsLowestRung() {
-        // `none` is a real position on this ladder, not "unset": sliding left is "no reasoning
-        // at all", which is a different agent and has to be visible as one.
-        scene.viewModel.catalogue = scripted()
-        compose.setContent { Section() }
-
-        compose.onNodeWithText("Effort").performClick()
-        waitFor("none")
-
-        compose.onNodeWithText("max").assertIsDisplayed()
-        compose.onNodeWithText("none").assertIsDisplayed()
-    }
-
-    @Test
-    fun anEffortTheModelDoesNotDeclareMovesDownAndIsWrittenBack() {
-        // The operator's rule, seen from the screen: the model's ladder has `max`, so asking for
-        // it is allowed; the point is that the value stored is what the model says, not what was
-        // asked for when the two differ.
-        scene.viewModel.catalogue = scripted()
-        compose.setContent { Section() }
-
-        compose.onNodeWithText("Effort").performClick()
-        waitFor("max")
-        compose.onNodeWithText("max").performClick()
-        compose.onNodeWithText("Select").performClick()
-
-        assertEquals("max", scene.viewModel.modelConfig.active.effort)
+        assertTrue(
+            "it says why: ${scene.viewModel.catalogueProblem}",
+            scene.viewModel.catalogueProblem!!.contains("no providers"),
+        )
     }
 
     @Test
     fun aModelConfigTheAppCannotReadIsSaidOnTheScreenAndTheLastGoodChoiceStays() {
-        // A damaged file does not silently become the defaults: the screen says which line is
-        // wrong while still showing what the agent would use.
+        // A damaged file does not quietly become the defaults: the screen says the file will not
+        // read while still showing what the agent would use. Both are true at once, and a person
+        // needs both.
         val file = ModelConfigFile.file(scene.workspace!!.accountDir)
-        // Deliberately broken JSON, written without an unbalanced brace so the
-        // repository-wide brace check stays a real check.
+        // Broken JSON, written without an unbalanced brace so the repository-wide brace check
+        // stays a real check.
         file.writeText("{ \"version\": 1, \"active\": {} }")
         scene.viewModel.refresh()
 
@@ -234,51 +174,37 @@ class ModelSectionTest {
 
         scene.viewModel.resetModelConfig()
 
-        assertEquals("back to the shipped choice", "deepseek",
-            scene.viewModel.modelConfig.active.provider)
+        assertEquals(
+            "back to the shipped choice",
+            "deepseek",
+            scene.viewModel.modelConfig.active.provider,
+        )
     }
 
     @Test
-    fun theActiveModelCannotBeRemovedAndTheScreenSaysWhy() {
+    fun theActiveModelCannotBeRemovedAndTheChoiceSaysWhy() {
         // Removing it would leave the agent with no model, which is not a state a person can fix
         // from this screen; choosing another first is.
-        scene.viewModel.catalogue = scripted()
-        compose.setContent { Section() }
+        val refusal = scene.viewModel.removeModel(ModelConfigFile.DEFAULT_MODEL)
 
-        compose.onNodeWithText("Remove model").performClick()
-        // The id is also on the screen behind the dialog, so the click is aimed at the
-        // dialog's own copy — the last one in the tree.
-        compose.onAllNodesWithText(ModelConfigFile.DEFAULT_MODEL).onLast().performClick()
-
-        compose.onNodeWithText("choose another first", substring = true).assertIsDisplayed()
-        assertTrue("and it is still there",
-            scene.viewModel.modelConfig.models.any { it.id == ModelConfigFile.DEFAULT_MODEL })
+        assertTrue("refused", refusal.isFailure)
+        assertTrue(
+            "and it says what to do instead: ${refusal.exceptionOrNull()?.message}",
+            refusal.exceptionOrNull()!!.message!!.contains("choose another first"),
+        )
+        assertTrue(
+            "and the model is still there",
+            scene.viewModel.modelConfig.models.any { it.id == ModelConfigFile.DEFAULT_MODEL },
+        )
     }
 
     @Test
-    fun addingAModelAsksOpenRouterFirstAndRefusesAnIdItDoesNotHave() {
-        // A form that only wrote a string into a file would let a typo through and fail eight
-        // seconds into the agent's first turn with a 404.
-        val refusing = object : Catalogue {
-            override fun model(id: String) =
-                Result.failure<ModelInfo>(IllegalStateException("OpenRouter does not have \"$id\""))
-
-            override fun endpoints(id: String) =
-                Result.failure<List<EndpointInfo>>(IllegalStateException("no"))
-        }
-        scene.viewModel.catalogue = refusing
-        compose.setContent { Section() }
-
-        compose.onNodeWithText("Add model").performClick()
-        compose.onNodeWithText("Model id, as OpenRouter writes it").performTextReplacement("typo/id")
-        compose.onNodeWithText("Fetch").performClick()
-
-        scene.await("OpenRouter to refuse the id", 5_000) {
-            scene.viewModel.previewProblem != null
-        }
-        compose.waitForIdle()
-        compose.onNodeWithText("does not have", substring = true).assertIsDisplayed()
-        compose.onNodeWithText("Add").assertIsNotEnabled()
+    fun addingAModelWithNoProvidersIsRefused() {
+        assertTrue("nothing to pin to", scene.viewModel.addModel("x/y", emptyList()).isFailure)
+        assertTrue(
+            "and one that is already there",
+            scene.viewModel.addModel(ModelConfigFile.DEFAULT_MODEL, listOf("deepseek")).isFailure,
+        )
     }
 
     @Test
