@@ -16,6 +16,8 @@ import java.io.File
  * a service has none — and because the two callers sharing one implementation is the whole point,
  * so the implementation had better work when it is the only thing running.
  */
+@org.junit.runner.RunWith(org.robolectric.RobolectricTestRunner::class)
+@org.robolectric.annotation.Config(sdk = [34])
 class AgentRunnerTest {
 
     private lateinit var root: File
@@ -24,6 +26,8 @@ class AgentRunnerTest {
     private lateinit var settings: SettingsStore
 
     private val author = GitAuthor("Muffy", "muffy@example.com")
+
+    private val app: android.app.Application get() = org.robolectric.RuntimeEnvironment.getApplication()
 
     /** Answers every request with `wait`, and counts them. */
     private class WaitDoor : Door {
@@ -46,10 +50,9 @@ class AgentRunnerTest {
         ws.write(File(ws.repoOf("shopping"), "milk.txt"), "two litres")
         git = ProjectGit(ws, { null }, { author })
         git.init("shopping")
-        settings = SettingsStore(
-            org.robolectric.RuntimeEnvironment.getApplication(),
-            "runner-settings-${System.nanoTime()}",
-        )
+        // The settings store is a phone's preferences, so it needs a phone: the runner reads the
+        // reminder interval and the two context limits from it, and a fake would test the fake.
+        settings = SettingsStore(app, "runner-settings-${System.nanoTime()}")
     }
 
     @After
