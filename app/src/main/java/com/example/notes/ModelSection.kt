@@ -17,7 +17,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -25,9 +24,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -169,33 +165,17 @@ private fun ModelPicker(
     val config = viewModel.modelConfig
     val active = config.active
     var chosen by remember { mutableStateOf<String?>(null) }
-    var numbers by remember { mutableStateOf<List<EndpointInfo>?>(null) }
-    var failure by remember { mutableStateOf<String?>(null) }
-    var info by remember { mutableStateOf<ModelInfo?>(null) }
-    var reading by remember { mutableStateOf(what != MODEL) }
+    val numbers = viewModel.modelEndpoints
+    val info = viewModel.modelInfo
+    val failure = viewModel.catalogueProblem
+    val reading = viewModel.catalogueReading
 
-    // **Off the main thread, and once per opening.** "Updated on entering the selection menu"
-    // is exactly this: fresh numbers where the person is looking, no polling anywhere. It is
-    // not in the composition itself, because a list that fetches while it draws is a list that
-    // freezes when the network is slow — and it is slow precisely when a person opens it.
+    // **The shapes, now; the numbers, when they arrive.** "Updated on entering the selection
+    // menu" is what this is: one read per opening, on the app's worker, with no polling
+    // anywhere. It is not inside the composition, because a sheet that fetches while it draws
+    // freezes exactly when the network is slow — which is when it was opened.
     LaunchedEffect(what, active.model) {
-        if (what == MODEL) {
-            reading = false
-        } else {
-            val found = withContext(Dispatchers.IO) {
-                viewModel.catalogue.model(active.model) to
-                    viewModel.catalogue.endpoints(active.model)
-            }
-            found.first.fold(
-                onSuccess = { info = it },
-                onFailure = { failure = it.message },
-            )
-            found.second.fold(
-                onSuccess = { numbers = it },
-                onFailure = { if (failure == null) failure = it.message },
-            )
-            reading = false
-        }
+        if (what != MODEL) viewModel.readCatalogue(active.model)
     }
 
     val allowed = config.providersOf(active.model)
@@ -222,20 +202,25 @@ private fun ModelPicker(
                 }
                 val rows = when (what) {
                     MODEL -> config.models.map { it.id }
-                    PROVIDER -> numbers?.filter { it.tag in allowed }.orEmpty().map { it.tag }
-                    else -> info?.efforts.orEmpty()
+                    // From the config, not from the answer: these are the tags the person chose,
+                    // and they are on the phone. A sheet that showed nothing until OpenRouter
+                    // replied would be a sheet that could not be used offline.
+                    PROVIDER -> allowed
+                    else -> info?.efforts.orEmpty().ifEmpty { listOf(active.effort) }
                 }
                 if (rows.isEmpty() && failure == null) {
                     Text(
-                        text = when {
-                            reading -> "Reading OpenRouter…"
-                            what == PROVIDER ->
-                                "No providers read. The list comes from OpenRouter, so it " +
-                                    "needs a key and a connection."
-                            else -> "This model declares no effort levels, so there is nothing " +
-                                "to choose and nothing is sent."
-                        },
+                        text = "Nothing to choose from yet.",
                         style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                if (reading && what != MODEL) {
+                    // Said in the list rather than instead of it: the rows are readable while
+                    // the prices are still on their way.
+                    Text(
+                        text = "Reading OpenRouter…",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
@@ -324,13 +309,15 @@ private fun detailFor(
     what: String,
     row: String,
     info: ModelInfo?,
-    numbers: List<EndpointInfo>?,
+    numbers: List<EndpointInfo>,
 ): String {
     if (what == MODEL) return ""
     if (what == EFFORT) {
         return if (row == info?.defaultEffort) "the model's own default" else ""
     }
-    val endpoint = numbers?.firstOrNull { it.tag == row } ?: return ""
+    // No answer yet means no line under the tag — not a row of dashes, which would look like a
+    // provider OpenRouter publishes nothing about rather than one it has not been asked about.
+    val endpoint = numbers.firstOrNull { it.tag == row } ?: return ""
     val parts = ArrayList<String>(5)
     parts.add("in ${money(endpoint.priceIn)} · out ${money(endpoint.priceOut)} per M")
     parts.add("cache ${money(endpoint.priceCache)}")
@@ -376,12 +363,12 @@ fun released(at: Long?): String = if (at == null) "—" else
 @Composable
 private fun AddModelDialog(viewModel: AppViewModel, onDismiss: () -> Unit) {
     var id by remember { mutableStateOf("") }
-    var info by remember { mutableStateOf<ModelInfo?>(null) }
-    var numbers by remember { mutableStateOf<List<EndpointInfo>?>(null) }
+    var asked by remember { mutableStateOf(false) }
     var ticked by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var failure by remember { mutableStateOf<String?>(null) }
-    var fetching by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
+    val info = viewModel.previewInfo
+    val numbers = viewModel.previewEndpoints
+    val failure = viewModel.previewProblem
+    val fetching = viewModel.previewReading
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -392,9 +379,7 @@ private fun AddModelDialog(viewModel: AppViewModel, onDismiss: () -> Unit) {
                     value = id,
                     onValueChange = {
                         id = it
-                        info = null
-                        numbers = null
-                        failure = null
+                        asked = false
                     },
                     label = { Text("Model id, as OpenRouter writes it") },
                     placeholder = { Text(ModelConfigFile.DEFAULT_MODEL) },
@@ -403,31 +388,15 @@ private fun AddModelDialog(viewModel: AppViewModel, onDismiss: () -> Unit) {
                 TextButton(
                     enabled = id.isNotBlank() && !fetching,
                     onClick = {
-                        failure = null
-                        fetching = true
-                        // The two reads are two round trips, and a button that froze the window
+                        asked = true
+                        // Two round trips, on the app's worker: a button that froze the window
                         // for them would look like a button that did nothing.
-                        scope.launch {
-                            val asked = id.trim()
-                            val found = withContext(Dispatchers.IO) {
-                                viewModel.catalogue.model(asked) to
-                                    viewModel.catalogue.endpoints(asked)
-                            }
-                            found.first.fold(
-                                onSuccess = { seen -> info = seen },
-                                onFailure = { failure = it.message },
-                            )
-                            found.second.fold(
-                                onSuccess = { list -> numbers = list },
-                                onFailure = { if (failure == null) failure = it.message },
-                            )
-                            fetching = false
-                        }
+                        viewModel.readPreview(id)
                     },
                 ) { Text(if (fetching) "Reading…" else "Fetch") }
 
                 val found = info
-                if (found != null) {
+                if (found != null && asked) {
                     Text(found.name, style = MaterialTheme.typography.bodyMedium)
                     Text(
                         text = "${found.inputModalities.joinToString("+")} -> " +
@@ -438,7 +407,7 @@ private fun AddModelDialog(viewModel: AppViewModel, onDismiss: () -> Unit) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     LazyColumn(modifier = Modifier.heightIn(max = 240.dp)) {
-                        items(numbers.orEmpty()) { endpoint ->
+                        items(numbers) { endpoint ->
                             val usable = endpoint.tools
                             Row(
                                 modifier = Modifier

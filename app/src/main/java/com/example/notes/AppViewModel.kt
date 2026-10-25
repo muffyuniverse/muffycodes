@@ -170,6 +170,100 @@ class AppViewModel @JvmOverloads constructor(
         { activeLogin?.let { credentials.modelKey(it) } }
     )
 
+    /**
+     * What OpenRouter says about the model in use, read when a picker opens.
+     *
+     * **State rather than a call from the screen**, for two reasons. A sheet that fetches while
+     * it draws freezes exactly when the network is slow, which is when somebody opened it; and
+     * the *choices* do not need the network at all — the provider tags are in the config file —
+     * so only the numbers are allowed to be late. Before they arrive the rows are still there.
+     */
+    var modelInfo: ModelInfo? by mutableStateOf(null)
+        private set
+
+    var modelEndpoints: List<EndpointInfo> by mutableStateOf(emptyList())
+        private set
+
+    var catalogueProblem: String? by mutableStateOf(null)
+        private set
+
+    var catalogueReading: Boolean by mutableStateOf(false)
+        private set
+
+    /** The model the numbers above belong to, so a picker does not re-read on every frame. */
+    private var catalogueFor: String? = null
+
+    /** Reads the numbers for [model], once per model unless [force]. */
+    fun readCatalogue(model: String, force: Boolean = false) {
+        if (!force && model == catalogueFor && (modelInfo != null || catalogueProblem != null)) return
+        catalogueFor = model
+        catalogueReading = true
+        catalogueProblem = null
+        val source = catalogue
+        onWorker {
+            val info = source.model(model)
+            val endpoints = source.endpoints(model)
+            main.post {
+                info.fold(
+                    onSuccess = { modelInfo = it },
+                    onFailure = { catalogueProblem = it.message },
+                )
+                endpoints.fold(
+                    onSuccess = { modelEndpoints = it },
+                    onFailure = { if (catalogueProblem == null) catalogueProblem = it.message },
+                )
+                catalogueReading = false
+            }
+        }
+    }
+
+    /** The add form's own read: a model that is not in use yet. */
+    var previewInfo: ModelInfo? by mutableStateOf(null)
+        private set
+
+    var previewEndpoints: List<EndpointInfo> by mutableStateOf(emptyList())
+        private set
+
+    var previewProblem: String? by mutableStateOf(null)
+        private set
+
+    var previewReading: Boolean by mutableStateOf(false)
+        private set
+
+    /**
+     * Asks OpenRouter about [id] before anything is written.
+     *
+     * A form that only wrote a string into the file would let a typo through and fail eight
+     * seconds into the agent's first turn with a 404; this turns that into a sentence at the
+     * moment the person is looking.
+     */
+    fun readPreview(id: String) {
+        val clean = id.trim()
+        previewInfo = null
+        previewEndpoints = emptyList()
+        previewProblem = null
+        previewReading = true
+        val source = catalogue
+        onWorker {
+            val info = source.model(clean)
+            val endpoints = if (info.isSuccess) source.endpoints(clean) else
+                Result.failure(IllegalStateException("not asked"))
+            main.post {
+                info.fold(
+                    onSuccess = { previewInfo = it },
+                    onFailure = { previewProblem = it.message },
+                )
+                if (info.isSuccess) {
+                    endpoints.fold(
+                        onSuccess = { previewEndpoints = it },
+                        onFailure = { previewProblem = it.message },
+                    )
+                }
+                previewReading = false
+            }
+        }
+    }
+
     /** The search text, which searches inside the current project (§7). */
     var query: String by mutableStateOf("")
 

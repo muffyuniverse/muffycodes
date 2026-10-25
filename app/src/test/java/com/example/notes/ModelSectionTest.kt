@@ -108,7 +108,6 @@ class ModelSectionTest {
         compose.setContent { Section() }
 
         compose.onNodeWithText("Provider").performClick()
-        waitFor("deepinfra/fp8")
         compose.onNodeWithText("deepinfra/fp8").performClick()
         compose.onNodeWithText("Select").performClick()
 
@@ -125,7 +124,6 @@ class ModelSectionTest {
         compose.setContent { Section() }
 
         compose.onNodeWithText("Provider").performClick()
-        waitFor("deepinfra/fp8")
         compose.onNodeWithText("deepinfra/fp8").performClick()
         compose.onNodeWithText("Cancel").performClick()
 
@@ -141,7 +139,6 @@ class ModelSectionTest {
         compose.setContent { Section() }
 
         compose.onNodeWithText("Provider").performClick()
-        waitFor("deepinfra/fp8")
 
         compose.onNodeWithText("Select").assertIsNotEnabled()
         compose.onNodeWithText("deepinfra/fp8").performClick()
@@ -156,7 +153,6 @@ class ModelSectionTest {
         compose.setContent { Section() }
 
         compose.onNodeWithText("Provider").performClick()
-        waitFor("deepinfra/fp8")
 
         compose.onNodeWithText("deepinfra/fp8").assertIsDisplayed()
         compose.onNodeWithText("deepinfra/fp8/flex").assertIsDisplayed()
@@ -171,9 +167,10 @@ class ModelSectionTest {
         compose.setContent { Section() }
 
         compose.onNodeWithText("Provider").performClick()
-        waitFor("deepinfra/fp8")
-
-        compose.onNodeWithText("in $0.0784 · out $0.2352 per M", substring = true)
+        // The tag is on the phone; the price is not. So the row is there at once and the line
+        // under it arrives — which is the difference this test exists to hold.
+        compose.onNodeWithText("deepinfra/fp8").assertIsDisplayed()
+        waitFor("in $0.0784 · out $0.2352 per M", substring = true)
             .assertIsDisplayed()
         compose.onNodeWithText("— tok/s", substring = true).assertIsDisplayed()
     }
@@ -275,7 +272,10 @@ class ModelSectionTest {
         compose.onNodeWithText("Model id, as OpenRouter writes it").performTextReplacement("typo/id")
         compose.onNodeWithText("Fetch").performClick()
 
-        waitFor("does not have", substring = true)
+        scene.await("OpenRouter to refuse the id", 5_000) {
+            scene.viewModel.previewProblem != null
+        }
+        compose.waitForIdle()
         compose.onNodeWithText("does not have", substring = true).assertIsDisplayed()
         compose.onNodeWithText("Add").assertIsNotEnabled()
     }
