@@ -146,8 +146,23 @@ class AgentLog private constructor(
          * The body is the only part that can hold a separator, and [LogFormat] escapes it — so
          * two spaces followed by anything is the detail, always.
          */
+        /** Six columns: the record as this build writes it. */
         private val ROW =
             Regex("""^(\d\d:\d\d:\d\d\.\d\d\d) +(\d+) +(\S+) +(\S+) +(\S+)(?:  (.*))?$""")
+
+        /**
+         * Five columns: the row an older build wrote, before `ctx` existed.
+         *
+         * **Read, not rejected.** An update that treated every row of yesterday's record as
+         * unreadable would lose every session's memory on the phone it was installed on — and it
+         * would do it quietly, because a broken row is drawn rather than dropped. So the old shape
+         * parses, its ctx is left unknown, and [foldLegacy] resolves it from the old second file.
+         */
+        private val LEGACY_ROW =
+            Regex("""^(\d\d:\d\d:\d\d\.\d\d\d) +(\d+) +(\S+) +(\S+)  (.*)$|^(\d\d:\d\d:\d\d\.\d\d\d) +(\d+) +(\S+) +(\S+)$""")
+
+        /** A row from before the column existed, waiting to be told what it was. */
+        const val UNKNOWN = ""
 
         /**
          * One lock per record file, for the whole process.
@@ -166,7 +181,7 @@ class AgentLog private constructor(
             val dir = File(projectDir, DIR)
             dir.mkdirs()
             val log = AgentLog(File(dir, SESSION))
-            log.foldLegacyContext()
+            log.foldLegacy()
             log.load()
             return log
         }
@@ -180,10 +195,9 @@ class AgentLog private constructor(
          */
         fun parseRow(line: String): Row = try {
             val match = ROW.matchEntire(line)
-            if (match == null) {
-                Row("", 0, "?", "?", "?", line, broken = true)
-            } else {
-                Row(
+            val legacy = if (match == null) LEGACY_ROW.matchEntire(line) else null
+            when {
+                match != null -> Row(
                     time = match.groupValues[1],
                     id = match.groupValues[2].toInt(),
                     kind = match.groupValues[3],
@@ -192,6 +206,23 @@ class AgentLog private constructor(
                     detail = match.groupValues[6],
                     raw = line,
                 )
+
+                legacy != null -> {
+                    // Either shape of the old row: with a body, or ending at the name.
+                    val hasBody = legacy.groupValues[1].isNotEmpty()
+                    val at = if (hasBody) 0 else 5
+                    Row(
+                        time = legacy.groupValues[at + 1],
+                        id = legacy.groupValues[at + 2].toInt(),
+                        kind = legacy.groupValues[at + 3],
+                        ctx = UNKNOWN,
+                        name = legacy.groupValues[at + 4],
+                        detail = if (hasBody) legacy.groupValues[5] else "",
+                        raw = line,
+                    )
+                }
+
+                else -> Row("", 0, "?", "?", "?", line, broken = true)
             }
         } catch (t: Throwable) {
             Row("", 0, "?", "?", "?", line, broken = true)
@@ -448,30 +479,54 @@ class AgentLog private constructor(
     }
 
     /**
-     * Folds a record written by an older build — two files — into the one file.
+     * Brings a record written by an older build into this one, once.
      *
-     * The old `context.log` held exactly the rows that were in the context, so it says what the
-     * ctx column now says: read once, mark the rows it names `in` and the rest `app`, delete it.
-     * Without this an update would silently drop every session's working context, which is the one
-     * thing a record must not do quietly.
+     * Two things changed, and both are about not losing what is already on the phone:
+     *
+     * 1. **The row gained a column.** An old row parses with its `ctx` unknown; the old
+     *    `context.log` says which rows were in it, and a row it does not name was out because the
+     *    app had trimmed it or the agent had cleared it — `app` is the honest answer, since the old
+     *    file cannot tell those apart. With no old context file, every old row is `in`: before the
+     *    column existed, both files held the same rows.
+     * 2. **The second file is deleted.** Once folded, nothing keeps it in step, and a file that
+     *    claims to be the context while nothing writes it is a lie waiting to be believed.
+     *
+     * Rows are re-rendered, not flipped: an old row's line has no ctx column to flip.
      */
-    private fun foldLegacyContext() {
+    private fun foldLegacy() {
         val old = File(file.parentFile, CONTEXT)
-        if (!old.isFile) return
         try {
-            val inContext = old.readText().split("\n")
-                .filter { it.isNotBlank() }
-                .map { parseRow(it).id }
-                .toSet()
-            // A row the old context did not hold was either the app's own or already forgotten;
-            // `app` is the honest answer, because the old file cannot tell the two apart.
-            val marked = rows().map { it.flipped(if (it.id in inContext) IN else APP) }
+            val rows = rows()
+            if (rows.none { it.ctx == UNKNOWN } && !old.isFile) return
+            val inContext = if (old.isFile) {
+                old.readText().split("\n").filter { it.isNotBlank() }.mapNotNull { line ->
+                    // The old context held the same rows in the same columns, so the id is the
+                    // second field — read positionally, because these lines are the format before
+                    // this one and re-parsing them as the new shape is what would misread them.
+                    line.trim().split(Regex(" +")).getOrNull(1)?.toIntOrNull()
+                }.toSet()
+            } else {
+                null
+            }
+            val marked = rows.map { row ->
+                if (row.ctx != UNKNOWN) {
+                    row
+                } else {
+                    // `raw` is dropped so the line is written in the new shape, with the column.
+                    val ctx = when {
+                        inContext == null -> IN
+                        row.id in inContext -> IN
+                        else -> APP
+                    }
+                    row.copy(ctx = ctx, raw = "")
+                }
+            }
             rewrite(marked.map { it.line })
-            old.delete()
+            if (old.isFile) old.delete()
             seen = size()
         } catch (t: Throwable) {
-            // A record that cannot be folded is left as it is, and the old file is not deleted —
-            // so nothing is lost, and the next open tries again.
+            // A record that cannot be folded is left exactly as it is, and the old file is not
+            // deleted — so nothing is lost, and the next open tries again.
         }
     }
 

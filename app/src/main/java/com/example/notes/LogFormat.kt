@@ -102,12 +102,16 @@ object LogFormat {
      * match stops at the fourth column, so the name and the body are carried over exactly as the
      * file had them.
      */
-    fun flipCtx(line: String, ctx: String): String =
-        HEAD.replaceFirst(line) { m ->
-            val id = m.groupValues[2].padStart(4)
-            val kind = m.groupValues[3].padEnd(7)
-            "${m.groupValues[1]} $id $kind ${ctx.padEnd(3)} "
-        }
+    fun flipCtx(line: String, ctx: String): String {
+        val match = HEAD.find(line) ?: return line
+        val stamp = match.groupValues[1]
+        val id = match.groupValues[2].padStart(4)
+        val kind = match.groupValues[3].padEnd(7)
+        // Everything after the separator belongs to the name and the body, and is carried over as
+        // the same characters: this function has no way to touch them.
+        val rest = line.substring(match.range.last + 1)
+        return "$stamp $id $kind ${ctx.padEnd(3)} $rest"
+    }
 
     /** The four fixed columns, ending at the space before the name. */
     private val HEAD = Regex("""^(\d\d:\d\d:\d\d\.\d\d\d) +(\d+) +(\S+) +(\S+) +""")

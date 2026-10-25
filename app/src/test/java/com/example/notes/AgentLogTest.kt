@@ -147,24 +147,48 @@ class AgentLogTest {
     }
 
     @Test
-    fun `an old build's context file is folded in once and deleted`() {
-        // An update must not silently lose a session's working context. The old second file says
-        // what the new column says, so it is read once: the rows it holds become `in`, the rest
-        // `app`, and the file is removed so nothing has to keep it in step.
-        log.told("the first thing")
-        val second = log.told("the second thing")
-        val old = File(project, "agent/${AgentLog.CONTEXT}")
-        old.writeText(linesIn(log.session).first() + "\n")
+    fun `an old build's record is read, not rejected`() {
+        // **The update path, and the reason it is tested.** Both the row and the file changed: the
+        // row gained a column, and the second file went away. A parser that treated yesterday's
+        // five-column rows as unreadable would lose every session's memory on the phone it was
+        // installed on — quietly, because a broken row is drawn rather than dropped.
+        val record = File(project, "agent/${AgentLog.SESSION}")
+        record.writeText(
+            "14:02:11.410    1 TOLD    operator  the first thing\n" +
+                "14:02:12.000    2 TOLD    operator  the second thing\n",
+        )
+        // The old context held only the second row; the first was trimmed out of it.
+        File(project, "agent/${AgentLog.CONTEXT}")
+            .writeText("14:02:12.000    2 TOLD    operator  the second thing\n")
 
         val reopened = AgentLog.open(project)
 
+        assertEquals("both rows are read", 2, reopened.rows().size)
         assertEquals(
-            "only the row the old context held is in",
-            listOf(second - 1),
+            "and the row the old context held is the one in",
+            listOf(2),
             reopened.contextRows().map { it.id },
         )
-        assertFalse("and the old file is gone", old.exists())
-        assertEquals("while the record keeps both rows", 2, reopened.rows().size)
+        assertEquals(
+            "the other is the app's, because the old file cannot say why it was out",
+            AgentLog.APP,
+            reopened.rows().first { it.id == 1 }.ctx,
+        )
+        assertFalse("and the old file is gone", File(project, "agent/${AgentLog.CONTEXT}").exists())
+        assertTrue(
+            "with the rows rewritten in the new shape, with their column",
+            linesIn(record).all { it.contains("TOLD    app ") || it.contains("TOLD    in  ") },
+        )
+    }
+
+    @Test
+    fun `an old record with no second file keeps everything in the context`() {
+        // Before the column existed both files held the same rows, so with no context file to
+        // consult, `in` is the reading that loses nothing.
+        val record = File(project, "agent/${AgentLog.SESSION}")
+        record.writeText("14:02:11.410    1 TOLD    operator  a task\n")
+
+        assertEquals("the row is in", 1, AgentLog.open(project).contextRows().size)
     }
 
     @Test
