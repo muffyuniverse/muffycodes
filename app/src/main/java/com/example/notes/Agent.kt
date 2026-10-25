@@ -383,28 +383,30 @@ class Agent(
      * contain it. A cached transcript would keep sending what he threw away.
      */
     private fun build(layers: AgentPrompt.Layers): Request {
-        val rows = log.contextRows()
-        val messages = messages(rows)
         val tools = AgentTools.specs()
-        // **The size is measured, then the two limits act on it, in that order.** Trimming first
-        // would act on a number nobody had taken; warning first would name a size the app was
-        // about to change. One measurement, one decision, one pair of numbers on the record.
-        val size = ContextBudget.tokens(layers.message) +
-            rows.sumOf { ContextBudget.tokens(it.line) } +
-            tools.sumOf { ContextBudget.tokens(it.description, it.parameters.toString()) }
+        var rows = log.contextRows()
+        var size = measure(layers.message, rows, tools)
+
+        // **The hard limit is applied once per request, not until it stops hurting.** A loop that
+        // re-measured and re-trimmed would trim, write its marker, re-measure, trim the marker,
+        // and keep going — and with a limit below what the instructions alone cost it would never
+        // converge. One trim, one line saying how many rows went, and the next request decides
+        // again. The limit is the operator's; an impossible one is honoured once rather than
+        // fought.
         val hard = limits.hardAt
         if (hard > 0 && size > hard) {
-            // Half the limit, so the next turn's rows do not immediately undo the trim — and at
-            // least one token, so a limit small enough to halve to nothing still trims something
-            // rather than reporting a trim that dropped nothing.
             val dropped = log.trimContext(maxOf(hard / 2, 1L))
             if (dropped > 0) {
                 Trace.note("agent-trim", "$project · $dropped rows, over ${ContextBudget.short(hard)}")
-                // Rebuilt from the trimmed file, not from the rows in hand: what is sent has to be
-                // what was left behind, or the trim is a note about the app's own intentions.
-                return build(layers)
+                // Read back from the file: what is sent has to be what was left, or the trim is a
+                // note about the app's intentions rather than a change to the request.
+                rows = log.contextRows()
+                size = measure(layers.message, rows, tools)
             }
         }
+
+        // The warning names the size, so it is measured after the trim — a request told it is over
+        // 100k when 60k of that has just been removed is a message from before the app acted.
         val trigger = limits.triggerAt
         val line = if (trigger > 0 && size > trigger) {
             Trace.note(
@@ -415,15 +417,28 @@ class Agent(
         } else {
             null
         }
+
         return Request(
             model = model.model,
             provider = model.provider,
             effort = model.effort,
             system = layers.withLine(line),
-            messages = messages,
+            messages = messages(rows),
             tools = tools,
         )
     }
+
+    /**
+     * What the request costs, estimated.
+     *
+     * The three parts it is made of and nothing else: the instructions, the rows, and the tool
+     * descriptions. A measurement that left out the tool specs would be a limit the request could
+     * exceed without ever being over it.
+     */
+    private fun measure(system: String, rows: List<AgentLog.Row>, tools: List<ToolSpec>): Long =
+        ContextBudget.tokens(system) +
+            rows.sumOf { ContextBudget.tokens(it.line) } +
+            tools.sumOf { ContextBudget.tokens(it.description, it.parameters.toString()) }
 
     /**
      * What the agent is told when its context is over the trigger.
