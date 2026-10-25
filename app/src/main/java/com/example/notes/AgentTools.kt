@@ -210,7 +210,7 @@ class AgentTools(
         // **Through the funnel.** A locked file, a hidden name or a structural folder is refused
         // by `write` itself, and the refusal is the whole answer.
         if (!ws.write(file, text)) return refusal("${rel(file)} cannot be changed")
-        return committed("Edited ${file.name}", "${rel(file)} changed")
+        return commit("Edited ${file.name}", "${rel(file)} changed")
     }
 
     private fun create(args: JSONObject): String {
