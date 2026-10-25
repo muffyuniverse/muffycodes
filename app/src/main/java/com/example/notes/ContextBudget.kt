@@ -128,17 +128,23 @@ object ContextBudget {
             // the trigger is. Below the trigger it is not reserved, it is the normal path, and the
             // agent never gets the turn the design promises it — so it is not offered there: the
             // numbers are ordered, and a hard limit under the trigger is raised to it.
-            require(hard.inForce == 0L || hard.inForce >= trigger.inForce) {
+            require(hardAt == 0L || hardAt >= triggerAt) {
                 "the hard limit is a last resort below the trigger, so it cannot be smaller"
             }
         }
 
-
         /** The trigger in force, resolved from the ceiling when the operator left it at zero. */
         val triggerAt: Long get() = if (trigger.inForce == 0L) trigger.ceiling / 4 else trigger.inForce
 
-        /** The hard limit in force, or zero for "never". */
-        val hardAt: Long get() = hard.inForce
+        /**
+         * The hard limit in force, or zero for "never".
+         *
+         * **Raised to the trigger, not stored that way.** What was typed stays in
+         * [Limit.asked] — the number a person sees beside the field — while the number enforced is
+         * the larger of the two, because a last resort that fires before the agent is asked is not
+         * a last resort.
+         */
+        val hardAt: Long get() = if (hard.inForce == 0L) 0L else maxOf(hard.inForce, triggerAt)
 
         companion object {
             /**
@@ -150,15 +156,8 @@ object ContextBudget {
              * clear up at all. What is repaired is the effective number; what was typed stays in
              * [Limit.asked], which is what makes the screen able to say so.
              */
-            fun of(triggerAsked: Long, hardAsked: Long, ceiling: Long): Limits {
-                val trigger = Limit(triggerAsked, ceiling)
-                val hard = if (hardAsked <= 0L) {
-                    Limit(0, ceiling)
-                } else {
-                    Limit(maxOf(hardAsked, trigger.inForce), ceiling)
-                }
-                return Limits(trigger, hard)
-            }
+            fun of(triggerAsked: Long, hardAsked: Long, ceiling: Long): Limits =
+                Limits(Limit(triggerAsked, ceiling), Limit(hardAsked, ceiling))
         }
     }
 

@@ -112,6 +112,7 @@ class ContextBudgetTest {
         assertEquals("the agent is asked first", 50_000L, limits.triggerAt)
         assertEquals("and the app's trim waits for it", 50_000L, limits.hardAt)
         assertEquals("with what was typed still on record", 10_000L, limits.hard.asked)
+        assertTrue("which the row can say it raised", limits.hardAt > limits.hard.inForce)
     }
 
     @Test

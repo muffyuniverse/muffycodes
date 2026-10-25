@@ -416,8 +416,10 @@ class AgentSessionFeatureTest : FeatureTest() {
         val evidence = record("groceries").rows()
 
         scene.viewModel.resetAgent("groceries")
+        // **Wait on the trace, not on the file.** The row is written before the note that says so,
+        // and a test that waited on the file read the app mid-act.
         scene.await("the reset to be written") {
-            record("groceries").contextRows().size == 1
+            Trace.report().lines.any { it.contains("agent-reset") }
         }
 
         assertEquals(
