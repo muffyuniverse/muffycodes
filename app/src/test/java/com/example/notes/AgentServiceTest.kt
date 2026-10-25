@@ -20,6 +20,9 @@ import org.robolectric.RuntimeEnvironment
  * that the standing notification says what the session strip says.
  */
 @RunWith(RobolectricTestRunner::class)
+// The same phone the feature tests use. Robolectric's newest SDK needs a newer JDK than the CI
+// runs, and pinning it here is what every other Robolectric suite in this repo does.
+@org.robolectric.annotation.Config(sdk = [34])
 class AgentServiceTest {
 
     /** Built per test: the runner is constructed before the class in a JUnit test otherwise. */
@@ -111,9 +114,10 @@ class AgentServiceTest {
         return shadow.nextStartedService
     }
 
+    /** Drains the queue of started services, so the next assertion asks what *this* call started. */
     private fun reset() {
-        // Robolectric keeps a queue of started services; draining it is how a second assertion in
-        // the same test asks "what did this call start" rather than "what did anything start".
-        while (started() != null) Unit
+        while (started() != null) {
+            // `nextStartedService` pops the queue; the body is deliberately empty.
+        }
     }
 }
