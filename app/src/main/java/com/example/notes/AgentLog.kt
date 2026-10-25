@@ -108,6 +108,30 @@ class AgentLog private constructor(
         }
 
         /**
+         * One line as a row.
+         *
+         * Not private: the clear-up check reads a file the agent is about to write, and it has
+         * to ask the same question this file asks of its own lines — otherwise a row the app
+         * cannot read and a row the checker cannot read are two different rows.
+         */
+        fun parseRow(line: String): Row = try {
+            val match = ROW.matchEntire(line)
+            if (match == null) {
+                Row("", 0, "?", "?", line, broken = true)
+            } else {
+                Row(
+                    time = match.groupValues[1],
+                    id = match.groupValues[2].toInt(),
+                    kind = match.groupValues[3],
+                    name = match.groupValues[4],
+                    detail = match.groupValues[5],
+                )
+            }
+        } catch (t: Throwable) {
+            Row("", 0, "?", "?", line, broken = true)
+        }
+
+        /**
          * Why [after] is not a clear-up of [before], or null when it is.
          *
          * The agent shrinks its own context, and this is the whole of what it may do to it:
@@ -301,30 +325,6 @@ class AgentLog private constructor(
         // when the file ends in a newline and the half-written row last when it does not, so
         // dropping it is the same rule either way.
         return text.split("\n").dropLast(1).map { parseRow(it) }
-    }
-
-    /**
-     * One line as a row.
-     *
-     * Not private: the clear-up check reads a file the agent is about to write and has to ask the
-     * same question this file asks of its own lines — otherwise a row the app cannot read and a
-     * row the checker cannot read are two different rows.
-     */
-    fun parseRow(line: String): Row = try {
-        val match = ROW.matchEntire(line)
-        if (match == null) {
-            Row("", 0, "?", "?", line, broken = true)
-        } else {
-            Row(
-                time = match.groupValues[1],
-                id = match.groupValues[2].toInt(),
-                kind = match.groupValues[3],
-                name = match.groupValues[4],
-                detail = match.groupValues[5],
-            )
-        }
-    } catch (t: Throwable) {
-        Row("", 0, "?", "?", line, broken = true)
     }
 
     // ---- opening ------------------------------------------------------------
