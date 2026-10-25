@@ -136,6 +136,17 @@ class AppViewModel @JvmOverloads constructor(
     var lockedPaths: Set<String> by mutableStateOf(emptySet())
         private set
 
+    /**
+     * The agent sessions this phone is running, read from `.muffy/agents.json`.
+     *
+     * **Declared here, with the other state, and not with the methods below.** `refresh()` writes
+     * it and an `init` block calls `refresh()` for an account that is already signed in, so a
+     * declaration further down is a null delegate at the first write — the crash `projectNames`
+     * already cost once.
+     */
+    var agentSessions: List<AgentSession> by mutableStateOf(emptyList())
+        private set
+
     /** The paths that are selected, for a move or a delete of several at once. */
     var selected: Set<String> by mutableStateOf(emptySet())
         private set
@@ -482,6 +493,7 @@ class AppViewModel @JvmOverloads constructor(
         entries = currentDir?.let { ws.list(it) } ?: emptyList()
         pins = ws.pins()
         lockedPaths = ws.locked()
+        agentSessions = AgentSessions(ws.accountDir).read()
         readModelConfig(ws)
         // A selection is a set of paths, and a path that is no longer there cannot
         // be selected: an item moved or deleted out from under the selection would
@@ -1797,15 +1809,12 @@ class AppViewModel @JvmOverloads constructor(
         val g = git ?: return
         Trace.tap("send", said.take(60))
         chatWorking = true
+        // **Speaking to a stopped agent turns it on again**, because the person is the switch:
+        // there is no other control they would have used, and a message that vanished into a
+        // stopped session would look like the app ignoring them.
+        sessionOf(project)?.let { if (!it.running) putSession(it.waited(System.currentTimeMillis())) }
         val model = modelConfig.active
-        val door = (chatDoor ?: { active ->
-            OpenRouterDoor(
-                key = { activeLogin?.let { credentials.modelKey(it) } },
-                model = active.model,
-                provider = active.provider,
-                effort = active.effort,
-            )
-        })(model)
+        val door = doorFor(model)
         onWorker {
             val dir = File(ws.projectsDir, project)
             val log = AgentLog.open(dir)
@@ -1829,11 +1838,161 @@ class AppViewModel @JvmOverloads constructor(
                 applyChat(rows, follow = true)
                 chatWorking = false
                 message = answer
+                applyEnd(project, end, System.currentTimeMillis())
                 refresh()
                 refreshChanges()
             }
         }
     }
+
+    // ---- the agent's sessions -----------------------------------------------
+
+
+    /**
+     * Where a notification goes.
+     *
+     * A hook rather than a `NotificationManager`, for the same reason the door is an interface:
+     * what should be said, and when, is the part worth testing, and it can be tested without a
+     * tray. The Android side passes a lambda that posts.
+     */
+    var agentNotifier: ((AgentSession) -> Unit)? = null
+
+    /** Projects with a poll in flight, so one slow poll is not started twice. */
+    private val polling = mutableSetOf<String>()
+
+    /** How often a session that needs a person reminds them, from Settings. */
+    val reminderMs: Long get() = settings.remindMinutes * 60_000L
+
+    /** The projects with a poll in flight, so a test can wait for one to finish. */
+    internal fun agentPollingInFlight(): Set<String> = polling.toSet()
+
+    /** The session of [project], or null when the agent is not running there. */
+    fun sessionOf(project: String): AgentSession? =
+        agentSessions.firstOrNull { it.project == project }
+
+    /**
+     * Switches the agent on for [project], with nothing said yet.
+     *
+     * The first poll is one interval away, because the agent has nothing to poll about until the
+     * person has asked for something — an agent switched on at 09:00 and asked at 09:03 should
+     * not have spent three requests discovering it had no task.
+     */
+    fun startAgent(project: String, now: Long = System.currentTimeMillis()) {
+        Trace.tap("start agent", project)
+        if (sessionOf(project)?.running == true) return
+        putSession(
+            AgentSession(project = project, state = AgentSession.State.IDLE, lastPollAt = now)
+        )
+        Trace.said("the agent is on for $project")
+    }
+
+    /** Switches it off. The reason is recorded, because "why did it stop" is the question later. */
+    fun stopAgent(project: String) {
+        val session = sessionOf(project) ?: return
+        Trace.tap("stop agent", project)
+        putSession(session.stopped(AgentSession.StopReason.BY_OPERATOR))
+        Trace.said("the agent is off for $project")
+    }
+
+    /**
+     * One tick of the clock: remind whoever needs reminding, and poll whoever is due.
+     *
+     * **The clock is a parameter, not `now()`.** Every rule about four minutes and one hour is
+     * then a test that moves a number, which is the only way to test them at all — and it is why
+     * the shell that calls this can be a service, an alarm, or a test, without changing a rule.
+     */
+    fun tickAgents(now: Long = System.currentTimeMillis()) {
+        for (session in agentSessions.toList()) {
+            var current = session
+            if (current.reminderDue(now, reminderMs)) {
+                current = current.reminded()
+                putSession(current)
+                Trace.note("agent-reminder", current.notice() ?: "")
+                agentNotifier?.invoke(current)
+            }
+            if (current.pollDue(now) && current.project !in polling) {
+                poll(current, now)
+            }
+        }
+    }
+
+    /** Sends one poll, on the worker, and keeps the session in step with how it ended. */
+    private fun poll(session: AgentSession, now: Long) {
+        val ws = workspace ?: return
+        val g = git ?: return
+        val project = session.project
+        if (!File(ws.projectsDir, project).isDirectory) {
+            // A project that is gone takes its session with it, rather than polling a folder
+            // that does not exist for ever.
+            Trace.note("agent-gone", project)
+            AgentSessions(ws.accountDir).remove(project)
+            agentSessions = agentSessions.filterNot { it.project == project }
+            polling.remove(project)
+            return
+        }
+        polling += project
+        putSession(session.polled(now))
+        Trace.note("agent-poll", "$project · ${session.label(now)}")
+        val model = modelConfig.active
+        val door = doorFor(model)
+        onWorker {
+            val dir = File(ws.projectsDir, project)
+            val log = AgentLog.open(dir)
+            val agent = Agent(ws.accountDir, project, ws, g, log, door, model)
+            val end = try {
+                agent.poll()
+            } catch (t: Throwable) {
+                Agent.End.Stopped(Secrets.explain(t, "The poll could not run"), retryable = true)
+            }
+            val rows = log.rows()
+            main.post {
+                polling.remove(project)
+                if (chatProject == project) applyChat(rows, follow = true)
+                applyEnd(project, end, System.currentTimeMillis())
+            }
+        }
+    }
+
+    /** Reads a session's own file and keeps the observable copy in step. */
+    private fun putSession(session: AgentSession) {
+        val ws = workspace ?: return
+        AgentSessions(ws.accountDir).put(session)
+        agentSessions = agentSessions.filterNot { it.project == session.project } + session
+        Trace.note("agent-state", "${session.project} · ${session.label()}")
+        // **Only a session that just started needing somebody speaks.** Otherwise every reminder
+        // tick would also post here, and the reminder count would never leave the first one.
+        if (session.needsYou && session.reminders == 0) agentNotifier?.invoke(session)
+    }
+
+    /** The session's own state, moved on by how a turn ended. */
+    private fun applyEnd(project: String, end: Agent.End, now: Long) {
+        val current = sessionOf(project) ?: return
+        val next = when (end) {
+            is Agent.End.Asked -> current.asked(now)
+            is Agent.End.Concluded -> current.concluded()
+            is Agent.End.Waited -> current.waited(now)
+            // A transport that failed is a blip; a model that answered with nothing useful is a
+            // wall. The first reconnects, the second stops and says so.
+            is Agent.End.Stopped -> if (end.retryable) {
+                // The ladder in the session decides when to try again — and when to give up. Its
+                // words are kept, because the last failure is what the stopped label shows.
+                current.copy(lastWords = end.why).failed(now)
+            } else {
+                current.stopped(end.reason, end.why)
+            }
+        }
+        if (next != current) putSession(next)
+    }
+
+    /** The door for [model]: the test's, when one is set, and the pinned endpoint otherwise. */
+    private fun doorFor(model: ActiveModel): Door = (chatDoor ?: { active ->
+        OpenRouterDoor(
+            key = { activeLogin?.let { credentials.modelKey(it) } },
+            model = active.model,
+            provider = active.provider,
+            effort = active.effort,
+        )
+    })(model)
 
     /** Hands a freshly read conversation to the screen, keeping the turn in range. */
     private fun applyChat(rows: List<AgentLog.Row>, follow: Boolean) {

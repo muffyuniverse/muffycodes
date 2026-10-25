@@ -103,6 +103,21 @@ class Scenario(
         return this
     }
 
+    /**
+     * The same phone, opened again.
+     *
+     * A second view model over the same account, settings and credentials is what opening the
+     * app is: nothing is carried in memory, so anything that survives came off the disk.
+     */
+    fun reopen(): AppViewModel = AppViewModel(
+        app,
+        rootDir = root,
+        credentials = credentials,
+        settings = settings,
+        saveDebounceMs = 0,
+        signInGitHub = { DiskGitHub(viewModel.accounts.devGitHubDir(login), login) },
+    )
+
     /** The GitHub the account is talking to, for asking what really happened. */
     val github: DiskGitHub
         get() = DiskGitHub(viewModel.accounts.devGitHubDir(login), login)

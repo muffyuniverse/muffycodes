@@ -294,6 +294,22 @@ fun BrowserScreen(
                     EntryList(viewModel, actions)
                 }
             }
+            // **The strip above the listing: how many agents are on, and how many need you.**
+            // The design asks for it as a permanent bar, and it is the same state the
+            // notification reads — once inside the app, once outside it, so the two cannot
+            // disagree. Silent when no agent exists, because a strip saying "0 sessions" is a
+            // row of the screen spent on nothing.
+            val strip = AgentSession.strip(viewModel.agentSessions)
+            if (strip.isNotEmpty()) {
+                Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
+                    Text(
+                        strip,
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                    )
+                }
+            }
+
             // **A tap outside the add menu closes it and does nothing else.** Without
             // this the menu stayed open while the tap went through to whatever was under
             // it — a row opened, a folder was entered, and the menu was still there over

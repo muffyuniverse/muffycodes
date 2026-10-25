@@ -72,6 +72,7 @@ fun AgentChatScreen(
     onBack: () -> Unit,
 ) {
     val project = viewModel.chatProject ?: return
+    val session = viewModel.sessionOf(project)
     // Read the generation so a fresh read of an identical-looking conversation still redraws;
     // it is also the key that follows a new turn's arrival.
     val generation = viewModel.chatGeneration
@@ -99,15 +100,42 @@ fun AgentChatScreen(
                         )
                     }
                 },
-                title = { Text(project) },
+                title = { Column {
+                    Text(project)
+                    Text(
+                        // **The state, in the words the notification uses.** One vocabulary for
+                        // the box, the strip and the tray, so "why is it not answering" has one
+                        // answer wherever a person looks.
+                        text = session?.label(System.currentTimeMillis()) ?: "off",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (session?.needsYou == true) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                } },
                 actions = {
                     if (viewModel.chatWorking) {
                         Text(
                             "working",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(end = 16.dp),
+                            modifier = Modifier.padding(end = 8.dp),
                         )
+                    }
+                    // **One control, and its label is what it will do.** An agent is on or off;
+                    // a switch would need a name for the on state that is not a button's.
+                    TextButton(
+                        onClick = {
+                            if (session?.running == true) {
+                                viewModel.stopAgent(project)
+                            } else {
+                                viewModel.startAgent(project)
+                            }
+                        },
+                    ) {
+                        Text(if (session?.running == true) "Stop the agent" else "Start the agent")
                     }
                 },
             )

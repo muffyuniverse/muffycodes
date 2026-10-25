@@ -65,6 +65,8 @@ VOCABULARY = {
     "reset model config", "set model key",
     # the agent's conversation: one project's, and the turns inside it
     "chat", "close chat", "send", "previous turn", "next turn", "latest turn", "turn",
+    # the agent itself, and how often it reminds
+    "start agent", "stop agent", "remind me",
 }
 
 # Names built from a value, so they cannot be a literal in the list.

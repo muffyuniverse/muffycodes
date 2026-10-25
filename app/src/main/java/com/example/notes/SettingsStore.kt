@@ -101,6 +101,27 @@ class SettingsStore(context: Context, name: String = "settings") {
     }
 
     /**
+     * How often a session that needs a person reminds them: minutes, default one hour.
+     *
+     * **A reminder, not a poll.** The poll is the agent working; this is the app asking somebody
+     * to look at it, and it stops the moment the thing is dealt with. Zero means "say it once and
+     * never again", which is a choice a person is allowed to make.
+     */
+    var remindMinutes: Int by mutableStateOf(
+        prefs.getInt(KEY_REMIND, DEFAULT_REMIND_MINUTES)
+    )
+        private set
+
+    /** Sets the reminder interval, clamped to minutes a person would recognise. */
+    fun keepRemind(minutes: Int) {
+        val clean = minutes.coerceIn(0, MAX_REMIND_MINUTES)
+        Trace.tap("remind me", if (clean == 0) "once" else "$clean min")
+        remindMinutes = clean
+        prefs.edit().putInt(KEY_REMIND, clean).apply()
+        Trace.said(if (clean == 0) "no reminders" else "a reminder every $clean minutes")
+    }
+
+    /**
      * The two lengths older builds stored separately, read once for the migration.
      *
      * The larger of the two is kept: a person who had set either history longer
@@ -119,6 +140,15 @@ class SettingsStore(context: Context, name: String = "settings") {
         const val KEY_DARK = "use_dark"
         const val KEY_LIVE = "live_trace"
         const val KEY_HISTORY = "history_length"
+
+        /** The reminder interval, in minutes. */
+        const val KEY_REMIND = "agent_remind_minutes"
+
+        /** One hour: the design's default. */
+        const val DEFAULT_REMIND_MINUTES = 60
+
+        /** A week. Past this a reminder is a message from the past. */
+        const val MAX_REMIND_MINUTES = 10_080
 
         /** The two keys older builds wrote; read once, then ignored. */
         const val KEY_APP_HISTORY = "app_history_length"

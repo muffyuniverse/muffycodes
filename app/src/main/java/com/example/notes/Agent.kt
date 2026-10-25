@@ -39,8 +39,22 @@ class Agent(
         /** Idle until the person speaks. */
         data object Waited : End()
 
-        /** The turn could not go on, and the reason is in the record. */
-        data class Stopped(val why: String) : End()
+        /**
+         * The turn could not go on, and the reason is in the record.
+         *
+         * [retryable] is the difference between **a blip and a wall**: a transport that failed is
+         * a session that reconnects in one, two, four seconds, and a model that answered with
+         * nonsense is a session that stops and says so. Without the difference, a tunnel through
+         * a train would end an agent for good, and a stuck model would spin for ever.
+         *
+         * [reason] is what the session's own state says once it stops, so the app has one
+         * vocabulary for "why" rather than translating a sentence back into a cause.
+         */
+        data class Stopped(
+            val why: String,
+            val retryable: Boolean = false,
+            val reason: AgentSession.StopReason = AgentSession.StopReason.ERROR,
+        ) : End()
     }
 
     companion object {
@@ -80,12 +94,30 @@ class Agent(
         return end
     }
 
-    private fun loop(operator: String, progress: () -> Unit): End {
+    /**
+     * One poll: the same request, sent again, with nothing new said.
+     *
+     * **No `TOLD` row, because the person did not say anything.** A poll is the app keeping a
+     * promise — every four minutes, the identical request — so writing the operator's message
+     * again would put words in their mouth and change the one part of the context that has to
+     * stay byte-identical. The agent's own reply is recorded like any other turn.
+     */
+    fun poll(progress: () -> Unit = {}): End {
+        val end = loop(operator = null, progress)
+        log.trimSession()
+        progress()
+        return end
+    }
+
+    private fun loop(operator: String?, progress: () -> Unit): End {
         // The seal belongs here, at the start of a session, and not to a read: no endpoint
-        // accepts a conversation whose last assistant message calls a tool nobody answered.
-        log.beginSession()
-        log.told(operator)
-        Trace.note("agent", "$project: ${operator.take(80)}")
+        // accepts a conversation whose last assistant message calls a tool nobody answered. A
+        // poll continues a session, so it does not seal anything.
+        if (operator != null) {
+            log.beginSession()
+            log.told(operator)
+            Trace.note("agent", "$project: ${operator.take(80)}")
+        }
 
         var idle = 0
         var requests = 0
@@ -99,7 +131,7 @@ class Agent(
                 val said = Secrets.explain(problem, "The model could not be asked")
                 log.note("stopped", said)
                 Trace.note("agent", "$project stopped: ${said.take(80)}")
-                return End.Stopped(said)
+                return End.Stopped(said, retryable = true)
             }
 
             if (reply.text.isNotBlank()) log.note("agent", reply.text)
@@ -109,7 +141,10 @@ class Agent(
                 // than asked again — a second request would be answered with more words.
                 val said = reply.text.trim().ifEmpty { "(the model said nothing)" }
                 log.note("stopped", "no tool calls, so the turn ended")
-                return End.Stopped("the model answered with words and no tool call: $said")
+                return End.Stopped(
+                    "the model answered with words and no tool call: $said",
+                    reason = AgentSession.StopReason.LOOP,
+                )
             }
 
             val ending = reply.calls.firstOrNull { it.tool in AgentTools.TERMINATING }
@@ -182,7 +217,10 @@ class Agent(
             progress()
         }
         log.note("stopped", "$MAX_REQUESTS requests in one turn")
-        return End.Stopped("it made $MAX_REQUESTS requests without ending the turn")
+        return End.Stopped(
+            "it made $MAX_REQUESTS requests without ending the turn",
+            reason = AgentSession.StopReason.LOOP,
+        )
     }
 
     /**
@@ -219,7 +257,7 @@ class Agent(
             "and asked nothing"
         log.note("stopped", said)
         Trace.note("agent", "$project stopped: idle")
-        return End.Stopped(said)
+        return End.Stopped(said, reason = AgentSession.StopReason.LOOP)
     }
 
     /** Runs one call and returns its body with its `0` or `1` already on the front. */
