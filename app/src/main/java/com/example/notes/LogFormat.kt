@@ -38,8 +38,18 @@ object LogFormat {
      * alignment for the long names and not the short ones.
      */
     fun row(at: Long, id: Int, kind: String, name: String, detail: String): String =
+        row(stamp(at), id, kind, name, detail)
+
+    /**
+     * The same row from a stamp that is already text.
+     *
+     * Needed by anything that **rewrites** a file it did not read through this class: the
+     * agent's session is truncated at a burst boundary, and a row that came back with a fresh
+     * timestamp would say the whole conversation happened at the moment it was trimmed.
+     */
+    fun row(stamp: String, id: Int, kind: String, name: String, detail: String): String =
         buildString {
-            append(stamp(at))
+            append(stamp)
             append(' ')
             append(id.toString().padStart(4))
             append(' ')

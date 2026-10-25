@@ -1,0 +1,304 @@
+package com.example.notes
+
+import java.io.File
+
+/**
+ * The agent's record: two files, the same rows, one id.
+ *
+ * `agent/session.log` is the evidence — every event, in order, and the app truncates it at a
+ * generous size. `agent/context.log` is the working context — the same rows, minus the ones the
+ * agent cleared out of it — and it is the only one of the two that is ever sent to the model.
+ *
+ * **The rows are identical, and that is the design.** They share an id and they share their text,
+ * so `diff` between the two files is exactly the agent's judgement about what did not matter:
+ * a row that is in `session.log` and not in `context.log` is one he decided to forget. A second
+ * format, or a second id sequence, would make that diff a reconciliation instead of a glance.
+ *
+ * The columns are [LogFormat]'s — the trace's own — because both files are read by the same
+ * habits: `grep`, a shell, an eye on a phone.
+ */
+class AgentLog private constructor(
+    val session: File,
+    val context: File,
+) {
+
+    private val guard = Any()
+
+    /** The id the next row gets. Shared by both files, so a row's id means one thing. */
+    private var next = 1
+
+    companion object {
+
+        /** The folder name under a project: `agent/`. */
+        const val DIR = "agent"
+        const val SESSION = "session.log"
+        const val CONTEXT = "context.log"
+
+        /**
+         * Generous, because this file keeps the repeated `wait` rows too.
+         *
+         * The context is trimmed by the agent to what it needs; the session is the evidence, and
+         * an agent that polls every four minutes writes fifteen rows an hour — so the session's
+         * limit has to be the sort of size that holds days, not the trace's 512 KB.
+         */
+        const val SESSION_LIMIT = 4L * 1024 * 1024
+
+        /** The row kinds. Named once, so the box, the tools and the checks agree. */
+        const val TOLD = "TOLD"
+        const val CALL = "CALL"
+        const val GOT = "GOT"
+        const val ASK = "ASK"
+        const val CONCLUDE = "CONCLUDE"
+        const val NOTE = "NOTE"
+
+        /** A result's first line: the call worked. */
+        const val SUCCESS = "0"
+
+        /** A result's first line: it did not, and the rest of the body says why. */
+        const val FAILURE = "1"
+
+        /**
+         * `14:02:11.410    8 CALL  tree      {"path":"GitHub"}`
+         *
+         * The body is the only part that can hold a separator, and [LogFormat] escapes it — so
+         * two spaces followed by anything is the detail, always.
+         */
+        private val ROW = Regex("""^(\d\d:\d\d:\d\d\.\d\d\d) +(\d+) +(\S+) +(\S+)  (.*)$""")
+
+        /** Opens the record of the project in [projectDir], making the folder on first use. */
+        fun open(projectDir: File): AgentLog {
+            val dir = File(projectDir, DIR)
+            dir.mkdirs()
+            val log = AgentLog(File(dir, SESSION), File(dir, CONTEXT))
+            log.load()
+            return log
+        }
+
+        /**
+         * Splits rows into bursts, oldest first.
+         *
+         * A burst is one conversation: an operator's message starts it, and a terminating row
+         * ends it. Trimming happens between bursts and never inside one — half a conversation is
+         * a log that reads like a bug.
+         */
+        fun bursts(rows: List<Row>): List<List<Row>> {
+            val out = mutableListOf<MutableList<Row>>()
+            for (row in rows) {
+                if (row.startsBurst || out.isEmpty()) out.add(mutableListOf())
+                out.last().add(row)
+                if (row.endsBurst) out.add(mutableListOf())
+            }
+            return out.filter { it.isNotEmpty() }.map { it.toList() }
+        }
+
+        /**
+         * The newest bursts that fit [keep] rows, and how many were dropped.
+         *
+         * Whole bursts only, so a conversation is never cut in half; [keep] is the target and one
+         * burst may overshoot it, because "the newest conversation" is not something a size limit
+         * gets to delete.
+         */
+        fun keepNewest(rows: List<Row>, keep: Int): Pair<List<Row>, Int> {
+            val all = bursts(rows)
+            val kept = mutableListOf<List<Row>>()
+            var total = 0
+            for (burst in all.asReversed()) {
+                if (kept.isNotEmpty() && total + burst.size > keep) break
+                kept.add(burst)
+                total += burst.size
+            }
+            val newest = kept.asReversed().flatten()
+            return newest to (rows.size - newest.size)
+        }
+    }
+
+    /** One row of either file. */
+    data class Row(
+        val time: String,
+        val id: Int,
+        val kind: String,
+        val name: String,
+        val detail: String,
+        /** True for a line that did not parse: shown as a row that could not be read. */
+        val broken: Boolean = false,
+    ) {
+        /** An operator's message begins a conversation, and a terminating tool ends it. */
+        val startsBurst: Boolean get() = kind == TOLD
+        val endsBurst: Boolean get() = kind == ASK || kind == CONCLUDE
+
+        val line: String
+            get() = if (broken) detail else LogFormat.row(time, id, kind, name, detail)
+
+        /** The body as the agent wrote it, with its newlines back. */
+        val body: String get() = LogFormat.unescaped(detail)
+    }
+
+    // ---- writing ------------------------------------------------------------
+
+    /** The operator's words. Appended to both, because this is what a turn is for. */
+    fun told(text: String): Int = record(TOLD, "operator", text, both = true)
+
+    /** A tool the agent called: the name, and its arguments as the model wrote them. */
+    fun call(tool: String, args: String): Int = record(CALL, tool, args, both = true)
+
+    /**
+     * The answer to a call. Its first line is `0` or `1`, always.
+     *
+     * Written as its own row under the tool's name rather than folded into the call, because the
+     * two happen at different times: the gap between them is how long the tool took, and a
+     * session that stopped between them is exactly what a dangling call looks like.
+     */
+    fun got(tool: String, body: String): Int = record(GOT, tool, body, both = true)
+
+    /** The terminating question, and the terminating statement. */
+    fun ask(question: String): Int = record(ASK, "question", question, both = true)
+    fun conclude(text: String): Int = record(CONCLUDE, "conclusion", text, both = true)
+
+    /** A row the agent or the app wants on the record without it being a tool. */
+    fun note(name: String, detail: String): Int = record(NOTE, name, detail, both = true)
+
+    /**
+     * A row that goes only to the session.
+     *
+     * For the repeated `wait` poll: the request is re-sent every four minutes, and the evidence
+     * keeps every one of them, while the context keeps only the first — because a context that
+     * grew by a timestamped row every four minutes would never be the same request twice, and
+     * the whole poll is cheap only because it is a cache hit.
+     */
+    fun sessionOnly(kind: String, name: String, detail: String): Int =
+        record(kind, name, detail, both = false)
+
+    private fun record(kind: String, name: String, detail: String, both: Boolean): Int {
+        synchronized(guard) {
+            val id = next++
+            val line = LogFormat.row(System.currentTimeMillis(), id, kind, name, detail)
+            append(session, line)
+            if (both) append(context, line)
+            return id
+        }
+    }
+
+    private fun append(file: File, line: String) {
+        try {
+            file.parentFile?.mkdirs()
+            file.appendText(line + "\n")
+        } catch (t: Throwable) {
+            // A record that cannot be written is worth more than the operation it describes:
+            // the turn goes on, and the person still has the app. Recorded nowhere, because
+            // there is nowhere to record it — the file is the failure.
+        }
+    }
+
+    // ---- reading ------------------------------------------------------------
+
+    /** Every row of the session, oldest first. The box renders from this. */
+    fun rows(): List<Row> = parse(session)
+
+    /** The rows the agent's context holds, oldest first. This is what is sent. */
+    fun contextRows(): List<Row> = parse(context)
+
+    private fun parse(file: File): List<Row> {
+        val text = try {
+            if (file.isFile) file.readText() else ""
+        } catch (t: Throwable) {
+            ""
+        }
+        if (text.isEmpty()) return emptyList()
+        // **The last line is only a row when it is finished.** The app appends while the box
+        // reads, so a line without its newline is one being written, and half a row shown as an
+        // event is showing something that did not happen. Splitting puts an empty string last
+        // when the file ends in a newline and the half-written row last when it does not, so
+        // dropping it is the same rule either way.
+        return text.split("\n").dropLast(1).map { parseRow(it) }
+    }
+
+    private fun parseRow(line: String): Row = try {
+        val match = ROW.matchEntire(line)
+        if (match == null) {
+            Row("", 0, "?", "?", line, broken = true)
+        } else {
+            Row(
+                time = match.groupValues[1],
+                id = match.groupValues[2].toInt(),
+                kind = match.groupValues[3],
+                name = match.groupValues[4],
+                detail = match.groupValues[5],
+            )
+        }
+    } catch (t: Throwable) {
+        Row("", 0, "?", "?", line, broken = true)
+    }
+
+    // ---- opening ------------------------------------------------------------
+
+    /**
+     * Reads what is there, numbers the next row, and seals a call that was never answered.
+     *
+     * **A dangling call is sealed on open.** The app can be closed, killed, or lose its network
+     * between a call and its result, and the model's next request must not carry a call with no
+     * answer: every endpoint refuses that, and an agent that meets a refusal at the start of a
+     * session has no way back. The seal says so in words, so the record explains itself.
+     */
+    private fun load() {
+        synchronized(guard) {
+            val rows = rows()
+            val contextRows = contextRows()
+            val highest = maxOf(
+                rows.maxOfOrNull { it.id } ?: 0,
+                contextRows.maxOfOrNull { it.id } ?: 0,
+            )
+            next = highest + 1
+            val pending = dangling(rows)
+            for (call in pending) {
+                got(call.name, "$FAILURE the app was closed before this answered")
+            }
+        }
+    }
+
+    /** The calls in [rows] with no answer after them. */
+    fun dangling(rows: List<Row>): List<Row> {
+        val out = mutableListOf<Row>()
+        var pending: Row? = null
+        for (row in rows) {
+            when (row.kind) {
+                CALL -> {
+                    pending?.let { out.add(it) }
+                    pending = row
+                }
+
+                GOT -> pending = null
+            }
+        }
+        pending?.let { out.add(it) }
+        return out
+    }
+
+    /**
+     * Truncates the session at a burst boundary, keeping the newest conversations that fit.
+     *
+     * Half the limit is the target rather than all of it, so the trim is not immediately undone
+     * by the rows the next turn writes — the trace's own rule, reused rather than reinvented.
+     */
+    fun trimSession(limit: Long = SESSION_LIMIT): Int {
+        synchronized(guard) {
+            val size = try {
+                if (session.isFile) session.length() else 0L
+            } catch (t: Throwable) {
+                0L
+            }
+            if (size <= limit) return 0
+            val rows = rows()
+            val (kept, dropped) = keepNewest(rows, (limit / 2).toInt())
+            val marker = LogFormat.row(
+                System.currentTimeMillis(), next++, NOTE, "trimmed",
+                "$dropped rows from before ${kept.firstOrNull()?.time ?: "now"}",
+            )
+            try {
+                session.writeText((listOf(marker) + kept.map { it.line }).joinToString("\n") + "\n")
+            } catch (t: Throwable) {
+                return 0
+            }
+            return dropped
+        }
+    }
+}
