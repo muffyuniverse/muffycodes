@@ -95,7 +95,7 @@ class ContextBudgetTest {
         assertFalse(limit.clamped)
         assertEquals(
             "one number, and the room it has",
-            "50k (this pin allows 917k)",
+            "50k (this pin allows 918k)",
             limit.said(),
         )
     }
