@@ -111,8 +111,10 @@ class SettingsScreenTest {
         // The row is below the fold on a phone-shaped window, and a screen is not "not showing"
         // something because it is further down the same page.
         compose.onNodeWithText("Battery").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Not exempt · polls may fail").assertIsDisplayed()
-        compose.onNodeWithText("Ask Android").performClick()
+        // Each node is scrolled to before it is asked about: a page taller than the window shows
+        // one screenful, and "further down the same page" is not "not there".
+        compose.onNodeWithText("Not exempt · polls may fail").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Ask Android").performScrollTo().performClick()
 
         assertEquals("and the button asks", 1, asked)
     }
@@ -124,6 +126,10 @@ class SettingsScreenTest {
         settings(exempt = { true })
 
         compose.onNodeWithText("Exempt · the agent can poll").performScrollTo().assertIsDisplayed()
+        // The row is on the page; the button is not. Scrolling to where the button would be, and
+        // still finding nothing, is the assertion — existence alone would pass on a page nobody
+        // could reach.
+        compose.onNodeWithText("Battery").performScrollTo()
         compose.onNodeWithText("Ask Android").assertDoesNotExist()
     }
 
