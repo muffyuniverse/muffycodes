@@ -88,6 +88,7 @@ Three consequences worth stating out loud:
 - **`model_conf` must never be rewritten wholesale by the app**, or the person's comments and
   ordering die on first save. The app owns exactly one block, marked by lines it wrote itself
   (§6). Everything else is the person's text, read-only to the app.
+  @ good
 
 ### C2. "An editable file at account root" is not editable on Android
 
@@ -104,6 +105,7 @@ no door. Three possible doors:
 **Recommended: the app's editor, from Settings.** "Edit model_conf" and "Reset to the
 catalogue". The file does not appear in the tree. If you want it in Downloads too, that is a
 separate copy step and a second truth — I would not.
+@ accept the recommendation, and we can also add buttons to add, remove model and restore model config with a form on add that asks for model endpoint and selected provider names - then the app fetches it from openrouter api and errors out if cant find the model or provider.
 
 ### C3. YAML, in an app with no YAML parser
 
@@ -120,6 +122,7 @@ by three spaces. Three ways out:
 **Recommended: the subset**, with the refusal message being the important part — "line 14:
 `active` must be a mapping, keeping the file from before". A config parser that silently
 falls back to defaults is a config parser that eats the person's work.
+@ json, and we decided that people use forms instead of direct model config edit.
 
 ### C4. Two of the six provider stats do not exist
 
@@ -143,6 +146,7 @@ date it was taken. I would drop it — a stale number that looks live is worse t
 And for the three that *do* exist but are often null (`intelligence_index` 39% of the
 catalogue, `max_prompt_tokens`, `latency`/`throughput` on a quiet provider): **`—`, never 0,
 never invented.** That is the "silent failure is two bugs" rule applied to a stats row.
+@ then no need to use those undeclared stats
 
 ### C5. "A provider" is not one thing — and "(not priority)" is the tell
 
@@ -161,6 +165,7 @@ Also: the model-level context and max-output are the *top provider's* figures. C
 advertises 943,718 output tokens against the model's 393,216. So the numbers shown must be
 **the provider's** once a provider is chosen, and the model's only as a summary — otherwise
 the picker promises a limit the chosen provider will refuse.
+@ ok, show different tags as separate choices
 
 ### C6. "Set active effort level" meets an effort ladder that varies by model
 
@@ -173,6 +178,7 @@ in the log ("effort: max → high, this model's highest") — because a silent c
 decision the person made that the app quietly overruled. The picker's slider is built from
 `supported_efforts`, so "left is min available, right is max available" is exactly what the
 API says rather than a ladder we invented.
+@ ok, if model doesnt declare previously selected effort then it moves down to the one that is supported (operator can increase if needed).
 
 ### C7. "Always on" needs a service, and the draft does not mention one
 
@@ -190,6 +196,7 @@ notification is the honest price. The global switch in Settings then *is* the se
 switch, and its "N sessions active" count is the notification's subtitle. If you would rather
 not have a notification at all, then the right answer is the second row — and the `wait` tool
 should be described as "check again in four minutes if you are still looking".
+@ foreground service - set up max resiliency for the app and its processes.
 
 ### C8. "User message interrupts and is sent immediately, tool results come on second turn"
 
@@ -205,6 +212,7 @@ sent *immediately* mid-turn. What can happen immediately:
 
 That is the draft's own "tool results come on second turn", so the mechanism stands; the words
 need to be "the turn is cut short immediately", not "the message is sent immediately".
+@ in-flight generations are cancelled in that case, right order.
 
 ### C9. Two mechanisms delete the same text
 
@@ -217,6 +225,7 @@ one you actually asked for.
 **Recommended order, stated in the file's own header:** over the *trigger* → the system
 message, every turn, as drafted. Over the *hard limit* → the app trims oldest-first and says
 so in the log. Never silently, and never before the agent has had a turn to fix it.
+@ hard limit is reserved option and much higher than trigger but below max context length for selected model.
 
 ### C10. "Each tool call has to have a response with 0 on empty success and 1 on empty failure"
 
@@ -230,6 +239,7 @@ Two sub-questions the draft raises by omitting them: what is the status when the
 **truncated** by the response-length limit (I would say `1`, with the body and "showing first
 N of M" — an error with no body spends a whole turn teaching nothing), and what is the status
 for a **cancelled** tool (`1`, "interrupted by you").
+@ agree
 
 ---
 
@@ -247,12 +257,14 @@ refuses screenshots, encrypted with the same Keystore key, scrubbed from every m
 exception, excluded from backups, and **one per phone rather than one per account** (the model
 is a paid subscription of the person, not of a GitHub account). Chat with no key says so and
 offers the screen, instead of failing with a 401 eight seconds later.
+@ yes, same as with github account
 
 ### G2. What the chat shows when a turn is in flight, and what happens if the app dies mid-turn
 
 On restart, a session may contain a `tool_call` with no result — an illegal sequence, and a
 request that will be rejected forever. **Proposed:** on open, any dangling call is sealed with
 `1 the app was closed before this answered`, appended once, and that is the end of it.
+@ ok, and by the way can we show commands agent calls in his chat message window? how I see it: when operator sends a request app opens agent response message box and shows in it every turn's toolcalls from the agent, and operator can move inside this box with < and > between terns to observe, and >> moves to the latest turn, and message box ends with message command, next command starts a new box. And mesaage box is scrollable and cant take more than 3/4 of the screen (becomes scrollable beyond that). and there is always a small message box below that operator can touch to write a message, and when keyboard pops up it moves content above so that nothing is hidden behind it.
 
 ### G3. Cost is uncapped
 
@@ -263,6 +275,7 @@ Settings (in tokens or money) with the same counter idiom as everything else —
 per turn and the session stops with a message when it is reached. And a line in the doc:
 excluding reasoning traces **saves context, not tokens** — the model still generates and bills
 them.
+@ but we already have agent turn off per chat and in settings for all. We can instead send system notifications every hour on what agents are waiting, and we can set this notification interval as a configurable field in settings.
 
 ### G4. `wait` can wake itself
 
@@ -273,6 +286,7 @@ agent investigates its own work — forever, once per edit. **Proposed:** the wa
 taken after the app's own writes have settled (the `Trace.awaitWrites()` idiom, already used
 for exactly this reason), and the returned number is "changes since you last looked", computed
 from the same `unsentCount` the row shows, so it survives the history prune.
+@ why, agent recieves responses for each toolcall so he is informed, and lets do it so that wait when it is called with other tools doesnt hold them and returns error with "dont use wait with other tools" with the last response of an actual command.
 
 ### G5. What the agent may touch, and what it may never touch
 
@@ -282,6 +296,7 @@ structural folder. So an edit tool built on it could write `.muffy/locked.json`,
 file, or `.git/`. **Proposed three hard refusals**, in one place: `.muffy/` and `.git/` and
 the lock/pin files are never writable by anyone but the app; the agent may not edit a locked
 path (see G6); and the agent may not delete the folder its own session lives in.
+@ locked files should be read only.
 
 ### G6. The lock is a rail, not a wall — fix it before the agent exists
 
@@ -296,6 +311,7 @@ Two holes, both real today and both made worse by an agent:
 a lock cover descendants (`path == locked`, or `path` starts with `locked + "/"`). One funnel,
 so "the agent honours locks" needs no agent code at all. This is a bug fix, not a feature, and
 it should land before the chat does.
+@ yes, fix it properly
 
 ### G7. Where the session and the working context actually live
 
@@ -309,12 +325,14 @@ history and never pushed to GitHub. That also makes the lock meaningful and the 
 context" undoable. Whether `system_prompt` sits at the account root (draft) or beside the
 project's agent folder is a question: one prompt for every project, or a default with a
 per-project override?
+@ we can add project prompt (system - about how to use app, project - about how to work in the project, work context files - what the agent did before. final context is composed of all 3)
 
 **And the session file's shape:** I would use the same five fixed columns as the trace
 (`time id kind name detail`, with `kind` ∈ TOLD/SAID/CALL/GOT/NOTE) rather than JSON, for one
 reason: you read the trace, so you can read this, and the app gets a parser it already trusts.
 The cost is that a hand-edited `CALL` line must still carry valid JSON in `detail`, and a line
 that does not is refused with its line number — the same rule as C3.
+@ ok, we can use first 4 as captions and detail as message body. Remember that this data is used to render the chat.
 
 ### G8. Tests, or the loop is only testable with money
 
@@ -328,6 +346,7 @@ important structural decision in the whole feature, and it is cheap if it is mad
 Two smaller gaps in the same family: every new tap needs a word in `tools/check-taps.py`
 (the check fails otherwise, which is the point), and the trace needs to record a turn as
 something greppable, so the live log stays the instrument you have been using all session.
+@ dont quite understand but it needs to be testable - maybe some kind of prepared scenario tests, like we do with tours
 
 ### G9. "By default we use openrouter router catalogue" vs a provider field
 
@@ -336,6 +355,7 @@ being used; if it never sends one, the provider setting is decoration. **Propose
 when no provider is named in the file (that *is* "the router catalogue"), an explicit pin when
 one is named (`provider.order` + `allow_fallbacks: false`, so a pinned-but-down provider fails
 loudly instead of silently going somewhere else). Which of the two is the default you want?
+@ no fallback or autorouting! only selection pin, make sure about it.
 
 ---
 
