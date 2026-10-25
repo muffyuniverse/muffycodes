@@ -205,10 +205,11 @@ the first makes the files agree row for row.
 
 ### 4.3 Still missing
 
-- **The battery-optimisation ask.** `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` is declared, and the
-  manifest says it is "asked for in one place" — and nothing asks: no screen fires
-  `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`. §2.2's second hole is therefore open on every
-  phone, for as long as Doze is willing to suspend the network under a poll.
+- **The battery-optimisation ask.** `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` is declared and
+  nothing asks for it: no screen fires `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`, so the
+  declaration buys nothing and §2.2's second hole is open on every phone for as long as Doze is
+  willing to suspend the network under a poll. (The manifest comment used to claim it was "asked
+  for in one place"; it now says what is true.)
 
 ### 4.4 Corrections made while building, each now one rule in one place
 
