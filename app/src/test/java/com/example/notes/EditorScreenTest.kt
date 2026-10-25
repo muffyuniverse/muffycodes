@@ -95,18 +95,20 @@ class EditorScreenTest {
         // **The tap is recorded before the work starts**, so its absence can be measured — a
         // check for "nothing is waiting" run too early would pass on a save that never happened.
         val tapsBefore = Trace.report().taps
+        val answeredBefore = Trace.report().answered
         compose.onNodeWithText("Save").performClick()
         // Saving writes on the app's worker, so the file answers a moment later.
         compose.waitUntil(10_000) { file.readText() == "three litres" }
-        // **Waited for the app's own sentence, and its answer.** The message and the log row are
-        // written together, so waiting for the message waits for the answer — and the answered
-        // counter is monotone, unlike a count of lines in a shared ring or a set of taps that
-        // another test in this JVM may have left waiting.
         assertTrue("the save was recorded as a tap", Trace.report().taps > tapsBefore)
-        compose.waitUntil(10_000) { scene.viewModel.message == "Saved milk.txt" }
-        // **The save's own row, near the top.** It is written by the same code that answers the
-        // tap by id, one line before the message this test has just waited for — so its
-        // presence here is the answer's, not a neighbour's.
+        // **Waited on a counter that only the answer moves.** The message is no use here:
+        // `scene.file(...)` saved this same file a moment ago, so it already says "Saved
+        // milk.txt" — waiting for it returned at once and the assertion below measured the
+        // *previous* save's row. `answered` is monotone and counts only taps that were
+        // answered, which is exactly the question.
+        scene.await("the save to answer its tap") {
+            Trace.report().answered > answeredBefore
+        }
+        // And the row is the save's own: the words the app said, under the press that did it.
         val report = Trace.report()
         assertTrue(
             "the log says the save was answered: newest ${report.lines.take(3)}",

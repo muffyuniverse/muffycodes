@@ -58,7 +58,10 @@ class AgentChatScreenTest {
             }
         }
         scene.viewModel.openChat("groceries")
-        compose.waitUntil(20_000) { scene.viewModel.chatGeneration > 0 }
+        // **Not `compose.waitUntil`.** The read is posted from the worker to the main looper,
+        // and this harness only runs the looper while the scenario's own wait is idling it —
+        // a compose wait spins the clock and never gives the post its turn.
+        scene.await("the conversation to be read") { scene.viewModel.chatGeneration > 0 }
     }
 
     private fun say(text: String) {
@@ -67,7 +70,7 @@ class AgentChatScreenTest {
     }
 
     private fun awaitTurns(count: Int) {
-        compose.waitUntil(20_000) { scene.viewModel.chatBox?.turns?.size == count }
+        scene.await("$count turns") { scene.viewModel.chatBox?.turns?.size == count }
         compose.waitForIdle()
     }
 
@@ -158,7 +161,7 @@ class AgentChatScreenTest {
 
         chat(door)
         say("anything new?")
-        compose.waitUntil(20_000) {
+        scene.await("the idle line") {
             scene.viewModel.chatBox?.idle?.contains("1 check") == true
         }
         compose.waitForIdle()

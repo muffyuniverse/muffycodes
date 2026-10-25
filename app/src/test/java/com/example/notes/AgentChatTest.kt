@@ -77,7 +77,11 @@ class AgentChatTest {
         )
 
         assertEquals("one request", 1, box?.turns?.size)
-        assertEquals("two tool lines", 2, box?.turns?.first()?.lines?.size)
+        assertEquals(
+            "two tool lines and the ending, in the order they happened",
+            listOf("tree", "read", "concluded"),
+            box?.turns?.first()?.lines?.map { it.caption },
+        )
     }
 
     @Test
