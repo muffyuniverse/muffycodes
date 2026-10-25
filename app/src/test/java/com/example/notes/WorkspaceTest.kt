@@ -184,7 +184,7 @@ class WorkspaceTest {
 
     @Test
     fun theProjectOfAPathIsFound() {
-        val project = workspace.createProjectFolders("Shopping").getOrThrow()
+        val project = aProject("Shopping")
         val file = File(project, "Milk.txt")
         assertEquals("Shopping", workspace.projectOf(file))
         assertEquals("one level, which is the whole of the merge", "Shopping", workspace.projectAt(listOf("Shopping")))
@@ -194,9 +194,24 @@ class WorkspaceTest {
 
     @Test
     fun projectsAreListedByName() {
-        workspace.createProjectFolders("beta")
-        workspace.createProjectFolders("Alpha")
+        aProject("beta")
+        aProject("Alpha")
         assertEquals(listOf("Alpha", "beta"), workspace.projectNames())
+    }
+
+    /**
+     * A project's folder, with the repository that makes it one.
+     *
+     * `createProjectFolders` makes the folder only; `ProjectGit.init` makes the repository. The
+     * second half is what `isProjectFolder` asks for, because a project's folder *is* its
+     * repository — so a test that wants a project has to have both, and a folder alone is a folder
+     * (which is why `projectsAreListedByName` used to pass with two folders that were not
+     * projects at all).
+     */
+    private fun aProject(name: String): File {
+        val folder = workspace.createProjectFolders(name).getOrThrow()
+        File(folder, ".git").mkdirs()
+        return folder
     }
 
     @Test

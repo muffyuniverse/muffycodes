@@ -13,38 +13,42 @@ Where an earlier proposal disagrees, this document is right.
 
 ---
 
-## 2. The shape — three levels on disk, and the screen shows the ones you made
+## 2. The shape — the account is the list of projects, and a project *is* the repository
 
 ```text
 files/
   accounts/
-    muffyuniverse/                 the ACTIVE account — the root, and a git repository
-      .git/                        the app-wide history (invisible, §4)
-      .gitignore                   invisible; keeps project repos out of it
+    muffyuniverse/                 the ACTIVE account — the root, and the list of projects
       .muffy/                      invisible; the app's own bookkeeping
         pins.json                  the pinned flags
-      projects/
-        Shopping/                  a PROJECT — a folder you open and browse
-          .muffy/                  invisible; this project's bookkeeping
-          repo/                    the git worktree: everything GitHub sees
-            .git/
-            LICENSE                seeded by GitHub
-            README.md              seeded by GitHub
-            Milk.txt
-            Photos/
-              Shop.png
-          ideas.txt                local only — never committed to GitHub
-          Drafts/                  local only — a folder beside the repo
-            Shopping-list.txt
+      model_conf.json              invisible; the model the agent talks to
+      .gitignore                   invisible; github's, once a project is cloned into it
+      Shopping/                    a PROJECT — and at the same time the REPOSITORY
+        .git/                      the history, and what sync pushes
+        .gitignore                 invisible; keeps the app's own two folders out of git
+        agent/                     invisible; the record — what the model was sent and answered
+        LICENSE                    seeded by GitHub
+        README.md                  seeded by GitHub
+        Milk.txt
+        Photos/
+          Shop.png
+      Work/                        another project — its own repository, its own history
     someoneelse/                   invisible while another account is active
 ```
 
-- **`projects/` is a folder in the account's tree** — a second kind of folder can
-  sit beside it later.
-- **A project is a folder you open and browse.** You see `repo/` and everything
-  you keep beside it. Nothing is stepped through on your behalf.
+- **There is no `projects/` folder and no `repo/` folder.** The root of an account
+  *is* its list of projects, and a project's folder *is* its repository: its
+  `.git`, its `.gitignore` and the person's files live together, so the thing on
+  GitHub is the folder they are looking at.
+- **A project is a folder that holds a repository.** That is the definition, and it
+  is enforced: a folder at the root with no `.git` is only a folder, and the app
+  does not draw a project row for it.
 - **A project's name is its repository's name.** Renaming renames the repository
   on GitHub too.
+- **The app's own things live inside the project and are kept out of git**:
+  `agent/` holds the record, `.muffy/` the flags. Two lines in the project's
+  `.gitignore` — written by the app, committed by the app — are what make that
+  true, so a project that has been running an agent still has nothing to send.
 - **Files are pristine** — nothing is added to what you type. A file's identity
   is its path; renaming renames the file and git sees a rename.
 - **The extension is just the part of the name after the dot.** Default `.txt`.
@@ -52,8 +56,8 @@ files/
   digits, joined by single underscores — `My Shopping List` is written
   `my_shopping_list.txt`, and an imported `Holo and Lawrence, Kraft - Spice and
   Wolf.jpeg` arrives as `holo_and_lawrence_kraft_spice_and_wolf.jpeg`. The
-  extension survives, lowercased. A name here is a path component in two git
-  repositories and in the folder tree that *is* the account, so the rule lives in
+  extension survives, lowercased. A name here is a path component in a git
+  repository and in the folder tree that *is* the account, so the rule lives in
   one function (`Workspace.cleanName`) and every way in — typing, renaming,
   importing a file or a whole folder — goes through it. When it changes a name it
   says so, because a file that arrives under an unexpected name reads as a file
@@ -61,6 +65,9 @@ files/
 - **A project's folder is the exception**, and deliberately: it is named after its
   repository, which may already exist on GitHub. The app never renames somebody's
   repository on the phone.
+- **A local project** is the same thing with no remote: its own folder, its own
+  repository, its own versions — and nothing to push, which is why Sync is not
+  offered on it.
 
 ---
 
@@ -70,10 +77,9 @@ files/
 
 | | visible on screen | can be renamed / moved / deleted |
 |---|---|---|
-| your files and folders | **yes** | **yes** |
-| `repo/`, and everything inside it | yes — it is yours | yes, as a tree |
-| a project folder and `projects/` | yes | yes |
-| `.muffy/` (bookkeeping), `.git/`, `.gitignore` | **no** | **no** |
+| your files and folders, anywhere in a project | **yes** | **yes** |
+| a project's folder — its row is the project list | yes | renamed with the project, never moved or deleted as a file |
+| `agent/` (the record), `.muffy/`, `.git/`, `.gitignore` | **no** | **no** |
 | `LICENSE`, `README.md` | yes — GitHub created them, but they are files of yours to handle | yes |
 
 - Hidden things are hidden by **name and by rule**: the app's own files live
@@ -84,92 +90,90 @@ files/
 ### Moving
 
 Moving is an ordinary action on any file or folder **you** made — and only on
-those:
+those. There is no "move into the repository" and no "keep only on this phone" any
+more: a project's folder *is* its repository, so any folder the picker offers is
+inside one.
 
-- inside `repo/`, a move is a git change, and it is committed there at once — the
-  same as any other change, so sync is only the push;
-- beside `repo/`, a move is an ordinary move, and the app-wide history of §4
-  records it;
-- **into or out of `repo/`** is the same command. There is no "move into the
-  repository" and no "keep only on this phone": the picker offers **every folder
-  in the account**, and where the file lands is what decides which history owns
-  it.
-
-A move is the one command that can cross the line between the two histories, so
-**both sides are committed**: the destination repository records the file as
-tracked, and the source repository records that it is gone. Committing only the
-destination is how GitHub ends up holding a copy this phone no longer has.
+A move is the one command that can cross from one repository to another, so **both
+sides are committed**: the destination records the file as tracked, and the source
+records that it is gone. Committing only the destination is how GitHub ends up
+holding a copy this phone no longer has.
 
 | where it went | which history records it |
 |---|---|
-| into a project's `repo/` | that project — a new tracked file |
-| out of a project's `repo/` | that project — a removal, from where it used to be |
+| within one project | that project |
 | between two projects | both of them, one each |
-| anywhere else | the account's own history |
+| a folder outside every project | nothing — there is nothing there of a person's to version |
 
 ---
 
-## 4. The app-wide history
+## 4. The history — one per project, and none above them
 
-**The account's entire tree is a git repository of its own, and every change you
-make outside a project's `repo/` is committed to it automatically.**
+**Every project's folder is a git repository, and every change you make inside it is
+committed to that repository automatically.** It is the same repository sync pushes,
+which is why the arrows and GitHub's history are the same list and cannot disagree.
 
-It never leaves the phone. It has no remote, no sync button and no GitHub
-account — it is purely how this phone remembers what it used to hold.
+There is no account-level history. There used to be one — an account-wide repository
+that versioned everything outside a project — and it was removed with the two-level
+layout: once every folder under the account is a project, everything a person can
+touch is already inside a repository, and the second history had nothing left to
+cover. One history per project, one answer to "where did this version come from".
 
 ### What it covers
 
 | | which history keeps it |
 |---|---|
-| files inside a project's `repo/` | that project's repository — the existing one, with its sync and its arrows |
-| **everything else you made** — local files, local folders, folder creation, renames, moves, deletions, and a project's own name | **the app-wide history** |
-
-Project repositories are excluded from it (`.gitignore`), so nothing is stored
-twice and the two histories never fight.
+| every file and folder inside a project | **that project's repository** — the one sync pushes |
+| the app's own things: `agent/`, `.muffy/`, `.git/` | none — they are named in the project's `.gitignore` and are not the person's work |
+| a project's own name | none — the folder is named after the repository, and renaming renames the repository on GitHub |
 
 ### When it commits
 
 - **when the editor saves** — saving is a button, and pressing it writes the text
-  and commits it. Consecutive changes within a few seconds fold into one, because
-  a commit takes everything that is waiting
+  and commits it as one version. Consecutive changes within a few seconds fold into
+  one, because a commit takes everything that is waiting
 - **when the tree changes** — creating, renaming, moving, importing or deleting a
-  file or a folder
+  file or a folder. Creating an *empty* folder is not a version: git stores
+  content, so there is nothing to commit until something is in it, and the app says
+  nothing rather than inventing a marker file in the person's repository
+- **when a project arrives** — the clone is a repository already, so its history
+  starts with whatever the repository held. The app's own two `.gitignore` lines
+  are written after the clone (git will not clone into a non-empty folder) and are
+  committed by the app, so a project that has just arrived has nothing waiting
 
 A save's commit says one word — `Saved` — because the person never types it and
-every row of a file's history would otherwise repeat the same sentence; nothing
-on the screen shows it (`appVoice`). A change to the tree says what happened, in
-the same plain style as sync's: `Created Drafts/`, `Moved Shopping-list.txt into
+every row of a file's history would otherwise repeat the same sentence; nothing on
+the screen shows it (`appVoice`). A change to the tree says what happened, in the
+same plain style as sync's: `Created Drafts/`, `Moved Shopping-list.txt into
 Drafts/`, `Deleted Drafts/`. Empty commits are never made. The one message a
 history ever *shows* is the note typed when syncing.
 
 ### What it buys you
 
-- **The arrows work everywhere.** The ← and → buttons and restore stop being a
-  privilege of tracked files: a local file's versions, and the tree at any past
-  moment, are browsable and restorable the same way.
-- **A deleted folder is no longer gone.** Deleting `Drafts/` commits the
-  deletion, so the folder and everything in it can be brought back.
+- **The arrows work everywhere you can go.** Every file in a project has versions
+  and a restore, not only the ones Git already tracked.
+- **A deleted folder is no longer gone.** Deleting `Drafts/` commits the deletion,
+  so the folder and everything in it can be brought back.
 - **A deleted file is no longer lost either.** Its row is gone, so the add button
   offers **Restore deleted…**: the files the folder's own history holds and the
   folder no longer does, put back byte for byte — a version of a picture is not
   text, and writing a UTF-8 reading of it back would destroy the picture.
-- **Folder organisation is versioned.** Renames and moves of local things are
-  reversible, which is exactly where people regret things most.
-- **It is invisible until wanted.** No status, no count, no badge. The Project
-  row's `3 changed` still means "unsynced to GitHub" and nothing else, because
-  local changes are never *pending* — they are committed the moment they happen.
+- **Folder organisation is versioned.** Renames and moves are reversible, which is
+  exactly where people regret things most.
+- **It is invisible until wanted.** No status, no count, no badge. The project
+  row's `3 changed` still means "unsynced to GitHub" and nothing else, because a
+  change is committed the moment it happens and being committed is not being sent.
 
 ### What it costs, stated plainly
 
-- **Disk.** Each commit stores only what changed, but an image edited ten times
-  is stored ten times. For notes this is small; it is not free.
-- **No pruning, ever, for now.** History is never trimmed. If it ever becomes a
-  problem, that is a separate decision with its own design.
-- **One repository per account, not one for the whole app** — my call, stated so
-  you can overrule it. Accounts are independent roots, and a single repository
-  spanning all of them would put a switch between accounts into one shared
-  history and keep a removed account's content alive inside it. Per account, the
-  history belongs to the account and disappears when its copies do.
+- **Disk.** Each commit stores only what changed, but an image edited ten times is
+  stored ten times, and a project's `.git` grows with it. For notes this is small;
+  it is not free.
+- **One repository per project.** Two projects cannot share a history, and a file
+  moved between them has a version in each — which is the honest record of a move,
+  not a duplicate.
+- **What is not in a project is not versioned.** The account root holds projects and
+  nothing else, so there is nothing there for a history to protect.
 
 ---
 
@@ -198,7 +202,7 @@ The active account is shown **above** the controls:
   > `[ Cancel ]` `[ Remove ]`
 
   Either way the account's key is gone from this phone. The difference is whether
-  the local tree — and with it the app-wide history — is deleted or merely left
+  the local tree — and with it every project's history — is deleted or merely left
   unreachable until the same account signs in again.
 
 An account stores its own **commit identity** (name and email, editable,
@@ -223,8 +227,8 @@ One row per project of the active account:
                                             (＋)
 ```
 
-- The second line is **`N changed`**, read from `git status` inside `repo/`, or
-  **`up to date`**.
+- The second line is **`N changed`** — what the project has that GitHub does not —
+  or **`up to date`**.
 - **Tapping a row enters the project** — the folder view of §3, with the slim row
   on top.
 - **No separate Pull or Delete screens exist.** They live here.
@@ -234,7 +238,7 @@ One row per project of the active account:
 | item | what it does |
 |---|---|
 | **Sync** | pushes — the same action as the button inside, so you never have to enter a project just to push it |
-| **Rename…** | renames the project **and its repository on GitHub** (and commits the rename to the app-wide history) |
+| **Rename…** | renames the project **and its repository on GitHub** (the folder's name and the repository's are one name) |
 | **Delete…** | one command; the dialog carries the choice, below |
 
 > **Delete `muffyuniverse/shopping`?**
@@ -265,11 +269,14 @@ A repository already deleted on GitHub is not an error — the local side goes.
   default `gpl-3.0`), creates the repository with `auto_init` +
   `license_template`, and clones it in. GitHub writes `LICENSE` and `README.md`;
   the app never writes a README.
+- **＋ New local project…** makes one with no remote: its own folder, its own
+  repository, its own history, and nothing to push — which is why Sync is not
+  offered on it.
 - **Everything below it** is the account's public repositories, newest-changed
   first, with the ones already here marked. Picking one pulls it in: not here →
   cloned; already here → asks once, *"Replace the copy on this phone?"*, then
-  fetches, resets to the remote branch and cleans untracked files. **Local files
-  beside `repo/` survive**, because the reset happens inside the worktree only.
+  fetches and resets to the remote branch. **The app's own folders survive** —
+  `agent/` and `.muffy/` are ignored by git, so the reset cannot reach them.
 
 ---
 
@@ -310,7 +317,7 @@ muffyuniverse · Shopping              3 changed   [ Sync ]
 
 ## 8. Sync
 
-**A sync is a push, and nothing else.** Every change inside `repo/` is already
+**A sync is a push, and nothing else.** Every change in the project is already
 committed when it happens — a save, a rename, a move, an import, a deletion — so by
 the time Sync is pressed there is nothing left to decide about.
 
@@ -322,8 +329,9 @@ the time Sync is pressed there is nothing left to decide about.
    few.
 
 The history's arrows move between **changes**, not between pushes: a version exists
-the moment you save, and an undo does not wait for a network. Local files beside
-`repo/` are not part of the push — they are already versioned by §4, on this phone.
+the moment you save, and an undo does not wait for a network. The app's own folders
+are not part of the push — they are not the person's work, and git is told so in the
+project's `.gitignore`.
 
 **Online is required.** With no network, sync does nothing and says so plainly —
 nothing lands half-done, and the changed count stays as it was. A repository
@@ -379,8 +387,8 @@ where a key is typed refuses screenshots · the encryption key needs an unlocked
 phone · backups cannot carry the tokens · a test runs a clone and a push with a
 fake key and fails if git wrote it down in any file.
 
-The app-wide history of §4 is **local and keyless**: it has no remote, so it adds
-no way for anything to leave the phone.
+The history of §4 is **the project's own repository**: it has no second remote and
+no second key, so it adds no way for anything to leave the phone.
 
 ---
 
@@ -397,16 +405,15 @@ no search across projects, no history pruning.
 
 1. **Accounts** — `accounts/` folders, Add / Switch / Remove with its two
    outcomes, the key and commit identity per account.
-2. **Storage** — the account root, `projects/`, the project folder with `repo/`
-   inside it, local files beside it, hidden `.muffy/`, titles as file names,
-   `.txt` default, extensions deciding how a file opens, paths as identity, and
-   the visibility rule of §3 enforced in one place.
-3. **The app-wide history** — the account tree as a repository that commits on
-   every save and every tree change, with project repos excluded, and the arrows
-   and restore reading through it for local files and folders.
-4. **Screens** — the root, the Projects screen with rows, `⋮` and `＋`, the
-   project folder view with the slim row, the local/tracked distinction and the
-   crosses of §3.
+2. **Storage** — the account root *as* the projects list, a project's folder *as*
+   its repository, hidden `.muffy/` and `agent/`, titles as file names, `.txt`
+   default, extensions deciding how a file opens, paths as identity, and the
+   visibility rule of §3 enforced in one place.
+3. **The history** — each project's repository committing on every save and every
+   tree change, with the app's own folders ignored, and the arrows and restore
+   reading through it.
+4. **Screens** — the root, the project list with rows, `⋮` and `＋`, the project
+   folder view with the slim row and the crosses of §3.
 5. **Sync** — messages from changed names, force push, online-required failures,
    reachable from both the slim row and the row's `⋮`.
 6. **Settings** — Add / Switch / Remove with the active account above them, the
@@ -418,15 +425,15 @@ Steps 1–3 are the load-bearing ones; 4–6 land on top of them.
 
 ## 14. The history length (added at build time)
 
-**One setting, one sentence:** how many changes are kept in each project's repo,
-and in the local one that holds everything else. It applies **at the next change**
-rather than when the number is typed — a history that shortened itself the moment
-a number was typed would destroy commits before their replacements existed.
+**One setting, one sentence:** how many changes are kept in a project's history. It
+applies **at the next change** rather than when the number is typed — a history that
+shortened itself the moment a number was typed would destroy commits before their
+replacements existed. There is one history per project and no other, so the number
+bounds every history there is.
 
 | it bounds | what that means |
 |---|---|
 | each project's repository | its commits, shortened after the next change |
-| the account's own history | every save, rename, move, import and deletion outside a worktree |
 
 An empty field means **keep everything**, which is the default. When a length is
 set, the oldest commits are dropped by rebuilding the chain from the newest ones
@@ -464,7 +471,7 @@ claims to be one is treated as an ordinary account and talks to GitHub.
 With it, the promises above are walked by 8 feature files that drive the real
 ViewModel — visibility, files, accounts, projects, sync, history, retention and
 key safety — and by the screenshot tour, which signs in as the test account, makes
-a project, writes into its worktree, syncs it and opens the history, drawing every
+a project, writes a file into it, syncs it and opens the history, drawing every
 screen on the way.
 
 Every one of those steps goes through the code the release ships. One switch is
