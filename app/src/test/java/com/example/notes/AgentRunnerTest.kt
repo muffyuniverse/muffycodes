@@ -201,6 +201,74 @@ class AgentRunnerTest {
     }
 
     @Test
+    fun `an outage is written down once, and its end carries the count`() {
+        // **One outage, not eight events.** Each failed attempt used to leave a `stopped` row in
+        // the record; eight of them say what one row and a number say, and the next clear-up has to
+        // carry all eight.
+        on("shopping", now = 1_000)
+        var down = true
+        val door = object : Door {
+            override fun turn(request: Request): Result<Reply> =
+                if (down) {
+                    Result.failure(IllegalStateException("OpenRouter answered 503"))
+                } else {
+                    Result.success(Reply("", listOf(Call("c1", "wait", "{}"))))
+                }
+        }
+        val runner = runner(door)
+        val log = AgentLog.open(File(ws.projectsDir, "shopping"))
+
+        runner.tick(1_000 + AgentSession.POLL_MS)
+        settle(runner)
+        val afterFirst = log.rows().count { it.name == "stopped" }
+        assertEquals("the first failure is in the record", 1, afterFirst)
+
+        // Two more attempts while it is still down.
+        repeat(2) {
+            val at = runner.sessions().single().nextPollAt
+            runner.tick(at)
+            settle(runner)
+        }
+        assertEquals("after three attempts", 3, runner.sessions().single().retries)
+        assertEquals(
+            "still one row about it",
+            afterFirst,
+            log.rows().count { it.name == "stopped" },
+        )
+
+        // And it comes back.
+        down = false
+        runner.tick(runner.sessions().single().nextPollAt)
+        settle(runner)
+
+        val session = runner.sessions().single()
+        assertEquals("the ladder is cleared", 0, session.retries)
+        assertEquals("and it is waiting again", AgentSession.Sub.WAITING, session.sub)
+        val back = log.rows().single { it.name == "retry" }
+        assertEquals("one line, with the count", "reconnected after 3 tries", back.body)
+        assertEquals("and it is evidence, not context", 0, log.contextRows().count { it.name == "retry" })
+    }
+
+    @Test
+    fun `a first failure that is not retried is not called a reconnect`() {
+        // The count belongs to the ladder, so a poll that fails from rest says nothing about
+        // reconnecting — there was nothing to reconnect from.
+        on("shopping", now = 1_000)
+        val door = object : Door {
+            override fun turn(request: Request): Result<Reply> =
+                Result.failure(IllegalStateException("OpenRouter answered 503"))
+        }
+        val runner = runner(door)
+        val log = AgentLog.open(File(ws.projectsDir, "shopping"))
+
+        runner.tick(1_000 + AgentSession.POLL_MS)
+        settle(runner)
+
+        assertTrue("no reconnect row", log.rows().none { it.name == "retry" })
+        assertEquals("but the failure is there", 1, log.rows().count { it.name == "stopped" })
+    }
+
+    @Test
     fun `the reminder is the settings' interval, repeated, and it stops when answered`() {
         on("shopping", now = 1_000)
         AgentSessions(ws.accountDir).put(

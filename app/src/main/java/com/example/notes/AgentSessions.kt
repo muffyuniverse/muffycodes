@@ -26,6 +26,21 @@ class AgentSessions(private val accountDir: File) {
 
     private val file: File get() = File(stateDir, AGENTS)
 
+    /**
+     * The lock the file is protected by — **shared by every instance over the same file.**
+     *
+     * A per-instance lock would exclude nothing, and this file has two writers by design: the screen
+     * writes a session when the person starts or stops an agent and when a turn it ran ends, and the
+     * runner writes one on every poll, from its own worker. Two `AgentSessions` objects over one
+     * account would each read the whole file, each change their own key, and each write the whole
+     * file back — so the second write silently undoes the first, and an agent somebody just switched
+     * off comes back, or one just switched on never appears.
+     *
+     * The read-modify-write is therefore *inside* the lock rather than around it: reading outside
+     * and writing inside is the same lost update with better manners.
+     */
+    private val guard: Any get() = lockFor(file)
+
     /** Every session this phone knows, newest-looking first is not meaningful: by name. */
     fun read(): List<AgentSession> {
         if (!file.isFile) return emptyList()
@@ -60,23 +75,37 @@ class AgentSessions(private val accountDir: File) {
 
     /** Writes one session, and forgets any other key for the same project. */
     fun put(session: AgentSession) {
-        val root = objectOf()
-        root.put(session.project, one(session))
-        write(root)
+        synchronized(guard) {
+            val root = objectOf()
+            root.put(session.project, one(session))
+            write(root)
+        }
     }
 
     /** Forgets a project's session. */
     fun remove(project: String) {
-        val root = objectOf()
-        if (!root.has(project)) return
-        root.remove(project)
-        write(root)
+        synchronized(guard) {
+            val root = objectOf()
+            if (!root.has(project)) return
+            root.remove(project)
+            write(root)
+        }
     }
 
     private fun objectOf(): JSONObject = try {
         if (file.isFile) JSONObject(file.readText()) else JSONObject()
     } catch (t: Throwable) {
         JSONObject()
+    }
+
+    companion object {
+        /**
+         * One lock per file, for the whole process — the same rule as the record's, for the same
+         * reason: two objects over one file are two writers, not two owners.
+         */
+        private val locks = java.util.concurrent.ConcurrentHashMap<String, Any>()
+
+        private fun lockFor(file: File): Any = locks.computeIfAbsent(file.absolutePath) { Any() }
     }
 
     private fun write(root: JSONObject) {

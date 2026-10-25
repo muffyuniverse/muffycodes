@@ -113,6 +113,8 @@ class AgentRunner(
                     doorFor,
                     active,
                     limits = limits,
+                    // The ladder's position, so a repeated failure is not written down again.
+                    retrying = session.retries > 0,
                 )
                 agent.poll() to log.rows()
             } catch (t: Throwable) {
@@ -128,8 +130,26 @@ class AgentRunner(
             // the retry ladder land an hour away from where the state machine had put it.
             val current = sessionOf(project) ?: session
             put(guarded(current, how.after(current, now)))
+            // **One line when it comes back, with the count.** The other half of the design's rule:
+            // an outage is bracketed — the first failure in the record, and this — rather than left
+            // as fifteen `stopped` rows saying what one row and a number say.
+            var shown = rows
+            if (session.retries > 0 && how !is Agent.End.Stopped) {
+                try {
+                    val record = AgentLog.open(File(ws.projectsDir, project))
+                    record.sessionOnly(
+                        AgentLog.NOTE,
+                        "retry",
+                        "reconnected after ${session.retries} " +
+                            (if (session.retries == 1) "try" else "tries"),
+                    )
+                    shown = record.rows()
+                } catch (t: Throwable) {
+                    // A row about a reconnect is not worth failing the reconnect for.
+                }
+            }
             synchronized(inFlight) { inFlight -= project }
-            polled(project, rows, how)
+            polled(project, shown, how)
             changed(sessions.read())
         }
     }

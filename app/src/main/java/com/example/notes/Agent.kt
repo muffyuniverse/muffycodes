@@ -51,6 +51,16 @@ class Agent(
      * obeyed after the person said to stop.
      */
     private val cut: () -> String? = { null },
+    /**
+     * True when this poll is a retry — the session has already failed at least once.
+     *
+     * **A failed attempt is news once.** Eight attempts at a provider that is down are one outage,
+     * and a row per attempt would put eight identical `stopped` rows into a file the next clear-up
+     * then has to carry. The design's rule is the first attempt written down and one line when it
+     * comes back, with the count. The runner knows the ladder's position and the turn does not, so
+     * it is passed in.
+     */
+    private val retrying: Boolean = false,
 ) {
 
     private val tools = AgentTools(ws, project, git, log, maxResult)
@@ -405,7 +415,10 @@ class Agent(
     /** A transport that failed: the session reconnects on its ladder, and the words are kept. */
     private fun blip(problem: Throwable): End {
         val said = Secrets.explain(problem, "The model could not be asked")
-        log.note("stopped", said)
+        // The first failure of an outage is written down; the retries are one outage, not eight
+        // events. What the person wants to know when it comes back is how many tries it took, and
+        // that row is the runner's — it is the one holding the ladder.
+        if (!retrying) log.note("stopped", said)
         return End.Stopped(said, retryable = true)
     }
 

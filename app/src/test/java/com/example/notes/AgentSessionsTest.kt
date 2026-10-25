@@ -72,6 +72,41 @@ class AgentSessionsTest {
     }
 
     @Test
+    fun `two writers at once never lose the other's session`() {
+        // **The file has two writers by design** — the screen writes when the person starts or stops
+        // an agent, and the runner writes on every poll from its own worker. Each write reads the
+        // whole file and writes the whole file back, so without a lock shared by both instances the
+        // second write silently undoes the first: an agent somebody just switched off comes back,
+        // and one they just switched on never appears.
+        val threads = 4
+        val each = 15
+        val start = java.util.concurrent.CountDownLatch(1)
+        val done = java.util.concurrent.CountDownLatch(threads)
+        repeat(threads) { t ->
+            Thread {
+                start.await()
+                val writer = AgentSessions(account)
+                repeat(each) { i ->
+                    writer.put(
+                        AgentSession(
+                            project = "p-$t-$i",
+                            state = AgentSession.State.IDLE,
+                            lastPollAt = 1_000,
+                        ),
+                    )
+                }
+                done.countDown()
+            }.start()
+        }
+        start.countDown()
+        done.await(30, java.util.concurrent.TimeUnit.SECONDS)
+
+        val sessions = AgentSessions(account).read()
+        assertEquals("every session written survives", threads * each, sessions.size)
+        assertEquals("and none twice", sessions.size, sessions.map { it.project }.toSet().size)
+    }
+
+    @Test
     fun `writing one project does not forget another`() {
         // The trap: a write that serialises the one session it was given, deleting the rest of
         // the file. It would look right in every single-agent test.
