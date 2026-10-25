@@ -189,6 +189,17 @@ private fun AppRoot(viewModel: AppViewModel) {
         )
         if (uris.isNotEmpty()) viewModel.importFiles(uris)
     }
+    // The one system setting this app needs, opened the way the pickers are: the press is recorded
+    // before the screen opens and answered when the person comes back, and the state is read again
+    // at that moment because the setting is the phone's and this app is not told when it changes.
+    var batteryAsked by remember { mutableIntStateOf(0) }
+    var openingBattery by remember { mutableIntStateOf(0) }
+    val askBattery = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult(),
+    ) {
+        Trace.answered(openingBattery, Battery.said(this))
+        batteryAsked++
+    }
     val pickFolder = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree(),
     ) { uri ->
@@ -324,6 +335,8 @@ private fun AppRoot(viewModel: AppViewModel) {
 
         showSettings -> SettingsScreen(
             viewModel = viewModel,
+            batteryAsked = batteryAsked,
+            onAskBattery = { openingBattery = tap("battery"); askBattery.launch(Battery.intent(this)) },
             onBack = { showSettings = false },
             onSignIn = { tap("add account"); pending = Pending.SignIn },
             onSetKey = { tap("set model key"); pending = Pending.ModelKey },

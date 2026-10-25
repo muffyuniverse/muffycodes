@@ -537,6 +537,108 @@ class AgentLogTest {
         assertEquals("and the task is still there", 2, log.contextRows().size)
     }
 
+    // ---- the audit: session minus context is his judgement -------------------
+
+    /**
+     * The agent's clear-up, done the way the `edit` tool does it: the context file is rewritten with
+     * exactly the rows that were kept. Not a helper on the production class, because the production
+     * class does not offer one — the tool goes through the workspace write funnel, which is the
+     * thing being bypassed here on purpose.
+     */
+    private fun clearUpTo(keep: List<String>) {
+        val file = File(project, "agent/context.log")
+        file.writeText(keep.joinToString("\n") + "\n")
+    }
+
+    @Test
+    fun `what the agent cleared is exactly what the two files disagree about`() {
+        log.told("make the list")
+        log.call("read", """{"path":"GitHub/milk.txt"}""")
+        log.got("read", "0\ntwo litres")
+        log.call("read", """{"path":"GitHub/eggs.txt"}""")
+        log.got("read", "0\na dozen")
+        log.note("agent", "the eggs matter, the milk does not")
+
+        // The agent clears the milk pair, exactly as the tool lets it: whole rows, by text. The
+        // call's row is the one whose text names the file; the result's row is the one after it.
+        val lines = log.contextRows().map { it.line }
+        val milk = lines.indexOfFirst { it.contains("milk") }
+        clearUpTo(lines.filterIndexed { i, _ -> i != milk && i != milk + 1 })
+
+        val thrown = log.thrownAway()
+        assertEquals("one pair", 2, thrown.size)
+        assertTrue("the call", thrown.any { it.name == "read" && it.kind == AgentLog.CALL })
+        assertTrue("and its result", thrown.any { it.kind == AgentLog.GOT && it.body.contains("litres") })
+        assertTrue(
+            "and nothing he kept",
+            thrown.none { it.body.contains("eggs") || it.body == "make the list" },
+        )
+    }
+
+    @Test
+    fun `the app's own rows are not called his judgement`() {
+        // **The rows that would be misread.** Each is written to one file on purpose, so a plain
+        // subtraction reports them as the agent's clearing — and the audit is only worth having if
+        // it is exact about whose decision each row was.
+        log.told("make the list")
+        log.sessionOnly(AgentLog.TURN, "turn", "1")
+        log.call("wait", "{}")
+        log.got("wait", "0 still waiting")
+        log.note("idle", "waiting for the operator")
+        // The poll, again: session only, by design.
+        log.sessionOnly(AgentLog.CALL, "wait", "{}")
+        log.sessionOnly(AgentLog.GOT, "wait", "0 still waiting")
+        log.sessionOnly(AgentLog.NOTE, "idle", "waiting for the operator")
+        log.sessionOnly(AgentLog.NOTE, "retry", "reconnected after 3 tries")
+        log.trimContext(budget = 1)
+
+        val thrown = log.thrownAway().map { it.line }
+        assertTrue("nothing here is his: $thrown", thrown.isEmpty())
+    }
+
+    @Test
+    fun `a reset is the person's act, so nothing before it is read as his clearing`() {
+        // A reset empties the context, which is *shape-identical* to the agent clearing everything.
+        // The reset's own row is in both files, so the boundary is on the record.
+        repeat(3) { i ->
+            log.told("task $i")
+            log.call("read", """{"path":"GitHub/f$i.txt"}""")
+            log.got("read", "0\nline")
+        }
+        log.reset()
+        log.told("the new task")
+
+        assertTrue(
+            "his clearing is empty: ${log.thrownAway().map { it.body }}",
+            log.thrownAway().isEmpty(),
+        )
+
+        // But a clear he makes *after* the reset is still his.
+        log.call("read", """{"path":"GitHub/after.txt"}""")
+        log.got("read", "0\nnothing much")
+        val pair = log.contextRows().filter { it.name == "read" && it.body.contains("after.txt") }
+        clearUpTo(log.contextRows().map { it.line } - pair.map { it.line }.toSet())
+        assertEquals("one pair cleared after the reset", 2, log.thrownAway().size)
+    }
+
+    @Test
+    fun `a seal the app wrote is not the agent's clearing either`() {
+        // The one way a dangling call ends up outside the context: a reset took the context away
+        // while the call was still unanswered. The next launch seals it — into the session, because
+        // that is the file the call is in — and the seal is the app's repair, not a decision.
+        log.told("make the list")
+        log.call("read", """{"path":"GitHub/milk.txt"}""")
+        log.reset()
+        log.beginSession()
+
+        assertTrue(
+            "a seal was written",
+            log.rows().any { it.kind == AgentLog.GOT && it.body.contains("closed before") },
+        )
+        val thrown = log.thrownAway().map { it.line }
+        assertTrue("and it is the app's: $thrown", thrown.isEmpty())
+    }
+
     @Test
     fun `the session keeps a row the context does not want`() {
         // The repeated poll is real evidence and is not sent: fifteen of them an hour would make

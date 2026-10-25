@@ -45,7 +45,13 @@ class SettingsScreenTest {
         MaterialTheme { Surface { content() } }
     }
 
-    private fun settings(onSignIn: () -> Unit = {}, onRemove: () -> Unit = {}) {
+    private fun settings(
+        onSignIn: () -> Unit = {},
+        onRemove: () -> Unit = {},
+        /** The phone the test is testing: the exemption is a fact of the system, not of the screen. */
+        exempt: (android.content.Context) -> Boolean = { false },
+        onAskBattery: () -> Unit = {},
+    ) {
         compose.setContent {
             Frame {
                 SettingsScreen(
@@ -54,6 +60,8 @@ class SettingsScreenTest {
                     onSignIn = onSignIn,
                     onRemoveAccount = onRemove,
                     onTestAccount = {},
+                    exempt = exempt,
+                    onAskBattery = onAskBattery,
                 )
             }
         }
@@ -89,6 +97,31 @@ class SettingsScreenTest {
 
         compose.onNodeWithText("Change history").assertIsDisplayed()
         compose.onNodeWithText("Changes kept").assertIsDisplayed()
+    }
+
+    @Test
+    fun `the battery row says what the system is doing, and offers the only fix`() {
+        // **The one thing on this screen the app cannot do for the person.** In Doze the network is
+        // suspended for apps that are not exempt, so a poll fails and — with no fallback provider by
+        // design — the session stops rather than waiting. The row says which state the phone is in.
+        var asked = 0
+        settings(exempt = { false }, onAskBattery = { asked++ })
+
+        compose.onNodeWithText("Battery").assertIsDisplayed()
+        compose.onNodeWithText("Not exempt · polls may fail").assertIsDisplayed()
+        compose.onNodeWithText("Ask Android").performClick()
+
+        assertEquals("and the button asks", 1, asked)
+    }
+
+    @Test
+    fun `an exempt phone is told so, and is not asked again`() {
+        // A button that goes on asking after the answer is yes is a button that teaches people to
+        // dismiss the dialog — so the row must not offer it once the phone already allows polls.
+        settings(exempt = { true })
+
+        compose.onNodeWithText("Exempt · the agent can poll").assertIsDisplayed()
+        compose.onNodeWithText("Ask Android").assertDoesNotExist()
     }
 
     @Test

@@ -163,6 +163,44 @@ class AgentLog private constructor(
         }
 
         /**
+         * True when [row] is **the app's own**, rather than the agent's judgement.
+         *
+         * The audit this format is built for — `session.log` minus `context.log` is what the model
+         * decided did not matter — is only true if the app's own bookkeeping is excluded from the
+         * subtraction. There are five such rows, and each is written to one file on purpose:
+         *
+         * | row | where | why not in both |
+         * |---|---|---|
+         * | `TURN turn` | session only | the boundary the box counts turns by; the model is given a conversation, not request numbers |
+         * | `CALL/GOT wait` | session only after the first | the poll is the same request again; a row per poll would make every poll a different request |
+         * | `NOTE idle` | session only after the first | the same, in words |
+         * | `NOTE trimmed` | one file each | a row about a trim is about that file |
+         * | `NOTE retry` | session only | the ladder's count is the app's, and the poll that follows must be byte-identical |
+         *
+         * **A row the agent clears is still the agent's judgement even when it is one of these** —
+         * the `wait` pair in its first form, above all. That is the one decision the subtraction
+         * cannot show, and it is a bound worth stating rather than a fault worth hiding: what the
+         * audit answers is "what did he throw away", and the answer is exact for everything except
+         * a row the app wrote for itself.
+         */
+        fun byTheApp(row: Row): Boolean = when {
+            row.kind == TURN -> true
+            row.kind == NOTE && row.name == "trimmed" -> true
+            row.kind == NOTE && row.name == "retry" -> true
+            row.kind == NOTE && row.name == "idle" -> true
+            // The poll's repeats. The first pair is in both files, so it only reaches the
+            // subtraction when the agent cleared it — which is why this is a name test and not a
+            // count: a row that is in both is never subtracted in the first place.
+            row.name == "wait" -> true
+            // The app's repair of a call it outlived: a seal written into the file the call was in,
+            // so the evidence can hold one the context does not.
+            row.kind == GOT && row.body.startsWith(FAILURE) && row.body.contains("closed before") ->
+                true
+
+            else -> false
+        }
+
+        /**
          * Why [after] is not a clear-up of [before], or null when it is.
          *
          * The agent shrinks its own context, and this is the whole of what it may do to it:
@@ -512,6 +550,37 @@ class AgentLog private constructor(
 
     /** The rows the agent's context holds, oldest first. This is what is sent. */
     fun contextRows(): List<Row> = parse(context)
+
+    /**
+     * **What the agent decided did not matter.**
+     *
+     * The two files hold the same rows, and only `context.log` is sent, so subtracting one from the
+     * other is the agent's compaction as a fact rather than as a claim. That is the whole point of
+     * keeping both: compaction is normally the one part of an agent's memory nobody can check — a
+     * summary is written and its source is gone, so "I kept what mattered" can be neither proved
+     * nor disproved. Here nothing is rewritten, only removed, and the removed rows are still on the
+     * record. So a person can read what was dropped, and a drop that turned out to matter can be
+     * pointed at by name.
+     *
+     * Three things are *not* this, and they are subtracted out. A row the app wrote for itself
+     * ([byTheApp]) — the turn boundary, the poll's repeats, the trim markers, the reconnect line —
+     * is bookkeeping, not judgement. A row the app's own trim removed is the app's doing, and the
+     * marker it left says how many. And a row that is simply **not in the context because it was
+     * written before a reset** is the person's act, recorded by the reset's own row in both files.
+     *
+     * Ordered as the evidence is, so the answer reads like the conversation it came from.
+     */
+    fun thrownAway(): List<Row> = synchronized(guard) {
+        val rows = rows()
+        // **A reset is not a judgement, and it looks exactly like one.** It empties the context, so
+        // every row before it is out of the context and would otherwise be read as the agent's
+        // clearing — the one thing the person's own act must never be mistaken for. The reset's row
+        // is in both files, so the boundary is on the record and needs no other marker.
+        val reset = rows.indexOfLast { it.kind == NOTE && it.name == "reset" }
+        val since = if (reset >= 0) reset + 1 else 0
+        val kept = contextRows().map { it.id }.toSet()
+        rows.drop(since).filter { it.id !in kept && !byTheApp(it) }
+    }
 
     private fun parse(file: File): List<Row> {
         val text = try {

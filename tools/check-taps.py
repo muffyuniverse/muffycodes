@@ -67,6 +67,8 @@ VOCABULARY = {
     "chat", "close chat", "send", "previous turn", "next turn", "latest turn", "turn",
     # the agent itself, and how often it reminds
     "start agent", "stop agent", "reset agent", "remind me",
+    # the one system setting this app needs, asked for from settings
+    "battery",
     "clear up", "trim context",
 }
 

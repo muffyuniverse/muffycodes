@@ -30,6 +30,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import android.content.Context
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -44,6 +45,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.draw.clip
@@ -87,10 +89,28 @@ fun SettingsScreen(
     onReport: () -> Unit = {},
     /** Asks for the OpenRouter key: a screen that refuses screenshots, like the GitHub one. */
     onSetKey: () -> Unit = {},
+    /**
+     * Whether Android will let an agent poll while the screen is off — **the system's fact, passed
+     * in** rather than read here.
+     *
+     * The same rule as the clock: a system fact a screen depends on is a parameter, so a test states
+     * the phone it is testing instead of arranging a shadow to impersonate one. The default reads the
+     * phone, because that is what the app does.
+     */
+    exempt: (Context) -> Boolean = { Battery.exempt(it) },
+    /** Changes when the person comes back from the system's screen, so the fact is read again. */
+    batteryAsked: Int = 0,
+    /** Opens the system's exemption screen. MainActivity owns the launcher, as it does the pickers. */
+    onAskBattery: () -> Unit = {},
 ) {
     val settings = viewModel.settings
     val account = viewModel.account
     var showingSwitch by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    // Read once per visit to the system's screen — not per frame, because the check is an IPC into
+    // the power service, and not once for ever, because the answer can change while the app is
+    // paused behind that screen.
+    val exemptNow = remember(batteryAsked) { exempt(context) }
 
     Scaffold(
         topBar = {
@@ -322,6 +342,35 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary,
             )
+            // ---- what Android does to an agent in a pocket ----
+            // One button, because nothing in the app can work around Doze and only the person can
+            // exempt it. Here rather than on launch: an app that opens with a permissions dialog
+            // teaches people to dismiss permissions dialogs.
+            Text("Battery", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "While the screen is off, Android suspends the network for apps it does not " +
+                    "exempt — and a poll that cannot go out stops the agent rather than delaying " +
+                    "it, because there is no fallback provider by design.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    if (exemptNow) "Exempt · the agent can poll" else "Not exempt · polls may fail",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (exemptNow) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+                // Offered only while it is needed: a button that goes on asking after the answer is
+                // yes teaches people to dismiss the dialog.
+                if (!exemptNow) {
+                    TextButton(onClick = onAskBattery) { Text("Ask Android") }
+                }
+            }
             Spacer(Modifier.height(24.dp))
 
             // ---- the agent's model ----
