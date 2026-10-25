@@ -475,6 +475,9 @@ class AgentTest {
 
     @Test
     fun `the evidence is not the agent's to write`() {
+        log.told("a task")
+        val before = File(log.session.path).readText()
+
         val answer = tools().run(
             Call(
                 "c8",
@@ -486,7 +489,7 @@ class AgentTest {
 
         assertTrue("refused: $answer", answer.startsWith(AgentLog.FAILURE))
         assertTrue("and it says what the file is: $answer", answer.contains("evidence"))
-        assertTrue("which is still there", File(log.session.path).length() > 0)
+        assertEquals("which is untouched", before, File(log.session.path).readText())
     }
 
     // ---- the record as the model reads it -----------------------------------

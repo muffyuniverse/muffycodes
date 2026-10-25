@@ -62,6 +62,29 @@ object LogFormat {
             }
         }
 
+    /**
+     * The same line, from a detail that is **already escaped**.
+     *
+     * For a row that came back out of a file: its detail column is the escaped form, and putting
+     * it through [escaped] a second time doubles every backslash. A trim that did that would
+     * rewrite the two characters backslash-n as four, and every trim would add two more — the
+     * file drifting one character at a time away from what was actually recorded.
+     */
+    fun rawRow(stamp: String, id: Int, kind: String, name: String, escapedDetail: String): String =
+        buildString {
+            append(stamp)
+            append(' ')
+            append(id.toString().padStart(4))
+            append(' ')
+            append(kind.padEnd(7))
+            append(' ')
+            append(name)
+            if (escapedDetail.isNotEmpty()) {
+                append("  ")
+                append(escapedDetail)
+            }
+        }
+
     /** The body's one escaping rule: a newline and a backslash, in that order. */
     fun escaped(text: String): String = text.replace("\\", "\\\\").replace("\n", "\\n")
 

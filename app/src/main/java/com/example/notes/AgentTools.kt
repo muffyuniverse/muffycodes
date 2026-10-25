@@ -218,7 +218,7 @@ class AgentTools(
             if (text.isNotEmpty() && !text.endsWith("\n")) {
                 return refusal("End the context with a newline, or its last row is a half row")
             }
-            val problem = AgentLog.clearUpProblem(rowsOf(before), rowsOf(text))
+            val problem = AgentLog.clearUpProblem(linesOf(before), linesOf(text))
             if (problem != null) return refusal(problem)
         }
         // **Through the funnel.** A locked file, a hidden name or a structural folder is refused
@@ -446,14 +446,13 @@ class AgentTools(
         file.name == AgentLog.SESSION && file.parentFile?.canonicalFile ==
             File(projectDir, AgentLog.DIR).canonicalFile
 
-    /** [text] as rows, for the clear-up check; a line that does not parse becomes a broken row. */
-    private fun rowsOf(text: String): List<AgentLog.Row> {
+    /** [text] as its lines, for the clear-up check; no parsing, so the comparison is the file's. */
+    private fun linesOf(text: String): List<String> {
         if (text.isEmpty()) return emptyList()
         val lines = text.split("\n")
         // Only the empty string after a final newline is dropped; a file written without one has
         // a real row there, and a check that skipped it would pass a clear-up that lost it.
-        val complete = if (text.endsWith("\n")) lines.dropLast(1) else lines
-        return complete.map { AgentLog.parseRow(it) }
+        return if (text.endsWith("\n")) lines.dropLast(1) else lines
     }
 
     /** True for the two places the agent may write: `GitHub/` and `agent/`. */

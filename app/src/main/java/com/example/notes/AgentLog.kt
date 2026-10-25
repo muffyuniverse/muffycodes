@@ -143,30 +143,35 @@ class AgentLog private constructor(
          * Four rules, each with its own sentence, because a refusal that does not say which rule
          * it broke teaches the model nothing:
          * 1. every line still reads as a row;
-         * 2. what is left is a subset of what was there, in the same order;
+         * 2. what is left is the **same lines**, in the same order — removal, nothing else;
          * 3. the newest task is still on the record — it is what the turn is for;
          * 4. a call and its result stay together, because a call with no answer is a request
          *    every endpoint refuses and an answer with no call is a message it cannot place.
+         *
+         * The lines are compared as text, not as rows re-rendered back into lines: "the same
+         * row" is a claim about the file's bytes, and a comparison that went through the parser
+         * twice could pass an edit that changed them.
          */
-        fun clearUpProblem(before: List<Row>, after: List<Row>): String? {
+        fun clearUpProblem(before: List<String>, after: List<String>): String? {
             if (after.isEmpty()) return "Your context cannot be emptied: it holds the task"
-            if (after.any { it.broken }) {
+            val rows = after.map { parseRow(it) }
+            if (rows.any { it.broken }) {
                 return "A line no longer reads as a row; keep the five columns exactly as they are"
             }
             var index = 0
-            for (row in after) {
-                while (index < before.size && before[index].line != row.line) index++
+            for (line in after) {
+                while (index < before.size && before[index] != line) index++
                 if (index == before.size) {
                     return "Clear-up removes rows. It does not change them or add new ones."
                 }
                 index++
             }
-            val task = before.lastOrNull { it.kind == TOLD }
-            if (task != null && after.none { it.id == task.id && it.kind == TOLD }) {
+            val task = before.map { parseRow(it) }.lastOrNull { it.kind == TOLD }
+            if (task != null && rows.none { it.id == task.id && it.kind == TOLD }) {
                 return "The newest task stays: it is what you are working on"
             }
             val waiting = ArrayDeque<Row>()
-            for (row in after) {
+            for (row in rows) {
                 when (row.kind) {
                     CALL -> if (row.name !in SPEAKING) waiting.addLast(row)
                     GOT -> {
@@ -241,8 +246,15 @@ class AgentLog private constructor(
         val startsBurst: Boolean get() = kind == TOLD
         val endsBurst: Boolean get() = kind == ASK || kind == CONCLUDE
 
+        /**
+         * The row as it stands in the file.
+         *
+         * [detail] is the file's own column — already escaped — so this uses [LogFormat.rawRow]
+         * and not [LogFormat.row]: re-escaping a parsed row doubles a backslash every time the
+         * file is rewritten, which is a record that quietly stops matching what was recorded.
+         */
         val line: String
-            get() = if (broken) detail else LogFormat.row(time, id, kind, name, detail)
+            get() = if (broken) detail else LogFormat.rawRow(time, id, kind, name, detail)
 
         /** The body as the agent wrote it, with its newlines back. */
         val body: String get() = LogFormat.unescaped(detail)
