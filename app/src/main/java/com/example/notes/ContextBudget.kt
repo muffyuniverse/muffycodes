@@ -134,14 +134,16 @@ object ContextBudget {
     }
 
     /**
-     * A count as a person reads it: `917k`, `104k`, `96k`.
+     * A count as a person reads it: `918k`, `105k`, `96k`.
      *
-     * Thousands only — a token count is a scale, not a quantity, and `917,504` invites a reader to
-     * treat the last four digits as meaningful when they are the app's estimate.
+     * Thousands only, and **rounded to the nearest**, because a token count is a scale rather than
+     * a quantity: `917,504` invites a reader to treat the last four digits as meaningful when they
+     * are the app's own estimate, and the design's own sentence reads "this pin allows 105k" for
+     * 104,858. A truncation would print 104k there and disagree with the document.
      */
     fun short(tokens: Long): String = when {
         tokens <= 0L -> "off"
-        tokens >= 1_000L -> "${tokens / 1_000L}k"
+        tokens >= 1_000L -> "${(tokens + 500L) / 1_000L}k"
         else -> "$tokens"
     }
 }

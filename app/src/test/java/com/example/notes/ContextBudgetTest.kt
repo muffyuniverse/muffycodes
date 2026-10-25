@@ -146,7 +146,8 @@ class ContextBudgetTest {
     @Test
     fun `a count reads as a scale, not a quantity`() {
         assertEquals("96k", ContextBudget.short(96_000))
-        assertEquals("917k", ContextBudget.short(917_504))
+        assertEquals("918k", ContextBudget.short(917_504))
+        assertEquals("and a pin's ceiling is the design's own example", "105k", ContextBudget.short(104_858))
         assertEquals("off", ContextBudget.short(0))
         assertEquals("999", ContextBudget.short(999))
     }
