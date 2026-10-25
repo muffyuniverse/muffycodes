@@ -72,7 +72,7 @@ class TraceTest {
         assertTrue("the newlines are escaped: $line", line.contains("0\\nGitHub/"))
         // From the name's own separator, not from the first double space: the id is padded,
         // so the row begins with a run of spaces that has nothing to do with the detail.
-        assertEquals("and it reads back exactly", body, Trace.unescaped(line.substringAfter("tree  ")))
+        assertEquals("and it reads back exactly", body, LogFormat.unescaped(line.substringAfter("tree  ")))
     }
 
     @Test
@@ -83,7 +83,7 @@ class TraceTest {
         Trace.note("path", body)
         settle()
 
-        assertEquals("as it was", body, Trace.unescaped(firstLine().substringAfter("path  ")))
+        assertEquals("as it was", body, LogFormat.unescaped(firstLine().substringAfter("path  ")))
     }
 
     @Test

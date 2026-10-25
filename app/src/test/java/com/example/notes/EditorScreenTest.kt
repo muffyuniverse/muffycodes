@@ -92,11 +92,6 @@ class EditorScreenTest {
 
         editorFor(file)
         compose.onNodeWithText("two litres").performTextReplacement("three litres")
-        // **The newest matching line, not a count of them.** The ring is shared by every test
-        // in this JVM and holds a fixed number of events, so another test's save of a milk.txt
-        // can be pushed out while this one runs — and then a count that should have gone up
-        // reads the same. What must be true is that the newest save line is a different line.
-        val saidBefore = lastSavedLine()
         compose.onNodeWithText("Save").performClick()
         // Saving writes on the app's worker, so the file answers a moment later.
         compose.waitUntil(10_000) { file.readText() == "three litres" }
@@ -112,18 +107,13 @@ class EditorScreenTest {
         // is on the screen — the file's name is the same afterwards — so nothing the app
         // draws can answer it, and the log showed `save milk.txt` waiting for ever while
         // the next back press spent it.
-        // **Waited for, not sampled.** The line is written on the worker after the commit,
-        // which is after the write this test has already waited for — so asking once, at the
-        // moment the file is right, is asking a fraction of a second too early.
-        compose.waitUntil(10_000) {
-            val after = lastSavedLine()
-            after != null && after != saidBefore
-        }
+        // **Asked of the tap, not of the ring's text.** What "a save answers itself" means is
+        // that the tap stops waiting — and a save that could not commit answers too, with a
+        // failure, which is why the message is asserted separately below. Reading the ring for
+        // a sentence measured the wording; this measures the guarantee.
+        compose.waitUntil(10_000) { Trace.report().waiting.none { it.what == "save" } }
+        assertEquals("and the app said so", "Saved milk.txt", scene.viewModel.message)
     }
-
-    /** The newest line saying the app saved this file, or null when there is none. */
-    private fun lastSavedLine(): String? =
-        Trace.report().lines.lastOrNull { it.contains("Saved milk.txt") }
 
     @Test
     fun `renaming the file does not throw away what was typed`() {
