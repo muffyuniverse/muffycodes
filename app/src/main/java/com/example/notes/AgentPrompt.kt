@@ -8,8 +8,18 @@ import java.io.File
  * ① is how to use *this app*: the tools, the rules, the shape of a turn. ② is how to work in
  * *this project*, which starts empty and is meant to be edited by the person. Both are ordinary
  * text files in the account, so they can be read on the phone, edited with the editor, versioned
- * with everything else — and both are written **only when they are missing**, because a default
- * that overwrites an edit is a default that loses work.
+ * with everything else — and both are written when they are missing, because a default that
+ * overwrites an edit is a default that loses work.
+ *
+ * **A default that changes is a different case, and it was getting it wrong.** The one-record round
+ * rewrote ① — the record stopped being two files, and the instructions stopped telling the agent to
+ * edit `agent/context.log`. The file is only written when missing, so every phone that had already
+ * run the agent kept the old text: the model would be told to edit a file that no longer exists,
+ * and the app would refuse it, forever, with the person's only clue being a confused agent. So
+ * [layer] also replaces a file that is **byte-for-byte one of the texts this app shipped before**
+ * — an unedited default — and never one that has been edited. That distinction is not a check on
+ * the person's file; it is what makes the two rules compatible: a default may be replaced when it
+ * is still the default, and an edit is never touched.
  *
  * The third layer is not a file this class writes: it is the `in` rows of the record, and they
  * belong to the agent (see [AgentLog]).
@@ -71,6 +81,68 @@ object AgentPrompt {
           not to write. `forget` is the one thing you may do to your context, and it names ids.
     """.trimIndent()
 
+    /**
+     * ① as the app shipped it before the one-record round.
+     *
+     * **Kept so it can be recognised and replaced**, not for anything to read. Comparison ignores
+     * whitespace (see [sameAsShipped]): what is being asked is "did the person change any of the
+     * words", and re-indenting a file is not changing what it tells the agent.
+     *
+     * It describes `agent/context.log` as a file the agent may edit, which is the design this build
+     * replaced. An agent still holding it tries to read a file that no longer exists.
+     */
+    private val SYSTEM_BEFORE_ONE_RECORD = """
+        You are working inside a phone app. A person is talking to you about one project of
+        theirs, and you change their files for them.
+
+        WHERE YOU ARE
+        The project folder holds:
+          GitHub/        the files that live on GitHub. This is the only part that syncs.
+          agent/         your own record. session.log is the evidence; context.log is your
+                         context, and you may edit it.
+          project_prompt.txt  how to work in this project. Read it. It is short.
+        You cannot see or change anything outside this project, another project included.
+
+        HOW A TURN WORKS
+        Call one or more tools. Every call gets a result whose first line is 0 (it worked) or 1
+        (it did not, and the rest says why — read it, do not guess). Then you are asked again.
+        A turn ends in exactly one of three ways:
+          ask       you need the person. Ask one clear question and stop.
+          conclude  the work is done. Say what you did, in a sentence or two.
+          wait      you are idle and the person has not spoken yet.
+        These three end the turn, so they are called ALONE. Anything called with them is refused.
+
+        RULES THE APP ENFORCES
+          - A locked file, and anything inside a locked folder, is read-only. A tool that would
+            change it is refused, and the refusal is the answer: do not try another way.
+          - Names that start with a dot, and the folders the app keeps, are not yours.
+          - Save is a commit on the phone. Nothing you do is pushed to GitHub; the person pushes.
+          - A result is never silently shortened. If it says "showing first N of M", it is
+            truncated, and you may ask for the rest by range.
+
+        HOW TO BEHAVE
+          - Read before you write. Guess only when reading is impossible.
+          - Change as little as the task needs. A rename is not a rewrite.
+          - Your record is the memory of this project. agent/context.log is what is sent every
+            turn: when it fills up, clear it up by removing rows that no longer matter to the
+            task - whole rows, a call together with its result, never the newest task, and never
+            a row rewritten or added. agent/session.log is the evidence: read it, do not change
+            it. Do not annotate.
+          - If the last thing you were told is missing, say so and ask. Silence is worse.
+
+        FILES YOU MAY WRITE
+        Anything inside GitHub/, and agent/context.log. Nothing else: agent/session.log is
+        yours to read, not to write.
+    """.trimIndent()
+
+    /**
+     * Every ① text this app has shipped **before** the current one.
+     *
+     * Public because it is a fact about the app that a test has to be able to state: a file holding
+     * one of these is a default nobody has edited, and [layer] replaces it with [SYSTEM_DEFAULT].
+     */
+    val PREVIOUS_SYSTEM: List<String> = listOf(SYSTEM_BEFORE_ONE_RECORD)
+
     /** ② — the project's own instructions, empty until somebody writes them. */
     val PROJECT_DEFAULT = """
         # How to work in this project
@@ -86,25 +158,38 @@ object AgentPrompt {
      * answer to it is the same as for a missing one — the agent must not be handed an empty
      * instruction set because a save was interrupted.
      */
-    fun layer(file: File, fallback: String): String {
+    fun layer(file: File, fallback: String, before: List<String> = emptyList()): String {
         val text = try {
             if (file.isFile) file.readText() else ""
         } catch (t: Throwable) {
             ""
         }
-        if (text.isNotBlank()) return text
+        // **Still the default? Then it may be replaced.** Only the app's own words are recognised,
+        // and only words: a person who reflowed the file without changing it loses the reflow, and
+        // a person who changed one word keeps their file for ever.
+        val replace = text.isBlank() || before.any { sameAsShipped(text, it) }
+        if (!replace) return text
         return try {
             file.parentFile?.mkdirs()
             file.writeText(fallback)
             fallback
         } catch (t: Throwable) {
-            fallback
+            if (text.isNotBlank()) text else fallback
         }
     }
 
+    /**
+     * True when [text] says exactly what [shipped] said, whitespace aside.
+     *
+     * Whitespace-insensitive on purpose: the question is whether the *words* are still the app's,
+     * and a trailing newline or a re-indent is not a person telling the agent something else.
+     */
+    private fun sameAsShipped(text: String, shipped: String): Boolean =
+        text.filterNot { it.isWhitespace() } == shipped.filterNot { it.isWhitespace() }
+
     /** ① for [accountDir]. */
     fun system(accountDir: File): String =
-        layer(File(accountDir, SYSTEM_FILE), SYSTEM_DEFAULT)
+        layer(File(accountDir, SYSTEM_FILE), SYSTEM_DEFAULT, PREVIOUS_SYSTEM)
 
     /** ② for the project in [projectDir]. */
     fun project(projectDir: File): String =

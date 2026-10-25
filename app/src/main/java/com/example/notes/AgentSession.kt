@@ -14,7 +14,14 @@ package com.example.notes
  * |---|---|---|
  * | idle | polling in `wait` · concluded · reconnecting | none |
  * | asked | called `ask` | now, then every interval until answered |
- * | stopped | by the operator · by the phone · an error | only for a cause the operator did not choose |
+ * | stopped | by the operator · an error | only for a cause the operator did not choose |
+ *
+ * **There is no "stopped by the phone" state, and its absence is deliberate.** The design named
+ * one, and the app cannot honour both it and the stronger rule it sits under: "it must never stop
+ * until the operator removes it". A phone that force-stops the app has not been asked to end the
+ * session — so on resume the session goes on, and what the phone did is written down where it can
+ * be read ([AgentSession.missedBy] and the row the runner writes). A state that says "stopped"
+ * about a session that is about to carry on would be the label lying about the fact.
  *
  * A *session* is one per project, because a session is a conversation and a conversation belongs
  * to a project.
@@ -61,9 +68,6 @@ data class AgentSession(
         /** The operator switched it off. Silent, because they were there. */
         BY_OPERATOR,
 
-        /** The system ended it: a force-stop, an OEM battery manager. */
-        BY_THE_PHONE,
-
         /** The pinned provider refused, with no fallback by design. */
         PIN_REFUSED,
 
@@ -86,6 +90,9 @@ data class AgentSession(
 
         /** How many times a failing poll reconnects before the session admits it is a wall. */
         const val MAX_RETRIES = 8
+
+        /** How late a poll has to be before the app says the phone was not running it. */
+        const val GAP_MS = 3 * POLL_MS
 
         /** `2nd`, `3rd`… and `11th`, which is why the last two digits are checked first. */
         fun ordinal(n: Int): String {
@@ -155,6 +162,25 @@ data class AgentSession(
 
     /** How long until the next poll, for a label; never negative. */
     fun untilPoll(at: Long): Long = (nextPollAt - at).coerceAtLeast(0)
+
+    /**
+     * How late this session's next poll is, in milliseconds, when it is late enough to be the phone.
+     *
+     * **The one thing the app can honestly say about a force-stop.** Android does not tell an app
+     * that it was stopped: a force-stop is a cold start indistinguishable from any other, and an
+     * OEM battery manager usually kills without calling anything at all. What *is* observable is the
+     * clock: a session that was running should have polled every four minutes, so a `lastPollAt`
+     * hours in the past means the app was not running for hours. That is a fact about the phone, and
+     * it is worth writing down rather than resuming silently.
+     *
+     * [GAP_MS] is three intervals, not one: a late wake, a network change and a Doze window are all
+     * ordinary, and a row about every one of them would be noise. A quarter of an hour is not.
+     */
+    fun missedBy(at: Long): Long {
+        if (!running || lastPollAt <= 0) return 0
+        val late = at - lastPollAt
+        return if (late > GAP_MS) late else 0
+    }
 
     /**
      * A poll was sent at [at].
@@ -313,7 +339,6 @@ data class AgentSession(
 
     private fun stopWords(s: AgentSession): String = when (s.reason) {
         StopReason.BY_OPERATOR -> "stopped by you"
-        StopReason.BY_THE_PHONE -> "the phone stopped the app"
         StopReason.PIN_REFUSED -> s.lastWords.ifBlank { "the pinned provider refused" }
         StopReason.LOOP -> "it kept going without doing anything"
         StopReason.ERROR -> s.lastWords.ifBlank { "it could not go on" }

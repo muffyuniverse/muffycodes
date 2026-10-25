@@ -200,6 +200,17 @@ private fun AppRoot(viewModel: AppViewModel) {
         Trace.answered(openingBattery, Battery.said(context))
         batteryAsked++
     }
+    // The notification permission, asked the same way: the press is recorded before the dialog
+    // opens and answered when the person is back, and the fact is read again at that moment
+    // because only the phone knows the answer.
+    var noticesAsked by remember { mutableIntStateOf(0) }
+    var openingNotices by remember { mutableIntStateOf(0) }
+    val askNotices = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+    ) {
+        Trace.answered(openingNotices, Notices.said(context))
+        noticesAsked++
+    }
     val pickFolder = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree(),
     ) { uri ->
@@ -337,6 +348,12 @@ private fun AppRoot(viewModel: AppViewModel) {
             viewModel = viewModel,
             batteryAsked = batteryAsked,
             onAskBattery = { openingBattery = tap("battery"); askBattery.launch(Battery.intent(context)) },
+            noticesAsked = noticesAsked,
+            onAskNotices = {
+                openingNotices = tap("notifications")
+                val permission = Notices.permission()
+                if (permission != null) askNotices.launch(permission)
+            },
             onBack = { showSettings = false },
             onSignIn = { tap("add account"); pending = Pending.SignIn },
             onSetKey = { tap("set model key"); pending = Pending.ModelKey },

@@ -65,10 +65,11 @@ VOCABULARY = {
     "reset model config", "set model key",
     # the agent's conversation: one project's, and the turns inside it
     "chat", "close chat", "send", "previous turn", "next turn", "latest turn", "turn",
-    # the agent itself, and how often it reminds
-    "start agent", "stop agent", "reset agent", "remind me",
-    # the one system setting this app needs, asked for from settings
-    "battery",
+    # the agent itself, how often it reminds, and the numbers it runs with
+    "start agent", "stop agent", "stop all agents", "reset agent", "remind me",
+    "answer timeout", "result length",
+    # the two system settings this app needs, both asked for from settings
+    "battery", "notifications",
     "clear up", "trim context",
 }
 

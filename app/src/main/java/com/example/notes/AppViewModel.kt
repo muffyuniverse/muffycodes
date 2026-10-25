@@ -502,6 +502,9 @@ class AppViewModel @JvmOverloads constructor(
         pins = ws.pins()
         lockedPaths = ws.locked()
         agentSessions = AgentSessions(ws.accountDir).read()
+        // The first refresh of a new process is where a session that survived a reboot gets its
+        // clock back: the answer is read here, but nothing else in a refresh would start it.
+        applyService(agentSessions)
         readModelConfig(ws)
         // A selection is a set of paths, and a path that is no longer there cannot
         // be selected: an item moved or deleted out from under the selection would
@@ -997,7 +1000,7 @@ class AppViewModel @JvmOverloads constructor(
     fun isLocked(file: File): Boolean = workspace?.isLocked(file) ?: false
 
     /**
-     * True for the agent's two files, which the app keeps and does not let a person save over.
+     * True for the agent's record, which the app keeps and does not let a person save over.
      *
      * Asked here for the same reason [isLocked] is: the greyed Save and the funnel that refuses the
      * write must be one answer, not two copies of a rule that can drift apart.
@@ -1892,6 +1895,10 @@ class AppViewModel @JvmOverloads constructor(
             val log = AgentLog.open(File(ws.projectsDir, project))
             val agent = Agent(
                 ws.accountDir, project, ws, g, log, door, model,
+                // How much of one result the model may be handed. A field rather than a constant:
+                // the brief asked for it, and a person who is told "showing first 20000 of 40000"
+                // should be able to raise the 20000 rather than tell the agent to work in pieces.
+                maxResult = settings.maxResult,
                 limits = limits,
                 // Read at every boundary rather than captured: the person may speak or stop while
                 // this turn is waiting for an answer, and the loop has to see that when it comes.
@@ -1946,6 +1953,16 @@ class AppViewModel @JvmOverloads constructor(
     /** The projects with a poll in flight, so a test can wait for one to finish. */
     internal fun agentPollingInFlight(): Set<String> = runner?.polling() ?: emptySet()
 
+    /**
+     * The last answer to "does a clock need to exist?", or null before this process asked.
+     *
+     * **Asked on change rather than on every tick**, because the answer is the same on almost every
+     * tick and starting a service is not free. Null rather than false so the first refresh of a new
+     * process always asks — which is what starts the clock for sessions that were already on when
+     * the phone was switched off.
+     */
+    private var serviceWanted: Boolean? = null
+
     /** The session of [project], or null when the agent is not running there. */
     fun sessionOf(project: String): AgentSession? =
         agentSessions.firstOrNull { it.project == project }
@@ -1967,13 +1984,28 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /**
+     * Switches every running agent off — **one switch, in settings, that the brief assumed existed.**
+     *
+     * It is the same act as one box's Stop, repeated: each session goes through [stopAgent], so the
+     * request in flight is interrupted and the session is written the same way. A second
+     * implementation of "the person stopped it" is the thing this app keeps out of itself.
+     */
+    fun stopAllAgents() {
+        val on = agentSessions.filter { it.running }
+        if (on.isEmpty()) return
+        Trace.tap("stop all agents", "${on.size}")
+        for (session in on) stopAgent(session.project)
+    }
+
+    /**
      * Clears the agent's working context, and keeps the evidence.
      *
-     * The person's act, not the agent's: the clear-up it may do itself is checked as removal of
-     * whole rows and never of the newest task ([AgentLog.clearUpProblem]), and a reset is a
-     * different thing — the conversation starts here. `agent/session.log` is not touched, so
-     * nothing that happened is lost, and the two files still differ only by what was thrown away
-     * plus this one row.
+     * The person's act, not the agent's: the agent's own clear-up is checked by
+     * [AgentLog.forgetProblem] and can never take the newest task, while a reset is a different
+     * thing — the conversation starts here. `agent/session.log` is not touched, so nothing that
+     * happened is lost: the rows that were in the context are marked `app`, which is the truth (the
+     * app took them out; the agent did not judge them), and [AgentLog.thrownAway] still reports
+     * only what the model chose to drop.
      *
      * Refused while a turn is running: a context replaced under a reply being written would
      * leave the record half in each file.
@@ -2028,6 +2060,25 @@ class AppViewModel @JvmOverloads constructor(
         }
         runner.tick(now)
         agentSessions = runner.sessions()
+        // **A session on disk needs a clock even if nobody pressed anything.** The service is
+        // sticky, so the system restarts it after a kill — but not after a reboot, and not after
+        // the app was force-stopped. Opening the app is the first moment the app is allowed to
+        // start it again, and this is that moment.
+        applyService(agentSessions)
+    }
+
+    /**
+     * Starts the clock when one is needed, and says nothing when the answer has not changed.
+     *
+     * The service is what keeps the promise "it must never stop until the operator removes it"; the
+     * screen's own tick only runs while somebody is looking. So the app asks the question wherever
+     * the sessions are read — on every tick, on every refresh — and [AgentService.apply] decides.
+     */
+    private fun applyService(sessions: List<AgentSession>) {
+        val wanted = sessions.any { it.running || it.needsYou }
+        if (wanted == serviceWanted) return
+        serviceWanted = wanted
+        AgentService.apply(getApplication(), sessions)
     }
 
     /**
@@ -2072,7 +2123,7 @@ class AppViewModel @JvmOverloads constructor(
         agentSessions = agentSessions.filterNot { it.project == session.project } + session
         // **The service follows the sessions, always.** One call, from the one place a session is
         // written, so no path can switch an agent on and leave the phone without a clock.
-        AgentService.apply(getApplication(), agentSessions)
+        applyService(agentSessions)
         Trace.note("agent-state", "${session.project} · ${session.label()}")
         // **Only a session that just started needing somebody speaks.** Otherwise every reminder
         // tick would also post here, and the reminder count would never leave the first one.
@@ -2098,6 +2149,10 @@ class AppViewModel @JvmOverloads constructor(
             model = active.model,
             provider = active.provider,
             effort = active.effort,
+            // **The person's number, not the app's.** Four minutes by default; a slow network is a
+            // fact only they know, and a timeout that is too short turns a long turn into a ladder of
+            // retries that never let it finish.
+            timeoutMs = settings.timeoutMinutes * 60_000,
         )
     })(model)
 

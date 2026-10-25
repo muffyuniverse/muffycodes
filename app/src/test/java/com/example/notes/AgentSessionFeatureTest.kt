@@ -80,6 +80,42 @@ class AgentSessionFeatureTest : FeatureTest() {
         }
     }
 
+    @Test
+    fun `one switch in settings stops every agent on the phone`() {
+        // **The brief assumed this existed and it never did.** Each box has its own Stop, and the
+        // strip says how many are on — but a person who wants them all off had to open each project
+        // to do it, which is the one thing a settings switch is for.
+        listening()
+        scene.project("groceries")
+        scene.project("letters")
+        scene.viewModel.startAgent("groceries")
+        scene.viewModel.startAgent("letters")
+        assertEquals("two on", "2 sessions", AgentSession.strip(scene.viewModel.agentSessions))
+
+        scene.viewModel.stopAllAgents()
+
+        assertEquals(
+            "every one of them off",
+            setOf(AgentSession.State.STOPPED),
+            scene.viewModel.agentSessions.map { it.state }.toSet(),
+        )
+        assertEquals(
+            "and each one says who stopped it",
+            setOf(AgentSession.StopReason.BY_OPERATOR),
+            scene.viewModel.agentSessions.map { it.reason }.toSet(),
+        )
+        assertEquals(
+            "so the strip has nothing left to ask about",
+            "",
+            AgentSession.strip(scene.viewModel.agentSessions),
+        )
+        assertTrue("and nobody was woken up to be told", notices.isEmpty())
+        assertTrue(
+            "the one press is on the record, not two",
+            Trace.report().lines.count { it.contains("TAP") && it.contains("stop-all-agents") } == 1,
+        )
+    }
+
     // ---- idle ---------------------------------------------------------------
 
     @Test

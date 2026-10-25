@@ -102,6 +102,16 @@ fun SettingsScreen(
     batteryAsked: Int = 0,
     /** Opens the system's exemption screen. MainActivity owns the launcher, as it does the pickers. */
     onAskBattery: () -> Unit = {},
+    /**
+     * Whether a notification posted now would be seen — **the system's fact, passed in**, like the
+     * battery exemption above and for the same reason: a screen that reads the phone itself cannot
+     * be tested against a stated one.
+     */
+    notified: (Context) -> Boolean = { Notices.granted(it) },
+    /** Changes when the person comes back from the permission dialog, so the fact is read again. */
+    noticesAsked: Int = 0,
+    /** Shows the permission dialog. MainActivity owns the launcher, as it does the pickers'. */
+    onAskNotices: () -> Unit = {},
 ) {
     val settings = viewModel.settings
     val account = viewModel.account
@@ -111,6 +121,7 @@ fun SettingsScreen(
     // the power service, and not once for ever, because the answer can change while the app is
     // paused behind that screen.
     val exemptNow = remember(batteryAsked) { exempt(context) }
+    val noticesNow = remember(noticesAsked) { notified(context) }
 
     Scaffold(
         topBar = {
@@ -282,6 +293,25 @@ fun SettingsScreen(
             )
             Spacer(Modifier.height(16.dp))
 
+            // ---- every agent on this phone, and one switch ----
+            // The brief assumed this existed; it did not. The box has a Stop per project, and the
+            // strip says how many are on — but a person who wants them all off should not have to
+            // open each project to do it.
+            Text("Agents", style = MaterialTheme.typography.titleMedium)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    AgentSession.strip(viewModel.agentSessions).ifEmpty { "No agent is on." },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    onClick = { viewModel.stopAllAgents() },
+                    enabled = viewModel.agentSessions.any { it.running },
+                ) { Text("Stop all agents") }
+            }
+            Spacer(Modifier.height(16.dp))
+
             // ---- how often an agent that needs a person says so ----
             // The poll is the agent working; this is the app asking somebody to look at it.
             // It stops the moment the thing is dealt with, which is why the number is an
@@ -342,6 +372,33 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary,
             )
+            Spacer(Modifier.height(16.dp))
+
+            // ---- how long it waits, and how much it is handed ----
+            // Two numbers the brief asked for, and both are about a phone rather than a policy: a
+            // slow network makes an answer take longer, and a big file makes a result longer than
+            // the app's own default. Neither is a decision the app can make for the person.
+            Text("Agent pace", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "An answer that takes longer than the timeout is not lost: it is treated as a " +
+                    "blip, and the agent reconnects. A result longer than the length is cut and " +
+                    "says how much it showed.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            LengthField(
+                label = "Wait for an answer (minutes)",
+                value = settings.timeoutMinutes,
+                placeholder = "4",
+                onValueChange = { settings.keepTimeout(it) },
+            )
+            LengthField(
+                label = "One result may carry (characters)",
+                value = settings.maxResult,
+                placeholder = "20000",
+                onValueChange = { settings.keepMaxResult(it) },
+            )
+            Spacer(Modifier.height(24.dp))
             // ---- what Android does to an agent in a pocket ----
             // One button, because nothing in the app can work around Doze and only the person can
             // exempt it. Here rather than on launch: an app that opens with a permissions dialog
@@ -369,6 +426,34 @@ fun SettingsScreen(
                 // yes teaches people to dismiss the dialog.
                 if (!exemptNow) {
                     TextButton(onClick = onAskBattery) { Text("Ask Android") }
+                }
+            }
+            Spacer(Modifier.height(24.dp))
+            // ---- whether a reminder can reach the tray at all ----
+            // The battery exemption decides whether a poll can go out; this decides whether the
+            // answer can be seen. The agent's reminders are the whole point of the "asked" state,
+            // and from Android 13 a declared permission that was never granted means a
+            // notification that is posted and silently dropped — a session that looks healthy.
+            Text("Notifications", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "A question, or a session that stopped on its own, is only useful if the phone " +
+                    "shows it. Android asks once, here, rather than in a dialog at launch.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    if (noticesNow) "On · a reminder reaches you" else "Off · nothing is shown",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (noticesNow) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+                if (!noticesNow) {
+                    TextButton(onClick = onAskNotices) { Text("Allow") }
                 }
             }
             Spacer(Modifier.height(24.dp))

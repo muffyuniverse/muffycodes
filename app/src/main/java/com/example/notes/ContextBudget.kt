@@ -177,14 +177,6 @@ object ContextBudget {
     }
 
     /**
-     * A count as a person reads it: `918k`, `105k`, `96k`.
-     *
-     * Thousands only, and **rounded to the nearest**, because a token count is a scale rather than
-     * a quantity: `917,504` invites a reader to treat the last four digits as meaningful when they
-     * are the app's own estimate, and the design's own sentence reads "this pin allows 105k" for
-     * 104,858. A truncation would print 104k there and disagree with the document.
-     */
-    /**
      * A size a person reads, in **bytes**: `412 B`, `9.3k`, `1.2M`.
      *
      * The exact unit, shown where somebody could check it with `wc -c` — a row's caption in the
@@ -205,6 +197,14 @@ object ContextBudget {
         return if (part == 0L) "$whole" else "$whole.$part"
     }
 
+    /**
+     * A token count as a person reads it: `918k`, `105k`, `96k`.
+     *
+     * Thousands only, and **rounded to the nearest**, because a token count is a scale rather than
+     * a quantity: `917,504` invites a reader to treat the last four digits as meaningful when they
+     * are the app's own estimate, and the design's own sentence reads "this pin allows 105k" for
+     * 104,858. A truncation would print 104k there and disagree with the document.
+     */
     fun short(tokens: Long): String = when {
         tokens <= 0L -> "off"
         tokens >= 1_000L -> "${(tokens + 500L) / 1_000L}k"

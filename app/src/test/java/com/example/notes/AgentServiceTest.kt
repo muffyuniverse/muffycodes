@@ -30,6 +30,23 @@ class AgentServiceTest {
 
     private fun service() = Robolectric.buildService(AgentService::class.java).create()
 
+    /**
+     * Runs [block] with a live service, and destroys it afterwards.
+     *
+     * **The destroy is the point.** The service keeps a static "am I alive" flag, which is what
+     * spares every screen refresh a deprecated binder call — and a test that left a service running
+     * would leave the flag true for the next test in this class, which is a test about whether the
+     * service gets started at all.
+     */
+    private fun <T> withService(block: (AgentService) -> T): T {
+        val controller = service()
+        return try {
+            block(controller.get())
+        } finally {
+            controller.destroy()
+        }
+    }
+
     @Test
     fun `the manifest declares a special-use foreground service, and says why`() {
         // **Read from the manifest rather than remembered.** `dataSync` is capped at six hours in
@@ -109,6 +126,60 @@ class AgentServiceTest {
         )
         assertEquals("2 sessions · 1 needs you", AgentSession.strip(sessions))
     }
+
+    // ---- what the tray offers ----------------------------------------------
+
+    @Test
+    fun `a session's notification carries the two ways to answer it`() {
+        // **The design named both buttons, and neither existed.** A notification that only opens the
+        // app makes a person walk to the screen that has the switch, which is the one moment a
+        // notification is supposed to save them — so Open and Stop this session are the whole
+        // content of it.
+        val posted = withService { service ->
+            service.notify(AgentSession("shopping", state = AgentSession.State.ASKED, askedAt = 1_000))
+            notifications().single()
+        }
+        assertEquals("two buttons", 2, posted.actions.size)
+        assertEquals(
+            "the first is Open",
+            listOf("Open", "Stop this session"),
+            posted.actions.map { it.title.toString() },
+        )
+        assertTrue(
+            "and the sentence is the session's own",
+            posted.extras?.getCharSequence(android.app.Notification.EXTRA_TEXT)
+                ?.contains("shopping") == true,
+        )
+    }
+
+    @Test
+    fun `two sessions that need a person are two notifications, not one`() {
+        // A single id means whichever was posted last hides the other, and a person answering one
+        // question never learns there was a second.
+        val count = withService { service ->
+            service.notify(AgentSession("shopping", state = AgentSession.State.ASKED, askedAt = 1_000))
+            service.notify(AgentSession("letters", state = AgentSession.State.ASKED, askedAt = 1_000))
+            notifications().size
+        }
+
+        assertEquals("one each", 2, count)
+    }
+
+    @Test
+    fun `a session that needs nobody is not posted at all`() {
+        val posted = withService { service ->
+            service.notify(AgentSession("shopping", state = AgentSession.State.IDLE, lastPollAt = 1_000))
+            notifications()
+        }
+
+        assertTrue("nothing to say", posted.isEmpty())
+    }
+
+    /** Everything in the tray, which in a test is a shadow's list rather than a person's screen. */
+    private fun notifications(): List<android.app.Notification> =
+        org.robolectric.Shadows.shadowOf(
+            app.getSystemService(android.app.NotificationManager::class.java),
+        ).allNotifications
 
     // ---- what the system was asked to start ---------------------------------
 

@@ -396,6 +396,111 @@ class AgentTest {
         )
     }
 
+    // ---- the instructions, and the default that changed ----------------------
+
+    @Test
+    fun `an instructions file that is still the app's old default is replaced`() {
+        // **The update path, and the reason it is tested.** The one-record round rewrote ①, and the
+        // file is only written when missing — so a phone that had already run the agent kept the text
+        // that tells the model to edit `agent/context.log`, a file that no longer exists. The agent
+        // would be refused for ever, and the person's only clue would be an agent that seemed confused.
+        val file = File(account, AgentPrompt.SYSTEM_FILE)
+        file.writeText(AgentPrompt.PREVIOUS_SYSTEM.first())
+
+        val read = AgentPrompt.system(account)
+
+        assertEquals("the new text is what the agent is given", AgentPrompt.SYSTEM_DEFAULT, read)
+        assertEquals("and it is what the file holds now", AgentPrompt.SYSTEM_DEFAULT, file.readText())
+        assertFalse("so nothing tells it to edit a file that is gone", read.contains("context.log"))
+    }
+
+    @Test
+    fun `re-indenting the old default does not make it the person's file`() {
+        // What is being asked is whether any of the *words* changed. A file somebody reflowed is
+        // still the app's instructions, and the app's instructions are the ones that must be current.
+        val file = File(account, AgentPrompt.SYSTEM_FILE)
+        file.writeText(AgentPrompt.PREVIOUS_SYSTEM.first().replace("\n", "\n   "))
+
+        assertEquals("replaced anyway", AgentPrompt.SYSTEM_DEFAULT, AgentPrompt.system(account))
+    }
+
+    @Test
+    fun `an instructions file the person edited is kept, whatever it says`() {
+        val file = File(account, AgentPrompt.SYSTEM_FILE)
+        val theirs = AgentPrompt.PREVIOUS_SYSTEM.first() + "\n\nAlso: never touch the README."
+        file.writeText(theirs)
+
+        val read = AgentPrompt.system(account)
+
+        assertTrue("their sentence survives", read.contains("never touch the README"))
+        assertEquals("and nothing of their file was rewritten", theirs, file.readText())
+    }
+
+    // ---- the agent's search: tree and read with grep -------------------------
+
+    /** One call, answered the way the loop answers it. */
+    private fun tool(name: String, args: String): String =
+        tools().run(Call("c7", name, args))
+
+    @Test
+    fun `tree with a name answers with the paths that match and nothing else`() {
+        ws.write(File(ws.repoOf("shopping"), "README.md"), "the readme")
+        ws.write(File(ws.repoOf("shopping"), "notes.md"), "notes")
+
+        val body = tool("tree", """{"path":"GitHub","name":"\\.md$"}""")
+
+        assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
+        assertTrue("the readme is in the answer: $body", body.contains("GitHub/README.md"))
+        assertTrue("and so are the notes: $body", body.contains("GitHub/notes.md"))
+        assertFalse("but not the file that did not match: $body", body.contains("milk.txt"))
+    }
+
+    @Test
+    fun `tree with grep answers with the line that matched, and where it is`() {
+        ws.write(File(ws.repoOf("shopping"), "README.md"), "one line\ntwo litres\n")
+
+        val body = tool("tree", """{"path":"GitHub","grep":"litres"}""")
+
+        assertTrue(
+            "the file, the line number and the line: $body",
+            body.contains("GitHub/README.md:2: two litres"),
+        )
+        assertTrue("and the other file's own line: $body", body.contains("GitHub/milk.txt:1: two litres"))
+    }
+
+    @Test
+    fun `read with grep answers with numbered lines and leaves the rest out`() {
+        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "first\ntwo litres\nthird\n")
+
+        val body = tool("read", """{"path":"GitHub/milk.txt","grep":"litres"}""")
+
+        assertTrue("the line and its number: $body", body.contains("2: two litres"))
+        assertFalse("and not the lines that did not match: $body", body.contains("first"))
+        assertFalse("nor the one after it: $body", body.contains("third"))
+    }
+
+    @Test
+    fun `a read of the file the record used to be says where it went`() {
+        // The one name an older instruction set still points at. An agent whose prompt the person
+        // edited keeps that prompt — so the app has to answer the question it will ask, rather than
+        // "there is no file", which leaves it guessing and trying to edit the other one.
+        val body = tool("read", """{"path":"agent/context.log"}""")
+
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("naming the file it became: $body", body.contains("agent/session.log"))
+        assertTrue("and the tool that does what it wanted: $body", body.contains("forget"))
+    }
+
+    @Test
+    fun `a pattern that is not a regular expression is refused, and says so about the pattern`() {
+        // **A model writing `[` is making a mistake about a regular expression.** The answer it
+        // needs is that sentence; "that tool could not be run" would say nothing about what to fix.
+        val body = tool("read", """{"path":"GitHub/milk.txt","grep":"["}""")
+
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("about the pattern: $body", body.contains("pattern"))
+    }
+
     // ---- the agent's own compaction: forget, by id ---------------------------
 
     private fun tools() = AgentTools(ws, "shopping", git, log)

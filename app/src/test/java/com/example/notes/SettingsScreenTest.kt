@@ -4,6 +4,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -52,6 +53,9 @@ class SettingsScreenTest {
         /** The phone the test is testing: the exemption is a fact of the system, not of the screen. */
         exempt: (android.content.Context) -> Boolean = { false },
         onAskBattery: () -> Unit = {},
+        /** Whether a reminder would be seen: the phone's fact, stated by the test. */
+        notified: (android.content.Context) -> Boolean = { true },
+        onAskNotices: () -> Unit = {},
     ) {
         compose.setContent {
             Frame {
@@ -63,6 +67,8 @@ class SettingsScreenTest {
                     onTestAccount = {},
                     exempt = exempt,
                     onAskBattery = onAskBattery,
+                    notified = notified,
+                    onAskNotices = onAskNotices,
                 )
             }
         }
@@ -147,4 +153,27 @@ class SettingsScreenTest {
 
         assertEquals("the other account is active", "someone-else", scene.viewModel.activeLogin)
     }
+    @Test
+    fun `the notification permission is offered only while it is missing`() {
+        // **A declared permission that was never granted is a reminder posted into nowhere.** The row
+        // says which way it is, and offers the button exactly when there is something to ask for.
+        var asked = 0
+        settings(notified = { false }, onAskNotices = { asked++ })
+
+        compose.onNodeWithText("Off · nothing is shown").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Allow").performScrollTo().performClick()
+
+        assertEquals("the dialog was asked for once", 1, asked)
+    }
+
+    @Test
+    fun `every agent can be switched off from settings`() {
+        // The brief assumed this existed. The button is there when there is nothing on, and it is
+        // greyed out — a switch that does nothing is worse than no switch.
+        settings()
+
+        compose.onNodeWithText("No agent is on.").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Stop all agents").performScrollTo().assertIsNotEnabled()
+    }
+
 }

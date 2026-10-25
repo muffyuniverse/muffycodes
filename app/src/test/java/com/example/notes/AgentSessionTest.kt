@@ -149,15 +149,48 @@ class AgentSessionTest {
         assertNull("so nothing to say", byThem.notice())
         assertEquals("and the strip does not count it", "", AgentSession.strip(listOf(byThem)))
 
-        val byThePhone = session().stopped(StopReason.BY_THE_PHONE)
-        assertTrue("this one they did not choose", byThePhone.needsYou)
+        val byItself = session().stopped(StopReason.LOOP)
+        assertTrue("this one they did not choose", byItself.needsYou)
         assertEquals(
-            "shopping: stopped, the phone stopped the app",
-            byThePhone.notice(),
+            "shopping: stopped, it kept going without doing anything",
+            byItself.notice(),
         )
 
         val refused = session().stopped(StopReason.PIN_REFUSED, "down (503)")
         assertEquals("the provider's own words", "shopping: stopped, down (503)", refused.notice())
+    }
+
+    @Test
+    fun `a session the phone was not running is late, and one that was is not`() {
+        // **The only thing the app can honestly say about a force-stop.** Android does not tell an
+        // app it was stopped, so the clock is the evidence: a session that should have polled every
+        // four minutes and did not for three hours was not running. It is written down rather than
+        // turned into a stopped state — the session is about to carry on, and a label saying
+        // "stopped" about a session that is running would be the label lying about the fact.
+        val on = session().waited(0).copy(lastPollAt = 1_000)
+
+        assertEquals("on time", 0L, on.missedBy(1_000 + AgentSession.POLL_MS))
+        assertEquals(
+            "a late wake is not the phone",
+            0L,
+            on.missedBy(1_000 + AgentSession.GAP_MS),
+        )
+        assertEquals(
+            "hours are",
+            2 * AgentSession.GAP_MS,
+            on.copy(lastPollAt = 1_000 + AgentSession.GAP_MS)
+                .missedBy(1_000 + 3 * AgentSession.GAP_MS),
+        )
+        assertEquals(
+            "a session that never polled has nothing to be late for",
+            0L,
+            session().missedBy(99_999_999),
+        )
+        assertEquals(
+            "and a stopped one is not polling at all",
+            0L,
+            on.stopped(StopReason.BY_OPERATOR).missedBy(99_999_999),
+        )
     }
 
     @Test

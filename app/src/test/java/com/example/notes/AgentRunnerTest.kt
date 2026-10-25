@@ -136,6 +136,73 @@ class AgentRunnerTest {
         assertEquals("one request between them", 1, floor.asked.size)
     }
 
+    // ---- what the phone took, and what it did not ---------------------------
+
+    @Test
+    fun `a session the phone was not running is written down as a gap, and goes on`() {
+        // A force-stop, an OEM battery manager, a Doze window the system never lifted: none of them
+        // announce themselves, and all of them look the same from inside — a session whose last poll
+        // is hours old. The row is how a hole becomes visible instead of looking like a poll that
+        // took no time; the session then polls and carries on, because "it must never stop until the
+        // operator removes it" is the stronger rule.
+        on("shopping", now = 1_000)
+        val door = WaitDoor()
+        val runner = runner(door)
+
+        runner.tick(1_000 + 3 * 60 * 60 * 1000L + 12 * 60_000L)
+        settle(runner)
+
+        val log = AgentLog.open(File(ws.projectsDir, "shopping"))
+        val gap = log.rows().single { it.name == "gap" }
+        assertEquals(
+            "how long, in words a person reads: ${gap.body}",
+            "the phone did not run the agent for 3 h 12 min",
+            gap.body,
+        )
+        assertEquals("and it is the app's row, not the model's", AgentLog.APP, gap.ctx)
+        assertEquals("the agent goes on", 1, door.asked.size)
+        assertEquals("idle", AgentSession.State.IDLE, runner.sessions().single().state)
+        assertTrue(
+            "and the trace says it",
+            Trace.report().lines.any { it.contains("agent-gap") && it.contains("shopping") },
+        )
+    }
+
+    @Test
+    fun `a poll that is a little late is not the phone stopping anything`() {
+        // A late wake, a network change, a short Doze window: ordinary, and a row about each of them
+        // would bury the one that matters.
+        on("shopping", now = 1_000)
+        val runner = runner()
+
+        runner.tick(1_000 + AgentSession.POLL_MS + 30_000L)
+        settle(runner)
+
+        assertTrue(
+            "nothing to say",
+            AgentLog.open(File(ws.projectsDir, "shopping")).rows().none { it.name == "gap" },
+        )
+    }
+
+    @Test
+    fun `the tray's stop writes the same session the box does`() {
+        // One act, one session write. The box's Stop also interrupts the request in flight, which is
+        // the part a notification cannot reach; what it must not do is invent a second meaning for
+        // "the person stopped it".
+        on("shopping", now = 1_000)
+        val runner = runner()
+
+        runner.stop("shopping")
+
+        val session = runner.sessions().single()
+        assertEquals("stopped", AgentSession.State.STOPPED, session.state)
+        assertEquals("by the person", AgentSession.StopReason.BY_OPERATOR, session.reason)
+        assertTrue(
+            "and the trace records the press",
+            Trace.report().lines.any { it.contains("TAP") && it.contains("stop agent") },
+        )
+    }
+
     @Test
     fun `a project that is gone takes its session with it`() {
         on("shopping", now = 1_000)
@@ -295,6 +362,25 @@ class AgentRunnerTest {
         runner.tick(2_000 + 20 * 60_000)
 
         assertEquals("nothing more once dealt with", 2, notices.size)
+    }
+
+    @Test
+    fun `the timeout and the result length are the person's numbers, clamped to what works`() {
+        // Both were constants before the audit: two minutes for an answer and twenty thousand
+        // characters for a result. The brief asked for them as fields, and the clamps are the part
+        // that matters — a timeout of zero retries for ever, and a result of zero is a hang.
+        assertEquals("four minutes by default", 4, settings.timeoutMinutes)
+        assertEquals("twenty thousand characters by default", 20_000, settings.maxResult)
+
+        settings.keepTimeout(0)
+        assertEquals("under a minute cannot finish", 1, settings.timeoutMinutes)
+        settings.keepTimeout(600)
+        assertEquals("half a day holds the worker", 30, settings.timeoutMinutes)
+
+        settings.keepMaxResult(0)
+        assertEquals("a result of nothing is a hang", 1_000, settings.maxResult)
+        settings.keepMaxResult(999_999)
+        assertEquals("and a megabyte is not a result", 200_000, settings.maxResult)
     }
 
     @Test

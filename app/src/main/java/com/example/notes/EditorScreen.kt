@@ -302,7 +302,7 @@ fun EditorScreen(
                             "The agent's record. The app keeps this file — it is what the " +
                                 "conversation was, and what the model is sent — so it is read here " +
                                 "and never saved over. Reset clears the working context; deleting " +
-                                "the project takes both files.",
+                                "the project takes the record with it.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),

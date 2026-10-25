@@ -29,12 +29,12 @@
         `POST_NOTIFICATIONS` is not optional here: a foreground service without a visible
         notification is a service the system will not keep.
 
-        `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` is declared here and **not yet asked for**: the
-          reason is that in Doze the network is suspended for apps that are not exempt, so
-          every poll would fail against the pinned provider — and this app has no fallback by design, so a
-          suspended network is not "a bit late", it is a session that stops on its own. Until a screen
-          fires ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, this declaration buys nothing, and no
-          comment here should say otherwise.
+        `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` is asked for from Settings, once, because in Doze
+        the network is suspended for apps that are not exempt — so every poll would fail against
+        the pinned provider, and this app has no fallback by design: a suspended network is not
+        "a bit late", it is a session that stops on its own. `POST_NOTIFICATIONS` is asked for in
+        the same place and for the same reason: from Android 13 a declared permission that was
+        never granted means a reminder that is posted and silently dropped.
     -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />

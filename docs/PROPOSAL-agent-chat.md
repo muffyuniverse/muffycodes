@@ -1,110 +1,74 @@
-# The agent chat — sixth round: one record, one column
+# The agent chat — seventh round: the audit
 
-Status: **built.** Round 5's two files are gone: there is one record, and whether the model is sent
-a row is a column on the row. This supersedes round 5 §0 and §4.2 — the audit no longer subtracts
-anything — and it keeps every rule of rounds 1–4 that is not about file layout.
+Status: **built.** Round 6 (`-v6-annotated`) is unchanged in substance: one record, one `ctx`
+column, `forget` by id. This round is what an audit of the *whole* feature against rounds 1–6 and
+against the original brief found, and what was done about each difference. The evidence — every
+element, the test that covers it and the trace line it writes — is in `docs/audit-agent-chat.md`.
 
-Round 5 is kept as `-v5-annotated`.
+Nothing here changes a rule. Six things were missing, one was a state the app could not honestly
+report, and the rest were sentences that described a file that no longer exists.
 
 ---
 
-## 0. One record
+## 1. What the design promised and the app did not do
 
-```text
-files/accounts/<login>/
-  system_prompt.txt            how to use this app: the tools, the rules, the shape of a turn
-  model_conf.json
-  projects/shopping/
-    project_prompt.txt         how to work in this project
-    agent/
-      session.log              every event, in order, and what the model is sent
-    GitHub/                    the worktree; his edits become commits here
-```
+| promised | where | what was there | what there is now |
+|---|---|---|---|
+| a notification with **Open** and **Stop this session** | v3 §1.6 | a notification that only opened the app | both buttons; Stop goes through `AgentRunner.stop`, the same session write the box uses |
+| **one notification per session**, replaced in place | v3 §1.6 | one id for the whole app, so two questions hid each other | an id per project |
+| `POST_NOTIFICATIONS` **asked for** | v1 `@` (system settings), v3 §1.7 | declared in the manifest, never requested | a row in Settings with its state and an **Allow** button, like the battery exemption |
+| a session that was on **gets its clock back** | v3 §1.7, v2 `@` ("must never stop until the operator removes it") | `apply()` was called only when the person pressed something, so after a reboot nothing polled until the app was opened and a session changed | `apply()` is asked wherever the sessions are read; the deprecated `getRunningServices` became an owner flag |
+| **`tree` and `read` with grep** | the original brief ("grep filter for filenames and separately for content … then same grep read") | `tree` took a path and a depth; `read` took a range | `tree` takes `name` (paths) and `grep` (contents, with line numbers); `read` takes `grep` |
+| the **answer timeout** and the **result length** as settings, 4 min and 20k | the original brief | `OpenRouterDoor(timeoutMs = 120_000)` and `AgentTools.MAX_RESULT = 20_000` | two fields, clamped, wired to the door and the tools |
+| one switch that turns **every** agent off, in Settings | v1 `@` ("we already have agent turn off per chat and in settings for all") | it did not exist | **Agents** row with the strip and **Stop all agents** |
 
-One file, one row per event, five columns plus one:
+## 2. What was promised and could not be true
 
-```text
-14:02:11.410    1 TOLD    in  operator  rename milk.txt to dairy.txt
-14:02:18.902    2 CALL    in  tree      {"path":"GitHub"}
-14:02:18.955    3 GOT     in  tree      0 · GitHub/ GitHub/milk.txt
-14:06:11.007    4 CALL    app wait      {}
-14:11:03.418    5 CALL    in  forget    {"ids":[2,3]}
-14:11:03.421    6 GOT     in  forget    0 · forgot 2 rows. The task is still 1.
-```
+**`stopped · the phone stopped the app` is gone.** Round 5 §2.3 named it and §2.5 promised it would
+be visible "rather than silent". It was unreachable: nothing ever set it, and nothing honestly
+could. Android does not tell an app it was force-stopped — a cold start afterwards is
+indistinguishable from any other — and an OEM battery manager usually kills without calling
+anything. The state also contradicted the stronger rule it sat under, which is the operator's own:
+*it must never stop until the operator removes it.* A phone that stops the app has not been asked
+to end the session, so on resume the session goes on, and a label saying "stopped" about a session
+that is carrying on would be the label lying.
 
-| ctx | meaning | who put it there |
-|---|---|---|
-| `in` | the model is sent this row | the turn, or the agent's own words |
-| `out` | the model is not sent it | **the agent, by `forget`** |
-| `app` | the model is not sent it | the app: a poll's repeats, a turn boundary, a trim, the reconnect line, a reset |
+What replaces it is the fact the app can see: **the clock.** A session whose last poll is more than
+three intervals old was not running, and `AgentRunner` writes one row — `gap`, `app`, so the model
+is never sent it and the poll stays byte-identical — saying how long for. It is in the box, in the
+record and on the trace (`agent-gap`). The hole is visible; the state is not invented.
 
-**The request is ① + ② + the `in` rows.** Nothing else.
+## 3. The update that had to reach the phone
 
-## 1. Why one column instead of two files
+The one-record round rewrote ① (`system_prompt.txt`) — it stopped telling the agent to edit
+`agent/context.log`. The file is written **only when missing**, so every phone that had already run
+the agent kept the old text: the model would be told to edit a file that no longer exists and the
+app would refuse it, for ever, with the person's only clue a confused agent.
 
-Round 5 kept the context as a second file and defined the audit as the difference between the two.
-That worked, and it cost a rule for every row the app wrote to only one of them — plus, because a
-removal was a *text edit*, four more: whole rows only, a final newline, a line-by-line comparison
-to prove nothing was rewritten, and an escaping path that had to round-trip exactly.
+`AgentPrompt.layer` now also replaces a file that is **whitespace-for-whitespace one of the texts
+this app shipped before** (`AgentPrompt.PREVIOUS_SYSTEM`), and never one that has been edited. A
+default may be replaced while it is still the default; an edit is never touched. And if the person
+*did* edit the old prompt, the one name it will ask for — `agent/context.log` — now gets an answer
+that names `agent/session.log` and `forget` instead of "there is no file".
 
-A column deletes that class of problem:
+## 4. What the audit did not change, and why
 
-- **Removal is a set of ids.** `forget` carries no text, so compaction cannot change what the record
-  says — it is not that the app checks; the text is not offered.
-- **The judgement is stated, not inferred.** `out` *is* the agent's decision, written at the moment
-  it is made. No subtraction, and no exceptions to name: a row the app wrote is `app` from birth.
-- **A reset cannot be misread as a decision.** It marks `app`, so the person's act never appears in
-  the agent's judgement.
-- **Nothing is re-rendered.** A row carries its own line, and a flip rewrites four characters of the
-  ctx column; the name and the body are carried over byte for byte.
+- **The poll's bytes.** The repeated `wait` is born `app`; the gap row is `app`; nothing added here
+  enters a request. Measured by the tests that compare two polls' messages.
+- **The record's shape.** One file, six columns, ids monotonic, the lock per file. Unchanged.
+- **`wait` in company.** The refusal is still `1 … is a terminating tool; call it alone`, and the
+  other calls still run — the operator's "it doesn't hold them". Each call gets its own result row
+  rather than the other results being pasted into the refusal, because a result belongs to its call.
+- **`hard` and `trigger`.** Tokens, the pin's ceiling, the number typed survives being clamped.
+- **The effort picker.** A vertical sheet of the model's declared efforts, clamped down on a model
+  change — the round-1 horizontal scroller was superseded by §1.2's sheet, not dropped by accident.
+- **`ask`/`conclude` write a `CALL` row.** It is not drawn and not sent (`SPEAKING`), but it is what
+  makes the record say the agent called the tool it called.
 
-## 2. Compaction: `forget`
+## 5. The leftovers that were cleared
 
-The agent calls `forget` with ids. The app refuses only three things:
-
-1. an id that is **not in the context** — already out, or never there;
-2. **the newest task**;
-3. **half a pair** — a call without its result, or a result without its call.
-
-It answers with what it did, and which task is still standing: `0 · forgot 2 rows. The task is
-still 1.` The forgotten rows stay in the record, marked `out`, with their text — so a drop that
-turned out to matter can still be read afterwards.
-
-**This is the audit, and it is the whole of it.** In every other agent design compaction is a
-summary: the model writes one and the source is gone, so "I kept what mattered" can be neither
-proved nor disproved, and a forgotten instruction is indistinguishable from an instruction that
-never arrived. Here the answer is a column: `thrownAway()` is the `out` rows, in order.
-
-## 3. What went with the second file
-
-- `rawRow`, and the double-escaping hazard it existed to avoid.
-- The final-newline rule, the "same lines in the same order" comparison, and the in-flight-call
-  exception they needed.
-- `byTheApp` and the reset boundary — a table of exceptions that existed only to make a subtraction
-  mean what a column now says outright.
-- `Workspace.writeRecord`: the one door through which the agent's compaction used to reach a text
-  file. Nothing outside [AgentLog] writes the record now, so the person and the agent are under the
-  same rule — and that is checked once, in `Workspace.write`.
-
-## 4. What did not change
-
-- **The poll is the same bytes.** A repeated `wait` is written `app`, so it never enters the request;
-  nothing in the request carries a clock.
-- **Placement.** ① then ② then the rows, so a compaction edit invalidates the conversation and never
-  the instructions.
-- **The trim.** The app's own limit still drops the oldest whole messageboxes — the only place rows
-  leave the record for good, and therefore the audit's horizon: what the agent forgot survives until
-  the session's own size limit takes it, and not for ever.
-- **States, reminders, the ladder, the pin, the lock, the record's format and the tests**, as in the
-  rounds this document corrects.
-
-## 5. The record is the app's, and the person cannot save over it
-
-`agent/session.log` opens in the editor as read-only text: Save is grey and a sentence says whose
-file it is. The person's levers stay **Reset** (empties the working context, keeps everything) and
-**deleting the project** (takes the record with it). A single log file cannot be renamed, moved or
-deleted on its own.
-
-This is the app refusing, not the system: a file manager on the phone can still edit the file, and
-nothing here pretends otherwise. What it buys is that the app never offers the person a way to make
-its own record mean nothing.
+Stale "two files" wording in `AgentLog`, `AppViewModel`, `LogFormat` and the editor's sentence; an
+orphaned KDoc above `ContextBudget.sizeLabel`; `highestId()` and `load()` taking the maximum of two
+files that are now one value twice; the manifest comment claiming the battery permission was "not
+yet asked for"; `docs/agent-context-and-loop.md`, which was written for round 5. The test map and
+the tap vocabulary were extended with the new element and the four new controls.

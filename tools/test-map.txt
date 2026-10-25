@@ -40,7 +40,7 @@ ImportsFeatureTest app/src/main/java/com/example/notes/Imports.kt
 MarkdownTest        app/src/main/java/com/example/notes/Markdown.kt
 SelectionFeatureTest  app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/ProjectGit.kt
 NamingFeatureTest   app/src/main/java/com/example/notes/Workspace.kt
-SettingsScreenTest  app/src/main/java/com/example/notes/SettingsScreen.kt app/src/main/java/com/example/notes/SettingsStore.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/Battery.kt
+SettingsScreenTest  app/src/main/java/com/example/notes/SettingsScreen.kt app/src/main/java/com/example/notes/SettingsStore.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/Battery.kt app/src/main/java/com/example/notes/Notices.kt
 ScenariosTest      app/src/main/java/com/example/notes/BrowserScreen.kt app/src/main/java/com/example/notes/HistoryScreen.kt app/src/main/java/com/example/notes/SettingsScreen.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/AppTheme.kt app/src/main/java/com/example/notes/Workspace.kt
 KeySafetyFeatureTest  app/src/main/java/com/example/notes/GitHub.kt app/src/main/java/com/example/notes/Secrets.kt app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/AccountStore.kt
 
@@ -72,3 +72,4 @@ AgentSessionFeatureTest  app/src/main/java/com/example/notes/AgentSession.kt app
 ContextBudgetTest  app/src/main/java/com/example/notes/ContextBudget.kt
 AgentRunnerTest  app/src/main/java/com/example/notes/AgentRunner.kt app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentSessions.kt
 AgentServiceTest  app/src/main/java/com/example/notes/AgentService.kt app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentWiring.kt
+NoticesTest  app/src/main/java/com/example/notes/Notices.kt

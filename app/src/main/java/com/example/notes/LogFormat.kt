@@ -8,10 +8,10 @@ import java.util.Locale
  * The one shape of a row, for every file this app writes.
  *
  * `time id kind name detail` — fixed columns, one line per event, and the same formatting
- * whether the row is the app's own trace or the agent's record of a turn. The two files are
- * read by the same habits (`grep`, a shell, an eye on a phone), so they are formatted by the
- * same code: a second formatter is a second thing to keep in step, and it would drift on the
- * one detail that matters most, the escaping of a body that has newlines in it.
+ * whether the row is the app's own trace or the agent's record of a turn. The trace and the
+ * record are read by the same habits (`grep`, a shell, an eye on a phone), so they are formatted
+ * by the same code: a second formatter is a second thing to keep in step, and it would drift on
+ * the one detail that matters most, the escaping of a body that has newlines in it.
  *
  * `detail` is the only free-form part, and it is **escaped**: a newline becomes a backslash
  * and an `n`, a backslash becomes two backslashes. Every other choice was worse — a raw

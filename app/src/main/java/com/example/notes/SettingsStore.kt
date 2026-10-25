@@ -154,6 +154,51 @@ class SettingsStore(context: Context, name: String = "settings") {
     }
 
     /**
+     * How long the app waits for the model's answer, in minutes.
+     *
+     * **This is what turns "the provider is not answering" into a blip.** The door's read timeout
+     * ends the attempt, the ladder retries it at one, two, four seconds, and the session reconnects
+     * instead of hanging. Too short retries a long turn for ever; too long holds the session's one
+     * worker for half an hour on a provider that is simply down. The original brief asked for four
+     * minutes and a field, because a phone on a slow network is a fact only the person holding it
+     * knows.
+     */
+    var timeoutMinutes: Int by mutableStateOf(
+        prefs.getInt(KEY_TIMEOUT, DEFAULT_TIMEOUT_MINUTES)
+    )
+        private set
+
+    /** Sets the answer timeout, clamped to a wait a person would recognise. */
+    fun keepTimeout(minutes: Int) {
+        val clean = minutes.coerceIn(MIN_TIMEOUT_MINUTES, MAX_TIMEOUT_MINUTES)
+        Trace.tap("answer timeout", "$clean min")
+        timeoutMinutes = clean
+        prefs.edit().putInt(KEY_TIMEOUT, clean).apply()
+        Trace.said("the app waits $clean minutes for an answer")
+    }
+
+    /**
+     * The most one tool result may carry, in characters.
+     *
+     * The brief asked for this as a field, and the reason is the same as the timeout's: a result
+     * longer than the limit says so — `1`, and how much of it was shown — and the person can raise
+     * the number rather than being told by an agent that cannot read its own file.
+     */
+    var maxResult: Int by mutableStateOf(
+        prefs.getInt(KEY_MAX_RESULT, DEFAULT_MAX_RESULT)
+    )
+        private set
+
+    /** Sets the longest result. Never zero: a tool that answers with nothing is a hang. */
+    fun keepMaxResult(chars: Int) {
+        val clean = chars.coerceIn(MIN_MAX_RESULT, MAX_MAX_RESULT)
+        Trace.tap("result length", "$clean")
+        maxResult = clean
+        prefs.edit().putInt(KEY_MAX_RESULT, clean).apply()
+        Trace.said("one result may carry $clean characters")
+    }
+
+    /**
      * The two lengths older builds stored separately, read once for the migration.
      *
      * The larger of the two is kept: a person who had set either history longer
@@ -180,11 +225,27 @@ class SettingsStore(context: Context, name: String = "settings") {
     const val KEY_TRIGGER = "agent_trigger_tokens"
     const val KEY_HARD = "agent_hard_tokens"
 
+    /** How long one answer may take, in minutes, and how much one result may carry. */
+    const val KEY_TIMEOUT = "agent_timeout_minutes"
+    const val KEY_MAX_RESULT = "agent_max_result"
+
     /**
      * A million tokens. Past this the number is larger than any window this app can be pointed at,
      * so a bigger one is a typo rather than a setting.
      */
     const val MAX_TOKENS = 1_048_576
+
+    /** Four minutes: the brief's own number, and long enough for a turn that does real work. */
+    const val DEFAULT_TIMEOUT_MINUTES = 4
+
+    /** Under a minute a real request cannot finish; half an hour holds a worker too long. */
+    const val MIN_TIMEOUT_MINUTES = 1
+    const val MAX_TIMEOUT_MINUTES = 30
+
+    /** Twenty thousand characters is about a long source file, which is what a result is for. */
+    const val DEFAULT_MAX_RESULT = 20_000
+    const val MIN_MAX_RESULT = 1_000
+    const val MAX_MAX_RESULT = 200_000
 
         /** One hour: the design's default. */
         const val DEFAULT_REMIND_MINUTES = 60

@@ -34,6 +34,12 @@ class AgentTools(
         /** Enough for a file, a listing or a diff; past this a result is truncated and says so. */
         const val MAX_RESULT = 20_000
 
+        /** How many matches a search prints before it says there are more. */
+        const val MAX_MATCHES = 200
+
+        /** A file bigger than this is not searched: reading it into memory on a phone is the bug. */
+        const val MAX_SCAN = 2L * 1024 * 1024
+
         /**
          * The tools that end a turn. They are called alone; anything beside them is refused.
          *
@@ -59,13 +65,18 @@ class AgentTools(
         fun specs(): List<ToolSpec> = listOf(
             spec(
                 "tree",
-                "List the files in a folder of this project. Folders end with a slash.",
-                "{\"path\":\"where to look, relative to the project\",\"depth\":2}",
+                "List the files in a folder of this project. Folders end with a slash. " +
+                    "`name` keeps only paths whose name matches; `grep` keeps only files whose " +
+                    "text matches, and shows the matching lines.",
+                "{\"path\":\"where to look, relative to the project\",\"depth\":2," +
+                    "\"name\":\"a pattern for file names\",\"grep\":\"a pattern for their text\"}",
             ),
             spec(
                 "read",
-                "Read a text file. Always read before you change one.",
-                """{"path":"the file, relative to the project","from":1,"lines":200}""",
+                "Read a text file. Always read before you change one. With `grep`, show only " +
+                    "the lines that match, each with its line number.",
+                """{"path":"the file, relative to the project","from":1,"lines":200,""" +
+                    """"grep":"a pattern to look for"}""",
             ),
             spec(
                 "edit",
@@ -168,9 +179,87 @@ class AgentTools(
         if (!root.exists()) return refusal("There is nothing at " + rel(root))
         if (!root.isDirectory) return refusal("${rel(root)} is a file, not a folder")
         val depth = args.optInt("depth", 3).coerceIn(1, 8)
-        val out = mutableListOf<String>()
-        walk(root, depth, out)
-        return success(if (out.isEmpty()) "${rel(root)} is empty" else out.joinToString("\n"))
+        val name = pattern(args.optString("name", ""))
+            .getOrElse { return refusal("That is not a pattern: ${it.message}") }
+        val content = pattern(args.optString("grep", ""))
+            .getOrElse { return refusal("That is not a pattern: ${it.message}") }
+        if (name == null && content == null) {
+            val out = mutableListOf<String>()
+            walk(root, depth, out)
+            return success(if (out.isEmpty()) "${rel(root)} is empty" else out.joinToString("\n"))
+        }
+        // **A search, not a listing.** Once a pattern is given the answer is files, not folders:
+        // a folder is in the result because something in it matched, and printing the folder adds
+        // a line nobody asked about. What a person (and a model) wants is the path, and for a
+        // content match, the line.
+        val found = mutableListOf<String>()
+        search(root, depth, name, content, found)
+        if (found.isEmpty()) return success("nothing matches in ${rel(root)}")
+        // **A search that stopped says so.** [search] stops at [MAX_MATCHES] rather than scanning a
+        // project to its end, so a full list is either complete or bounded — and a model told
+        // "here they are" about a bounded list will act as though it saw everything.
+        val note = if (found.size >= MAX_MATCHES) {
+            "\n(showing the first $MAX_MATCHES matches; narrow the pattern)"
+        } else {
+            ""
+        }
+        return success(found.joinToString("\n") + note)
+    }
+
+    /**
+     * Files under [dir] that match [name] and [content], walking at most [left] levels.
+     *
+     * [content] is matched against the whole file and the result is the **matching lines**, so one
+     * search answers "where is this said" rather than "which file says it". A file too large to be
+     * worth reading is skipped and said so, rather than being read into memory on a phone.
+     */
+    private fun search(
+        dir: File,
+        left: Int,
+        name: Regex?,
+        content: Regex?,
+        out: MutableList<String>,
+    ) {
+        for (entry in ws.list(dir)) {
+            if (entry.isFolder) {
+                if (left > 1) search(entry.file, left - 1, name, content, out)
+                continue
+            }
+            if (name != null && !name.containsMatchIn(entry.name)) continue
+            if (content == null) {
+                out.add(rel(entry.file))
+                continue
+            }
+            if (ws.kindOf(entry.file) != EntryKind.TEXT) continue
+            if (entry.file.length() > MAX_SCAN) {
+                out.add("${rel(entry.file)} is too big to search")
+                continue
+            }
+            val text = ws.read(entry.file)
+            if (!content.containsMatchIn(text)) continue
+            for ((index, line) in text.split("\n").withIndex()) {
+                if (!content.containsMatchIn(line)) continue
+                out.add("${rel(entry.file)}:${index + 1}: ${line.trim().take(200)}")
+                if (out.size >= MAX_MATCHES) return
+            }
+        }
+    }
+
+    /**
+     * A pattern from the model, or null when it gave none.
+     *
+     * **A refusal, not a crash.** A model writing `[` is making a mistake about a regular
+     * expression, and the answer it needs is that sentence — not an exception turned into "that
+     * tool could not be run", which says nothing about what to fix.
+     */
+    private fun pattern(raw: String): Result<Regex?> {
+        val text = raw.trim()
+        if (text.isEmpty()) return Result.success(null)
+        return try {
+            Result.success(Regex(text, RegexOption.IGNORE_CASE))
+        } catch (e: Throwable) {
+            Result.failure<Regex?>(IllegalArgumentException("that is not a regular expression"))
+        }
     }
 
     private fun walk(dir: File, left: Int, out: MutableList<String>) {
@@ -184,12 +273,45 @@ class AgentTools(
     private fun read(args: JSONObject): String {
         val file = resolve(args.optString("path"))
             .getOrElse { return refusal(it.message ?: "that path cannot be read") }
-        if (!file.exists()) return refusal("There is no file at ${rel(file)}")
+        if (!file.exists()) {
+            // **The one name an older instruction set still points at.** The record used to be two
+            // files; this build folds the second into the first. An agent holding instructions from
+            // before that (a prompt the person edited, so the app would not replace it) will ask for
+            // `agent/context.log` — and "there is no file" would leave it guessing.
+            if (file.name == AgentLog.CONTEXT) {
+                return refusal(
+                    "agent/${AgentLog.CONTEXT} was folded into agent/${AgentLog.SESSION}. " +
+                        "Read that; forget takes rows out of your context.",
+                )
+            }
+            return refusal("There is no file at ${rel(file)}")
+        }
         if (file.isDirectory) return refusal("${rel(file)} is a folder; use tree")
         if (ws.kindOf(file) != EntryKind.TEXT) {
             return refusal("${rel(file)} is not a text file, so there is nothing to show you")
         }
         val text = ws.read(file)
+        // **The same grep as `tree`, on one file.** Line numbers, because the next thing the model
+        // does is edit what it found, and an edit needs a place; and no `from`/`lines` window on top
+        // of it, because two windows at once is a range that means two things.
+        val grep = pattern(args.optString("grep", ""))
+            .getOrElse { return refusal("That is not a pattern: ${it.message}") }
+        if (grep != null) {
+            val hits = text.split("\n").withIndex()
+                .filter { (_, line) -> grep.containsMatchIn(line) }
+                .take(MAX_MATCHES)
+            if (hits.isEmpty()) return success("nothing in ${rel(file)} matches that")
+            val body = hits.joinToString("\n") { (index, line) ->
+                "${index + 1}: ${line.trim().take(200)}"
+            }
+            val all = text.split("\n").count { grep.containsMatchIn(it) }
+            val note = if (all > hits.size) {
+                "\n(showing first ${hits.size} of $all matches; narrow the pattern)"
+            } else {
+                ""
+            }
+            return success(body + note)
+        }
         val from = args.optInt("from", 1).coerceAtLeast(1)
         val lines = text.split("\n")
         val wanted = args.optInt("lines", 0)

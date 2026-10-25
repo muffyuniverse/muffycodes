@@ -92,6 +92,23 @@ class AgentRunner(
             return
         }
         synchronized(inFlight) { inFlight += project }
+        // **What the phone took, said once.** A session whose last poll is hours old was not
+        // running, whatever the reason — a force-stop, an OEM battery manager, a Doze window the
+        // system never lifted. The app cannot be told that happened; it can see the clock, and a
+        // row is how a hole becomes visible instead of looking like a poll that took no time.
+        val missed = session.missedBy(now)
+        if (missed > 0) {
+            try {
+                AgentLog.open(File(ws.projectsDir, project)).bookkeeping(
+                    AgentLog.NOTE,
+                    "gap",
+                    "the phone did not run the agent for ${howLong(missed)}",
+                )
+            } catch (t: Throwable) {
+                // A row about a gap is not worth failing the poll that ended the gap for.
+            }
+            Trace.note("agent-gap", "$project · ${howLong(missed)}")
+        }
         put(session.polled(now))
         Trace.note("agent-poll", "$project · ${session.label(now)}")
         val active = model()
@@ -112,6 +129,7 @@ class AgentRunner(
                     log,
                     doorFor,
                     active,
+                    maxResult = settings.maxResult,
                     limits = limits,
                     // The ladder's position, so a repeated failure is not written down again.
                     retrying = session.retries > 0,
@@ -156,6 +174,28 @@ class AgentRunner(
             // already caught and turned into an ending.
             synchronized(inFlight) { inFlight -= project }
         }
+    }
+
+    /**
+     * Switches a session off — **the tray's own door, and only that one.**
+     *
+     * The box's Stop does more than this (it also interrupts the request in flight and drops the
+     * words waiting behind it), because the box owns those things and the notification does not.
+     * What the two share is the session write, and it is here so the notification cannot invent a
+     * second meaning for "the person stopped it".
+     */
+    fun stop(project: String) {
+        val session = sessionOf(project) ?: return
+        sessions.put(session.stopped(AgentSession.StopReason.BY_OPERATOR))
+        Trace.tap("stop agent", project)
+        Trace.note("agent-state", "$project · stopped by you")
+        changed(sessions.read())
+    }
+
+    /** A span a person reads: `9 min`, `3 h 12 min`. */
+    private fun howLong(ms: Long): String {
+        val minutes = (ms / 60_000).coerceAtLeast(1)
+        return if (minutes < 60) "$minutes min" else "${minutes / 60} h ${minutes % 60} min"
     }
 
     /** Writes a session to its file and says what changed. */

@@ -37,7 +37,8 @@ class AgentLog private constructor(
      *
      * A per-instance lock excludes nothing that matters: two `AgentLog` objects over one project
      * can both read the file, both see it unchanged since they opened, and both take the same next
-     * id, so two different rows would share a number and every diff of the two files would lie.
+     * id — so two different rows would share a number, and forgetting one of them would remove the
+     * wrong row.
      * Two writers over one project is the app's normal state — the screen's worker resetting a
      * context while the runner's worker appends a poll's rows — so the lock belongs to the file.
      */
@@ -45,7 +46,7 @@ class AgentLog private constructor(
 
     private val guard: Any get() = lockFor(file)
 
-    /** The id the next row gets. Shared by both files, so a row's id means one thing. */
+    /** The id the next row gets. **One file, so one sequence** — a row's id means one row. */
     private var next = 1
 
     /**
@@ -335,7 +336,7 @@ class AgentLog private constructor(
         }
     }
 
-    /** One row of either file. */
+    /** One row of the record. */
     data class Row(
         val time: String,
         val id: Int,
@@ -385,9 +386,10 @@ class AgentLog private constructor(
      * removed. [keepNewest] already keeps the newest burst even when it alone is over budget —
      * that is why this can be a call rather than a policy.
      *
-     * A marker row goes in both files, so the person reading the evidence still sees what happened
-     * and the model is told the context was shortened rather than finding it mysteriously smaller.
-     * The marker's name is not one [Agent.messages] renders.
+     * A marker row goes into the record — `app`, so the model is not sent it — so the person
+     * reading the evidence still sees what happened, while the model finds a context that is
+     * smaller without being handed an app-authored sentence about it. The marker's name is not one
+     * [Agent.messages] renders.
      */
     fun trimContext(budget: Long): Int {
         synchronized(guard) {
@@ -628,9 +630,9 @@ class AgentLog private constructor(
      *
      * The cheap case — this instance wrote last — is one `length()` call. The expensive case is
      * one re-read, and it happens only when somebody else appended: a second `AgentLog` for the
-     * same project (the box reading while a poll writes), or the agent's own clear-up having
-     * rewritten the context. Reusing an id there would make two different rows share one number,
-     * and every diff of the two files would be lying.
+     * same project (the box reading while a poll writes), or the agent's own `forget` having
+     * rewritten the file. Reusing an id there would make two different rows share one number — and
+     * an id is the handle `forget` takes, so that would be a compaction that removes the wrong row.
      */
     private fun nextId(): Int {
         val length = size()
@@ -718,20 +720,20 @@ class AgentLog private constructor(
      */
     private fun load() {
         synchronized(guard) {
-            val highest = maxOf(
-                rows().maxOfOrNull { it.id } ?: 0,
-                contextRows().maxOfOrNull { it.id } ?: 0,
-            )
-            next = highest + 1
+            next = highestId() + 1
             seen = size()
         }
     }
 
-    /** The highest id either file holds, or 0 when both are empty. */
-    private fun highestId(): Int = maxOf(
-        rows().maxOfOrNull { it.id } ?: 0,
-        contextRows().maxOfOrNull { it.id } ?: 0,
-    )
+    /**
+     * The highest id the record holds, or 0 when it is empty.
+     *
+     * **One file, one maximum.** This used to take the larger of two files' highest ids, which was
+     * the right question while the context was a second file that could be shorter than the
+     * evidence. The context is a filter over the one file now, so its maximum is the same number —
+     * and asking twice is how a reader comes to believe there are two.
+     */
+    private fun highestId(): Int = rows().maxOfOrNull { it.id } ?: 0
 
     /**
      * Seals a call that was never answered, and says how many.
