@@ -19,11 +19,15 @@ class VisibilityFeatureTest : FeatureTest() {
     fun `the root shows projects and the files a person made, and nothing the app made`() {
         // Written straight to disk, the way another app or a cable would. The root is the projects
         // list now, so what it shows is exactly what is on disk there.
+        // A project has a repository in it, because that is what makes it a project; a bare folder
+        // at the root is only a folder, and says as much.
         File(scene.workspace!!.accountDir, "notes.txt").writeText("mine")
         File(scene.workspace!!.accountDir, "Shopping").mkdirs()
+        File(scene.workspace!!.accountDir, "Shopping/.git").mkdirs()
+        File(scene.workspace!!.accountDir, "loose").mkdirs()
         scene.viewModel.refresh()
 
-        assertEquals(listOf("Shopping", "notes.txt"), scene.names())
+        assertEquals(listOf("loose", "Shopping", "notes.txt"), scene.names())
     }
 
     @Test

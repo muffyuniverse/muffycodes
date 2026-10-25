@@ -600,6 +600,12 @@ class AgentTools(
         // agent cannot make a failure disappear from it. The same rule the person is under.
         ws.isRecord(file) ->
             "${rel(file)} is the record of what happened. You may read it and not change it"
+        // **Your own instructions are the person's.** Reading the brief is how a turn starts;
+        // rewriting it is a different act, and one that would let one turn quietly change what
+        // the next turn is told to do. The paragraph above says so and the rule did not: the
+        // merged layout made this an ordinary file inside the project, and it stopped refusing.
+        rel(file) == AgentPrompt.PROJECT_FILE ->
+            "${rel(file)} is the person's instructions to you. You may read it and not change it"
         insideWorktreeOrAgent(file) -> null
         else -> "You may only write inside this project, and ${rel(file)} is outside it"
     }

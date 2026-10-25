@@ -36,26 +36,32 @@ class HistoryFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `an account with nothing in it has no history yet, and its first change starts one`() {
+    fun `a project arrives with its repository's versions, and the first change adds one`() {
         start()
 
-        assertTrue("nothing has happened", log().isEmpty())
+        // **A project that has just been made is not empty of history.** Its repository is a
+        // clone, so it arrives with the commits the repository already had — the licence GitHub
+        // seeded it with. What this test is about is the person's first change: the count goes up
+        // by one, and the thing they made is in it.
+        val arrived = log().size
+        assertTrue("the clone's own versions are here", arrived >= 1)
 
         // **An empty folder is not a change.** Git stores content, so a folder with nothing in it
-        // has nothing to commit; what the app has recorded is still nothing.
+        // has nothing to commit; the count stays where the clone left it.
         scene.folder("letters")
         scene.await("the folder to be made") { scene.names().contains("letters") }
-        assertTrue("still nothing to have a version of", log().isEmpty())
+        assertEquals("an empty folder is not a change", arrived, log().size)
 
-        scene.open("letters")
+        scene.openIn("letters")
         scene.file("one.txt", "first")
-        scene.await("the first commit") { log().isNotEmpty() }
+        scene.await("the first commit") { log().size > arrived }
 
-        assertTrue("the first thing in it is the first version", log().isNotEmpty())
+        assertTrue("and the first thing in it is a version", log().size > arrived)
     }
 
     @Test
     fun `an empty folder has no version, and stops being empty the moment it has one`() {
+        start()
         // **This is a fact about git, not a gap in the app.** A folder is made of the files in it,
         // so an empty one is not a change to commit and has no version to go back to. The app
         // records nothing and says nothing, which is right; the alternative — putting a marker
@@ -68,9 +74,9 @@ class HistoryFeatureTest : FeatureTest() {
         assertTrue("no version, because there is nothing to have one of",
             scene.versionsOfFolder("empty").isEmpty())
 
-        scene.open("empty")
+        scene.openIn("empty")
         scene.file("one.txt", "first")
-        scene.open()
+        scene.openIn()
         scene.await("a version, now that there is something in it") {
             scene.versionsOfFolder("empty").isNotEmpty()
         }
@@ -98,9 +104,9 @@ class HistoryFeatureTest : FeatureTest() {
         // person is already looking at; but silence in the *screen* is not silence in the
         // *log*, and an unanswered tap is the one thing the log exists to find.
         scene.folder("letters")
-        scene.open("letters")
+        scene.openIn("letters")
         scene.file("one.txt", "first")
-        scene.open()
+        scene.openIn()
         scene.await("a version") { scene.versionsOfFolder("letters").isNotEmpty() }
 
         // `versionsOfFolder` leaves the history open, which is what restoring acts on. Its
@@ -123,10 +129,16 @@ class HistoryFeatureTest : FeatureTest() {
 
         val before = log().size
 
-        scene.folder("letters")
+        // **A change to the tree means something appeared in it.** An empty folder is not one —
+        // git stores content — so the change this asks about is a file, and the commit that
+        // carries it says what was made.
+        scene.file("letters.txt", "the first")
         scene.await("the change to be recorded") { log().size > before }
 
-        assertTrue("the folder is named in the commit", log().first().message.contains("letters"))
+        assertTrue(
+            "the file is named in the commit: ${log().first().message}",
+            log().first().message.contains("letters.txt"),
+        )
     }
 
     @Test
@@ -208,8 +220,10 @@ class HistoryFeatureTest : FeatureTest() {
         // the screen reads the repository. A commit written by JGit with no screen
         // anywhere near it must appear in the list, which is what tells the two apart.
         val file = scene.file("milk.txt", "one litre")
-        val account = scene.workspace!!.accountDir
-        org.eclipse.jgit.api.Git.open(account).use { git ->
+        // **The project's repository**, which is the project's folder — there is no second
+        // repository above it any more, so this is the only place a version could come from.
+        val repo = scene.workspace!!.projectDir("work")
+        org.eclipse.jgit.api.Git.open(repo).use { git ->
             file.writeText("written straight to git")
             GitService.commitAll(git.repository, "A commit from outside the app", AppViewModel.DEFAULT_AUTHOR)
         }
@@ -222,28 +236,29 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `a folder deleted with everything in it comes back as a folder`() {
+        start()
         // Deleting a folder is one act, so bringing it back is one row — and putting
         // back one file at a time from a list of five names is not the same thing.
         scene.folder("letters")
-        scene.open("letters")
+        scene.openIn("letters")
         scene.file("milk.txt", "two litres")
         scene.folder("inner")
-        scene.open("letters", "inner")
+        scene.openIn("letters", "inner")
         scene.file("notes.txt", "the inner one")
-        scene.open()
-        val letters = File(scene.workspace!!.accountDir, "letters")
+        scene.openIn()
+        val letters = File(scene.workspace!!.projectDir("work"), "letters")
 
         scene.viewModel.delete(letters)
         scene.await("the folder to go", 20_000) { !letters.exists() }
 
-        val gone = scene.viewModel.deletedIn(scene.workspace!!.accountDir)
+        val gone = scene.viewModel.deletedIn(scene.workspace!!.projectDir("work"))
         val offered = gone.firstOrNull { it.name == "letters" }
         assertTrue("the folder is offered back: $gone", offered != null)
         assertTrue("and it is offered as a folder", offered!!.isFolder)
 
         assertTrue(
             "bringing it back works",
-            scene.viewModel.restoreDeleted(scene.workspace!!.accountDir, offered),
+            scene.viewModel.restoreDeleted(scene.workspace!!.projectDir("work"), offered),
         )
         assertTrue("the folder is there", letters.isDirectory)
         assertEquals("with its file", "two litres", File(letters, "milk.txt").readText())
@@ -264,10 +279,11 @@ class HistoryFeatureTest : FeatureTest() {
         val kept = scene.file("kept.txt", "still here")
         scene.viewModel.delete(kept)
         scene.await("the file to go", 20_000) { !kept.exists() }
-        scene.viewModel.restoreDeleted(scene.workspace!!.accountDir, scene.viewModel.deletedIn(scene.workspace!!.accountDir).first { it.name == "kept.txt" })
+        val root = scene.workspace!!.projectDir("work")
+        scene.viewModel.restoreDeleted(root, scene.viewModel.deletedIn(root).first { it.name == "kept.txt" })
         assertTrue("it is back", kept.isFile)
 
-        val gone = scene.viewModel.deletedIn(scene.workspace!!.accountDir)
+        val gone = scene.viewModel.deletedIn(scene.workspace!!.projectDir("work"))
 
         assertTrue("and it is not offered again: $gone", gone.none { it.name == "kept.txt" })
     }
@@ -326,17 +342,18 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `a deleted folder comes back with everything that was in it`() {
+        start()
         scene.folder("letters")
-        scene.open("letters")
+        scene.openIn("letters")
         scene.file("one.txt", "first")
         scene.folder("deeper")
-        scene.open("letters", "deeper")
+        scene.openIn("letters", "deeper")
         scene.file("two.txt", "second")
-        scene.open()
+        scene.openIn()
         scene.await("the versions") { scene.versionsOfFolder("letters").isNotEmpty() }
 
         val version = scene.versionsOfFolder("letters").first().first.id
-        val letters = File(scene.workspace!!.accountDir, "letters")
+        val letters = File(scene.workspace!!.projectDir("work"), "letters")
 
         scene.viewModel.delete(letters)
         assertFalse("the folder is gone", letters.exists())
@@ -354,10 +371,11 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `a folder's history lists what was in it at each version`() {
+        start()
         scene.folder("letters")
-        scene.open("letters")
+        scene.openIn("letters")
         scene.file("one.txt", "first")
-        scene.open()
+        scene.openIn()
         scene.await("a version of the folder") { scene.versionsOfFolder("letters").isNotEmpty() }
 
         val shown = scene.versionsOfFolder("letters").first()
@@ -367,23 +385,24 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `renaming a local folder is a version, so the name can be put back`() {
+        start()
         // §4: "Folder organisation is versioned. Renames and moves of local things
         // are reversible, which is exactly where people regret things most." The
         // commit is the easy half; this checks that the *old name* is genuinely in
         // the history and can be brought back, because a version that records only
         // the new name would be a version of nothing.
         scene.folder("notes-2019")
-        scene.open("notes-2019")
+        scene.openIn("notes-2019")
         scene.file("first.txt", "the first thing")
-        scene.open()
-        val folder = File(scene.workspace!!.accountDir, "notes-2019")
+        scene.openIn()
+        val folder = File(scene.workspace!!.projectDir("work"), "notes-2019")
 
         assertTrue(
             "the folder was renamed",
             scene.viewModel.rename(folder, "archive"),
         )
 
-        val renamed = File(scene.workspace!!.accountDir, "archive")
+        val renamed = File(scene.workspace!!.projectDir("work"), "archive")
         assertTrue("the folder has its new name", renamed.isDirectory)
         assertTrue("and holds what it held", File(renamed, "first.txt").isFile)
 
@@ -399,15 +418,16 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `moving a local folder into another is a version too`() {
+        start()
         // The other half of the same promise. A move is a rename of a path, so it
         // has to reach the history the same way.
         scene.folder("inbox")
         scene.folder("archive")
-        scene.open("inbox")
+        scene.openIn("inbox")
         scene.file("letter.txt", "dear")
-        scene.open()
-        val inbox = File(scene.workspace!!.accountDir, "inbox")
-        val archive = File(scene.workspace!!.accountDir, "archive")
+        scene.openIn()
+        val inbox = File(scene.workspace!!.projectDir("work"), "inbox")
+        val archive = File(scene.workspace!!.projectDir("work"), "archive")
         val before = scene.headId()
 
         assertTrue("the folder moved", scene.viewModel.move(inbox, archive))
@@ -425,7 +445,7 @@ class HistoryFeatureTest : FeatureTest() {
         // is wanted a second after the mistake, not after the next push — and the way
         // to know is to save twice and never sync at all.
         scene.project("shopping")
-        scene.open("shopping")
+        scene.openIn("shopping")
         val ws = scene.workspace!!
         val file = File(ws.repoOf("shopping"), "milk.txt")
         // Written through the editor, because the editor is what commits: writing
@@ -453,7 +473,7 @@ class HistoryFeatureTest : FeatureTest() {
         // until the next sync, and the version it was put back to was not in the
         // history it came from.
         scene.project("shopping")
-        scene.open("shopping")
+        scene.openIn("shopping")
         val ws = scene.workspace!!
         val file = File(ws.repoOf("shopping"), "milk.txt")
         scene.viewModel.refresh()
@@ -497,11 +517,12 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `a deleted file can be brought back from the folder it was deleted from`() {
+        start()
         // Deleting is the one change with no way back from the folder it happened in:
         // the row is gone, so there is nothing to open a history on. Hence the list
         // the add button offers.
         scene.folder("letters")
-        scene.open("letters")
+        scene.openIn("letters")
         val letter = scene.file("milk.txt", "two litres")
         scene.viewModel.delete(letter)
         scene.await("the deletion to be recorded", 20_000) { !letter.exists() }
@@ -517,18 +538,20 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `a deleted picture comes back as the same bytes, not as text`() {
+        start()
         // A version is not always text. Writing a UTF-8 reading of a picture back
         // over it replaces the picture with a row of replacement characters, which
         // is a restore that destroys the thing it restored.
         scene.folder("pictures")
-        scene.open("pictures")
+        scene.openIn("pictures")
         val bytes = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0xFF.toByte(), 0x00)
         val picture = File(scene.viewModel.currentDir!!, "dot.png")
         picture.writeBytes(bytes)
-        // Written behind the app's back, so it needs a change to carry it into the
-        // history — every commit takes everything that is waiting, which is what
-        // makes a file dropped in by another app show up at all.
-        scene.folder("marker")
+        // Written behind the app's back, so it needs a real change to carry it into the
+        // history — every commit takes everything that is waiting, which is what makes a file
+        // dropped in by another app show up at all. A file, not a folder: an empty folder is not
+        // a change, so it would carry nothing.
+        scene.file("marker.txt", "a change to carry the picture in")
         scene.await("the picture to be recorded", 20_000) {
             scene.trackedFiles().contains("pictures/dot.png")
         }
@@ -546,7 +569,7 @@ class HistoryFeatureTest : FeatureTest() {
     @Test
     fun `a deleted file inside a project comes back from that project's history`() {
         scene.project("shopping")
-        scene.open("shopping")
+        scene.openIn("shopping")
         val ws = scene.workspace!!
         val file = File(ws.repoOf("shopping"), "milk.txt")
         scene.viewModel.refresh()
@@ -556,7 +579,7 @@ class HistoryFeatureTest : FeatureTest() {
         scene.viewModel.delete(file)
         scene.await("the deletion", 20_000) { !file.exists() }
 
-        scene.open("shopping")
+        scene.openIn("shopping")
         val offered = scene.viewModel.deletedIn(scene.viewModel.currentDir!!)
             .firstOrNull { it.name == "milk.txt" }
         assertTrue("the worktree offers it back", offered != null)
@@ -592,11 +615,12 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `every file deleted from a folder is offered back, not only the last one`() {
+        start()
         // The list was built from commits that a path filter said touched the
         // folder, and deleting a file from a folder does not always answer as a
         // change to the folder. One name came back for three deletions.
         scene.folder("letters")
-        scene.open("letters")
+        scene.openIn("letters")
         val first = scene.file("one.txt", "the first")
         val second = scene.file("two.txt", "the second")
         val third = scene.file("three.txt", "the third")
@@ -617,17 +641,18 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `a file deleted from a folder inside this one is not offered here`() {
+        start()
         // Restoring puts a row back in *this* folder. A file that lived in a folder
         // inside it was never a row here, and putting it here would be a restore
         // that creates something the person never had.
         scene.folder("letters")
-        scene.open("letters")
+        scene.openIn("letters")
         scene.folder("drafts")
-        scene.open("letters", "drafts")
+        scene.openIn("letters", "drafts")
         val deep = scene.file("deep.txt", "kept in drafts")
         scene.viewModel.delete(deep)
         scene.await("the deletion", 20_000) { !deep.exists() }
-        scene.open("letters")
+        scene.openIn("letters")
 
         assertEquals(
             "nothing from inside a folder is offered",
@@ -638,8 +663,9 @@ class HistoryFeatureTest : FeatureTest() {
 
     @Test
     fun `a folder with nothing deleted says so rather than showing an empty window`() {
+        start()
         scene.folder("letters")
-        scene.open("letters")
+        scene.openIn("letters")
         scene.file("kept.txt", "here")
 
         assertEquals(
@@ -657,7 +683,7 @@ class HistoryFeatureTest : FeatureTest() {
         scene.await("the local project", 30_000) {
             scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
         }
-        scene.open("scratch")
+        scene.openIn("scratch")
         scene.file("note.txt", "mine")
         scene.await("a commit") { log().isNotEmpty() }
 

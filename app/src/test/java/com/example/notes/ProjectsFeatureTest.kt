@@ -290,8 +290,12 @@ class ProjectsFeatureTest : FeatureTest() {
         }
 
         assertEquals(
-            "both versions are there, newest first",
-            listOf("second", "first"),
+            // **The empty file it was made as is the oldest version**, and that is the app being
+            // honest: making a file is a change, so it is a version. A list that hid it would be
+            // a history the app does not have, and "go back to before I wrote anything" would
+            // have nothing to go back to.
+            "every version is there, newest first",
+            listOf("second", "first", ""),
             scene.versionsOf(file).map { it.second },
         )
     }

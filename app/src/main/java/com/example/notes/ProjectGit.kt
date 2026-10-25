@@ -63,6 +63,14 @@ class ProjectGit(
         Result.failure(e)
     }
 
+    /**
+     * The commit that adds the app's two ignore lines to a repository it did not make.
+     *
+     * It says what was added and who added it, because it is the one commit in a person's history
+     * they did not ask for.
+     */
+    private val IGNORE_COMMIT = "Ignore this app's own folder"
+
     /** What went wrong the last time this class looked at a project. */
     var lastError: String? = null
         private set
@@ -226,10 +234,15 @@ class ProjectGit(
     /**
      * Clones a remote into the project's folder — which becomes the repository.
      *
-     * The app's two ignore lines are added after a successful clone, because a repository pulled
-     * in was written by somebody who did not know this app would keep a record inside it. That is
-     * a change to the working tree, so it shows as something to send: honest, and the next sync
-     * carries it.
+     * **The app's two ignore lines are added and committed, not just written.** A repository
+     * pulled in was written by somebody who did not know this app would keep a record inside it,
+     * and the folder must not be made before the clone — git refuses to clone into a folder that
+     * already holds anything, which is why the lines go in afterwards.
+     *
+     * Afterwards is a change to the working tree, so leaving it uncommitted meant a project that
+     * had just arrived already had something to send, and its row said so before the person had
+     * touched anything. `aCleanProjectSaysNothingChanged` was right to fail. The lines are the
+     * app's own act, so the app records them, with a message that says what they are.
      */
     fun cloneInto(project: String, remoteUrl: String): GitService.RemoteResult {
         val dir = repoDir(project)
@@ -238,8 +251,14 @@ class ProjectGit(
         }
         val result = GitService.clone(remoteUrl, dir, authorProvider(), tokenProvider())
         if (result.success) {
-            open(project)?.use { repo -> GitService.scrubRemoteUrls(repo) }
             workspace.ensureIgnore(dir)
+            open(project)?.use { repo ->
+                GitService.scrubRemoteUrls(repo)
+                // The app's own act, committed by the app — and a commit that has nothing to
+                // say (a repository pulled in already ignoring both folders) writes nothing,
+                // because `commitEverything` answers "nothing" rather than making an empty one.
+                GitService.commitEverything(repo, IGNORE_COMMIT, authorProvider())
+            }
         }
         return result
     }

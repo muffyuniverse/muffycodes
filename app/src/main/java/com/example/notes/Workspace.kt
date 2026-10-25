@@ -182,10 +182,20 @@ class Workspace(val accountDir: File) {
         file.isDirectory && file.name == AgentLog.DIR &&
             file.parentFile?.parentFile?.canonicalFile == accountDir.canonicalFile
 
-    /** True when [file] is a project: a direct child folder of the account root. */
+    /**
+     * True when [file] is a project: a direct child folder of the account root **that holds a
+     * repository.**
+     *
+     * The second half is not a detail. A project's folder *is* its repository, so a folder at the
+     * root with no `.git` in it is not a project — and calling it one made the app claim things it
+     * could not do: `projectOf` answered with a name, every change inside tried to commit and
+     * silently wrote nothing (a commit that fails and a commit with nothing to do look identical,
+     * which is the failure mode this app's history was built to avoid), and the list drew a project
+     * row for a folder with nothing behind it.
+     */
     fun isProjectFolder(file: File): Boolean =
         file.isDirectory && file.parentFile?.canonicalFile == accountDir.canonicalFile &&
-            !isHidden(file.name)
+            !isHidden(file.name) && File(file, ".git").exists()
 
     /** The names of the projects on this phone, in display order. */
     fun projectNames(): List<String> =

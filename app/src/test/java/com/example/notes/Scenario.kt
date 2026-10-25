@@ -145,6 +145,19 @@ class Scenario(
         return this
     }
 
+    /**
+     * Opens a folder **inside the project that is open**, however deep.
+     *
+     * [open] takes a path from the account root, which every history test would otherwise have to
+     * spell out in full — and a path spelled by hand is how a test ends up making its files in a
+     * folder that is not in the project at all, waiting 20 seconds for a commit that could not
+     * happen, and calling the app broken.
+     */
+    fun openIn(vararg names: String): Scenario {
+        val project = viewModel.currentProject ?: error("not inside a project")
+        return open(project, *names)
+    }
+
     /** The names in the folder that is open, in the order the screen shows them. */
     fun names(): List<String> = viewModel.entries.map { it.name }
 
