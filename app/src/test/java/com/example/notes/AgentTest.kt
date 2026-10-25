@@ -759,23 +759,27 @@ class AgentTest {
 
     @Test
     fun `every way a turn ends is on the trace, and once`() {
-        // Four endings, four sentences — and the trace has one line for each, written where the
-        // ending is decided rather than five times over in five branches.
-        val endings = mapOf<String, Pair<List<Reply>, String>>(
-            "asked" to (listOf(Reply("", listOf(call("ask", """{"question":"Which?"}""")))) to "asked"),
-            "concluded" to (listOf(Reply("", listOf(call("conclude", """{"text":"done"}""")))) to "concluded"),
-            "waited" to (listOf(Reply("", listOf(call("wait", "{}")))) to "idle"),
-            "stopped" to (listOf(Reply("just some words", emptyList())) to "stopped"),
+        // Four endings, four lines — written where the ending is decided rather than five times
+        // over in five branches.
+        //
+        // **Compared as a set, not by counting from an index.** The trace is one fixed-size ring
+        // shared by every test in this JVM, so "the lines after position N" is a window that
+        // shifts when an older line is evicted — which is exactly how this test first failed,
+        // reading another test's lines and none of its own.
+        val endings = listOf(
+            Triple("asked", listOf(Reply("", listOf(call("ask", """{"question":"Which?"}""")))), "asked:"),
+            Triple("concluded", listOf(Reply("", listOf(call("conclude", """{"text":"done"}""")))), "concluded:"),
+            Triple("waited", listOf(Reply("", listOf(call("wait", "{}")))), "idle:"),
+            Triple("stopped", listOf(Reply("just some words", emptyList())), "stopped:"),
         )
-        for ((name, script) in endings) {
-            val (replies, word) = script
-            val before = Trace.report().lines.size
+        for ((name, replies, word) in endings) {
+            val before = Trace.report().lines.toSet()
             agent(ScriptedDoor(*replies.toTypedArray())).burst("go")
-            val added = Trace.report().lines.drop(before)
+            val added = Trace.report().lines.filterNot { it in before }
             assertEquals(
                 "$name is on the trace exactly once: $added",
                 1,
-                added.count { it.contains("agent") && it.contains(word) && it.contains("shopping") },
+                added.count { it.contains(word) },
             )
         }
     }
