@@ -27,6 +27,16 @@ class AgentLog private constructor(
     /** The id the next row gets. Shared by both files, so a row's id means one thing. */
     private var next = 1
 
+    /**
+     * The session's length after this instance's own last append; `-1` until it writes.
+     *
+     * **A counter in memory goes stale the moment another writer touches the file**, and two
+     * rows with one id is the one thing that breaks the audit this format is for — `session.log`
+     * minus `context.log` is only the agent's judgement if an id means one row. [nextId] compares
+     * the file against what this instance left and re-reads the highest id when they differ.
+     */
+    private var seen = -1L
+
     companion object {
 
         /** The folder name under a project: `agent/`. */
@@ -260,6 +270,51 @@ class AgentLog private constructor(
         val body: String get() = LogFormat.unescaped(detail)
     }
 
+    // ---- the person's own operation ------------------------------------------
+
+    /**
+     * Throws the working context away, and keeps the evidence.
+     *
+     * **The app's operation, not the agent's.** The agent's clear-up may only remove rows and may
+     * never remove the newest task — that is what [clearUpProblem] checks — because a context it
+     * can empty is a context it can quietly restart from. A reset is the person saying "the
+     * conversation starts from here", which is a different act, so it is a different door rather
+     * than a relaxation of his.
+     *
+     * `session.log` is untouched: it is the evidence of what happened, and a reset is a fact
+     * about the working context, not a way to make history disappear. The marker row is written
+     * to **both** files under one id, so `session.log` minus `context.log` still means exactly
+     * one thing — what the agent decided did not matter — with resetting listed as the app's own
+     * act rather than looking like a row he removed.
+     *
+     * The marker's name is not one [Agent.messages] renders, so the model is not handed an
+     * app-authored sentence: after a reset the next request is the instructions and the new task,
+     * and nothing else.
+     */
+    fun reset(): Int = synchronized(guard) {
+        val id = nextId()
+        val line = LogFormat.row(
+            System.currentTimeMillis(), id, NOTE, "reset", "the working context was cleared",
+        )
+        append(session, line)
+        try {
+            val fresh = File(context.parentFile, context.name + ".new")
+            fresh.writeText("$line\n")
+            // Beside and renamed: a reader must see the old context or the new one, never a file
+            // that has been truncated and not yet refilled.
+            if (!fresh.renameTo(context)) {
+                context.writeText("$line\n")
+                fresh.delete()
+            }
+        } catch (t: Throwable) {
+            // The file is the failure. The session row still says a reset happened, which is the
+            // half that must not be lost quietly — and the next turn's seal keeps the context
+            // legal either way.
+        }
+        seen = size()
+        id
+    }
+
     // ---- writing ------------------------------------------------------------
 
     /** The operator's words. Appended to both, because this is what a turn is for. */
@@ -297,12 +352,37 @@ class AgentLog private constructor(
 
     private fun record(kind: String, name: String, detail: String, both: Boolean): Int {
         synchronized(guard) {
-            val id = next++
+            val id = nextId()
             val line = LogFormat.row(System.currentTimeMillis(), id, kind, name, detail)
             append(session, line)
             if (both) append(context, line)
+            seen = size()
             return id
         }
+    }
+
+    /**
+     * The next id, checked against the file rather than trusted from memory.
+     *
+     * The cheap case — this instance wrote last — is one `length()` call. The expensive case is
+     * one re-read, and it happens only when somebody else appended: a second `AgentLog` for the
+     * same project (the box reading while a poll writes), or the agent's own clear-up having
+     * rewritten the context. Reusing an id there would make two different rows share one number,
+     * and every diff of the two files would be lying.
+     */
+    private fun nextId(): Int {
+        val length = size()
+        if (length != seen) {
+            next = maxOf(next, highestId() + 1)
+            seen = length
+        }
+        return next++
+    }
+
+    private fun size(): Long = try {
+        if (session.isFile) session.length() else 0L
+    } catch (t: Throwable) {
+        0L
     }
 
     private fun append(file: File, line: String) {
@@ -355,8 +435,15 @@ class AgentLog private constructor(
                 contextRows().maxOfOrNull { it.id } ?: 0,
             )
             next = highest + 1
+            seen = size()
         }
     }
+
+    /** The highest id either file holds, or 0 when both are empty. */
+    private fun highestId(): Int = maxOf(
+        rows().maxOfOrNull { it.id } ?: 0,
+        contextRows().maxOfOrNull { it.id } ?: 0,
+    )
 
     /**
      * Seals a call that was never answered, and says how many.
@@ -370,8 +457,14 @@ class AgentLog private constructor(
     fun beginSession(): Int {
         synchronized(guard) {
             val pending = dangling(rows())
+            // **The seal follows the call into the file the call is in.** After a reset the
+            // evidence still holds a call the context no longer has, and sealing it into the
+            // context would put a tool result there with no call above it — a request every
+            // endpoint refuses, produced by the app's own repair.
+            val inContext = dangling(contextRows()).map { it.id }.toSet()
             for (call in pending) {
-                got(call.name, "$FAILURE the app was closed before this answered")
+                val said = "$FAILURE the app was closed before this answered"
+                if (call.id in inContext) got(call.name, said) else sessionOnly(GOT, call.name, said)
             }
             return pending.size
         }
@@ -436,7 +529,7 @@ class AgentLog private constructor(
                 keepNewest(rows, budget = limit / 2) { row -> row.line.length.toLong() + 1 }
             if (dropped == 0) return 0
             val marker = LogFormat.row(
-                System.currentTimeMillis(), next++, NOTE, "trimmed",
+                System.currentTimeMillis(), nextId(), NOTE, "trimmed",
                 "$dropped rows from before ${kept.firstOrNull()?.time ?: "now"}",
             )
             try {
@@ -453,6 +546,7 @@ class AgentLog private constructor(
             } catch (t: Throwable) {
                 return 0
             }
+            seen = size()
             return dropped
         }
     }

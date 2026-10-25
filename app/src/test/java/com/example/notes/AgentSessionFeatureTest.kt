@@ -364,6 +364,86 @@ class AgentSessionFeatureTest : FeatureTest() {
         assertTrue("the person is the switch", scene.viewModel.sessionOf("groceries")?.running == true)
     }
 
+    // ---- the context the agent is answered with -----------------------------
+
+    @Test
+    fun `an edit to the project's instructions reaches the next turn`() {
+        listening()
+        val door = ScriptedDoor(
+            Reply("", listOf(Call("c1", "conclude", """{"text":"done"}"""))),
+            Reply("", listOf(Call("c2", "conclude", """{"text":"done"}"""))),
+        )
+        openChat("groceries", door)
+        scene.viewModel.startAgent("groceries")
+        scene.viewModel.sendChat("first")
+        scene.await("the first turn") { door.asked.size == 1 }
+        scene.await("the agent to be quiet") { !scene.viewModel.chatWorking }
+
+        File(scene.viewModel.workspace!!.projectsDir, "groceries/project_prompt.txt")
+            .writeText("Always answer in French.")
+        scene.viewModel.sendChat("second")
+        scene.await("the second turn") { door.asked.size == 2 }
+
+        assertFalse(
+            "the turn before the edit did not have it",
+            door.asked[0].system.contains("French"),
+        )
+        assertTrue(
+            "and the turn after it does",
+            door.asked[1].system.contains("Always answer in French."),
+        )
+    }
+
+    @Test
+    fun `resetting clears the working context, keeps the evidence, and says so`() {
+        listening()
+        val door = ScriptedDoor(
+            Reply("", listOf(Call("c1", "tree", """{"path":"GitHub"}"""))),
+            Reply("", listOf(Call("c2", "conclude", """{"text":"there is one file"}"""))),
+            Reply("", listOf(Call("c3", "conclude", """{"text":"done again"}"""))),
+        )
+        openChat("groceries", door)
+        scene.viewModel.startAgent("groceries")
+        scene.viewModel.sendChat("what is in the project?")
+        scene.await("the first turn") { door.asked.size == 2 }
+        scene.await("the agent to be quiet") { !scene.viewModel.chatWorking }
+        val evidence = record("groceries").rows()
+
+        scene.viewModel.resetAgent("groceries")
+        scene.await("the reset to be written") {
+            record("groceries").contextRows().size == 1
+        }
+
+        assertEquals(
+            "the working context is the reset and nothing else",
+            listOf("reset"),
+            record("groceries").contextRows().map { it.name },
+        )
+        assertEquals(
+            "and the evidence grew by exactly one row",
+            evidence.size + 1,
+            record("groceries").rows().size,
+        )
+        assertTrue(
+            "with everything that happened still in it",
+            record("groceries").rows().any { it.kind == AgentLog.CALL && it.name == "tree" },
+        )
+        assertTrue(
+            "the press and the act are on the trace",
+            Trace.report().lines.any { it.contains("TAP") && it.contains("reset-agent") } &&
+                Trace.report().lines.any { it.contains("agent-reset") },
+        )
+
+        scene.viewModel.sendChat("now something else")
+        scene.await("the turn after the reset") { door.asked.size == 3 }
+
+        assertEquals(
+            "the request after a reset is the new task alone",
+            listOf("now something else"),
+            door.asked.last().messages.map { it.text },
+        )
+    }
+
     @Test
     fun `a session survives the app being reopened`() {
         listening()

@@ -259,6 +259,97 @@ class AgentLogTest {
         assertEquals("and the file is untouched", before, sessionLines())
     }
 
+    // ---- resetting the working context --------------------------------------
+
+    @Test
+    fun `a reset clears the working context and leaves the evidence alone`() {
+        log.told("rename milk.txt")
+        log.call("tree", """{"path":"GitHub"}""")
+        log.got("tree", "0\nGitHub/milk.txt")
+        log.note("agent", "found it")
+        val evidence = sessionLines()
+
+        log.reset()
+
+        assertEquals(
+            "the context is one row: the reset",
+            1,
+            contextLines().size,
+        )
+        assertTrue("and that row says so", contextLines().first().contains("reset"))
+        assertEquals("the evidence grew by one", evidence.size + 1, sessionLines().size)
+        assertTrue(
+            "and everything that happened is still in it",
+            sessionLines().containsAll(evidence),
+        )
+    }
+
+    @Test
+    fun `a reset is one row in both files, under one id`() {
+        // The audit is `session.log` minus `context.log`. If a reset were a row only the session
+        // had, it would read as a row the agent removed — the app's act disguised as his.
+        log.told("a task")
+        log.reset()
+
+        val lastSession = AgentLog.parseRow(sessionLines().last())
+        val only = AgentLog.parseRow(contextLines().last())
+
+        assertEquals("one id", lastSession.id, only.id)
+        assertEquals("one line, so the diff is exact", lastSession.line, only.line)
+        assertEquals("and it is the app's own row", "reset", only.name)
+    }
+
+    @Test
+    fun `the ids carry on after a reset, and are never reused`() {
+        log.told("one")
+        val before = log.rows().maxOf { it.id }
+        log.reset()
+        log.told("two")
+
+        val ids = log.rows().map { it.id }
+        assertEquals("no id appears twice", ids.size, ids.toSet().size)
+        assertTrue("and the new rows are above the reset", log.rows().last().id > before + 1)
+    }
+
+    @Test
+    fun `a second writer does not reuse the first writer's ids`() {
+        // Two `AgentLog` objects for one project is not hypothetical: the box reads while a poll
+        // writes. A counter held in memory would hand both writers the same number, and every
+        // diff of the two files would then be lying.
+        log.told("from the first")
+        val other = AgentLog.open(project)
+        val first = log.rows().maxOf { it.id }
+
+        other.told("from the second")
+
+        val all = log.rows().map { it.id }
+        assertEquals("one id per row", all.size, all.toSet().size)
+        assertTrue("and the later writer is above the earlier", log.rows().last().id > first)
+    }
+
+    @Test
+    fun `a seal follows its call into the file the call is in`() {
+        // After a reset the evidence holds a call the context does not. Sealing it into both
+        // would put a tool result in the context with no call above it — a request every
+        // endpoint refuses, written by the app's own repair.
+        log.told("a task")
+        log.call("tree", """{"path":"GitHub"}""")
+        log.reset()
+
+        val sealed = log.beginSession()
+
+        assertEquals("the call was answered", 1, sealed)
+        assertTrue(
+            "in the evidence",
+            sessionLines().any { it.contains("app was closed") },
+        )
+        assertFalse(
+            "and not in the context",
+            contextLines().any { it.contains("app was closed") },
+        )
+        assertEquals("which is still just the reset", 1, contextLines().size)
+    }
+
     @Test
     fun `the session keeps a row the context does not want`() {
         // The repeated poll is real evidence and is not sent: fifteen of them an hour would make

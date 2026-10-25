@@ -124,6 +124,16 @@ fun AgentChatScreen(
                             modifier = Modifier.padding(end = 8.dp),
                         )
                     }
+                    // **Reset clears the working context and keeps the evidence.** No dialog:
+                    // nothing is lost — the session log is the record of what happened — and the
+                    // one thing a person needs to know afterwards is said in the sentence under
+                    // the screen.
+                    TextButton(
+                        onClick = { viewModel.resetAgent(project) },
+                        enabled = !viewModel.chatWorking,
+                    ) {
+                        Text("Reset")
+                    }
                     // **One control, and its label is what it will do.** An agent is on or off;
                     // a switch would need a name for the on state that is not a button's.
                     TextButton(

@@ -82,17 +82,7 @@ class Agent(
      * [operator] is the person's own words; they are written into the record first, so a turn
      * that fails still begins with what was asked.
      */
-    fun burst(operator: String, progress: () -> Unit = {}): End {
-        val end = loop(operator, progress)
-        // The evidence is the app's to keep to size, and a burst boundary is the only place a
-        // trim cannot cut a conversation in half. After the turn, so what just happened is real.
-        log.trimSession()
-        // **The last turn, drawn before the caller's own redraw.** Every row of the ending is
-        // written by now, so one refresh after it leaves the box showing the whole burst —
-        // including a refusal, which is a turn that produced nothing but a note.
-        progress()
-        return end
-    }
+    fun burst(operator: String, progress: () -> Unit = {}): End = turn(operator, progress)
 
     /**
      * One poll: the same request, sent again, with nothing new said.
@@ -102,14 +92,33 @@ class Agent(
      * again would put words in their mouth and change the one part of the context that has to
      * stay byte-identical. The agent's own reply is recorded like any other turn.
      */
-    fun poll(progress: () -> Unit = {}): End {
-        val end = loop(operator = null, progress)
-        log.trimSession()
-        progress()
-        return end
+    fun poll(progress: () -> Unit = {}): End = turn(null, progress)
+
+    /**
+     * One turn, and the two things that happen however it ends.
+     *
+     * **The layers are read here, once.** Not at startup, so an edit to the project's
+     * instructions is not missed; not per request, so one conversation cannot be answered under
+     * two different briefs. [AgentPrompt.Layers] carries that decision.
+     *
+     * The trim and the redraw are in a `finally` because they belong to the turn, not to a loop
+     * that reached its end: a turn that threw still has to leave the evidence at its size, and
+     * still has to hand the box what was written — otherwise a failure stays on the screen as
+     * "working" for ever.
+     */
+    private fun turn(operator: String?, progress: () -> Unit): End {
+        val layers = AgentPrompt.read(accountDir, tools.projectDir)
+        try {
+            return loop(layers, operator, progress)
+        } finally {
+            // The evidence is the app's to keep to size, and a turn boundary is the only place a
+            // trim cannot cut a conversation in half.
+            log.trimSession()
+            progress()
+        }
     }
 
-    private fun loop(operator: String?, progress: () -> Unit): End {
+    private fun loop(layers: AgentPrompt.Layers, operator: String?, progress: () -> Unit): End {
         // The seal belongs here, at the start of a session, and not to a read: no endpoint
         // accepts a conversation whose last assistant message calls a tool nobody answered. A
         // poll continues a session, so it does not seal anything.
@@ -122,105 +131,76 @@ class Agent(
         var idle = 0
         var requests = 0
         while (requests < MAX_REQUESTS) {
-            if (idle >= AgentTools.IDLE_CALLS) return tooIdle()
+            if (idle >= AgentTools.IDLE_CALLS) return finish(tooIdle())
             requests++
             // The boundary the box counts turns by, and the app's own row, not the model's.
             log.sessionOnly(AgentLog.TURN, "turn", "$requests")
-            val request = build()
-            val reply = door.turn(request).getOrElse { problem ->
-                val said = Secrets.explain(problem, "The model could not be asked")
-                log.note("stopped", said)
-                Trace.note("agent", "$project stopped: ${said.take(80)}")
-                return End.Stopped(said, retryable = true)
-            }
-
+            val reply = door.turn(build(layers)).getOrElse { return finish(blip(it)) }
             if (reply.text.isNotBlank()) log.note("agent", reply.text)
-
-            if (reply.calls.isEmpty()) {
-                // Words and no calls: the model has nothing to do. Recorded and ended, rather
-                // than asked again — a second request would be answered with more words.
-                val said = reply.text.trim().ifEmpty { "(the model said nothing)" }
-                log.note("stopped", "no tool calls, so the turn ended")
-                return End.Stopped(
-                    "the model answered with words and no tool call: $said",
-                    reason = AgentSession.StopReason.LOOP,
-                )
-            }
 
             val ending = reply.calls.firstOrNull { it.tool in AgentTools.TERMINATING }
 
-            if (ending != null && reply.calls.size > 1) {
+            when {
+                // Words and no calls: the model has nothing to do. Recorded and ended, rather than
+                // asked again — a second request would be answered with more words.
+                reply.calls.isEmpty() -> return finish(wordsWithoutCalls(reply))
+
                 // **A terminating tool is called alone.** The refusal is written as each call's
                 // own result, so the model sees what it did and what it should have done — and
-                // the terminating call is not obeyed, because a reply that ignored the rule is
-                // a reply that was improvising.
-                for (call in reply.calls) {
-                    val id = log.call(call.tool, call.args)
-                    val body = if (call.tool in AgentTools.TERMINATING) {
-                        AgentLog.FAILURE +
-                            " ${call.tool} is a terminating tool; call it alone. Nothing was done."
-                    } else {
-                        runTool(call)
-                    }
-                    log.got(call.tool, body)
-                    Trace.note("agent", "$project call ${call.tool} #$id")
+                // the terminating call is not obeyed, because a reply that ignored the rule is a
+                // reply that was improvising.
+                ending != null && reply.calls.size > 1 -> {
+                    refusedInCompany(reply.calls)
+                    idle++
+                    progress()
                 }
-                idle++
-                progress()
-                continue
-            }
 
-            if (ending != null) {
-                val args = try {
-                    org.json.JSONObject(ending.args.ifBlank { "{}" })
-                } catch (e: Exception) {
-                    org.json.JSONObject()
-                }
-                return when (ending.tool) {
-                    "ask" -> {
-                        log.call(ending.tool, ending.args)
-                        val question = args.optString("question", reply.text).trim()
-                            .ifEmpty { "(a question with no words)" }
-                        log.ask(question)
-                        Trace.note("agent", "$project asked")
-                        End.Asked(question)
-                    }
+                ending != null -> return finish(leave(ending, reply))
 
-                    "conclude" -> {
-                        log.call(ending.tool, ending.args)
-                        val said = args.optString("text", reply.text).trim()
-                        log.conclude(said)
-                        Trace.note("agent", "$project concluded: ${said.take(80)}")
-                        End.Concluded(said)
-                    }
-
-                    else -> waited(ending)
+                else -> {
+                    if (work(reply.calls)) idle = 0 else idle++
+                    progress()
                 }
             }
-
-            val before = changedFiles()
-            var changed = false
-            for (call in reply.calls) {
-                val id = log.call(call.tool, call.args)
-                Trace.note("agent", "$project call ${call.tool} #$id")
-                val body = runTool(call)
-                log.got(call.tool, body)
-                if (call.tool in AgentTools.WRITING && !body.startsWith(AgentLog.FAILURE)) {
-                    changed = true
-                }
-            }
-            if (!changed && changedFiles() == before) {
-                idle++
-            } else {
-                idle = 0
-            }
-            progress()
         }
-        log.note("stopped", "$MAX_REQUESTS requests in one turn")
-        return End.Stopped(
-            "it made $MAX_REQUESTS requests without ending the turn",
-            reason = AgentSession.StopReason.LOOP,
-        )
+        return finish(overBudget())
+    }
+
+    // ---- the four ways a turn ends -------------------------------------------
+    //
+    // One function each, and each one is the whole rule: the record rows it writes, and the
+    // sentence the session keeps. [finish] is the only place a trace line is written, so an
+    // ending cannot be added without being on the trace.
+
+    /** The agent needs the person. */
+    private fun asked(call: Call, args: org.json.JSONObject, reply: Reply): End {
+        log.call(call.tool, call.args)
+        val question = args.optString("question", reply.text).trim()
+            .ifEmpty { "(a question with no words)" }
+        log.ask(question)
+        return End.Asked(question)
+    }
+
+    /** The work is done. */
+    private fun concluded(call: Call, args: org.json.JSONObject, reply: Reply): End {
+        log.call(call.tool, call.args)
+        val said = args.optString("text", reply.text).trim()
+        log.conclude(said)
+        return End.Concluded(said)
+    }
+
+    /** Idle until the person speaks: [waited], which is the whole of what a poll does. */
+    private fun leave(call: Call, reply: Reply): End {
+        val args = try {
+            org.json.JSONObject(call.args.ifBlank { "{}" })
+        } catch (e: Exception) {
+            org.json.JSONObject()
+        }
+        return when (call.tool) {
+            "ask" -> asked(call, args, reply)
+            "conclude" -> concluded(call, args, reply)
+            else -> waited(call)
+        }
     }
 
     /**
@@ -248,16 +228,85 @@ class Agent(
             log.sessionOnly(AgentLog.GOT, call.tool, WAITING)
             log.sessionOnly(AgentLog.NOTE, "idle", "waiting for the operator")
         }
-        Trace.note("agent", "$project idle")
         return End.Waited
+    }
+
+    /** The model answered with prose and no call: nothing to do, and nothing to ask again. */
+    private fun wordsWithoutCalls(reply: Reply): End {
+        val said = reply.text.trim().ifEmpty { "(the model said nothing)" }
+        log.note("stopped", "no tool calls, so the turn ended")
+        return End.Stopped(
+            "the model answered with words and no tool call: $said",
+            reason = AgentSession.StopReason.LOOP,
+        )
+    }
+
+    /** A transport that failed: the session reconnects on its ladder, and the words are kept. */
+    private fun blip(problem: Throwable): End {
+        val said = Secrets.explain(problem, "The model could not be asked")
+        log.note("stopped", said)
+        return End.Stopped(said, retryable = true)
     }
 
     private fun tooIdle(): End {
         val said = "it made ${AgentTools.IDLE_CALLS} calls in a row that changed nothing " +
             "and asked nothing"
         log.note("stopped", said)
-        Trace.note("agent", "$project stopped: idle")
         return End.Stopped(said, reason = AgentSession.StopReason.LOOP)
+    }
+
+    private fun overBudget(): End {
+        val said = "it made $MAX_REQUESTS requests without ending the turn"
+        log.note("stopped", said)
+        return End.Stopped(said, reason = AgentSession.StopReason.LOOP)
+    }
+
+    /**
+     * The one place a turn is put on the trace.
+     *
+     * Worth the indirection: five separate `Trace.note` calls meant a sixth ending could be
+     * added and be invisible on the screen that exists to show what the app is doing.
+     */
+    private fun finish(end: End): End {
+        val (what, said) = when (end) {
+            is End.Asked -> "asked" to end.question
+            is End.Concluded -> "concluded" to end.said
+            End.Waited -> "idle" to WAITING
+            is End.Stopped -> "stopped" to end.why
+        }
+        Trace.note("agent", "$project $what: ${said.take(80)}")
+        return end
+    }
+
+    /** Runs a reply's calls, and says whether any of them changed the project. */
+    private fun work(calls: List<Call>): Boolean {
+        val before = changedFiles()
+        var changed = false
+        for (call in calls) {
+            val id = log.call(call.tool, call.args)
+            Trace.note("agent", "$project call ${call.tool} #$id")
+            val body = runTool(call)
+            log.got(call.tool, body)
+            if (call.tool in AgentTools.WRITING && !body.startsWith(AgentLog.FAILURE)) changed = true
+        }
+        // A call that wrote nothing and left the project as it was is a call that did nothing —
+        // the count the idle guard is about. Files, not the reply's own claim about itself.
+        return changed || changedFiles() != before
+    }
+
+    /** A terminating call in company: refused as each call's own result, and nothing done. */
+    private fun refusedInCompany(calls: List<Call>) {
+        for (call in calls) {
+            val id = log.call(call.tool, call.args)
+            val body = if (call.tool in AgentTools.TERMINATING) {
+                AgentLog.FAILURE +
+                    " ${call.tool} is a terminating tool; call it alone. Nothing was done."
+            } else {
+                runTool(call)
+            }
+            log.got(call.tool, body)
+            Trace.note("agent", "$project call ${call.tool} #$id")
+        }
     }
 
     /** Runs one call and returns its body with its `0` or `1` already on the front. */
@@ -277,14 +326,22 @@ class Agent(
      * edit real: he deletes a row from `context.log`, and the next request genuinely does not
      * contain it. A cached transcript would keep sending what he threw away.
      */
-    fun build(): Request = Request(
+    private fun build(layers: AgentPrompt.Layers): Request = Request(
         model = model.model,
         provider = model.provider,
         effort = model.effort,
-        system = AgentPrompt.systemMessage(accountDir, tools.projectDir),
+        system = layers.message,
         messages = messages(log.contextRows()),
         tools = AgentTools.specs(),
     )
+
+    /**
+     * The request as the files stand right now.
+     *
+     * The same composition [loop] makes, spelled once, for anything that asks what the agent
+     * would be sent — a check on a phone, and the tests that prove nothing is remembered.
+     */
+    fun request(): Request = build(AgentPrompt.read(accountDir, tools.projectDir))
 
     /**
      * The record, as the model reads it.
@@ -330,7 +387,13 @@ class Agent(
                 }
                 AgentLog.GOT -> {
                     flush()
-                    val id = awaiting.removeFirstOrNull() ?: callId(row.id)
+                    // **An answer with no call above it is not sent.** Every request needs each
+                    // tool message to answer a call the model made; an orphan result is a message
+                    // it cannot place and an endpoint will refuse. The clear-up rules cannot
+                    // produce one, but a reset can: the evidence keeps a call the context no
+                    // longer has, and the app's own seal then answers that call in the evidence
+                    // alone.
+                    val id = awaiting.removeFirstOrNull() ?: continue
                     out.add(Msg.tool(id, row.body))
                 }
 

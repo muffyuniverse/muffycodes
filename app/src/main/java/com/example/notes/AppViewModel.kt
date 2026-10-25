@@ -1886,6 +1886,34 @@ class AppViewModel @JvmOverloads constructor(
         Trace.said("the agent is on for $project")
     }
 
+    /**
+     * Clears the agent's working context, and keeps the evidence.
+     *
+     * The person's act, not the agent's: the clear-up it may do itself is checked as removal of
+     * whole rows and never of the newest task ([AgentLog.clearUpProblem]), and a reset is a
+     * different thing — the conversation starts here. `agent/session.log` is not touched, so
+     * nothing that happened is lost, and the two files still differ only by what was thrown away
+     * plus this one row.
+     *
+     * Refused while a turn is running: a context replaced under a reply being written would
+     * leave the record half in each file.
+     */
+    fun resetAgent(project: String) {
+        val ws = workspace ?: return
+        if (chatWorking || project in polling) return
+        Trace.tap("reset agent", project)
+        onWorker {
+            val log = AgentLog.open(File(ws.projectsDir, project))
+            val id = log.reset()
+            val rows = log.rows()
+            Trace.note("agent-reset", "$project · row $id")
+            main.post {
+                if (chatProject == project) applyChat(rows, follow = true)
+                message = "The working context was cleared. The session log still has it."
+            }
+        }
+    }
+
     /** Switches it off. The reason is recorded, because "why did it stop" is the question later. */
     fun stopAgent(project: String) {
         val session = sessionOf(project) ?: return

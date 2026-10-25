@@ -111,18 +111,39 @@ object AgentPrompt {
         layer(File(projectDir, PROJECT_FILE), PROJECT_DEFAULT)
 
     /**
-     * What the model is told: ① then ②, and then nothing.
+     * The two layers as they were at one moment, and the message they make together.
      *
-     * The context is *not* concatenated here. It is sent as the conversation before the burst,
-     * so that clearing a row out of it shortens the request from that row onwards instead of
-     * rewriting one large message — which is the difference between a cache hit and a full
-     * re-read of everything the app was told.
+     * **[read] is called at the start of a turn, never once at startup and never per request.**
+     * A turn is one conversation: if the person edits the project's instructions while the agent
+     * is working, the turn finishes under the brief it began with, and the next turn sees the
+     * edit. Re-reading per request would send two different briefs inside one conversation, and
+     * holding them in memory across turns would mean an edit that silently does not arrive.
+     *
+     * ① comes first and ② after it, so an edit to the project's instructions invalidates the
+     * request only from ② onwards: a provider's implicit cache matches on the longest common
+     * *prefix*, and the instructions above are still the same bytes.
      */
-    fun systemMessage(accountDir: File, projectDir: File): String = buildString {
-        append(system(accountDir).trim())
-        append("\n\n---\n\n")
-        append("# This project\n\n")
-        append(project(projectDir).trim())
-        append("\n")
+    data class Layers(val system: String, val project: String) {
+        /** What the model is told: ①, then ②, and then nothing. */
+        val message: String
+            get() = buildString {
+                append(system.trim())
+                append(SEPARATOR)
+                append("# This project\n\n")
+                append(project.trim())
+                append("\n")
+            }
     }
+
+    /**
+     * The boundary between the two layers.
+     *
+     * A constant, so that "did only the project layer change?" is a question about the text
+     * after this marker rather than about where the app happened to put a blank line.
+     */
+    const val SEPARATOR = "\n\n---\n\n"
+
+    /** Reads both layers from their files, now. */
+    fun read(accountDir: File, projectDir: File): Layers =
+        Layers(system(accountDir), project(projectDir))
 }

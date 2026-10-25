@@ -51,6 +51,8 @@ class AgentTest {
 
     private fun call(name: String, args: String, id: String = "c1") = Call(id, name, args)
 
+    private fun model() = ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high")
+
     private fun rows() = AgentLog.open(File(ws.projectsDir, "shopping")).rows()
 
     private fun callRows() = rows().filter { it.kind == AgentLog.CALL }
@@ -628,6 +630,154 @@ class AgentTest {
         val got = gotRows().first()
         assertTrue("it says it is not whole", got.body.startsWith(AgentLog.FAILURE))
         assertTrue("and how much: ${got.body.takeLast(80)}", got.body.contains("showing first 500"))
+    }
+
+    // ---- the context is the sources, not a copy of them ----------------------
+
+    @Test
+    fun `the instructions are read at the start of a turn, so an edit arrives at the next one`() {
+        // **One brief per conversation, and the next turn sees the change.** A layer read per
+        // request would answer one turn under two different briefs; a layer cached across turns
+        // would never see the edit at all. The door does the editing, because that is the only
+        // way to change the file *while* the agent is working.
+        val projectDir = File(ws.projectsDir, "shopping")
+        val brief = File(projectDir, AgentPrompt.PROJECT_FILE)
+        brief.writeText("Answer in one sentence.")
+
+        val door = object : Door {
+            val asked = mutableListOf<Request>()
+            override fun turn(request: Request): Result<Reply> {
+                asked.add(request)
+                if (asked.size == 1) brief.writeText("Answer in three sentences.")
+                return Result.success(
+                    if (asked.size == 1) {
+                        Reply("", listOf(Call("c1", "tree", """{"path":"GitHub"}""")))
+                    } else {
+                        Reply("", listOf(Call("c2", "conclude", """{"text":"done"}""")))
+                    },
+                )
+            }
+        }
+        Agent(account, "shopping", ws, git, log, door, model()).burst("start")
+
+        assertEquals("two requests", 2, door.asked.size)
+        assertTrue("the first was under the brief it began with", door.asked[0].system.contains("one sentence"))
+        assertFalse("and not the edit made while it worked", door.asked[0].system.contains("three sentences"))
+        assertTrue(
+            "the second request of the same turn did not change briefs",
+            door.asked[1].system.contains("one sentence"),
+        )
+
+        brief.writeText("Answer in three sentences.")
+        val next = ScriptedDoor(Reply("", listOf(Call("c3", "conclude", """{"text":"ok"}"""))))
+        agent(next).burst("again")
+        assertTrue("the next turn has the edit", next.asked.first().system.contains("three sentences"))
+    }
+
+    @Test
+    fun `an edit to the project layer leaves the instructions above it as they were`() {
+        // The cache is a prefix match. ① first and ② after it is what makes editing the project's
+        // brief cost a re-read of the brief rather than of everything the app was told.
+        val dir = File(ws.projectsDir, "shopping")
+        val brief = File(dir, AgentPrompt.PROJECT_FILE)
+        brief.writeText("Old brief.")
+        val before = agent(ScriptedDoor()).request().system
+
+        brief.writeText("A new brief, of a different length.")
+        val after = agent(ScriptedDoor()).request().system
+
+        val head = before.substringBefore(AgentPrompt.SEPARATOR)
+        assertEquals("the instructions are byte-identical", head, after.substringBefore(AgentPrompt.SEPARATOR))
+        assertTrue("the old brief is gone", !after.contains("Old brief."))
+        assertTrue("and the new one is there", after.contains("A new brief"))
+    }
+
+    @Test
+    fun `the working context is read from its file, not remembered`() {
+        // A row put there by somebody else — the agent's own edit tool, or a person with a shell.
+        // If the loop kept a transcript in memory this would be the request that never noticed.
+        val dir = File(ws.projectsDir, "shopping")
+        log.told("first")
+        val door = ScriptedDoor(Reply("", listOf(Call("c1", "conclude", """{"text":"done"}"""))))
+        val agent = agent(door)
+
+        File(dir, "${AgentLog.DIR}/${AgentLog.CONTEXT}").writeText("")
+        agent.burst("second")
+
+        val sent = door.asked.first().messages.map { it.text }
+        assertEquals("the context on disk, and the operator's own words", listOf("second"), sent)
+    }
+
+    @Test
+    fun `a reset leaves the next request with the new task and nothing before it`() {
+        val door = ScriptedDoor(
+            Reply("", listOf(call("tree", """{"path":"GitHub"}"""))),
+            Reply("", listOf(call("conclude", """{"text":"done"}"""))),
+            Reply("", listOf(Call("c3", "conclude", """{"text":"done again"}"""))),
+        )
+        val agent = agent(door)
+        agent.burst("look at the folder")
+        val before = log.contextRows().size
+
+        log.reset()
+        agent.burst("now something else")
+
+        assertEquals("the working context was emptied", 1, log.contextRows().count { it.kind == AgentLog.CALL })
+        assertTrue("and it is the new turn's", before > log.contextRows().size - 1)
+        val third = door.asked.last().messages
+        assertEquals(
+            "the third request is the new task alone",
+            listOf("now something else"),
+            third.map { it.text },
+        )
+        assertTrue(
+            "with nothing of the old conversation in it",
+            third.none { it.text.contains("GitHub") },
+        )
+        assertTrue(
+            "while the evidence still has all of it",
+            log.rows().any { it.kind == AgentLog.CALL && it.name == "tree" },
+        )
+    }
+
+    @Test
+    fun `an answer with no call above it is not sent`() {
+        // What a reset can leave behind: the evidence answers a call the context no longer has.
+        // A tool message the model cannot place is a request every endpoint refuses.
+        log.told("do it")
+        log.sessionOnly(AgentLog.GOT, "tree", "0\nleft over from before the reset")
+        log.note("agent", "Carrying on.")
+
+        val messages = agent(ScriptedDoor()).messages(log.contextRows())
+
+        assertTrue("no tool message", messages.none { it.role == "tool" })
+        assertFalse(
+            "and no trace of it: ${messages.map { it.text }}",
+            messages.any { it.text.contains("left over") },
+        )
+    }
+
+    @Test
+    fun `every way a turn ends is on the trace, and once`() {
+        // Four endings, four sentences — and the trace has one line for each, written where the
+        // ending is decided rather than five times over in five branches.
+        val endings = mapOf<String, Pair<List<Reply>, String>>(
+            "asked" to (listOf(Reply("", listOf(call("ask", """{"question":"Which?"}""")))) to "asked"),
+            "concluded" to (listOf(Reply("", listOf(call("conclude", """{"text":"done"}""")))) to "concluded"),
+            "waited" to (listOf(Reply("", listOf(call("wait", "{}")))) to "idle"),
+            "stopped" to (listOf(Reply("just some words", emptyList())) to "stopped"),
+        )
+        for ((name, script) in endings) {
+            val (replies, word) = script
+            val before = Trace.report().lines.size
+            agent(ScriptedDoor(*replies.toTypedArray())).burst("go")
+            val added = Trace.report().lines.drop(before)
+            assertEquals(
+                "$name is on the trace exactly once: $added",
+                1,
+                added.count { it.contains("agent") && it.contains(word) && it.contains("shopping") },
+            )
+        }
     }
 
     @Test
