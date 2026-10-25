@@ -492,9 +492,13 @@ class AgentLogTest {
             log.contextRows().count { it.name == "trimmed" },
         )
         assertEquals(
-            "and the newest one says how many went altogether",
-            "6 rows: the context was over its limit",
-            log.rows().last { it.name == "trimmed" }.body,
+            // Each marker reports its own trim, and the total is the sum — a running total kept by
+            // reading the previous marker back would count those rows again on every trim.
+            "three trims of two rows, and the markers say so",
+            listOf(2, 2, 2),
+            log.rows().filter { it.name == "trimmed" }.map {
+                it.body.substringBefore(' ').toInt()
+            },
         )
 
         AgentLog.open(project).told("after the context was trimmed")

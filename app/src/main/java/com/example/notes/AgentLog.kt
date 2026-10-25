@@ -403,14 +403,17 @@ class AgentLog private constructor(
             // Nothing to drop, or nothing that may be: a context that is one conversation is a
             // conversation, and cutting it would leave a task with no task.
             if (oldest.size >= inContext.size) return 0
-            val gone = droppedTotal(all) + oldest.size
+            // **What this trim did, not a running total.** Markers are the app's own rows and stay
+            // in the record, so a total maintained by reading the previous marker home would count
+            // those rows again on every trim. Each row reports its own act; the total is the sum,
+            // computed wherever it is wanted.
             val marker = LogFormat.recordRow(
                 LogFormat.stamp(System.currentTimeMillis()),
                 nextId(),
                 NOTE,
                 APP,
                 "trimmed",
-                "$gone rows: the context was over its limit",
+                "${oldest.size} rows: the context was over its limit",
             )
             // **Taken out, not taken away.** The rows the app trims stay in the record, marked
             // `app` rather than `out` — the app's doing, not the agent's judgement — so a trim can
@@ -430,16 +433,6 @@ class AgentLog private constructor(
             return oldest.size
         }
     }
-
-    /**
-     * How many rows the trim markers in [rows] between them say were dropped.
-     *
-     * The marker's body starts with the number, so this reads it back rather than keeping a counter
-     * somewhere — the file is the record, and a count that lived only in memory would start again
-     * from zero when the app opened.
-     */
-    private fun droppedTotal(rows: List<Row>): Int =
-        rows.sumOf { it.body.trim().substringBefore(' ').toIntOrNull() ?: 0 }
 
     // ---- the person's own operation ------------------------------------------
 

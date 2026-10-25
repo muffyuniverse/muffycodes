@@ -148,9 +148,13 @@ class AgentRunner(
                     // A row about a reconnect is not worth failing the reconnect for.
                 }
             }
-            synchronized(inFlight) { inFlight -= project }
             polled(project, shown, how)
             changed(sessions.read())
+            // **Last, and the flag means "the poll is not finished" — screen included.** It used
+            // to be cleared before the screen was told, so anything waiting on it could read the
+            // session as it stood before the poll. Not in a finally, because every throw above is
+            // already caught and turned into an ending.
+            synchronized(inFlight) { inFlight -= project }
         }
     }
 

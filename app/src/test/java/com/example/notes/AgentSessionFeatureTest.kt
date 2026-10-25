@@ -65,20 +65,18 @@ class AgentSessionFeatureTest : FeatureTest() {
 
     /** Runs one tick at the session's own due time, and waits for the poll it may start. */
     /**
-     * Polls [project] at its own due time, and waits for the *state*, not just the request.
+     * Polls [project] at its own due time, and waits until the poll is finished — screen included.
      *
-     * **Two conditions, because one of them is not enough.** Leaving the in-flight set says the
-     * turn is over; it does not say the screen has been told, and the screen's copy is updated by a
-     * post to the main thread. Waiting only for the request is a race the assertion then loses —
-     * which is what happened the moment the app did a little more work at the end of a poll.
+     * **The in-flight flag is the whole signal, and it is the app's own.** It is cleared after the
+     * screen has been told, so waiting on it cannot read a session as it stood before the poll. It
+     * used to be cleared earlier, and this helper is what noticed: the assertion saw `waiting` where
+     * the app had already decided `reconnecting`.
      */
     private fun tick(project: String) {
         val session = scene.viewModel.sessionOf(project) ?: return
-        val at = session.nextPollAt
-        scene.viewModel.tickAgents(at)
+        scene.viewModel.tickAgents(session.nextPollAt)
         scene.await("the poll to finish", 20_000) {
-            project !in scene.viewModel.agentPollingInFlight() &&
-                (scene.viewModel.sessionOf(project)?.lastPollAt ?: 0L) >= at
+            project !in scene.viewModel.agentPollingInFlight()
         }
     }
 
