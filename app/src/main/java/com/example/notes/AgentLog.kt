@@ -125,20 +125,25 @@ class AgentLog private constructor(
         }
 
         /**
-         * The newest bursts that fit [keep] rows, and how many were dropped.
+         * The newest whole bursts that fit [budget], and how many rows were dropped.
          *
-         * Whole bursts only, so a conversation is never cut in half; [keep] is the target and one
-         * burst may overshoot it, because "the newest conversation" is not something a size limit
-         * gets to delete.
+         * Whole bursts only, so a conversation is never cut in half; the newest burst is always
+         * kept even when it alone is over budget, because "the thing that just happened" is not
+         * something a size limit gets to delete. [size] is what a burst costs — bytes here, and a
+         * row count in the tests that think in rows.
          */
-        fun keepNewest(rows: List<Row>, keep: Int): Pair<List<Row>, Int> {
-            val all = bursts(rows)
+        fun keepNewest(
+            rows: List<Row>,
+            budget: Long = Long.MAX_VALUE,
+            size: (Row) -> Long = { 1 },
+        ): Pair<List<Row>, Int> {
             val kept = mutableListOf<List<Row>>()
-            var total = 0
-            for (burst in all.asReversed()) {
-                if (kept.isNotEmpty() && total + burst.size > keep) break
+            var total = 0L
+            for (burst in bursts(rows).asReversed()) {
+                val cost = burst.sumOf(size)
+                if (kept.isNotEmpty() && total + cost > budget) break
                 kept.add(burst)
-                total += burst.size
+                total += cost
             }
             val newest = kept.asReversed().flatten()
             return newest to (rows.size - newest.size)
@@ -333,6 +338,11 @@ class AgentLog private constructor(
     /**
      * Truncates the session at a burst boundary, keeping the newest conversations that fit.
      *
+     * **The limit is bytes, and the choice is made in bytes.** Keeping "half the limit" of rows
+     * rather than of bytes made the number mean nothing — a 4 MB limit asked for two million
+     * rows, which is every row this app will ever write, so the trim would never have fired.
+     * A row's length is its own line, which is exactly what the limit measures.
+     *
      * Half the limit is the target rather than all of it, so the trim is not immediately undone
      * by the rows the next turn writes — the trace's own rule, reused rather than reinvented.
      */
@@ -345,7 +355,9 @@ class AgentLog private constructor(
             }
             if (size <= limit) return 0
             val rows = rows()
-            val (kept, dropped) = keepNewest(rows, (limit / 2).toInt())
+            if (rows.isEmpty()) return 0
+            val (kept, dropped) = keepNewest(rows) { row -> row.line.length.toLong() + 1 }
+            if (dropped == 0) return 0
             val marker = LogFormat.row(
                 System.currentTimeMillis(), next++, NOTE, "trimmed",
                 "$dropped rows from before ${kept.firstOrNull()?.time ?: "now"}",

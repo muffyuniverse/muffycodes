@@ -216,6 +216,39 @@ class AgentLogTest {
     }
 
     @Test
+    fun `the trim measures bytes, not rows`() {
+        // The bug this pins: `limit` was passed to the burst chooser as a *row count*, so a 4 MB
+        // limit asked for two million rows — more than this app will ever write — and the trim
+        // could never fire. A limit that means nothing is a limit that does nothing.
+        repeat(6) { n ->
+            log.told("task $n " + "x".repeat(200))
+            log.conclude("done")
+        }
+
+        val dropped = log.trimSession(limit = 1_500)
+
+        assertTrue("a limit of 1.5 KB keeps about 750 bytes, not 750 rows", dropped > 0)
+        assertTrue(
+            "and the record is smaller than the limit",
+            File(project, "agent/session.log").length() < 1_500,
+        )
+    }
+
+    @Test
+    fun `the newest conversation is kept even when it alone is over the limit`() {
+        // Something has to be on the record. A trim that emptied the file would be a housekeeping
+        // step that destroyed the thing it was housekeeping.
+        log.told("everything " + "x".repeat(5_000))
+        log.conclude("done")
+        val before = sessionLines()
+
+        val dropped = log.trimSession(limit = 100)
+
+        assertEquals("nothing dropped", 0, dropped)
+        assertEquals("and the file is untouched", before, sessionLines())
+    }
+
+    @Test
     fun `trimming before the limit does nothing at all`() {
         log.told("a task")
         val before = sessionLines()

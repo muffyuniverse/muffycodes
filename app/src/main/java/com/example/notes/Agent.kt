@@ -70,6 +70,9 @@ class Agent(
      */
     fun burst(operator: String, progress: () -> Unit = {}): End {
         val end = loop(operator, progress)
+        // The evidence is the app's to keep to size, and a burst boundary is the only place a
+        // trim cannot cut a conversation in half. After the turn, so what just happened is real.
+        log.trimSession()
         // **The last turn, drawn before the caller's own redraw.** Every row of the ending is
         // written by now, so one refresh after it leaves the box showing the whole burst —
         // including a refusal, which is a turn that produced nothing but a note.
