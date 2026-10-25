@@ -103,6 +103,25 @@ class Agent(
          * sentence on the screen is read now by the person who asked. Two audiences, two strings,
          * and each one defined once — here, on the type that knows the difference.
          */
+        /**
+         * The session's own state, moved on by this ending.
+         *
+         * **Here rather than in the caller**, because there are two callers — a burst from the
+         * screen and a poll from the timer — and a transition each of them remembered is a
+         * transition one of them forgets. A blip reconnects on the session's ladder; a wall stops
+         * and keeps the provider's words, because those are what the stopped label shows.
+         */
+        fun after(session: AgentSession, now: Long): AgentSession = when (this) {
+            is Asked -> session.asked(now)
+            is Concluded -> session.concluded()
+            Waited -> session.waited(now)
+            is Stopped -> if (retryable) {
+                session.copy(lastWords = why).failed(now)
+            } else {
+                session.stopped(reason, why)
+            }
+        }
+
         fun plainly(): String = when (this) {
             is Asked -> "The agent asked something"
             is Concluded -> "The agent finished"

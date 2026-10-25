@@ -61,6 +61,14 @@ class AppViewModel @JvmOverloads constructor(
     /** The accounts on this phone. */
     val accounts = AccountStore(rootDir)
 
+    /**
+     * Where the accounts live, so the runner can be built over the same root they were made in.
+     *
+     * Taken once at construction: the constructor's `rootDir` is shadowed by the property, and a
+     * method reading `rootDir` is reading the accounts folder rather than its parent.
+     */
+    private val accountsRoot: File = rootDir
+
     private val worker = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
 
@@ -1879,14 +1887,21 @@ class AppViewModel @JvmOverloads constructor(
      */
     var agentNotifier: ((AgentSession) -> Unit)? = null
 
-    /** Projects with a poll in flight, so one slow poll is not started twice. */
-    private val polling = mutableSetOf<String>()
+    /**
+     * The clock, shared with the foreground service.
+     *
+     * **One implementation of "which session is due".** The screen's tick and the service's tick
+     * are the same act, so both call the same runner — a second copy would be a second answer to
+     * the same question, and the one a person reads would be whichever ran last. The runner has no
+     * screen: [agentSessions] is refreshed from the file it keeps.
+     */
+    private var runner: AgentRunner? = null
 
     /** How often a session that needs a person reminds them, from Settings. */
     val reminderMs: Long get() = settings.remindMinutes * 60_000L
 
     /** The projects with a poll in flight, so a test can wait for one to finish. */
-    internal fun agentPollingInFlight(): Set<String> = polling.toSet()
+    internal fun agentPollingInFlight(): Set<String> = runner?.polling() ?: emptySet()
 
     /** The session of [project], or null when the agent is not running there. */
     fun sessionOf(project: String): AgentSession? =
@@ -1922,7 +1937,7 @@ class AppViewModel @JvmOverloads constructor(
      */
     fun resetAgent(project: String) {
         val ws = workspace ?: return
-        if (chatWorking || project in polling) return
+        if (chatWorking || project in agentPollingInFlight()) return
         Trace.tap("reset agent", project)
         onWorker {
             val log = AgentLog.open(File(ws.projectsDir, project))
@@ -1950,44 +1965,51 @@ class AppViewModel @JvmOverloads constructor(
      * **The clock is a parameter, not `now()`.** Every rule about four minutes and one hour is
      * then a test that moves a number, which is the only way to test them at all — and it is why
      * the shell that calls this can be a service, an alarm, or a test, without changing a rule.
+     * The rules themselves are [AgentRunner]'s, so a tick from the service and a tick from the
+     * screen cannot disagree.
      */
     fun tickAgents(now: Long = System.currentTimeMillis()) {
-        for (session in agentSessions.toList()) {
-            var current = session
-            if (current.reminderDue(now, reminderMs)) {
-                current = current.reminded()
-                putSession(current)
-                Trace.note("agent-reminder", current.notice() ?: "")
-                agentNotifier?.invoke(current)
-            }
-            if (current.pollDue(now) && current.project !in polling) {
-                poll(current, now)
-            }
-        }
-    }
-
-    /** Sends one poll, on the worker, and keeps the session in step with how it ended. */
-    private fun poll(session: AgentSession, now: Long) {
-        val ws = workspace ?: return
-        val g = git ?: return
-        val project = session.project
-        if (!File(ws.projectsDir, project).isDirectory) {
-            // A project that is gone takes its session with it, rather than polling a folder
-            // that does not exist for ever.
-            Trace.note("agent-gone", project)
-            AgentSessions(ws.accountDir).remove(project)
-            agentSessions = agentSessions.filterNot { it.project == project }
-            polling.remove(project)
+        val runner = runner ?: makeRunner()
+        if (runner == null) {
+            // Nobody is signed in, so there is no account whose sessions could be due.
+            agentSessions = emptyList()
             return
         }
-        polling += project
-        putSession(session.polled(now))
-        Trace.note("agent-poll", "$project · ${session.label(now)}")
-        runTurn(project, said = null) { rows, end ->
-            polling.remove(project)
-            if (chatProject == project) applyChat(rows, follow = true)
-            applyEnd(project, end, System.currentTimeMillis())
-        }
+        runner.tick(now)
+        agentSessions = runner.sessions()
+    }
+
+    /**
+     * Builds the runner for the account that is signed in now.
+     *
+     * Rebuilt when the account changes, because the projects, the record and the model are all the
+     * account's — a runner over the previous account would poll somebody else's folders. The old
+     * one is closed, so its thread goes with it.
+     */
+    private fun makeRunner(): AgentRunner? {
+        runner?.close()
+        val fresh = AgentWiring.runnerFor(
+            app = getApplication(),
+            rootDir = accountsRoot,
+            credentials = credentials,
+            settings = settings,
+            door = { active -> doorFor(active) },
+            notify = { session -> agentNotifier?.invoke(session) },
+            changed = { sessions ->
+                main.post {
+                    agentSessions = sessions
+                    // A poll can change what the box shows, and the person may be reading it. The
+                    // rows come from the record the same way every other refresh gets them: one
+                    // path from the file to the screen rather than two.
+                    chatProject?.let { project ->
+                        val dir = File(workspaceOf(project).absolutePath)
+                        if (dir.isDirectory) applyChat(AgentLog.open(dir).rows(), follow = true)
+                    }
+                }
+            },
+        )
+        runner = fresh
+        return fresh
     }
 
     /** Reads a session's own file and keeps the observable copy in step. */
@@ -1995,29 +2017,24 @@ class AppViewModel @JvmOverloads constructor(
         val ws = workspace ?: return
         AgentSessions(ws.accountDir).put(session)
         agentSessions = agentSessions.filterNot { it.project == session.project } + session
+        // **The service follows the sessions, always.** One call, from the one place a session is
+        // written, so no path can switch an agent on and leave the phone without a clock.
+        AgentService.apply(getApplication(), agentSessions)
         Trace.note("agent-state", "${session.project} · ${session.label()}")
         // **Only a session that just started needing somebody speaks.** Otherwise every reminder
         // tick would also post here, and the reminder count would never leave the first one.
         if (session.needsYou && session.reminders == 0) agentNotifier?.invoke(session)
     }
 
-    /** The session's own state, moved on by how a turn ended. */
+    /**
+     * The session's own state, moved on by how a turn ended.
+     *
+     * The transition itself is [Agent.End.after], because the timer makes it too — see
+     * [AgentRunner]. What is here is the screen's half: writing it down and redrawing.
+     */
     private fun applyEnd(project: String, end: Agent.End, now: Long) {
         val current = sessionOf(project) ?: return
-        val next = when (end) {
-            is Agent.End.Asked -> current.asked(now)
-            is Agent.End.Concluded -> current.concluded()
-            is Agent.End.Waited -> current.waited(now)
-            // A transport that failed is a blip; a model that answered with nothing useful is a
-            // wall. The first reconnects, the second stops and says so.
-            is Agent.End.Stopped -> if (end.retryable) {
-                // The ladder in the session decides when to try again — and when to give up. Its
-                // words are kept, because the last failure is what the stopped label shows.
-                current.copy(lastWords = end.why).failed(now)
-            } else {
-                current.stopped(end.reason, end.why)
-            }
-        }
+        val next = end.after(current, now)
         if (next != current) putSession(next)
     }
 

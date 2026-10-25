@@ -16,6 +16,29 @@
     -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!--
+        Being on. The agent's session outlives the screen: a poll every four minutes is what the
+        feature promises, and an app that can only tick while it is open breaks that promise the
+        moment the phone goes in a pocket.
+
+        `specialUse` rather than `dataSync` on purpose — the system caps dataSync at six hours in
+        any 24 on Android 15 and later, which would end the operator's session for them. This is
+        the app holding a conversation on the person's behalf; the subtype below says exactly that,
+        which is what the declaration is for.
+
+        `POST_NOTIFICATIONS` is not optional here: a foreground service without a visible
+        notification is a service the system will not keep.
+
+        `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` is declared and asked for in one place, with the
+        reason spelled out: in Doze the network is suspended for apps that are not exempt, so every
+        poll would fail against the pinned provider — and this app has no fallback by design, so a
+        suspended network is not "a bit late", it is a session that stops on its own.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -36,6 +59,15 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".AgentService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="A coding agent the person switched on holds a conversation in one of their projects: it polls the model they pinned every four minutes, and wakes them when it has a question. Not a sync — the session is meant to outlive the screen." />
+        </service>
     </application>
 
 </manifest>

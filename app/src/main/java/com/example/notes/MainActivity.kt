@@ -123,8 +123,11 @@ private fun AppRoot(viewModel: AppViewModel) {
      * the right moment — cheap enough to be a coroutine, and coarse enough that it is not a
      * battery question. The state machine decides everything else; this only moves `now` along.
      *
-     * A foreground service will call the same `tickAgents` when the app is not open; that is why
-     * the clock is a parameter, and why nothing here knows what time it is.
+     * The foreground service runs the same rules through the same [AgentRunner] when the app is
+     * not open — and while it is open, both tick. That is safe rather than wasteful: a poll writes
+     * the session's own `lastPollAt` to disk *before* the request goes out, so whichever clock gets
+     * there second reads a session that is not due. The clock is a parameter here, and nothing in
+     * this file knows what time it is.
      */
     LaunchedEffect(Unit) {
         while (true) {
