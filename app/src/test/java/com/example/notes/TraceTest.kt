@@ -59,6 +59,34 @@ class TraceTest {
     // ---- the columns --------------------------------------------------------
 
     @Test
+    fun `a body with a newline in it is still one row, and reads back as it was`() {
+        // The file is grepped, watched line by line, and read by eye on a phone. A body that
+        // carries a newline breaks all three, and it is the one part of a row the app does not
+        // choose the shape of: a tool's output, a parser's message, an exception.
+        val body = "0\nGitHub/\nGitHub/milk.txt"
+        Trace.note("tree", body)
+        settle()
+
+        val line = firstLine()
+        assertEquals("one row", 1, line.lines().size)
+        assertTrue("the newlines are escaped: $line", line.contains("0\\nGitHub/"))
+        // From the name's own separator, not from the first double space: the id is padded,
+        // so the row begins with a run of spaces that has nothing to do with the detail.
+        assertEquals("and it reads back exactly", body, Trace.unescaped(line.substringAfter("tree  ")))
+    }
+
+    @Test
+    fun `a backslash in a body survives the round trip`() {
+        // The escape that is easier to get wrong: replacing the newline first would turn a
+        // literal `\\n` in a body into a newline on the way back in.
+        val body = "C:\\Users\\milk.txt"
+        Trace.note("path", body)
+        settle()
+
+        assertEquals("as it was", body, Trace.unescaped(firstLine().substringAfter("path  ")))
+    }
+
+    @Test
     fun `a line is time, id, kind, name, detail`() {
         val id = Trace.tap("Save", "milk.txt")
         val line = firstLine()

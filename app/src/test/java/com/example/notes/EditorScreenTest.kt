@@ -112,11 +112,13 @@ class EditorScreenTest {
         // is on the screen — the file's name is the same afterwards — so nothing the app
         // draws can answer it, and the log showed `save milk.txt` waiting for ever while
         // the next back press spent it.
-        val after = lastSavedLine()
-        assertTrue(
-            "and the log says the save was answered",
-            after != null && after != saidBefore,
-        )
+        // **Waited for, not sampled.** The line is written on the worker after the commit,
+        // which is after the write this test has already waited for — so asking once, at the
+        // moment the file is right, is asking a fraction of a second too early.
+        compose.waitUntil(10_000) {
+            val after = lastSavedLine()
+            after != null && after != saidBefore
+        }
     }
 
     /** The newest line saying the app saved this file, or null when there is none. */

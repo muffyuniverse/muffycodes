@@ -93,7 +93,40 @@ object Trace {
             append(what)
             if (detail.isNotEmpty()) {
                 append("  ")
-                append(detail)
+                append(escaped(detail))
+            }
+        }
+    }
+
+    /**
+     * The one escaping rule, for every kind: a newline in `detail` becomes a backslash and an
+     * `n`, and a backslash becomes two backslashes.
+     *
+     * A row is a line, and the file is read by `grep`, by the watcher and by a person with the
+     * phone in their hand — all three of which a body with a newline in it breaks. The
+     * alternative, JSON-encoding `detail`, is correct and unreadable: every quote in a tool's
+     * argument arrives with a backslash before every quote, and the file stops being readable
+     * by eye.
+     *
+     * Each event is appended **after** its whole detail is known, so an escape is honest here
+     * in a way it would not be for a stream: nothing is half-written and later continued.
+     */
+    fun escaped(text: String): String = text.replace("\\", "\\\\").replace("\n", "\\n")
+
+    /** The inverse, for the reader that has to show the body under its captions. */
+    fun unescaped(text: String): String = buildString {
+        var i = 0
+        while (i < text.length) {
+            val c = text[i]
+            if (c == '\\' && i + 1 < text.length) {
+                when (text[i + 1]) {
+                    'n' -> { append('\n'); i += 2 }
+                    '\\' -> { append('\\'); i += 2 }
+                    else -> { append(c); i += 1 }
+                }
+            } else {
+                append(c)
+                i += 1
             }
         }
     }

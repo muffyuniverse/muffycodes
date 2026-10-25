@@ -1372,21 +1372,25 @@ class AppViewModel @JvmOverloads constructor(
                 }
                 if (outcome != null && !outcome.ok) refused = outcome.error
             }
+            // **The save answers itself here, and not after the hop to the screen.** A save
+            // changes the file and its history, and neither is on the screen: the name is the
+            // same afterwards, so the state line is either unchanged (never written) or
+            // identical. The tap therefore waited forever — the live log shows `save
+            // file26.txt` with no answer at all, while the next back press spent it.
+            //
+            // Written on this thread, the one that did the work, so a row is never missing
+            // because the main thread has not got to it. The message still goes through the
+            // post, because it is state the screen draws.
+            val answer = if (refused != null) {
+                "Saved to the file, but not to its history: $refused"
+            } else {
+                "Saved $name"
+            }
+            if (refused != null) Trace.failure(answer, "save") else Trace.said(answer)
             main.post {
                 refresh()
                 refreshChanges()
-                // **The save answers itself.** A save changes the file and its history,
-                // and neither is on the screen: the name is the same afterwards, so the
-                // state line is either unchanged (and never written) or identical. The
-                // tap therefore waited forever — the live log shows `save file26.txt`
-                // with no answer at all, while the next back press spent it.
-                if (refused != null) {
-                    val said = "Saved to the file, but not to its history: $refused"
-                    message = said
-                    Trace.failure(said, "save")
-                } else {
-                    Trace.said("Saved $name")
-                }
+                message = answer
             }
         }
     }
