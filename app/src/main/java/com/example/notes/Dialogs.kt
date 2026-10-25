@@ -891,22 +891,24 @@ fun ReportBody(
 }
 
 /**
- * The screen the OpenRouter key is typed on — **and it stays open when the key does not take.**
+ * The screen the OpenRouter key is typed on — **and it is told whether the key took.**
  *
  * A save is a write and a read back, and the read back can fail on a phone that is doing nothing
  * wrong (a locked screen is enough). The dialog used to dismiss itself the instant the button was
  * pressed, so that refusal arrived at a screen that was already gone, as a snackbar nobody was
- * looking for — which reads exactly like a key that was accepted. It closes only on an answer.
+ * looking for — which reads exactly like a key that was accepted.
  *
- * @param keep the save itself: null when the key is kept, or the sentence to show when it is not.
+ * The refusal is a **parameter**, the way the sign-in dialog's is: the screen that decides whether
+ * the window is open also decides why it stayed, and this one only draws what it is told. A dialog
+ * that kept its own copy could disagree with the screen about both.
  */
 @Composable
 fun ModelKeyDialog(
     onDismiss: () -> Unit,
-    keep: (String) -> String?,
+    error: String? = null,
+    onSave: (String) -> Unit,
 ) {
     var key by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf<String?>(null) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("OpenRouter key") },
@@ -928,7 +930,7 @@ fun ModelKeyDialog(
                 )
                 if (error != null) {
                     Text(
-                        error!!,
+                        error,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
@@ -938,10 +940,7 @@ fun ModelKeyDialog(
         confirmButton = {
             TextButton(
                 enabled = key.isNotBlank(),
-                onClick = {
-                    val refused = keep(key.trim())
-                    if (refused == null) onDismiss() else error = refused
-                },
+                onClick = { onSave(key.trim()) },
             ) { Text("Keep it") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },

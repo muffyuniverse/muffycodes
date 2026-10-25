@@ -481,11 +481,23 @@ private fun Dialogs(
         Pending.None -> Unit
 
         Pending.ModelKey -> {
-            // The dialog owns the refusal, like the sign-in one: a key that could not be read back
-            // keeps the screen open and says so where the person is already looking.
+            // **Refused keys keep the window open, with the reason in it.** The save is a write and a
+            // read back, and the read back can fail on a phone that is doing nothing wrong. Dismissing
+            // on the press turned that refusal into a snackbar at a screen that was already gone, which
+            // reads exactly like success.
+            var refused by remember { mutableStateOf<String?>(null) }
             ModelKeyDialog(
-                onDismiss = dismiss,
-                keep = { key -> viewModel.saveModelKey(key) },
+                onDismiss = { refused = null; dismiss() },
+                error = refused,
+                onSave = { key ->
+                    val why = viewModel.saveModelKey(key)
+                    if (why == null) {
+                        refused = null
+                        dismiss()
+                    } else {
+                        refused = why
+                    }
+                },
             )
         }
 
