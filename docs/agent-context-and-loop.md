@@ -69,11 +69,48 @@ and one place — `finish()` — that puts a turn on the trace, using the word a
 | `MAX_REQUESTS` reached | `NOTE stopped` | "a turn that never ends stops at the request budget" |
 | reset | one row in both files | "a reset clears the working context" |
 
-## Still not built (and deliberately not faked)
+## The two context limits (§1.8, §2.3)
 
-- the foreground service (`specialUse` + `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`); the tick runs
-  from a 15-second coroutine while the app is open;
-- the **token** limits (trigger/hard) for `context.log` and the settings that hold them — round 5
-  says the app trims the context at the hard limit, and the numbers are tokens, so nothing was
-  invented in bytes;
+| | what it is | default | who acts |
+|---|---|---|---|
+| **trigger** | the agent is told to clear up, with the size and the limit named | a quarter of the pin's ceiling | the agent |
+| **hard** | the app trims whole conversations, oldest first | **off** | the app |
+
+The ceiling belongs to the **pinned endpoint**, not the model (`cloudflare` allows a 943,718-token
+reply out of a 1,048,576 window; `deepinfra/fp8` only 131,072), so `ContextBudget.CEILINGS` holds
+the five measured pins and falls back through live numbers to three quarters of a window to a
+floor. **`asked` and `inForce` are two numbers, and the clamp never writes back** — §2.3's trap,
+where looking at a small model once destroys the number set for a big one.
+
+Sizes are estimated at four bytes a token, rounded up, because the phone has no tokenizer and
+early is the safe direction. Every place the number appears says it is an estimate.
+
+| transition | what it writes | test |
+|---|---|---|
+| over the trigger | one line at the **end** of the system message, instructions untouched | `AgentTest` "over the trigger…" |
+| under the trigger | nothing at all | "under the trigger nothing is said" |
+| over the hard limit | one trim per request, marker row, request rebuilt from what is left | "over the hard limit the app trims…" |
+| the numbers reach a turn | settings → `runTurn` → `Agent.limits` | `AgentSessionFeatureTest` |
+
+## Being on (§1.7, §2.2)
+
+`AgentService` is a `specialUse` foreground service — not `dataSync`, which Android 15 caps at six
+hours in any 24 and would end the operator's session for them. It is started from the one place a
+session is written (`putSession`), so no path can switch an agent on and leave the phone without a
+clock, and it stops itself when the session strip is empty.
+
+The rules are not in the service. `AgentRunner` is the clock — which session is due, what a poll
+costs, where the session ends up — and the screen's tick and the service's tick call the same
+object through `AgentWiring.runnerFor`. **Two tickers are safe because a poll claims its session
+before it asks**: `polled()` is written to `.muffy/agents.json` before the request goes out, so
+whichever clock arrives second reads a session that is not due. That is tested with two runners
+over one account, which is exactly the phone's situation.
+
+`Agent.End.after()` owns the transition an ending makes, so a burst and a poll cannot disagree
+about which state follows which.
+
+## Still not built
+
+- the battery-optimisation exemption is *declared* and asked for in one place, but the request
+  dialog itself is a screen nobody has written yet;
 - a UI for editing `project_prompt.txt` (it is an ordinary file, editable in the app's editor).
