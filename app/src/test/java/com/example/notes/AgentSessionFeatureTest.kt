@@ -124,6 +124,7 @@ class AgentSessionFeatureTest : FeatureTest() {
         scene.viewModel.startAgent("groceries")
         scene.viewModel.sendChat("keep an eye on it")
         scene.await("the first turn") { door.asked.isNotEmpty() }
+        scene.await("the agent to be quiet") { !scene.viewModel.chatWorking }
         val before = record("groceries").rows().count { it.kind == AgentLog.TOLD }
 
         tick("groceries")
@@ -150,6 +151,11 @@ class AgentSessionFeatureTest : FeatureTest() {
         scene.viewModel.startAgent("groceries")
         scene.viewModel.sendChat("keep an eye on it")
         scene.await("the first turn") { door.asked.isNotEmpty() }
+        // **The turn is over before the context is measured.** `asked` fires when the request is
+        // sent, and the wait pair is written after the reply comes back — measuring in between
+        // counts a context that is still being written, which is how this test once read a
+        // growth of two rows that were the first turn's own tail.
+        scene.await("the agent to be quiet") { !scene.viewModel.chatWorking }
         val before = record("groceries").contextRows().size
 
         tick("groceries")
