@@ -92,9 +92,11 @@ class EditorScreenTest {
 
         editorFor(file)
         compose.onNodeWithText("two litres").performTextReplacement("three litres")
-        // Counted as a difference rather than as "the line is there", because the ring is
-        // shared by every test in this JVM and another one saves a milk.txt too.
-        val saidBefore = savedLines()
+        // **The newest matching line, not a count of them.** The ring is shared by every test
+        // in this JVM and holds a fixed number of events, so another test's save of a milk.txt
+        // can be pushed out while this one runs — and then a count that should have gone up
+        // reads the same. What must be true is that the newest save line is a different line.
+        val saidBefore = lastSavedLine()
         compose.onNodeWithText("Save").performClick()
         // Saving writes on the app's worker, so the file answers a moment later.
         compose.waitUntil(10_000) { file.readText() == "three litres" }
@@ -110,14 +112,16 @@ class EditorScreenTest {
         // is on the screen — the file's name is the same afterwards — so nothing the app
         // draws can answer it, and the log showed `save milk.txt` waiting for ever while
         // the next back press spent it.
+        val after = lastSavedLine()
         assertTrue(
             "and the log says the save was answered",
-            savedLines() > saidBefore,
+            after != null && after != saidBefore,
         )
     }
 
-    /** How many times the app has said it saved this file, in the log's ring. */
-    private fun savedLines(): Int = Trace.report().lines.count { it.contains("Saved milk.txt") }
+    /** The newest line saying the app saved this file, or null when there is none. */
+    private fun lastSavedLine(): String? =
+        Trace.report().lines.lastOrNull { it.contains("Saved milk.txt") }
 
     @Test
     fun `renaming the file does not throw away what was typed`() {
