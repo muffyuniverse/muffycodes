@@ -18,6 +18,7 @@ import org.eclipse.jgit.transport.RefSpec
 import org.eclipse.jgit.transport.RemoteRefUpdate
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider
 import org.eclipse.jgit.treewalk.TreeWalk
+import org.eclipse.jgit.treewalk.filter.PathFilterGroup
 import java.io.File
 
 /**
@@ -699,14 +700,55 @@ object GitService {
      * Puts the contents of [path] at [revisionId] back into the working tree, byte
      * for byte.
      */
+    /**
+     * Puts [path] back as it was at [revisionId] — **a file or a whole folder.**
+     *
+     * A folder had no case here for a long time: `bytesAt` answers only for a blob, so restoring a
+     * folder version found nothing, deleted the target and reported success. A version of a folder
+     * is every file under it at that commit, so that is what is written back — and, because
+     * "this version" has to *be* the version, anything under it that the version did not hold is
+     * removed. The removal is committed like any other change, so it is as reversible as the
+     * restore itself.
+     */
     fun restore(repo: Repository, path: String, revisionId: String) {
-        val content = bytesAt(repo, path, revisionId)
-        val target = File(repo.workTree, path)
-        if (content == null) {
-            target.delete()
-        } else {
-            target.parentFile?.mkdirs()
-            target.writeBytes(content)
+        val clean = path.trim('/')
+        val target = File(repo.workTree, clean)
+        val walk = RevWalk(repo)
+        try {
+            val tree = treeFor(repo, walk, null, revisionId)
+            val found = TreeWalk.forPath(repo, clean, *arrayOf<AnyObjectId>(tree))
+            if (found == null) {
+                target.deleteRecursively()
+                return
+            }
+            found.use {
+                if (it.getFileMode(0) != FileMode.TREE) {
+                    // A file: the same bytes, written over whatever is there.
+                    target.parentFile?.mkdirs()
+                    target.writeBytes(repo.open(it.getObjectId(0)).bytes)
+                    return
+                }
+            }
+            // A folder: everything under it at that commit, and nothing else.
+            val keep = LinkedHashMap<String, ByteArray>()
+            TreeWalk(repo).use { treeWalk ->
+                treeWalk.addTree(tree)
+                treeWalk.isRecursive = true
+                treeWalk.filter = PathFilterGroup.createFromStrings(listOf(clean))
+                while (treeWalk.next()) {
+                    if (treeWalk.getFileMode(0) == FileMode.GITLINK) continue
+                    keep[treeWalk.pathString] = repo.open(treeWalk.getObjectId(0)).bytes
+                }
+            }
+            target.deleteRecursively()
+            target.mkdirs()
+            for ((pathInTree, bytes) in keep) {
+                val file = File(repo.workTree, pathInTree)
+                file.parentFile?.mkdirs()
+                file.writeBytes(bytes)
+            }
+        } finally {
+            walk.close()
         }
     }
 

@@ -250,7 +250,11 @@ class ProjectsFeatureTest : FeatureTest() {
         val dir = scene.workspace!!.projectDir("scratch")
         assertTrue("the folder is there", dir.isDirectory)
         assertTrue("with a repository in it", File(dir, ".git").isDirectory)
-        assertTrue("and the app's lines in its ignore file", File(dir, ".gitignore").isFile)
+        assertTrue(
+            "and the app's two lines in git's own exclude list, not in the person's .gitignore",
+            File(dir, ".git/info/exclude").readText().contains("agent/") &&
+                !File(dir, ".gitignore").exists(),
+        )
         assertTrue("and no remote at all", scene.viewModel.isLocalProject("scratch"))
         assertEquals("its name is the one typed", listOf("scratch"), scene.viewModel.projectNames)
     }

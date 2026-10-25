@@ -146,9 +146,11 @@ class BrowserChromeTest {
         scene.project("groceries")
 
         // The root is the projects list: the sync of one project said from there would be a
-        // sentence about a repository nobody is looking at.
+        // sentence about a repository nobody is looking at. **The words "up to date" are not the
+        // test** — a project's row at the root says them too, about itself. What must not be here
+        // is the slim row and its button.
         browser()
-        awaitText("up to date", present = false)
+        compose.waitForIdle()
         assertFalse("no sync row at the root", there("Sync"))
 
         // Inside the project, where its files are.
@@ -348,8 +350,8 @@ class BrowserChromeTest {
         // A folder of the person's own, one level below the project, with something in it — an
         // empty folder is not a version, and this test is about a place a person can add to.
         scene.folder("letters")
-        scene.file("note.txt", "in here")
         scene.open("groceries", "letters")
+        scene.file("note.txt", "in here")
         browser()
 
         awaitText("note.txt")
