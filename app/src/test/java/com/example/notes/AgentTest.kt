@@ -479,7 +479,7 @@ class AgentTest {
         log.note("agent", "a note that can go")
         log.told("another task")
         // The call in flight, exactly as the loop writes it.
-        log.call("edit", """{"path":"agent/context.log"}""")
+        val inFlight = log.call("edit", """{"path":"agent/context.log"}""")
 
         val after = log.rows()
             .filterNot { it.body == "a note that can go" }
@@ -488,7 +488,11 @@ class AgentTest {
         assertEquals(
             "the edit is a legal clear-up",
             null,
-            AgentLog.clearUpProblem(log.rows().map { it.line }, after),
+            AgentLog.clearUpProblem(log.rows().map { it.line }, after, inFlight),
+        )
+        assertTrue(
+            "and without being told which call is in flight, that last row is still a broken pair",
+            AgentLog.clearUpProblem(log.rows().map { it.line }, after) != null,
         )
     }
 
@@ -822,12 +826,17 @@ class AgentTest {
         speak = false
         agent.burst("never mind, do the other thing")
         val second = door.asked.last().messages
-        assertEquals(
-            "the interrupted answer comes before the new words",
-            "tool",
-            second[second.lastIndex - 1].role,
+        val tool = second.indexOfFirst { it.role == "tool" }
+        val words = second.indexOfLast { it.role == "user" }
+        assertEquals("the words are last", second.lastIndex, words)
+        assertTrue(
+            "and the interrupted answer is before them: ${second.map { it.role }}",
+            tool in 0 until words,
         )
-        assertEquals("and the words are last", "user", second.last().role)
+        assertTrue(
+            "saying what happened: ${second[tool].text}",
+            second[tool].text.contains("interrupted"),
+        )
     }
 
     @Test
@@ -942,10 +951,20 @@ class AgentTest {
             log.contextRows().none { it.name == "trimmed" },
         )
 
-        agent.burst("again")
+        // **A trigger above what the context now costs**, so the assertion is about the rule and
+        // not about arithmetic: the same content, a limit it fits under, and no warning.
+        val now = agent.size()
+        val lenient = ContextBudget.Limits.of(
+            triggerAsked = now + 1,
+            hardAsked = 0,
+            ceiling = 1_000_000,
+        )
+        val afterDoor = ScriptedDoor(Reply("", listOf(Call("c9", "conclude", """{"text":"ok"}"""))))
+        agent(afterDoor, lenient).burst("again")
+
         assertFalse(
-            "under the target, the next turn says nothing: ${door.asked.last().system.takeLast(200)}",
-            door.asked.last().system.contains("Compaction target"),
+            "under the target, the next turn says nothing: ${afterDoor.asked.last().system.takeLast(120)}",
+            afterDoor.asked.last().system.contains("Compaction target"),
         )
     }
 

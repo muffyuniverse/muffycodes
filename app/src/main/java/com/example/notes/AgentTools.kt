@@ -225,7 +225,12 @@ class AgentTools(
             if (text.isNotEmpty() && !text.endsWith("\n")) {
                 return refusal("End the context with a newline, or its last row is a half row")
             }
-            val problem = AgentLog.clearUpProblem(linesOf(before), linesOf(text))
+            // The row for this very call is already in the context, unanswered, because the record
+            // is written before a tool runs. It is named here so the pairing rule can excuse
+            // exactly that one row and no other.
+            val inFlight = log.rows().lastOrNull()
+                ?.takeIf { it.kind == AgentLog.CALL && it.name == "edit" }?.id
+            val problem = AgentLog.clearUpProblem(linesOf(before), linesOf(text), inFlight)
             if (problem != null) return refusal(problem)
         }
         // **Through the funnel.** A locked file, a hidden name or a structural folder is refused

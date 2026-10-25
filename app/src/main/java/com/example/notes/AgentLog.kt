@@ -162,7 +162,22 @@ class AgentLog private constructor(
          * row" is a claim about the file's bytes, and a comparison that went through the parser
          * twice could pass an edit that changed them.
          */
-        fun clearUpProblem(before: List<String>, after: List<String>): String? {
+        fun clearUpProblem(
+            before: List<String>,
+            after: List<String>,
+            /**
+             * The call whose result is about to be written, and is therefore allowed to be the
+             * last row with nothing after it.
+             *
+             * **Asked for, not guessed.** The row for a call is appended before its tool runs, so
+             * the file the edit tool reads always ends with its own unanswered `CALL edit` — and
+             * the only way to tell that row from a call somebody deleted the result of is to be
+             * told which call is in flight. A rule that excused any trailing call would let a
+             * clear-up remove a result and keep its call, which is the exact pair the rule exists
+             * to protect.
+             */
+            inFlight: Int? = null,
+        ): String? {
             if (after.isEmpty()) return "Your context cannot be emptied: it holds the task"
             val rows = after.map { parseRow(it) }
             if (rows.any { it.broken }) {
@@ -198,8 +213,7 @@ class AgentLog private constructor(
             // Counting it here made the clear-up edit impossible: every attempt was refused with
             // "the call to edit has no result left", because the file always ended with the call
             // whose result was about to be appended.
-            val newest = rows.lastOrNull()?.id
-            val left = waiting.firstOrNull { it.id != newest }
+            val left = waiting.firstOrNull { it.id != inFlight }
             if (left != null) {
                 return "The call to ${left.name} has no result left: remove the pair together"
             }
