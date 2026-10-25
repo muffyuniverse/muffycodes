@@ -693,6 +693,79 @@ class AgentTest {
         assertFalse("with the old one gone", second.asked.first().system.contains("in Latin"))
     }
 
+    // ---- the two context limits ---------------------------------------------
+
+    @Test
+    fun `over the trigger the request ends with the app's clear-up line, and the instructions are untouched`() {
+        // Round 5 §1.8: over the trigger the model is told to clear up, **with the numbers** —
+        // "you are over" teaches nothing. And the line goes at the *end* of the system message, so
+        // the instructions above it are still the same bytes: that is the difference between a
+        // warning that costs a line and one that costs a re-read of everything.
+        val dir = File(ws.projectsDir, "shopping")
+        val prompt = AgentPrompt.read(account, dir).message
+        val limits = ContextBudget.Limits.of(triggerAsked = 1, hardAsked = 0, ceiling = 100_000)
+        val door = ScriptedDoor(Reply("", listOf(call("conclude", """{"text":"done"}"""))))
+
+        Agent(account, "shopping", ws, git, log, door, model(), limits = limits).burst("go")
+
+        val sent = door.asked.first().system
+        assertTrue("the instruction: $sent", sent.contains("Clear up your context"))
+        assertTrue("and the size it is over", sent.contains("tokens and your limit is"))
+        assertTrue("the instructions are still the prefix", sent.startsWith(prompt.trim()))
+        assertTrue(
+            "and the line is after them, not inside them",
+            sent.indexOf("Clear up your context") > sent.indexOf(AgentPrompt.SEPARATOR),
+        )
+    }
+
+    @Test
+    fun `under the trigger nothing is said about the context at all`() {
+        val limits = ContextBudget.Limits.of(triggerAsked = 900_000, hardAsked = 0, ceiling = 917_504)
+        val door = ScriptedDoor(Reply("", listOf(call("conclude", """{"text":"done"}"""))))
+
+        Agent(account, "shopping", ws, git, log, door, model(), limits = limits).burst("go")
+
+        assertFalse(
+            "a request that fits says nothing about fitting",
+            door.asked.first().system.contains("Clear up your context"),
+        )
+    }
+
+    @Test
+    fun `over the hard limit the app trims the oldest conversations and says how many`() {
+        // The app's act, not the agent's: whole bursts, oldest first, and the newest one kept even
+        // when it alone is over — because it holds the task being worked on.
+        for (i in 1..6) {
+            log.told("task $i")
+            log.note("agent", "working on $i")
+        }
+        val limits = ContextBudget.Limits.of(triggerAsked = 0, hardAsked = 1, ceiling = 100_000)
+        val door = ScriptedDoor(Reply("", listOf(call("conclude", """{"text":"done"}"""))))
+        val before = Trace.report().lines.toSet()
+
+        Agent(account, "shopping", ws, git, log, door, model(), limits = limits).burst("the seventh")
+
+        val added = Trace.report().lines.filterNot { it in before }
+        assertEquals("the trim is on the trace", 1, added.count { it.contains("agent-trim") })
+        val context = log.contextRows()
+        assertTrue(
+            "the oldest task is gone from the context: $context",
+            context.none { it.body == "task 1" },
+        )
+        assertTrue(
+            "and the newest is still there",
+            context.any { it.body == "the seventh" },
+        )
+        assertTrue(
+            "while the evidence still has every one of them",
+            log.rows().count { it.kind == AgentLog.TOLD } == 7,
+        )
+        assertTrue(
+            "and the request was built from what was left",
+            door.asked.first().messages.none { it.text == "task 1" },
+        )
+    }
+
     @Test
     fun `the trace says which model and endpoint answered the turn`() {
         val before = Trace.report().lines.toSet()

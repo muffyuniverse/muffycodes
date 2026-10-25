@@ -1836,9 +1836,16 @@ class AppViewModel @JvmOverloads constructor(
         val g = git ?: return
         val model = modelConfig.active
         val door = doorFor(model)
+        // The two limits, with this pin's ceiling — read once per turn, because the pin does not
+        // change mid-turn and a settings read per request would be the same number twice.
+        val limits = ContextBudget.Limits.of(
+            triggerAsked = settings.triggerTokens.toLong(),
+            hardAsked = settings.hardTokens.toLong(),
+            ceiling = ContextBudget.ceiling(model.provider),
+        )
         onWorker {
             val log = AgentLog.open(File(ws.projectsDir, project))
-            val agent = Agent(ws.accountDir, project, ws, g, log, door, model)
+            val agent = Agent(ws.accountDir, project, ws, g, log, door, model, limits = limits)
             val end = try {
                 if (said == null) {
                     agent.poll()

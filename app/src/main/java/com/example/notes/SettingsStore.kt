@@ -122,6 +122,38 @@ class SettingsStore(context: Context, name: String = "settings") {
     }
 
     /**
+     * When the agent is told to clear up, in tokens — and when the app trims it, also in tokens.
+     *
+     * Zero means two different things, deliberately: a trigger of zero is "a quarter of what this
+     * pin allows", because an agent with no warning point is one the app surprises; a hard limit
+     * of zero is "never", because an app that silences a conversation on its own is worse than one
+     * that asks the agent to shorten it.
+     */
+    var triggerTokens: Int by mutableStateOf(prefs.getInt(KEY_TRIGGER, 0))
+        private set
+
+    var hardTokens: Int by mutableStateOf(prefs.getInt(KEY_HARD, 0))
+        private set
+
+    /** Sets the clear-up trigger. Zero leaves it to the pin. */
+    fun keepTrigger(tokens: Int) {
+        val clean = tokens.coerceIn(0, MAX_TOKENS)
+        Trace.tap("clear up", if (clean == 0) "when the pin is full" else "${ContextBudget.short(clean.toLong())}")
+        triggerTokens = clean
+        prefs.edit().putInt(KEY_TRIGGER, clean).apply()
+        Trace.said(if (clean == 0) "the trigger follows the pin" else "clear up at ${ContextBudget.short(clean.toLong())}")
+    }
+
+    /** Sets the hard limit. Zero is "never trim", which is the default. */
+    fun keepHard(tokens: Int) {
+        val clean = tokens.coerceIn(0, MAX_TOKENS)
+        Trace.tap("trim context", if (clean == 0) "never" else "${ContextBudget.short(clean.toLong())}")
+        hardTokens = clean
+        prefs.edit().putInt(KEY_HARD, clean).apply()
+        Trace.said(if (clean == 0) "the app never trims the context" else "the app trims at ${ContextBudget.short(clean.toLong())}")
+    }
+
+    /**
      * The two lengths older builds stored separately, read once for the migration.
      *
      * The larger of the two is kept: a person who had set either history longer
@@ -143,6 +175,16 @@ class SettingsStore(context: Context, name: String = "settings") {
 
         /** The reminder interval, in minutes. */
         const val KEY_REMIND = "agent_remind_minutes"
+
+    /** The two context limits, in tokens, as the operator typed them. */
+    const val KEY_TRIGGER = "agent_trigger_tokens"
+    const val KEY_HARD = "agent_hard_tokens"
+
+    /**
+     * A million tokens. Past this the number is larger than any window this app can be pointed at,
+     * so a bigger one is a typo rather than a setting.
+     */
+    const val MAX_TOKENS = 1_048_576
 
         /** One hour: the design's default. */
         const val DEFAULT_REMIND_MINUTES = 60

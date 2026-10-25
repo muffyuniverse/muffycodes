@@ -281,6 +281,47 @@ fun SettingsScreen(
                 placeholder = "once",
                 onValueChange = { settings.keepRemind(it) },
             )
+            Spacer(Modifier.height(16.dp))
+
+            // ---- how big the agent's working context may get ----
+            // Two numbers, and they are different acts. The trigger is a message to the agent —
+            // "you are over, clear up" — and the agent decides what to remove. The hard limit is
+            // the app trimming, and it is off unless somebody asks for it: an app that cuts a
+            // conversation on its own loses the thing the person was working on, and the agent is
+            // the one supposed to be choosing what to forget.
+            Text("Agent context", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Both in tokens, counted at about four bytes each — the phone has no tokenizer, " +
+                    "so these are the app's own numbers rather than a bill. A pin smaller than " +
+                    "your number lowers it rather than changing it: the number you typed stays.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            LengthField(
+                label = "Ask it to clear up at",
+                value = settings.triggerTokens,
+                placeholder = "a quarter",
+                onValueChange = { settings.keepTrigger(it) },
+            )
+            LengthField(
+                label = "Trim it myself at",
+                value = settings.hardTokens,
+                placeholder = "never",
+                onValueChange = { settings.keepHard(it) },
+            )
+            val limit = ContextBudget.Limits.of(
+                triggerAsked = settings.triggerTokens.toLong(),
+                hardAsked = settings.hardTokens.toLong(),
+                // No model is being named here: the sentence is about the numbers, and the pin's
+                // ceiling is spelled out on the agent's own settings rows.
+                ceiling = ContextBudget.UNKNOWN_CEILING,
+            )
+            Text(
+                "Clear up at ${ContextBudget.short(limit.triggerAt)} · " +
+                    "trim at ${ContextBudget.short(limit.hardAt)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
             Spacer(Modifier.height(24.dp))
 
             // ---- the agent's model ----

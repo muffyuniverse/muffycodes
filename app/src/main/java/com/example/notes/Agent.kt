@@ -29,6 +29,18 @@ class Agent(
      * instead of forty. The policy is the constant; this is only who is asking.
      */
     private val maxRequests: Int = MAX_REQUESTS,
+    /**
+     * The two context limits, as the settings and the pinned endpoint make them at this moment.
+     *
+     * A value rather than a settings reader, because the ceiling is the pin's and the pin does not
+     * change mid-turn — and because a test that had to build a `SettingsStore` to reach a size
+     * limit would be testing the store instead.
+     */
+    private val limits: ContextBudget.Limits = ContextBudget.Limits.of(
+        triggerAsked = 0,
+        hardAsked = 0,
+        ceiling = ContextBudget.UNKNOWN_CEILING,
+    ),
 ) {
 
     private val tools = AgentTools(ws, project, git, log, maxResult)
@@ -370,14 +382,60 @@ class Agent(
      * edit real: he deletes a row from `context.log`, and the next request genuinely does not
      * contain it. A cached transcript would keep sending what he threw away.
      */
-    private fun build(layers: AgentPrompt.Layers): Request = Request(
-        model = model.model,
-        provider = model.provider,
-        effort = model.effort,
-        system = layers.message,
-        messages = messages(log.contextRows()),
-        tools = AgentTools.specs(),
-    )
+    private fun build(layers: AgentPrompt.Layers): Request {
+        val rows = log.contextRows()
+        val messages = messages(rows)
+        val tools = AgentTools.specs()
+        // **The size is measured, then the two limits act on it, in that order.** Trimming first
+        // would act on a number nobody had taken; warning first would name a size the app was
+        // about to change. One measurement, one decision, one pair of numbers on the record.
+        val size = ContextBudget.tokens(layers.message) +
+            rows.sumOf { ContextBudget.tokens(it.line) } +
+            tools.sumOf { ContextBudget.tokens(it.description, it.parameters.toString()) }
+        val hard = limits.hardAt
+        if (hard > 0 && size > hard) {
+            val dropped = log.trimContext(hard / 2)
+            if (dropped > 0) {
+                Trace.note("agent-trim", "$project · $dropped rows, over ${ContextBudget.short(hard)}")
+                // Rebuilt from the trimmed file, not from the rows in hand: what is sent has to be
+                // what was left behind, or the trim is a note about the app's own intentions.
+                return build(layers)
+            }
+        }
+        val trigger = limits.triggerAt
+        val line = if (trigger > 0 && size > trigger) {
+            Trace.note(
+                "agent-clear-up",
+                "$project · ${ContextBudget.short(size)} over ${ContextBudget.short(trigger)}",
+            )
+            clearUpLine(size, trigger)
+        } else {
+            null
+        }
+        return Request(
+            model = model.model,
+            provider = model.provider,
+            effort = model.effort,
+            system = layers.withLine(line),
+            messages = messages,
+            tools = tools,
+        )
+    }
+
+    /**
+     * What the agent is told when its context is over the trigger.
+     *
+     * Two halves, and both are in the design for a reason: the instruction — clear out the records
+     * that do not relate to the current task — and **the numbers**, because "you are over your
+     * limit" with no size teaches a model nothing about how much to remove. The words are the
+     * app's, not the agent's, so the row that says it is a trace note and not a record row: the
+     * model reads this, the evidence does not pretend the agent wrote it.
+     */
+    private fun clearUpLine(size: Long, trigger: Long): String =
+        "Your context is about ${ContextBudget.short(size)} tokens and your limit is " +
+            "${ContextBudget.short(trigger)}. Clear up your context: edit agent/context.log and " +
+            "remove the rows that do not relate to your current task. Keep the newest task, and " +
+            "remove a call together with its result."
 
     /**
      * The request as the files stand right now.

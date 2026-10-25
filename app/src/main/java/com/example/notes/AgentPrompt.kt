@@ -125,14 +125,28 @@ object AgentPrompt {
      */
     data class Layers(val system: String, val project: String) {
         /** What the model is told: ①, then ②, and then nothing. */
-        val message: String
-            get() = buildString {
-                append(system.trim())
-                append(SEPARATOR)
-                append("# This project\n\n")
-                append(project.trim())
+        val message: String get() = withLine(null)
+
+        /**
+         * The same message with one app-authored line at the very end.
+         *
+         * **At the end, because of the cache.** A provider matches the longest common prefix, so a
+         * line appended after ① and ② costs the line rather than the instructions — which is the
+         * difference between a warning that is free and one that re-reads everything the app was
+         * told, on every turn it appears.
+         */
+        fun withLine(line: String?): String = buildString {
+            append(system.trim())
+            append(SEPARATOR)
+            append("# This project\n\n")
+            append(project.trim())
+            append("\n")
+            if (line != null) {
+                append("\n")
+                append(line.trim())
                 append("\n")
             }
+        }
     }
 
     /**

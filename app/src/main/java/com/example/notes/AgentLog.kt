@@ -270,6 +270,53 @@ class AgentLog private constructor(
         val body: String get() = LogFormat.unescaped(detail)
     }
 
+    /**
+     * Trims the working context to [budget] tokens, oldest conversation first.
+     *
+     * **Whole conversations, and never the newest one.** A call whose result was cut off is a
+     * request every endpoint refuses, so the trim works in bursts like the session's own; and the
+     * newest burst holds the task being worked on, which is the one thing §2.1 says may not be
+     * removed. [keepNewest] already keeps the newest burst even when it alone is over budget —
+     * that is why this can be a call rather than a policy.
+     *
+     * A marker row goes in both files, so the person reading the evidence still sees what happened
+     * and the model is told the context was shortened rather than finding it mysteriously smaller.
+     * The marker's name is not one [Agent.messages] renders.
+     */
+    fun trimContext(budget: Long, cost: (Row) -> Long = { 0L }): Int {
+        synchronized(guard) {
+            val rows = contextRows()
+            if (rows.isEmpty() || budget <= 0L) return 0
+            val (kept, dropped) = keepNewest(rows, budget = budget) { row ->
+                // A row's own length is what the request pays for; [cost] lets a caller add the
+                // constant overhead each row carries on the wire. Bytes here by default, because
+                // the estimate is the app's and this is the file it is estimating.
+                row.line.length.toLong() + cost(row)
+            }
+            if (dropped == 0) return 0
+            val marker = LogFormat.row(
+                System.currentTimeMillis(), nextId(), NOTE, "trimmed",
+                "$dropped rows: the context was over its limit",
+            )
+            val text = (kept.map { it.line } + marker).joinToString("\n") + "\n"
+            try {
+                val fresh = File(context.parentFile, context.name + ".new")
+                fresh.writeText(text)
+                if (!fresh.renameTo(context)) {
+                    context.writeText(text)
+                    fresh.delete()
+                }
+            } catch (t: Throwable) {
+                return 0
+            }
+            // The marker only exists in the context: putting it in the evidence too would claim a
+            // row the agent never saw.
+            append(session, marker)
+            seen = size()
+            return dropped
+        }
+    }
+
     // ---- the person's own operation ------------------------------------------
 
     /**

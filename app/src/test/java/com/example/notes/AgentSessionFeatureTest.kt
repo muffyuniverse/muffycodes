@@ -501,6 +501,31 @@ class AgentSessionFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `the two context limits are the settings', not the design's`() {
+        // Written with numbers the defaults would fail: a screen test on the same fields would
+        // pass with the values ignored, and the agent would warn at the wrong size for ever.
+        listening()
+        scene.settings.keepTrigger(1)
+        assertEquals("the number typed is what is stored", 1, scene.settings.triggerTokens)
+        assertEquals("and the hard limit is still off", 0, scene.settings.hardTokens)
+        val door = ScriptedDoor(Reply("", listOf(Call("c1", "conclude", """{"text":"done"}"""))))
+        openChat("groceries", door)
+        scene.viewModel.startAgent("groceries")
+
+        scene.viewModel.sendChat("do it")
+        scene.await("the turn") { door.asked.isNotEmpty() }
+
+        assertTrue(
+            "one token is over a trigger of one: ${door.asked.first().system.takeLast(160)}",
+            door.asked.first().system.contains("Clear up your context"),
+        )
+        assertTrue(
+            "the request says so on the trace",
+            Trace.report().lines.any { it.contains("agent-clear-up") },
+        )
+    }
+
+    @Test
     fun `a session survives the app being reopened`() {
         listening()
         scene.project("groceries")

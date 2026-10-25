@@ -67,6 +67,7 @@ VOCABULARY = {
     "chat", "close chat", "send", "previous turn", "next turn", "latest turn", "turn",
     # the agent itself, and how often it reminds
     "start agent", "stop agent", "reset agent", "remind me",
+    "clear up", "trim context",
 }
 
 # Names built from a value, so they cannot be a literal in the list.
