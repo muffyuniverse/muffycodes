@@ -247,6 +247,7 @@ it wrote it down) or guess.
 question as the assistant turn before the operator's message. It is the smallest possible carry,
 it comes from the log the box already renders, and it needs no token accounting because it is
 capped at one message.
+@ I dont understand, log and working context are same things!!! they are fed same records and the difference is that context is kept small by removing useless/old records.
 
 ### 2.2 A burst that waits forever, and the guard I proposed that would have killed it
 
@@ -265,6 +266,7 @@ Two things this decides:
   that are neither `wait` nor terminating and changed no file** → the next tool call is refused
   with `1 "20 calls, no change, no question — call ask or conclude"`. An idle agent never trips
   it, and a spinning one trips in minutes.
+  @ wait is not written repeatedly (just when it starts) - then context stays the same - what is even the reason to spam it with same messages?!
 
 ### 2.3 The two limits clamp — and the clamp must not eat your number
 
@@ -292,6 +294,7 @@ So: writing to ③ on a turn that only called `wait` is a defect, and it is meas
 knows whether the file changed and whether the turn was work, so it can write a `NOTE` line the
 day it happens. And the instruction that follows from it: `wait` changes nothing; notes are for
 things that happened.
+@ first see answer above, then the only time by design when context is PARTLY invalidated is asked to write in a single turn its own compaction edit. I dont understand what else in my design can cause it.
 
 ### 2.5 "Never stop" is a permission, not a service type
 
@@ -316,6 +319,7 @@ trust.** Concretely:
   a network wake every four minutes. I would offer **"exact" (wake lock) and "when the phone
   wakes" (no lock)** as the one choice here, because the second makes the wait late and the first
   costs a night of battery — and you should be the one to pick, per the same principle.
+  @ decide technicality yourself
 
 ### 2.6 A box with no terminating turn
 
@@ -327,6 +331,7 @@ in a dialog, and the top bar's state is `stopped`.
 This is also where `conclude`'s notification lives, and I think it needs one: `conclude` while the
 phone is in a pocket is the only signal that the work is finished, and it is not a reminder — one
 notification, once, no interval. → question 4.
+@ then next user message closes it
 
 ### 2.7 Trimming must not cut a burst in half, and the reader must not trust the tail
 
@@ -334,6 +339,7 @@ The trim happens at a burst boundary (operator message or terminating turn). If 
 it trims everything and says so. And the box reads a file the app is appending to: **the last line
 without a trailing newline is ignored** (still being written), and a line that does not parse is
 shown as `GOT 1 line 18 could not be read` rather than dropped — the trace's own rule.
+@ yes, autotrim is one messagebox at a time
 
 ### 2.8 `detail` cannot be JSON, or the file stops being greppable
 
@@ -367,12 +373,15 @@ same `unsentCount` the row shows) — which costs one line per wake and no inves
 1. **DeepInfra, one tag** — `deepinfra/fp8` ($0.0980/$0.2940 per M) or `deepinfra/fp8/flex`
    ($0.0784/$0.2352, cheaper than DeepSeek itself, a lower service tier). Shipped default: I
    would take **`/flex`**.
+   @ two separate
 2. **Retries on the pinned provider** — 3 tries with backoff on 429/5xx (same endpoint, so not a
    fallback) or none, fail straight to `stopped error`. I would take the retries: with Doze and a
    mobile network, a single blip otherwise ends a session you are not looking at.
+   @ retries untill reconnect (1, 2, 4, 4... sec intervals)
 3. **The `detail` escape** (§2.8) — `\n`-escaped, JSON-encoded, or no newlines at all.
+@ you are the agent, decise on what is better for agents.
 4. **A `conclude` notification** — one, once (§2.6), or silence because it is not a problem.
-
+@ conclude means idle
 ---
 
 ## 4. Order of work
