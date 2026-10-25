@@ -891,6 +891,23 @@ fun ReportBody(
 }
 
 /**
+ * Whether answering a key save closes the window, and what to say when it does not.
+ *
+ * **The rule the report was about, in one function.** The dialog used to close on the press, so a
+ * key that could not be read back was reported as kept: the refusal arrived as a snackbar at a
+ * screen that was already gone. A save that has an answer closes; one that does not stays and says
+ * why. It is a function so the rule is testable without drawing a dialog window — a text field
+ * inside one never goes idle under Robolectric, which is a harness fact and not a reason to leave
+ * the rule unpinned.
+ *
+ * @return null when the key was kept (and [closes] has been called), or the sentence to show.
+ */
+internal fun keySaveVerdict(why: String?, closes: () -> Unit): String? {
+    if (why == null) closes()
+    return why
+}
+
+/**
  * The screen the OpenRouter key is typed on — **and it is told whether the key took.**
  *
  * A save is a write and a read back, and the read back can fail on a phone that is doing nothing

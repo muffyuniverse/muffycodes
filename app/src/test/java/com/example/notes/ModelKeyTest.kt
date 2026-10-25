@@ -5,6 +5,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -69,23 +70,24 @@ class ModelKeyTest {
     }
 
     @Test
-    fun `the dialog says the refusal and stays`() {
-        // The window is drawn from what it is told — the screen owns whether it is open and why it
-        // stayed — so this is the whole of "it does not silently accept": the sentence is on the
-        // screen, and the button that would dismiss it is the person's, not the app's.
-        compose.setContent {
-            MaterialTheme {
-                ModelKeyDialog(
-                    onDismiss = {},
-                    error = "The key was stored, and this phone could not read it back.",
-                    onSave = {},
-                )
-            }
-        }
+    fun `a kept key closes the window and a refused one does not`() {
+        // **The rule the report was about.** The dialog used to close on the press, so a key that
+        // could not be read back was reported as kept — the refusal arrived at a screen that was
+        // already gone. Only an answer closes it, and a refusal *is* an answer: the window stays
+        // with the sentence in it.
+        var closed = false
 
-        compose.onNodeWithText("could not read it back", substring = true).assertIsDisplayed()
-        compose.onNodeWithText("Keep it").assertIsDisplayed()
-        compose.onNodeWithText("Cancel").assertIsDisplayed()
+        val kept = keySaveVerdict(null) { closed = true }
+        assertNull("a kept key says nothing", kept)
+        assertTrue("and the window closes", closed)
+
+        closed = false
+        val refused = keySaveVerdict("The key was stored, and this phone could not read it back.") {
+            closed = true
+        }
+        assertNotNull("a refused key has something to say", refused)
+        assertTrue("about reading it back: $refused", "read it back" in refused!!)
+        assertFalse("and the window stays open", closed)
     }
 }
 

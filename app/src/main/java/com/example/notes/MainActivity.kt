@@ -490,13 +490,7 @@ private fun Dialogs(
                 onDismiss = { refused = null; dismiss() },
                 error = refused,
                 onSave = { key ->
-                    val why = viewModel.saveModelKey(key)
-                    if (why == null) {
-                        refused = null
-                        dismiss()
-                    } else {
-                        refused = why
-                    }
+                    refused = keySaveVerdict(viewModel.saveModelKey(key)) { dismiss() }
                 },
             )
         }

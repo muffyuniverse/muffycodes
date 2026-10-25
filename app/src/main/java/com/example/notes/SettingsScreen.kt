@@ -404,10 +404,12 @@ fun SettingsScreen(
             // exempt it. Here rather than on launch: an app that opens with a permissions dialog
             // teaches people to dismiss permissions dialogs.
             Text("Battery", style = MaterialTheme.typography.titleMedium)
+            // **One sentence, saying what it is for.** The old one explained Doze, the absence of
+            // a fallback provider and what a stopped poll means — three true things, and a person
+            // deciding whether to press a button needs one: this is what lets the agent keep
+            // working while the phone is in a pocket.
             Text(
-                "While the screen is off, Android suspends the network for apps it does not " +
-                    "exempt — and a poll that cannot go out stops the agent rather than delaying " +
-                    "it, because there is no fallback provider by design.",
+                "So the agent keeps working in the background, with the screen off.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -435,9 +437,9 @@ fun SettingsScreen(
             // and from Android 13 a declared permission that was never granted means a
             // notification that is posted and silently dropped — a session that looks healthy.
             Text("Notifications", style = MaterialTheme.typography.titleMedium)
+            // One sentence for the same reason as the battery one: what the permission is for.
             Text(
-                "A question, or a session that stopped on its own, is only useful if the phone " +
-                    "shows it. Android asks once, here, rather than in a dialog at launch.",
+                "So you know when an agent needs you, without opening the app.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
