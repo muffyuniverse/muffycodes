@@ -85,12 +85,18 @@ class AgentChatScreenTest {
         say("what is in the project")
         awaitTurns(2)
 
+        // The box opens at the end of the conversation, so the conclusion is what it shows.
         compose.onNodeWithText("what is in the project", substring = true).assertExists()
-        compose.onNodeWithText("tree").assertExists()
-        compose.onNodeWithText("0 ·", substring = true).assertExists()
+        compose.onNodeWithText("2 of 2").assertExists()
         compose.onNodeWithText("concluded").assertExists()
         compose.onNodeWithText("There is one file.", substring = true).assertExists()
-        compose.onNodeWithText("2 of 2").assertExists()
+
+        // And the turn before it is one press away, with the call and its result on one line.
+        compose.onNodeWithText("‹").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("1 of 2").assertExists()
+        compose.onNodeWithText("tree").assertExists()
+        compose.onNodeWithText("0 ·", substring = true).assertExists()
     }
 
     @Test
