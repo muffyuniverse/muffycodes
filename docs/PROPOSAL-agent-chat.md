@@ -1,6 +1,8 @@
 # The agent chat — fifth round: two files, one stream
 
-Status: **for discussion. Nothing built.** This answers the clarification after round 4: the
+Status: **round 5, agreed, and built.** The record below is that round unchanged; what the code
+now does, and the one place it does not yet match, is §4. This answers the clarification after
+round 4: the
 session log and the working context are **two files with the same structure, both fed by the
 same events**, and `wait` **is** re-sent every four minutes.
 
@@ -167,3 +169,56 @@ Read, not decided:
 Everything else — the config, the forms, the picker with tags and `—`, the pin, the tools, the
 lock, the record format, the three states, the reminder ladder, the trim rules, the test scripts
 — is settled as written in the rounds this document corrects.
+
+---
+
+## 4. State as built (checked against the code)
+
+Everything in this round is built and green except what §4.2 names. Where the code has answered a
+question §3 left open, the answer is given with what pins it.
+
+### 4.1 The two questions in §3
+
+- **`session.log`'s limit** — 4 MB, keeping the newest 2 MB (`AgentLog.SESSION_LIMIT`): whole
+  messageboxes, oldest first, one trim per call, and **one marker row carrying the running total**
+  rather than one marker per trim. Each trim used to write its own marker; the model never sees
+  those rows, but the size counts them, so a context trimmed often filled with invisible rows and
+  was then trimmed for them. (`a trim in one file does not let the other file's numbering start
+  again` pins both halves.)
+- **Whether the two files hold the same ids** — they do, and it is not optional: one counter per
+  project, seeded from the higher id in *either* file, so an id never means two rows and never
+  goes backwards — including across a trim, because the session drops from the oldest end and the
+  highest id survives. Being per project rather than global is deliberate and safe: a request is
+  built from one project's record, so `call_<id>` is unique in the only scope an endpoint checks.
+
+### 4.2 The one place the audit property leaks
+
+"Diff the two files and you see what he threw away" is true of the agent's clears. It is not yet
+*exactly* true of the app's own rows, because **each trim writes its marker into one file only** —
+the session's into `session.log`, the context's into `context.log`. So an id that appears only in
+`session.log` is either a row the agent cleared or the app's session marker, and an id only in
+`context.log` is the context's marker.
+
+Two ways out, not decided: write the marker to both files (an app act recorded once, in both), or
+define the audit as the diff *ignoring `NOTE trimmed`*. The second costs nothing and loses nothing;
+the first makes the files agree row for row.
+
+### 4.3 Still missing
+
+- **The battery-optimisation ask.** `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` is declared, and the
+  manifest says it is "asked for in one place" — and nothing asks: no screen fires
+  `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`. §2.2's second hole is therefore open on every
+  phone, for as long as Doze is willing to suspend the network under a poll.
+
+### 4.4 Corrections made while building, each now one rule in one place
+
+- The session file has **one lock per file**, not one per object: it has two writers by design (the
+  screen and the runner's worker), and a `put` that read the file, changed its key and wrote it
+  back silently undid the other writer. The record's file had the same fault and the same fix.
+- **The operator's stop is the ending's business, not each caller's.** The screen and the runner
+  each carried a copy of "a stop is not undone by a turn that was in flight", and the copies
+  disagreed — the runner let a harder ending overwrite the person's stop. It is now
+  `End.onto(session, now)`, and one test pins the case that told the copies apart.
+- An outage is **bracketed**: one `stopped` row at its first failure, and one `retry` row —
+  "reconnected after N tries" — when it comes back, in the session only, so the poll that follows
+  is byte-identical to what it would have been.
