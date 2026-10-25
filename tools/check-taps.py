@@ -61,6 +61,8 @@ VOCABULARY = {
     "confirm rename project", "confirm delete project", "confirm remove account",
     # settings, which go through the store rather than the view model
     "theme", "dark", "light", "history limit",
+    # the agent's model, which is a file the settings rows edit
+    "reset model config", "set model key",
 }
 
 # Names built from a value, so they cannot be a literal in the list.

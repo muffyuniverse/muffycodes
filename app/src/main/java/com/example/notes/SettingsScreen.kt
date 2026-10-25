@@ -85,6 +85,8 @@ fun SettingsScreen(
     onOpenTrace: () -> Unit = {},
     /** The bug button, on every screen, always. */
     onReport: () -> Unit = {},
+    /** Asks for the OpenRouter key: a screen that refuses screenshots, like the GitHub one. */
+    onSetKey: () -> Unit = {},
 ) {
     val settings = viewModel.settings
     val account = viewModel.account
@@ -258,6 +260,15 @@ fun SettingsScreen(
                 value = settings.historyLength,
                 onValueChange = { settings.keepHistory(it) },
             )
+            Spacer(Modifier.height(24.dp))
+
+            // ---- the agent's model ----
+            //
+            // Three rows and a file. The file is the store, so these are editors of it
+            // rather than a second copy of the same three values: editing the file by hand
+            // and then opening this screen shows what the file says, which is the only way
+            // the two can never disagree.
+            ModelSection(viewModel = viewModel, onSetKey = onSetKey)
             Spacer(Modifier.height(24.dp))
         }
     }

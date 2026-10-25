@@ -34,6 +34,19 @@ interface Credentials {
 
     /** True when a key is stored for [login]. */
     fun hasToken(login: String): Boolean
+
+    /**
+     * The OpenRouter key of [login], or null when this phone has none.
+     *
+     * **Per account, like the GitHub token**, and for the same reason: it is the identity the
+     * app acts as. A second secret in the same store and behind the same door — typed on a
+     * screen that refuses screenshots, encrypted with the same keystore key, scrubbed out of
+     * every message, and kept out of backups by the same rules.
+     */
+    fun modelKey(login: String): String?
+
+    /** Keeps [key] for [login]. */
+    fun setModelKey(login: String, key: String)
 }
 
 /**
@@ -90,15 +103,35 @@ class CredentialStore(context: Context) : Credentials {
     override fun forget(login: String) {
         prefs.edit()
             .remove(tokenKey(login))
+            .remove(modelKeyKey(login))
             .putString(KEY_LOGINS, logins().filter { it != login }.joinToString("\n"))
             .apply()
         if (activeLogin == login) activeLogin = null
+    }
+
+    override fun modelKey(login: String): String? {
+        val stored = prefs.getString(modelKeyKey(login), null) ?: return null
+        return try {
+            decrypt(stored)
+        } catch (e: Exception) {
+            // Same rule as the GitHub token: a key the keystore can no longer open is
+            // dropped rather than kept in a state that fails on every use.
+            prefs.edit().remove(modelKeyKey(login)).apply()
+            null
+        }
+    }
+
+    override fun setModelKey(login: String, key: String) {
+        prefs.edit().putString(modelKeyKey(login), encrypt(key)).apply()
     }
 
     /** True when [login] has a token stored. */
     override fun hasToken(login: String): Boolean = token(login) != null
 
     private fun tokenKey(login: String): String = "token_$login"
+
+    /** A different prefs key, because the two secrets must not overwrite each other. */
+    private fun modelKeyKey(login: String): String = "model_key_$login"
 
     // ---- encryption --------------------------------------------------------
 

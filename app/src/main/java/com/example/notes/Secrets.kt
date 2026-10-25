@@ -130,9 +130,16 @@ object Secrets {
     /** `scheme://userinfo@` — the user info is the part that must not survive. */
     private val URL_USER_INFO = Regex("""([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@\s]+@""")
 
-    /** The token shapes GitHub hands out, for when one travels without a URL. */
-    private val TOKEN_SHAPE =
-        Regex("""(?:gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,})""")
+    /**
+     * The token shapes that travel without a URL: GitHub's, and OpenRouter's.
+     *
+     * The model key is a second secret under the same rule as the first: an OpenRouter key in a
+     * trace line or a chat message is a key somebody can spend. It is matched here, once, rather
+     * than in each place that builds a string — those are the places the mistake happens.
+     */
+    private val TOKEN_SHAPE = Regex(
+        """(?:gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,}|sk-or-v1-[A-Za-z0-9]{16,})"""
+    )
 }
 
 /**

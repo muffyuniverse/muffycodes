@@ -889,3 +889,51 @@ fun ReportBody(
         )
     }
 }
+
+/**
+ * Asks for the OpenRouter key: the second credential, behind the same door as the first.
+ *
+ * The screen it opens on refuses screenshots (the same `FLAG_SECURE` the sign-in dialog gets),
+ * the field is a password field, and the value is encrypted with the same keystore key. It is a
+ * separate key from the GitHub token so that revoking one does not revoke the other, and it is
+ * kept per account because it is the identity the agent acts as.
+ */
+@Composable
+fun ModelKeyDialog(
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    var key by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("OpenRouter key") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = key,
+                    onValueChange = { key = it },
+                    label = { Text("Key, starting sk-or-v1-") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                )
+                Text(
+                    "The agent talks to OpenRouter with this key, so it is the thing that " +
+                        "pays for the work. It is kept encrypted on this phone, is never " +
+                        "written to the log, and the model list is read with it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = key.isNotBlank(),
+                onClick = {
+                    onSave(key.trim())
+                    onDismiss()
+                },
+            ) { Text("Keep it") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}

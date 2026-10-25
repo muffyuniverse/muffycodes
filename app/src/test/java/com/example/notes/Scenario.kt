@@ -32,6 +32,15 @@ class MemoryCredentials : Credentials {
     }
 
     override fun hasToken(login: String): Boolean = tokens.containsKey(login)
+
+    /** The OpenRouter keys, kept the same way: in memory, because a test has no keystore. */
+    private val modelKeys = LinkedHashMap<String, String>()
+
+    override fun modelKey(login: String): String? = modelKeys[login]
+
+    override fun setModelKey(login: String, key: String) {
+        modelKeys[login] = key
+    }
 }
 
 /**

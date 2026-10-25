@@ -140,6 +140,36 @@ class AppViewModel @JvmOverloads constructor(
     var selected: Set<String> by mutableStateOf(emptySet())
         private set
 
+    /**
+     * The agent's model choice, read from `model_conf.json` in the account's folder.
+     *
+     * **The file is the only store.** The settings rows and the picker are editors of it, so
+     * there is no second copy of the same three values to disagree with the first.
+     */
+    var modelConfig: ModelConfig by mutableStateOf(ModelConfigFile.default())
+        private set
+
+    /**
+     * Why the config could not be read, or null when it did.
+     *
+     * Kept beside the config rather than thrown away, because the two together are the honest
+     * state: "this is the choice in force, and this is why it is not the one in your file".
+     * A config that will not parse is never replaced by the defaults on disk.
+     */
+    var modelConfigProblem: String? by mutableStateOf(null)
+        private set
+
+    /**
+     * Where the picker's numbers come from.
+     *
+     * Swappable so a test can answer without a socket: the whole agent is built on the rule that
+     * nothing in the suite opens a connection, and a picker that could only be tested against
+     * OpenRouter would be a picker tested by hand or not at all.
+     */
+    var catalogue: Catalogue = OpenRouterCatalogue(
+        { activeLogin?.let { credentials.modelKey(it) } }
+    )
+
     /** The search text, which searches inside the current project (§7). */
     var query: String by mutableStateOf("")
 
@@ -358,6 +388,7 @@ class AppViewModel @JvmOverloads constructor(
         entries = currentDir?.let { ws.list(it) } ?: emptyList()
         pins = ws.pins()
         lockedPaths = ws.locked()
+        readModelConfig(ws)
         // A selection is a set of paths, and a path that is no longer there cannot
         // be selected: an item moved or deleted out from under the selection would
         // otherwise be acted on again by the next press.
@@ -416,6 +447,126 @@ class AppViewModel @JvmOverloads constructor(
             main.post { changesByProject = counts }
         }
     }
+
+    // ---- the agent's model -------------------------------------------------
+
+    /**
+     * Reads `model_conf.json`, keeping the last good choice when the file will not parse.
+     *
+     * A damaged file leaves [modelConfig] as it was and puts the reason in
+     * [modelConfigProblem]: the screen can then say which line is wrong while still being able
+     * to show what the agent would use. Replacing it with the defaults would be the app deciding
+     * for the person that their file did not matter.
+     */
+    private fun readModelConfig(ws: Workspace) {
+        ModelConfigFile.load(ws.accountDir).fold(
+            onSuccess = { loaded ->
+                modelConfig = loaded
+                modelConfigProblem = null
+            },
+            onFailure = { problem -> modelConfigProblem = problem.message },
+        )
+    }
+
+    /** Writes the config and records it as a version, like any other change to the account. */
+    private fun writeModelConfig(next: ModelConfig, what: String) {
+        val ws = workspace ?: return
+        ModelConfigFile.write(ws.accountDir, next)
+        modelConfig = next
+        modelConfigProblem = null
+        Trace.changed("model ${next.summary()}")
+        record(what)
+        refresh()
+    }
+
+    /**
+     * The three values the picker sets, kept together because they only make sense together.
+     *
+     * The effort is clamped to what the model declares: a model that offers `low` and `max`
+     * cannot answer `high`, and sending a rung it never declared is a 400 from one provider and
+     * a silently ignored parameter from another.
+     */
+    fun chooseModel(model: String, provider: String, effort: String, supported: List<String>) {
+        val clamped = ModelConfigFile.effortFor(supported, effort) ?: effort
+        val before = modelConfig.active.effort
+        writeModelConfig(
+            modelConfig.copy(active = ActiveModel(model, provider, clamped)),
+            "Chose $model on $provider at $clamped",
+        )
+        if (clamped != before && supported.isNotEmpty()) {
+            Trace.said("effort: $before -> $clamped, this model's way of saying it")
+        }
+    }
+
+    /** Adds a model and the endpoints it may be pinned to. */
+    fun addModel(id: String, providers: List<String>): Result<Unit> {
+        val clean = providers.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (id.isBlank()) return Result.failure(IllegalArgumentException("A model needs an id"))
+        if (clean.isEmpty()) {
+            return Result.failure(IllegalArgumentException("A model needs at least one provider"))
+        }
+        if (modelConfig.models.any { it.id == id }) {
+            return Result.failure(IllegalArgumentException("$id is already in the list"))
+        }
+        writeModelConfig(
+            modelConfig.copy(models = modelConfig.models + ModelChoice(id, clean)),
+            "Added $id",
+        )
+        return Result.success(Unit)
+    }
+
+    /**
+     * Removes a model, refusing the one in use.
+     *
+     * Refused with a sentence rather than by removing it and then having no model: the picker
+     * asks a person to choose another first, which is a thing they can do, where "the agent has
+     * no model" is not.
+     */
+    fun removeModel(id: String): Result<Unit> {
+        if (id == modelConfig.active.model) {
+            return Result.failure(
+                IllegalArgumentException("That is the model in use, so choose another first")
+            )
+        }
+        val left = modelConfig.models.filterNot { it.id == id }
+        if (left.size == modelConfig.models.size) {
+            return Result.failure(IllegalArgumentException("$id is not in the list"))
+        }
+        writeModelConfig(modelConfig.copy(models = left), "Removed $id")
+        return Result.success(Unit)
+    }
+
+    /**
+     * Puts back the config the app shipped.
+     *
+     * From the build's own copy, not from the account's history: the two are different acts. A
+     * history step would put back whatever was there a version ago, which may be the broken
+     * edit; this is "the one the app ships", which is what a person asking to reset means.
+     */
+    fun resetModelConfig() {
+        val fresh = ModelConfigFile.default()
+        Trace.tap("reset model config")
+        writeModelConfig(fresh, "Reset the model config")
+        Trace.said("Back to the model the app ships")
+    }
+
+    /** The OpenRouter key of the active account, when there is one. */
+    val hasModelKey: Boolean
+        get() = activeLogin?.let { credentials.modelKey(it) } != null
+
+    /** Keeps the OpenRouter key of the active account. */
+    fun saveModelKey(key: String) {
+        val login = activeLogin ?: return
+        val trimmed = key.trim()
+        if (trimmed.isEmpty()) return
+        credentials.setModelKey(login, trimmed)
+        Trace.said("The OpenRouter key is kept on this phone")
+        modelKeySaved++
+    }
+
+    /** Bumped when a key is saved, so a screen showing "no key" can notice. */
+    var modelKeySaved: Int by mutableStateOf(0)
+        private set
 
     /**
      * The build, in one line, for a report to carry.

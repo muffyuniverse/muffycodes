@@ -65,6 +65,7 @@ class MainActivity : ComponentActivity() {
 private sealed interface Pending {
     data object None : Pending
     data object SignIn : Pending
+    data object ModelKey : Pending
     data object AddProject : Pending
     data object NewProject : Pending
     data object RemoveAccount : Pending
@@ -117,9 +118,9 @@ private fun AppRoot(viewModel: AppViewModel) {
     // The settings screen holds the field where a key is typed. While it is up,
     // the window refuses to be screenshotted or appear in the app switcher.
     val context = LocalContext.current
-    LaunchedEffect(showSettings, pending is Pending.SignIn) {
+    LaunchedEffect(showSettings, pending is Pending.SignIn, pending is Pending.ModelKey) {
         val window = context.findActivity()?.window ?: return@LaunchedEffect
-        if (showSettings || pending is Pending.SignIn) {
+        if (showSettings || pending is Pending.SignIn || pending is Pending.ModelKey) {
             window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         } else {
             window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
@@ -295,6 +296,7 @@ private fun AppRoot(viewModel: AppViewModel) {
             viewModel = viewModel,
             onBack = { showSettings = false },
             onSignIn = { tap("add account"); pending = Pending.SignIn },
+            onSetKey = { tap("set model key"); pending = Pending.ModelKey },
             onRemoveAccount = { tap("remove account"); pending = Pending.RemoveAccount },
             onTestAccount = { tap("use test account"); viewModel.signInAsTestAccount() },
             onOpenTrace = { showTrace = true },
@@ -410,6 +412,13 @@ private fun Dialogs(
 ) {
     when (pending) {
         Pending.None -> Unit
+
+        Pending.ModelKey -> {
+            ModelKeyDialog(
+                onDismiss = dismiss,
+                onSave = { key -> viewModel.saveModelKey(key) },
+            )
+        }
 
         Pending.SignIn -> {
             // The dialog owns the wait, so the answer lands where the person is

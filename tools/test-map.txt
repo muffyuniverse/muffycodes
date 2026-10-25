@@ -60,3 +60,4 @@ DownloadsSinkTest  app/src/main/java/com/example/notes/DownloadsSink.kt
 BrowserChromeTest  app/src/main/java/com/example/notes/BrowserScreen.kt
 CopyFeatureTest  app/src/main/java/com/example/notes/Workspace.kt
 CopyFeatureTest  app/src/main/java/com/example/notes/AppViewModel.kt
+ModelSectionTest    app/src/main/java/com/example/notes/ModelSection.kt app/src/main/java/com/example/notes/AppViewModel.kt
