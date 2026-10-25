@@ -171,6 +171,7 @@ class ModelSectionTest {
         // under it arrives — which is the difference this test exists to hold.
         compose.onNodeWithText("deepinfra/fp8").assertIsDisplayed()
         waitFor("in $0.0784 · out $0.2352 per M", substring = true)
+        compose.onNodeWithText("in $0.0784 · out $0.2352 per M", substring = true)
             .assertIsDisplayed()
         compose.onNodeWithText("— tok/s", substring = true).assertIsDisplayed()
     }
