@@ -379,6 +379,11 @@ class AgentLog private constructor(
      * `size` is the row's cost in **tokens**, and it is stored rather than remembered: the agent
      * chooses what to forget by it, the app measures a context by summing it, and the person's
      * transcript shows it beside the row. Three readers, one number, written once.
+     *
+     * It is measured on the body **as the record holds it** — escaped, so a newline costs the two
+     * characters the file spends on it rather than the one a request spends. That errs by a
+     * character per line break, in the direction that asks the agent to clear up early, and it is
+     * the only version of the number that `wc -c` on the file can confirm.
      */
     data class Row(
         val id: Int,
@@ -734,10 +739,11 @@ class AgentLog private constructor(
     /**
      * Puts [line] at the top of the file — the newest row.
      *
-     * **A rewrite, not an append**, because the file's newest row is its first. A row is a line and
-     * a session's file is tens of kilobytes, so this is a few milliseconds of a phone's flash; it is
-     * the price of the first page being the useful one, and it is paid once per row rather than once
-     * per read.
+     * **A rewrite, not an append**, because the file's newest row is its first — and the price of
+     * that is one rewrite of the file per row. It is bounded by the session cap
+     * ([SettingsStore.sessionMb]), which is why a person who keeps the record whole is choosing to
+     * pay it: a few milliseconds for a file of tens of kilobytes, and the first page of every read
+     * is the part that just happened.
      */
     private fun prepend(line: String) {
         try {
