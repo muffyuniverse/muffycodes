@@ -188,9 +188,13 @@ class AgentTest {
         agent(door).burst("make it three litres")
 
         assertEquals("the file", "three litres", File(ws.repoOf("shopping"), "milk.txt").readText())
-        // **The row's own count, asked of the repository.** It used to be a number kept in a file;
-        // a diff against the last push says the same thing and cannot drift from the disk.
-        assertEquals("a version was written, and it is work GitHub has not seen", 1, git.changes("shopping").ahead)
+        // **A version, in the repository, not a number kept beside it.** The row's count is a diff
+        // against the last push now — and this project has no remote, so there is nothing to compare
+        // it with; what the tool promised is that the write was *committed*, and that is what the
+        // history says.
+        val versions = git.versions("shopping", "milk.txt")
+        assertEquals("one version was written", 1, versions.size)
+        assertEquals("holding what the agent wrote", "three litres", versions.first().second)
     }
 
     @Test

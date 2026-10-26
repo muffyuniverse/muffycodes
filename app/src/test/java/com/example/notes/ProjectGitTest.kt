@@ -89,6 +89,58 @@ class ProjectGitTest {
     }
 
     @Test
+    fun `a file's diff says which lines were added, removed and left alone`() {
+        // **The preview behind "See changes".** Against the last push, not against the last commit:
+        // every save is a commit, so a diff of the working tree would be empty whenever a person
+        // looked at it.
+        workspace.createProjectFolders("Shopping").getOrThrow()
+        val git = gitFor()
+        git.init("Shopping").getOrThrow()
+        git.open("Shopping")!!.use { GitService.setRemoteUrl(it, bare.absolutePath) }
+        val worktree = workspace.repoOf("Shopping")
+        File(worktree, "milk.txt").writeText("one\ntwo\nthree")
+        git.commit("Shopping", "first")
+        assertTrue(git.sync("Shopping").success)
+
+        File(worktree, "milk.txt").writeText("one\nTWO\nthree\nfour")
+        git.commit("Shopping", "second")
+
+        val diff = git.diff("Shopping", "milk.txt").getOrThrow()
+
+        assertEquals(
+            listOf(
+                GitService.DiffLine.Kind.SAME to "one",
+                GitService.DiffLine.Kind.REMOVED to "two",
+                GitService.DiffLine.Kind.ADDED to "TWO",
+                GitService.DiffLine.Kind.SAME to "three",
+                GitService.DiffLine.Kind.ADDED to "four",
+            ),
+            diff.map { it.kind to it.text },
+        )
+    }
+
+    @Test
+    fun `a file that is not text has no preview, and says so`() {
+        // Rendering a picture's bytes as lines is convincing nonsense, and a person reading the
+        // window has no way to tell it from the file.
+        workspace.createProjectFolders("Shopping").getOrThrow()
+        val git = gitFor()
+        git.init("Shopping").getOrThrow()
+        git.open("Shopping")!!.use { GitService.setRemoteUrl(it, bare.absolutePath) }
+        val worktree = workspace.repoOf("Shopping")
+        File(worktree, "photo.png").writeBytes(byteArrayOf(0x89.toByte(), 0x50, 0x00, 0x01, 0x02))
+        git.commit("Shopping", "a picture")
+
+        val preview = git.diff("Shopping", "photo.png")
+
+        assertTrue("no preview: ${preview.exceptionOrNull()?.message}", preview.isFailure)
+        assertTrue(
+            "and the reason is text: ${preview.exceptionOrNull()?.message}",
+            preview.exceptionOrNull()?.message.orEmpty().contains("not text"),
+        )
+    }
+
+    @Test
     fun aSyncCanSayWhatItWasFor() {
         // Every other commit in a project is the app narrating a file — "Edited
         // milk.txt" — which is the right message for an undo step and the wrong one

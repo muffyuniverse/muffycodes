@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -28,6 +29,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -53,6 +55,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
@@ -258,6 +262,9 @@ fun BrowserScreen(
             }
         },
     ) { padding ->
+        // **Drawn from the view model's state, not from this screen's.** The editor covers the
+        // browser, and a window whose state lived here would be gone when it came back.
+        ChangesWindow(viewModel)
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             Column(modifier = Modifier.fillMaxSize()) {
                 ProjectSlimRow(viewModel, onRowSync)
@@ -348,6 +355,115 @@ fun BrowserScreen(
  * changed count on the editor and the count in the browser are the same number
  * from the same call.
  */
+/**
+ * What the last push does not have, file by file — **the answer to "1 to send".**
+ *
+ * Three shapes in one list: a path, a preview of how it differs, and a touch that opens it in the
+ * editor. Only text files get a preview — a picture's bytes rendered as lines are convincing
+ * nonsense — and the reason is said beside the name instead.
+ *
+ * **The window belongs to the view model, not to this composable**, which is what makes the round
+ * trip work: a person touches a file, the editor covers the screen, and closing the editor puts the
+ * browser back with the window exactly as it was.
+ */
+@Composable
+fun ChangesWindow(viewModel: AppViewModel) {
+    val files = viewModel.changes ?: return
+    AlertDialog(
+        onDismissRequest = { viewModel.closeChanges() },
+        title = { Text("Changes to send") },
+        text = {
+            if (files.isEmpty()) {
+                Text(
+                    "Nothing is waiting to be sent. Everything on this phone is on GitHub.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            } else {
+                LazyColumn(modifier = Modifier.heightIn(max = 460.dp)) {
+                    items(files) { file ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { viewModel.openChangedFile(file.path) }
+                                .padding(vertical = 8.dp, horizontal = 4.dp),
+                        ) {
+                            Text(
+                                file.path,
+                                style = MaterialTheme.typography.titleSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            val lines = file.lines
+                            if (lines == null) {
+                                Text(
+                                    file.said ?: "no preview",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            } else {
+                                DiffPreview(lines)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { viewModel.closeChanges() }) { Text("Close") }
+        },
+    )
+}
+
+/**
+ * A file's lines, coloured by what happened to them.
+ *
+ * **Additions are dark green, removals are the theme's error red, and everything else is the theme's
+ * own text colour** — the operator's words. Unchanged lines are most of the answer: without them a
+ * change has no place to be in.
+ *
+ * Past [CAP] lines the preview stops and says how many it did not show, because a screen is not a
+ * place to read forty thousand lines and a window that tried would take a second to open.
+ */
+@Composable
+private fun DiffPreview(lines: List<GitService.DiffLine>) {
+    // **A dark theme needs a lighter green for the same job.** A dark green on a dark surface is the
+    // one colour that reads as "nothing here", and this is the one line whose whole meaning is
+    // "something was added".
+    val dark = MaterialTheme.colorScheme.onSurface.luminance() > 0.5f
+    val added = if (dark) Color(0xFF7FD68A) else Color(0xFF1B5E20)
+    val removed = MaterialTheme.colorScheme.error
+    val shown = lines.take(CAP)
+    Column {
+        shown.forEach { line ->
+            Text(
+                text = when (line.kind) {
+                    GitService.DiffLine.Kind.ADDED -> "+ ${line.text}"
+                    GitService.DiffLine.Kind.REMOVED -> "- ${line.text}"
+                    GitService.DiffLine.Kind.SAME -> "  ${line.text}"
+                },
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                color = when (line.kind) {
+                    GitService.DiffLine.Kind.ADDED -> added
+                    GitService.DiffLine.Kind.REMOVED -> removed
+                    GitService.DiffLine.Kind.SAME -> MaterialTheme.colorScheme.onSurface
+                },
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (lines.size > shown.size) {
+            Text(
+                "… and ${lines.size - shown.size} more lines. Touch the file to read it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** How much of one file's diff the window draws before it stops. */
+private const val CAP = 60
+
 @Composable
 fun SlimRow(
     account: String,
@@ -355,6 +471,8 @@ fun SlimRow(
     changes: Int,
     busy: Boolean,
     onSync: () -> Unit,
+    /** Offered only where a screen can open the window: the browser, which is the project. */
+    onSeeChanges: (() -> Unit)? = null,
 ) {
     Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
         Row(
@@ -379,6 +497,14 @@ fun SlimRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.width(8.dp))
+            // **To the left of Sync, and only when there is something to see.** "1 to send" is the
+            // question this button answers; with nothing to send there is no answer and no button.
+            if (onSeeChanges != null && changes > 0) {
+                TextButton(
+                    onClick = onSeeChanges,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                ) { Text("See changes") }
+            }
             if (busy) {
                 CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
             } else if (changes > 0) {
@@ -777,6 +903,7 @@ fun ProjectSlimRow(viewModel: AppViewModel, onSync: (String) -> Unit) {
         changes = viewModel.changesOf(project),
         busy = viewModel.busy,
         onSync = { onSync(project) },
+        onSeeChanges = { viewModel.openChanges(project) },
     )
     HorizontalDivider()
 }

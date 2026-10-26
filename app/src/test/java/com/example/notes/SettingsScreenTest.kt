@@ -102,8 +102,10 @@ class SettingsScreenTest {
     fun `the history field says what it counts`() {
         settings()
 
-        compose.onNodeWithText("Change history").assertIsDisplayed()
-        compose.onNodeWithText("Versions kept").assertIsDisplayed()
+        // Below the fold now that the agent's block sits directly under the account, and a screen
+        // is not "not showing" something because it is further down the same page.
+        compose.onNodeWithText("Change history").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Versions kept").performScrollTo().assertIsDisplayed()
     }
 
     @Test

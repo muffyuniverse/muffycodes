@@ -318,6 +318,25 @@ class AppViewModel @JvmOverloads constructor(
     var editingPath: List<String>? by mutableStateOf(null)
         private set
 
+    /**
+     * The window that lists what is waiting to be sent, or null when it is closed.
+     *
+     * **It survives the editor on purpose.** A person reading the list touches a file, reads it,
+     * changes it maybe, and comes back — and a list that had closed itself would make them find the
+     * button again. Nothing here is a snapshot of the disk either: it is rebuilt from the repository
+     * every time it is opened, so the numbers in it are the ones the row has.
+     */
+    var changes: List<ChangedFile>? by mutableStateOf(null)
+        private set
+
+    /** One file in that window: its path, and how it differs from the last push. */
+    data class ChangedFile(
+        val path: String,
+        /** Null when there is no preview, and [said] then says why. */
+        val lines: List<GitService.DiffLine>?,
+        val said: String?,
+    )
+
     /** The file or folder whose history is open, as a path from the account root. */
     var historyPath: List<String>? by mutableStateOf(null)
         private set
@@ -1248,9 +1267,9 @@ class AppViewModel @JvmOverloads constructor(
         refresh()
         val what = when {
             moved.isEmpty() -> null
-            moved.size == 1 -> "Moved 1 item into ${into.name}/"
-            moved.size == files.size -> "Moved ${moved.size} items into ${into.name}/"
-            else -> "Moved ${moved.size} of ${files.size} items into ${into.name}/"
+            moved.size < files.size -> "Moved ${moved.size} of ${files.size} items into ${into.name}/"
+            files.size == 1 -> "Moved 1 item into ${into.name}/"
+            else -> "Moved ${moved.size} items into ${into.name}/"
         }
         // Both sides of the boundary, as for one move: the destination gains what
         // arrived, and every source repository records what left it. Only where something moved —
@@ -1301,9 +1320,9 @@ class AppViewModel @JvmOverloads constructor(
         refresh()
         val what = when {
             copied.isEmpty() -> null
-            copied.size == 1 -> "Copied 1 item into ${into.name}/"
-            copied.size == files.size -> "Copied ${copied.size} items into ${into.name}/"
-            else -> "Copied ${copied.size} of ${files.size} items into ${into.name}/"
+            copied.size < files.size -> "Copied ${copied.size} of ${files.size} items into ${into.name}/"
+            files.size == 1 -> "Copied 1 item into ${into.name}/"
+            else -> "Copied ${copied.size} items into ${into.name}/"
         }
         if (what != null) {
             ws.projectOf(into)?.takeIf { ws.inWorktree(into) }?.let { commitProject(it, what) }
@@ -1503,6 +1522,47 @@ class AppViewModel @JvmOverloads constructor(
     fun closeEditor() {
         Trace.tap("close editor")
         editingPath = null
+    }
+
+    /**
+     * Fills the changes window from the repository: every path the last push does not have, with its
+     * diff.
+     *
+     * **Opened empty and filled behind the UI**, because a project with two hundred changed files is
+     * two hundred blob reads, and a button that froze the screen while it worked would be a button
+     * people learn not to press. The list arrives all at once: a half-filled list whose numbers grow
+     * while a person reads it is worse than a moment of nothing.
+     */
+    fun openChanges(project: String) {
+        Trace.tap("see changes", project)
+        changes = emptyList()
+        onWorker {
+            val g = git ?: return@onWorker
+            val files = g.unsentPaths(project).map { path ->
+                g.diff(project, path).fold(
+                    onSuccess = { ChangedFile(path, it, null) },
+                    onFailure = { ChangedFile(path, null, it.message ?: "no preview") },
+                )
+            }
+            main.post { changes = files }
+        }
+    }
+
+    /** Closes the changes window. The editor closing does not. */
+    fun closeChanges() {
+        changes = null
+    }
+
+    /**
+     * Opens one of the changed files in the editor, **leaving the window behind it.**
+     *
+     * The path is git's: relative to the project, `/` between folders — which is also the file's
+     * place on disk, because the project's folder is the repository.
+     */
+    fun openChangedFile(path: String) {
+        val ws = workspace ?: return
+        val project = currentProject ?: return
+        openEditor(File(ws.projectDir(project), path))
     }
 
     /** The file the editor is showing, or null. */

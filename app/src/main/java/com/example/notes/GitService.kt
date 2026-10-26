@@ -93,6 +93,18 @@ object GitService {
         val isClean: Boolean get() = total == 0
     }
 
+    /**
+     * One line of a file as it differs from the last push.
+     *
+     * **Three kinds and no fourth.** A person reading a preview wants to know what changed and what
+     * did not, and git's own vocabulary (context, hunk, `\ No newline`) is about a patch file rather
+     * than about reading. [SAME] lines are shown in the theme's own text colour, which is what makes
+     * the other two mean something.
+     */
+    data class DiffLine(val kind: Kind, val text: String) {
+        enum class Kind { SAME, ADDED, REMOVED }
+    }
+
     /** The result of a push or pull. */
     data class RemoteResult(
         val message: String,
@@ -425,7 +437,8 @@ object GitService {
             val newer = treeOf(repo, head) ?: return emptyList()
             val older: AbstractTreeIterator = pushed?.let { treeOf(repo, it) } ?: EmptyTreeIterator()
             val out = sortedSetOf<String>()
-            DiffFormatter(java.io.OutputStream.nullOutputStream()).use { diff ->
+            // A sink of our own: `OutputStream.nullOutputStream()` is API 33 and this app starts at 26.
+            DiffFormatter(DISCARD).use { diff ->
                 diff.setRepository(repo)
                 for (entry in diff.scan(older, newer)) {
                     val path = if (entry.changeType == DiffEntry.ChangeType.DELETE) {
@@ -444,6 +457,12 @@ object GitService {
         }
     }
 
+    /** A stream that keeps nothing: the diff is read from `scan`, not from formatted text. */
+    private val DISCARD = object : java.io.OutputStream() {
+        override fun write(b: Int) = Unit
+        override fun write(b: ByteArray, off: Int, len: Int) = Unit
+    }
+
     /** The tree of [id], as the parser a diff needs. Null when the object is gone. */
     private fun treeOf(repo: Repository, id: ObjectId): CanonicalTreeParser? = try {
         val commit = RevWalk(repo).use { it.parseCommit(id) }
@@ -452,6 +471,96 @@ object GitService {
         parser
     } catch (e: Throwable) {
         null
+    }
+
+    /**
+     * A file's text at one revision, or null when it is not there.
+     *
+     * **Null covers two cases that the caller treats the same way**: an absent path (a file that was
+     * added or deleted) and a file too big to read into a preview. Neither is an error.
+     */
+    /** How big a file is at one revision, or null when it is not there. */
+    fun blobSize(repo: Repository, revision: String, path: String): Long? = try {
+        val id = repo.resolve("$revision:$path")
+        if (id == null) null else repo.open(id).use { obj -> if (obj.isLarge) -1L else obj.size.toLong() }
+    } catch (e: Throwable) {
+        null
+    }
+
+    fun blobText(repo: Repository, revision: String, path: String, limit: Int = 512 * 1024): String? = try {
+        val id = repo.resolve("$revision:$path")
+        if (id == null) {
+            null
+        } else {
+            repo.open(id).use { obj ->
+                if (obj.type != org.eclipse.jgit.lib.Constants.OBJ_BLOB || obj.size > limit) {
+                    null
+                } else {
+                    String(obj.bytes, Charsets.UTF_8)
+                }
+            }
+        }
+    } catch (e: Throwable) {
+        null
+    }
+
+    /**
+     * True when [text] is not text: a NUL byte in the first few thousand characters.
+     *
+     * The same rule git uses, and the reason a preview needs one: rendering a picture's bytes as
+     * lines produces convincing nonsense, and a person would have no way to tell it was not the file.
+     */
+    fun looksBinary(text: String): Boolean {
+        val upTo = text.take(8_000)
+        return upTo.indexOf('\u0000') >= 0
+    }
+
+    /**
+     * Two versions of one file, line by line — **every line, not a patch.**
+     *
+     * A hunk with three lines of context is the right shape for a terminal and the wrong one here: the
+     * person is reading the file, and the lines that did not change are what tells them where the
+     * change is. [DiffLine.Kind.SAME] is most of the answer.
+     */
+    fun diffLines(before: String, after: String): List<DiffLine> {
+        val old = if (before.isEmpty()) emptyList() else before.split("\n")
+        val new = if (after.isEmpty()) emptyList() else after.split("\n")
+        val edits = try {
+            org.eclipse.jgit.diff.HistogramDiff().diff(
+                org.eclipse.jgit.diff.RawTextComparator.DEFAULT,
+                org.eclipse.jgit.diff.RawText(before),
+                org.eclipse.jgit.diff.RawText(after),
+            )
+        } catch (e: Throwable) {
+            // A diff that cannot be computed is still a file the person may want to read; the honest
+            // answer is that every line is new rather than an exception on a screen.
+            null
+        }
+        if (edits == null) return new.map { DiffLine(DiffLine.Kind.ADDED, it) }
+        val out = ArrayList<DiffLine>(old.size + new.size)
+        var a = 0
+        var b = 0
+        for (edit in edits) {
+            while (a < edit.beginA) {
+                out += DiffLine(DiffLine.Kind.SAME, old.getOrElse(a) { "" })
+                a++
+                b++
+            }
+            for (i in edit.beginA until edit.endA) out += DiffLine(DiffLine.Kind.REMOVED, old.getOrElse(i) { "" })
+            for (i in edit.beginB until edit.endB) out += DiffLine(DiffLine.Kind.ADDED, new.getOrElse(i) { "" })
+            a = edit.endA
+            b = edit.endB
+        }
+        while (a < old.size) {
+            out += DiffLine(DiffLine.Kind.SAME, old[a])
+            a++
+            b++
+        }
+        while (b < new.size) {
+            out += DiffLine(DiffLine.Kind.ADDED, new[b])
+            b++
+        }
+        return out
     }
 
     fun changedPaths(repo: Repository): List<String> {

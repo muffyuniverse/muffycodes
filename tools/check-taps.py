@@ -50,7 +50,7 @@ VOCABULARY = {
     # making things
     "new file", "new folder", "upload files", "upload folder", "restore deleted",
     # projects
-    "add project", "new local project", "sync", "rename project", "delete project",
+    "add project", "new local project", "sync", "see changes", "rename project", "delete project",
     # the account
     "add account", "remove account", "use test account",
     # the log itself

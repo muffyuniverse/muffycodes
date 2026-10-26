@@ -2,6 +2,7 @@ package com.example.notes
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -26,6 +27,43 @@ class ProjectsFeatureTest : FeatureTest() {
             "and the clone brought the seeded files down",
             File(scene.workspace!!.repoOf("Shopping"), "README.md").isFile,
         )
+    }
+
+    @Test
+    fun `the changes window lists the files to send, and survives the editor`() {
+        // **The row says "1 to send"; this is the answer to "which one".** The window is filled from
+        // the repository, opens at once and fills behind it, and a file touched inside it opens in the
+        // editor — closing which must put the person back in the window, not in the folder.
+        scene.signedIn()
+        scene.project("groceries")
+        scene.open("groceries")
+        scene.file("milk.txt", "two litres")
+        val project = "groceries"
+
+        scene.viewModel.openChanges(project)
+        assertNotNull("it opens at once, empty", scene.viewModel.changes)
+        scene.await("the window to fill", 20_000) {
+            scene.viewModel.changes?.any { it.path == "milk.txt" } == true
+        }
+
+        val milk = scene.viewModel.changes!!.first { it.path == "milk.txt" }
+        assertNotNull("and it has a preview", milk.lines)
+        assertTrue(
+            "whose lines are the file's: ${milk.lines?.map { it.text }}",
+            milk.lines!!.any { it.kind == GitService.DiffLine.Kind.ADDED && it.text == "two litres" },
+        )
+
+        scene.viewModel.openChangedFile("milk.txt")
+        assertEquals(
+            "touching it opens the editor",
+            listOf("groceries", "milk.txt"),
+            scene.viewModel.editingPath,
+        )
+        scene.viewModel.closeEditor()
+        assertNotNull("and closing the editor leaves the window open", scene.viewModel.changes)
+
+        scene.viewModel.closeChanges()
+        assertNull("which the cross closes", scene.viewModel.changes)
     }
 
     @Test

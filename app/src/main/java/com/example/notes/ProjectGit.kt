@@ -195,6 +195,56 @@ class ProjectGit(
         }
     }
 
+    /** How much of one file a preview will read. Half a megabyte is a long file and a short read. */
+    private val PREVIEW_LIMIT = 512L * 1024
+
+    /** The paths that differ between the last push and now, as the row counts them. */
+    fun unsentPaths(project: String): List<String> {
+        val repo = open(project) ?: return emptyList()
+        return repo.use { GitService.unsentPaths(it) }
+    }
+
+    /**
+     * One file as it differs from the last push, line by line.
+     *
+     * **Pending means "not on GitHub", not "not committed"** — every save is a commit — so both sides
+     * are read from the repository: `refs/remotes/origin/<branch>` against `HEAD`. A file that has
+     * never been sent has no old side, and one that was deleted has no new side; both are `""`, which
+     * is what makes a preview of an added file read as all additions.
+     *
+     * The failure is the answer for a file that is not text: the window shows the reason beside the
+     * name instead of a page of convincing nonsense.
+     */
+    fun diff(project: String, path: String): Result<List<GitService.DiffLine>> {
+        val repo = open(project) ?: return Result.failure(
+            IllegalStateException("This project has no repository yet")
+        )
+        return repo.use {
+            try {
+                val branch = it.branch ?: return Result.failure(
+                    IllegalStateException("This project is not on a branch")
+                )
+                val sent = "refs/remotes/origin/$branch"
+                // **Said before it is read**, because reading it is the thing to avoid: a preview of a
+                // 40 MB file would be a page of text the person cannot use and a second of a stalled
+                // screen.
+                if ((GitService.blobSize(it, "HEAD", path) ?: 0) > PREVIEW_LIMIT ||
+                    (GitService.blobSize(it, sent, path) ?: 0) > PREVIEW_LIMIT
+                ) {
+                    return Result.failure(IllegalStateException("too big to preview"))
+                }
+                val before = GitService.blobText(it, sent, path).orEmpty()
+                val after = GitService.blobText(it, "HEAD", path).orEmpty()
+                if (GitService.looksBinary(before) || GitService.looksBinary(after)) {
+                    return Result.failure(IllegalStateException("not text, so there is no preview"))
+                }
+                Result.success(GitService.diffLines(before, after))
+            } catch (e: Throwable) {
+                Result.failure(e)
+            }
+        }
+    }
+
     /** Applies the project's history length, when one is set. */
     private fun prune(repo: Repository) {
         val keep = keepProvider()
