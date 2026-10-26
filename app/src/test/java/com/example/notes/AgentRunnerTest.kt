@@ -239,7 +239,7 @@ class AgentRunnerTest {
         // left it — the next sentence they type pays for a fresh prompt, which is the trade.
         on("shopping", now = 1_000)
         val door = PingDoor()
-        settings.setKeepAlive(false)
+        settings.keepWarm(false)
         val runner = runner(door)
 
         runner.tick(1_000 + 10 * AgentSession.POLL_MS)
@@ -249,7 +249,7 @@ class AgentRunnerTest {
         assertEquals("and the clock did not move", 1_000L, runner.sessions().single().lastPollAt)
 
         // Back on, and the same tick that did nothing now warms.
-        settings.setKeepAlive(true)
+        settings.keepWarm(true)
         runner.tick(1_000 + 10 * AgentSession.POLL_MS)
         settle(runner)
         assertEquals("one ping", 1, door.pings.size)

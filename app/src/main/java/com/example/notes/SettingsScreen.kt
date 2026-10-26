@@ -314,7 +314,7 @@ fun SettingsScreen(
                 // the act, and a person who tapped the words has said what they meant.
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { settings.setKeepAlive(!settings.keepAlive) },
+                    .clickable { settings.keepWarm(!settings.keepAlive) },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(modifier = Modifier.weight(1f)) {
@@ -329,7 +329,7 @@ fun SettingsScreen(
                 }
                 Switch(
                     checked = settings.keepAlive,
-                    onCheckedChange = { settings.setKeepAlive(it) },
+                    onCheckedChange = { settings.keepWarm(it) },
                 )
             }
             if (settings.keepAlive) {
@@ -349,7 +349,7 @@ fun SettingsScreen(
                     label = "For at most (minutes, blank = until you speak)",
                     value = settings.warmMinutes,
                     placeholder = "until you speak",
-                    onValueChange = { settings.setWarmMinutes(it) },
+                    onValueChange = { settings.keepWarmFor(it) },
                 )
                 Text(
                     text = "Now: " + if (settings.warmMinutes <= 0) {

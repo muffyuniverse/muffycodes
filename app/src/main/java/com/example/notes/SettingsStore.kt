@@ -171,7 +171,7 @@ class SettingsStore(context: Context, name: String = "settings") {
         private set
 
     /** Turns the keepalive on or off. */
-    fun setKeepAlive(on: Boolean) {
+    fun keepWarm(on: Boolean) {
         Trace.tap("keepalive", if (on) "on" else "off")
         keepAlive = on
         prefs.edit().putBoolean(KEY_KEEPALIVE, on).apply()
@@ -220,7 +220,7 @@ class SettingsStore(context: Context, name: String = "settings") {
         private set
 
     /** Sets the ceiling on keeping warm, in minutes. Zero is "until the person speaks". */
-    fun setWarmMinutes(minutes: Int) {
+    fun keepWarmFor(minutes: Int) {
         val clean = minutes.coerceIn(0, MAX_WARM_MINUTES)
         Trace.tap("keepalive cap", if (clean == 0) "until you speak" else "$clean min")
         warmMinutes = clean
