@@ -131,7 +131,7 @@ class AgentLog private constructor(
          * Named here rather than imported from [AgentTools], because the record has to be
          * readable — and sealable — without a workspace, a repository or a model behind it.
          */
-        val TERMINATING = setOf("ask", "conclude", "wait")
+        val TERMINATING = setOf("ask", "conclude")
 
         /**
          * The terminating tools that never get a result, because their words are their own row.

@@ -672,13 +672,12 @@ class AgentLogTest {
         // clearing — and the audit is only worth having if it is exact about whose decision it was.
         log.told("make the list")
         log.bookkeeping(AgentLog.TURN, "turn", "1")
-        log.call("wait", "{}")
-        log.got("wait", "0 still waiting")
-        log.note("idle", "waiting for the operator")
-        // The poll, again: the app's own, by design.
-        log.bookkeeping(AgentLog.CALL, "wait", "{}")
-        log.bookkeeping(AgentLog.GOT, "wait", "0 still waiting")
-        log.bookkeeping(AgentLog.NOTE, "idle", "waiting for the operator")
+        log.note("agent", "I looked, and there is nothing to change.")
+        // The keepalive, three times: the app's own, by design.
+        repeat(3) {
+            log.bookkeeping(AgentLog.TURN, "turn", "ping")
+            log.bookkeeping(AgentLog.NOTE, "ping", "kept warm")
+        }
         log.bookkeeping(AgentLog.NOTE, "retry", "reconnected after 3 tries")
         log.trimContext(budget = 1)
 
@@ -732,12 +731,12 @@ class AgentLogTest {
 
     @Test
     fun `a row the model is not sent is still on the record`() {
-        // The repeated poll is real evidence and is not sent: fifteen of them an hour would make the
-        // request differ from itself, and the poll is only cheap while it is a cache hit.
+        // The repeated ping is real evidence and is not sent: fifteen of them an hour would make the
+        // request differ from itself, and the ping is only cheap while it is a cache hit.
         log.told("a task")
         val contextBefore = contextLines().size
 
-        val poll = log.bookkeeping(AgentLog.CALL, "wait", "{}")
+        val poll = log.bookkeeping(AgentLog.NOTE, "ping", "kept warm")
 
         assertEquals("the record keeps it", contextBefore + 1, sessionLines().size)
         assertEquals("the context does not", contextBefore, contextLines().size)

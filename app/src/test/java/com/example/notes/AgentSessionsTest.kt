@@ -63,7 +63,7 @@ class AgentSessionsTest {
     @Test
     fun `two projects keep two sessions`() {
         store.put(AgentSession("shopping"))
-        store.put(AgentSession("notes").concluded())
+        store.put(AgentSession("notes").concluded(0))
 
         val read = store.read()
 

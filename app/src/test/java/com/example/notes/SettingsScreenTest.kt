@@ -3,6 +3,7 @@ package com.example.notes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -186,6 +187,28 @@ class SettingsScreenTest {
         compose.onNodeWithText("Stop a background command after", substring = true)
             .performScrollTo()
             .assertIsDisplayed()
+    }
+
+    @Test
+    fun `the keepalive is a switch, and its two numbers are behind it`() {
+        // **On by default, because it was already happening**: an agent that said `wait` was polled
+        // every four minutes, and this replaces that poll with something cheaper. Off, the two fields
+        // go with it — a number that nothing reads is a number a person sets twice.
+        assertEquals("on out of the box", true, scene.viewModel.settings.keepAlive)
+        assertEquals("an hour of it", 60, scene.viewModel.settings.warmMinutes)
+        settings()
+
+        compose.onNodeWithText("Keepalive").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Keep the conversation warm").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Warm it every", substring = true).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("For at most", substring = true).performScrollTo().assertIsDisplayed()
+
+        compose.onNodeWithText("Keep the conversation warm").performScrollTo().performClick()
+        compose.waitForIdle()
+
+        assertEquals("switched off", false, scene.viewModel.settings.keepAlive)
+        compose.onNodeWithText("Warm it every", substring = true).assertDoesNotExist()
+        assertEquals("and nothing in a store was disturbed", 240_000L, scene.viewModel.settings.pollMs)
     }
 
     @Test

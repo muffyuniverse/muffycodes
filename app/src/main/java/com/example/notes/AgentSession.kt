@@ -57,6 +57,14 @@ data class AgentSession(
      * is checked on. Zero means the file has none, and the design's [POLL_MS] applies.
      */
     val idleMs: Long = 0,
+    /**
+     * When this session started waiting on the person, which is what the keepalive's ceiling runs
+     * from — **not the last ping**, or the ceiling would never arrive.
+     *
+     * Zero on a file written before the keepalive existed; [warmSince] reads that as the last poll,
+     * which is the closest thing an older file has to the moment the wait began.
+     */
+    val warmFrom: Long = 0,
 ) {
 
     /** The three states of §2.3, and the two the operator did not choose are the ones that speak. */
@@ -185,20 +193,38 @@ data class AgentSession(
     /** This session's poll interval: the setting it was given, or the design's own. */
     val intervalMs: Long get() = idleMs.takeIf { it > 0 } ?: POLL_MS
 
+    /** The moment the wait began: [warmFrom], or the last poll on a file written before it existed. */
+    val warmSince: Long get() = if (warmFrom > 0) warmFrom else lastPollAt
+
     /**
-     * True when a poll is owed at [at].
+     * True when the conversation should be kept warm at [at].
      *
-     * **Only an idle agent that is waiting polls.** An agent in `ask` is waiting for the person,
-     * and polling it would spend money asking the same question again; an agent that concluded
-     * has nothing to do until it is spoken to; one that is reconnecting is already trying.
+     * **Every session waiting on the person, not only one that said `wait`.** An agent that asked a
+     * question is the one most likely to be answered in the next few minutes, and an agent that
+     * concluded is one the person will add to — both had their cache left to expire until now,
+     * because a poll was something only an idle `wait` asked for.
+     *
+     * Three refusals. A stopped session is not waiting for anybody: the person said stop, and
+     * spending their money to keep a conversation warm they switched off is the app arguing with
+     * them. A reconnecting one is already on its ladder, and a second request beside it would be two
+     * doors into one conversation. And past [forAt] the arithmetic has turned: a ping reads the whole
+     * prompt at cache price, so keeping it warm for longer than a dozen of them costs more than
+     * letting it go cold and paying for one fresh prompt later.
+     *
+     * [keepAlive] is the operator's switch, passed in rather than stored here, so a switch flipped
+     * while the app is running takes effect at the next tick.
      */
-    fun pollDue(at: Long, every: Long = intervalMs): Boolean = when {
-        state != State.IDLE -> false
-        // Finished means the agent concluded: it has nothing to poll for until it is spoken to.
-        sub == Sub.FINISHED -> false
-        // Waiting polls every interval; reconnecting polls at its retry time, which is what
-        // `failed` moved `lastPollAt` to. Treating reconnecting as "not due" would make one
-        // dropped packet end the session, which is the opposite of the retry ladder's purpose.
+    fun warmDue(
+        at: Long,
+        keepAlive: Boolean,
+        every: Long = intervalMs,
+        forAt: Long = 0,
+        from: Long = warmSince,
+    ): Boolean = when {
+        !keepAlive -> false
+        state == State.STOPPED -> false
+        sub == Sub.RECONNECTING -> false
+        forAt > 0 && from > 0 && at - from >= forAt -> false
         else -> at >= lastPollAt + every
     }
 
@@ -244,7 +270,41 @@ data class AgentSession(
      */
     fun polled(at: Long): AgentSession = copy(lastPollAt = at)
 
-    /** A poll could not be sent, or was refused: the ladder decides when to try again. */
+    /**
+     * A ping was sent at [at].
+     *
+     * **Only the clock moves.** The last copy of this (`waited`) also set the sub-state and cleared
+     * the retries, because it was the ending of a turn the model had taken; a ping is not a turn, and
+     * a session that asked a question is still asked, a session that finished is still finished.
+     */
+    fun warmed(at: Long): AgentSession = copy(
+        lastPollAt = at,
+        // **A ping that got through is proof the transport is back**, so the ladder ends here — but
+        // only a session that was reconnecting is moved: one that asked a question is still asked,
+        // and one that finished is still finished.
+        retries = 0,
+        sub = if (sub == Sub.RECONNECTING) Sub.WAITING else sub,
+    )
+
+    /**
+     * The person spoke to an agent that was switched off: **on again, and the wait starts now.**
+     *
+     * Not `waited`, which was a model's `wait` read back as an ending: this is the person's own act,
+     * and the session it starts is a fresh one — nothing of the stop survives except the project.
+     */
+    fun resumed(at: Long): AgentSession = copy(
+        state = State.IDLE,
+        sub = Sub.WAITING,
+        reason = null,
+        retries = 0,
+        askedAt = 0,
+        reminders = 0,
+        lastPollAt = at,
+        warmFrom = 0,
+        lastWords = "",
+    )
+
+    /** A ping could not be sent, or was refused: the ladder decides when to try again. */
     fun failed(at: Long): AgentSession {
         val tries = retries + 1
         // **A blip reconnects; a wall stops.** Eight attempts at one, two and four seconds is
@@ -283,6 +343,11 @@ data class AgentSession(
         retries = 0,
         askedAt = at,
         reminders = 0,
+        // **The keepalive starts here.** An answered question is the likeliest thing to be answered
+        // next, and the ceiling in Settings runs from the moment the wait began rather than from the
+        // last ping — which would push the ceiling along for ever.
+        lastPollAt = at,
+        warmFrom = at,
     )
 
     /**
@@ -290,37 +355,23 @@ data class AgentSession(
      *
      * **The interval travels with the session**, so a tick after a reboot knows how often this one
      * is checked on without reading the settings — and so a person changing the number affects the
-     * sessions that exist, through the runner passing its own value to [pollDue].
+     * sessions that exist, through the runner passing its own value to [warmDue].
      */
     fun withInterval(every: Long): AgentSession = copy(idleMs = every)
 
     /** `conclude` ended a turn: idle, and silent — there is nothing wrong with finishing. */
-    fun concluded(): AgentSession = copy(
+    fun concluded(at: Long): AgentSession = copy(
         state = State.IDLE,
         sub = Sub.FINISHED,
         reason = null,
         retries = 0,
         askedAt = 0,
         reminders = 0,
+        lastPollAt = at,
+        warmFrom = at,
     )
 
     /** `wait` ended a turn: idle and polling. */
-    fun waited(at: Long): AgentSession = copy(
-        state = State.IDLE,
-        sub = Sub.WAITING,
-        reason = null,
-        retries = 0,
-        askedAt = 0,
-        reminders = 0,
-        // The interval restarts from the `wait`: an agent that has just finished a turn has
-        // nothing to check for its interval, and a poll fired on the spot would ask it again about
-        // the turn it just ended.
-        lastPollAt = at,
-        // **Cleared when the agent does not say.** `wait` with no argument is "the app's own
-        // interval", not "what I asked last time" — an agent that waited twenty minutes once and
-        // then stopped asking would otherwise go on being polled every twenty minutes for ever.
-    )
-
     /**
      * The session stopped.
      *

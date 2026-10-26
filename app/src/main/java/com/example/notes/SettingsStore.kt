@@ -154,31 +154,82 @@ class SettingsStore(context: Context, name: String = "settings") {
     }
 
     /**
-     * How often an idle agent is checked on, in seconds — **the operator's number.**
+     * Whether an agent waiting on the person has its conversation kept warm — **the operator's
+     * switch.**
      *
-     * The agent says only that it is idle; how often the app comes back is a decision about this
-     * person's phone: a poll is a request that is paid for and a wake that costs battery, and a
-     * shorter interval is a faster agent on both counts. It is not the agent's to choose, because an
-     * agent has no way of knowing what a request costs the person paying for it.
+     * On, the app re-sends the identical conversation every [pollSeconds] with a one-token answer
+     * nobody reads: the provider's cache stays warm, and the sentence the person finally types costs
+     * a cache read instead of a fresh prompt. Nothing is written to the conversation and the agent
+     * does not act, so this is a question about money and battery, not about behaviour.
      *
-     * Zero means the design's own four minutes. The ceiling is 250 seconds, which is short enough
-     * that an idle session is never far from being seen.
+     * **On by default, because it was already happening.** An agent that called `wait` was polled
+     * every four minutes by default; the switch replaces that poll with something cheaper rather
+     * than adding a new expense. Off, a session waits in silence and the next turn pays full price
+     * for its prompt.
+     */
+    var keepAlive: Boolean by mutableStateOf(prefs.getBoolean(KEY_KEEPALIVE, true))
+        private set
+
+    /** Turns the keepalive on or off. */
+    fun setKeepAlive(on: Boolean) {
+        Trace.tap("keepalive", if (on) "on" else "off")
+        keepAlive = on
+        prefs.edit().putBoolean(KEY_KEEPALIVE, on).apply()
+        Trace.said(if (on) "the conversation is kept warm while it waits" else "nothing is sent while it waits")
+    }
+
+    /**
+     * How often the conversation is kept warm, in seconds — **the operator's number.**
+     *
+     * It is a decision about this person's phone: every ping is a request that is paid for and a wake
+     * that costs battery, and a shorter interval keeps the cache reliably warm on both counts. It is
+     * not the agent's to choose, because an agent has no way of knowing what a request costs the
+     * person paying for it.
+     *
+     * Zero means the design's own four minutes. The ceiling is 250 seconds, below the five-minute
+     * cache almost every provider keeps: a ping that arrives after the cache expired is a cold prompt
+     * paid for nothing.
      */
     var pollSeconds: Int by mutableStateOf(prefs.getInt(KEY_POLL, 0))
         private set
 
-    /** Sets the idle interval, clamped. */
+    /** Sets the keepalive interval, clamped. */
     fun keepPoll(seconds: Int) {
         val clean = if (seconds <= 0) {
             0
         } else {
             seconds.coerceIn(MIN_POLL_SECONDS, MAX_POLL_SECONDS)
         }
-        Trace.tap("poll interval", if (clean == 0) "the app's own" else "$clean s")
+        Trace.tap("keepalive interval", if (clean == 0) "the app's own" else "$clean s")
         pollSeconds = clean
         prefs.edit().putInt(KEY_POLL, clean).apply()
-        Trace.said(if (clean == 0) "polled at the app's own four minutes" else "polled every $clean s")
+        Trace.said(if (clean == 0) "warmed at the app's own four minutes" else "warmed every $clean s")
     }
+
+    /**
+     * How long keeping warm may go on, in minutes — **the operator's ceiling on the cost.**
+     *
+     * A ping reads the whole prompt at cache price, and a cold start writes it once: keeping warm
+     * pays for itself up to about twelve pings, which is fifty minutes at the default four, and past
+     * that it is spending money to protect a cache it would have been cheaper to lose. Sixty minutes
+     * is that break-even with a little room.
+     *
+     * Zero means no ceiling: it stays warm until the person speaks, however long that takes.
+     */
+    var warmMinutes: Int by mutableStateOf(prefs.getInt(KEY_WARM_MINUTES, DEFAULT_WARM_MINUTES))
+        private set
+
+    /** Sets the ceiling on keeping warm, in minutes. Zero is "until the person speaks". */
+    fun setWarmMinutes(minutes: Int) {
+        val clean = minutes.coerceIn(0, MAX_WARM_MINUTES)
+        Trace.tap("keepalive cap", if (clean == 0) "until you speak" else "$clean min")
+        warmMinutes = clean
+        prefs.edit().putInt(KEY_WARM_MINUTES, clean).apply()
+        Trace.said(if (clean == 0) "kept warm until you speak" else "kept warm for at most $clean min")
+    }
+
+    /** [warmMinutes] in milliseconds; zero is no ceiling. */
+    val warmMs: Long get() = warmMinutes * 60_000L
 
     /** The interval in milliseconds, with the design's own when the person set none. */
     val pollMs: Long
@@ -337,7 +388,11 @@ class SettingsStore(context: Context, name: String = "settings") {
     /** How long one answer may take, in minutes, and how much one result may carry. */
     const val KEY_TIMEOUT = "agent_timeout_minutes"
 
-    /** How often an idle agent is polled, and how long a command may run before it is stopped. */
+    /** Whether a waiting conversation is kept warm, how often, and for how long. */
+    const val KEY_KEEPALIVE = "agent_keepalive"
+    const val KEY_WARM_MINUTES = "agent_warm_minutes"
+
+    /** How often a waiting agent is warmed, and how long a command may run before it is stopped. */
     const val KEY_POLL = "agent_poll_seconds"
     const val KEY_FOREGROUND = "agent_foreground_seconds"
     const val KEY_BACKGROUND = "agent_background_seconds"
@@ -353,9 +408,19 @@ class SettingsStore(context: Context, name: String = "settings") {
     /** Four minutes: the brief's own number, and long enough for a turn that does real work. */
     const val DEFAULT_TIMEOUT_MINUTES = 4
 
-    /** The idle interval: a floor below which polling is a loop of its own, and the 250 s cap. */
+    /** The keepalive interval: a floor below which pinging is a loop of its own, and the 250 s cap. */
     const val MIN_POLL_SECONDS = 15
     const val MAX_POLL_SECONDS = 250
+
+    /**
+     * An hour, which is where keeping warm stops being cheaper than going cold.
+     *
+     * Twelve pings of cache read is roughly the price of one cache write of the same prompt, so an
+     * absence longer than that is paid for twice if the pings keep coming. A day is the ceiling for
+     * anyone who really wants it; zero is "until the person speaks".
+     */
+    const val DEFAULT_WARM_MINUTES = 60
+    const val MAX_WARM_MINUTES = 1_440
 
     /**
      * Command limits: **three minutes in the conversation, off for work that goes to a file.**

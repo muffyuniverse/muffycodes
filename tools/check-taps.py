@@ -68,10 +68,12 @@ VOCABULARY = {
     # the agent itself, how often it reminds, and the numbers it runs with
     "start agent", "stop agent", "stop all agents", "reset agent", "remind me",
     "answer timeout", "result length",
-    # the three waits the operator owns: how often an idle agent is checked on, how long a command
-    # whose result goes into the conversation may run, and how long one whose result goes to a file
-    # may run. The last two are separate numbers because the results land in two places.
-    "poll interval", "foreground timeout", "background timeout",
+    # the three waits the operator owns: the keepalive that keeps a waiting conversation warm (its
+    # switch, its interval and its ceiling), and the two command limits — how long a command whose
+    # result goes into the conversation may run, and how long one whose result goes to a file may
+    # run. The last two are separate numbers because the results land in two places.
+    "keepalive", "keepalive interval", "keepalive cap",
+    "foreground timeout", "background timeout",
     # how big the evidence may get, which is a different number from the context's: one takes a row
     # out of what the model is sent, the other removes it
     "session log",

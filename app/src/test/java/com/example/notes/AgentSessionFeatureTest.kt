@@ -21,24 +21,37 @@ import java.io.File
  */
 class AgentSessionFeatureTest : FeatureTest() {
 
-    /** Answers every request with `wait`, and keeps what it was asked. */
-    private class WaitDoor : Door {
+    /**
+     * Ends every turn with words — a conclusion now — and counts the keepalive pings.
+     *
+     * **Two counters, because they are two different acts.** A turn is the person talking; a ping is
+     * the app keeping the cache warm, and a test that could not tell them apart would read a warm
+     * conversation as activity.
+     */
+    private class KeepDoor : Door {
         val asked = mutableListOf<Request>()
+        val pings = mutableListOf<Request>()
         override fun turn(request: Request): Result<Reply> {
             asked.add(request)
-            return Result.success(Reply("", listOf(Call("call_${asked.size}", "wait", "{}"))))
+            return Result.success(Reply("nothing to change", emptyList()))
+        }
+        override fun ping(request: Request): Result<Unit> {
+            pings.add(request)
+            return Result.success(Unit)
         }
     }
 
-    /** Refuses the first [times] requests, then waits. */
-    private class FlakyDoor(private val times: Int) : Door {
+    /** Refuses the first [times] pings as the provider would, then warms. */
+    private class FlakyDoor(private val times: Int, private val code: Int = 503) : Door {
         var attempts = 0
-        override fun turn(request: Request): Result<Reply> {
+        override fun turn(request: Request) = Result.success(Reply("nothing to change", emptyList()))
+        override fun ping(request: Request): Result<Unit> {
             attempts++
-            if (attempts <= times) {
-                return Result.failure(IllegalStateException("OpenRouter answered 503"))
+            return if (attempts <= times) {
+                Result.failure(Refused(code, "OpenRouter answered $code"))
+            } else {
+                Result.success(Unit)
             }
-            return Result.success(Reply("", listOf(Call("call_$attempts", "wait", "{}"))))
         }
     }
 
@@ -144,76 +157,75 @@ class AgentSessionFeatureTest : FeatureTest() {
     fun `a poll happens at four minutes and not a second earlier`() {
         listening()
         scene.project("groceries")
-        val door = WaitDoor()
+        val door = KeepDoor()
         scene.viewModel.chatDoor = { door }
         scene.viewModel.startAgent("groceries")
         val due = scene.viewModel.sessionOf("groceries")!!.nextPollAt
 
         scene.viewModel.tickAgents(due - 1)
         scene.await("the app to be quiet") { scene.viewModel.agentPollingInFlight().isEmpty() }
-        assertEquals("a second early is early", 0, door.asked.size)
+        assertEquals("a second early is early", 0, door.pings.size)
 
         scene.viewModel.tickAgents(due)
-        scene.await("the poll") { door.asked.size == 1 }
+        scene.await("the ping") { door.pings.size == 1 }
 
-        assertEquals("one request", 1, door.asked.size)
+        assertEquals("one request", 1, door.pings.size)
+        assertEquals("and not one turn", 0, door.asked.size)
     }
 
     @Test
-    fun `a poll says nothing in the person's name`() {
+    fun `a ping says nothing in the person's name, and asks nothing`() {
         listening()
         scene.project("groceries")
-        val door = WaitDoor()
+        val door = KeepDoor()
         openChat("groceries", door)
         scene.viewModel.startAgent("groceries")
         scene.viewModel.sendChat("keep an eye on it")
         scene.await("the first turn") { door.asked.isNotEmpty() }
         scene.await("the agent to be quiet") { !scene.viewModel.chatWorking }
         val before = record("groceries").rows().count { it.kind == AgentLog.TOLD }
+        val turns = record("groceries").rows().count { it.kind == AgentLog.TURN }
 
         tick("groceries")
 
         val rows = record("groceries").rows()
         assertEquals("no operator message was invented", before, rows.count { it.kind == AgentLog.TOLD })
-        assertTrue("but the poll is a turn in the record", rows.count { it.kind == AgentLog.TURN } >= 2)
+        assertEquals("the ping is a turn in the record", turns + 1, rows.count { it.kind == AgentLog.TURN })
+        assertTrue("and the box can see it", rows.any { it.name == AgentChat.PING })
+        assertEquals("the model was asked nothing", 1, door.asked.size)
         assertEquals(
-            "and the session is idle again",
-            "idle · waiting",
+            "and the session is where the turn left it",
+            "idle · finished",
             scene.viewModel.sessionOf("groceries")?.label(),
         )
     }
 
     @Test
-    fun `two polls send the same context twice`() {
-        // **The whole reason the repeated `wait` is kept out of the context.** A provider's
-        // implicit cache matches on the longest common prefix, so a context that grew a row every
-        // four minutes would never be the same request twice, and the poll would stop being cheap.
+    fun `two pings send the same context twice`() {
+        // **The whole reason a ping writes nothing into the context.** A provider's implicit cache
+        // matches on the longest common prefix, so a conversation that grew a row every four minutes
+        // would never be the same request twice, and the ping would stop being cheap.
         listening()
         scene.project("groceries")
-        val door = WaitDoor()
+        val door = KeepDoor()
         openChat("groceries", door)
         scene.viewModel.startAgent("groceries")
         scene.viewModel.sendChat("keep an eye on it")
         scene.await("the first turn") { door.asked.isNotEmpty() }
-        // **The turn is over before the context is measured.** `asked` fires when the request is
-        // sent, and the wait pair is written after the reply comes back — measuring in between
-        // counts a context that is still being written, which is how this test once read a
-        // growth of two rows that were the first turn's own tail.
         scene.await("the agent to be quiet") { !scene.viewModel.chatWorking }
         val before = record("groceries").contextRows().size
 
         tick("groceries")
-        val first = door.asked.size
         tick("groceries")
-        val second = door.asked.size
 
-        assertEquals("the context did not grow by a poll", before, record("groceries").contextRows().size)
-        assertTrue("and two polls happened", second > first)
+        assertEquals("the context did not grow by a ping", before, record("groceries").contextRows().size)
+        assertEquals("and two pings happened", 2, door.pings.size)
         assertEquals(
-            "the second poll sent exactly what the first did",
-            door.asked[first - 1].messages.map { it.role to it.text },
-            door.asked[second - 1].messages.map { it.role to it.text },
+            "the second sent exactly what the first did",
+            door.pings[0].messages.map { it.role to it.text },
+            door.pings[1].messages.map { it.role to it.text },
         )
+        assertEquals("and nothing was asked", 1, door.asked.size)
     }
 
     // ---- asked --------------------------------------------------------------
@@ -342,14 +354,15 @@ class AgentSessionFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `a provider that keeps refusing ends the session with words`() {
-        // A blip reconnects; a wall stops. The difference is eight tries, and what a person reads
-        // afterwards is the provider's own sentence rather than the app's guess at it.
+    fun `a key the provider refuses ends the session with words`() {
+        // **The one ping failure that is the person's to fix.** A blip reconnects; a wall stops. The
+        // difference is eight tries, and what a person reads afterwards is the provider's own
+        // sentence rather than the app's guess at it. A 5xx is not this case: that is a ping missed.
         listening()
         scene.project("groceries")
         // **One door, not a new one per poll.** A lambda that built a door on every call would
         // reset its own attempt count, and a failure count that resets is not a failure count.
-        val broken = FlakyDoor(times = Int.MAX_VALUE)
+        val broken = FlakyDoor(times = Int.MAX_VALUE, code = 401)
         scene.viewModel.chatDoor = { broken }
         scene.viewModel.startAgent("groceries")
 
@@ -367,11 +380,14 @@ class AgentSessionFeatureTest : FeatureTest() {
         assertEquals("it gave up: $last", AgentSession.State.STOPPED, session?.state)
         assertEquals("and knows why", AgentSession.StopReason.PIN_REFUSED, session?.reason)
         assertTrue("and said so once", notices.any { it.contains("groceries") })
-        assertTrue("with the reason in the label: $last", last.contains("OpenRouter answered 503"))
+        assertTrue("with the reason in the label: $last", last.contains("OpenRouter answered 401"))
     }
 
     @Test
-    fun `one dropped poll reconnects instead of ending the session`() {
+    fun `one dropped ping is missed, and the session goes on untouched`() {
+        // A 5xx is the provider having a bad minute, not the person's key being wrong. Nothing is
+        // retried in a burst, nothing is written down, and the session is not moved: the next tick
+        // tries again an interval later.
         listening()
         scene.project("groceries")
         val flaky = FlakyDoor(times = 1)
@@ -380,19 +396,17 @@ class AgentSessionFeatureTest : FeatureTest() {
 
         tick("groceries")
 
-        val reconnecting = scene.viewModel.sessionOf("groceries")
-        assertEquals("still on", true, reconnecting?.running)
-        assertEquals("reconnecting", AgentSession.Sub.RECONNECTING, reconnecting?.sub)
-        assertEquals("after one try", 1, reconnecting?.retries)
+        val after = scene.viewModel.sessionOf("groceries")
+        assertEquals("still on", true, after?.running)
+        assertEquals("not even reconnecting", AgentSession.Sub.WAITING, after?.sub)
+        assertEquals("and no ladder", 0, after?.retries)
+        assertEquals("the label says what it always said", "idle · waiting", after?.label())
+        assertTrue("and nobody was woken for it", notices.isEmpty())
 
-        // The retry is one second later, and it works: the ladder resets.
-        scene.viewModel.tickAgents(reconnecting!!.nextPollAt)
-        scene.await("the retry") {
-            scene.viewModel.sessionOf("groceries")?.sub == AgentSession.Sub.WAITING
-        }
-
-        assertEquals("back to waiting", "idle · waiting", scene.viewModel.sessionOf("groceries")?.label())
-        assertEquals("and the ladder is reset", 0, scene.viewModel.sessionOf("groceries")?.retries)
+        // The next interval, and it lands: the clock moves, nothing else does.
+        scene.viewModel.tickAgents(after!!.nextPollAt)
+        scene.await("the next ping") { flaky.attempts == 2 }
+        assertEquals("still nobody", 0, scene.viewModel.sessionOf("groceries")?.retries)
     }
 
     @Test
@@ -586,21 +600,21 @@ class AgentSessionFeatureTest : FeatureTest() {
         scene.project("groceries")
         scene.viewModel.startAgent("groceries")
         val due = scene.viewModel.sessionOf("groceries")!!.nextPollAt
-        val door = ScriptedDoor(Reply("", listOf(Call("c1", "wait", "{}"))))
+        val door = KeepDoor()
 
         val reopened = scene.reopen()
         reopened.chatDoor = { door }
         reopened.tickAgents(due)
 
-        // **Wait for the request, not for the claim.** A poll writes `lastPollAt` *before* the
+        // **Wait for the request, not for the claim.** A ping writes `lastPollAt` *before* the
         // request goes out — that is what makes two tickers safe — so waiting on the timestamp
         // returns the instant the claim is written and then reads the door a moment too early. The
-        // signal that the turn is over is the in-flight set, and it is cleared after the screen was
+        // signal that the ping is over is the in-flight set, and it is cleared after the screen was
         // told.
-        scene.await("the resumed poll to finish", 20_000) {
-            door.asked.size == 1 && reopened.agentPollingInFlight().isEmpty()
+        scene.await("the resumed ping to finish", 20_000) {
+            door.pings.size == 1 && reopened.agentPollingInFlight().isEmpty()
         }
-        assertEquals("one request, with nobody looking at a button", 1, door.asked.size)
+        assertEquals("one request, with nobody looking at a button", 1, door.pings.size)
         assertEquals(
             "and the session is waiting again",
             AgentSession.Sub.WAITING,

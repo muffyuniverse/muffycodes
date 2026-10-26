@@ -2133,7 +2133,9 @@ class AppViewModel @JvmOverloads constructor(
         // **Speaking to a stopped agent turns it on again**, because the person is the switch:
         // there is no other control they would have used, and a message that vanished into a
         // stopped session would look like the app ignoring them.
-        sessionOf(project)?.let { if (!it.running) putSession(it.waited(System.currentTimeMillis())) }
+        sessionOf(project)?.let {
+            if (!it.running) putSession(it.resumed(System.currentTimeMillis()))
+        }
         speak(project, said)
     }
 
@@ -2166,12 +2168,12 @@ class AppViewModel @JvmOverloads constructor(
     /**
      * Runs one turn on the worker and hands back what it wrote.
      *
-     * **A burst and a poll differ by one thing** — whether the person said something — and two
-     * copies of everything else (the record opened fresh, the model read once, a throw turned into
-     * an ending) is two copies to drift. What is deliberately not shared is what genuinely
-     * differs: a poll redraws nothing mid-turn, because nobody is waiting to read it.
+     * **The person's turn, and only that.** The app's own keepalive is the runner's, not this: it
+     * builds a request and throws the answer away, so it has nothing to draw and nothing to tell
+     * the screen mid-flight. Sharing this function with it would have meant a redraw path nobody
+     * waits for and a `said` that can be null — which is exactly the null branch this used to carry.
      */
-    private fun runTurn(project: String, said: String?, then: (List<AgentLog.Row>, Agent.End) -> Unit) {
+    private fun runTurn(project: String, said: String, then: (List<AgentLog.Row>, Agent.End) -> Unit) {
         val ws = workspace ?: return
         val g = git ?: return
         val model = modelConfig.active
@@ -2212,20 +2214,19 @@ class AppViewModel @JvmOverloads constructor(
                 cut = { interrupt },
             )
             val end = try {
-                if (said == null) {
-                    agent.poll()
-                } else {
-                    agent.burst(said) {
-                        val rows = log.rows()
-                        main.post { applyChat(rows, follow = true) }
-                    }
+                // **The screen only ever speaks.** The tick's own pings come from the runner, where
+                // nothing is drawn; a poll built here as well was a second door into the same
+                // conversation, and the two could not agree about who was waiting.
+                agent.burst(said) {
+                    val rows = log.rows()
+                    main.post { applyChat(rows, follow = true) }
                 }
             } catch (t: Throwable) {
-                // **A burst that threw is a wall; a poll that threw is a blip.** The transport's
-                // own failures already come back as a retryable Stopped from inside the loop, so
-                // what escapes to here is the turn's own machinery — the record, a tool, a bug —
-                // and retrying that every four seconds would hide it.
-                Agent.End.Stopped(Secrets.explain(t, "The agent could not run"), retryable = said == null)
+                // **A burst that threw is a wall.** The transport's own failures already come back
+                // as a retryable Stopped from inside the loop, so what escapes to here is the turn's
+                // own machinery — the record, a tool, a bug — and retrying that every four seconds
+                // would hide it.
+                Agent.End.Stopped(Secrets.explain(t, "The agent could not run"))
             }
             val rows = log.rows()
             main.post { then(rows, end) }
@@ -2257,7 +2258,7 @@ class AppViewModel @JvmOverloads constructor(
     /** How often a session that needs a person reminds them, from Settings. */
     val reminderMs: Long get() = settings.remindMinutes * 60_000L
 
-    /** The projects with a poll in flight, so a test can wait for one to finish. */
+    /** The projects with a ping in flight, so a test can wait for one to finish. */
     internal fun agentPollingInFlight(): Set<String> = runner?.polling() ?: emptySet()
 
     /**
@@ -2277,9 +2278,9 @@ class AppViewModel @JvmOverloads constructor(
     /**
      * Switches the agent on for [project], with nothing said yet.
      *
-     * The first poll is one interval away, because the agent has nothing to poll about until the
-     * person has asked for something — an agent switched on at 09:00 and asked at 09:03 should
-     * not have spent three requests discovering it had no task.
+     * The first ping is one interval away, because there is no conversation to keep warm until the
+     * person has asked for something — an agent switched on at 09:00 and asked at 09:03 should not
+     * have spent three requests warming an empty one.
      */
     fun startAgent(project: String, now: Long = System.currentTimeMillis()) {
         Trace.tap("start agent", project)
@@ -2353,7 +2354,7 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /**
-     * One tick of the clock: remind whoever needs reminding, and poll whoever is due.
+     * One tick of the clock: remind whoever needs reminding, and warm whoever is due.
      *
      * **The clock is a parameter, not `now()`.** Every rule about four minutes and one hour is
      * then a test that moves a number, which is the only way to test them at all — and it is why

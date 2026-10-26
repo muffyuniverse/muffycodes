@@ -32,8 +32,8 @@ class AgentRunner(
     private val notify: (AgentSession) -> Unit = {},
     /** Called with the sessions after anything changes, so a screen can redraw. */
     private val changed: (List<AgentSession>) -> Unit = {},
-    /** Called with a project's fresh rows after a poll, when somebody is reading them. */
-    private val polled: (String, List<AgentLog.Row>, Agent.End) -> Unit = { _, _, _ -> },
+    /** Called with a project's fresh rows after a ping, when somebody is reading them. */
+    private val polled: (String, List<AgentLog.Row>, Agent.Warm) -> Unit = { _, _, _ -> },
     /**
      * Where a `background` call's work runs — **one thread per call, made when it is asked for.**
      *
@@ -54,8 +54,14 @@ class AgentRunner(
     /** The projects with a poll in flight, so a test can wait for one to finish. */
     fun polling(): Set<String> = synchronized(inFlight) { inFlight.toSet() }
 
-    /** How often an idle agent is checked on, from Settings — the person's number. */
+    /** How often a waiting conversation is kept warm, from Settings — the person's number. */
     private val pollMs: Long get() = settings.pollMs
+
+    /** Whether it is kept warm at all, from Settings. */
+    private val keepAlive: Boolean get() = settings.keepAlive
+
+    /** How long keeping it warm may go on, from Settings; zero is "until the person speaks". */
+    private val warmMs: Long get() = settings.warmMs
 
     /** How often a session that needs a person reminds them, from Settings. */
     private val reminderMs: Long get() = settings.remindMinutes * 60_000L
@@ -80,21 +86,27 @@ class AgentRunner(
                 notify(current)
             }
             // **The setting decides, not the session's copy of it.** The person may have changed
-            // the interval since this session was written, and a tick is when that matters.
-            if (current.pollDue(now, pollMs) && current.project !in polling()) {
-                poll(current, now)
+            // the interval, the switch or the ceiling since this session was written, and a tick is
+            // when that matters.
+            if (current.warmDue(now, keepAlive, pollMs, warmMs) && current.project !in polling()) {
+                warm(current, now)
             }
         }
         changed(sessions.read())
     }
 
     /**
-     * Sends one poll, on the worker, and keeps the session in step with how it ended.
+     * Keeps one waiting conversation warm, on the worker, and keeps the session in step with it.
      *
-     * [now] is the tick that decided the poll was due, and the ending is dated by it: a session
-     * whose timing came from two clocks would back off to a time the state machine never chose.
+     * **A ping is not a turn and cannot end one.** Its only outcomes are "the cache is warm again"
+     * and "this one did not arrive": nothing is written into the conversation, nothing is parsed,
+     * and the session's state, sub-state and retry count are untouched by a success.
+     *
+     * [now] is the tick that decided the ping was due, and the clock moves to it either way: a
+     * session whose timing came from two clocks would land an hour away from where the state machine
+     * put it.
      */
-    private fun poll(session: AgentSession, now: Long) {
+    private fun warm(session: AgentSession, now: Long) {
         val project = session.project
         if (!ws.projectDir(project).isDirectory) {
             // A project that is gone takes its session with it, rather than polling a folder that
@@ -123,7 +135,7 @@ class AgentRunner(
             Trace.note("agent-gap", "$project · ${howLong(missed)}")
         }
         put(session.polled(now))
-        Trace.note("agent-poll", "$project · ${session.label(now)}")
+        Trace.note("agent-warm-due", "$project · ${session.label(now)}")
         val active = model()
         // **The model's own window, read from the choice rather than guessed.** A poll builds the
         // same limits a turn does, and a ceiling the screen and the runner disagree about is a trim
@@ -135,7 +147,7 @@ class AgentRunner(
         )
         val doorFor = door(active)
         worker.execute {
-            val end = try {
+            val warmth = try {
                 val log = AgentLog.open(ws.projectDir(project))
                 val agent = Agent(
                     ws.accountDir,
@@ -157,25 +169,40 @@ class AgentRunner(
                     backgroundMs = { settings.backgroundMs },
                     sessionBytes = settings.sessionBytes,
                 )
-                agent.poll() to log.rows()
+                agent.warm() to log.rows()
             } catch (t: Throwable) {
-                // What escapes the loop is the turn's own machinery rather than the transport, so
-                // it is retried on the ladder like a blip — the alternative is a poll that fails
-                // once and stops a session for good.
-                Agent.End.Stopped(Secrets.explain(t, "The poll could not run"), retryable = true) to
-                    emptyList()
+                // What escapes the ping is the app's own machinery rather than the transport, and it
+                // is the ladder's business for the same reason a refused key is: the alternative is
+                // a session that keeps pinging into a wall it cannot see.
+                Agent.Warm.Failed(Secrets.explain(t, "The conversation could not be kept warm"),
+                    stopping = true) to emptyList()
             }
-            val (how, rows) = end
+            val (how, rows) = warmth
             // **The tick's clock, not the wall's.** The whole point of `now` being a parameter is
             // that a session's timing is one number; mixing a test's clock with the phone's made
             // the retry ladder land an hour away from where the state machine had put it.
             val current = sessionOf(project) ?: session
-            put(how.onto(current, now))
+            // **Three answers, and only one of them touches the session.** Sent moves the clock; a
+            // refusal of the key or the credit goes on the ladder, because it will not heal by
+            // waiting; anything else is a ping missed and stays out of the session's story — a
+            // provider that will not take a one-token answer must not stop the person's work.
+            when (how) {
+                is Agent.Warm.Sent -> put(current.warmed(now))
+                is Agent.Warm.Failed -> {
+                    if (how.stopping) {
+                        // **The words travel with the ladder**, or the session stops saying only
+                        // "the pinned provider refused" when the provider said why.
+                        put(current.copy(lastWords = how.why).failed(now))
+                    } else {
+                        put(current.warmed(now))
+                    }
+                }
+            }
             // **One line when it comes back, with the count.** The other half of the design's rule:
             // an outage is bracketed — the first failure in the record, and this — rather than left
             // as fifteen `stopped` rows saying what one row and a number say.
             var shown = rows
-            if (session.retries > 0 && how !is Agent.End.Stopped) {
+            if (session.retries > 0 && how is Agent.Warm.Sent) {
                 try {
                     val record = AgentLog.open(ws.projectDir(project))
                     record.bookkeeping(

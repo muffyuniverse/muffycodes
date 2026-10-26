@@ -120,12 +120,12 @@ private fun AppRoot(viewModel: AppViewModel) {
      * The clock, while the app is on the screen.
      *
      * **Fifteen seconds is a decision, not an interval.** The tick does no work when nothing is
-     * due, and it is what turns "four minutes passed" into a poll within a quarter of a minute of
+     * due, and it is what turns "four minutes passed" into a ping within a quarter of a minute of
      * the right moment — cheap enough to be a coroutine, and coarse enough that it is not a
      * battery question. The state machine decides everything else; this only moves `now` along.
      *
      * The foreground service runs the same rules through the same [AgentRunner] when the app is
-     * not open — and while it is open, both tick. That is safe rather than wasteful: a poll writes
+     * not open — and while it is open, both tick. That is safe rather than wasteful: a ping writes
      * the session's own `lastPollAt` to disk *before* the request goes out, so whichever clock gets
      * there second reads a session that is not due. The clock is a parameter here, and nothing in
      * this file knows what time it is.

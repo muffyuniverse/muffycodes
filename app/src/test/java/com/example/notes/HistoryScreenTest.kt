@@ -90,7 +90,7 @@ class HistoryScreenTest {
      *
      * `waitUntil` throws when the condition never becomes true, so a test built only on
      * `waitFor`/`waitForGone` still fails when the screen is wrong. They are named
-     * "wait" because that is what they look like, and the three tests that use nothing
+     * "ping" because that is what they look like, and the three tests that use nothing
      * else say so here rather than each carrying the same paragraph.
      */
     private fun waitFor(text: String) {

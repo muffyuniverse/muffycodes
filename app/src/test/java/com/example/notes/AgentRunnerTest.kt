@@ -29,12 +29,21 @@ class AgentRunnerTest {
 
     private val app: android.app.Application get() = org.robolectric.RuntimeEnvironment.getApplication()
 
-    /** Answers every request with `wait`, and counts them. */
-    private class WaitDoor : Door {
-        val asked = mutableListOf<Request>()
+    /**
+     * Counts keepalive pings — **and fails loudly if the runner asks a turn**, because it never
+     * should: the tick's whole job is the cache, and a turn from here is a second door into a
+     * conversation the person is not talking in.
+     */
+    private class PingDoor(private val answer: () -> Result<Unit> = { Result.success(Unit) }) : Door {
+        val pings = mutableListOf<Request>()
+        var turns = 0
         override fun turn(request: Request): Result<Reply> {
-            asked.add(request)
-            return Result.success(Reply("", listOf(Call("call_${asked.size}", "wait", "{}"))))
+            turns++
+            return Result.success(Reply("nothing to do"))
+        }
+        override fun ping(request: Request): Result<Unit> {
+            pings.add(request)
+            return answer()
         }
     }
 
@@ -61,7 +70,7 @@ class AgentRunnerTest {
         root.deleteRecursively()
     }
 
-    private fun runner(door: Door = WaitDoor()): AgentRunner = AgentRunner(
+    private fun runner(door: Door = PingDoor()): AgentRunner = AgentRunner(
         ws = ws,
         git = git,
         settings = settings,
@@ -87,7 +96,7 @@ class AgentRunnerTest {
     @Test
     fun `asleep, a runner polls nothing and says nothing`() {
         on("shopping", now = 1_000)
-        val door = WaitDoor()
+        val door = PingDoor()
         val runner = runner(door)
 
         // A minute before it is due. This is the case that must be free: an idle phone that
@@ -95,25 +104,27 @@ class AgentRunnerTest {
         runner.tick(1_000 + 60_000)
         settle(runner)
 
-        assertTrue("no request", door.asked.isEmpty())
+        assertTrue("no request", door.pings.isEmpty())
+        assertEquals("and never a turn", 0, door.turns)
         assertTrue("and nothing said to anybody", notices.isEmpty())
         assertEquals("and the session is untouched", 1_000L, runner.sessions().single().lastPollAt)
     }
 
     @Test
-    fun `at its own due time a runner polls once and writes it down`() {
+    fun `at its own due time the conversation is warmed once, and nothing is asked`() {
         on("shopping", now = 1_000)
-        val door = WaitDoor()
+        val door = PingDoor()
         val runner = runner(door)
         val due = runner.sessions().single().nextPollAt
 
         runner.tick(due)
         settle(runner)
 
-        assertEquals("one request", 1, door.asked.size)
+        assertEquals("one ping", 1, door.pings.size)
+        assertEquals("and not one turn", 0, door.turns)
         val session = runner.sessions().single()
         assertEquals("claimed at the tick", due, session.lastPollAt)
-        assertEquals("and waiting again", AgentSession.Sub.WAITING, session.sub)
+        assertEquals("and still waiting", AgentSession.Sub.WAITING, session.sub)
     }
 
     @Test
@@ -123,7 +134,7 @@ class AgentRunnerTest {
         // double spend. Without the claim, one person looking at their phone would cost two
         // requests every four minutes for as long as the app was open.
         on("shopping", now = 1_000)
-        val floor = WaitDoor()
+        val floor = PingDoor()
         val screen = runner(floor)
         val service = runner(floor)
         val due = service.sessions().single().nextPollAt
@@ -133,7 +144,7 @@ class AgentRunnerTest {
         settle(screen)
         settle(service)
 
-        assertEquals("one request between them", 1, floor.asked.size)
+        assertEquals("one ping between them", 1, floor.pings.size)
     }
 
     // ---- what the phone took, and what it did not ---------------------------
@@ -146,7 +157,7 @@ class AgentRunnerTest {
         // took no time; the session then polls and carries on, because "it must never stop until the
         // operator removes it" is the stronger rule.
         on("shopping", now = 1_000)
-        val door = WaitDoor()
+        val door = PingDoor()
         val runner = runner(door)
 
         runner.tick(1_000 + 3 * 60 * 60 * 1000L + 12 * 60_000L)
@@ -160,7 +171,7 @@ class AgentRunnerTest {
             gap.body,
         )
         assertEquals("and it is the app's row, not the model's", AgentLog.APP, gap.ctx)
-        assertEquals("the agent goes on", 1, door.asked.size)
+        assertEquals("the agent goes on", 1, door.pings.size)
         assertEquals("idle", AgentSession.State.IDLE, runner.sessions().single().state)
         assertTrue(
             "and the trace says it",
@@ -219,41 +230,55 @@ class AgentRunnerTest {
         )
     }
 
-    // ---- what a poll does to the session -----------------------------------
+    // ---- what a ping does to the session ------------------------------------
 
     @Test
-    fun `a poll that waits leaves the session idle, and one that asks wakes the person`() {
+    fun `the switch in settings stops every ping on the phone`() {
+        // **One switch, and it is the person's.** Off means nothing goes out while the agent waits:
+        // no cache is kept warm, nothing is spent, and the conversation is exactly as the last turn
+        // left it — the next sentence they type pays for a fresh prompt, which is the trade.
         on("shopping", now = 1_000)
-        val waiting = runner(WaitDoor())
-        waiting.tick(1_000 + AgentSession.POLL_MS)
-        settle(waiting)
-        assertEquals("idle", AgentSession.State.IDLE, waiting.sessions().single().state)
-        assertTrue("and nobody was told", notices.isEmpty())
+        val door = PingDoor()
+        settings.setKeepAlive(false)
+        val runner = runner(door)
 
-        // Now a poll whose answer is a question.
-        on("shopping", now = 1_000)
-        val asking = runner(
-            ScriptedDoor(Reply("", listOf(Call("c1", "ask", """{"question":"Which branch?"}"""))))
-        )
-        asking.tick(1_000 + AgentSession.POLL_MS)
-        settle(asking)
+        runner.tick(1_000 + 10 * AgentSession.POLL_MS)
+        settle(runner)
 
-        val session = asking.sessions().single()
-        assertEquals("asked", AgentSession.State.ASKED, session.state)
-        assertEquals("and the person was told once", 1, notices.size)
-        assertTrue("in the words the reminder uses", notices.single().notice()!!.contains("asked something"))
+        assertTrue("nothing was sent", door.pings.isEmpty())
+        assertEquals("and the clock did not move", 1_000L, runner.sessions().single().lastPollAt)
+
+        // Back on, and the same tick that did nothing now warms.
+        settings.setKeepAlive(true)
+        runner.tick(1_000 + 10 * AgentSession.POLL_MS)
+        settle(runner)
+        assertEquals("one ping", 1, door.pings.size)
     }
 
     @Test
-    fun `a poll that cannot reach the provider reconnects rather than stopping`() {
+    fun `a ping leaves the session exactly where it was, and tells nobody`() {
+        // **A ping is not a turn.** It cannot ask, cannot conclude and cannot stop anything: the
+        // session's state, sub-state and retries are what the last real turn left, and the only
+        // thing a ping moves is the clock.
         on("shopping", now = 1_000)
-        var attempts = 0
-        val door = object : Door {
-            override fun turn(request: Request): Result<Reply> {
-                attempts++
-                return Result.failure(IllegalStateException("OpenRouter answered 503"))
-            }
-        }
+        val waiting = runner(PingDoor())
+        waiting.tick(1_000 + AgentSession.POLL_MS)
+        settle(waiting)
+
+        val session = waiting.sessions().single()
+        assertEquals("idle", AgentSession.State.IDLE, session.state)
+        assertEquals("waiting, as it was", AgentSession.Sub.WAITING, session.sub)
+        assertEquals("and the clock moved", 1_000 + AgentSession.POLL_MS, session.lastPollAt)
+        assertTrue("and nobody was told", notices.isEmpty())
+    }
+
+    @Test
+    fun `a ping that does not arrive is missed, and the session is not stopped for it`() {
+        // A provider that will not take a one-token answer, a tunnel, a Doze window: a courtesy that
+        // did not arrive. Nothing is retried in a burst, nothing is written into the record, and the
+        // session is where it was — the next tick tries again an interval later.
+        on("shopping", now = 1_000)
+        val door = PingDoor { Result.failure(IllegalStateException("OpenRouter answered 400")) }
         val runner = runner(door)
 
         runner.tick(1_000 + AgentSession.POLL_MS)
@@ -261,37 +286,33 @@ class AgentRunnerTest {
 
         val session = runner.sessions().single()
         assertEquals("still on", AgentSession.State.IDLE, session.state)
-        assertEquals("reconnecting", AgentSession.Sub.RECONNECTING, session.sub)
-        assertEquals("after one try", 1, session.retries)
-        assertTrue("and the next attempt is seconds away, not minutes", session.nextPollAt < 1_000 + AgentSession.POLL_MS + 10_000)
-        // A session that needs nobody does not wake anybody: a tunnel is not a question.
-        assertTrue("and nobody was woken up for it", notices.isEmpty())
+        assertEquals("not even reconnecting: a ping has no ladder", 0, session.retries)
+        assertEquals("and the clock moved so the next try is an interval away", 1_000 + AgentSession.POLL_MS, session.lastPollAt)
+        assertTrue(
+            "the trace says it did not arrive",
+            Trace.report().lines.any { it.contains("agent-warm-failed") },
+        )
     }
 
     @Test
-    fun `an outage is written down once, and its end carries the count`() {
-        // **One outage, not eight events.** Each failed attempt used to leave a `stopped` row in
-        // the record; eight of them say what one row and a number say, and the next clear-up has to
-        // carry all eight.
+    fun `a key that was refused goes on the ladder, and the outage is written down once`() {
+        // **The one refusal a ping may act on**, because it will not heal by waiting. The ladder is
+        // the app's usual one, so the person learns about a dead key with the session stopped — and
+        // the outage is one row and a count rather than eight events.
         on("shopping", now = 1_000)
         var down = true
-        val door = object : Door {
-            override fun turn(request: Request): Result<Reply> =
-                if (down) {
-                    Result.failure(IllegalStateException("OpenRouter answered 503"))
-                } else {
-                    Result.success(Reply("", listOf(Call("c1", "wait", "{}"))))
-                }
+        val door = PingDoor {
+            if (down) Result.failure(Refused(401, "OpenRouter answered 401: no such key"))
+            else Result.success(Unit)
         }
         val runner = runner(door)
         val log = AgentLog.open(File(ws.accountDir, "shopping"))
 
         runner.tick(1_000 + AgentSession.POLL_MS)
         settle(runner)
-        val afterFirst = log.rows().count { it.name == "stopped" }
-        assertEquals("the first failure is in the record", 1, afterFirst)
+        assertEquals("one try", 1, runner.sessions().single().retries)
+        assertEquals("and the refusal is the session's words", true, runner.sessions().single().lastWords.contains("401"))
 
-        // Two more attempts while it is still down.
         repeat(2) {
             val at = runner.sessions().single().nextPollAt
             runner.tick(at)
@@ -299,8 +320,8 @@ class AgentRunnerTest {
         }
         assertEquals("after three attempts", 3, runner.sessions().single().retries)
         assertEquals(
-            "still one row about it",
-            afterFirst,
+            "the first failure is in the record, and only it",
+            1,
             log.rows().count { it.name == "stopped" },
         )
 
@@ -318,22 +339,26 @@ class AgentRunnerTest {
     }
 
     @Test
-    fun `a first failure that is not retried is not called a reconnect`() {
-        // The count belongs to the ladder, so a poll that fails from rest says nothing about
-        // reconnecting — there was nothing to reconnect from.
+    fun `a session that asked is warmed too, and a stopped one is not`() {
+        // **The two states that were left to go cold.** A question is the thing most likely to be
+        // answered next, and a concluded agent is one the person will add to — both had no ping at
+        // all, because a poll was something only `wait` asked for.
         on("shopping", now = 1_000)
-        val door = object : Door {
-            override fun turn(request: Request): Result<Reply> =
-                Result.failure(IllegalStateException("OpenRouter answered 503"))
-        }
+        val sessions = AgentSessions(ws.accountDir)
+        sessions.put(sessions.read().single().asked(1_000))
+        val door = PingDoor()
         val runner = runner(door)
-        val log = AgentLog.open(File(ws.accountDir, "shopping"))
 
         runner.tick(1_000 + AgentSession.POLL_MS)
         settle(runner)
+        assertEquals("a question is kept warm", 1, door.pings.size)
+        assertEquals("and it is still a question", AgentSession.State.ASKED, runner.sessions().single().state)
 
-        assertTrue("no reconnect row", log.rows().none { it.name == "retry" })
-        assertEquals("but the failure is there", 1, log.rows().count { it.name == "stopped" })
+        // The person stops it: nothing more is spent on a conversation they switched off.
+        runner.stop("shopping")
+        runner.tick(1_000 + 10 * AgentSession.POLL_MS)
+        settle(runner)
+        assertEquals("and a stopped session is left alone", 1, door.pings.size)
     }
 
     @Test
@@ -359,7 +384,7 @@ class AgentRunnerTest {
 
         // Answering it — the session stops needing anybody — ends the ladder.
         val asked = runner.sessions().single()
-        AgentSessions(ws.accountDir).put(asked.waited(2_000 + 11 * 60_000))
+        AgentSessions(ws.accountDir).put(asked.resumed(2_000 + 11 * 60_000))
         runner.tick(2_000 + 20 * 60_000)
 
         assertEquals("nothing more once dealt with", 2, notices.size)

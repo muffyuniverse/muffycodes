@@ -31,8 +31,8 @@ middle of the current one.
 `①` comes before `②` in the system message, and the separator between them is
 `AgentPrompt.SEPARATOR`. A provider's implicit cache matches on the longest common prefix, so
 editing ② costs a re-read of ② and of the rows below it — never of ①. Nothing in the request
-carries a clock: the repeated `wait` is written `app` and never enters the request, so every poll
-of one turn is the same bytes.
+carries a clock: the keepalive's own rows are written `app` and never enter the request, so every
+ping of one conversation is the same bytes.
 
 **A default that changed is replaced; an edited file never is.** ① is written when the file is
 missing, and also when it is byte-for-byte one of the texts the app shipped before
@@ -46,14 +46,14 @@ exists.
 14:02:11.410    1 TOLD    in  operator  rename milk.txt to dairy.txt
 14:02:18.902    2 CALL    in  tree      {"path":"GitHub"}
 14:02:18.955    3 GOT     in  tree      0 · GitHub/ GitHub/milk.txt
-14:06:11.007    4 CALL    app wait      {}
+14:06:11.007    4 NOTE    app ping      kept warm
 14:11:03.418    5 CALL    in  forget    {"ids":[2,3]}
 14:11:03.421    6 GOT     in  forget    0 · forgot 2 rows. The task is still 1.
 ```
 
 | column | meaning |
 |---|---|
-| time | when the app wrote it. The model never sees it: `TURN`, the repeated `wait`, the gap row and the trim markers are `app` |
+| time | when the app wrote it. The model never sees it: `TURN`, the keepalive's `ping`, the gap row and the trim markers are `app` |
 | id | the row's handle. `forget` takes ids; the box and `read` take **lines**, which is why the clear-up index names both |
 | kind | `TOLD` · `TURN` · `CALL` · `GOT` · `ASK` · `CONCLUDE` · `NOTE` |
 | ctx | `in` — the model is sent it · `out` — the agent called `forget` on it · `app` — the app wrote it |
@@ -84,7 +84,7 @@ empty is a context it can quietly restart from; a person restarting it is a diff
 6. Over the trigger, the app appends one line to the system message — the sizes, the target, and
    the biggest rows by **line** and id. The same bytes for the rest of the turn.
 7. Every call: a `CALL` row, the tool, a `GOT` row whose first line is `0` or `1`.
-8. An ending (`ask`, `conclude`, `wait`, stopped) — one trace line, and the session moves.
+8. An ending (`ask`, `conclude`, words alone, stopped) — one trace line, and the session moves.
 9. `trimSession` — the app's own limit on the evidence, at a burst boundary, oldest first.
 
 **A call with no result is an illegal conversation**, so two things keep the record legal: a
@@ -98,9 +98,9 @@ behind, and puts the seal in the context only when its call is in the context.
 |---|---|
 | what was the model sent? | `agent/session.log`, the `in` rows in order |
 | what did the agent decide to forget? | the `out` rows, in order |
-| what is the app's own bookkeeping? | the `app` rows: `TURN`, `wait`, `trimmed`, `forgot`, `gap`, `retry`, `reset` |
+| what is the app's own bookkeeping? | the `app` rows: `TURN`, `ping`, `trimmed`, `forgot`, `gap`, `retry`, `reset` |
 | which request was which? | `TURN` rows, and the box's `‹ n of m ›` |
 | which model and endpoint answered? | the trace, `agent-request`, once per turn the person started |
 | why did a turn stop? | the `stopped` note in the record, and the trace's `agent … stopped:` |
-| why is a poll late or missing? | the trace, `agent-poll` and `agent-gap` |
+| why is a conversation not warm? | the trace, `agent-warm`, `agent-warm-failed` and `agent-gap` |
 | what did a press do? | the trace, `TAP …` then its answer |

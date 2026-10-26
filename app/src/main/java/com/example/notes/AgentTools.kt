@@ -119,7 +119,6 @@ class AgentTools(
             "reason" to setOf("text"),
             "ask" to setOf("question"),
             "conclude" to setOf("text"),
-            "wait" to emptySet(),
         )
 
         /** The keys [args] carries that [tool] does not take, in the order the model wrote them. */
@@ -234,12 +233,6 @@ class AgentTools(
                 "conclude",
                 "End the turn: the work is done. Say what you did. Called alone.",
                 """{"text":"what you did"}""",
-            ),
-            spec(
-                "wait",
-                "End the turn and stay idle until the person speaks. Called alone. The app checks " +
-                    "on you at the interval the operator set; you do not choose it.",
-                """{}""",
             ),
         )
 

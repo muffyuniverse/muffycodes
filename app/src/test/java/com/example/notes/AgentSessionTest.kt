@@ -25,46 +25,90 @@ class AgentSessionTest {
 
     private val minute = 60_000L
 
-    // ---- the poll's clock ---------------------------------------------------
+    // ---- the keepalive's clock ----------------------------------------------
 
     @Test
-    fun `a poll is due after four minutes and not a millisecond before`() {
-        val s = session().polled(at = 1_000).waited(1_000)
+    fun `a ping is due after four minutes and not a millisecond before`() {
+        val s = session().warmed(1_000)
 
         assertFalse(
             "not at four minutes minus one",
-            s.pollDue(1_000 + AgentSession.POLL_MS - 1),
+            s.warmDue(1_000 + AgentSession.POLL_MS - 1, keepAlive = true),
         )
-        assertTrue("but at four minutes exactly", s.pollDue(1_000 + AgentSession.POLL_MS))
+        assertTrue("but at four minutes exactly", s.warmDue(1_000 + AgentSession.POLL_MS, keepAlive = true))
     }
 
     @Test
-    fun `the next poll is one interval after the last one, not one after now`() {
+    fun `the switch turns the pings off, and nothing else does`() {
+        val s = session().warmed(0)
+        val due = AgentSession.POLL_MS
+
+        assertFalse("off means silent", s.warmDue(due, keepAlive = false))
+        assertTrue("on means due", s.warmDue(due, keepAlive = true))
+    }
+
+    @Test
+    fun `the ceiling runs from when the wait began, not from the last ping`() {
+        // **The arithmetic that makes the ceiling mean anything.** Twelve pings of cache read cost
+        // about what one cold prompt costs to write, so an hour is where keeping warm stops paying —
+        // and a ceiling measured from each success would never arrive, because every ping would push
+        // it along.
+        val half = 30 * minute
+        val s = session().asked(at = 1_000).warmed(at = 1_000 + half)
+
+        assertTrue(
+            "half an hour in, still warm",
+            s.warmDue(1_000 + half + AgentSession.POLL_MS, keepAlive = true, forAt = 60 * minute),
+        )
+        assertFalse(
+            "an hour after the question it stops, however many pings have landed",
+            s.warmDue(1_000 + 60 * minute, keepAlive = true, forAt = 60 * minute),
+        )
+        assertTrue(
+            "and a ceiling of zero means until the person speaks",
+            s.warmDue(1_000 + 60 * minute, keepAlive = true, forAt = 0),
+        )
+    }
+
+    @Test
+    fun `the next ping is one interval after the last one, not one after now`() {
         // A clock consulted at "now + interval" drifts by however late the tick was: four minutes
         // of work plus four minutes of waiting is not a four-minute interval, and an agent left
-        // overnight would poll half as often as it promised.
-        val s = session().polled(at = 0).waited(0)
+        // overnight would ping half as often as it promised.
+        val s = session().warmed(0)
         val late = 0 + AgentSession.POLL_MS + 9_000
 
-        assertEquals("the interval starts at the poll", AgentSession.POLL_MS, s.nextPollAt)
-        assertEquals("so a late tick does not move it", AgentSession.POLL_MS, s.polled(late).nextPollAt - late)
+        assertEquals("the interval starts at the ping", AgentSession.POLL_MS, s.nextPollAt)
+        assertEquals(
+            "so a late tick does not move it",
+            AgentSession.POLL_MS,
+            s.warmed(late).nextPollAt - late,
+        )
     }
 
     @Test
-    fun `an agent that asked, concluded or is reconnecting is not polled`() {
+    fun `an agent that asked or concluded is kept warm, and one that is reconnecting is not`() {
+        // **The two states that used to be left to go cold.** A question is the likeliest thing to
+        // be answered next, and a finished agent is one the person will add to; neither had a ping,
+        // because a poll was something only `wait` asked for.
         val asked = session().asked(at = 10)
-        assertFalse("asked is waiting for a person, not for the clock", asked.pollDue(10 + 10 * minute))
+        assertTrue("a question is kept warm", asked.warmDue(10 + 10 * minute, keepAlive = true))
 
-        val done = session().concluded()
-        assertFalse("finished has nothing to do", done.pollDue(10 + 10 * minute))
+        val done = session().concluded(at = 10)
+        assertTrue("and so is a conclusion", done.warmDue(10 + 10 * minute, keepAlive = true))
+
+        val stopped = done.stopped(StopReason.BY_OPERATOR)
+        assertFalse("a session the person stopped is not", stopped.warmDue(10 + 10 * minute, keepAlive = true))
 
         val retrying = session().polled(0).failed(at = AgentSession.POLL_MS)
-        assertFalse("a retry waits for its own ladder, not the interval", retrying.pollDue(AgentSession.POLL_MS + 500))
-        assertTrue("and fires at the retry's time", retrying.pollDue(AgentSession.POLL_MS + 1_000))
+        assertFalse(
+            "and a reconnecting one is already trying",
+            retrying.warmDue(AgentSession.POLL_MS + 500, keepAlive = true),
+        )
     }
 
     @Test
-    fun `one dropped poll does not end the session, and the ladder backs off to four seconds`() {
+    fun `one dropped request does not end the session, and the ladder backs off to four seconds`() {
         // The retry ladder exists for a tunnel through a train. If a failure stopped the session,
         // the design's own promise — "must never stop until the operator removes it" — would be
         // false the first time a phone changed networks.
@@ -83,12 +127,12 @@ class AgentSessionTest {
     }
 
     @Test
-    fun `a timer that fires twice in one interval polls once`() {
-        // The shell is allowed to tick often; the session is the thing that decides. A poll that
+    fun `a timer that fires twice in one interval pings once`() {
+        // The shell is allowed to tick often; the session is the thing that decides. A ping that
         // spent money twice per interval would be the app's own bug, not the operator's.
-        val s = session().polled(at = 0)
-        assertFalse("not again in the same interval", s.pollDue(AgentSession.POLL_MS - 1))
-        assertTrue("and the first moment of the next one", s.pollDue(AgentSession.POLL_MS))
+        val s = session().warmed(at = 0)
+        assertFalse("not again in the same interval", s.warmDue(AgentSession.POLL_MS - 1, keepAlive = true))
+        assertTrue("and the first moment of the next one", s.warmDue(AgentSession.POLL_MS, keepAlive = true))
     }
 
     // ---- the reminder ladder ------------------------------------------------
@@ -135,7 +179,7 @@ class AgentSessionTest {
 
     @Test
     fun `a healthy agent is silent, however long it waits`() {
-        val waiting = session().polled(0).waited(0)
+        val waiting = session().warmed(0)
 
         assertNull("nothing to say about an agent in wait", waiting.notice())
         assertFalse("and nothing to remind", waiting.reminderDue(100 * 60 * minute))
@@ -167,7 +211,7 @@ class AgentSessionTest {
         // four minutes and did not for three hours was not running. It is written down rather than
         // turned into a stopped state — the session is about to carry on, and a label saying
         // "stopped" about a session that is running would be the label lying about the fact.
-        val on = session().waited(0).copy(lastPollAt = 1_000)
+        val on = session().warmed(0).copy(lastPollAt = 1_000)
 
         // **The default interval's gap.** The session has no interval set, so it is polled every
         // POLL_MS and the gap is three of those — the number the app used before the interval became
@@ -221,7 +265,7 @@ class AgentSessionTest {
     fun `answering the question puts the reminder ladder back to nothing`() {
         // The trap: the count survives the answer, so the *next* question's first reminder is
         // already called "4th" and fires immediately.
-        val answered = session().asked(at = 0).reminded().reminded().waited(at = 10_000)
+        val answered = session().asked(at = 0).reminded().reminded().resumed(at = 10_000)
         val next = answered.asked(at = 20_000)
 
         assertEquals("no reminders spent", 0, next.reminders)
@@ -274,33 +318,33 @@ class AgentSessionTest {
     /**
      * The interval is the operator's, and 250 seconds is the ceiling.
      *
-     * The agent says only that it is idle; how often the app comes back is a decision about a phone
-     * and a provider bill. Two claims: a session given an interval polls at it, and one given more
-     * than the cap polls at the cap rather than never.
+     * **A phone and a provider bill**, not the agent's opinion: the app comes back at the number the
+     * person chose. Two claims: a session given an interval is warmed at it, and one given more than
+     * the cap is warmed at the cap rather than never.
      */
     @Test
-    fun `an idle agent is polled at the interval the operator set`() {
-        val everyMinute = session().waited(0).withInterval(60_000)
+    fun `a waiting conversation is warmed at the interval the operator set`() {
+        val everyMinute = session().warmed(0).withInterval(60_000)
 
-        assertFalse("not due before it", everyMinute.pollDue(59_999))
-        assertTrue("due at it", everyMinute.pollDue(60_000))
+        assertFalse("not due before it", everyMinute.warmDue(59_999, keepAlive = true))
+        assertTrue("due at it", everyMinute.warmDue(60_000, keepAlive = true))
         assertEquals(
             "and the design's own when none is set",
             AgentSession.POLL_MS,
-            session().waited(0).intervalMs,
+            session().warmed(0).intervalMs,
         )
     }
 
     @Test
     fun `an interval past the cap is the cap, not the number asked for`() {
         // A hand-set file could hold anything; the ceiling is what keeps a session visible.
-        val tooLong = session().waited(0).withInterval(60 * 60 * 1000L)
+        val tooLong = session().warmed(0).withInterval(60 * 60 * 1000L)
 
         assertEquals(AgentSession.MAX_IDLE_MS, tooLong.idleMs.coerceAtMost(AgentSession.MAX_IDLE_MS))
         assertTrue(
-            "a check is owed by the ceiling",
+            "a ping is owed by the ceiling",
             tooLong.copy(idleMs = AgentSession.MAX_IDLE_MS)
-                .pollDue(AgentSession.MAX_IDLE_MS),
+                .warmDue(AgentSession.MAX_IDLE_MS, keepAlive = true),
         )
     }
 }

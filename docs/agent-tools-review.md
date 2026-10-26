@@ -21,11 +21,16 @@ followed it; the decisions in them are what this says, and the plan that impleme
 | `background` | `tool`, `args` | any command, with its result written to a file instead of into the conversation |
 | `reason` | `text` | the agent's own note in the record |
 | `forget` | `ids` | takes rows out of the context; the whole of compaction |
-| `ask`, `conclude`, `wait` | — | end the turn. Called alone |
+| `ask`, `conclude` | — | end the turn. Called alone |
 
 There is no `clone`. Cloning a repository is the operator's, through the add-project window — the
 agent never needed it, and naming a tool `clone` while it meant `git clone` is what made the whole
 conversation confusing.
+
+There is no `wait` either. It was the app's own job written as the model's: a request every four
+minutes whose whole answer was the word "wait". The app sends that request itself, for one token it
+does not read (**keepalive**), so an agent with nothing to call concludes — and a turn ends in two
+ways rather than three.
 
 ## 2. The rules that hold everywhere
 
@@ -59,6 +64,19 @@ commands" — a read of a huge log, a tree of a huge project and a history of a 
 times are all slow on a phone. Each asks `Deadline.check` inside its own loop. Commands that write
 once (`create`, `edit`, `move`) either finished or never started when the time passes; `delete` is the
 one command that can stop half way, and it says so rather than claiming nothing happened.
+
+**The app keeps the conversation warm, and the agent does not.** While a session waits on the
+person — an agent that asked, and one that finished — the app re-sends the identical request every
+interval the operator set, with `max_tokens: 1`, and throws the answer away. That is a cache read of
+the prompt instead of the cache going cold, and the next sentence the person types is cheap. Nothing
+enters the conversation (the rows are the app's own), so every ping is the same bytes as the last;
+a switch, the interval and a ceiling are the operator's, and the ceiling is an hour because about
+twelve pings of cache read cost what one cold prompt costs to write. A ping that fails is **not** the
+session failing: only a refused key or an empty balance goes on the retry ladder, and everything else
+is a courtesy that did not arrive.
+
+**A turn can also end with words.** A reply with no call is a conclusion: the words are the answer,
+and a session is not stopped because the model answered in prose instead of calling `conclude`.
 
 **`background` takes any command.** Its answer — the path — comes back **before the work starts**, so
 it never holds a turn open; the command's own limit is the operator's *background* number, applied to

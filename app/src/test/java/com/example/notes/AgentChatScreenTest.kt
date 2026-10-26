@@ -203,17 +203,20 @@ class AgentChatScreenTest {
 
     @Test
     fun `an idle agent is one line, not a turn`() {
-        // A `wait` ends the burst, so one burst holds one poll. A conversation that holds many
-        // is what the four-minute timer will write — [AgentChatTest] pins the collapsing; this
-        // pins that a real poll reaches the box as the line it is meant to be.
-        val door = ScriptedDoor(Reply("", listOf(call("wait", "{}"))))
+        // **A real ping, through the app's own clock.** The conversation ends with a conclusion, and
+        // the four-minute tick keeps it warm: the rows a ping writes reach the screen as the line
+        // they are meant to be — [AgentChatTest] pins the collapsing, this pins the wiring.
+        val door = ScriptedDoor(Reply("", listOf(call("conclude", """{"text":"Nothing to do."}"""))))
 
         chat(door)
+        scene.viewModel.startAgent("groceries")
         say("anything new?")
-        scene.await("the idle line") {
-            scene.viewModel.chatBox?.idle?.contains("1 check") == true &&
-                !scene.viewModel.chatWorking
-        }
+        scene.await("the turn") { door.asked.size == 1 && !scene.viewModel.chatWorking }
+
+        val due = scene.viewModel.sessionOf("groceries")!!.nextPollAt
+        scene.viewModel.tickAgents(due)
+        scene.await("the ping") { door.pings.size == 1 }
+        scene.await("the idle line") { scene.viewModel.chatBox?.idle?.contains("1 check") == true }
         compose.waitForIdle()
 
         compose.onNodeWithText("anything new?", substring = true).assertExists()

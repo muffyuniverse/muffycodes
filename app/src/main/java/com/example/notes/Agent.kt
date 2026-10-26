@@ -102,9 +102,6 @@ class Agent(
         /** The work is done. */
         data class Concluded(val said: String) : End()
 
-        /** Idle until the person speaks. */
-        data object Waited : End()
-
         /**
          * The person spoke while the agent was working, so the turn was abandoned.
          *
@@ -136,7 +133,6 @@ class Agent(
             get() = when (this) {
                 is Asked -> "asked"
                 is Concluded -> "concluded"
-                Waited -> "idle"
                 is Interrupted -> "interrupted"
                 is Stopped -> "stopped"
             }
@@ -151,7 +147,6 @@ class Agent(
             get() = when (this) {
                 is Asked -> question
                 is Concluded -> said
-                Waited -> Agent.WAITING
                 is Interrupted -> why
                 is Stopped -> why
             }
@@ -188,8 +183,7 @@ class Agent(
 
         fun after(session: AgentSession, now: Long): AgentSession = when (this) {
             is Asked -> session.asked(now)
-            is Concluded -> session.concluded()
-            Waited -> session.waited(now)
+            is Concluded -> session.concluded(now)
             // **The person speaking does not change the session.** The agent is still on and the
             // words that interrupted it are the next turn; a stop is the only thing here that
             // switches anything off.
@@ -211,10 +205,28 @@ class Agent(
         fun plainly(): String = when (this) {
             is Asked -> "The agent asked something"
             is Concluded -> "The agent finished"
-            Waited -> "The agent is waiting"
             is Interrupted -> "The agent was cut short by what you said"
             is Stopped -> why
         }
+    }
+
+    /**
+     * What one keepalive ping did. **Not an [End]**, because a ping cannot end a turn.
+     *
+     * The distinction is the feature: an ending moves the session, and a ping that could move the
+     * session would be a model able to stop itself by failing. [Failed.stopping] is the one thing a
+     * ping may act on, and only when the refusal is the person's to fix — a key or an empty balance.
+     */
+    sealed class Warm {
+        /** Sent, and the cache is warm again. Nothing else happened. */
+        data object Sent : Warm()
+
+        /**
+         * It was not sent. [stopping] when the ladder should take over, which it does only for a
+         * refusal of the key or the credit: everything else — a provider that will not take a
+         * one-token answer, a tunnel, a Doze window — is a ping missed, not a session stopped.
+         */
+        data class Failed(val why: String, val stopping: Boolean = false) : Warm()
     }
 
     companion object {
@@ -227,16 +239,18 @@ class Agent(
          */
         const val MAX_REQUESTS = 40
 
-        /**
-         * What `wait` answers, in the context and in the evidence.
-         *
-         * A constant on purpose: a number that changed ("3 changes since you last looked") would
-         * make every poll a different request, which is the one thing the poll cannot be.
-         */
-        const val WAITING = "0\ncontinue waiting"
-
         /** Why a turn was cut short by the person stopping the agent. */
         const val BY_OPERATOR = "the agent was stopped"
+
+        /**
+         * The refusals that are the person's to fix, and so the only ones a ping may hand to the
+         * ladder: the key was refused (401/403) or the credit ran out (402).
+         *
+         * Everything else — a provider that will not take a one-token answer, a tunnel, a Doze
+         * window — is a courtesy that did not arrive, and a session stopped over one of those would
+         * be the app charging a mistake in its own keepalive to the person's work.
+         */
+        val KEY_REFUSALS = setOf(401, 402, 403)
 
         /** How many rows the clear-up line names. Five is enough to make a dent; more is a list. */
         const val BIGGEST_ROWS = 5
@@ -251,14 +265,42 @@ class Agent(
     fun burst(operator: String, progress: () -> Unit = {}): End = turn(operator, progress)
 
     /**
-     * One poll: the same request, sent again, with nothing new said.
+     * The keepalive: the same conversation, sent again for the provider's cache.
      *
-     * **No `TOLD` row, because the person did not say anything.** A poll is the app keeping a
-     * promise — every four minutes, the identical request — so writing the operator's message
-     * again would put words in their mouth and change the one part of the context that has to
-     * stay byte-identical. The agent's own reply is recorded like any other turn.
+     * **Nothing is written into the context and nothing is read back.** A ping asks for one token
+     * (see [Door.PING_TOKENS]) and drops the answer, so the conversation the person will add to is
+     * the one that was kept warm, byte for byte — which is the whole economy of it. Two rows go into
+     * the evidence, both bookkeeping: the box shows the check, the model never sees it.
+     *
+     * **No `TOLD` row either.** The person did not say anything, and the words they will say next
+     * are the only thing that may change that part of the context.
+     *
+     * The request is built by [build], the same function a turn uses, so the ping is the turn the
+     * person is about to take. It can trim the context if the app's own limit says so, exactly as a
+     * turn would: a limit the app enforces only when somebody is talking is not a limit.
      */
-    fun poll(progress: () -> Unit = {}): End = turn(null, progress)
+    fun warm(): Warm {
+        val layers = AgentPrompt.read(accountDir, tools.projectDir)
+        val request = try {
+            build(layers, readOpening(layers, log, AgentTools.specs()), clearedUp = false)
+        } catch (t: Throwable) {
+            return Warm.Failed(Secrets.explain(t, "The conversation could not be kept warm"))
+        }
+        return door.ping(request).fold(
+            onSuccess = {
+                log.bookkeeping(AgentLog.TURN, "turn", "ping")
+                log.bookkeeping(AgentLog.NOTE, "ping", "kept warm")
+                Trace.note("agent-warm", "$project · ${request.shape}")
+                Warm.Sent
+            },
+            onFailure = { t ->
+                val said = Secrets.explain(t, "The conversation could not be kept warm")
+                val code = (t as? Refused)?.code ?: (t.cause as? Refused)?.code
+                Trace.note("agent-warm-failed", "$project · $said")
+                Warm.Failed(said, stopping = code != null && code in KEY_REFUSALS)
+            },
+        )
+    }
 
     /**
      * One turn, and the two things that happen however it ends.
@@ -406,13 +448,19 @@ class Agent(
         return End.Concluded(said)
     }
 
-    /** Idle until the person speaks: [waited], which is the whole of what a poll does. */
+    /**
+     * A terminating call, obeyed — **one of two, because the app does the waiting now.**
+     *
+     * `wait` used to be the third, and it was the app's own job written as the model's: a request
+     * every four minutes whose reply was the word "wait". The app sends that request itself, with a
+     * one-token answer and no model turn to pay for, so an agent that cannot act has nothing to say
+     * — it concludes, or it asks.
+     */
     private fun leave(call: Call, reply: Reply): End {
         val args = argsOf(call)
         return when (call.tool) {
             "ask" -> asked(call, args, reply)
-            "conclude" -> concluded(call, args, reply)
-            else -> waited(call)
+            else -> concluded(call, args, reply)
         }
     }
 
@@ -427,34 +475,6 @@ class Agent(
         org.json.JSONObject(call.args.ifBlank { "{}" })
     } catch (e: Exception) {
         org.json.JSONObject()
-    }
-
-    /**
-     * `wait` ends the turn, and only its first pair reaches the context.
-     *
-     * The evidence keeps every poll — fifteen rows an hour, which is why that file's limit is
-     * generous — while the working context keeps the first call and its result and nothing after,
-     * because a context that grew a timestamped row every four minutes would never be the same
-     * request twice, and the poll is only cheap because it is a cache hit.
-     *
-     * **The result is written once, even though the tool never runs.** `wait` is terminating, so
-     * nothing answers it in the loop — and a context whose last assistant message calls a tool
-     * with no result is a request every endpoint refuses. The pair is what keeps the rebuilt
-     * conversation legal while the agent is idle.
-     */
-    private fun waited(call: Call): End {
-        val first = log.contextRows().none { it.kind == AgentLog.CALL && it.name == "wait" }
-        if (first) {
-            log.call(call.tool, call.args)
-            log.got(call.tool, WAITING)
-            log.note("idle", "waiting for the operator")
-        } else {
-            // Session only, both rows: the box still sees the poll, the model does not.
-            log.bookkeeping(AgentLog.CALL, call.tool, call.args)
-            log.bookkeeping(AgentLog.GOT, call.tool, WAITING)
-            log.bookkeeping(AgentLog.NOTE, "idle", "waiting for the operator")
-        }
-        return End.Waited
     }
 
     /**
@@ -480,13 +500,25 @@ class Agent(
     }
 
     /** The model answered with prose and no call: nothing to do, and nothing to ask again. */
+    /**
+     * The model answered with words and no call: **that is a conclusion.**
+     *
+     * It used to stop the session with `LOOP`, on the reasoning that a model which ignored the tool
+     * protocol would only produce more prose. The operator's ruling is the better one: the words are
+     * what it has to say, and a person reading "I read the three files and changed nothing, because
+     * the file they asked about is locked" has been answered — stopping the agent over the shape of
+     * the reply punishes the person for the model's grammar.
+     *
+     * **The conclusion row is bookkeeping on purpose.** The words are already in the context as the
+     * agent's own text (`log.note("agent", …)` above), and a second `CONCLUDE` row in the context
+     * would put the same paragraph in the conversation twice. The box and the evidence get the
+     * ending they need; the model does not get its own sentence echoed back.
+     */
     private fun wordsWithoutCalls(reply: Reply): End {
         val said = reply.text.trim().ifEmpty { "(the model said nothing)" }
-        log.note("stopped", "no tool calls, so the turn ended")
-        return End.Stopped(
-            "the model answered with words and no tool call: $said",
-            reason = AgentSession.StopReason.LOOP,
-        )
+        log.bookkeeping(AgentLog.CONCLUDE, "conclusion", said)
+        log.bookkeeping(AgentLog.NOTE, "ended", "no tool call, so the words are the conclusion")
+        return End.Concluded(said)
     }
 
     /** A transport that failed: the session reconnects on its ladder, and the words are kept. */

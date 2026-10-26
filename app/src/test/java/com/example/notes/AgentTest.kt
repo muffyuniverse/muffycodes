@@ -343,8 +343,8 @@ class AgentTest {
 
     @Test
     fun `calls that change nothing and ask nothing stop the loop`() {
-        // The guard is on *unproductive* calls, not on turns: an idle agent waits for ever by
-        // design, and a turn limit would stop every healthy session.
+        // The guard is on *unproductive* calls, not on turns: a turn that keeps working is
+        // allowed to keep working, and a turn limit would stop every healthy session.
         val replies = List(AgentTools.IDLE_CALLS + 2) {
             Reply("", listOf(call("tree", """{"path":""}""")))
         }
@@ -362,43 +362,57 @@ class AgentTest {
     }
 
     @Test
-    fun `wait ends the turn and is not repeated into the context`() {
-        // The evidence keeps every poll; the context keeps one. A context that grew a
-        // timestamped row every four minutes would never be the same request twice.
-        val door = ScriptedDoor(Reply("", listOf(call("wait", "{}"))))
-        val end = agent(door).burst("nothing for now")
+    fun `a keepalive ping sends the conversation and writes nothing into it`() {
+        // **The whole economy of the feature.** A ping is the conversation the person will add to,
+        // sent again so the provider's cache is warm — so it must not add a row to the context, or
+        // the next ping would be a different request and every one of them a cold prompt.
+        val door = ScriptedDoor(Reply("", listOf(call("conclude", """{"text":"nothing to do"}"""))))
+        val agent = agent(door)
+        agent.burst("look at it")
 
-        assertTrue("idle", end is Agent.End.Waited)
-        assertEquals("one call row", 1, callRows().count { it.name == "wait" })
+        val before = log.contextRows()
+        val pings = (1..3).map { agent.warm() }
 
-        // **The context's last message is a call with a result.** `wait` never runs, so nothing
-        // in the loop answers it — and a conversation whose last assistant message calls a tool
-        // with no answer is refused by every endpoint. This is what makes an idle agent's next
-        // poll a legal request.
-        val inContext = log.contextRows().filter { it.name == "wait" }
-        assertEquals("the context holds the pair, in order", listOf(AgentLog.CALL, AgentLog.GOT), inContext.map { it.kind })
-        assertTrue("and the result says it is still waiting", inContext.last().body.startsWith("0"))
+        assertTrue("every ping was sent: $pings", pings.all { it is Agent.Warm.Sent })
+        assertEquals("three pings, no turns", 3, door.pings.size)
+        assertEquals("and not one question asked", 1, door.asked.size)
+
+        // **The same request every time.** One that added anything — a note, a timestamp, the
+        // ping's own row — would be a miss for ever after, and the second ping would pay full price.
+        assertEquals("the conversation as it stood", before.size, log.contextRows().size)
+        assertEquals(
+            "and the first ping sent exactly what the last one did",
+            door.pings.first().messages.map { it.role to it.text },
+            door.pings.last().messages.map { it.role to it.text },
+        )
+
+        // The evidence still shows the checks — that is the only place a ping is visible.
+        val evidence = rows()
+        assertEquals(
+            "each ping left exactly one note",
+            3,
+            evidence.count { it.kind == AgentLog.NOTE && it.name == AgentChat.PING },
+        )
+        assertEquals(
+            "and nothing of it reached the context",
+            0,
+            log.contextRows().count { it.name == AgentChat.PING },
+        )
     }
 
     @Test
-    fun `a second poll is in the evidence and not in the context`() {
-        // The idle agent polls for ever; the context is asked to stay the same. Without this,
-        // every four minutes would add a timestamped row to the thing that is supposed to be
-        // byte-identical — which is the whole reason the poll is cheap.
-        val door = ScriptedDoor(
-            Reply("", listOf(call("wait", "{}"))),
-            Reply("", listOf(call("wait", "{}"))),
-        )
-        val agent = agent(door)
-        agent.burst("nothing for now")
-        agent.burst("still nothing")
+    fun `a ping that fails does not end the session and says nothing in the context`() {
+        // A provider that will not take a one-token answer, a tunnel, a Doze window: none of them
+        // is the person's work failing. The ping is missed and the next tick tries again.
+        val door = object : Door {
+            override fun turn(request: Request) = Result.success(Reply("nothing to do"))
+            override fun ping(request: Request) =
+                Result.failure<Unit>(IllegalStateException("OpenRouter answered 400"))
+        }
+        val warm = agent(door).warm()
 
-        assertEquals("the evidence keeps both polls", 2, callRows().count { it.name == "wait" })
-        assertEquals(
-            "the context keeps the first pair only",
-            2,
-            log.contextRows().count { it.name == "wait" },
-        )
+        assertTrue("failed, and not on the ladder: $warm", warm is Agent.Warm.Failed)
+        assertFalse("(nothing here is the person's to fix)", (warm as Agent.Warm.Failed).stopping)
     }
 
     // ---- the instructions, and the default that changed ----------------------
@@ -559,6 +573,47 @@ class AgentTest {
         assertEquals("the model's own way of saying effort", "high", body.getString("reasoning_effort"))
         assertEquals("tool calling is the model's choice", "auto", body.getString("tool_choice"))
         assertFalse("and the answer is not streamed", body.getBoolean("stream"))
+    }
+
+    @Test
+    fun `a ping's body is the turn's body with one token asked for, and nothing else`() {
+        // **The cache, stated as a fact about the bytes.** A provider matches the longest common
+        // prefix, so everything except the answer's size has to be the same request — the tools, the
+        // pin, the reasoning flag, the messages. One field added and one field changed is the whole
+        // difference, and `max_tokens` is the changed one because zero is not a value endpoints take.
+        val door = OpenRouterDoor(
+            key = { "unused-by-this-test" },
+            model = "deepseek/deepseek-v4.1-flash-1017",
+            provider = "decart/fp4",
+            effort = "high",
+        )
+        val request = Request(
+            model = "deepseek/deepseek-v4.1-flash-1017",
+            provider = "decart/fp4",
+            effort = "high",
+            system = "the instructions",
+            messages = listOf(Msg.user("a task"), Msg.assistant("done")),
+            tools = AgentTools.specs(),
+        )
+
+        val turn = door.body(request)
+        val ping = door.body(request, OpenRouterDoor.PING_TOKENS)
+
+        assertFalse("a turn asks for no size of its own", turn.has("max_tokens"))
+        assertEquals("a ping asks for exactly one token", 1, ping.getInt("max_tokens"))
+        val keys = turn.keys().asSequence().toSet()
+        assertEquals(
+            "and adds nothing else to the request",
+            keys + "max_tokens",
+            ping.keys().asSequence().toSet(),
+        )
+        for (key in keys) {
+            assertEquals(
+                "$key is the same on both, or the prompt is not the one being warmed",
+                turn.get(key).toString(),
+                ping.get(key).toString(),
+            )
+        }
     }
 
     @Test
@@ -1003,9 +1058,9 @@ class AgentTest {
     }
 
     @Test
-    fun `the three that end a turn cannot be put in the background`() {
+    fun `the two that end a turn cannot be put in the background`() {
         // There is no result to file: the turn ends on them.
-        listOf("ask", "conclude", "wait").forEach { tool ->
+        listOf("ask", "conclude").forEach { tool ->
             val body = tool("background", """{"tool":"$tool","args":{}}""")
             assertTrue("$tool is refused: $body", body.startsWith(AgentLog.FAILURE))
             assertTrue("and says why: $body", body.contains("ends the turn"))
@@ -1516,7 +1571,7 @@ class AgentTest {
         assertEquals(
             "while an ending that arrives at a running session is obeyed",
             AgentSession.State.IDLE,
-            Agent.End.Waited.onto(AgentSession("shopping"), now = 5_000).state,
+            Agent.End.Concluded("done").onto(AgentSession("shopping"), now = 5_000).state,
         )
     }
 
@@ -1804,8 +1859,9 @@ class AgentTest {
 
     @Test
     fun `every way a turn ends is on the trace, and once`() {
-        // Four endings, four lines — written where the ending is decided rather than five times
-        // over in five branches.
+        // Three endings, three lines — written where the ending is decided rather than five times
+        // over in five branches. `stopped` is the turn that never ends; words alone are a
+        // conclusion now, not a stop, and they are the fourth case below.
         //
         // **Compared as a set, not by counting from an index.** The trace is one fixed-size ring
         // shared by every test in this JVM, so "the lines after position N" is a window that
@@ -1814,8 +1870,7 @@ class AgentTest {
         val endings = listOf(
             Triple("asked", listOf(Reply("", listOf(call("ask", """{"question":"Which?"}""")))), "asked:"),
             Triple("concluded", listOf(Reply("", listOf(call("conclude", """{"text":"done"}""")))), "concluded:"),
-            Triple("waited", listOf(Reply("", listOf(call("wait", "{}")))), "idle:"),
-            Triple("stopped", listOf(Reply("just some words", emptyList())), "stopped:"),
+            Triple("words", listOf(Reply("just some words", emptyList())), "concluded:"),
         )
         for ((name, replies, word) in endings) {
             val before = Trace.report().lines.toSet()

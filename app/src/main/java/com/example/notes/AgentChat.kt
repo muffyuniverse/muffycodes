@@ -17,8 +17,8 @@ package com.example.notes
  */
 object AgentChat {
 
-    /** The tool that asks whether anything happened. Three letters, named once. */
-    const val WAIT = "wait"
+    /** The note a keepalive ping leaves behind. Four letters, named once. */
+    const val PING = "ping"
 
     /** One line as the box draws it. [detail] is what tapping the turn adds. */
     /**
@@ -49,17 +49,19 @@ object AgentChat {
     data class Turn(val rows: List<AgentLog.Row>) {
 
         /**
-         * True for a turn that only asked whether anything happened.
+         * True for a turn that only kept the conversation warm.
          *
-         * The idle polls are the one thing that repeats for ever, so they are the one thing the
-         * box does not draw turn by turn: forty of them would be forty identical lines, and the
-         * record already keeps every one of them.
+         * Keepalive pings are the one thing that repeats for ever, so they are the one thing the box
+         * does not draw turn by turn: forty of them would be forty identical lines, and the record
+         * already keeps every one of them.
+         *
+         * **Keyed to the app's own note, not to a tool call.** A ping asks the model for nothing, so
+         * there is no call row to recognise; what a ping leaves is the `ping` note, and a turn is
+         * idle when it has that note and no calls at all.
          */
         val idle: Boolean
-            get() {
-                val calls = rows.filter { it.kind == AgentLog.CALL }
-                return calls.isNotEmpty() && calls.all { it.name == WAIT }
-            }
+            get() = rows.none { it.kind == AgentLog.CALL } &&
+                rows.any { it.kind == AgentLog.NOTE && it.name == PING }
 
         val lines: List<Line> get() = AgentChat.lines(rows)
     }
@@ -83,8 +85,22 @@ object AgentChat {
      * operator's message opens one and a terminating turn closes it. That split is also what the
      * trim works on, so a conversation the box can show is never half a conversation.
      */
-    fun conversation(rows: List<AgentLog.Row>): List<AgentLog.Row>? =
-        AgentLog.bursts(rows).lastOrNull { burst -> burst.any { it.kind == AgentLog.TOLD } }
+    fun conversation(rows: List<AgentLog.Row>): List<AgentLog.Row>? {
+        val bursts = AgentLog.bursts(rows)
+        val start = bursts.indexOfLast { burst -> burst.any { it.kind == AgentLog.TOLD } }
+        if (start < 0) return null
+        // **The checks after the ending are still its conversation.** `ask` and `conclude` end a
+        // burst — that is what makes them an ending — so the keepalive's rows that follow start a
+        // new burst with no operator message in it. Reading only the last burst *with* a TOLD would
+        // drop them, and the idle line the person watches would disappear the moment the agent
+        // finished. The tail is taken only while it holds no new ending of its own.
+        val out = bursts[start].toMutableList()
+        for (next in bursts.drop(start + 1)) {
+            if (next.any { it.kind == AgentLog.TOLD || it.endsBurst }) break
+            out += next
+        }
+        return out
+    }
 
     /**
      * The turns of [conversation], oldest first.
@@ -189,8 +205,8 @@ object AgentChat {
                     ),
                 )
                 AgentLog.NOTE -> when (row.name) {
-                    // The idle note belongs to the collapsed idle line, not to a turn.
-                    "idle" -> Unit
+                    // The ping's own note belongs to the collapsed idle line, not to a turn.
+                    PING -> Unit
                     "agent", "reason" -> out.add(
                         Line(
                             row.name,

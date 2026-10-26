@@ -297,31 +297,71 @@ fun SettingsScreen(
 
             // ---- how often it is checked on, and for how long a command is waited for ----
             //
-            // **Two waits, and they are different questions.** The first is how long an idle agent
-            // is left alone between checks — the agent says only that it is idle, and this number is
-            // the person's, because every check is a request that is paid for and a wake that costs
-            // battery. The second is how long a *command* may run before it is stopped: past it the
-            // command is aborted, its result says "stopped after 180 s; nothing was kept", and the
-            // turn carries on — the model is told the truth rather than made to wait for ever.
+            // **Three waits, and they are different questions.** The keepalive is about money: a
+            // waiting conversation is re-sent so the provider's cache stays warm, and the person pays
+            // for that in requests and battery, so the switch, the interval and the ceiling are all
+            // theirs. A *command* limit is about the turn: past it the command is aborted, its result
+            // says so, and the turn carries on — the model is told the truth rather than made to wait
+            // for ever.
             //
+            // **"Keepalive", because that is what it does.** The agent used to say `wait` and the app
+            // came back to ask again; the name described the model's act and hid the person's bill.
             // Reported from the live log: "what is agent pace description? I totally dont understand
-            // what those words mean". "Pace" and "an answer that takes longer than the timeout is not
-            // lost: it is treated as a blip" were describing the wrong mechanism as well as using the
-            // wrong words — a slow command was never a blip.
-            Text("Checks and commands", style = MaterialTheme.typography.titleMedium)
-            LengthField(
-                label = "Check on it every (seconds)",
-                value = settings.pollSeconds,
-                placeholder = "240",
-                onValueChange = { settings.keepPoll(it) },
-            )
-            Text(
-                text = "Now: every ${settings.pollMs / 1000} s. The agent only says it is idle; " +
-                    "this is how often the app comes back. At most " +
-                    "${SettingsStore.MAX_POLL_SECONDS} s.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
+            // what those words mean".
+            Text("Keepalive", style = MaterialTheme.typography.titleMedium)
+            Row(
+                // **The whole row is the switch.** The words are the explanation and the switch is
+                // the act, and a person who tapped the words has said what they meant.
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { settings.setKeepAlive(!settings.keepAlive) },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Keep the conversation warm", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "While it waits for you the app re-sends the same conversation with a " +
+                            "one-token answer: nothing is written down, the agent does not act, and " +
+                            "your next sentence costs a cache read instead of a fresh prompt.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = settings.keepAlive,
+                    onCheckedChange = { settings.setKeepAlive(it) },
+                )
+            }
+            if (settings.keepAlive) {
+                LengthField(
+                    label = "Warm it every (seconds)",
+                    value = settings.pollSeconds,
+                    placeholder = "240",
+                    onValueChange = { settings.keepPoll(it) },
+                )
+                Text(
+                    text = "Now: every ${settings.pollMs / 1000} s, and at most " +
+                        "${SettingsStore.MAX_POLL_SECONDS} s — past that the cache has already gone.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                LengthField(
+                    label = "For at most (minutes, blank = until you speak)",
+                    value = settings.warmMinutes,
+                    placeholder = "until you speak",
+                    onValueChange = { settings.setWarmMinutes(it) },
+                )
+                Text(
+                    text = "Now: " + if (settings.warmMinutes <= 0) {
+                        "until you speak."
+                    } else {
+                        "for ${settings.warmMinutes} min. An hour is about where keeping it warm " +
+                            "stops being cheaper than letting it go cold."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
             LengthField(
                 label = "Stop a command after (seconds, blank = never)",
                 value = settings.foregroundSeconds,

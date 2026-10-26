@@ -15,7 +15,34 @@ import java.net.URL
  */
 interface Door {
     fun turn(request: Request): Result<Reply>
+
+    /**
+     * Sends the conversation again **for the provider's cache, not for an answer.**
+     *
+     * A conversation nobody is talking in still has a price: the next sentence the person types is
+     * a fresh prompt unless the cache is warm. Re-sending the identical request every few minutes
+     * costs a cache read of it, which is a tenth of the price of building it again.
+     *
+     * **The answer is not read, and that is the act.** [OpenRouterDoor] asks for one token, so
+     * nothing is generated, nothing is parsed and nothing can end a turn — a model that answered
+     * with nonsense here would change nothing.
+     *
+     * Defaulted to an ordinary turn with the result dropped, because a door that cannot tell the
+     * two apart still warms correctly; the scripted door overrides it to keep pings out of a
+     * script that is about turns.
+     */
+    fun ping(request: Request): Result<Unit> = turn(request).map { }
 }
+
+/**
+ * The provider's answer was a refusal, **kept as a code.**
+ *
+ * A ping's failure is not a turn's failure: a dead key and a parameter the provider will not take
+ * are both "no", and only the first is the person's to fix. The number is what tells them apart,
+ * and a message that only said "OpenRouter answered 401" would be parsed back into the number it
+ * came from.
+ */
+class Refused(val code: Int, message: String) : IllegalStateException(message)
 
 /** One thing said in a burst. */
 data class Msg(
@@ -87,11 +114,19 @@ class ScriptedDoor(vararg script: Reply) : Door {
     /** Every request the app made, in order. */
     val asked = mutableListOf<Request>()
 
+    /** Every keepalive ping, in order — **not** counted as a question, and it consumes no reply. */
+    val pings = mutableListOf<Request>()
+
     override fun turn(request: Request): Result<Reply> {
         asked.add(request)
         val next = replies.removeFirstOrNull()
             ?: return Result.failure(IllegalStateException("the script ran out of replies"))
         return Result.success(next)
+    }
+
+    override fun ping(request: Request): Result<Unit> {
+        pings.add(request)
+        return Result.success(Unit)
     }
 }
 
@@ -128,24 +163,39 @@ class OpenRouterDoor(
 ) : Door {
 
     override fun turn(request: Request): Result<Reply> = try {
-        val token = key() ?: throw IllegalStateException(
-            // **A locked phone is not a missing key.** The agent polls with the screen off, and the
-            // store's own key is only usable while it is unlocked — so the ordinary case is a key
-            // that exists and cannot be read right now. Said as "no key", it sent a person to type
-            // one they already had.
-            when (keyState()) {
-                KeyState.LOCKED ->
-                    "This phone is locked, so the OpenRouter key cannot be read. It is kept: " +
-                        "unlock the phone and the agent will use it."
-                else -> "No OpenRouter key on this account yet"
-            },
-        )
-        Result.success(send(request, token))
+        Result.success(parseReply(exchange(request, maxTokens = null)))
     } catch (e: Exception) {
         Result.failure(
             IllegalStateException(Secrets.explain(e, "The model could not be asked"))
         )
     }
+
+    /**
+     * The same request, one token of answer, thrown away.
+     *
+     * **The failure keeps its type**, unlike [turn]'s: whether a refusal is the person's to fix
+     * depends on the code, and the caller is the one that knows a ping may not stop a session.
+     */
+    override fun ping(request: Request): Result<Unit> = try {
+        exchange(request, maxTokens = PING_TOKENS)
+        Result.success(Unit)
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    /** The token, or the sentence explaining why there is none. */
+    private fun token(): String = key() ?: throw IllegalStateException(
+        // **A locked phone is not a missing key.** The agent sends with the screen off, and the
+        // store's own key is only usable while it is unlocked — so the ordinary case is a key
+        // that exists and cannot be read right now. Said as "no key", it sent a person to type
+        // one they already had.
+        when (keyState()) {
+            KeyState.LOCKED ->
+                "This phone is locked, so the OpenRouter key cannot be read. It is kept: " +
+                    "unlock the phone and the agent will use it."
+            else -> "No OpenRouter key on this account yet"
+        },
+    )
 
     /**
      * The body this door sends — **a function of its own so a test can read it.**
@@ -156,7 +206,7 @@ class OpenRouterDoor(
      * look like the app working, so the assembled body is the thing worth pinning rather than the
      * call that wraps it — and the call cannot be tested without a socket.
      */
-    internal fun body(request: Request): JSONObject {
+    internal fun body(request: Request, maxTokens: Int? = null): JSONObject {
         val body = JSONObject()
             .put("model", request.model)
             .put("messages", messagesOf(request))
@@ -167,11 +217,17 @@ class OpenRouterDoor(
             .put("reasoning", JSONObject().put("exclude", true))
             .put("stream", false)
         if (request.effort.isNotBlank()) body.put("reasoning_effort", request.effort)
+        // **Everything above is unchanged by a ping, and must be.** A provider's cache matches the
+        // longest common prefix, so the tools and the pin are part of what is being kept warm; only
+        // the answer's size differs, and that is not part of the prompt.
+        if (maxTokens != null) body.put("max_tokens", maxTokens)
         return body
     }
 
-    private fun send(request: Request, token: String): Reply {
-        val body = body(request)
+    /** One exchange, as text. **Unparsed**, because a ping does not read its answer. */
+    private fun exchange(request: Request, maxTokens: Int?): String {
+        val token = token()
+        val body = body(request, maxTokens)
 
         var connection: HttpURLConnection? = null
         val text = try {
@@ -190,13 +246,13 @@ class OpenRouterDoor(
             val answer = (if (code in 200..299) connection.inputStream else connection.errorStream)
                 ?.bufferedReader()?.use { it.readText() }.orEmpty()
             if (code !in 200..299) {
-                throw IllegalStateException("OpenRouter answered $code${why(answer)}")
+                throw Refused(code, "OpenRouter answered $code${why(answer)}")
             }
             answer
         } finally {
             connection?.disconnect()
         }
-        return parseReply(text)
+        return text
     }
 
     /** The provider's own sentence, which is always more useful than the number. */
@@ -264,6 +320,17 @@ class OpenRouterDoor(
     }
 
     companion object {
+
+        /**
+         * What a ping asks for: **one token.**
+         *
+         * Not zero, although nothing is wanted: OpenAI-compatible endpoints require `max_tokens`
+         * to be at least one, and OpenRouter passes the field straight to the provider, so a zero
+         * comes back as a 400. Measured against the same idea in this container's own keepalive:
+         * a one-token ping of a cache-warm prefix cost about $0.000018, because the price of a
+         * ping is the prompt it re-reads and not the token it generates.
+         */
+        const val PING_TOKENS = 1
 
         /**
          * One reply out of the endpoint's own shape.

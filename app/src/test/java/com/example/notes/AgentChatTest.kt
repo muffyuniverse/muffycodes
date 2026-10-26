@@ -171,16 +171,17 @@ class AgentChatTest {
         assertTrue("and it is visibly a failure", lines[0].failed)
     }
 
-    // ---- the idle polls -----------------------------------------------------
+    // ---- the idle pings -----------------------------------------------------
+
+    /** One keepalive ping as the record keeps it: the app's turn row and its note, both `app`. */
+    private fun ping() = listOf(
+        row(AgentLog.TURN, "turn", "ping", ctx = AgentLog.APP),
+        row(AgentLog.NOTE, AgentChat.PING, "kept warm", time = "14:02:30.000", ctx = AgentLog.APP),
+    )
 
     @Test
-    fun `forty idle polls are one line`() {
-        val poll = listOf(
-            turn(),
-            call("wait"),
-            got("wait", "0\nstill waiting"),
-            row(AgentLog.NOTE, "idle", "waiting for the operator", time = "14:02:30.000"),
-        )
+    fun `forty idle pings are one line`() {
+        val poll = ping()
         val rows = listOf(told("anything new?")) + poll + poll + poll
 
         val box = AgentChat.box(rows)
@@ -190,19 +191,51 @@ class AgentChatTest {
     }
 
     @Test
+    fun `the checks after a conclusion are still its conversation`() {
+        // **A conclusion ends the burst, so the pings that follow start a new one with no operator
+        // message in it.** Reading only the last burst that has a TOLD would drop every check after
+        // the agent finished — and the idle line is exactly what a person watches while it waits.
+        val rows = listOf(
+            told("look"),
+            turn(),
+            call("tree"),
+            got("tree", "0\n"),
+            row(AgentLog.CONCLUDE, "conclusion", "Nothing to change."),
+        ) + ping() + ping()
+
+        val box = AgentChat.box(rows)
+
+        assertEquals("the work is a turn", 1, box?.turns?.size)
+        assertEquals("and the checks are the idle line", "idle since 14:02 · 2 checks", box?.idle)
+    }
+
+    @Test
+    fun `a new question ends the tail: its checks are its own`() {
+        // The other half of the rule: a burst that holds an ending is a new answer to the person, not
+        // a check on the old one.
+        val rows = listOf(
+            told("look"),
+            row(AgentLog.CONCLUDE, "conclusion", "Nothing to change."),
+        ) + ping() + listOf(
+            told("what about now"),
+            turn(),
+            ask("Shall I?"),
+        )
+
+        val box = AgentChat.box(rows)
+
+        assertEquals("the new conversation is the one on screen", "what about now", box?.told)
+        assertEquals("and it has no idle line of its own yet", null, box?.idle)
+    }
+
+    @Test
     fun `a turn that worked is still there beside the idle line`() {
         val rows = listOf(
             told("look"),
             turn(),
             call("tree"),
             got("tree", "0\n"),
-            turn(),
-            call("wait"),
-            got("wait", "0\nstill waiting"),
-            turn(),
-            call("wait"),
-            got("wait", "0\nstill waiting"),
-        )
+        ) + ping() + ping()
 
         val box = AgentChat.box(rows)
 
