@@ -168,7 +168,7 @@ class Background(
          * For the app's non-agent paths and for tests that are not about the wait. Nothing is
          * queued and nothing is deferred, which is the honest reading of "inline".
          */
-        fun inline(): Background = Background { work -> work() }
+        fun inline(): Background = Background(launch = { work -> work() })
 
         /** Nothing runs in the background; used where the parameter is not exercised. */
         fun none(): Background = inline()
@@ -179,14 +179,19 @@ class Background(
          * Daemon so a thread still waiting on a socket cannot hold the app — or Gradle's test fork —
          * open. Its `Future` is deliberately ignored: the result's only home is the file.
          */
-        fun real(): Background = Background { work ->
-            // **`runCatching`, because the result's only home is the file.** An exception on a
-            // thread with nobody waiting would otherwise be invisible to everybody.
-            val thread = Thread({ runCatching { work() } }, "muffy-bg-${threads.incrementAndGet()}")
-            thread.isDaemon = true
-            thread.priority = Thread.MIN_PRIORITY + 1
-            thread.start()
-        }
+        fun real(): Background = Background(
+            launch = { work ->
+                // **`runCatching`, because the result's only home is the file.** An exception on a
+                // thread with nobody waiting would otherwise be invisible to everybody.
+                val thread = Thread(
+                    { runCatching { work() } },
+                    "muffy-bg-${threads.incrementAndGet()}",
+                )
+                thread.isDaemon = true
+                thread.priority = Thread.MIN_PRIORITY + 1
+                thread.start()
+            },
+        )
 
         /** A number for a thread's name, so two threads of one tool are told apart in a trace. */
         private val threads = AtomicInteger()
