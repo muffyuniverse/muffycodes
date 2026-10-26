@@ -51,6 +51,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 
 /**
  * Settings: the account, the appearance, and how much history is kept — and
@@ -273,82 +274,83 @@ fun SettingsScreen(
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
             // ---- how much change history is kept ----
-            // Said in three clauses, because it is one number doing one job:
-            // every change is committed on this phone — into a project's own repo
-            // when the file is in one, and into the local repo behind the account
-            // for everything else — and this is how many of those are kept.
+            //
+            // **One sentence, and it is now true.** The old one described a local history "that
+            // holds everything outside one", and that repository is gone: every file on this phone
+            // is inside a project, and every project has its own history. Keeping the sentence
+            // would have been the app describing a repository that no longer exists.
             Text("Change history", style = MaterialTheme.typography.titleMedium)
             Text(
-                // "repo" was the folder's old name, and a concept most people do not
-                // hold; the sentence now says what the number governs in plain words.
-                "How many changes are kept in each project, and in the local history " +
-                    "that holds everything outside one. Empty keeps all of them.",
+                "How many versions are kept in each project. Empty keeps all of them.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             LengthField(
-                label = "Changes kept",
+                label = "Versions kept",
                 value = settings.historyLength,
                 onValueChange = { settings.keepHistory(it) },
             )
-            Spacer(Modifier.height(16.dp))
-
-            // ---- every agent on this phone, and one switch ----
-            // The brief assumed this existed; it did not. The box has a Stop per project, and the
-            // strip says how many are on — but a person who wants them all off should not have to
-            // open each project to do it.
-            Text("Agents", style = MaterialTheme.typography.titleMedium)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    AgentSession.strip(viewModel.agentSessions).ifEmpty { "No agent is on." },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(
-                    onClick = { viewModel.stopAllAgents() },
-                    enabled = viewModel.agentSessions.any { it.running },
-                ) { Text("Stop all agents") }
-            }
-            Spacer(Modifier.height(16.dp))
-
-            // ---- how often an agent that needs a person says so ----
-            // The poll is the agent working; this is the app asking somebody to look at it.
-            // It stops the moment the thing is dealt with, which is why the number is an
-            // interval and not a count: a reminder that arrives while the question is still
-            // the newest thing on the screen is noise.
-            Text("Agent reminders", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(20.dp))
+            // ---- everything the agent needs, in one place, on this screen once ----
+            //
+            // **A block, not six sections.** Every row below exists for the same machine: the key
+            // it talks with, the model it talks to, how big its memory may get, how long it waits,
+            // when it asks for help, and the two Android permissions that decide whether any of
+            // that can happen while the phone is in a pocket. Reported from the live log as two
+            // separate complaints that are one fix: "move agent block up, right below signed in as
+            // block. and make openrouter key the first field of agent block", and "block all agent
+            // related stuff together and use if possible horisontal lines to delineate all what
+            // relates to agent management and remove agent from every field title except the title
+            // of the block (and put it in center)".
+            //
+            // **Above the first field, not between two fields.** The block opened with a divider
+            // of its own, which drew a line directly under the history row and left the word AGENT
+            // on the far side of it from everything the word governs.
+            //
+            // The word is in the title and in no row: inside this block it is the only thing on the
+            // screen, so repeating it in six labels says nothing six times.
             Text(
-                "When an agent needs you — it asked something, or it stopped on its own — " +
-                    "it says so, and repeats at this interval until you deal with it. " +
-                    "Empty says it once and never again.",
+                "AGENT",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                "One model, one key, and what it is allowed to use. Everything here is about the " +
+                    "agent on this phone.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            LengthField(
-                label = "Remind me every (minutes)",
-                value = settings.remindMinutes,
-                placeholder = "once",
-                onValueChange = { settings.keepRemind(it) },
-            )
-            Spacer(Modifier.height(16.dp))
 
-            // ---- how big the agent's working context may get ----
+            // **First, because nothing below works without it.** The key was at the bottom of the
+            // model rows, so the screen asked a person to choose a model and a provider before
+            // telling them the list they were choosing from could not be read at all.
+            KeyRow(viewModel = viewModel, onSetKey = onSetKey)
+            RowDivider()
+
+            // The model, the provider and the effort: [ModelSection] draws the three rows, each of
+            // which opens the window that changes it — and that window is where models are added
+            // and removed now, beside the list they change.
+            ModelSection(viewModel = viewModel)
+            RowDivider()
+
+            // ---- how big the working context may get ----
             // Two numbers, and they are different acts. The trigger is a message to the agent —
             // "you are over, clear up" — and the agent decides what to remove. The hard limit is
             // the app trimming, and it is off unless somebody asks for it: an app that cuts a
             // conversation on its own loses the thing the person was working on, and the agent is
             // the one supposed to be choosing what to forget.
-            Text("Agent context", style = MaterialTheme.typography.titleMedium)
+            Text("Context", style = MaterialTheme.typography.titleMedium)
             Text(
-                "Both in tokens, counted at about four bytes each — the phone has no tokenizer, " +
-                    "so these are the app's own numbers rather than a bill. A pin smaller than " +
-                    "your number lowers it rather than changing it: the number you typed stays.",
+                "In tokens, counted at about four bytes each — the phone has no tokenizer, so " +
+                    "these are the app's own numbers rather than a bill. A pin smaller than your " +
+                    "number lowers it rather than changing it: the number you typed stays.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             LengthField(
-                label = "Ask it to clear up at",
+                label = "Clear up at",
                 value = settings.triggerTokens,
                 placeholder = "a quarter",
                 onValueChange = { settings.keepTrigger(it) },
@@ -359,12 +361,19 @@ fun SettingsScreen(
                 placeholder = "never",
                 onValueChange = { settings.keepHard(it) },
             )
+            // **The pin's real ceiling**, read from what the catalogue said about the active
+            // model — the same number the runner builds its limits from. This line used to pass
+            // the floor on purpose ("no model is being named here"), and the result was a screen
+            // that told a person their million-token model would be trimmed at 96k.
+            val catalogue = viewModel.modelInfo
             val limit = ContextBudget.Limits.of(
                 triggerAsked = settings.triggerTokens.toLong(),
                 hardAsked = settings.hardTokens.toLong(),
-                // No model is being named here: the sentence is about the numbers, and the pin's
-                // ceiling is spelled out on the agent's own settings rows.
-                ceiling = ContextBudget.UNKNOWN_CEILING,
+                ceiling = ContextBudget.ceiling(
+                    pin = viewModel.modelConfig.active.provider,
+                    contextLength = catalogue?.contextLength,
+                    maxOutput = catalogue?.maxOutput,
+                ),
             )
             Text(
                 "Clear up at ${ContextBudget.short(limit.triggerAt)} · " +
@@ -372,22 +381,62 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary,
             )
-            Spacer(Modifier.height(16.dp))
+            RowDivider()
 
-            // ---- how long it waits, and how much it is handed ----
-            // Two numbers the brief asked for, and both are about a phone rather than a policy: a
-            // slow network makes an answer take longer, and a big file makes a result longer than
-            // the app's own default. Neither is a decision the app can make for the person.
-            Text("Agent pace", style = MaterialTheme.typography.titleMedium)
+            // ---- how often it is checked on, and for how long a command is waited for ----
+            //
+            // **Two waits, and they are different questions.** The first is how long an idle agent
+            // is left alone between checks — the agent says only that it is idle, and this number is
+            // the person's, because every check is a request that is paid for and a wake that costs
+            // battery. The second is how long the app waits for a *command* before it stops holding
+            // the conversation: past it the agent is told the command is still running and the work
+            // carries on beside the conversation, arriving with a later call's results.
+            //
+            // Reported from the live log: "what is agent pace description? I totally dont understand
+            // what those words mean". "Pace" and "an answer that takes longer than the timeout is not
+            // lost: it is treated as a blip" were describing the wrong mechanism as well as using the
+            // wrong words — a slow command was never a blip.
+            Text("Checks and commands", style = MaterialTheme.typography.titleMedium)
+            LengthField(
+                label = "Check an idle agent every (seconds)",
+                value = settings.pollSeconds,
+                placeholder = "240",
+                onValueChange = { settings.keepPoll(it) },
+            )
             Text(
-                "An answer that takes longer than the timeout is not lost: it is treated as a " +
-                    "blip, and the agent reconnects. A result longer than the length is cut and " +
-                    "says how much it showed.",
+                text = "Now: every ${settings.pollMs / 1000} s. The agent only says it is idle; " +
+                    "this is how often the app comes back. At most " +
+                    "${SettingsStore.MAX_POLL_SECONDS} s.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            LengthField(
+                label = "A command may take (seconds, blank = any)",
+                value = settings.commandSeconds,
+                placeholder = "any",
+                onValueChange = { settings.keepCommand(it) },
+            )
+            Text(
+                text = if (settings.commandSeconds <= 0) {
+                    "Now: the agent waits for every command however long it takes."
+                } else {
+                    "Now: past ${settings.commandSeconds} s the agent is told the command is still " +
+                        "running and the work carries on beside the conversation."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            RowDivider()
+
+            // ---- how long the app waits for the model itself ----
+            Text(
+                "An answer from the model that takes longer than this is a blip: the app " +
+                    "reconnects. A result longer than the length is cut and says how much it showed.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             LengthField(
-                label = "Wait for an answer (minutes)",
+                label = "Wait for the model (minutes)",
                 value = settings.timeoutMinutes,
                 placeholder = "4",
                 onValueChange = { settings.keepTimeout(it) },
@@ -398,24 +447,79 @@ fun SettingsScreen(
                 placeholder = "20000",
                 onValueChange = { settings.keepMaxResult(it) },
             )
-            Spacer(Modifier.height(24.dp))
-            // ---- what Android does to an agent in a pocket ----
+            RowDivider()
+
+            // ---- how much of the record is kept ----
+            // **The other half of Context, and it is a different act.** Clearing up takes a row out
+            // of the conversation and leaves it in the record; this is where the record itself stops,
+            // and what it drops is dropped for good. Two numbers were reported as one confusion —
+            // "where is max session log size? because context trim just switches row out of context,
+            // and session log limit removes them altogether" — so they are named apart here.
+            Text("The record", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "agent/session.log is kept until it reaches " +
+                    "${ContextBudget.sizeLabel(AgentLog.SESSION_LIMIT)}, then the oldest turns go " +
+                    "and a row says how many. What goes there is gone; what clearing up does is " +
+                    "take a row out of the conversation and leave it in the file.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            RowDivider()
+
+            // ---- how often a thing that needs a person says so ----
+            // The poll is the agent working; this is the app asking somebody to look at it. It
+            // stops the moment the thing is dealt with, which is why the number is an interval and
+            // not a count: a reminder that arrives while the question is still the newest thing on
+            // the screen is noise.
+            Text("Reminders", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "When it needs you — it asked something, or it stopped on its own — it says so, " +
+                    "and repeats at this interval until you deal with it. Empty says it once.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            LengthField(
+                label = "Repeat every (minutes)",
+                value = settings.remindMinutes,
+                placeholder = "once",
+                onValueChange = { settings.keepRemind(it) },
+            )
+            RowDivider()
+
+            // ---- every one on this phone, and one switch ----
+            // The box has a Stop per project, and the strip says how many are on — but a person
+            // who wants them all off should not have to open each project to do it.
+            Text("Running", style = MaterialTheme.typography.titleMedium)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    AgentSession.strip(viewModel.agentSessions).ifEmpty { "Nothing is running." },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    onClick = { viewModel.stopAllAgents() },
+                    enabled = viewModel.agentSessions.any { it.running },
+                ) { Text("Stop all") }
+            }
+            RowDivider()
+
+            // ---- what Android does to it in a pocket ----
             // One button, because nothing in the app can work around Doze and only the person can
             // exempt it. Here rather than on launch: an app that opens with a permissions dialog
             // teaches people to dismiss permissions dialogs.
-            Text("Battery", style = MaterialTheme.typography.titleMedium)
+            Text("Background", style = MaterialTheme.typography.titleMedium)
             // **One sentence, saying what it is for.** The old one explained Doze, the absence of
             // a fallback provider and what a stopped poll means — three true things, and a person
-            // deciding whether to press a button needs one: this is what lets the agent keep
-            // working while the phone is in a pocket.
+            // deciding whether to press a button needs one.
             Text(
-                "So the agent keeps working in the background, with the screen off.",
+                "So it keeps working with the screen off.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    if (exemptNow) "Exempt · the agent can poll" else "Not exempt · polls may fail",
+                    if (exemptNow) "Exempt · it can poll" else "Not exempt · polls may fail",
                     style = MaterialTheme.typography.bodyMedium,
                     color = if (exemptNow) {
                         MaterialTheme.colorScheme.primary
@@ -424,24 +528,21 @@ fun SettingsScreen(
                     },
                     modifier = Modifier.weight(1f),
                 )
-                // Offered only while it is needed: a button that goes on asking after the answer is
-                // yes teaches people to dismiss the dialog.
+                // Offered only while it is needed: a button that goes on asking after the answer
+                // is yes teaches people to dismiss the dialog.
                 if (!exemptNow) {
                     TextButton(onClick = onAskBattery) { Text("Ask Android") }
                 }
             }
-            Spacer(Modifier.height(24.dp))
             // ---- whether a reminder can reach the tray at all ----
             // The battery exemption decides whether a poll can go out; this decides whether the
-            // answer can be seen. The agent's reminders are the whole point of the "asked" state,
-            // and from Android 13 a declared permission that was never granted means a
-            // notification that is posted and silently dropped — a session that looks healthy.
-            Text("Notifications", style = MaterialTheme.typography.titleMedium)
-            // One sentence for the same reason as the battery one: what the permission is for.
+            // answer can be seen. From Android 13 a declared permission that was never granted
+            // means a notification posted and silently dropped — a session that looks healthy.
             Text(
-                "So you know when an agent needs you, without opening the app.",
+                "So you know when it needs you, without opening the app.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 12.dp),
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -458,16 +559,6 @@ fun SettingsScreen(
                     TextButton(onClick = onAskNotices) { Text("Allow") }
                 }
             }
-            Spacer(Modifier.height(24.dp))
-
-            // ---- the agent's model ----
-            //
-            // Three rows and a file. The file is the store, so these are editors of it
-            // rather than a second copy of the same three values: editing the file by hand
-            // and then opening this screen shows what the file says, which is the only way
-            // the two can never disagree.
-            ModelSection(viewModel = viewModel, onSetKey = onSetKey)
-            Spacer(Modifier.height(24.dp))
         }
     }
 
@@ -554,6 +645,21 @@ private fun Swatch(theme: AppTheme, selected: Boolean, onClick: () -> Unit) {
             else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
+}
+
+/**
+ * The line between two rows of the same block.
+ *
+ * Written once rather than at eleven call sites, because a block whose rows are separated by
+ * lines that are each a little different is a block that reads as a list of accidents. It is
+ * short, faint and inset, so it separates without becoming a section break of its own.
+ */
+@Composable
+private fun RowDivider() {
+    HorizontalDivider(
+        modifier = Modifier.padding(vertical = 10.dp),
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+    )
 }
 
 /**

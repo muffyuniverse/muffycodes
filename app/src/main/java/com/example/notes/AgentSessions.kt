@@ -67,6 +67,9 @@ class AgentSessions(private val accountDir: File) {
             askedAt = json.optLong("askedAt", 0),
             reminders = json.optInt("reminders", 0).coerceAtLeast(0),
             lastPollAt = json.optLong("lastPollAt", 0),
+            // **An older file has no interval**, and zero is "the app's own" — which is exactly
+            // what a session written before an agent could ask for one was getting.
+            idleMs = json.optLong("idleMs", 0).coerceAtLeast(0),
             lastWords = json.optString("lastWords"),
         )
     } catch (t: Throwable) {
@@ -127,6 +130,7 @@ class AgentSessions(private val accountDir: File) {
         .put("askedAt", s.askedAt)
         .put("reminders", s.reminders)
         .put("lastPollAt", s.lastPollAt)
+        .put("idleMs", s.idleMs)
         .put("lastWords", s.lastWords)
 
     /** An enum by name, and [fallback] rather than a crash when the file holds something else. */

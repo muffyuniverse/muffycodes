@@ -169,17 +169,16 @@ class AgentSessionTest {
         // "stopped" about a session that is running would be the label lying about the fact.
         val on = session().waited(0).copy(lastPollAt = 1_000)
 
+        // **The default interval's gap.** The session has no interval set, so it is polled every
+        // POLL_MS and the gap is three of those — the number the app used before the interval became
+        // a setting, and still what an unset one means.
+        val gap = AgentSession.POLL_MS * AgentSession.GAP_INTERVALS
         assertEquals("on time", 0L, on.missedBy(1_000 + AgentSession.POLL_MS))
-        assertEquals(
-            "a late wake is not the phone",
-            0L,
-            on.missedBy(1_000 + AgentSession.GAP_MS),
-        )
+        assertEquals("a late wake is not the phone", 0L, on.missedBy(1_000 + gap))
         assertEquals(
             "hours are",
-            2 * AgentSession.GAP_MS,
-            on.copy(lastPollAt = 1_000 + AgentSession.GAP_MS)
-                .missedBy(1_000 + 3 * AgentSession.GAP_MS),
+            2 * gap,
+            on.copy(lastPollAt = 1_000 + gap).missedBy(1_000 + 3 * gap),
         )
         assertEquals(
             "a session that never polled has nothing to be late for",
@@ -270,5 +269,38 @@ class AgentSessionTest {
 
         assertTrue("it needs you", odd.needsYou)
         assertEquals("stopped · not running", odd.label())
+    }
+
+    /**
+     * The interval is the operator's, and 250 seconds is the ceiling.
+     *
+     * The agent says only that it is idle; how often the app comes back is a decision about a phone
+     * and a provider bill. Two claims: a session given an interval polls at it, and one given more
+     * than the cap polls at the cap rather than never.
+     */
+    @Test
+    fun `an idle agent is polled at the interval the operator set`() {
+        val everyMinute = session().waited(0).withInterval(60_000)
+
+        assertFalse("not due before it", everyMinute.pollDue(59_999))
+        assertTrue("due at it", everyMinute.pollDue(60_000))
+        assertEquals(
+            "and the design's own when none is set",
+            AgentSession.POLL_MS,
+            session().waited(0).intervalMs,
+        )
+    }
+
+    @Test
+    fun `an interval past the cap is the cap, not the number asked for`() {
+        // A hand-set file could hold anything; the ceiling is what keeps a session visible.
+        val tooLong = session().waited(0).withInterval(60 * 60 * 1000L)
+
+        assertEquals(AgentSession.MAX_IDLE_MS, tooLong.idleMs.coerceAtMost(AgentSession.MAX_IDLE_MS))
+        assertTrue(
+            "a check is owed by the ceiling",
+            tooLong.copy(idleMs = AgentSession.MAX_IDLE_MS)
+                .pollDue(AgentSession.MAX_IDLE_MS),
+        )
     }
 }

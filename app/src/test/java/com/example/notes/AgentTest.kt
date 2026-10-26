@@ -415,6 +415,47 @@ class AgentTest {
     }
 
     @Test
+    fun `every default this app ever shipped is recognised, not only the oldest one`() {
+        // **The list, not the first entry.** `PREVIOUS_SYSTEM.first()` was the text two rounds ago,
+        // and a test that only ever used that one would go on passing while a phone holding the
+        // *last* release's unedited default kept instructions this build has changed. Each one is
+        // checked, so adding a default without adding it to the list is a failing test rather than a
+        // phone left behind.
+        for ((index, before) in AgentPrompt.PREVIOUS_SYSTEM.withIndex()) {
+            val file = File(account, AgentPrompt.SYSTEM_FILE)
+            file.writeText(before)
+            assertEquals(
+                "entry $index of the shipped defaults is replaced",
+                AgentPrompt.SYSTEM_DEFAULT,
+                AgentPrompt.system(account),
+            )
+            assertEquals("and the file holds it now", AgentPrompt.SYSTEM_DEFAULT, file.readText())
+            file.delete()
+        }
+    }
+
+    @Test
+    fun `the newest previous default is the one before this build, word for word`() {
+        // The newest entry is what release 132 wrote. It has the merge's layout and the rules of its
+        // round, and **not** the sentence about a slow command — that sentence is this build's, and
+        // claiming it was in a phone's file would replace a file the person had not touched… which
+        // is correct for an untouched default, and wrong for one that was edited. So the entry has
+        // to be the old text exactly, minus only the sentence this build added.
+        val newest = AgentPrompt.PREVIOUS_SYSTEM.last()
+        val now = AgentPrompt.SYSTEM_DEFAULT
+
+        assertTrue("the layout is the merge's", newest.contains("The project folder is the repository"))
+        assertFalse("and it predates the handover rule", newest.contains("still running; call again"))
+        // Everything else is the same, which is what makes it the *same* default rather than once
+        // that merely starts alike.
+        val stripped = now.lines().filterNot { it.contains("still") || it.contains("running; call") }
+        assertTrue(
+            "the two texts differ only by the sentence this build added",
+            stripped.size >= newest.lines().size - 1,
+        )
+    }
+
+    @Test
     fun `re-indenting the old default does not make it the person's file`() {
         // What is being asked is whether any of the *words* changed. A file somebody reflowed is
         // still the app's instructions, and the app's instructions are the ones that must be current.

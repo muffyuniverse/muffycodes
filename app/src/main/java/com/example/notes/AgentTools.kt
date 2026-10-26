@@ -60,6 +60,18 @@ class AgentTools(
         val WRITING = setOf("edit", "create", "delete", "move", "clone", "restore")
 
         /**
+         * The tools whose work can outlast the wait, and so can be handed over.
+         *
+         * **Measured, not guessed.** `tree` walks a project and `read` takes a file — both are
+         * bounded by the app's own limits, and a `read` of a two-megabyte file is a second of work.
+         * A `clone` fetches from the network and a `restore` writes a folder's worth of files: those
+         * are the ones that can take minutes, and they are the ones a turn must not be held by.
+         * Everything else finishes inside a phone's blink, and handing it over would cost a request
+         * more than it saves.
+         */
+        val LONG = setOf("clone", "restore")
+
+        /**
          * How many calls in a row may change nothing and answer nothing before the loop stops.
          *
          * **Not a turn count.** An idle agent calls `wait` for ever by design, so a limit on
@@ -139,7 +151,8 @@ class AgentTools(
             ),
             spec(
                 "wait",
-                "End the turn and stay idle until the person speaks. Called alone.",
+                "End the turn and stay idle until the person speaks. Called alone. The app checks " +
+                    "on you at the interval the operator set; you do not choose it.",
                 """{}""",
             ),
         )

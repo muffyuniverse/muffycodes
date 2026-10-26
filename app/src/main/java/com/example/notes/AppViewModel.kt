@@ -1617,13 +1617,19 @@ class AppViewModel @JvmOverloads constructor(
             ).init(clean)
             main.post {
                 busy = false
+                // **The words and the answer first, then the redraw.** `refresh()` is what makes the
+                // new project a row; the screen waiting on this is the add window, and it was closed
+                // on a list that had not been redrawn yet — so the project appeared only after
+                // leaving the screen and coming back. Reported from the live log: "adding and
+                // deleting a project shows the change only after you exit and enter the project
+                // menue again".
                 message = if (made.isSuccess) {
                     "Made \"$clean\" on this phone. It does not go to GitHub."
                 } else {
                     "Made the folder, but its history could not be started"
                 }
-                refresh()
                 onDone(made.isSuccess)
+                refresh()
             }
         }
     }
@@ -1690,8 +1696,11 @@ class AppViewModel @JvmOverloads constructor(
                 // **It does not move you inside.** A project appearing in the list is the
                 // result, and being teleported into an empty folder is how a person loses
                 // track of where they were — the row is right there when they want it.
-                refresh()
-                onDone(clone.success)
+                  // **And the window is answered before the list is redrawn**, for the reason the
+                  // local-project path gives: the screen that waits is the add window, and a list
+                  // redrawn after it has closed reaches nobody.
+                  onDone(clone.success)
+                  refresh()
             }
         }
     }
@@ -1782,6 +1791,11 @@ class AppViewModel @JvmOverloads constructor(
                     if (everywhere) "Deleted $project everywhere" else "Deleted $project from this phone"
                 }
                 if (currentProject == project) path = emptyList()
+                // **The row must be gone before the sentence about it is read.** The delete window
+                // closed on the old list, so the project was still drawn under the message saying it
+                // had been deleted — the same fault as the add window's, reported in the same breath:
+                // "adding and deleting a project shows the change only after you exit and enter the
+                // project menue again".
                 refresh()
             }
         }
@@ -2023,6 +2037,11 @@ class AppViewModel @JvmOverloads constructor(
                 // should be able to raise the 20000 rather than tell the agent to work in pieces.
                 maxResult = settings.maxResult,
                 limits = limits,
+                // **The same registry the polls use.** A command handed over while somebody is
+                // typing is collected by their next message, and one handed over during a poll is
+                // collected here — one project, one record, one place the work finishes.
+                long = runner?.long ?: LongCommands(LongRunner.direct()),
+                toolWaitMs = settings.commandMs,
                 // Read at every boundary rather than captured: the person may speak or stop while
                 // this turn is waiting for an answer, and the loop has to see that when it comes.
                 cut = { interrupt },
@@ -2102,6 +2121,9 @@ class AppViewModel @JvmOverloads constructor(
         if (sessionOf(project)?.running == true) return
         putSession(
             AgentSession(project = project, state = AgentSession.State.IDLE, lastPollAt = now)
+                // **The interval in force when it started.** A tick reads this copy, so a session
+                // written now keeps answering after a reboot without the settings file in hand.
+                .withInterval(settings.pollMs)
         )
         Trace.said("the agent is on for $project")
     }

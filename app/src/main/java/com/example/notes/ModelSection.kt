@@ -36,23 +36,10 @@ import java.util.Locale
  * provider, so the choices are made in that order.
  */
 @Composable
-fun ModelSection(
-    viewModel: AppViewModel,
-    onSetKey: () -> Unit,
-) {
+fun ModelSection(viewModel: AppViewModel) {
     val config = viewModel.modelConfig
     val problem = viewModel.modelConfigProblem
     var picking by remember { mutableStateOf<String?>(null) }
-    var adding by remember { mutableStateOf(false) }
-    var removing by remember { mutableStateOf(false) }
-
-    Text("Agent", style = MaterialTheme.typography.titleMedium)
-    Text(
-        text = "The model the agent works with. The choice is kept in model_conf.json in this " +
-            "account's folder, so it survives a reinstall and can be versioned.",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
 
     if (problem != null) {
         // Named with its line, because the file is the operator's and they are the one who can
@@ -82,36 +69,37 @@ fun ModelSection(
         onTap = { picking = EFFORT },
     )
 
+    // **Only Reset is here.** Add and Remove belong to the list they change, so they live in the
+    // window that opens when the model (or the provider) is pressed — reported from the live log:
+    // "move add and remove model buttons into the window that opens after pressing the model name.
+    // Add the same to provider. right in settings leave only reset model configuration button".
+    // Reset stays because it is the opposite of a choice: it puts back the config the app ships,
+    // which is not something to hunt for inside the list of things to pick.
     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        TextButton(onClick = { adding = true }) { Text("Add model") }
-        TextButton(onClick = { removing = true }) { Text("Remove model") }
         TextButton(onClick = { viewModel.resetModelConfig() }) { Text("Reset") }
     }
 
-    // **Read the revision, not only the getter.** `modelKeyState` is a plain property, so Compose
-    // has no reason to re-run this block when a dialog writes a key — and the row kept saying "No key
-    // yet" after the key had been kept, which looks exactly like a key that did not take.
-    val saved = viewModel.modelKeySaved
-    val keyState = remember(saved) { viewModel.modelKeyState }
-    val hasKey = keyState == KeyState.READABLE
-    Text(
-        text = when (keyState) {
-            KeyState.READABLE -> "An OpenRouter key is kept on this phone for this account."
-            KeyState.LOCKED ->
-                "A key is kept for this account. This phone has to be unlocked before the model " +
-                    "list or the agent can read it."
-            KeyState.NONE ->
-                "No OpenRouter key yet, so the model list cannot be read and the agent cannot talk."
-        },
-        style = MaterialTheme.typography.bodySmall,
-        color = if (hasKey) {
-            MaterialTheme.colorScheme.onSurfaceVariant
-        } else {
-            MaterialTheme.colorScheme.error
-        },
+    // **What context the pin actually allows, named here because this is where the model is
+    // chosen.** The number under the Context fields is the floor when nothing has been read yet,
+    // and a floor that looks like a limit is how "96k" got reported as a cap on a million-token
+    // model. This row says which of the two it is, and pressing it re-reads the catalogue.
+    val info = viewModel.modelInfo
+    val ceiling = ContextBudget.ceiling(
+        pin = viewModel.modelConfig.active.provider,
+        contextLength = info?.contextLength,
+        maxOutput = info?.maxOutput,
     )
-    TextButton(onClick = onSetKey) {
-        Text(if (keyState == KeyState.NONE) "Set the OpenRouter key" else "Change the OpenRouter key")
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = "Context: ${ContextBudget.short(ceiling)}" +
+                (info?.contextLength?.let { " of ${ContextBudget.short(it.toLong())}" } ?: ""),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(
+            onClick = { viewModel.readCatalogue(viewModel.modelConfig.active.model, force = true) },
+        ) { Text("Read") }
     }
 
     if (picking != null) {
@@ -120,12 +108,6 @@ fun ModelSection(
             what = picking!!,
             onDismiss = { picking = null },
         )
-    }
-    if (adding) {
-        AddModelDialog(viewModel = viewModel, onDismiss = { adding = false })
-    }
-    if (removing) {
-        RemoveModelDialog(viewModel = viewModel, onDismiss = { removing = false })
     }
 }
 
@@ -174,6 +156,10 @@ private fun ModelPicker(
     val config = viewModel.modelConfig
     val active = config.active
     var chosen by remember { mutableStateOf<String?>(null) }
+    // The two list acts, held by the picker rather than by the settings screen: the button that
+    // opens them is in this window now, and closing one dialog must not close the other.
+    var adding by remember { mutableStateOf(false) }
+    var removing by remember { mutableStateOf(false) }
     val numbers = viewModel.modelEndpoints
     val info = viewModel.modelInfo
     val failure = viewModel.catalogueProblem
@@ -183,8 +169,14 @@ private fun ModelPicker(
     // menu" is what this is: one read per opening, on the app's worker, with no polling
     // anywhere. It is not inside the composition, because a sheet that fetches while it draws
     // freezes exactly when the network is slow — which is when it was opened.
+    //
+    // **The model list needs it as much as the other two**, and is the one that was left out. The
+    // effort ladder is a fact about the model, so it came from here already; but the context
+    // limit is too, and with no read the agent fell back to the floor — which is how a 1M-token
+    // model came to be trimmed at 96k. Reported from the live log: "why there is 96k limit on
+    // trim? it should be only capped by active model context size".
     LaunchedEffect(what, active.model) {
-        if (what != MODEL) viewModel.readCatalogue(active.model)
+        viewModel.readCatalogue(active.model)
     }
 
     val allowed = config.providersOf(active.model)
@@ -304,9 +296,23 @@ private fun ModelPicker(
             ) { Text("Select") }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            // **Add and Remove live here**, beside the list they change — on every step of the
+            // choice, because a model is added with its endpoints and one is removed from the
+            // model in use. Neither is on the settings screen any more.
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = { adding = true }) { Text("Add") }
+                TextButton(onClick = { removing = true }) { Text("Remove") }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
         },
     )
+
+    if (adding) {
+        AddModelDialog(viewModel = viewModel, onDismiss = { adding = false })
+    }
+    if (removing) {
+        RemoveModelDialog(viewModel = viewModel, onDismiss = { removing = false })
+    }
 }
 
 private fun current(what: String, active: ActiveModel): String = when (what) {
@@ -524,4 +530,49 @@ private fun RemoveModelDialog(viewModel: AppViewModel, onDismiss: () -> Unit) {
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
     )
+}
+
+/**
+ * The OpenRouter key: **the first field of the agent block**, because nothing else in it works
+ * without one.
+ *
+ * It is here rather than inside [ModelSection] because of an order a person found confusing: the
+ * three model rows were on the settings screen, and the key — the thing that makes them usable —
+ * was at the bottom of them. Reported from the live log: "move agent block up, right below signed in
+ * as block. and make openrouter key the first field of agent block".
+ *
+ * The state is read through a revision ([AppViewModel.modelKeySaved]) rather than the getter: a
+ * plain property gives Compose no reason to re-run this block when a dialog writes a key, and the
+ * row went on saying "No key yet" after the key had been kept, which looks exactly like a key that
+ * did not take.
+ */
+@Composable
+fun KeyRow(viewModel: AppViewModel, onSetKey: () -> Unit) {
+    val saved = viewModel.modelKeySaved
+    val keyState = remember(saved) { viewModel.modelKeyState }
+    val hasKey = keyState == KeyState.READABLE
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = when (keyState) {
+                    KeyState.READABLE -> "An OpenRouter key is kept on this phone for this account."
+                    KeyState.LOCKED ->
+                        "A key is kept for this account. This phone has to be unlocked before the " +
+                            "model list or the agent can read it."
+                    KeyState.NONE ->
+                        "No OpenRouter key yet, so the model list cannot be read and the agent " +
+                            "cannot talk."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (hasKey) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    MaterialTheme.colorScheme.error
+                },
+            )
+        }
+        TextButton(onClick = onSetKey) {
+            Text(if (keyState == KeyState.NONE) "Set key" else "Change key")
+        }
+    }
 }

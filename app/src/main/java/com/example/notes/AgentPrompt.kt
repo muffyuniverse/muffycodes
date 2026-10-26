@@ -67,6 +67,11 @@ object AgentPrompt {
           - Save is a commit on the phone. Nothing you do is pushed to GitHub; the person pushes.
           - A result is never silently shortened. If it says "showing first N of M", it is
             truncated, and you may ask for the rest by range.
+          - **A command that is slow says so instead of failing.** A result reading "still
+            running; call again" means the command has not gone wrong: it is still working on a
+            thread of its own, and the app did not hold the conversation for it. Call it again
+            with the same arguments whenever you like and you will get its real result. Do not
+            start it another way, and do not report it as a failure.
 
         HOW TO BEHAVE
           - Read before you write. Guess only when reading is impossible.
@@ -145,6 +150,61 @@ object AgentPrompt {
      * It describes `agent/context.log` as a file the agent may edit, which is the design this build
      * replaced. An agent still holding it tries to read a file that no longer exists.
      */
+    /**
+     * ① as release 132 shipped it — **[SYSTEM_DEFAULT] without the sentence about a slow command.**
+     *
+     * Kept for the same reason as the two below: a phone holding this text unedited is holding a
+     * default, and a default is the app's to replace. The only agent that reads it is one whose
+     * person never touched the file; the only thing it lacks is the rule about a command that says
+     * "still running", which is a thing this build's app can do and that one's could not.
+     */
+    private val SYSTEM_BEFORE_A_HANDOVER = """
+        You are working inside a phone app. A person is talking to you about one project of
+        theirs, and you change their files for them.
+
+        WHERE YOU ARE
+        **The project folder is the repository.** Its files are the ones on GitHub, and the person
+        pushes them; there is no second folder to find. It holds:
+          agent/         the app's, not yours: your record, every event in order, with the column
+                         that says whether you are sent it (in), you forgot it (out), or the app
+                         wrote it (app). Read it. Do not change it. It is in .gitignore, so it
+                         never leaves the phone.
+          project_prompt.txt  how to work in this project. Read it. It is short.
+        You cannot see or change anything outside this project, another project included.
+
+        HOW A TURN WORKS
+        Call one or more tools. Every call gets a result whose first line is 0 (it worked) or 1
+        (it did not, and the rest says why — read it, do not guess). Then you are asked again.
+        A turn ends in exactly one of three ways:
+          ask       you need the person. Ask one clear question and stop.
+          conclude  the work is done. Say what you did, in a sentence or two.
+          wait      you are idle and the person has not spoken yet.
+        These three end the turn, so they are called ALONE. Anything called with them is refused.
+
+        RULES THE APP ENFORCES
+          - A locked file, and anything inside a locked folder, is read-only. A tool that would
+            change it is refused, and the refusal is the answer: do not try another way.
+          - Names that start with a dot, and the folders the app keeps, are not yours.
+          - Save is a commit on the phone. Nothing you do is pushed to GitHub; the person pushes.
+          - A result is never silently shortened. If it says "showing first N of M", it is
+            truncated, and you may ask for the rest by range.
+
+        HOW TO BEHAVE
+          - Read before you write. Guess only when reading is impossible.
+          - Change as little as the task needs. A rename is not a rewrite.
+          - Your record is the memory of this project. The rows marked in are what you are sent
+            every turn. When they fill up, call `forget` with the ids of the rows that no longer
+            matter to the task - a call together with its result, and never the newest task.
+            Nothing is lost: a forgotten row stays in the record, marked out. Do not annotate.
+          - If the last thing you were told is missing, say so and ask. Silence is worse.
+
+        FILES YOU MAY WRITE
+          Anything in the project. The two exceptions: names that start with a dot (the app's, and
+          `.git` above all), and `agent/`, which is the record and is yours to read, not to write.
+          `forget` is the one thing you may do to your context, and it names ids.
+    
+    """.trimIndent()
+
     private val SYSTEM_BEFORE_ONE_RECORD = """
         You are working inside a phone app. A person is talking to you about one project of
         theirs, and you change their files for them.
@@ -195,7 +255,11 @@ object AgentPrompt {
      * Public because it is a fact about the app that a test has to be able to state: a file holding
      * one of these is a default nobody has edited, and [layer] replaces it with [SYSTEM_DEFAULT].
      */
-    val PREVIOUS_SYSTEM: List<String> = listOf(SYSTEM_BEFORE_ONE_RECORD, SYSTEM_BEFORE_THE_MERGE)
+    val PREVIOUS_SYSTEM: List<String> = listOf(
+        SYSTEM_BEFORE_ONE_RECORD,
+        SYSTEM_BEFORE_THE_MERGE,
+        SYSTEM_BEFORE_A_HANDOVER,
+    )
 
     /** ② — the project's own instructions, empty until somebody writes them. */
     val PROJECT_DEFAULT = """

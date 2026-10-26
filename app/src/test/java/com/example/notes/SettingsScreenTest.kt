@@ -103,7 +103,7 @@ class SettingsScreenTest {
         settings()
 
         compose.onNodeWithText("Change history").assertIsDisplayed()
-        compose.onNodeWithText("Changes kept").assertIsDisplayed()
+        compose.onNodeWithText("Versions kept").assertIsDisplayed()
     }
 
     @Test
@@ -115,8 +115,10 @@ class SettingsScreenTest {
         settings(exempt = { false }, onAskBattery = { asked++ })
 
         // The row is below the fold on a phone-shaped window, and a screen is not "not showing"
-        // something because it is further down the same page.
-        compose.onNodeWithText("Battery").performScrollTo().assertIsDisplayed()
+        // something because it is further down the same page. It is called **Background** now: it
+        // is inside the agent's block, and "Battery" described the setting rather than the thing it
+        // is for.
+        compose.onNodeWithText("Background").performScrollTo().assertIsDisplayed()
         // Each node is scrolled to before it is asked about: a page taller than the window shows
         // one screenful, and "further down the same page" is not "not there".
         compose.onNodeWithText("Not exempt · polls may fail").performScrollTo().assertIsDisplayed()
@@ -131,11 +133,11 @@ class SettingsScreenTest {
         // dismiss the dialog — so the row must not offer it once the phone already allows polls.
         settings(exempt = { true })
 
-        compose.onNodeWithText("Exempt · the agent can poll").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Exempt · it can poll").performScrollTo().assertIsDisplayed()
         // The row is on the page; the button is not. Scrolling to where the button would be, and
         // still finding nothing, is the assertion — existence alone would pass on a page nobody
         // could reach.
-        compose.onNodeWithText("Battery").performScrollTo()
+        compose.onNodeWithText("Background").performScrollTo()
         compose.onNodeWithText("Ask Android").assertDoesNotExist()
     }
 
@@ -172,8 +174,8 @@ class SettingsScreenTest {
         // greyed out — a switch that does nothing is worse than no switch.
         settings()
 
-        compose.onNodeWithText("No agent is on.").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Stop all agents").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithText("Nothing is running.").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Stop all").performScrollTo().assertIsNotEnabled()
     }
 
 }

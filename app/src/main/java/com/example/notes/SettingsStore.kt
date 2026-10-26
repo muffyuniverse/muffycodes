@@ -227,6 +227,10 @@ class SettingsStore(context: Context, name: String = "settings") {
 
     /** How long one answer may take, in minutes, and how much one result may carry. */
     const val KEY_TIMEOUT = "agent_timeout_minutes"
+
+    /** How often an idle agent is polled, and how long a command may run before a handover. */
+    const val KEY_POLL = "agent_poll_seconds"
+    const val KEY_COMMAND = "agent_command_seconds"
     const val KEY_MAX_RESULT = "agent_max_result"
 
     /**
@@ -237,6 +241,14 @@ class SettingsStore(context: Context, name: String = "settings") {
 
     /** Four minutes: the brief's own number, and long enough for a turn that does real work. */
     const val DEFAULT_TIMEOUT_MINUTES = 4
+
+    /** The idle interval: a floor below which polling is a loop of its own, and the 250 s cap. */
+    const val MIN_POLL_SECONDS = 15
+    const val MAX_POLL_SECONDS = 250
+
+    /** A command's soft timeout. Past fifteen minutes it is not a conversation any more. */
+    const val DEFAULT_COMMAND_SECONDS = 60
+    const val MAX_COMMAND_SECONDS = 900
 
     /** Under a minute a real request cannot finish; half an hour holds a worker too long. */
     const val MIN_TIMEOUT_MINUTES = 1

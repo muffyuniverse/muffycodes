@@ -34,6 +34,14 @@ class AgentRunner(
     private val changed: (List<AgentSession>) -> Unit = {},
     /** Called with a project's fresh rows after a poll, when somebody is reading them. */
     private val polled: (String, List<AgentLog.Row>, Agent.End) -> Unit = { _, _, _ -> },
+    /**
+     * The commands whose work can outlast a turn, **shared with the person's own turns**.
+     *
+     * One registry for the project, because it is one project and one record: a `clone` handed over
+     * during a poll is collected by the next poll, and one handed over while somebody is typing is
+     * collected by their next message.
+     */
+    val long: LongCommands = LongCommands(LongRunner.real()),
 ) {
 
     private val sessions = AgentSessions(ws.accountDir)
@@ -45,6 +53,9 @@ class AgentRunner(
 
     /** The projects with a poll in flight, so a test can wait for one to finish. */
     fun polling(): Set<String> = synchronized(inFlight) { inFlight.toSet() }
+
+    /** How often an idle agent is checked on, from Settings — the person's number. */
+    private val pollMs: Long get() = settings.pollMs
 
     /** How often a session that needs a person reminds them, from Settings. */
     private val reminderMs: Long get() = settings.remindMinutes * 60_000L
@@ -68,7 +79,9 @@ class AgentRunner(
                 Trace.note("agent-reminder", current.notice() ?: "")
                 notify(current)
             }
-            if (current.pollDue(now) && current.project !in polling()) {
+            // **The setting decides, not the session's copy of it.** The person may have changed
+            // the interval since this session was written, and a tick is when that matters.
+            if (current.pollDue(now, pollMs) && current.project !in polling()) {
                 poll(current, now)
             }
         }
@@ -96,7 +109,7 @@ class AgentRunner(
         // running, whatever the reason — a force-stop, an OEM battery manager, a Doze window the
         // system never lifted. The app cannot be told that happened; it can see the clock, and a
         // row is how a hole becomes visible instead of looking like a poll that took no time.
-        val missed = session.missedBy(now)
+        val missed = session.missedBy(now, pollMs)
         if (missed > 0) {
             try {
                 AgentLog.open(ws.projectDir(project)).bookkeeping(
@@ -133,6 +146,11 @@ class AgentRunner(
                     limits = limits,
                     // The ladder's position, so a repeated failure is not written down again.
                     retrying = session.retries > 0,
+                    // A command that outlasts the wait finishes beside the conversation, and the
+                    // agent is told the truth: still running, come back for it with the same
+                    // arguments. The wait is the operator's setting, not the agent's choice.
+                    long = long,
+                    toolWaitMs = settings.commandMs,
                 )
                 agent.poll() to log.rows()
             } catch (t: Throwable) {

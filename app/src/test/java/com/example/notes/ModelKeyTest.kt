@@ -42,7 +42,9 @@ class ModelKeyTest {
         val locked = scenario(LockedStore())
         try {
             compose.setContent {
-                MaterialTheme { Surface { ModelSection(viewModel = locked.viewModel, onSetKey = {}) } }
+                MaterialTheme {
+                    Surface { KeyRow(viewModel = locked.viewModel, onSetKey = {}) }
+                }
             }
 
             compose.onNodeWithText("A key is kept for this account", substring = true).assertIsDisplayed()

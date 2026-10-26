@@ -92,6 +92,15 @@ class AgentLog private constructor(
          * an agent that polls every four minutes writes fifteen rows an hour — so the session's
          * limit has to be the sort of size that holds days, not the trace's 512 KB.
          */
+        /**
+         * How big `session.log` may get before its oldest turns go.
+         *
+         * **The evidence's own horizon, and the only place rows leave for good.** Clearing up takes
+         * a row out of the conversation and leaves it in the file; this drops it. The number is a
+         * constant rather than a setting on purpose: it is not a policy about the agent's memory but
+         * about how much of a phone's storage one record may hold, and a person who could set it to
+         * "no limit" would be choosing to fill their phone.
+         */
         const val SESSION_LIMIT = 4L * 1024 * 1024
 
         /** The row kinds. Named once, so the box, the tools and the checks agree. */

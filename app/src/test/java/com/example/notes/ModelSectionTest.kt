@@ -1,5 +1,6 @@
 package com.example.notes
 
+import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -64,9 +65,23 @@ class ModelSectionTest {
             override fun endpoints(id: String): Result<List<EndpointInfo>> = Result.success(endpoints)
         }
 
+    /**
+     * The section's rows, and the key above them — which is where both are now.
+     *
+     * The key stopped being the last line of the model rows and became the first field of the
+     * agent block. This harness draws them in that order, so a test that asks about either is
+     * asking about the screen a person sees.
+     */
     @Composable
     private fun Section(onSetKey: () -> Unit = {}) {
-        MaterialTheme { Surface { ModelSection(viewModel = scene.viewModel, onSetKey = onSetKey) } }
+        MaterialTheme {
+            Surface {
+                Column {
+                    KeyRow(viewModel = scene.viewModel, onSetKey = onSetKey)
+                    ModelSection(viewModel = scene.viewModel)
+                }
+            }
+        }
     }
 
     @Test
@@ -224,7 +239,7 @@ class ModelSectionTest {
         compose.setContent { Section() }
 
         compose.onNodeWithText("An OpenRouter key is kept", substring = true).assertIsDisplayed()
-        compose.onNodeWithText("Change the OpenRouter key").assertIsDisplayed()
+        compose.onNodeWithText("Change key").assertIsDisplayed()
     }
 
     @Test
@@ -274,6 +289,6 @@ class ModelSectionTest {
         compose.waitForIdle()
 
         compose.onNodeWithText("An OpenRouter key is kept", substring = true).assertIsDisplayed()
-        compose.onNodeWithText("Change the OpenRouter key").assertIsDisplayed()
+        compose.onNodeWithText("Change key").assertIsDisplayed()
     }
 }

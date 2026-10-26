@@ -49,6 +49,14 @@ data class AgentSession(
      * the first transition, which is the one moment it is needed.
      */
     val lastWords: String = "",
+    /**
+     * The poll interval this session was started with, in milliseconds — **a copy of the setting.**
+     *
+     * Kept on the session so a tick can be answered from the file alone: the runner is rebuilt, the
+     * process is killed, the phone reboots, and the session that comes back still knows how often it
+     * is checked on. Zero means the file has none, and the design's [POLL_MS] applies.
+     */
+    val idleMs: Long = 0,
 ) {
 
     /** The three states of §2.3, and the two the operator did not choose are the ones that speak. */
@@ -80,7 +88,24 @@ data class AgentSession(
 
     companion object {
         /** The poll interval: four minutes, and it is the design's number, not a tuning knob. */
+        /**
+         * The app's own interval, for an agent that did not say what it wanted.
+         *
+         * Every four minutes is the design's number: between a provider's cache lifetime and a
+         * person's patience, and it is what an agent that ends a turn in `wait` gets having asked
+         * for nothing.
+         */
         const val POLL_MS = 4 * 60 * 1000L
+
+        /**
+         * The longest polling interval a person may set: 250 seconds.
+         *
+         * **A ceiling on the setting, not a default.** Beyond four minutes the app is checking less
+         * often than an agent that is waiting on somebody would want, and a session that went quiet
+         * for an hour could not be told apart from one the phone had stopped. The number is the
+         * operator's: "max in seconds (max limit is 250 sec)".
+         */
+        const val MAX_IDLE_MS = 250_000L
 
         /** The reminder interval's default. The operator may change it in Settings. */
         const val REMIND_MS = 60 * 60 * 1000L
@@ -91,8 +116,14 @@ data class AgentSession(
         /** How many times a failing poll reconnects before the session admits it is a wall. */
         const val MAX_RETRIES = 8
 
-        /** How late a poll has to be before the app says the phone was not running it. */
-        const val GAP_MS = 3 * POLL_MS
+        /**
+         * How many intervals late a poll has to be before the app says the phone was not running it.
+         *
+         * A multiple rather than a fixed number of minutes, because the interval is the operator's:
+         * three late checks of a one-minute session is three minutes, and of a four-minute one is
+         * twelve. A single constant would have been wrong for every setting but the default.
+         */
+        const val GAP_INTERVALS = 3
 
         /** `2nd`, `3rd`… and `11th`, which is why the last two digits are checked first. */
         fun ordinal(n: Int): String {
@@ -141,7 +172,18 @@ data class AgentSession(
     // ---- the poll's clock ---------------------------------------------------
 
     /** When the next poll is due, one interval after the last one rather than one after now. */
-    val nextPollAt: Long get() = lastPollAt + POLL_MS
+    /**
+     * The interval before this session's next poll — **the operator's number.**
+     *
+     * The agent does not choose it and cannot ask for one: `wait` is a statement that it is idle,
+     * and how often an idle agent is checked on is a person's decision about their phone, their
+     * provider bill and their battery. [idleMs] carries that decision, and a session with none (a
+     * test, or a file written before this existed) falls back to the design's [POLL_MS].
+     */
+    val nextPollAt: Long get() = lastPollAt + intervalMs
+
+    /** This session's poll interval: the setting it was given, or the design's own. */
+    val intervalMs: Long get() = idleMs.takeIf { it > 0 } ?: POLL_MS
 
     /**
      * True when a poll is owed at [at].
@@ -150,18 +192,19 @@ data class AgentSession(
      * and polling it would spend money asking the same question again; an agent that concluded
      * has nothing to do until it is spoken to; one that is reconnecting is already trying.
      */
-    fun pollDue(at: Long): Boolean = when {
+    fun pollDue(at: Long, every: Long = intervalMs): Boolean = when {
         state != State.IDLE -> false
         // Finished means the agent concluded: it has nothing to poll for until it is spoken to.
         sub == Sub.FINISHED -> false
         // Waiting polls every interval; reconnecting polls at its retry time, which is what
         // `failed` moved `lastPollAt` to. Treating reconnecting as "not due" would make one
         // dropped packet end the session, which is the opposite of the retry ladder's purpose.
-        else -> at >= nextPollAt
+        else -> at >= lastPollAt + every
     }
 
     /** How long until the next poll, for a label; never negative. */
-    fun untilPoll(at: Long): Long = (nextPollAt - at).coerceAtLeast(0)
+    fun untilPoll(at: Long, every: Long = intervalMs): Long =
+        (lastPollAt + every - at).coerceAtLeast(0)
 
     /**
      * How late this session's next poll is, in milliseconds, when it is late enough to be the phone.
@@ -173,13 +216,22 @@ data class AgentSession(
      * hours in the past means the app was not running for hours. That is a fact about the phone, and
      * it is worth writing down rather than resuming silently.
      *
-     * [GAP_MS] is three intervals, not one: a late wake, a network change and a Doze window are all
-     * ordinary, and a row about every one of them would be noise. A quarter of an hour is not.
+     * Three intervals, not one: a late wake, a network change and a Doze window are all ordinary,
+     * and a row about every one of them would be noise.
      */
-    fun missedBy(at: Long): Long {
+    /**
+     * How late this session's next check is, when it is late enough to be the phone.
+     *
+     * **Three intervals, and the interval is the setting's.** A session polled every minute that has
+     * not been polled for five is the phone having stopped the app; one polled every four minutes
+     * and four seconds late is a phone doing its best. With a fixed three-times-four-minutes this
+     * would have called every session with a short interval a gap, and reported nothing for one with
+     * a long interval.
+     */
+    fun missedBy(at: Long, every: Long = intervalMs): Long {
         if (!running || lastPollAt <= 0) return 0
         val late = at - lastPollAt
-        return if (late > GAP_MS) late else 0
+        return if (late > every * GAP_INTERVALS) late else 0
     }
 
     /**
@@ -233,6 +285,15 @@ data class AgentSession(
         reminders = 0,
     )
 
+    /**
+     * Started with the operator's interval.
+     *
+     * **The interval travels with the session**, so a tick after a reboot knows how often this one
+     * is checked on without reading the settings — and so a person changing the number affects the
+     * sessions that exist, through the runner passing its own value to [pollDue].
+     */
+    fun withInterval(every: Long): AgentSession = copy(idleMs = every)
+
     /** `conclude` ended a turn: idle, and silent — there is nothing wrong with finishing. */
     fun concluded(): AgentSession = copy(
         state = State.IDLE,
@@ -252,9 +313,12 @@ data class AgentSession(
         askedAt = 0,
         reminders = 0,
         // The interval restarts from the `wait`: an agent that has just finished a turn has
-        // nothing to check for four minutes, and a poll fired on the spot would ask it again
-        // about the turn it just ended.
+        // nothing to check for its interval, and a poll fired on the spot would ask it again about
+        // the turn it just ended.
         lastPollAt = at,
+        // **Cleared when the agent does not say.** `wait` with no argument is "the app's own
+        // interval", not "what I asked last time" — an agent that waited twenty minutes once and
+        // then stopped asking would otherwise go on being polled every twenty minutes for ever.
     )
 
     /**

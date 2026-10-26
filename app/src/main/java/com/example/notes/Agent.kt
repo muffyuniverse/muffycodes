@@ -65,6 +65,18 @@ class Agent(
 
     private val tools = AgentTools(ws, project, git, log, maxResult)
 
+    /**
+     * Where a command that outlasts its turn goes to finish, and how long a turn waits for one.
+     *
+     * **The wait is the person's, not the model's.** [toolWaitMs] is the same number as the
+     * "wait for an answer" setting; before this existed it was the socket's read timeout and
+     * nothing else, so a `clone` that took five minutes held the app's only worker for five minutes
+     * and the trace said nothing at all. The default here waits for ever, which is exactly the
+     * behaviour a turn had before — a test that is not about a slow command must not acquire one.
+     */
+    private val long: LongCommands = LongCommands(LongRunner.direct()),
+    private val toolWaitMs: Long = 0L,
+
     /** How a turn ended. */
     sealed class End {
         /** The agent needs the person. */
@@ -475,7 +487,7 @@ class Agent(
         for (call in calls) {
             val id = log.call(call.tool, call.args)
             Trace.note("agent", "$project call ${call.tool} #$id")
-            val body = runTool(call)
+            val body = answer(call)
             log.got(call.tool, body)
             if (call.tool in AgentTools.WRITING && !body.startsWith(AgentLog.FAILURE)) changed = true
         }
@@ -492,7 +504,7 @@ class Agent(
                 AgentLog.FAILURE +
                     " ${call.tool} is a terminating tool; call it alone. Nothing was done."
             } else {
-                runTool(call)
+                answer(call)
             }
             log.got(call.tool, body)
             Trace.note("agent", "$project call ${call.tool} #$id")
@@ -501,6 +513,25 @@ class Agent(
 
     /** Runs one call and returns its body with its `0` or `1` already on the front. */
     private fun runTool(call: Call): String = tools.run(call)
+
+    /**
+     * A call's result — **inline, or handed over if it outlasts the wait.**
+     *
+     * The conversation has one shape that is legal and it is unforgiving: every tool call in an
+     * assistant message must be answered before the next request. So a command that is still running
+     * is answered *now*, with the truth — still running, come back for it with the same arguments —
+     * and the work goes on beside the conversation. The model then decides when to ask again, and
+     * when it does the answer is already finished and is handed over without running anything twice.
+     *
+     * **A writing call is never handed over.** `edit`, `create`, `delete`, `move` are the ones that
+     * change files: answering "still running" for one of those and letting the turn carry on would
+     * mean the next request reads a tree that is being written underneath it. Those finish or the
+     * turn does not go on.
+     */
+    private fun answer(call: Call): String {
+        if (call.tool !in AgentTools.LONG || toolWaitMs <= 0L) return runTool(call)
+        return long.answer(project, call, toolWaitMs) { runTool(call) }
+    }
 
     /**
      * What the turn began with.
