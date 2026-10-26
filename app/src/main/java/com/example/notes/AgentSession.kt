@@ -65,6 +65,15 @@ data class AgentSession(
      * which is the closest thing an older file has to the moment the wait began.
      */
     val warmFrom: Long = 0,
+    /**
+     * The last completed background command this session has already been woken for.
+     *
+     * **A watermark, not a flag.** One command finishes once and may wake the agent once; the next
+     * tick must not wake it again for the same file, and a second command that lands a minute later
+     * must. Comparing times against a single number answers both, where "a wake is pending" would
+     * need clearing and would lose the second command if the first wake failed.
+     */
+    val wokenThrough: Long = 0,
 ) {
 
     /** The three states of §2.3, and the two the operator did not choose are the ones that speak. */
@@ -280,6 +289,15 @@ data class AgentSession(
      * the retries, because it was the ending of a turn the model had taken; a ping is not a turn, and
      * a session that asked a question is still asked, a session that finished is still finished.
      */
+    /**
+     * The wake's claim, written before the turn goes out.
+     *
+     * Both clocks move: a wake is also a check, so the ping that follows must wait its own interval
+     * rather than firing the moment the turn ends. The claim is written first for the same reason a
+     * ping's is — two tickers, one owner.
+     */
+    fun woken(at: Long): AgentSession = copy(lastPollAt = at, wokenThrough = at)
+
     fun warmed(at: Long): AgentSession = copy(
         lastPollAt = at,
         // **A ping that got through is proof the transport is back**, so the ladder ends here — but

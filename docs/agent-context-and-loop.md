@@ -55,7 +55,7 @@ exists.
 |---|---|
 | time | when the app wrote it. The model never sees it: `TURN`, the keepalive's `ping`, the gap row and the trim markers are `app` |
 | id | the row's handle. `forget` takes ids; the box and `read` take **lines**, which is why the clear-up index names both |
-| kind | `TOLD` · `TURN` · `CALL` · `GOT` · `ASK` · `CONCLUDE` · `NOTE` |
+| kind | `TOLD` · `TURN` · `CALL` · `GOT` · `ASK` · `CONCLUDE` · `NOTE` (`ping` and `woke` are the app's, and `woke` is the one note the model is sent) |
 | ctx | `in` — the model is sent it · `out` — the agent called `forget` on it · `app` — the app wrote it |
 | name | the tool, the operator, or the app's own word (`turn`, `trimmed`, `gap`, `retry`) |
 | detail | the body, escaped: a newline is `\n` |

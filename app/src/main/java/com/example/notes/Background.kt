@@ -30,7 +30,38 @@ class Background(
      * to remove.
      */
     private val launch: (() -> String) -> Unit,
+    /** The clock the completion's time comes from, so a test can say when "now" is. */
+    private val now: () -> Long = { System.currentTimeMillis() },
 ) {
+
+    /**
+     * One command that has finished, and where its result is.
+     *
+     * [path] is the same relative path the tool's own answer gave, so the note that wakes the agent
+     * names the file it will read.
+     */
+    data class Done(val project: String, val tool: String, val path: String, val at: Long)
+
+    /**
+     * The completions the tick has not answered for yet — **in memory, on purpose.**
+     *
+     * The file is the protocol between a command and the agent, and this is the protocol between a
+     * command and the *app's clock*: "something landed, a turn is owed". Nothing here is evidence, so
+     * nothing here is kept across a process: after a restart the result files are still there and the
+     * agent reads them on its next turn, which is the old, honest behaviour rather than a wake for a
+     * command nobody remembers starting.
+     */
+    private val done = ArrayDeque<Done>()
+
+    /**
+     * The commands for [project] that finished after [since], newest last.
+     *
+     * [since] is the session's own watermark, so one command wakes the agent once however many ticks
+     * follow — a command that landed at 14:02 is not news at 14:06, 14:10 and 14:14.
+     */
+    fun finishedSince(project: String, since: Long): List<Done> = synchronized(done) {
+        done.filter { it.project == project && it.at > since }
+    }
 
     /**
      * Starts [call] in the background and returns the sentence the agent reads.
@@ -53,6 +84,7 @@ class Background(
             }
             write(file, body)
             Trace.note("agent", "${project.name} · ${call.tool} finished in ${file.name}")
+            remember(project.name, call.tool, relativeName(project, file))
             body
         }
         Trace.note("agent", "${project.name} · ${call.tool} running in ${file.name}")
@@ -109,7 +141,25 @@ class Background(
     private fun relativeName(project: File, file: File): String =
         file.relativeTo(project).invariantSeparatorsPath
 
+    /** Notes a completion, keeping only the newest [KEPT]. */
+    private fun remember(project: String, tool: String, path: String) {
+        synchronized(done) {
+            done.addLast(Done(project, tool, path, now()))
+            while (done.size > KEPT) done.removeFirst()
+        }
+    }
+
     companion object {
+
+        /**
+         * How many completions are remembered.
+         *
+         * A number of commands, not a span of time: the watermark already stops one command waking
+         * the agent twice, so this exists only to bound a list that is never cleaned by anything
+         * else. Thirty-two commands finished and never answered for is a session that has bigger
+         * problems than its memory.
+         */
+        const val KEPT = 32
 
         /** What a test or a call with no threading gets: the work runs, and is finished on return. */
         /**

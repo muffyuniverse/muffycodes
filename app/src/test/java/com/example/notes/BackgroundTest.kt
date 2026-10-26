@@ -83,6 +83,28 @@ class BackgroundTest {
     }
 
     @Test
+    fun `a finished command is remembered with the path the agent was given`() {
+        // **The app's own clock has to know a command landed**, or nothing can wake the agent for it.
+        // The path is the same relative one the tool's answer named, so the note that wakes it and
+        // the file it reads are the same address.
+        val bg = Background({ work -> work() }, now = { 4_000 })
+
+        val answer = bg.start(project, call("tree", id = "7")) { "${AgentLog.SUCCESS} three files" }
+
+        val done = bg.finishedSince(project.name, 0)
+        assertEquals("one completion", 1, done.size)
+        assertEquals("for this project", project.name, done.single().project)
+        assertEquals("naming the tool", "tree", done.single().tool)
+        assertEquals("at the registry's time", 4_000L, done.single().at)
+        assertTrue(
+            "and the same path the answer gave: ${done.single().path} / $answer",
+            answer.contains(done.single().path) && File(project, done.single().path).isFile,
+        )
+        assertTrue("nothing at or before the watermark", bg.finishedSince(project.name, 4_000).isEmpty())
+        assertTrue("and nothing for another project", bg.finishedSince("another", 0).isEmpty())
+    }
+
+    @Test
     fun `a command that stopped leaves its reason in the file`() {
         // A background result nobody is waiting on still has to say why it is not there. Otherwise
         // the file reads `running` for ever and the agent keeps coming back to it.

@@ -32,8 +32,8 @@ class AgentRunner(
     private val notify: (AgentSession) -> Unit = {},
     /** Called with the sessions after anything changes, so a screen can redraw. */
     private val changed: (List<AgentSession>) -> Unit = {},
-    /** Called with a project's fresh rows after a ping, when somebody is reading them. */
-    private val polled: (String, List<AgentLog.Row>, Agent.Warm) -> Unit = { _, _, _ -> },
+    /** Called with a project's fresh rows after a check, when somebody is reading them. */
+    private val polled: (String, List<AgentLog.Row>) -> Unit = { _, _ -> },
     /**
      * Where a `background` call's work runs — **one thread per call, made when it is asked for.**
      *
@@ -48,11 +48,31 @@ class AgentRunner(
 
     private val worker = Executors.newSingleThreadExecutor()
 
-    /** Projects with a poll in flight, so one slow poll is not started twice in this process. */
+    /** Projects with a check in flight, so one slow check is not started twice in this process. */
     private val inFlight = mutableSetOf<String>()
 
-    /** The projects with a poll in flight, so a test can wait for one to finish. */
-    fun polling(): Set<String> = synchronized(inFlight) { inFlight.toSet() }
+    /** Projects a screen turn is running, which the tick must not disturb. Guarded by [inFlight]. */
+    private val held = mutableSetOf<String>()
+
+    /**
+     * The projects with a check or a turn in flight — **the tick's own guard, and the screen's.**
+     *
+     * A turn from the screen and a wake from the tick would otherwise be two requests on one
+     * conversation at the same time, writing two endings and two sets of results. The screen takes
+     * the same claim a ping does, so the tick sees the project as busy and leaves it alone.
+     */
+    fun polling(): Set<String> = synchronized(inFlight) { (inFlight + held).toSet() }
+
+    /**
+     * Says "a turn is being taken for [project]" until the returned function is called.
+     *
+     * Separate from [inFlight] rather than the same set: a turn and a ping may overlap for a moment
+     * (a ping in flight while the person types), and one finishing must not release the other's claim.
+     */
+    fun hold(project: String): () -> Unit {
+        synchronized(inFlight) { held += project }
+        return { synchronized(inFlight) { held -= project } }
+    }
 
     /** How often a waiting conversation is kept warm, from Settings — the person's number. */
     private val pollMs: Long get() = settings.pollMs
@@ -97,14 +117,49 @@ class AgentRunner(
                 current = current.polled(now)
                 put(current, speak = false)
             }
+            // **A finished command outranks a ping, and does not wait for the interval.** Its own work
+            // coming back is the one thing worth spending a turn on that the person did not ask for.
+            // A stopped session is not woken — the person switched it off — but an `asked` one is:
+            // the result may be exactly what it was waiting for, and the operator chose that.
+            val finished = if (current.state == AgentSession.State.STOPPED) {
+                emptyList()
+            } else {
+                bg.finishedSince(current.project, current.wokenThrough)
+            }
             // **The setting decides, not the session's copy of it.** The person may have changed
             // the interval, the switch or the ceiling since this session was written, and a tick is
             // when that matters.
-            if (current.warmDue(now, keepAlive, pollMs, warmMs) && current.project !in polling()) {
+            if (finished.isNotEmpty() && current.project !in polling()) {
+                wake(current, now, finished)
+            } else if (current.warmDue(now, keepAlive, pollMs, warmMs) && current.project !in polling()) {
                 warm(current, now)
             }
         }
         changed(sessions.read())
+    }
+
+    /**
+     * A background command finished: **one real turn, so the agent can do something about it.**
+     *
+     * The task is the same shape as a ping's — claim the session, build the agent, run on the worker
+     * — and only the work differs, which is why both go through [dispatch]. What makes it a turn is
+     * [Agent.wake]: the model is asked with the finished file named in the conversation, so it can
+     * read the result, act on it, ask, or conclude, exactly as if the person had said "that finished".
+     */
+    private fun wake(session: AgentSession, now: Long, finished: List<Background.Done>) =
+        dispatch(session, now, woke(finished))
+
+    /** What the agent is told, in the conversation, about the command that landed. */
+    private fun woke(finished: List<Background.Done>): String = buildString {
+        append(
+            if (finished.size == 1) {
+                "A background command has finished: "
+            } else {
+                "${finished.size} background commands have finished: "
+            },
+        )
+        append(finished.joinToString("; ") { "${it.path} (${it.tool})" })
+        append(". Read the result and carry on, or conclude if there is nothing to do.")
     }
 
     /**
@@ -118,7 +173,16 @@ class AgentRunner(
      * session whose timing came from two clocks would land an hour away from where the state machine
      * put it.
      */
-    private fun warm(session: AgentSession, now: Long) {
+    private fun warm(session: AgentSession, now: Long) = dispatch(session, now, null)
+
+    /**
+     * One request for [session]: **[waking] is the sentence a wake carries, or null for a ping.**
+     *
+     * The two branches share everything that is not the work itself — the project check, the claim,
+     * the model and its window, the worker, the in-flight flag — because a second copy of those is a
+     * second answer to "which model, which limits, who owns this session".
+     */
+    private fun dispatch(session: AgentSession, now: Long, waking: String?) {
         val project = session.project
         if (!ws.projectDir(project).isDirectory) {
             // A project that is gone takes its session with it, rather than polling a folder that
@@ -129,8 +193,13 @@ class AgentRunner(
             return
         }
         synchronized(inFlight) { inFlight += project }
-        put(session.polled(now), speak = false)
-        Trace.note("agent-warm-due", "$project · ${session.label(now)}")
+        // **The claim, written before the work goes out, and it names which kind of work it was.** A
+        // wake also moves the watermark, so the same finished file cannot wake the agent twice.
+        put(if (waking == null) session.polled(now) else session.woken(now), speak = false)
+        Trace.note(
+            if (waking == null) "agent-warm-due" else "agent-wake",
+            "$project · ${session.label(now)}",
+        )
         val active = model()
         // **The model's own window, read from the choice rather than guessed.** A poll builds the
         // same limits a turn does, and a ceiling the screen and the runner disagree about is a trim
@@ -164,7 +233,11 @@ class AgentRunner(
                     backgroundMs = { settings.backgroundMs },
                     sessionBytes = settings.sessionBytes,
                 )
-                agent.warm() to log.rows()
+                if (waking == null) {
+                    agent.warm() to log.rows()
+                } else {
+                    agent.wake(waking) to log.rows()
+                }
             } catch (t: Throwable) {
                 // What escapes the ping is the app's own machinery rather than the transport, and it
                 // is the ladder's business for the same reason a refused key is: the alternative is
@@ -177,51 +250,42 @@ class AgentRunner(
             // that a session's timing is one number; mixing a test's clock with the phone's made
             // the retry ladder land an hour away from where the state machine had put it.
             val current = sessionOf(project) ?: session
-            // **Three answers, and only one of them touches the session.** Sent moves the clock; a
-            // refusal of the key or the credit goes on the ladder, because it will not heal by
-            // waiting; anything else is a ping missed and stays out of the session's story — a
-            // provider that will not take a one-token answer must not stop the person's work.
-            when (how) {
-                // **A ping does not speak.** The session already needed the person (or did not) long
-                // before this check; posting the question again every four minutes is what the
-                // reminder ladder is for, and it counts its own.
-                is Agent.Warm.Sent -> put(current.warmed(now), speak = false)
-                is Agent.Warm.Failed -> {
-                    if (how.stopping) {
-                        // **The words travel with the ladder**, or the session stops saying only
-                        // "the pinned provider refused" when the provider said why. This one may
-                        // speak: it is the moment a session that was fine became one that needs
-                        // fixing.
-                        put(current.copy(lastWords = how.why).failed(now))
+            // **A wake is a turn; a ping is a check**, and the difference is the work that was done.
+            // A turn's ending moves the session — ask, conclude, stopped, or a blip onto the ladder —
+            // and it may speak. A ping's may only move the clock: the session already needed the
+            // person (or did not) long before this check, and posting the question again every four
+            // minutes is what the reminder ladder is for, and it counts its own.
+            if (how is Agent.End) {
+                put(how.onto(current, now))
+                polled(
+                    project,
+                    // **One line when an outage ends, with the count.** The outage is bracketed — the
+                    // first failure in the record, and this — rather than left as eight `stopped` rows
+                    // saying what one row and a number say.
+                    if (session.retries > 0 && how !is Agent.End.Stopped) {
+                        afterOutage(session, project, rows)
                     } else {
-                        put(current.warmed(now), speak = false)
-                    }
-                }
+                        rows
+                    },
+                )
+            } else if (how is Agent.Warm.Failed && how.stopping) {
+                // **The words travel with the ladder**, or the session stops saying only "the pinned
+                // provider refused" when the provider said why. This one may speak: it is the moment
+                // a session that was fine became one that needs fixing.
+                put(current.copy(lastWords = how.why).failed(now))
+                polled(project, rows)
+            } else {
+                put(current.warmed(now), speak = false)
+                polled(
+                    project,
+                    if (how is Agent.Warm.Sent && session.retries > 0) {
+                        afterOutage(session, project, rows)
+                    } else {
+                        rows
+                    },
+                )
             }
-            // **One line when it comes back, with the count.** The other half of the design's rule:
-            // an outage is bracketed — the first failure in the record, and this — rather than left
-            // as fifteen `stopped` rows saying what one row and a number say.
-            var shown = rows
-            if (session.retries > 0 && how is Agent.Warm.Sent) {
-                try {
-                    val record = AgentLog.open(ws.projectDir(project))
-                    record.bookkeeping(
-                        AgentLog.NOTE,
-                        "retry",
-                        "reconnected after ${session.retries} " +
-                            (if (session.retries == 1) "try" else "tries"),
-                    )
-                    shown = record.rows()
-                } catch (t: Throwable) {
-                    // A row about a reconnect is not worth failing the reconnect for.
-                }
-            }
-            polled(project, shown, how)
             changed(sessions.read())
-            // **Last, and the flag means "the poll is not finished" — screen included.** It used
-            // to be cleared before the screen was told, so anything waiting on it could read the
-            // session as it stood before the poll. Not in a finally, because every throw above is
-            // already caught and turned into an ending.
             synchronized(inFlight) { inFlight -= project }
         }
     }
@@ -262,6 +326,25 @@ class AgentRunner(
         // **Only a session that just started needing somebody speaks.** Otherwise every reminder
         // tick would also post here, and the reminder count would never leave the first one.
         if (speak && session.needsYou && session.reminders == 0) notify(session)
+    }
+
+    /** The record's one line when an outage ends, and the rows it leaves behind. */
+    private fun afterOutage(
+        session: AgentSession,
+        project: String,
+        rows: List<AgentLog.Row>,
+    ): List<AgentLog.Row> = try {
+        val record = AgentLog.open(ws.projectDir(project))
+        record.bookkeeping(
+            AgentLog.NOTE,
+            "retry",
+            "reconnected after ${session.retries} " +
+                (if (session.retries == 1) "try" else "tries"),
+        )
+        record.rows()
+    } catch (t: Throwable) {
+        // A row about a reconnect is not worth failing the reconnect for.
+        rows
     }
 
     /**

@@ -237,6 +237,145 @@ class AgentRunnerTest {
 
     // ---- what a ping does to the session ------------------------------------
 
+    // ---- a finished command wakes the agent ---------------------------------
+
+    @Test
+    fun `a finished background command wakes the agent with a turn, once`() {
+        // **The one thing worth a turn the person did not ask for.** Its own work coming back: the
+        // model is asked with the file named in the conversation, so it can read the result and act.
+        on("shopping", now = 1_000)
+        // **The registry's clock is the test's**, so a completion's time and a tick's are the same
+        // axis: the watermark is a comparison of two numbers that have to mean the same thing.
+        val bg = Background({ it() }, now = { 1_001 })
+        val door = ScriptedDoor(Reply("", listOf(Call("c1", "conclude", """{"text":"three files"}"""))))
+        val runner = AgentRunner(
+            ws = ws,
+            git = git,
+            settings = settings,
+            model = { ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high") },
+            door = { door },
+            notify = { notices += it },
+            bg = bg,
+        ).also { runners += it }
+
+        // A command starts and lands while the agent is idle.
+        bg.start(ws.projectDir("shopping"), Call("c9", "tree", "{}")) { "0 three files" }
+
+        runner.tick(1_001)
+        settle(runner)
+
+        assertEquals("one turn was taken", 1, door.asked.size)
+        assertTrue(
+            "and it says what finished: ${door.asked.firstOrNull()?.messages?.last()?.text}",
+            door.asked.first().messages.last().text.contains("agent/background_results/tree-c9.txt"),
+        )
+        val session = runner.sessions().single()
+        assertEquals("its ending moved the session", AgentSession.Sub.FINISHED, session.sub)
+        assertEquals("and the watermark moved with it", 1_001L, session.wokenThrough)
+
+        // The same file does not wake it again, however many ticks follow.
+        runner.tick(2_000)
+        settle(runner)
+        runner.tick(3_000)
+        settle(runner)
+        assertEquals("still one turn for one command", 1, door.asked.size)
+    }
+
+    @Test
+    fun `a second command landing later wakes the agent again`() {
+        // **The watermark is a time, not a flag.** A flag cleared by the first wake would lose the
+        // second command, which is the ordinary case for a model that starts work in parallel.
+        on("shopping", now = 1_000)
+        var at = 5_000L
+        val bg = Background({ it() }, now = { at })
+        val door = ScriptedDoor(
+            Reply("", listOf(Call("c1", "conclude", """{"text":"one"}"""))),
+            Reply("", listOf(Call("c2", "conclude", """{"text":"two"}"""))),
+        )
+        val runner = AgentRunner(
+            ws = ws, git = git, settings = settings,
+            model = { ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high") },
+            door = { door }, notify = { notices += it }, bg = bg,
+        ).also { runners += it }
+
+        bg.start(ws.projectDir("shopping"), Call("c1", "tree", "{}")) { "0 one" }
+        runner.tick(1_001)
+        settle(runner)
+        assertEquals("the first turned it", 1, door.asked.size)
+
+        // A second command finishes later than the watermark.
+        at = 6_000
+        bg.start(ws.projectDir("shopping"), Call("c2", "read", """{"path":"milk.txt"}""")) { "0 two litres" }
+        runner.tick(6_001)
+        settle(runner)
+
+        assertEquals("the second turned it again", 2, door.asked.size)
+        assertTrue(
+            "and the note names the second file",
+            door.asked.last().messages.last().text.contains("read-c2.txt"),
+        )
+    }
+
+    @Test
+    fun `a stopped session is not woken, and an asked one is`() {
+        // **The person's stop wins, and an answered question does not block its own answer.** A
+        // session they switched off is not woken for anything; one waiting on an answer is woken,
+        // because the result may be exactly what it was waiting for.
+        on("shopping", now = 1_000)
+        var at = 5_000L
+        val bg = Background({ it() }, now = { at })
+        val door = ScriptedDoor(
+            Reply("", listOf(Call("c1", "ask", """{"question":"Which branch?"}"""))),
+            Reply("", listOf(Call("c2", "conclude", """{"text":"fine"}"""))),
+        )
+        val runner = AgentRunner(
+            ws = ws, git = git, settings = settings,
+            model = { ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high") },
+            door = { door }, notify = { notices += it }, bg = bg,
+        ).also { runners += it }
+
+        // Asked, and then a command lands.
+        AgentSessions(ws.accountDir).put(
+            AgentSessions(ws.accountDir).read().single().asked(1_000),
+        )
+        bg.start(ws.projectDir("shopping"), Call("c1", "tree", "{}")) { "0 one" }
+        runner.tick(5_001)
+        settle(runner)
+
+        assertEquals("a question is woken", 1, door.asked.size)
+        assertEquals("and the wake's ending replaced it", AgentSession.Sub.FINISHED, runner.sessions().single().sub)
+
+        // Stopped, and then a command lands: nothing is spent.
+        runner.stop("shopping")
+        at = 9_000
+        bg.start(ws.projectDir("shopping"), Call("c2", "tree", "{}")) { "0 two" }
+        runner.tick(9_000)
+        settle(runner)
+
+        assertEquals("a stopped session is left alone", 1, door.asked.size)
+    }
+
+    @Test
+    fun `a wake outranks a ping, and the ping waits its own interval afterwards`() {
+        // Both are due at once — a command landed and four minutes have passed — and the wake is the
+        // one worth paying for. Afterwards the clock has moved, so the ping is not fired on its heels.
+        on("shopping", now = 1_000)
+        val bg = Background({ it() }, now = { 1_000 + 2 * AgentSession.POLL_MS })
+        val door = ScriptedDoor(Reply("", listOf(Call("c1", "conclude", """{"text":"done"}"""))))
+        val runner = AgentRunner(
+            ws = ws, git = git, settings = settings,
+            model = { ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high") },
+            door = { door }, notify = { notices += it }, bg = bg,
+        ).also { runners += it }
+
+        bg.start(ws.projectDir("shopping"), Call("c1", "tree", "{}")) { "0 one" }
+        runner.tick(1_000 + 2 * AgentSession.POLL_MS)
+        settle(runner)
+
+        assertEquals("a turn, not a ping", 1, door.asked.size)
+        assertEquals("and no ping at all", 0, door.pings.size)
+    }
+
     @Test
     fun `the switch in settings stops every ping on the phone`() {
         // **One switch, and it is the person's.** Off means nothing goes out while the agent waits:

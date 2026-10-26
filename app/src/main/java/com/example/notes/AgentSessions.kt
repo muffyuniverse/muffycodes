@@ -71,6 +71,7 @@ class AgentSessions(private val accountDir: File) {
             // what a session written before an agent could ask for one was getting.
             idleMs = json.optLong("idleMs", 0).coerceAtLeast(0),
             warmFrom = json.optLong("warmFrom", 0).coerceAtLeast(0),
+            wokenThrough = json.optLong("wokenThrough", 0).coerceAtLeast(0),
             lastWords = json.optString("lastWords"),
         )
     } catch (t: Throwable) {
@@ -133,6 +134,7 @@ class AgentSessions(private val accountDir: File) {
         .put("lastPollAt", s.lastPollAt)
         .put("idleMs", s.idleMs)
         .put("warmFrom", s.warmFrom)
+        .put("wokenThrough", s.wokenThrough)
         .put("lastWords", s.lastWords)
 
     /** An enum by name, and [fallback] rather than a crash when the file holds something else. */

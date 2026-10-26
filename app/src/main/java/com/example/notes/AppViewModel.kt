@@ -2193,43 +2193,51 @@ class AppViewModel @JvmOverloads constructor(
         // One result may not be bigger than the model's input window: bigger than that cannot be
         // sent at all, so the ask is clamped and the settings row says which number is in force.
         val resultLimit = ContextBudget.resultLimit(settings.maxResult, model.contextLength)
+        // **The tick must not wake this session while the person's turn is running.** One request on
+        // one conversation at a time: a wake landing beside this turn would write a second ending and
+        // a second set of results, and the person would read the mixture of the two.
+        val release = runner?.hold(project)
         onWorker {
-            val log = AgentLog.open(ws.projectDir(project))
-            val agent = Agent(
-                ws.accountDir, project, ws, g, log, door, model,
-                // How much of one result may enter the conversation, clamped by the model's input
-                // window — a result larger than that cannot be sent, so it would be filed for ever.
-                maxResult = resultLimit.inForce.toInt(),
-                limits = limits,
-                // **The same registry the polls use.** A `background` command started while
-                // somebody is typing keeps running beside the turn and lands its result in a file on
-                // its own thread; a turn and a poll share the one registry, so a command started by
-                // one is not invisible to the other.
-                bg = runner?.bg ?: Background.inline(),
-                foregroundMs = settings.foregroundMs,
-                backgroundMs = { settings.backgroundMs },
-                sessionBytes = settings.sessionBytes,
-                // Read at every boundary rather than captured: the person may speak or stop while
-                // this turn is waiting for an answer, and the loop has to see that when it comes.
-                cut = { interrupt },
-            )
-            val end = try {
-                // **The screen only ever speaks.** The tick's own pings come from the runner, where
-                // nothing is drawn; a poll built here as well was a second door into the same
-                // conversation, and the two could not agree about who was waiting.
-                agent.burst(said) {
-                    val rows = log.rows()
-                    main.post { applyChat(rows, follow = true) }
+            try {
+                val log = AgentLog.open(ws.projectDir(project))
+                val agent = Agent(
+                    ws.accountDir, project, ws, g, log, door, model,
+                    // How much of one result may enter the conversation, clamped by the model's input
+                    // window — a result larger than that cannot be sent, so it would be filed for ever.
+                    maxResult = resultLimit.inForce.toInt(),
+                    limits = limits,
+                    // **The same registry the polls use.** A `background` command started while
+                    // somebody is typing keeps running beside the turn and lands its result in a file on
+                    // its own thread; a turn and a poll share the one registry, so a command started by
+                    // one is not invisible to the other.
+                    bg = runner?.bg ?: Background.inline(),
+                    foregroundMs = settings.foregroundMs,
+                    backgroundMs = { settings.backgroundMs },
+                    sessionBytes = settings.sessionBytes,
+                    // Read at every boundary rather than captured: the person may speak or stop while
+                    // this turn is waiting for an answer, and the loop has to see that when it comes.
+                    cut = { interrupt },
+                )
+                val end = try {
+                    // **The screen only ever speaks.** The tick's own pings come from the runner, where
+                    // nothing is drawn; a poll built here as well was a second door into the same
+                    // conversation, and the two could not agree about who was waiting.
+                    agent.burst(said) {
+                        val rows = log.rows()
+                        main.post { applyChat(rows, follow = true) }
+                    }
+                } catch (t: Throwable) {
+                    // **A burst that threw is a wall.** The transport's own failures already come back
+                    // as a retryable Stopped from inside the loop, so what escapes to here is the turn's
+                    // own machinery — the record, a tool, a bug — and retrying that every four seconds
+                    // would hide it.
+                    Agent.End.Stopped(Secrets.explain(t, "The agent could not run"))
                 }
-            } catch (t: Throwable) {
-                // **A burst that threw is a wall.** The transport's own failures already come back
-                // as a retryable Stopped from inside the loop, so what escapes to here is the turn's
-                // own machinery — the record, a tool, a bug — and retrying that every four seconds
-                // would hide it.
-                Agent.End.Stopped(Secrets.explain(t, "The agent could not run"))
+                val rows = log.rows()
+                main.post { then(rows, end) }
+            } finally {
+                release?.invoke()
             }
-            val rows = log.rows()
-            main.post { then(rows, end) }
         }
     }
 

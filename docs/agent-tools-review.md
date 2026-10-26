@@ -80,8 +80,17 @@ and a session is not stopped because the model answered in prose instead of call
 
 **`background` takes any command.** Its answer — the path — comes back **before the work starts**, so
 it never holds a turn open; the command's own limit is the operator's *background* number, applied to
-the work. The three that end a turn and `background` itself are refused. A command that changes files
+the work. The two that end a turn and `background` itself are refused. A command that changes files
 still changes them while the turn carries on, and the tool description says so.
+
+**A finished command wakes the agent, once.** When the work lands, the app's next tick sends a real
+turn — not a ping — whose conversation carries one extra message naming the file. That is the only
+turn the app takes that the person did not ask for, and it exists because the alternative is a result
+that sits unread until somebody types: its own work coming back is worth one request. Waking is per
+command (`wokenThrough` on the session is a watermark, so the same file cannot wake it twice and a
+second command landing later can), it happens from `asked` as well as from idle, and never from a
+session the person stopped. A wake turn can start another command, and that command can wake it
+again: that is work, not a loop, and the per-turn guard on calls that change nothing still applies.
 
 **A name that is taken is refused, in a copy as much as in a move.** A silent `milk 2.txt` puts a file
 where the person did not ask for it, under a name they will not recognise, and reports success. An

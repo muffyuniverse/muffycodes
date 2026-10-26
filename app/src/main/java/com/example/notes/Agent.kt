@@ -308,6 +308,26 @@ class Agent(
     }
 
     /**
+     * A background command finished: **one turn the model takes without being spoken to.**
+     *
+     * Its own work coming back is the one thing worth spending a turn on that the person did not
+     * ask for, and nothing else in the app can act on it — a ping is one token, and the file is only
+     * read by something that decides to read it.
+     *
+     * [what] is written into the record first, in the context, as the app's own line: the model is
+     * handed the same conversation it ended plus one sentence saying what landed and where. Without
+     * it there is nothing new to answer, and a model asked the same question twice answers the same
+     * way.
+     *
+     * **No `TOLD` row.** The person did not speak; the note is the app's, and the ending is the
+     * turn's own.
+     */
+    fun wake(what: String): End {
+        log.note("woke", what)
+        return turn(null, {})
+    }
+
+    /**
      * One turn, and the two things that happen however it ends.
      *
      * **The layers are read here, once.** Not at startup, so an edit to the project's
@@ -872,8 +892,19 @@ class Agent(
                     out.add(Msg.assistant(row.body))
                 }
 
-                AgentLog.NOTE -> if (row.name == "agent" || row.name == "reason") {
-                    text.append(row.body).append("\n")
+                // **`woke` is a message of its own, and the only note that is.** A wake has to say
+                // why it happened; `agent`/`reason` accumulate into the assistant's own paragraph,
+                // which would make the app's sentence look like something the model wrote. It is a
+                // user message because that is the only role every endpoint lets a conversation
+                // carry mid-array — and it is at the end of the array, where changing it costs one
+                // message rather than the whole prompt.
+                AgentLog.NOTE -> when (row.name) {
+                    "woke" -> {
+                        flush()
+                        out.add(Msg.user(row.body))
+                    }
+                    "agent", "reason" -> text.append(row.body).append("\n")
+                    else -> Unit
                 }
             }
         }

@@ -409,6 +409,55 @@ class AgentTest {
     }
 
     @Test
+    fun `a wake is a turn, and the request says what finished and where`() {
+        // **The one turn the app takes without being spoken to.** Its own work coming back is worth a
+        // request, and the model has to be told: the conversation it already answered, plus one
+        // sentence naming the file, is the whole difference between "do something" and "answer me
+        // again the same way".
+        val door = ScriptedDoor(
+            Reply("", listOf(call("conclude", """{"text":"started it"}"""))),
+            Reply("", listOf(call("read", """{"path":"agent/background_results/tree-c9.txt"}"""))),
+            Reply("", listOf(call("conclude", """{"text":"three files, all fine"}"""))),
+        )
+        val agent = agent(door)
+        agent.burst("look at everything")
+        // The file the wake names really exists, so the read in the wake's turn is a read.
+        ws.write(
+            File(ws.projectDir("shopping"), "agent/background_results/tree-c9.txt"),
+            "0\n3 files: milk.txt, bread.txt, eggs.txt",
+        )
+        val talked = door.asked.size
+
+        val end = agent.wake(
+            "A background command has finished: agent/background_results/tree-c9.txt (tree). " +
+                "Read the result and carry on, or conclude if there is nothing to do.",
+        )
+
+        assertTrue("it took a turn: $end", end is Agent.End.Concluded)
+        assertEquals("with the words it concluded", "three files, all fine", (end as Agent.End.Concluded).said)
+        assertEquals("two requests: the read, then the conclusion", talked + 2, door.asked.size)
+        assertTrue("and no ping was involved", door.pings.isEmpty())
+
+        // **The note is in the request as a user message, at the end.** The system message cannot
+        // carry it without rewriting the first bytes of a conversation that was already warm.
+        val asked = door.asked[talked]
+        assertEquals(
+            "the last message is the app's own",
+            "user" to "A background command has finished: agent/background_results/tree-c9.txt (tree). " +
+                "Read the result and carry on, or conclude if there is nothing to do.",
+            asked.messages.last().role to asked.messages.last().text,
+        )
+        assertTrue(
+            "and nothing was put in the person's mouth",
+            log.contextRows().none { it.kind == AgentLog.TOLD && it.body.contains("background command") },
+        )
+        assertTrue(
+            "and the read it made found the result: ${gotRows().last { it.name == "read" }.body}",
+            gotRows().last { it.name == "read" }.body.contains("3 files: milk.txt"),
+        )
+    }
+
+    @Test
     fun `a ping that fails does not end the session and says nothing in the context`() {
         // A provider that will not take a one-token answer, a tunnel, a Doze window: none of them
         // is the person's work failing. The ping is missed and the next tick tries again.
@@ -473,15 +522,16 @@ class AgentTest {
         val now = AgentPrompt.SYSTEM_DEFAULT
 
         assertTrue(
-            "it is the text that told the model to say it was waiting",
-            newest.contains("wait      you are idle and the person has not spoken yet."),
+            "it is the text that did not know a finished command could wake it",
+            newest.contains("Do not start the same command twice.") &&
+                !newest.contains("wakes you with a note naming the file"),
         )
-        assertFalse("and this build has no such tool", now.contains("wait      you are idle"))
+        assertTrue("and this build does say so", now.contains("wakes you with a note naming the file"))
         assertTrue("the layout is the merge's", newest.contains("The project folder is the repository"))
         assertFalse("and it predates the handover rule", newest.contains("still running; call again"))
         assertTrue(
-            "the one before it is the text that refused a result for its size",
-            older.contains("comes back as a refusal naming its"),
+            "the one before it is the text that offered wait as an ending",
+            older.contains("wait      you are idle and the person has not spoken yet."),
         )
         assertTrue("a previous default is not the current one", newest != now)
     }
