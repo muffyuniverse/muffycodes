@@ -102,6 +102,27 @@ object LogFormat {
     }
 
     /**
+     * A row as `agent/context.log` keeps it: `id size name  body` — **no kind, no ctx.**
+     *
+     * The two columns it leaves out are the app's: `kind` is how a conversation is rebuilt, and
+     * everything in this file is in the context, so a `ctx` column would read `in` on every line.
+     * What is left is what the model acts on — the id `forget` takes, what the row costs, and the
+     * words — and the body is escaped exactly as the evidence escapes it, so the same row is the
+     * same characters in both files.
+     */
+    fun contextRow(id: Int, size: Long, name: String, detail: String): String = buildString {
+        append(id.toString().padStart(4))
+        append(' ')
+        append(size.toString().padStart(5))
+        append(' ')
+        append(name)
+        if (detail.isNotEmpty()) {
+            append("  ")
+            append(escaped(detail))
+        }
+    }
+
+    /**
      * The same line with its ctx column changed, and **not one other byte moved.**
      *
      * Text surgery, deliberately: the alternative is re-rendering the row from its parsed parts,

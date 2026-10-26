@@ -156,7 +156,7 @@ Nothing was left as a silent gap.
 | 3 | `POST_NOTIFICATIONS` **asked for** (v1 `@`, r3 §1.7) | declared in the manifest, never requested — a reminder posted into nowhere on Android 13+ | a Settings row with its state and **Allow**; the manifest's "not yet asked for" comment corrected. `NoticesTest`, `SettingsScreenTest` |
 | 4 | a session that is on **keeps its clock** (v2 `@`) | `apply()` was only reached from a press, so after a reboot nothing polled until a session changed | `applyService` asked wherever the sessions are read (refresh and every tick), on change; the deprecated `getRunningServices` replaced by an owner flag |
 | 5 | `stopped · the phone stopped the app` (r5 §2.3, §2.5) | **unreachable** — nothing set it, and nothing honestly could: a force-stop is indistinguishable from a cold start, and a resume contradicts "never stop until you remove it" | **removed.** Replaced by the fact the app can see: a `gap` row (`app`, so the poll's bytes are unchanged) saying how long the phone did not run the agent, drawn in the box and traced as `agent-gap`. Round 7 §2 |
-| 6 | the shipped `system_prompt.txt` describes this build | a file written only when missing, so the old text — which tells the agent to edit `agent/context.log` — survived the update | an unedited shipped default is replaced (`AgentPrompt.PREVIOUS_SYSTEM`), an edited one is never touched; and the old name now gets an answer naming `session.log` and `forget`. Three tests in `AgentTest` |
+| 6 | the shipped `system_prompt.txt` describes this build | a file written only when missing, so the old text — which tells the agent to edit `agent/context.log` — survived the update | **removed 2026-10-26**: the app is developed, not released, so no phone holds a previous default. A file that exists is the person's, word for word; the shipped text is written only when it is missing or empty. Three tests in `AgentTest` |
 | 7 | `tree`/`read` with grep; the timeout and the result length as settings; a global off switch | all five absent (the brief asked for each; the v1 `@` assumed the switch) | `tree name/grep`, `read grep`; `SettingsStore.timeoutMinutes`/`maxResult` wired to the door and the tools; **Stop all agents** in Settings |
 
 ### Leftovers cleared
@@ -164,7 +164,7 @@ Nothing was left as a silent gap.
 - Stale "two files" wording in `AgentLog` (four comments), `AppViewModel`, `LogFormat` and the
   editor's sentence — they described a design that no longer exists.
 - An orphaned KDoc block sitting above `ContextBudget.sizeLabel` instead of `short`.
-- `highestId()` and `load()` taking the maximum of `rows()` and `contextRows()` — the same number
+- `highestId()` and `load()` taking the maximum of the two files — the same number
   twice, left over from when the context was a second file.
 - The manifest comment claiming the battery permission was "not yet asked for".
 - `docs/agent-context-and-loop.md` — rewritten for the one-record model.

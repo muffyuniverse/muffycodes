@@ -38,24 +38,20 @@ three intervals old was not running, and `AgentRunner` writes one row — `gap`,
 is never sent it and the poll stays byte-identical — saying how long for. It is in the box, in the
 record and on the trace (`agent-gap`). The hole is visible; the state is not invented.
 
-## 3. The update that had to reach the phone
+## 3. How the instructions are read now
 
-The one-record round rewrote ① (`system_prompt.txt`) — it stopped telling the agent to edit
-`agent/context.log`. The file is written **only when missing**, so every phone that had already run
-the agent kept the old text: the model would be told to edit a file that no longer exists and the
-app would refuse it, for ever, with the person's only clue a confused agent.
-
-`AgentPrompt.layer` now also replaces a file that is **whitespace-for-whitespace one of the texts
-this app shipped before** (`AgentPrompt.PREVIOUS_SYSTEM`), and never one that has been edited. A
-default may be replaced while it is still the default; an edit is never touched. And if the person
-*did* edit the old prompt, the one name it will ask for — `agent/context.log` — now gets an answer
-that names `agent/session.log` and `forget` instead of "there is no file".
+A file that exists is the person's, word for word. There is **no list of the texts this app
+shipped before** and no comparison with them: the app is being developed rather than released, so
+a ① on the phone was written by this build or by a person, and "is this still our default?" asks
+about installations that do not exist. `AgentPrompt.layer` writes the shipped text when the file
+is missing or empty, and otherwise hands over whatever is in it.
 
 ## 4. What the audit did not change, and why
 
 - **The poll's bytes.** The repeated `wait` is born `app`; the gap row is `app`; nothing added here
   enters a request. Measured by the tests that compare two polls' messages.
-- **The record's shape.** One file, six columns, ids monotonic, the lock per file. Unchanged.
+- **The record's shape.** Two files — the evidence and the context written from it — appended
+  oldest-first, ids monotonic, the lock per file.
 - **`wait` in company.** The refusal is still `1 … is a terminating tool; call it alone`, and the
   other calls still run — the operator's "it doesn't hold them". Each call gets its own result row
   rather than the other results being pasted into the refusal, because a result belongs to its call.

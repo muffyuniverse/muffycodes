@@ -475,89 +475,47 @@ class AgentTest {
     // ---- the instructions, and the default that changed ----------------------
 
     @Test
-    fun `an instructions file that is still the app's old default is replaced`() {
-        // **The update path, and the reason it is tested.** The one-record round rewrote ①, and the
-        // file is only written when missing — so a phone that had already run the agent kept the text
-        // that tells the model to edit `agent/context.log`, a file that no longer exists. The agent
-        // would be refused for ever, and the person's only clue would be an agent that seemed confused.
+    fun `an instructions file that exists is the person's, word for word`() {
+        // **No list of the texts the app used to ship.** The app is being developed, not released,
+        // so a file on the phone was written by this build or by a person — and comparing it
+        // against half-remembered defaults would rewrite somebody's instructions to fix a phon
+        // that does not exist.
         val file = File(account, AgentPrompt.SYSTEM_FILE)
-        file.writeText(AgentPrompt.PREVIOUS_SYSTEM.first())
-
-        val read = AgentPrompt.system(account)
-
-        assertEquals("the new text is what the agent is given", AgentPrompt.SYSTEM_DEFAULT, read)
-        assertEquals("and it is what the file holds now", AgentPrompt.SYSTEM_DEFAULT, file.readText())
-        assertFalse("so nothing tells it to edit a file that is gone", read.contains("context.log"))
-    }
-
-    @Test
-    fun `every default this app ever shipped is recognised, not only the oldest one`() {
-        // **The list, not the first entry.** `PREVIOUS_SYSTEM.first()` was the text two rounds ago,
-        // and a test that only ever used that one would go on passing while a phone holding the
-        // *last* release's unedited default kept instructions this build has changed. Each one is
-        // checked, so adding a default without adding it to the list is a failing test rather than a
-        // phone left behind.
-        for ((index, before) in AgentPrompt.PREVIOUS_SYSTEM.withIndex()) {
-            val file = File(account, AgentPrompt.SYSTEM_FILE)
-            file.writeText(before)
-            assertEquals(
-                "entry $index of the shipped defaults is replaced",
-                AgentPrompt.SYSTEM_DEFAULT,
-                AgentPrompt.system(account),
-            )
-            assertEquals("and the file holds it now", AgentPrompt.SYSTEM_DEFAULT, file.readText())
-            file.delete()
-        }
-    }
-
-    @Test
-    fun `the newest previous default is the text this build replaced`() {
-        // **The entry that matters most, because it is what most phones are holding.** A phone that
-        // ran the previous release has an ① file with its unedited default — which is this build's
-        // predecessor, and which describes the record as five columns that include a clock and a ctx
-        // flag and no size. Recognising it needs those words exactly, so the entry is the old text
-        // rather than a paraphrase of it, and it is last because it is the most recent.
-        val newest = AgentPrompt.PREVIOUS_SYSTEM.last()
-        val older = AgentPrompt.PREVIOUS_SYSTEM[AgentPrompt.PREVIOUS_SYSTEM.size - 2]
-        val now = AgentPrompt.SYSTEM_DEFAULT
-
-        assertTrue(
-            "it is the text that described the record with a ctx column and no size",
-            newest.contains("that says whether you are sent it") &&
-                !newest.contains("id name body"),
-        )
-        assertTrue("and this build says what a row looks like", now.contains("id name body"))
-        assertTrue("the layout is the merge's", newest.contains("The project folder is the repository"))
-        assertTrue("and it knows a wake", newest.contains("wakes you with a note naming the file"))
-        assertFalse("but it predates the size", newest.contains("id size"))
-        assertTrue(
-            "the one before it is the text that did not know a wake",
-            older.contains("Do not start the same command twice.") &&
-                !older.contains("wakes you with a note naming the file"),
-        )
-        assertTrue("a previous default is not the current one", newest != now)
-    }
-
-    @Test
-    fun `re-indenting the old default does not make it the person's file`() {
-        // What is being asked is whether any of the *words* changed. A file somebody reflowed is
-        // still the app's instructions, and the app's instructions are the ones that must be current.
-        val file = File(account, AgentPrompt.SYSTEM_FILE)
-        file.writeText(AgentPrompt.PREVIOUS_SYSTEM.first().replace("\n", "\n   "))
-
-        assertEquals("replaced anyway", AgentPrompt.SYSTEM_DEFAULT, AgentPrompt.system(account))
-    }
-
-    @Test
-    fun `an instructions file the person edited is kept, whatever it says`() {
-        val file = File(account, AgentPrompt.SYSTEM_FILE)
-        val theirs = AgentPrompt.PREVIOUS_SYSTEM.first() + "\n\nAlso: never touch the README."
+        val theirs = "Work only in src/. Never touch the README.\n"
         file.writeText(theirs)
 
         val read = AgentPrompt.system(account)
 
-        assertTrue("their sentence survives", read.contains("never touch the README"))
-        assertEquals("and nothing of their file was rewritten", theirs, file.readText())
+        assertEquals("handed over as it is", theirs, read)
+        assertEquals("and left alone on disk", theirs, file.readText())
+    }
+
+    @Test
+    fun `a missing instructions file is written from the default, once`() {
+        // The one thing the file system has to do here: a fresh account has no instructions, and an
+        // agent with none is an agent inventing its own rules.
+        val file = File(account, AgentPrompt.SYSTEM_FILE)
+        file.delete()
+
+        assertEquals("the shipped text", AgentPrompt.SYSTEM_DEFAULT, AgentPrompt.system(account))
+        assertEquals("and it is on disk now", AgentPrompt.SYSTEM_DEFAULT, file.readText())
+
+        // **And an emptied file is a missing one.** A save that wrote nothing is not a person saying
+        // the agent has no rules.
+        file.writeText("   \n")
+        assertEquals("still instructioned", AgentPrompt.SYSTEM_DEFAULT, AgentPrompt.system(account))
+    }
+
+    @Test
+    fun `the default describes the record this build writes`() {
+        // The prompt is the only place the agent is told where its memory lives, so the words have
+        // to match the files: two of them, oldest line first, and the columns each one has.
+        val now = AgentPrompt.SYSTEM_DEFAULT
+
+        assertTrue("both files are named", now.contains("context.log") && now.contains("session.log"))
+        assertTrue("with the context's own columns", now.contains("id size name body"))
+        assertTrue("and the order they are written in", now.contains("oldest line first"))
+        assertFalse("and no projection key that read no longer takes", now.contains("`raw`"))
     }
 
     // ---- what the door says when it has no key --------------------------------
@@ -696,9 +654,9 @@ class AgentTest {
 
     @Test
     fun `no key is accepted without being described`() {
-        // **A key only the whitelist knows is a key found by guessing.** `raw` and `id` were both in
-        // `read` while its example named neither, and the example is what a model copies; the
-        // description is where it learns the rest. Every key this command takes has to be visible to
+        // **A key only the whitelist knows is a key found by guessing.** `raw` and `id` were keys
+        // `read` took while its example named neither, and the example is what a model copies; the
+        // description is where it learns the rest. Every key a command takes has to be visible to
         // the model in the spec it is sent — as a backticked name or as a field of the example.
         for (spec in AgentTools.specs()) {
             val keys = AgentTools.KEYS[spec.name] ?: continue
@@ -772,15 +730,15 @@ class AgentTest {
     }
 
     @Test
-    fun `raw shows the record's own columns, and a pattern can then find a size`() {
-        // **The size is worth reading even though it is not the default view.** It is the number the
-        // clear-up line quotes; a model that wants to rank rows itself has to be able to see it, and
-        // to search for it. One flag, and `grep` matches the columns again.
+    fun `read shows the evidence as the file holds it, so a size is searchable`() {
+        // **A file is shown as it is.** No projection, no second view: what `read` returns is what
+        // `wc -c` and a person's editor see, so the size column is searchable with the same `grep`
+        // that searches anything else.
         log.told("make a list")
         log.got("read", "0\n" + "x".repeat(700))
 
-        val raw = tool("read", """{"path":"agent/session.log","raw":true}""")
-        val searched = tool("read", """{"path":"agent/session.log","raw":true,"grep":"^ +\\d+ +2\\d\\d "}""")
+        val raw = tool("read", """{"path":"agent/session.log"}""")
+        val searched = tool("read", """{"path":"agent/session.log","grep":"^ +\\d+ +2\\d\\d "}""")
 
         assertTrue("the columns are there: $raw", raw.contains("GOT"))
         assertTrue("including the size: $raw", Regex("^\\s*\\d+ +\\d+ +GOT", RegexOption.MULTILINE).containsMatchIn(raw))
@@ -788,25 +746,42 @@ class AgentTest {
     }
 
     @Test
-    fun `raw on a file that is not the record is refused rather than silently the same`() {
-        // A key that quietly does nothing is the `lines` mistake: the model would believe it had
-        // asked for the columns and read a view instead.
-        val body = tool("read", """{"path":"milk.txt","raw":true}""")
+    fun `the context file is the rows in the context, without kind or ctx`() {
+        // **What the agent reads when it looks at its own memory.** The two columns it lacks are
+        // the app's: `kind` rebuilds the conversation, and every row in this file is `in`, so a ctx
+        // column would say the same word on every line. A row the app wrote for itself never enters
+        // it — that is what keeps a repeated poll out of the request.
+        log.told("a task")
+        val kept = log.got("read", "0  one file")
+        val out = log.note("agent", "a note")
+        log.bookkeeping(AgentLog.TURN, "turn", "1")
+        log.forget(setOf(out))
 
-        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
-        assertTrue("saying what raw is for: $body", body.contains("record"))
+        val body = tool("read", """{"path":"agent/context.log"}""")
+
+        assertTrue("the row that is in: $body", body.contains("one file"))
+        assertFalse("the row the agent forgot is gone: $body", body.contains("a note"))
+        assertFalse("the app's own row was never there: $body", body.contains("TURN"))
+        assertFalse("and no kind column: $body", body.contains("GOT"))
+        assertFalse("and no ctx column: $body", body.contains(" in  "))
+        assertTrue(
+            "the id and the size stay: $body",
+            Regex("^\\s*$kept +\\d+ ", RegexOption.MULTILINE).containsMatchIn(body),
+        )
     }
 
     @Test
-    fun `a read of the file the record used to be says where it went`() {
-        // The one name an older instruction set still points at. An agent whose prompt the person
-        // edited keeps that prompt — so the app has to answer the question it will ask, rather than
-        // "there is no file", which leaves it guessing and trying to edit the other one.
-        val body = tool("read", """{"path":"agent/context.log"}""")
+    fun `an id is not a key read takes, because a line is what a file has`() {
+        // It was a key while the record was newest-first and a line number moved under it. The
+        // files are appended to now, so a line is a handle again — and a key that is not in the
+        // whitelist has to be refused by name rather than ignored, which is the `lines` mistake.
+        log.told("a task")
+
+        val body = tool("read", """{"path":"agent/session.log","id":3}""")
 
         assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
-        assertTrue("naming the file it became: $body", body.contains("agent/session.log"))
-        assertTrue("and the tool that does what it wanted: $body", body.contains("forget"))
+        assertTrue("naming the key it did not take: $body", body.contains("id"))
+        assertTrue("and what read does take: $body", body.contains("path"))
     }
 
     @Test
@@ -2053,11 +2028,12 @@ class AgentTest {
     }
 
     @Test
-    fun `the clear-up index names an id a read can open, and the biggest rows first`() {
+    fun `the clear-up index names a line of the context file, and the biggest rows first`() {
         // **How the agent actually chooses.** A `read` of a large context stops at the tool's own
         // limit, so a model deciding what to remove either pages through it — a request per twenty
-        // thousand characters — or guesses. The index gives the row's id — a handle that works a
-        // turn later, which a line number cannot be in a newest-first file — ordered by cost.
+        // thousand characters — or guesses. The index names the row's line in `context.log`, which
+        // is a position that stays put because the file is only ever appended to, and orders the
+        // rows by what each costs.
         log.told("a small task")
         log.note("agent", "short note")
         // One big row: a result carrying a file's worth of text.
@@ -2070,21 +2046,19 @@ class AgentTest {
 
         val sent = door.asked.first().system
         val index = sent.substringAfter("The rows taking the most room")
-        assertTrue("the biggest row is named first: $index", index.contains("#4 GOT read"))
+        assertTrue("the biggest row is named first: $index", index.contains("line 4: #4"))
         assertTrue("with what it costs", index.contains("tokens"))
         assertTrue(
             "and the exact call to see it: $index",
-            index.contains("{\"path\":\"agent/session.log\",\"id\":<id>}"),
+            index.contains("`read agent/context.log from <line> to <line>`"),
         )
 
-        // **The handle has to work a turn later.** A line number could not: the newest row is the
-        // file's first, so every row written after this sentence moves every line below it — the id
-        // is the row's own, and it is what this reads.
-        val byId = tool("read", """{"path":"agent/session.log","id":4}""")
-        assertTrue("the id reads that row: $byId", byId.startsWith(AgentLog.SUCCESS))
-        assertTrue("and it is the big one: $byId", byId.contains("x".repeat(50)))
-        assertFalse("in the model's own view, without the columns: $byId", byId.contains("GOT"))
-        assertFalse("and without a second number: $byId", Regex("^\\s*\\d+ +\\d+ ", RegexOption.MULTILINE).containsMatchIn(byId))
+        // **The handle has to work.** Line four of the context file is that row, and this reads it
+        // the way the sentence says to — the call the app told the model to make.
+        val byLine = tool("read", """{"path":"agent/context.log","from":4,"to":4}""")
+        assertTrue("the line reads that row: $byLine", byLine.startsWith(AgentLog.SUCCESS))
+        assertTrue("and it is the big one: $byLine", byLine.contains("x".repeat(50)))
+        assertFalse("without a kind column: $byLine", byLine.contains("GOT"))
     }
 
     @Test
@@ -2105,42 +2079,6 @@ class AgentTest {
                 "${ContextBudget.tokens(row.line)} vs ${row.size}",
             ContextBudget.tokens(row.line) > row.size,
         )
-    }
-
-    @Test
-    fun `raw with an id gives the row's own line, because a key that is ignored is a lie`() {
-        // `raw` on the record shows the columns. Returning the view to a model that asked for the
-        // columns would be exactly the `lines` mistake: a key that quietly does nothing.
-        log.told("a task")
-        val id = log.note("agent", "a note")
-
-        val view = tool("read", """{"path":"agent/session.log","id":$id}""")
-        val raw = tool("read", """{"path":"agent/session.log","id":$id,"raw":true}""")
-
-        assertFalse("the view has no kind: $view", view.contains("NOTE"))
-        assertTrue("the raw line does: $raw", raw.contains("NOTE"))
-        assertTrue("and its ctx column: $raw", raw.contains(" in "))
-    }
-
-    @Test
-    fun `an id reads one row of the record, and is refused where there are no rows`() {
-        // The refusal matters as much as the read: `id` on an ordinary file would silently mean
-        // nothing, and a key that quietly does nothing is the `lines` mistake again.
-        log.told("a task")
-        val big = log.got("read", "0\n" + "x".repeat(200))
-
-        val found = tool("read", """{"path":"agent/session.log","id":$big}""")
-        val missing = tool("read", """{"path":"agent/session.log","id":999}""")
-        val wrongFile = tool("read", """{"path":"milk.txt","id":$big}""")
-        val both = tool("read", """{"path":"agent/session.log","id":$big,"from":1}""")
-
-        assertTrue("the row is read: $found", found.startsWith(AgentLog.SUCCESS))
-        assertTrue("with its words: $found", found.contains("x".repeat(50)))
-        assertTrue("a missing row is refused: $missing", missing.startsWith(AgentLog.FAILURE))
-        assertTrue("naming it: $missing", missing.contains("999"))
-        assertTrue("and a file with no rows: $wrongFile", wrongFile.startsWith(AgentLog.FAILURE))
-        assertTrue("says what id is for: $wrongFile", wrongFile.contains("record"))
-        assertTrue("and one row or a range, not both: $both", both.startsWith(AgentLog.FAILURE))
     }
 
     @Test

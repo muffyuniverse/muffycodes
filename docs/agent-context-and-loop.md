@@ -36,7 +36,7 @@ ping of one conversation is the same bytes.
 
 **A default that changed is replaced; an edited file never is.** ① is written when the file is
 missing, and also when it is byte-for-byte one of the texts the app shipped before
-(`AgentPrompt.PREVIOUS_SYSTEM`). That is how the one-record round reached a phone that already had
+(`AgentPrompt.PREVIOUS_SYSTEM`, since removed — the app is being developed, not released). That is how the one-record round reached a phone that already had
 the old instructions — which told the agent to edit `agent/context.log`, a file that no longer
 exists.
 

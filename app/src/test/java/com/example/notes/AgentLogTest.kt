@@ -122,7 +122,7 @@ class AgentLogTest {
         // backslash-n that is not a newline, real newlines (escaped in the file), and a quote.
         val nasty = "a\\b and \\n literally, then a real\nnewline, and a \"quote\""
         val id = log.got("read", "0\n$nasty")
-        val before = linesIn(log.session).first()
+        val before = linesIn(log.session).first { it.contains(" GOT ") }
 
         log.forget(setOf(id))
 
@@ -147,48 +147,56 @@ class AgentLogTest {
     }
 
     @Test
-    fun `an old build's record is read, not rejected`() {
-        // **The update path, and the reason it is tested.** Both the row and the file changed: the
-        // row gained a column, and the second file went away. A parser that treated yesterday's
-        // five-column rows as unreadable would lose every session's memory on the phone it was
-        // installed on — quietly, because a broken row is drawn rather than dropped.
+    fun `a line the app cannot read is one broken row, and the rest still parse`() {
+        // **Never dropped and never fatal.** A record with one unreadable line is a record
+        // somebody may need to be told about; throwing the file away because of one line would
+        // lose the conversation to report a typo.
         val record = File(project, "agent/${AgentLog.SESSION}")
         record.writeText(
-            "14:02:11.410    1 TOLD    operator  the first thing\n" +
-                "14:02:12.000    2 TOLD    operator  the second thing\n",
+            "   1     4 TOLD    in  operator  the first thing\n" +
+                "this line is not a row\n" +
+                "   2     5 TOLD    in  operator  the second thing\n",
         )
-        // The old context held only the second row; the first was trimmed out of it.
-        File(project, "agent/${AgentLog.CONTEXT}")
-            .writeText("14:02:12.000    2 TOLD    operator  the second thing\n")
 
         val reopened = AgentLog.open(project)
 
-        assertEquals("both rows are read", 2, reopened.rows().size)
+        assertEquals("three rows", 3, reopened.rows().size)
         assertEquals(
-            "and the row the old context held is the one in",
-            listOf(2),
-            reopened.contextRows().map { it.id },
+            "two of them read",
+            listOf(1, 2),
+            reopened.rows().filterNot { it.broken }.map { it.id },
         )
         assertEquals(
-            "the other is the app's, because the old file cannot say why it was out",
-            AgentLog.APP,
-            reopened.rows().first { it.id == 1 }.ctx,
+            "and the third keeps its text, so it can be looked at",
+            "this line is not a row",
+            reopened.rows().first { it.broken }.detail,
         )
-        assertFalse("and the old file is gone", File(project, "agent/${AgentLog.CONTEXT}").exists())
-        assertTrue(
-            "with the rows rewritten in the new shape, with their column",
-            linesIn(record).all { it.contains("TOLD    app ") || it.contains("TOLD    in  ") },
-        )
+        assertEquals("both readable rows are in the context", 2, reopened.contextRows().size)
     }
 
     @Test
-    fun `an old record with no second file keeps everything in the context`() {
-        // Before the column existed both files held the same rows, so with no context file to
-        // consult, `in` is the reading that loses nothing.
-        val record = File(project, "agent/${AgentLog.SESSION}")
-        record.writeText("14:02:11.410    1 TOLD    operator  a task\n")
+    fun `a context file that is missing is written from the evidence`() {
+        // The model's memory is the second file. If somebody deletes it, or the app is interrupted
+        // between the two writes, the rows are still in the evidence — and the next open puts them
+        // back rather than leaving the agent with a memory it cannot read.
+        log.told("a task")
+        log.got("read", "0  one file")
+        File(project, "agent/${AgentLog.CONTEXT}").delete()
 
-        assertEquals("the row is in", 1, AgentLog.open(project).contextRows().size)
+        val reopened = AgentLog.open(project)
+
+        assertEquals("the rows are in", 2, reopened.contextRows().size)
+        // **In its own columns**, not the evidence's: `id size name body`, so a line's second field
+        // is a number and there is no kind to be found.
+        val written = linesIn(File(project, "agent/${AgentLog.CONTEXT}"))
+        assertEquals("both rows are written back", 2, written.size)
+        assertEquals(
+            "with the id each one has",
+            listOf(1, 2),
+            written.map { it.trim().split(Regex(" +"))[0].toInt() },
+        )
+        assertTrue("the first is the task: ${written[0]}", written[0].contains("a task"))
+        assertTrue("the second is the result: ${written[1]}", written[1].contains("one file"))
     }
 
     @Test
@@ -203,13 +211,13 @@ class AgentLogTest {
 
     @Test
     fun `a line with no newline after it is not a row yet`() {
-        // A file read while an older build was appending to it. Half a row shown as an event is
-        // showing something that did not happen, and this build writes every row whole, so the rule
-        // now exists only for the files it inherited.
+        // A file read while a row is being appended to it — the box reads while a poll writes.
+        // Half a row shown as an event is showing something that did not happen, and the next
+        // append lands after it rather than on top of it.
         log.told("finished")
         // Half a row, with no brace in it: the repository's brace check counts braces in
         // text as well as in code, and a fixture is not a reason to weaken a check.
-        log.session.appendText("14:02:11.410   99 CALL  tree      \"path\":\"Git")
+        log.session.appendText("  99   12 CALL    in  tree  \"path\":\"Git")
 
         val rows = AgentLog.open(project).rows()
         assertEquals("only the finished one", 1, rows.size)
@@ -217,20 +225,19 @@ class AgentLogTest {
     }
 
     @Test
-    fun `the newest row is the first line of the file, and the rows come back oldest first`() {
-        // **The order is the file's whole point.** A record is read by something with a limit — a
-        // `read`, a person's eye, a model whose context is already full — so the newest rows are at
-        // the top. Everything that reasons about the conversation still thinks oldest-first, so the
-        // reversal is in `parse` and nowhere else.
+    fun `a row is appended at the end, so a line number means the same row later`() {
+        // **The order is the file's whole point, and it is the ordinary one.** Line one happened
+        // first; a new row goes at the end and leaves every other line where it was. That is what
+        // makes a line number a handle — `read from 7 to 7` opens the same row in the next turn.
         val first = log.told("the first task")
         val second = log.told("the second task")
 
         val file = linesIn(log.session)
         val rows = AgentLog.open(project).rows()
 
-        assertTrue("the newest is the first line: ${file.first()}", file.first().contains("the second task"))
-        assertTrue("the oldest is the last: ${file.last()}", file.last().contains("the first task"))
-        assertEquals("and the rows are oldest first", listOf(first, second), rows.map { it.id })
+        assertTrue("the oldest is the first line: ${file.first()}", file.first().contains("the first task"))
+        assertTrue("the newest is the last: ${file.last()}", file.last().contains("the second task"))
+        assertEquals("and the rows are in that order", listOf(first, second), rows.map { it.id })
     }
 
     @Test
@@ -259,11 +266,10 @@ class AgentLogTest {
 
         val rows = AgentLog.open(project).rows()
         assertEquals("both lines are rows", 2, rows.size)
-        // **The unreadable line is the oldest, not the newest.** It was appended to the end of the
-        // file, and the file keeps its newest row at the top — so in the oldest-first list it is
-        // the first row.
-        assertTrue("the unreadable one is marked", rows.first().broken)
-        assertEquals("and it keeps its text", "this is not a row", rows.first().detail)
+        // **Where it was written is where it stays.** It was appended after the good row, so it is
+        // the last row of the file and the last row of the list.
+        assertTrue("the unreadable one is marked", rows.last().broken)
+        assertEquals("and it keeps its text", "this is not a row", rows.last().detail)
     }
 
     @Test
@@ -453,7 +459,7 @@ class AgentLogTest {
 
         val ids = log.rows().map { it.id }
         assertEquals("no id appears twice", ids.size, ids.toSet().size)
-        assertTrue("and the new rows are above the reset", log.rows().last().id > before + 1)
+        assertTrue("and the new rows come after the reset", log.rows().last().id > before + 1)
     }
 
     @Test
@@ -606,7 +612,7 @@ class AgentLogTest {
 
         val all = log.rows().map { it.id }
         assertEquals("one id per row", all.size, all.toSet().size)
-        assertTrue("and the later writer is above the earlier", log.rows().last().id > first)
+        assertTrue("and the later writer is after the earlier", log.rows().last().id > first)
     }
 
     @Test

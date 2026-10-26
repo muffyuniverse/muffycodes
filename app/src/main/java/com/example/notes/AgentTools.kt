@@ -136,7 +136,7 @@ class AgentTools(
          */
         val KEYS: Map<String, Set<String>> = mapOf(
             "tree" to setOf("path", "depth", "name", "grep", "from", "to"),
-            "read" to setOf("path", "from", "to", "grep", "revision", "raw", "id"),
+            "read" to setOf("path", "from", "to", "grep", "revision"),
             "edit" to setOf("path", "find", "replace", "from", "to", "at", "text"),
             "forget" to setOf("ids"),
             "create" to setOf("path", "text"),
@@ -198,10 +198,9 @@ class AgentTools(
                     "With `grep` only the lines that match are shown, each with its line number, " +
                     "and the pattern is applied inside `from`/`to` rather than to the whole file. " +
                     "A pattern is a regular expression, case-insensitive, matched inside one line. " +
-                    "Your record is shown as `id name body`; `id` picks exactly one row, and " +
-                    "{\"path\":\"agent/session.log\",\"id\":8} is that call — the one the " +
-                    "clear-up line tells you to make. With `raw` the record is shown as the file " +
-                    "holds it, `id size kind ctx name body`.",
+                    "A file is shown exactly as it is stored, columns and all. Your own " +
+                    "`agent/context.log` is the rows in your context as `id size name body`, and " +
+                    "`agent/session.log` is everything that happened, with `kind` and `ctx`.",
                 "{\"path\":\"the file, relative to the project\",\"from\":1,\"to\":200," +
                     "\"grep\":\"a pattern to look for\",\"revision\":\"an id from history\"}",
             ),
@@ -693,18 +692,6 @@ class AgentTools(
         val file = resolveFile(args.optString("path"))
             .getOrElse { return Result.failure(IllegalArgumentException(it.message ?: "that path cannot be read")) }
         if (!file.exists()) {
-            // **The one name an older instruction set still points at.** The record used to be two
-            // files; this build folds the second into the first. An agent holding instructions from
-            // before that (a prompt the person edited, so the app would not replace it) will ask for
-            // `agent/context.log` — and "there is no file" would leave it guessing.
-            if (file.name == AgentLog.CONTEXT) {
-                return Result.failure(
-                    IllegalArgumentException(
-                        "agent/${AgentLog.CONTEXT} was folded into agent/${AgentLog.SESSION}. " +
-                            "Read that; forget takes rows out of your context.",
-                    ),
-                )
-            }
             return Result.failure(IllegalArgumentException("There is no file at ${rel(file)}"))
         }
         if (file.isDirectory) {
@@ -720,54 +707,11 @@ class AgentTools(
         // guessed at by restoring it. The bytes come from the same function `restore` uses, so a
         // revision is read exactly as it would be written back.
         val revision = args.optString("revision").trim()
-        val record = ws.isRecord(file)
-        // **One row, by the handle that does not move.** A line number in this file is a position,
-        // and the file's newest row is its first — so every row written after the question was asked
-        // shifts every line below it. An id is the row's own, and it is the same handle `forget`
-        // takes, so what the clear-up line names is what the agent can open a turn later.
-        val only = count(args, "id", 0)
-            .getOrElse { return Result.failure(IllegalArgumentException(it.message ?: "that id cannot be used")) }
-        if (only > 0 && !record) {
-            return Result.failure(
-                IllegalArgumentException(
-                    "`id` selects a row of your record, and ${rel(file)} is not it. " +
-                        "For lines of a file use `from`/`to`, and for versions `revision`",
-                ),
-            )
-        }
-        if (only > 0 && (args.has("from") || args.has("to"))) {
-            return Result.failure(
-                IllegalArgumentException(
-                    "Give `id` or `from`/`to`, not both: an id is one row, and a range is " +
-                        "already exactly what it says",
-                ),
-            )
-        }
-        val raw = args.optBoolean("raw", false)
-        if (raw && !record) {
-            return Result.failure(
-                IllegalArgumentException(
-                    "`raw` shows the columns of your own record, and ${rel(file)} is not it",
-                ),
-            )
-        }
+        // **A file is shown as it is.** There is no second view of any file here: a `grep` is how a
+        // model finds the row it wants, in the columns the file actually has, and a projection would
+        // make what it reads differ from what it can check with `wc`.
         val text = if (revision.isEmpty()) {
-            // **The record is shown as the model's own view of it — unless it asks for the file.**
-            // Its columns belong to four audiences: `kind` is how the conversation is rebuilt, `ctx`
-            // is the audit's, `size` is the measurement the person and the app act on, and the
-            // padding is for an eye on a file. None of them is something the model can act on, and
-            // two numbers side by side invite it to forget the wrong one, so the view is
-            // `id name body`.
-            //
-            // **`raw` is the way back to the columns**, because the size *is* worth reading: it is
-            // the number the clear-up line quotes, and a model that wants to rank rows itself, or
-            // search the record for the expensive ones, needs the file rather than the view. One
-            // flag, and the same `grep` then matches the columns too.
-            //
-            // **An `id` reads the file, and answers in the view.** The row has to be found by its
-            // own id, which only the file carries; what comes back is the row as every other read
-            // of the record shows it, so one row and a pageful are the same shape.
-            if (record && !raw && only <= 0) recordText(file, deadline) else readText(file, deadline)
+            readText(file, deadline)
         } else {
             val bytes = git.bytesAt(project, rel(file), revision)
                 ?: return Result.failure(
@@ -777,19 +721,6 @@ class AgentTools(
         }
         val grep = pattern(args.optString("grep", ""))
             .getOrElse { return Result.failure(IllegalArgumentException("That is not a pattern: ${it.message}")) }
-        if (only > 0) {
-            val parsed = text.split("\n")
-                .filter { it.isNotBlank() }
-                .map { AgentLog.parseRow(it) }
-                .firstOrNull { it.id == only && !it.broken }
-                ?: return Result.failure(IllegalArgumentException("There is no row $only"))
-            // **`raw` is honoured here too.** Returning the view to a model that asked for the
-            // columns would be the silent-ignore this file refuses everywhere else.
-            val row = if (raw) parsed.line else parsed.shown
-            val at = if (grep == null) null else hit(row, grep, deadline, "read")
-            if (grep != null && at == null) return Result.success("row $only does not match that")
-            return Result.success(if (grep == null) row else excerpt(row, at!!, HIT))
-        }
         val lines = text.split("\n")
         val chosen = slice(lines, args)
             .getOrElse { return Result.failure(IllegalArgumentException(it.message ?: "that range cannot be used")) }
@@ -816,19 +747,122 @@ class AgentTools(
         return Result.success(chosen.joinToString("\n"))
     }
 
+    /** The first line of [text] that [pattern] matches, and where in the line it matched. */
+    private fun firstHit(
+        text: String,
+        pattern: Regex,
+        deadline: Deadline,
+        tool: String,
+    ): Pair<String, IntRange>? {
+        for (line in text.split("\n")) {
+            val at = hit(line, pattern, deadline, tool) ?: continue
+            return line to at
+        }
+        return null
+    }
+
     /**
-     * The record, line by line, as the model reads it — `id size name  body`.
+     * The part of [line] a hit shows: a window around the match, with a mark where it was cut.
      *
-     * Read in chunks so the deadline is asked, and each line parsed once. A line the record cannot
-     * give meaning to is passed through **as it is** rather than dropped: the model is looking at
-     * evidence, and a row the app cannot parse is one more thing a person may need to be told about.
+     * **The window is placed around the match, not at the start of the line.** A minified line can
+     * be a hundred thousand characters; the answer is a path, a line number and enough text to
+     * recognise the place, and a hit reported at character 40 000 beside the first two hundred
+     * characters would be an answer that does not contain the thing it answers about.
      */
-    private fun recordText(file: File, deadline: Deadline): String =
-        readText(file, deadline)
-            .split("\n")
-            .joinToString("\n") { line ->
-                if (line.isBlank()) line else AgentLog.parseRow(line).shown
+    private fun excerpt(line: String, at: IntRange, width: Int): String {
+        val start = if (line.length <= width) {
+            0
+        } else {
+            (at.first - width / 4).coerceIn(0, line.length - width)
+        }
+        val end = (start + width).coerceAtMost(line.length)
+        val window = line.substring(start, end).filterNot { it < ' ' && it != '\t' }.trim()
+        if (window.isEmpty()) return "\u2026"
+        return (if (start > 0) "\u2026" else "") + window + (if (end < line.length) "\u2026" else "")
+    }
+
+    private fun walk(dir: File, left: Int, out: MutableList<String>, deadline: Deadline) {
+        val entries = ws.list(dir)
+        for (entry in entries) {
+            deadline.check("tree")
+            if (!withinProject(entry.file)) continue
+            out.add(rel(entry.file) + if (entry.isFolder) "/" else "")
+            if (entry.isFolder && left > 1) walk(entry.file, left - 1, out, deadline)
+        }
+    }
+
+    private fun read(args: JSONObject, deadline: Deadline): String =
+        readInto(args, deadline).fold(
+            onSuccess = { success(it) },
+            onFailure = { refusal(it.message ?: "that file cannot be read") },
+        )
+
+    /**
+     * The text a `read` selects — **the body with no `0` or `1` on the front.**
+     *
+     * The prefix belongs to a result that enters the conversation, and one caller is not a result:
+     * `edit`'s `replace` may be a `read` call whose text goes straight into a file. That is also why
+     * nothing here is measured against the operator's limit — [read] puts its answer through
+     * [trim], and a replacement never does.
+     */
+    private fun readInto(args: JSONObject, deadline: Deadline): Result<String> {
+        val file = resolveFile(args.optString("path"))
+            .getOrElse { return Result.failure(IllegalArgumentException(it.message ?: "that path cannot be read")) }
+        if (!file.exists()) {
+            return Result.failure(IllegalArgumentException("There is no file at ${rel(file)}"))
+        }
+        if (file.isDirectory) {
+            return Result.failure(IllegalArgumentException("${rel(file)} is a folder; use tree"))
+        }
+        if (ws.kindOf(file) != EntryKind.TEXT) {
+            return Result.failure(
+                IllegalArgumentException("${rel(file)} is not a text file, so there is nothing to show you"),
+            )
+        }
+        // **A version, when one is named.** `history` finds the id and `restore` puts it back; this
+        // is the step between them, and without it the middle of a version's life could only be
+        // guessed at by restoring it. The bytes come from the same function `restore` uses, so a
+        // revision is read exactly as it would be written back.
+        val revision = args.optString("revision").trim()
+        // **A file is shown as it is.** There is no second view of any file here: a `grep` is how a
+        // model finds the row it wants, in the columns the file actually has, and a projection would
+        // make what it reads differ from what it can check with `wc`.
+        val text = if (revision.isEmpty()) {
+            readText(file, deadline)
+        } else {
+            val bytes = git.bytesAt(project, rel(file), revision)
+                ?: return Result.failure(
+                    IllegalArgumentException("There is no version $revision of ${rel(file)}"),
+                )
+            String(bytes, Charsets.UTF_8)
+        }
+        val grep = pattern(args.optString("grep", ""))
+            .getOrElse { return Result.failure(IllegalArgumentException("That is not a pattern: ${it.message}")) }
+        val lines = text.split("\n")
+        val chosen = slice(lines, args)
+            .getOrElse { return Result.failure(IllegalArgumentException(it.message ?: "that range cannot be used")) }
+        val from = count(args, "from", 1)
+            .getOrElse { return Result.failure(IllegalArgumentException(it.message ?: "that range cannot be used")) }
+            .coerceAtLeast(1)
+        if (chosen.isEmpty()) {
+            return Result.success("nothing from line $from: the file has ${lines.size} lines")
+        }
+        // **The same grep as `tree`, on one file, inside the range if there is one.** Each hit comes
+        // with its real line number, because the next thing the model does with a hit is change it
+        // and an edit needs a place — and the numbers are the file's, not the selection's, so a
+        // number read in one call means the same line in the next.
+        if (grep != null) {
+            val found = chosen.withIndex().mapNotNull { (offset, line) ->
+                val at = hit(line, grep, deadline, "read") ?: return@mapNotNull null
+                "${from + offset}: ${excerpt(line, at, HIT)}"
             }
+            if (found.isEmpty()) {
+                return Result.success("nothing in ${rel(file)} matches that")
+            }
+            return Result.success(found.joinToString("\n"))
+        }
+        return Result.success(chosen.joinToString("\n"))
+    }
 
     /**
      * The part of [lines] that the arguments select — `from` and `to`, both inclusive, 1-based.

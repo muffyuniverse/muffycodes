@@ -36,7 +36,7 @@ class WorkspaceTest {
     // ---- the agent's record is kept, not editable -----------------------------
 
     /** One row of the record, in the columns the app writes. */
-    private val FIRST_ROW = "14:02:11.410    1 TOLD    in  operator  task\n"
+    private val FIRST_ROW = "   1     4 TOLD    in  operator  task\n"
 
     private fun record(): File {
         val dir = File(workspace.accountDir, "shopping")
@@ -50,12 +50,12 @@ class WorkspaceTest {
     fun `the record is one file, and a file of that name elsewhere is not it`() {
         val session = record()
         val prompt = File(session.parentFile.parentFile, "project_prompt.txt")
-        // A record written by an older build: its second file is still the app's, so a person
-        // cannot edit it while the update folds it in.
-        val legacy = File(session.parentFile, AgentLog.CONTEXT).apply { writeText(FIRST_ROW) }
+        // Both files are the app's: the evidence and the context written from it. A person cannot
+        // edit either one, which is what makes them evidence.
+        val context = File(session.parentFile, AgentLog.CONTEXT).apply { writeText(FIRST_ROW) }
 
         assertTrue("the record", workspace.isRecord(session))
-        assertTrue("and an old build's context, until it is folded in", workspace.isRecord(legacy))
+        assertTrue("and the context written from it", workspace.isRecord(context))
         assertFalse("the project's own instructions are the person's", workspace.isRecord(prompt))
         assertFalse(
             "a file with the record's name somewhere else is not the record",

@@ -152,8 +152,8 @@ class Workspace(val accountDir: File) {
     fun isHidden(name: String): Boolean = name.startsWith(".")
 
     /**
-     * True for the agent's record, `<project>/agent/session.log` — and for the second file an older
-     * build wrote, `context.log`, until [AgentLog] folds it in.
+     * True for the agent's record: `<project>/agent/session.log` — every event — and
+     * `<project>/agent/context.log`, the rows the model is sent.
      *
      * **The record is readable and not writable, and that is a rule about the person too.** The
      * whole value of the file is that it is what happened and what the model is sent; a person who
