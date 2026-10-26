@@ -1975,9 +1975,11 @@ class AgentTest {
         // prepended, so a line number read from the file at the end of the test names a different row
         // — the request itself is the only moment the promise can be checked at.
         val context = File(ws.accountDir, "shopping/${AgentLog.DIR}/${AgentLog.SESSION}")
+        val requests = mutableListOf<Request>()
         var atRequest: List<String>? = null
         val door = object : Door {
             override fun turn(request: Request): Result<Reply> {
+                requests += request
                 if (atRequest == null) atRequest = context.readLines()
                 return Result.success(Reply("", listOf(call("conclude", """{"text":"done"}"""))))
             }
@@ -1985,7 +1987,7 @@ class AgentTest {
 
         agent(door, limits).burst("clear up please")
 
-        val sent = door.asked.first().system
+        val sent = requests.first().system
         val index = sent.substringAfter("The rows taking the most room")
         assertTrue("the biggest row is named first: $index", index.contains("#4 GOT read"))
         assertTrue("and its size", index.contains("tokens"))
