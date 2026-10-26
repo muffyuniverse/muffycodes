@@ -198,9 +198,10 @@ class AgentTools(
                     "With `grep` only the lines that match are shown, each with its line number, " +
                     "and the pattern is applied inside `from`/`to` rather than to the whole file. " +
                     "A pattern is a regular expression, case-insensitive, matched inside one line. " +
-                    "Your record is shown as `id name body`; `id` picks exactly that row, " +
-                    "which is how the clear-up line tells you to look at one. With `raw` the " +
-                    "record is shown as the file holds it, `id size kind ctx name body`.",
+                    "Your record is shown as `id name body`, and " +
+                    "{\"path\":\"agent/session.log\",\"id\":8} is exactly one row — the call " +
+                    "the clear-up line tells you to make. With `raw` the record is shown as the " +
+                    "file holds it, `id size kind ctx name body`.",
                 "{\"path\":\"the file, relative to the project\",\"from\":1,\"to\":200," +
                     "\"grep\":\"a pattern to look for\",\"revision\":\"an id from history\"}",
             ),

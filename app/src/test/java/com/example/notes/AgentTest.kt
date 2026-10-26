@@ -694,6 +694,20 @@ class AgentTest {
         }
     }
 
+    @Test
+    fun `no key is accepted without being described`() {
+        // **A key only the whitelist knows is a key found by guessing.** `raw` and `id` were both in
+        // `read` while its example named neither, and the example is what a model copies; the
+        // description is where it learns the rest. Every key this command takes has to be visible to
+        // the model in the spec it is sent — as a backticked name or as a field of the example.
+        for (spec in AgentTools.specs()) {
+            val keys = AgentTools.KEYS[spec.name] ?: continue
+            val taught = spec.description + " " + spec.parameters.keys().asSequence().joinToString(" ")
+            val silent = keys.filterNot { taught.contains("`$it`") || spec.parameters.has(it) }
+            assertTrue("${spec.name} accepts no undescribed key: $silent", silent.isEmpty())
+        }
+    }
+
     // ---- the agent's search: tree and read with grep -------------------------
 
     /** One call, answered the way the loop answers it. */
