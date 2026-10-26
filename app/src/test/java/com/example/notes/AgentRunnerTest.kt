@@ -325,8 +325,10 @@ class AgentRunnerTest {
         var at = 5_000L
         val bg = Background(launch = { it() }, now = { at })
         val door = ScriptedDoor(
-            Reply("", listOf(Call("c1", "ask", """{"question":"Which branch?"}"""))),
-            Reply("", listOf(Call("c2", "conclude", """{"text":"fine"}"""))),
+            // **The wake's own reply.** The session is put into `asked` by the test, because that is
+            // the state being tested; the wake then answers for itself, which is what a real turn
+            // does when the result it was waiting for arrives.
+            Reply("", listOf(Call("c1", "conclude", """{"text":"that was the branch I meant"}"""))),
         )
         val runner = AgentRunner(
             ws = ws, git = git, settings = settings,
@@ -349,7 +351,7 @@ class AgentRunnerTest {
         runner.stop("shopping")
         at = 9_000
         bg.start(ws.projectDir("shopping"), Call("c2", "tree", "{}")) { "0 two" }
-        runner.tick(9_000)
+        runner.tick(9_001)
         settle(runner)
 
         assertEquals("a stopped session is left alone", 1, door.asked.size)
