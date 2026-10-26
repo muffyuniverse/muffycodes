@@ -227,6 +227,14 @@ class Agent(
          * one-token answer, a tunnel, a Doze window — is a ping missed, not a session stopped.
          */
         data class Failed(val why: String, val stopping: Boolean = false) : Warm()
+
+        /**
+         * What a ping that could not be built says, **in the one place it can be changed.**
+         *
+         * It is written by the turn as well as by the runner, and two copies of a sentence a person
+         * reads is two sentences the day one of them is edited.
+         */
+        const val NOT_WARM = "The conversation could not be kept warm"
     }
 
     companion object {
@@ -284,7 +292,7 @@ class Agent(
         val request = try {
             build(layers, readOpening(layers, log, AgentTools.specs()), clearedUp = false)
         } catch (t: Throwable) {
-            return Warm.Failed(Secrets.explain(t, "The conversation could not be kept warm"))
+            return Warm.Failed(Secrets.explain(t, Warm.NOT_WARM))
         }
         return door.ping(request).fold(
             onSuccess = {
@@ -294,7 +302,7 @@ class Agent(
                 Warm.Sent
             },
             onFailure = { t ->
-                val said = Secrets.explain(t, "The conversation could not be kept warm")
+                val said = Secrets.explain(t, Warm.NOT_WARM)
                 val code = (t as? Refused)?.code ?: (t.cause as? Refused)?.code
                 val stopping = code != null && code in KEY_REFUSALS
                 Trace.note("agent-warm-failed", "$project · $said")

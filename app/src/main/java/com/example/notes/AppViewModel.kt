@@ -865,11 +865,6 @@ class AppViewModel @JvmOverloads constructor(
         return true
     }
 
-    /** Leaves a project and shows the projects list, which is the account root. */
-    fun goToProjects() = goToRoot()
-
-    fun goToRoot() = open(emptyList())
-
     /** The entries shown for a search, or the folder's own contents. */
     val visibleEntries: List<Entry>
         get() {
@@ -1550,6 +1545,7 @@ class AppViewModel @JvmOverloads constructor(
 
     /** Closes the changes window. The editor closing does not. */
     fun closeChanges() {
+        Trace.tap("close changes")
         changes = null
     }
 

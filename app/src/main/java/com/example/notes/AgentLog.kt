@@ -623,16 +623,8 @@ class AgentLog private constructor(
      * would leave a record whose last row is half a row — and this file is the evidence, so a
      * reader must see either the old one whole or the new one whole.
      */
-    private fun rewrite(lines: List<String>) {
-        file.parentFile?.mkdirs()
-        val text = lines.joinToString("\n") + "\n"
-        val fresh = File(file.parentFile, file.name + ".new")
-        fresh.writeText(text)
-        if (!fresh.renameTo(file)) {
-            file.writeText(text)
-            fresh.delete()
-        }
-    }
+    private fun rewrite(lines: List<String>) =
+        Beside.write(file, lines.joinToString("\n") + "\n")
 
     /**
      * The next id, checked against the file rather than trusted from memory.

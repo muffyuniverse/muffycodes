@@ -240,10 +240,6 @@ data class AgentSession(
         else -> at >= lastPollAt + every
     }
 
-    /** How long until the next poll, for a label; never negative. */
-    fun untilPoll(at: Long, every: Long = intervalMs): Long =
-        (lastPollAt + every - at).coerceAtLeast(0)
-
     /**
      * How late this session's next poll is, in milliseconds, when it is late enough to be the phone.
      *

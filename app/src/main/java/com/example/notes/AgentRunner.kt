@@ -249,8 +249,8 @@ class AgentRunner(
                 // What escapes the ping is the app's own machinery rather than the transport, and it
                 // is the ladder's business for the same reason a refused key is: the alternative is
                 // a session that keeps pinging into a wall it cannot see.
-                Agent.Warm.Failed(Secrets.explain(t, "The conversation could not be kept warm"),
-                    stopping = true) to emptyList()
+                Agent.Warm.Failed(Secrets.explain(t, Agent.Warm.NOT_WARM), stopping = true) to
+                    emptyList()
             }
             val (how, rows) = warmth
             // **The tick's clock, not the wall's.** The whole point of `now` being a parameter is

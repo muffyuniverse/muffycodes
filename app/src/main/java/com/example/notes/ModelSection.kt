@@ -53,6 +53,8 @@ fun ModelSection(viewModel: AppViewModel) {
         )
     }
 
+    // **Opening a list is not recorded; taking something out of it is.** A sheet a person opens and
+    // closes changed nothing, and a tap for it would be the noise that makes a real one hard to find.
     SettingRow(
         label = "Model",
         value = config.active.model,
@@ -98,7 +100,12 @@ fun ModelSection(viewModel: AppViewModel) {
             modifier = Modifier.weight(1f),
         )
         TextButton(
-            onClick = { viewModel.readCatalogue(viewModel.modelConfig.active.model, force = true) },
+            onClick = {
+                // Only this press is an act: the sheet's own read is the app doing its job, and a
+                // tap recorded for it would be a gesture nobody made.
+                Trace.tap("read catalogue", viewModel.modelConfig.active.model)
+                viewModel.readCatalogue(viewModel.modelConfig.active.model, force = true)
+            },
         ) { Text("Read") }
     }
 
@@ -273,6 +280,7 @@ private fun ModelPicker(
                     val pick = chosen ?: return@TextButton
                     when (what) {
                         MODEL -> {
+                            Trace.tap("model", pick)
                             // A model change moves the provider too, because the endpoints
                             // belong to the model: keeping the old tag would pin to something
                             // this model does not have.
@@ -294,12 +302,18 @@ private fun ModelPicker(
                                 maxOutput = info?.maxOutput.takeIf { pick == active.model },
                             )
                         }
-                        PROVIDER -> viewModel.chooseModel(
-                            active.model, pick, active.effort, info?.efforts.orEmpty(),
-                        )
-                        else -> viewModel.chooseModel(
-                            active.model, active.provider, pick, info?.efforts.orEmpty(),
-                        )
+                        PROVIDER -> {
+                            Trace.tap("provider", pick)
+                            viewModel.chooseModel(
+                                active.model, pick, active.effort, info?.efforts.orEmpty(),
+                            )
+                        }
+                        else -> {
+                            Trace.tap("effort", pick)
+                            viewModel.chooseModel(
+                                active.model, active.provider, pick, info?.efforts.orEmpty(),
+                            )
+                        }
                     }
                     onDismiss()
                 },
@@ -311,7 +325,7 @@ private fun ModelPicker(
             // model in use. Neither is on the settings screen any more.
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextButton(onClick = { adding = true }) { Text("Add") }
-                TextButton(onClick = { removing = true }) { Text("Remove") }
+TextButton(onClick = { removing = true }) { Text("Remove") }
                 TextButton(onClick = onDismiss) { Text("Cancel") }
             }
         },
@@ -494,6 +508,7 @@ private fun AddModelDialog(viewModel: AppViewModel, onDismiss: () -> Unit) {
             TextButton(
                 enabled = info != null && ticked.isNotEmpty(),
                 onClick = {
+                    Trace.tap("add model", id.trim())
                     viewModel.addModel(id.trim(), ticked.toList())
                     onDismiss()
                 },
@@ -518,6 +533,7 @@ private fun RemoveModelDialog(viewModel: AppViewModel, onDismiss: () -> Unit) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
+                                Trace.tap("remove model", choice.id)
                                 viewModel.removeModel(choice.id).fold(
                                     onSuccess = { onDismiss() },
                                     onFailure = { failure = it.message },

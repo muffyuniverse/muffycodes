@@ -299,16 +299,7 @@ class Workspace(val accountDir: File) {
      * documents, and routing them through [write] would mean the app could lock itself
      * out of remembering what is locked.
      */
-    private fun put(file: File, text: String) {
-        file.parentFile?.mkdirs()
-        val temp = File(file.parentFile, ".${file.name}.tmp")
-        temp.writeText(text)
-        if (!temp.renameTo(file)) {
-            file.delete()
-            temp.copyTo(file, overwrite = true)
-            temp.delete()
-        }
-    }
+    private fun put(file: File, text: String) = Beside.write(file, text)
 
     // ---- changing the tree -------------------------------------------------
 

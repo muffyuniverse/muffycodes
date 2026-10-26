@@ -224,7 +224,7 @@ class ProjectGit(
                 val branch = it.branch ?: return Result.failure(
                     IllegalStateException("This project is not on a branch")
                 )
-                val sent = "refs/remotes/origin/$branch"
+                val sent = GitService.ORIGIN + branch
                 // **Said before it is read**, because reading it is the thing to avoid: a preview of a
                 // 40 MB file would be a page of text the person cannot use and a second of a stalled
                 // screen.

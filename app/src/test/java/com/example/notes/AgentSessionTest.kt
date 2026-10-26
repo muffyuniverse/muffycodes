@@ -279,16 +279,6 @@ class AgentSessionTest {
     // ---- what a person reads ------------------------------------------------
 
     @Test
-    fun `the label never says a negative wait`() {
-        // A label computed as `now - lastPoll` reads "reconnecting (-2 s)" the moment the clock
-        // moves back, which looks like a bug in the app rather than in the phone's clock.
-        val s = session().polled(at = 10 * minute)
-
-        assertEquals("four minutes", AgentSession.POLL_MS, s.untilPoll(10 * minute))
-        assertEquals("and never less than none", 0, s.untilPoll(100 * minute))
-    }
-
-    @Test
     fun `the strip counts agents that are on, and only those that need somebody`() {
         val sessions = listOf(
             AgentSession("a", state = State.IDLE, sub = Sub.WAITING),

@@ -25,7 +25,7 @@ ProjectGitTest      app/src/main/java/com/example/notes/ProjectGit.kt app/src/ma
 AccountStoreTest    app/src/main/java/com/example/notes/AccountStore.kt
 VisibilityFeatureTest  app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AppViewModel.kt
 FilesFeatureTest   app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/CommitMessage.kt
-TraceTest          app/src/main/java/com/example/notes/Trace.kt
+TraceTest          app/src/main/java/com/example/notes/Trace.kt app/src/main/java/com/example/notes/LogFormat.kt
 ReportTest         app/src/main/java/com/example/notes/DownloadsSink.kt app/src/main/java/com/example/notes/Trace.kt app/src/main/java/com/example/notes/Dialogs.kt
 ObservabilityScreenTest  app/src/main/java/com/example/notes/ObservabilityScreen.kt app/src/main/java/com/example/notes/Trace.kt
 HistoryScreenTest  app/src/main/java/com/example/notes/HistoryScreen.kt
@@ -55,15 +55,14 @@ KeySafetyFeatureTest  app/src/main/java/com/example/notes/GitHub.kt app/src/main
 # them, which would run too few tests rather than too many.
 # always-full app/src/main/java/com/example/notes/Dialogs.kt
 # always-full app/src/main/java/com/example/notes/MainActivity.kt
+BesideTest  app/src/main/java/com/example/notes/Beside.kt
 DownloadsSinkTest  app/src/main/java/com/example/notes/DownloadsSink.kt
 BrowserChromeTest  app/src/main/java/com/example/notes/BrowserScreen.kt
-CopyFeatureTest  app/src/main/java/com/example/notes/Workspace.kt
-CopyFeatureTest  app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/Imports.kt
+CopyFeatureTest  app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/Imports.kt
 ModelSectionTest    app/src/main/java/com/example/notes/ModelSection.kt app/src/main/java/com/example/notes/AppViewModel.kt
 ModelKeyTest        app/src/main/java/com/example/notes/ModelSection.kt app/src/main/java/com/example/notes/Dialogs.kt app/src/main/java/com/example/notes/CredentialStore.kt
 AgentLogTest  app/src/main/java/com/example/notes/AgentLog.kt app/src/main/java/com/example/notes/LogFormat.kt
-TraceTest  app/src/main/java/com/example/notes/LogFormat.kt
-AgentTest  app/src/main/java/com/example/notes/Agent.kt app/src/main/java/com/example/notes/AgentPrompt.kt app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Door.kt app/src/main/java/com/example/notes/AgentPrompt.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitService.kt
+AgentTest  app/src/main/java/com/example/notes/Agent.kt app/src/main/java/com/example/notes/AgentPrompt.kt app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Door.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitService.kt
 AgentChatTest  app/src/main/java/com/example/notes/AgentChat.kt app/src/main/java/com/example/notes/AgentLog.kt
 AgentChatScreenTest  app/src/main/java/com/example/notes/AgentChatScreen.kt app/src/main/java/com/example/notes/AgentChat.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/BrowserScreen.kt
 AgentSessionTest  app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentSessions.kt
@@ -72,6 +71,6 @@ TimeoutsTest  app/src/main/java/com/example/notes/Timeouts.kt app/src/main/java/
 AgentSessionsTest  app/src/main/java/com/example/notes/AgentSessions.kt app/src/main/java/com/example/notes/AgentSession.kt
 AgentSessionFeatureTest  app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentSessions.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/Agent.kt app/src/main/java/com/example/notes/SettingsStore.kt app/src/main/java/com/example/notes/AgentRunner.kt
 ContextBudgetTest  app/src/main/java/com/example/notes/ContextBudget.kt
-AgentRunnerTest  app/src/main/java/com/example/notes/AgentRunner.kt app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentSessions.kt
+AgentRunnerTest  app/src/main/java/com/example/notes/AgentRunner.kt app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentSessions.kt app/src/main/java/com/example/notes/Background.kt
 AgentServiceTest  app/src/main/java/com/example/notes/AgentService.kt app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentWiring.kt
 NoticesTest  app/src/main/java/com/example/notes/Notices.kt

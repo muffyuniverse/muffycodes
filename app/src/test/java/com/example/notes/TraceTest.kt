@@ -88,20 +88,20 @@ class TraceTest {
 
     @Test
     fun `a line is time, id, kind, name, detail`() {
-        val id = Trace.tap("Save", "milk.txt")
+        val id = Trace.tap("save", "milk.txt")
         val line = firstLine()
 
         val fields = line.split(Regex("\\s+"))
         assertTrue("the time is first: $line", Regex("""^\d\d:\d\d:\d\d\.\d\d\d""").containsMatchIn(line))
         assertEquals("the id is second, which is what a shell counts", id.toString(), fields[1])
         assertEquals("the kind is third", "TAP", fields[2])
-        assertEquals("the name is fourth", "Save", fields[3])
+        assertEquals("the name is fourth", "save", fields[3])
         assertTrue("and the detail is the tail, spaces and all", line.contains("milk.txt"))
     }
 
     @Test
     fun `a name with spaces becomes a slug, so the columns stay columns`() {
-        Trace.tap("confirm delete chosen", "3 items")
+        Trace.tap("confirm delete", "3 items")
         val line = firstLine()
 
         assertTrue("no spaces in the name field: $line", line.contains("confirm-delete-chosen"))
@@ -112,7 +112,7 @@ class TraceTest {
 
     @Test
     fun `an answer quotes the id of the tap it answers`() {
-        val id = Trace.tap("Save", "milk.txt")
+        val id = Trace.tap("save", "milk.txt")
         Trace.changed("at / · 1 rows")
 
         val lines = settle()
@@ -139,8 +139,8 @@ class TraceTest {
         // answer belongs to the newest tap (the UI serves one at a time, and pretending
         // an old answer was for a new tap is how a missing reaction gets hidden), so the
         // *older* tap is the one left over.
-        val older = Trace.tap("Save", "milk.txt")
-        val newer = Trace.tap("Sync", "testrepo")
+        val older = Trace.tap("save", "milk.txt")
+        val newer = Trace.tap("sync", "testrepo")
         Trace.changed("at /")
 
         val lines = settle()
@@ -163,8 +163,8 @@ class TraceTest {
 
     @Test
     fun `an older tap stays unanswered when a newer one is served`() {
-        val older = Trace.tap("Save")
-        val newer = Trace.tap("close-editor")
+        val older = Trace.tap("save")
+        val newer = Trace.tap("close editor")
         Trace.changed("screen browser")
 
         val broken = Trace.report().waiting
@@ -175,7 +175,7 @@ class TraceTest {
 
     @Test
     fun `words answer a tap the way a change does`() {
-        Trace.tap("add-account")
+        Trace.tap("add account")
         Trace.said("Signed in as muffy")
 
         assertEquals("answered by words", 0, Trace.report().waiting.size)
@@ -198,7 +198,7 @@ class TraceTest {
 
     @Test
     fun `waiting is not broken until it has waited`() {
-        Trace.tap("Save")
+        Trace.tap("save")
         Trace.staleMs = 2_000
 
         assertTrue("nothing is broken yet", Trace.broken().isEmpty())
@@ -216,7 +216,7 @@ class TraceTest {
         // lived only in that ring, using the app would erase the evidence of what broke
         // it — and the report would look better the longer a person waited.
         Trace.staleMs = -1
-        val id = Trace.tap("Save", "the one that broke")
+        val id = Trace.tap("save", "the one that broke")
         repeat(Trace.EVENTS + 50) { Trace.note("noise", "line $it") }
 
         val broken = Trace.broken()
@@ -224,7 +224,7 @@ class TraceTest {
         assertEquals("and still the same tap", id, broken.first().id)
         assertTrue(
             "even though its own line has fallen out of the ring",
-            Trace.report().lines.none { it.contains("Save") },
+            Trace.report().lines.none { it.contains("save") },
         )
     }
 
@@ -232,8 +232,8 @@ class TraceTest {
 
     @Test
     fun `a report is a line in the same stream, with the person's own words`() {
-        Trace.tap("Save", "milk.txt")
-        Trace.checkpoint("I pressed Save and nothing appeared in the history")
+        Trace.tap("save", "milk.txt")
+        Trace.checkpoint("I pressed save and nothing appeared in the history")
 
         val lines = settle()
         val report = lines.lastOrNull { it.contains("REPORT") }.orEmpty()
@@ -267,8 +267,8 @@ class TraceTest {
         // The falsification of a tempting mistake: writing a report is not the app
         // responding to the thing that went wrong. If it consumed the waiting tap, the
         // finding would be erased by the very act of reporting it.
-        val id = Trace.tap("Save", "milk.txt")
-        Trace.checkpoint("Save does nothing")
+        val id = Trace.tap("save", "milk.txt")
+        Trace.checkpoint("save does nothing")
 
         // `waiting`, not `broken`: `broken` is the stale filter, and this tap is
         // milliseconds old. The claim being tested is that the checkpoint consumed
@@ -350,10 +350,10 @@ class TraceTest {
     fun `a second answer does not claim a tap made before the first`() {
         // **The other half of the live bug.** Creating a folder produces a redraw and then
         // a sentence. The redraw answered the press; the sentence went looking for the
-        // next waiting tap and found `upload-folder` from ten seconds earlier, because
+        // next waiting tap and found `upload folder` from ten seconds earlier, because
         // opening the system picker is a tap the app can never answer itself.
-        val picker = Trace.tap("upload-folder")
-        val create = Trace.tap("new-folder")
+        val picker = Trace.tap("upload folder")
+        val create = Trace.tap("new folder")
 
         Trace.changed("at / · 2 rows · new_folder/")
         Trace.said("Created new_folder/ (was \"New folder\")")
@@ -379,13 +379,13 @@ class TraceTest {
         // A minute later the picker returns, and the reply belongs to *that* press —
         // longer than the freshness window, and older than whatever else is waiting.
         val picker = Trace.tap("upload files")
-        Trace.tap("new-folder")
+        Trace.tap("new folder")
 
         Trace.answered(picker, "Chose 2 file(s)")
 
         assertEquals(
             "the press that opened the picker is the one answered",
-            listOf("new-folder"),
+            listOf("new folder"),
             Trace.report().waiting.map { it.what },
         )
         // The id column is padded to four characters in the file, and `split` collapses
@@ -398,7 +398,7 @@ class TraceTest {
     fun `a screen change at once is the answer to the tap`() {
         // The other half of the rule, so the fix cannot be "never pair anything" and still
         // pass: a press shows itself at once, and that is what pairing is for.
-        Trace.tap("open-folder", "projects")
+        Trace.tap("open folder", "projects")
 
         Trace.changed("at / · 1 rows · groceries/")
 
@@ -414,7 +414,7 @@ class TraceTest {
         parent.writeText("I am a file, not a folder")
         Trace.attach(File(parent, "trace.log"))
 
-        Trace.tap("Save")
+        Trace.tap("save")
         Trace.changed("at /")
         Trace.failure("something refused")
         Trace.checkpoint("it does not work")
@@ -427,7 +427,7 @@ class TraceTest {
 
     @Test
     fun `clearing the screen keeps the file`() {
-        Trace.tap("Save")
+        Trace.tap("save")
         Trace.changed("at /")
         settle()
 
@@ -451,14 +451,14 @@ class TraceTest {
 
     @Test
     fun `clearing everything wipes the log too`() {
-        Trace.tap("Save")
+        Trace.tap("save")
         Trace.changed("at /")
         settle()
 
         Trace.clear()
 
         val now = if (file.isFile) file.readText() else ""
-        assertFalse("nothing of the old session: $now", now.contains("Save"))
+        assertFalse("nothing of the old session: $now", now.contains("save"))
     }
 
     @Test
@@ -472,7 +472,7 @@ class TraceTest {
     fun `nothing is written when no sink is attached`() {
         // The release build's case: no sink, so no file, no directory, nothing on disk.
         Trace.attach((null as Trace.Sink?))
-        Trace.tap("Save")
+        Trace.tap("save")
         Trace.changed("at /")
         Trace.checkpoint("this must go nowhere")
 

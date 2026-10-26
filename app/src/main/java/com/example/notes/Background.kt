@@ -127,16 +127,7 @@ class Background(
      * `.new` and a rename, which is the same rule `agents.json` follows and for the same reason: a
      * `read` that lands mid-write would otherwise report a result that is half a sentence.
      */
-    private fun write(file: File, body: String) {
-        val fresh = File(file.parentFile, file.name + ".new")
-        fresh.writeText(body)
-        if (!fresh.renameTo(file)) {
-            // A rename that fails still leaves the reader a file; the alternative is a result that
-            // was written and then thrown away because the rename could not be done.
-            fresh.copyTo(file, overwrite = true)
-            fresh.delete()
-        }
-    }
+    private fun write(file: File, body: String) = Beside.write(file, body)
 
     private fun relativeName(project: File, file: File): String =
         file.relativeTo(project).invariantSeparatorsPath

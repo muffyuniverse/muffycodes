@@ -116,49 +116,6 @@ fun ConfirmDialog(
     )
 }
 
-/** One option of a dialog that offers a choice. */
-data class Choice(val label: String, val detail: String = "", val action: () -> Unit)
-
-/** Offers a few clearly different ways forward, each with its own explanation. */
-@Composable
-fun ChoiceDialog(
-    title: String,
-    text: String,
-    choices: List<Choice>,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(text, style = MaterialTheme.typography.bodyMedium)
-                choices.forEach { choice ->
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                choice.action()
-                                onDismiss()
-                            }
-                            .padding(vertical = 8.dp),
-                    ) {
-                        Text(choice.label, style = MaterialTheme.typography.bodyLarge)
-                        if (choice.detail.isNotEmpty()) {
-                            Text(
-                                choice.detail,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
-
 /**
  * The two outcomes of Remove, side by side (§5): keeping the projects, or
  * deleting them from this phone as well.

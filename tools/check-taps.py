@@ -40,7 +40,7 @@ SOURCES = ROOT / "app/src/main/java/com/example/notes"
 # read in one go.
 VOCABULARY = {
     # getting around
-    "open file", "open folder", "close editor", "close history", "settings",
+    "open file", "open folder", "close editor", "close history", "close changes", "settings",
     # editing
     "save", "history", "restore version",
     # a row's own switches
@@ -52,7 +52,7 @@ VOCABULARY = {
     # projects
     "add project", "new local project", "sync", "see changes", "rename project", "delete project",
     # the account
-    "add account", "remove account", "use test account",
+    "add account", "confirm add account", "remove account", "use test account",
     # the log itself
     "share log",
     # dialogs' buttons — the acts above, confirmed
@@ -61,8 +61,14 @@ VOCABULARY = {
     "confirm rename project", "confirm delete project", "confirm remove account",
     # settings, which go through the store rather than the view model
     "theme", "dark", "light", "history limit",
-    # the agent's model, which is a file the settings rows edit
-    "reset model config", "set model key",
+    # the agent's model: the three lists, the two ways to change the list of models, and the
+    # catalogue the numbers come from. A list opened and closed is not here — it changed nothing.
+    "reset model config", "set model key", "save key",
+    "model", "provider", "effort", "add model", "remove model", "read catalogue",
+    # making a project, which is a different act from adding one that is already on GitHub
+    "new project", "local project", "confirm add project",
+    # replacing a copy that is already here
+    "replace", "confirm replace",
     # the agent's conversation: one project's, and the turns inside it
     "chat", "close chat", "send", "previous turn", "next turn", "latest turn", "turn",
     # the agent itself, how often it reminds, and the numbers it runs with

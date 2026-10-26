@@ -495,6 +495,8 @@ private fun Dialogs(
                 onDismiss = { refused = null; dismiss() },
                 error = refused,
                 onSave = { key ->
+                    // The key is never the detail: a trace is a file a person shares.
+                    tap("save key", viewModel.account?.login.orEmpty())
                     refused = keySaveVerdict(viewModel.saveModelKey(key)) { dismiss() }
                 },
             )
@@ -513,6 +515,9 @@ private fun Dialogs(
                 // The login is whatever GitHub says it is, not what was typed, and
                 // the question goes to GitHub off the main thread.
                 onSignIn = { token ->
+                    // The token itself is never recorded: the name of the act is enough to place it,
+                    // and a trace is a file a person shares.
+                    tap("confirm add account")
                     signingIn = true
                     error = null
                     viewModel.signInWithToken(token) { ok ->
@@ -564,15 +569,17 @@ private fun Dialogs(
                 },
                 onNewLocalProject = {
                     dismiss()
-                    tap("new local project")
                     newLocalProject()
                 },
                 onPick = { repo ->
                     dismiss()
                     if (repo.name in viewModel.projectNames) {
-                        // Already here: replacing the copy is a question (§5.2).
+                        // Already here: replacing the copy is a question (§5.2). The choice that
+                        // started it is "replace"; the question's button is its confirm.
+                        tap("replace", repo.name)
                         askReplace(repo.name)
                     } else {
+                        tap("confirm add project", repo.name)
                         viewModel.pullRepository(repo)
                     }
                 },
@@ -586,7 +593,10 @@ private fun Dialogs(
             licences = emptyList(),
             local = true,
             onDismiss = dismiss,
-            onCreate = { name, _ -> viewModel.createLocalProject(name) },
+            onCreate = { name, _ ->
+                tap("local project", name)
+                viewModel.createLocalProject(name)
+            },
         )
 
         is Pending.RenameProject -> PromptDialog(
@@ -768,7 +778,10 @@ private fun Dialogs(
                 "Your local files beside the repository are kept.",
             confirm = "Replace",
             onDismiss = dismiss,
-            onConfirm = { viewModel.replaceWithRemote(pending.project) },
+            onConfirm = {
+                tap("confirm replace", pending.project)
+                viewModel.replaceWithRemote(pending.project)
+            },
         )
     }
 }
@@ -831,7 +844,10 @@ private fun NewProjectUI(viewModel: AppViewModel, dismiss: () -> Unit) {
     NewProjectDialog(
         licences = licences,
         onDismiss = dismiss,
-        onCreate = { name, licence -> viewModel.createProject(name, licence) },
+        onCreate = { name, licence ->
+            tap("new project", name)
+            viewModel.createProject(name, licence)
+        },
     )
 }
 

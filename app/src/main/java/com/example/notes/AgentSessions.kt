@@ -105,17 +105,10 @@ class AgentSessions(private val accountDir: File) {
 
     private fun write(root: JSONObject) {
         try {
-            stateDir.mkdirs()
-            // **Written beside the file and renamed over it.** A process killed mid-write leaves
-            // a truncated `agents.json`, and a truncated file is every session lost at once —
-            // the one failure this file exists to prevent. A rename replaces it whole or not at
-            // all, and the reader sees one of two complete versions.
-            val fresh = File(stateDir, "$AGENTS.new")
-            fresh.writeText(root.toString())
-            if (!fresh.renameTo(file)) {
-                file.writeText(root.toString())
-                fresh.delete()
-            }
+            // **Whole or not at all.** A process killed mid-write would otherwise leave a truncated
+            // `agents.json`, and a truncated file is every session lost at once — the one failure
+            // this file exists to prevent.
+            Beside.write(file, root.toString())
         } catch (t: Throwable) {
             // A session that could not be written is a session that will have to be started
             // again. It is not worth losing the turn in progress over, and there is nowhere to

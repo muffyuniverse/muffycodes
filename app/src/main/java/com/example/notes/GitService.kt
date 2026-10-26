@@ -40,6 +40,16 @@ import java.io.File
 object GitService {
 
     /**
+     * Where a remote branch's copy is kept, as git names it.
+     *
+     * **One string, because it is built and parsed in the same breath.** "N to send" compares `HEAD`
+     * with `refs/remotes/origin/<branch>`, the pull merges from it, and the branch list strips it
+     * back off — a typo in one of those would be a count against nothing or a branch named with a
+     * path in front of it. `ProjectGit` reads it from here for the same reason.
+     */
+    const val ORIGIN = "refs/remotes/origin/"
+
+    /**
      * How many versions a reader may return.
      *
      * Not a limit on the history: how far back a person can go is the setting in
@@ -58,13 +68,6 @@ object GitService {
         val author: String,
         val authorEmail: String,
         val timestamp: Long,
-    )
-
-    /** One entry in a git tree (the contents of a folder at one revision). */
-    data class TreeEntry(
-        val name: String,
-        val path: String,
-        val isDirectory: Boolean,
     )
 
     /**
@@ -432,7 +435,7 @@ object GitService {
         // read as unsent for ever.
         val remote = repo.config.getString("remote", "origin", "url")
         if (remote.isNullOrBlank()) return emptyList()
-        val pushed = repo.resolve("refs/remotes/origin/$branch")
+        val pushed = repo.resolve(ORIGIN + branch)
         return try {
             val newer = treeOf(repo, head) ?: return emptyList()
             val older: AbstractTreeIterator = pushed?.let { treeOf(repo, it) } ?: EmptyTreeIterator()
@@ -623,14 +626,14 @@ object GitService {
                     git.checkout()
                         .setName(remote)
                         .setCreateBranch(!exists)
-                        .setStartPoint("refs/remotes/origin/$remote")
+                        .setStartPoint(ORIGIN + remote)
                         .call()
                 }
 
                 landedOn = remote
                 git.reset()
                     .setMode(ResetCommand.ResetType.HARD)
-                    .setRef("refs/remotes/origin/$remote")
+                    .setRef(ORIGIN + remote)
                     .call()
 
                 // Anything the remote does not have goes, so the folder really
@@ -658,15 +661,15 @@ object GitService {
      */
     fun remoteBranch(repo: Repository, local: String): String? {
         fun exists(name: String): Boolean =
-            repo.exactRef("refs/remotes/origin/$name") != null
+            repo.exactRef(ORIGIN + name) != null
 
         if (exists(local)) return local
-        val head = repo.exactRef("refs/remotes/origin/HEAD")
-        val pointed = head?.target?.name?.removePrefix("refs/remotes/origin/")
+        val head = repo.exactRef(ORIGIN + "HEAD")
+        val pointed = head?.target?.name?.removePrefix(ORIGIN)
             ?.takeIf { it.isNotBlank() && it != "HEAD" }
         if (pointed != null && exists(pointed)) return pointed
-        val others = repo.refDatabase.getRefsByPrefix("refs/remotes/origin/")
-            .map { it.name.removePrefix("refs/remotes/origin/") }
+        val others = repo.refDatabase.getRefsByPrefix(ORIGIN)
+            .map { it.name.removePrefix(ORIGIN) }
             .filter { it != "HEAD" }
         return others.singleOrNull()
     }
@@ -710,39 +713,6 @@ object GitService {
         authorEmail = commit.authorIdent.emailAddress,
         timestamp = commit.authorIdent.`when`?.time ?: (commit.commitTime.toLong() * 1000L),
     )
-
-    /**
-     * The contents of the folder [path] at the revision [revisionId].
-     * A blank path means the root of the repository.
-     */
-    fun treeAt(
-        repo: Repository,
-        path: String?,
-        revisionId: String? = null,
-    ): List<TreeEntry> {
-        val walk = RevWalk(repo)
-        try {
-            val tree = treeFor(repo, walk, path, revisionId)
-            val entries = mutableListOf<TreeEntry>()
-            TreeWalk(repo).use { treeWalk ->
-                treeWalk.addTree(tree)
-                treeWalk.setRecursive(false)
-                while (treeWalk.next()) {
-                    val name = treeWalk.getNameString()
-                    entries.add(
-                        TreeEntry(
-                            name = name,
-                            path = if (path.isNullOrBlank()) name else "${path.trimEnd('/')}/$name",
-                            isDirectory = treeWalk.isSubtree(),
-                        )
-                    )
-                }
-            }
-            return entries.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
-        } finally {
-            walk.close()
-        }
-    }
 
     /** The tree object of [path] at [revisionId]. */
     private fun treeFor(
@@ -1021,7 +991,7 @@ object GitService {
     fun setRemoteUrl(repo: Repository, url: String) {
         val config = repo.config
         config.setString("remote", "origin", "url", url)
-        config.setString("remote", "origin", "fetch", "+refs/heads/*:refs/remotes/origin/*")
+        config.setString("remote", "origin", "fetch", "+refs/heads/*:" + ORIGIN + "*")
         config.save()
     }
 

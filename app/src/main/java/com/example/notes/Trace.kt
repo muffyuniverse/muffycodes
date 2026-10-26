@@ -555,16 +555,11 @@ object Trace {
                 val kept = all.takeLast(LOG_KEEP)
                 val from = kept.indexOf('\n').let { if (it < 0) 0 else it + 1 }
                 val text = "… the oldest lines were dropped; ids keep counting …\n" + kept.substring(from)
-                // **Written beside the file and renamed over it.** A trim that truncated the
-                // file in place is a trim that shows anything reading concurrently a log which
-                // begins correctly and then stops mid-row — and the report, the watcher and the
-                // test all read this file while the app writes it.
-                val fresh = File(file.parentFile, file.name + ".new")
-                fresh.writeText(text)
-                if (!fresh.renameTo(file)) {
-                    file.writeText(text)
-                    fresh.delete()
-                }
+                // **The same whole-file rule as everything else.** A trim that truncated the file in
+                // place shows anything reading concurrently a log which begins correctly and then
+                // stops mid-row — and the report, the watcher and the test all read this file while
+                // the app writes it.
+                Beside.write(file, text)
             } catch (t: Throwable) {
                 // A log that could not be trimmed is still a log.
             }

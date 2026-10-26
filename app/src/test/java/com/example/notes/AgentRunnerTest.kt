@@ -393,6 +393,85 @@ class AgentRunnerTest {
     }
 
     @Test
+    fun `two commands that land together are one turn, and it names both`() {
+        // **One wake can be owed several results.** A model that starts two commands before its
+        // turn ends has two files waiting; waking twice would spend two requests to read two files
+        // it could have read in one. The note lists them both, and the second file does not wake it
+        // again afterwards because the watermark is the tick's time, past both completions.
+        on("shopping", now = 1_000)
+        val bg = Background(launch = { it() }, now = { 5_000 })
+        val door = ScriptedDoor(Reply("", listOf(Call("c1", "conclude", """{"text":"both read"}"""))))
+        val runner = AgentRunner(
+            ws = ws, git = git, settings = settings,
+            model = { ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high") },
+            door = { door }, notify = { notices += it }, bg = bg,
+        ).also { runners += it }
+
+        bg.start(ws.projectDir("shopping"), Call("c1", "tree", "{}")) { "0 one" }
+        bg.start(ws.projectDir("shopping"), Call("c2", "read", """{"path":"milk.txt"}""")) { "0 two" }
+        runner.tick(5_001)
+        settle(runner)
+
+        assertEquals("one turn for two results", 1, door.asked.size)
+        val said = door.asked.single().messages.last().text
+        assertTrue("it says there were two: $said", said.startsWith("2 background commands have finished"))
+        assertTrue("naming the first", said.contains("tree-c1.txt"))
+        assertTrue("and the second", said.contains("read-c2.txt"))
+
+        runner.tick(9_000)
+        settle(runner)
+        assertEquals("and neither wakes it again", 1, door.asked.size)
+    }
+
+    @Test
+    fun `a session a screen is holding is not woken under it`() {
+        // **A turn already in flight is a turn.** The screen takes the hold before it asks, so the
+        // tick cannot put a second request on the same conversation — two endings for one session,
+        // two sets of results, and the last one to land wins. The completion is not lost: it waits.
+        on("shopping", now = 1_000)
+        val bg = Background(launch = { it() }, now = { 5_000 })
+        val door = ScriptedDoor(Reply("", listOf(Call("c1", "conclude", """{"text":"now I can"}"""))))
+        val runner = AgentRunner(
+            ws = ws, git = git, settings = settings,
+            model = { ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high") },
+            door = { door }, notify = { notices += it }, bg = bg,
+        ).also { runners += it }
+
+        val release = runner.hold("shopping")
+        bg.start(ws.projectDir("shopping"), Call("c1", "tree", "{}")) { "0 one" }
+        runner.tick(5_001)
+        assertEquals("nothing went out while the screen had it", 0, door.asked.size)
+
+        release()
+        runner.tick(5_002)
+        settle(runner)
+        assertEquals("and it goes out the moment the screen lets go", 1, door.asked.size)
+    }
+
+    @Test
+    fun `a command that finished for a project that is gone wakes nothing`() {
+        // The folder is the project. A session whose folder was deleted — by the person, by another
+        // app, by a phone tidying up — is removed rather than polled into a directory that is not
+        // there, and its waiting result has nowhere to be read from.
+        on("shopping", now = 1_000)
+        val bg = Background(launch = { it() }, now = { 5_000 })
+        val door = ScriptedDoor(Reply("", listOf(Call("c1", "conclude", """{"text":"no"}"""))))
+        val runner = AgentRunner(
+            ws = ws, git = git, settings = settings,
+            model = { ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high") },
+            door = { door }, notify = { notices += it }, bg = bg,
+        ).also { runners += it }
+
+        bg.start(ws.projectDir("shopping"), Call("c1", "tree", "{}")) { "0 one" }
+        ws.projectDir("shopping").deleteRecursively()
+        runner.tick(5_001)
+        settle(runner)
+
+        assertEquals("no turn was taken", 0, door.asked.size)
+        assertTrue("and the session went with the folder", runner.sessions().isEmpty())
+    }
+
+    @Test
     fun `a wake outranks a ping, and the ping waits its own interval afterwards`() {
         // Both are due at once — a command landed and four minutes have passed — and the wake is the
         // one worth paying for. Afterwards the clock has moved, so the ping is not fired on its heels.
