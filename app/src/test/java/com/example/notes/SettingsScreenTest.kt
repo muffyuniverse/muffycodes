@@ -175,7 +175,7 @@ class SettingsScreenTest {
         // the handover existed — so an update must not change an agent nobody configured.
         assertEquals("off", 0, scene.viewModel.settings.commandSeconds)
         assertEquals("and no wait, which means wait for it", 0L, scene.viewModel.settings.commandMs)
-        compose.setContent { Frame { SettingsScreen(viewModel = scene.viewModel, onBack = {}) } }
+        settings()
         compose.onNodeWithText("Hand a command over after", substring = true)
             .performScrollTo()
             .assertIsDisplayed()
