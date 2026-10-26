@@ -285,11 +285,20 @@ class ProjectGit(
     }
 
     /** The versions of a file inside the worktree, newest first. */
-    fun versions(project: String, path: String): List<Pair<GitService.CommitInfo, String?>> {
+    fun versions(
+        project: String,
+        path: String,
+        deadline: Deadline = Deadline.none(),
+    ): List<Pair<GitService.CommitInfo, String?>> {
         val repo = open(project) ?: return emptyList()
         return repo.use {
             try {
-                GitService.versionsOf(it, path)
+                GitService.versionsOf(it, path, deadline = deadline)
+            } catch (e: StoppedException) {
+                // **A stop is not a failure to read.** Every other exception here means "there is no
+                // history for you"; this one means the operator's time ran out, and answering
+                // "this file has no versions yet" would be a lie about the repository.
+                throw e
             } catch (e: Throwable) {
                 emptyList()
             }

@@ -64,8 +64,8 @@ class Background(
      * The file a call's result belongs in.
      *
      * **Named after the call, not after the moment**, so the path in the result row names the same
-     * number as the `CALL` row above it and two clones of two repositories cannot overwrite each
-     * other's result.
+     * number as the `CALL` row above it and two commands run in the same second cannot overwrite
+     * each other's result.
      */
     fun resultFile(project: File, call: Call): File =
         File(File(File(project, AgentTools.LONG_DIR), "background_results"), "${call.tool}-${call.id}.txt")

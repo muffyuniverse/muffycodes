@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 /**
  * The deadline a command asks about, and the sentence it produces.
@@ -37,11 +38,55 @@ class TimeoutsTest {
 
     @Test
     fun `the stopped sentence says how long, and that nothing was kept`() {
-        val said = Stopped.body("clone", Deadline(60_000L))
+        val said = Stopped.body("restore", Deadline(60_000L))
         assertTrue("it is a failure: $said", said.startsWith(AgentLog.FAILURE))
-        assertTrue("it names the command: $said", said.contains("clone"))
+        assertTrue("it names the command: $said", said.contains("restore"))
         assertTrue("it says it was stopped: $said", said.contains("stopped after 60 s"))
         assertTrue("and what was left: $said", said.contains("nothing was kept"))
+    }
+
+    @Test
+    fun `a limit that ran out is a throw, so every command can ask the same question`() {
+        val past = Deadline(1L)
+        Thread.sleep(5)
+        try {
+            past.check("read")
+            throw AssertionError("check should have thrown")
+        } catch (e: StoppedException) {
+            assertTrue("with the sentence a result carries: ${e.message}", e.message!!.contains("stopped"))
+        }
+    }
+
+    @Test
+    fun `a stopped delete says part of it is gone instead of claiming nothing was kept`() {
+        // **The one command whose sentence is different, because it is the one that can stop half
+        // way.** Every other command that can be stopped writes nothing or writes all at once.
+        val said = Stopped.partway("delete", Deadline(60_000L))
+        assertTrue("it is a failure: $said", said.startsWith(AgentLog.FAILURE))
+        assertTrue("it names the command: $said", said.contains("delete"))
+        assertTrue("it says part of it is gone: $said", said.contains("already gone"))
+        assertFalse("and does not claim nothing happened: $said", said.contains("nothing was kept"))
+    }
+
+    @Test
+    fun `a foreground read stops on the operator's deadline, not only a slow command`() {
+        // **The reason LONG had to go.** Nothing bounds a read by the size of the file any more, so
+        // a read with no deadline is a turn that does not come back. One millisecond is already past
+        // by the time the file has been opened and its path checked.
+        val account = File(System.getProperty("java.io.tmpdir"), "timeouts-" + System.nanoTime())
+        account.mkdirs()
+        val ws = Workspace(account)
+        val project = File(account, "shopping")
+        project.mkdirs()
+        File(project, "huge.log").writeText((1..20_000).joinToString("\n") { "line $it" })
+        val git = ProjectGit(ws, { null }, { GitAuthor("Muffy", "muffy@example.com") })
+        val log = AgentLog.open(project)
+
+        val body = AgentTools(ws, "shopping", git, log)
+            .run(Call("c1", "read", """{"path":"huge.log"}"""), Deadline(1))
+
+        assertTrue("it is stopped rather than answered: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("and says so: $body", body.contains("stopped"))
     }
 
     @Test

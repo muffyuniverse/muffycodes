@@ -968,6 +968,9 @@ class AppViewModel @JvmOverloads constructor(
      * unlike a move, which has to tell the repository it left as well as the one it
      * arrived in. Getting that wrong would put a "deleted" commit into a project whose
      * file is still sitting there.
+     *
+     * **The name never changes.** A taken name is refused by [Workspace.copy], so there is one
+     * sentence here rather than two: the copy is `milk.txt` or nothing happened.
      */
     fun copy(file: File, into: File): Boolean {
         val ws = workspace ?: return false
@@ -977,15 +980,8 @@ class AppViewModel @JvmOverloads constructor(
             message = result.exceptionOrNull()?.message ?: "That did not work"
             return false
         }
-        val made = result.getOrNull() ?: file
         refresh()
-        val what = if (made.name == file.name) {
-            "Copied ${file.name} into ${into.name}/"
-        } else {
-            // The name is said when it changed, because that is the one thing a person
-            // cannot see from the folder they copied out of.
-            "Copied ${file.name} into ${into.name}/ as ${made.name}"
-        }
+        val what = "Copied ${file.name} into ${into.name}/"
         if (now != null) commitProject(now, what)
         historyGeneration++
         message = what
@@ -1166,8 +1162,11 @@ class AppViewModel @JvmOverloads constructor(
             message = "Nothing is selected"
             return false
         }
-        val refused = mutableListOf<String>()
-        var movedCount = 0
+        // **All or nothing, decided before anything moves.** Moving what can be moved reads as one
+        // act that worked, and the one that was left behind is a surprise found later; the same is
+        // true of a name that silently grew a number. Both checks happen first, they name what is
+        // wrong, and a batch that fails leaves the folder exactly as it was.
+        blocked(files, into, "moved")?.let { message = it; return false }
         // Which repositories the things came out of. A move that crosses the
         // boundary has to be recorded on both sides, and with several things at once
         // the sources can be more than one.
@@ -1176,21 +1175,16 @@ class AppViewModel @JvmOverloads constructor(
             ws.projectOf(file)?.takeIf { ws.inWorktree(file) }?.let { was += it }
             val result = ws.move(file, into)
             if (result.isFailure) {
-                refused += result.exceptionOrNull()?.message ?: "One file could not be moved"
-            } else {
-                movedCount++
+                message = result.exceptionOrNull()?.message ?: "One file could not be moved"
+                return false
             }
         }
         selected = emptySet()
         refresh()
-        if (movedCount == 0) {
-            message = refused.firstOrNull() ?: "Nothing was moved"
-            return false
-        }
-        val what = if (movedCount == 1) {
+        val what = if (files.size == 1) {
             "Moved 1 item into ${into.name}/"
         } else {
-            "Moved $movedCount items into ${into.name}/"
+            "Moved ${files.size} items into ${into.name}/"
         }
         // Both sides of the boundary, as for one move: the destination gains what
         // arrived, and every source repository records what left it.
@@ -1199,18 +1193,15 @@ class AppViewModel @JvmOverloads constructor(
         leaving.forEach { commitProject(it, what) }
         if (arriving != null) commitProject(arriving, what)
         historyGeneration++
-        message = if (refused.isEmpty()) what else "$what — ${refused.first()}"
+        message = what
         return true
     }
 
     /**
-     * Copies everything selected into [into].
+     * Copies everything selected into [into], or nothing at all.
      *
-     * The same shape as [moveSelected], for the same reasons: one at a time so a single
-     * refusal does not take the rest with it, one commit at the end because a commit
-     * takes everything that is waiting anyway, and **only the receiving side** — nothing
-     * left any source. A name that was already taken comes back renamed, and that is
-     * said: it is the one effect a person cannot see from where they were standing.
+     * The same pre-check as [moveSelected], and the same reason. **Only the receiving side is
+     * committed** — nothing left any source, so there is nothing to record on the other side.
      */
     fun copySelected(into: File): Boolean {
         val ws = workspace ?: return false
@@ -1219,39 +1210,56 @@ class AppViewModel @JvmOverloads constructor(
             message = "Nothing is selected"
             return false
         }
-        val refused = mutableListOf<String>()
-        var copiedCount = 0
-        var renamed = 0
+        blocked(files, into, "copied")?.let { message = it; return false }
         files.forEach { file ->
             val result = ws.copy(file, into)
             if (result.isFailure) {
-                refused += result.exceptionOrNull()?.message ?: "One thing could not be copied"
-            } else {
-                copiedCount++
-                if (result.getOrNull()?.name != file.name) renamed++
+                message = result.exceptionOrNull()?.message ?: "One thing could not be copied"
+                return false
             }
         }
         selected = emptySet()
         refresh()
-        if (copiedCount == 0) {
-            message = refused.firstOrNull() ?: "Nothing was copied"
-            return false
-        }
-        val what = if (copiedCount == 1) {
+        val what = if (files.size == 1) {
             "Copied 1 item into ${into.name}/"
         } else {
-            "Copied $copiedCount items into ${into.name}/"
+            "Copied ${files.size} items into ${into.name}/"
         }
         ws.projectOf(into)?.takeIf { ws.inWorktree(into) }?.let { commitProject(it, what) }
         historyGeneration++
-        message = buildString {
-            append(what)
-            if (renamed > 0) append(" — $renamed renamed, the name was taken")
-            if (refused.isNotEmpty()) append(" — ${refused.first()}")
-        }
+        message = what
         return true
     }
 
+    /**
+     * Why a batch must not start, or null when every name is free and nothing is locked.
+     *
+     * **The two questions a batch has to answer before it touches anything.** A taken name is the
+     * one the person cannot see from where they are standing, so it is named; a locked file in a
+     * move is a member of the batch that cannot go, and moving the others would leave the act
+     * half done. A copy of a locked file is fine — a copy only reads the source.
+     *
+     * [verb] is past tense, because the sentence is about the act that did not happen.
+     */
+    private fun blocked(files: List<File>, into: File, verb: String): String? {
+        val taken = files.map { File(into, it.name) }.filter { it.exists() }.map { it.name }.distinct()
+        if (taken.isNotEmpty()) {
+            val quoted = taken.map { "\"$it\"" }
+            val list = when (quoted.size) {
+                1 -> quoted.first()
+                2 -> "${quoted[0]} and ${quoted[1]}"
+                else -> quoted.dropLast(1).joinToString(", ") + " and " + quoted.last()
+            }
+            return "Nothing was $verb — there is already $list there"
+        }
+        if (verb == "moved") {
+            files.firstOrNull { isLocked(it) }?.let {
+                return "${it.name} is locked, so nothing was moved"
+            }
+        }
+        if (isLocked(into)) return "${into.name} is locked, so nothing was $verb"
+        return null
+    }
 
     /** Deletes everything selected, in one recorded change. */
     fun deleteSelected(): Boolean {

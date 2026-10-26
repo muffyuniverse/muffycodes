@@ -659,6 +659,14 @@ object GitService {
         path: String,
         /** A ceiling for the screen; [READ_ALL] for the ordinary case. */
         limit: Int = READ_ALL,
+        /**
+         * Asked once per version, because this loads every version's contents.
+         *
+         * It is the one read in this class that grows with the *history* rather than with the file:
+         * a file saved a thousand times is a thousand trees to open, and a command that may not
+         * outlast its turn has to be able to stop between them.
+         */
+        deadline: Deadline = Deadline.none(),
     ): List<Pair<CommitInfo, String?>> {
         val walk = RevWalk(repo)
         try {
@@ -666,6 +674,7 @@ object GitService {
                 git.log().addPath(path).call().take(limit).toList()
             }
             return commits.map { commit ->
+                deadline.check("history")
                 val info = toInfo(commit)
                 val found = TreeWalk.forPath(repo, path.trim('/'), *arrayOf<AnyObjectId>(commit.tree))
                 val content = found?.use {

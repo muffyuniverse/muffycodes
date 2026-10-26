@@ -14,9 +14,12 @@ import java.io.File
  * while one of them was broken:
  *
  * - the original is untouched — the one thing that separates copy from move;
- * - the copy is a *new* thing, so a taken name is renamed rather than refused, and
- *   `milk.txt` becomes `milk 2.txt` rather than `milk.txt 2`;
+ * - **a taken name is refused, not numbered.** A copy that quietly became `milk 2.txt` put a
+ *   file somewhere the person did not ask for, under a name they will not recognise in a list,
+ *   and said "Copied". The refusal is one sentence, and it is the same sentence a move gives;
  * - a folder arrives complete, and not inside itself;
+ * - **a batch is all or nothing**: a taken name anywhere means nothing moves, and the message
+ *   names the names that are taken;
  * - only the receiving history is told, because nothing left anywhere.
  *
  * The falsification each test carries is its own negative: "the original is still there"
@@ -79,66 +82,23 @@ class CopyFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `a name that is taken becomes a numbered name, and the extension stays on the end`() {
+    fun `a name that is taken is refused, and nothing is numbered`() {
         // Given a folder that already holds a file of that name
         val into = aFolder("drafts")
         File(into, "milk.txt").writeText("one litre")
         val original = aFile("milk.txt", "two litres")
 
         // When a file of the same name is copied in
-        scene.viewModel.copy(original, into)
+        val done = scene.viewModel.copy(original, into)
 
-        // Then the copy is renamed, extension last, and nothing is overwritten
-        assertEquals("the file that was there is untouched", "one litre", File(into, "milk.txt").readText())
-        assertTrue("the copy arrived beside it", File(into, "milk 2.txt").isFile)
-        assertEquals("with its own text", "two litres", File(into, "milk 2.txt").readText())
-    }
-
-    @Test
-    fun `a second copy of the same name is numbered again rather than reusing 2`() {
-        // Given a folder that already holds milk.txt and milk 2.txt
-        val into = aFolder("drafts")
-        File(into, "milk.txt").writeText("one")
-        File(into, "milk 2.txt").writeText("two")
-        val original = aFile("milk.txt", "three")
-
-        // When it is copied in
-        scene.viewModel.copy(original, into)
-
-        // Then the next free number is used
-        assertTrue("milk 3.txt is the new one", File(into, "milk 3.txt").isFile)
-        assertEquals("one", File(into, "milk.txt").readText())
-        assertEquals("two", File(into, "milk 2.txt").readText())
-    }
-
-    @Test
-    fun `the app says when a copy was renamed, because that is what the person cannot see`() {
-        // Given a taken name
-        val into = aFolder("drafts")
-        File(into, "milk.txt").writeText("one")
-
-        // When a copy lands under a new name
-        scene.viewModel.copy(aFile("milk.txt", "two"), into)
-
-        // Then the message names both the folder and the new name
+        // Then the app refuses rather than inventing a name, and says which name
+        assertFalse("the copy is refused", done)
         val said = scene.viewModel.message.orEmpty()
-        assertTrue("it says a copy happened: $said", said.contains("Copied"))
-        assertTrue("it names the folder: $said", said.contains("drafts"))
-        assertTrue("and the new name: $said", said.contains("milk 2.txt"))
-    }
-
-    @Test
-    fun `a name that was free is not renamed, and the message does not pretend otherwise`() {
-        // Given an empty folder
-        val into = aFolder("drafts")
-
-        // When a copy lands with its own name
-        scene.viewModel.copy(aFile("milk.txt", "two"), into)
-
-        // Then nothing is said about renaming
-        val said = scene.viewModel.message.orEmpty()
-        assertTrue("the copy is reported: $said", said.contains("Copied milk.txt"))
-        assertFalse("and no rename is claimed: $said", said.contains(" as "))
+        assertTrue("it names the file: $said", said.contains("milk.txt"))
+        assertTrue("and says it is already there: $said", said.contains("already"))
+        assertFalse("no numbered name was made: $said", File(into, "milk 2.txt").exists())
+        assertEquals("and the file that was there is untouched", "one litre", File(into, "milk.txt").readText())
+        assertEquals("as is the original", "two litres", original.readText())
     }
 
     // ---- a folder -----------------------------------------------------------
@@ -302,7 +262,7 @@ class CopyFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `copying several says how many were renamed rather than quietly numbering them`() {
+    fun `a batch with one taken name copies nothing, and names what is taken`() {
         // Given a folder that already holds one of the two names
         val into = aFolder("drafts")
         File(into, "milk.txt").writeText("old")
@@ -311,28 +271,32 @@ class CopyFeatureTest : FeatureTest() {
         scene.viewModel.toggleSelected(milk)
         scene.viewModel.toggleSelected(bread)
 
-        // When they are copied
-        scene.viewModel.copySelected(into)
+        // When they are copied together
+        val done = scene.viewModel.copySelected(into)
 
-        // Then one was renamed and the message says so
+        // Then the whole batch is refused: the one that would have worked is not a partial answer
+        assertFalse("nothing was copied", done)
+        assertFalse("the free name did not arrive either", File(into, "bread.txt").exists())
+        assertEquals("and the file that was there is untouched", "old", File(into, "milk.txt").readText())
         val said = scene.viewModel.message.orEmpty()
-        assertTrue("it says two arrived: $said", said.contains("Copied 2 items"))
-        assertTrue("and that one was renamed: $said", said.contains("1 renamed"))
+        assertTrue("it says nothing was copied: $said", said.contains("Nothing was copied"))
+        assertTrue("and names the taken name: $said", said.contains("milk.txt"))
+        assertFalse("without inventing a numbered one: $said", File(into, "milk 2.txt").exists())
     }
 
     @Test
-    fun `a copy and an import number a taken name the same way`() {
-        // Given a file already called `photo.png`
+    fun `an import still numbers a taken name, because the person never chose it`() {
+        // Given a folder already holding `photo.png` and `photo 2.png`
         val dir = scene.viewModel.currentDir!!
         File(dir, "photo.png").writeText("one")
         File(dir, "photo 2.png").writeText("two")
 
-        // When a copy needs a free name, and an import needs one for the same name
+        // When an import needs a free name for a file it is bringing in
         val byCopy = Workspace.freeName(dir, "photo.png")
-        val byImport = Imports.freeName(dir, "photo.png").name
 
-        // Then they agree. They used to differ — `photo 3.png` from a copy and
-        // `photo_3.png` from an import — which is two answers to one question.
+        // Then it takes the next number, in the app's one name shape. A copy and a move refuse
+        // instead — the person named those — but an import has no name to contradict.
+        val byImport = Imports.freeName(dir, "photo.png").name
         assertEquals("photo 3.png", byCopy)
         assertEquals("the import asks the same rule", byCopy, byImport)
     }

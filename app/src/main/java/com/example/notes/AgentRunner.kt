@@ -35,13 +35,6 @@ class AgentRunner(
     /** Called with a project's fresh rows after a poll, when somebody is reading them. */
     private val polled: (String, List<AgentLog.Row>, Agent.End) -> Unit = { _, _, _ -> },
     /**
-     * The commands whose work can outlast a turn, **shared with the person's own turns**.
-     *
-     * One registry for the project, because it is one project and one record: a `clone` handed over
-     * during a poll is collected by the next poll, and one handed over while somebody is typing is
-     * collected by their next message.
-     */
-    /**
      * Where a `background` call's work runs — **one thread per call, made when it is asked for.**
      *
      * The previous design kept a fixed pool here and held the test suite open for eighteen minutes

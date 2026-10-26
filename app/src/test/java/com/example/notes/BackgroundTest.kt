@@ -32,15 +32,15 @@ class BackgroundTest {
     @Test
     fun `the answer is the path the result will be written to`() {
         val bg = Background.inline()
-        val said = bg.start(project, call("clone")) { "${AgentLog.SUCCESS} cloned" }
+        val said = bg.start(project, call("restore")) { "${AgentLog.SUCCESS} restored" }
 
         // The sentence names the file, so the model needs no new instruction: it reads the path it
         // was given, which is the one thing it already knows how to do.
-        assertTrue("it names the file: $said", said.contains("agent/background_results/clone-12.txt"))
+        assertTrue("it names the file: $said", said.contains("agent/background_results/restore-12.txt"))
         assertEquals(
             "the file is where the sentence said",
-            "${AgentLog.SUCCESS} cloned",
-            File(project, "agent/background_results/clone-12.txt").readText(),
+            "${AgentLog.SUCCESS} restored",
+            File(project, "agent/background_results/restore-12.txt").readText(),
         )
     }
 
@@ -64,9 +64,9 @@ class BackgroundTest {
     @Test
     fun `a result that lands replaces the running line`() {
         val bg = Background.inline()
-        bg.start(project, call("clone", id = "7")) { "${AgentLog.FAILURE} could not reach GitHub" }
+        bg.start(project, call("restore", id = "7")) { "${AgentLog.FAILURE} could not reach GitHub" }
 
-        val file = File(project, "agent/background_results/clone-7.txt")
+        val file = File(project, "agent/background_results/restore-7.txt")
         assertEquals(
             "the file holds the body and only the body",
             "${AgentLog.FAILURE} could not reach GitHub",
@@ -78,7 +78,7 @@ class BackgroundTest {
         )
         assertFalse(
             "nor a half-written temp file",
-            File(project, "agent/background_results/clone-7.txt.new").exists(),
+            File(project, "agent/background_results/restore-7.txt.new").exists(),
         )
     }
 
@@ -87,11 +87,11 @@ class BackgroundTest {
         // A background result nobody is waiting on still has to say why it is not there. Otherwise
         // the file reads `running` for ever and the agent keeps coming back to it.
         val bg = Background.inline()
-        bg.start(project, call("clone", id = "9")) {
-            throw StoppedException(Stopped.body("clone", Deadline(60_000L)))
+        bg.start(project, call("restore", id = "9")) {
+            throw StoppedException(Stopped.body("restore", Deadline(60_000L)))
         }
 
-        val body = File(project, "agent/background_results/clone-9.txt").readText()
+        val body = File(project, "agent/background_results/restore-9.txt").readText()
         assertTrue("it starts with a failure: $body", body.startsWith(AgentLog.FAILURE))
         assertTrue("and says it was stopped: $body", body.contains("stopped"))
         assertTrue("and that nothing was kept: $body", body.contains("nothing was kept"))
@@ -99,12 +99,12 @@ class BackgroundTest {
 
     @Test
     fun `two calls do not share a file`() {
-        // Named after the call, not after the moment: two clones in one turn are two results.
+        // Named after the call, not after the moment: two commands in one turn are two results.
         val bg = Background.inline()
-        bg.start(project, call("clone", id = "1")) { "first" }
-        bg.start(project, call("clone", id = "2")) { "second" }
+        bg.start(project, call("restore", id = "1")) { "first" }
+        bg.start(project, call("restore", id = "2")) { "second" }
 
-        assertEquals("first", File(project, "agent/background_results/clone-1.txt").readText())
-        assertEquals("second", File(project, "agent/background_results/clone-2.txt").readText())
+        assertEquals("first", File(project, "agent/background_results/restore-1.txt").readText())
+        assertEquals("second", File(project, "agent/background_results/restore-2.txt").readText())
     }
 }

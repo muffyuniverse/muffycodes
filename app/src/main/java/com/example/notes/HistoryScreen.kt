@@ -300,7 +300,7 @@ fun HistoryScreen(
 internal fun appVoice(message: String): Boolean {
     val verbs = setOf(
         "Edited", "Created", "Deleted", "Renamed", "Moved", "Imported",
-        "Restored", "Brought", "Synced", "Saved",
+        "Restored", "Brought", "Synced", "Saved", "Copied",
     )
     return message.trim().substringBefore(' ') in verbs
 }

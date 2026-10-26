@@ -435,24 +435,23 @@ class AgentTest {
     }
 
     @Test
-    fun `the newest previous default is the one before this build, word for word`() {
-        // The newest entry is what release 132 wrote. It has the merge's layout and the rules of its
-        // round, and **not** the sentence about a slow command — that sentence is this build's, and
-        // claiming it was in a phone's file would replace a file the person had not touched… which
-        // is correct for an untouched default, and wrong for one that was edited. So the entry has
-        // to be the old text exactly, minus only the sentence this build added.
+    fun `the newest previous default is the text this build replaced`() {
+        // **The entry that matters most, because it is what most phones are holding.** A phone that ran
+        // the previous release has an ① file with its unedited default — which is this build's
+        // predecessor, and whose sentence about a "showing first N of M" result is now wrong, because
+        // nothing is cut short any more. Recognising it needs those words exactly, so the entry is
+        // the old text rather than a paraphrase of it, and it is last because it is the most recent.
         val newest = AgentPrompt.PREVIOUS_SYSTEM.last()
         val now = AgentPrompt.SYSTEM_DEFAULT
 
+        assertTrue(
+            "it is the text that described a cut-short result",
+            newest.contains("showing first N of M"),
+        )
+        assertFalse("and this build no longer says that", now.contains("showing first N of M"))
         assertTrue("the layout is the merge's", newest.contains("The project folder is the repository"))
         assertFalse("and it predates the handover rule", newest.contains("still running; call again"))
-        // Everything else is the same, which is what makes it the *same* default rather than once
-        // that merely starts alike.
-        val stripped = now.lines().filterNot { it.contains("still") || it.contains("running; call") }
-        assertTrue(
-            "the two texts differ only by the sentence this build added",
-            stripped.size >= newest.lines().size - 1,
-        )
+        assertTrue("a previous default is not the current one", newest != now)
     }
 
     @Test
@@ -616,17 +615,244 @@ class AgentTest {
         assertTrue("about the pattern: $body", body.contains("pattern"))
     }
 
+    // ---- the one range language: from / to, then grep inside it ---------------
+
+    @Test
+    fun `a read range is inclusive at both ends and to alone means the file`() {
+        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "one\ntwo\nthree\nfour\n")
+
+        assertEquals("0\ntwo\nthree", tool("read", """{"path":"milk.txt","from":2,"to":3}"""))
+        assertEquals("0\nthree\nfour\n", tool("read", """{"path":"milk.txt","from":3}"""))
+        assertEquals("0\none\ntwo", tool("read", """{"path":"milk.txt","to":2}"""))
+    }
+
+    @Test
+    fun `grep is applied inside the range, and the line numbers are the file's`() {
+        // **The order is the whole contract.** The range says which part of the file you are looking
+        // at; the pattern says which lines of that part. If grep ran first, the numbers it printed
+        // would be numbers in the *result*, and the `edit` that followed would change the wrong line.
+        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "milk\nbread\nmilk again\neggs\nmilk last\n")
+
+        val body = tool("read", """{"path":"milk.txt","from":2,"to":4,"grep":"milk"}""")
+
+        assertTrue("the hit inside the window: $body", body.contains("3: milk again"))
+        assertFalse("not the one before it: $body", body.contains("1: milk"))
+        assertFalse("nor the one after it: $body", body.contains("5: milk last"))
+    }
+
+    @Test
+    fun `a range that ends before it starts is refused, and says which is which`() {
+        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "one\ntwo\n")
+
+        val body = tool("read", """{"path":"milk.txt","from":3,"to":1}""")
+
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("naming both numbers: $body", body.contains("3") && body.contains("1"))
+    }
+
+    // ---- edit: one shape at a time -----------------------------------------
+
+    @Test
+    fun `edit replaces a block of lines by number`() {
+        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "one\ntwo\nthree\nfour")
+
+        val body = tool("edit", """{"path":"milk.txt","from":2,"to":3,"replace":"TWO"}""")
+
+        assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
+        assertEquals("the block was replaced, the rest untouched", "one\nTWO\nfour",
+            ws.read(File(ws.repoOf("shopping"), "milk.txt")))
+    }
+
+    @Test
+    fun `edit inserts after the line it is given, and 0 puts the line at the top`() {
+        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "one\ntwo\nthree")
+
+        assertTrue(tool("edit", """{"path":"milk.txt","at":1,"replace":"and half"}""")
+            .startsWith(AgentLog.SUCCESS))
+        assertEquals("one\nand half\ntwo\nthree", ws.read(File(ws.repoOf("shopping"), "milk.txt")))
+
+        assertTrue(tool("edit", """{"path":"milk.txt","at":0,"replace":"first"}""")
+            .startsWith(AgentLog.SUCCESS))
+        assertEquals("first\none\nand half\ntwo\nthree", ws.read(File(ws.repoOf("shopping"), "milk.txt")))
+    }
+
+    @Test
+    fun `an at beyond the file is refused rather than silently appended`() {
+        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "one\ntwo")
+
+        val body = tool("edit", """{"path":"milk.txt","at":9,"replace":"nowhere"}""")
+
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertEquals("and the file is untouched", "one\ntwo", ws.read(File(ws.repoOf("shopping"), "milk.txt")))
+    }
+
+    @Test
+    fun `edit will not take two shapes at once`() {
+        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "one\ntwo")
+
+        val body = tool("edit", """{"path":"milk.txt","find":"one","at":1,"replace":"x"}""")
+
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("and it says why: $body", body.contains("one of"))
+        assertEquals("with nothing changed", "one\ntwo", ws.read(File(ws.repoOf("shopping"), "milk.txt")))
+    }
+
+    @Test
+    fun `a replacement can be a read call, and the paste never enters the conversation`() {
+        // The whole reason for the shape: two hundred kilobytes of one file going into another
+        // must not be refused for being large, because the limit is about what enters the context.
+        val big = (1..40).joinToString("\n") { "row $it" }
+        ws.write(File(ws.repoOf("shopping"), "notes.txt"), big)
+        ws.write(File(ws.repoOf("shopping"), "todo.txt"), "top\nbottom")
+
+        val body = tool(
+            "edit",
+            """{"path":"todo.txt","at":1,"replace":{"tool":"read","args":{"path":"notes.txt"}}}""",
+        )
+
+        assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
+        assertEquals("the whole source came through", "top\n$big\nbottom",
+            ws.read(File(ws.repoOf("shopping"), "todo.txt")))
+    }
+
+    @Test
+    fun `a replacement that names any tool but read is refused`() {
+        ws.write(File(ws.repoOf("shopping"), "todo.txt"), "text")
+
+        val body = tool(
+            "edit",
+            """{"path":"todo.txt","at":0,"replace":{"tool":"delete","args":{"path":"notes.txt"}}}""",
+        )
+
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("it says which tool it was: $body", body.contains("delete"))
+        assertEquals("and nothing was written", "text", ws.read(File(ws.repoOf("shopping"), "todo.txt")))
+    }
+
+    // ---- read at a version --------------------------------------------------
+
+    @Test
+    fun `read shows a version without putting it back`() {
+        // **The middle step between history and restore.** Without it the only way to see what an
+        // older commit said is to put it back, which changes the file the person is working on.
+        val file = File(ws.repoOf("shopping"), "milk.txt")
+        ws.write(file, "one litre")
+        val first = git.commit("shopping", "first")!!
+        ws.write(file, "three litres")
+        git.commit("shopping", "second")
+
+        val body = tool("read", """{"path":"milk.txt","revision":"$first"}""")
+
+        assertEquals("the text as it stood at that commit", "0\none litre", body)
+        assertEquals("and the file itself did not move", "three litres", ws.read(file))
+    }
+
+    @Test
+    fun `an unknown revision is refused, and names it`() {
+        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "two litres")
+
+        val body = tool("read", """{"path":"milk.txt","revision":"0000000"}""")
+
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("naming the id: $body", body.contains("0000000"))
+    }
+
+    // ---- history: a save is not the same row twice --------------------------
+
+    @Test
+    fun `a history row says what the version contained, so twenty saves are told apart`() {
+        // **Save commits one word, so the message tells versions apart not at all.** The file's own
+        // first line is the only thing that does, and `versionsOf` has already loaded it.
+        val file = File(ws.repoOf("shopping"), "milk.txt")
+        ws.write(file, "one litre and a lemon")
+        git.commit("shopping", CommitMessage.SAVE)
+        ws.write(file, "three litres")
+        git.commit("shopping", CommitMessage.SAVE)
+
+        val body = tool("history", """{"path":"milk.txt"}""")
+
+        assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
+        assertTrue("the newer save is recognisable: $body", body.contains("three litres"))
+        assertTrue("and so is the older one: $body", body.contains("one litre and a lemon"))
+        assertTrue("both rows say the same word, which is why the excerpt exists: $body",
+            body.split(CommitMessage.SAVE).size == 3)
+    }
+
+    @Test
+    fun `history greps the file's text at each version, not the commit messages`() {
+        val file = File(ws.repoOf("shopping"), "milk.txt")
+        ws.write(file, "two litres of milk")
+        git.commit("shopping", "first")
+        ws.write(file, "two litres of bread")
+        git.commit("shopping", "second")
+
+        val body = tool("history", """{"path":"milk.txt","grep":"bread"}""")
+
+        assertTrue("the version whose text matched: $body", body.contains("bread"))
+        assertFalse("and not the one whose text did not: $body", body.contains("of milk"))
+    }
+
+    // ---- move with a copy flag ---------------------------------------------
+
+    @Test
+    fun `move with copy leaves the original, and a taken name is refused`() {
+        val dir = ws.repoOf("shopping")
+        ws.write(File(dir, "milk.txt"), "two litres")
+        ws.createFolder(dir, "drafts")
+
+        val body = tool("move", """{"path":"milk.txt","into":"drafts","copy":true}""")
+
+        assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
+        assertTrue("the copy is there", File(dir, "drafts/milk.txt").isFile)
+        assertTrue("and the original stayed", File(dir, "milk.txt").isFile)
+
+        val again = tool("move", """{"path":"milk.txt","into":"drafts","copy":true}""")
+        assertTrue("the second copy is refused: $again", again.startsWith(AgentLog.FAILURE))
+        assertFalse("and no numbered name was invented", File(dir, "drafts/milk 2.txt").exists())
+    }
+
+    @Test
+    fun `a copy that also asks for a new name is refused, because it is two acts`() {
+        val dir = ws.repoOf("shopping")
+        ws.write(File(dir, "milk.txt"), "two litres")
+        ws.createFolder(dir, "drafts")
+
+        val body = tool("move", """{"path":"milk.txt","into":"drafts","copy":true,"name":"dairy.txt"}""")
+
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertFalse("nothing was copied", File(dir, "drafts/milk.txt").exists())
+        assertFalse("and nothing was renamed", File(dir, "drafts/dairy.txt").exists())
+    }
+
     // ---- background: a result that lands in a file ---------------------------
 
     @Test
-    fun `a command that finishes in milliseconds is refused by background, and told to be called directly`() {
-        // **A file for a call that takes no time is a cost with no saving.** The model would pay a
-        // read to learn "created", and the app would carry a file nobody needs. The refusal has to
-        // say what to do instead, or the model tries the same thing again.
+    fun `any command can be put in the background, and the answer is the path before the work starts`() {
+        // **The device is weak and the files are big.** Even a copy can take a while, and grepping
+        // an enormous log is the case this exists for — so the old refusal of "everything else
+        // finishes in milliseconds" was a claim about the phone that the phone does not make.
+        //
+        // The file exists when the answer comes back — "running" until the work lands, then the
+        // body — so a `read` a millisecond later finds the truth rather than an empty folder.
         val body = tool("background", """{"tool":"read","args":{"path":"milk.txt"}}""")
 
-        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
-        assertTrue("it says to call it directly: $body", body.contains("Call it directly"))
+        assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
+        val path = body.substringAfter("written to ").trim()
+        assertTrue("it names where the result goes: $body", path.contains("background_results/"))
+        assertTrue(
+            "and that file is already there: $path",
+            File(ws.projectDir("shopping"), path).isFile,
+        )
+    }
+
+    @Test
+    fun `the three that end a turn cannot be put in the background`() {
+        // There is no result to file: the turn ends on them.
+        listOf("ask", "conclude", "wait").forEach { tool ->
+            val body = tool("background", """{"tool":"$tool","args":{}}""")
+            assertTrue("$tool is refused: $body", body.startsWith(AgentLog.FAILURE))
+            assertTrue("and says why: $body", body.contains("ends the turn"))
+        }
     }
 
     @Test
@@ -875,9 +1101,11 @@ class AgentTest {
     }
 
     @Test
-    fun `a tool result is truncated with a one, and says how much it is showing`() {
-        // Never silently: a model told "here is the file" and handed half of it will edit the
-        // wrong half with complete confidence.
+    fun `a result over the limit is an error that says how to narrow it`() {
+        // **Whole or refused, never a fragment.** A model handed the first half of a file with a
+        // note at the bottom edits the wrong half with complete confidence — and the note is at
+        // the bottom, which is the part it is least likely to read. The answer carries the number
+        // it asked about and the two ways to ask again.
         val big = (1..400).joinToString("\n") { "line $it of the file" }
         ws.write(File(ws.repoOf("shopping"), "big.txt"), big)
         git.commit("shopping", "big")
@@ -895,8 +1123,10 @@ class AgentTest {
         ).burst("read the whole thing")
 
         val got = gotRows().first()
-        assertTrue("it says it is not whole", got.body.startsWith(AgentLog.FAILURE))
-        assertTrue("and how much: ${got.body.takeLast(80)}", got.body.contains("showing first 500"))
+        assertTrue("it is refused: ${got.body.takeLast(80)}", got.body.startsWith(AgentLog.FAILURE))
+        assertTrue("it says the limit it passed: ${got.body}", got.body.contains("500"))
+        assertTrue("and how to narrow it: ${got.body}", got.body.contains("Narrow it"))
+        assertFalse("nothing of the file came through", got.body.contains("line 400 of the file"))
     }
 
     // ---- the context is the sources, not a copy of them ----------------------

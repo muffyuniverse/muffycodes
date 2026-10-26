@@ -518,18 +518,18 @@ class Agent(
      * A call's result, **with the operator's deadline on it.**
      *
      * The conversation has one shape that is legal and it is unforgiving: every tool call in an
-     * assistant message must be answered before the next request. So a command that outlasts the
-     * deadline is answered now, with the truth — it was stopped, and nothing was kept — and the turn
-     * carries on. Nothing is handed over and nothing is asked again.
+     * assistant message must be answered before the next request. So a command that runs out of time
+     * is answered now, with the truth, and the turn carries on. Nothing is handed over and nothing is
+     * asked again.
      *
-     * **The deadline is honoured by the command, not imposed on it.** `clone` asks JGit's
-     * `ProgressMonitor` whether it may continue and `restore` checks between files, so a timeout
-     * really stops the work; a timer over code that never looks at it would only stop the *waiting*,
-     * leaving a thread writing into the project after the agent had been told it failed.
+     * **Every command, not a short list of slow ones.** There used to be a `LONG` set here, on the
+     * argument that everything outside it finishes in microseconds — which stopped being true the
+     * moment nothing bounded a `read` by its size. A file and a project are as big as the person's
+     * disk, so the deadline is attached to the dispatch itself and each command asks it where it can.
      */
     private fun answer(call: Call): String {
-        if (call.tool !in AgentTools.LONG || foregroundMs <= 0L) return runTool(call)
-        return tools.runWithin(call, Deadline(foregroundMs))
+        if (foregroundMs <= 0L) return runTool(call)
+        return tools.run(call, Deadline(foregroundMs))
     }
 
     /**

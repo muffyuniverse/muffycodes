@@ -2,6 +2,7 @@ package com.example.notes
 
 import org.json.JSONObject
 import java.io.File
+import java.io.InputStreamReader
 
 /**
  * What the agent can do, and what it is refused.
@@ -11,10 +12,10 @@ import java.io.File
  * file remembering them. That is the whole reason the lock moved into the funnel before the
  * agent existed: "the agent honours locks" needs no agent code at all.
  *
- * A result's **first line is `0` or `1`, always**, and a result is never silently shortened — a
- * truncated body says so and says how much it is showing. Both are promises the model is told
- * about, and both are things a silent tool would break: an agent whose tool goes quiet is an
- * agent that either hangs or invents.
+ * A result's **first line is `0` or `1`, always**, and a result is either whole or a refusal that
+ * says it was too big and how to narrow it — never a fragment with a note at the bottom. Both are
+ * promises the model is told about, and both are things a silent tool would break: an agent whose
+ * tool goes quiet is an agent that either hangs or invents.
  */
 class AgentTools(
     private val ws: Workspace,
@@ -46,14 +47,8 @@ class AgentTools(
     val worktree: File get() = ws.repoOf(project)
 
     companion object {
-        /** Enough for a file, a listing or a diff; past this a result is truncated and says so. */
-        const val MAX_RESULT = 20_000
-
-        /** How many matches a search prints before it says there are more. */
-        const val MAX_MATCHES = 200
-
-        /** A file bigger than this is not searched: reading it into memory on a phone is the bug. */
-        const val MAX_SCAN = 2L * 1024 * 1024
+        /** The default result limit, for a caller that has no setting of its own. */
+        const val MAX_RESULT = SettingsStore.DEFAULT_MAX_RESULT
 
         /**
          * The tools that end a turn. They are called alone; anything beside them is refused.
@@ -66,19 +61,7 @@ class AgentTools(
         val TERMINATING = AgentLog.TERMINATING
 
         /** The tools that change a file. */
-        val WRITING = setOf("edit", "create", "delete", "move", "clone", "restore")
-
-        /**
-         * The tools whose work can outlast the wait, and so can be handed over.
-         *
-         * **Measured, not guessed.** `tree` walks a project and `read` takes a file — both are
-         * bounded by the app's own limits, and a `read` of a two-megabyte file is a second of work.
-         * A `clone` fetches from the network and a `restore` writes a folder's worth of files: those
-         * are the ones that can take minutes, and they are the ones a turn must not be held by.
-         * Everything else finishes inside a phone's blink, and handing it over would cost a request
-         * more than it saves.
-         */
-        val LONG = setOf("clone", "restore")
+        val WRITING = setOf("edit", "create", "delete", "move", "restore")
 
         /**
          * How many calls in a row may change nothing and answer nothing before the loop stops.
@@ -88,6 +71,14 @@ class AgentTools(
          * minutes on an agent that is spinning and never on one that is waiting.
          */
         const val IDLE_CALLS = 20
+
+        /**
+         * How much of a version's first line a `history` row shows.
+         *
+         * A row is a signpost, not a reading: it has to fit beside an id, a message and a time and
+         * still leave one of twenty rows recognisable at a glance.
+         */
+        const val EXCERPT = 60
 
         /**
          * The folder a `background` result is written into, under `agent/`.
@@ -103,21 +94,32 @@ class AgentTools(
                 "tree",
                 "List the files in a folder of this project. Folders end with a slash. " +
                     "`name` keeps only paths whose name matches; `grep` keeps only files whose " +
-                    "text matches, and shows the matching lines.",
+                    "text matches, and shows the matching lines. `from`/`to` pick a range of the " +
+                    "result's lines, which here are paths.",
                 "{\"path\":\"where to look, relative to the project\",\"depth\":2," +
-                    "\"name\":\"a pattern for file names\",\"grep\":\"a pattern for their text\"}",
+                    "\"name\":\"a pattern for file names\",\"grep\":\"a pattern for their text\"," +
+                    "\"from\":1,\"to\":200}",
             ),
             spec(
                 "read",
-                "Read a text file. Always read before you change one. With `grep`, show only " +
-                    "the lines that match, each with its line number.",
-                """{"path":"the file, relative to the project","from":1,"lines":200,""" +
-                    """"grep":"a pattern to look for"}""",
+                "Read a text file, or one of its versions. Always read before you change one. " +
+                    "`from` and `to` are line numbers, both included; `to` alone means the end. " +
+                    "With `grep` only the lines that match are shown, each with its line number, " +
+                    "and the pattern is applied inside `from`/`to` rather than to the whole file.",
+                "{\"path\":\"the file, relative to the project\",\"from\":1,\"to\":200," +
+                    "\"grep\":\"a pattern to look for\",\"revision\":\"an id from history\"}",
             ),
             spec(
                 "edit",
-                "Replace text in a file. Either find-and-replace, or write the whole file.",
-                """{"path":"the file","find":"text to look for","replace":"what to put there"}""",
+                "Change part of a file. `find`/`replace` replaces text wherever it appears; " +
+                    "`from`/`to` replaces that block of lines; `at` inserts after that line (0 puts " +
+                    "it at the top); `text` writes the whole file. `replace` may be a `read` call, " +
+                    "which copies that call's answer out of another file without it passing " +
+                    "through this conversation.",
+                "{\"path\":\"the file\",\"find\":\"text to look for\",\"replace\":\"what to " +
+                    "put there\"} — or {\"path\":\"the file\",\"from\":10,\"to\":12,\"replace\":" +
+                    "{\"tool\":\"read\",\"args\":{\"path\":\"notes.txt\"}}} — or {\"path\":\"the " +
+                    "file\",\"at\":11,\"replace\":\"a new line\"}",
             ),
             spec(
                 "forget",
@@ -132,19 +134,17 @@ class AgentTools(
             spec("delete", "Delete one file or an empty folder.", """{"path":"what to delete"}"""),
             spec(
                 "move",
-                "Move a file into a folder, or rename it inside its own folder.",
-                """{"path":"the file","into":"the folder","name":"the new name"}""",
-            ),
-            spec(
-                "clone",
-                "Clone a GitHub repository into this project's folder. Refused when there are " +
-                    "changes that would be lost.",
-                """{"url":"https://github.com/owner/repo"}""",
+                "Move a file into a folder, or rename it inside its own folder. With `copy` the " +
+                    "original stays where it is. A name that is already taken is refused.",
+                "{\"path\":\"the file\",\"into\":\"the folder\",\"name\":\"the new name\"," +
+                    "\"copy\":true}",
             ),
             spec(
                 "history",
-                "List the versions of a file, newest first, with the id each is restored from.",
-                """{"path":"the file"}""",
+                "List the versions of a file, newest first: the id each is restored from, and the " +
+                    "first line it contained. `from`/`to` pick a range of versions; `grep` keeps " +
+                    "only the versions whose text matches.",
+                "{\"path\":\"the file\",\"grep\":\"a pattern\",\"from\":1,\"to\":20}",
             ),
             spec(
                 "restore",
@@ -153,10 +153,11 @@ class AgentTools(
             ),
             spec(
                 "background",
-                "Run a slow command and have its result written to a file instead of into this " +
-                    "conversation. The answer is the path; read it to see whether it finished. " +
-                    "Only the slow commands can be run this way.",
-                """{"tool":"clone","args":{"url":"https://github.com/owner/repo"}}""",
+                "Run any command and have its result written to a file instead of into this " +
+                    "conversation. The answer comes back at once with the path; read it to see " +
+                    "whether the command has finished. Use it for slow work on a big file. A " +
+                    "command that changes files will change them while this turn carries on.",
+                "{\"tool\":\"read\",\"args\":{\"path\":\"a big file\"}}",
             ),
             spec(
                 "reason",
@@ -196,85 +197,70 @@ class AgentTools(
      *
      * `ask`, `conclude` and `wait` are not run here: the loop ends the turn on them, because
      * the turn is what they end. Everything else is answered here, including the refusal.
+     *
+     * **One `when`, and every command gets the deadline.** There used to be a short list of "slow"
+     * commands with a deadline and a second dispatch beside this one for them; a `read` of a huge
+     * file and a `tree` of a huge project are as slow as the disk says they are, so no command has
+     * the option of outlasting its turn. What each one does with the deadline is its own business:
+     * the ones that can ask inside a loop do ([Deadline.check]), and the ones that write once have
+     * either finished or not started by the time it passes.
      */
-    fun run(call: Call): String = try {
+    fun run(call: Call, deadline: Deadline = Deadline.none()): String = try {
         val args = JSONObject(call.args.ifBlank { "{}" })
         when (call.tool) {
-            "tree" -> tree(args)
-            "read" -> read(args)
-            "edit" -> edit(args)
+            "tree" -> tree(args, deadline)
+            "read" -> read(args, deadline)
+            "edit" -> edit(args, deadline)
             "forget" -> forget(args)
-            "create" -> create(args)
-            "delete" -> delete(args)
-            "move" -> move(args)
-            "clone" -> clone(args)
-            "history" -> history(args)
-            "restore" -> restore(args)
+            "create" -> create(args, deadline)
+            "delete" -> delete(args, deadline)
+            "move" -> move(args, deadline)
+            "history" -> history(args, deadline)
+            "restore" -> restore(args, deadline)
             "background" -> background(args)
             "reason" -> reason(args)
             else -> refusal("There is no tool called ${call.tool}")
         }
+    } catch (e: StoppedException) {
+        e.message ?: Stopped.body(call.tool, deadline)
     } catch (e: Throwable) {
         refusal(Secrets.explain(e, "That tool could not be run"))
     }
 
     /**
-     * Runs [call] with a deadline, and stops it if the operator's time runs out.
+     * Any command, run so that its result lands in a file instead of in the conversation.
      *
-     * **Only for [LONG].** Everything else finishes or throws in microseconds, so a deadline there
-     * would be a sentence about a wait that cannot happen.
-     */
-    fun runWithin(call: Call, deadline: Deadline): String {
-        if (call.tool !in LONG) return run(call)
-        return try {
-            val args = JSONObject(call.args.ifBlank { "{}" })
-            when (call.tool) {
-                "clone" -> clone(args, deadline)
-                "restore" -> restore(args, deadline)
-                else -> run(call)
-            }
-        } catch (e: StoppedException) {
-            e.message ?: Stopped.body(call.tool, deadline)
-        } catch (e: Throwable) {
-            refusal(Secrets.explain(e, "That tool could not be run"))
-        }
-    }
-
-    /**
-     * `background` — a slow command whose result lands in a file instead of in the conversation.
+     * **The answer comes back before the work starts** — [Background.start] writes the file and then
+     * hands the work over — so this never holds a turn open, however long the command takes. Its
+     * limit is the operator's *background* number, applied to the work and not to the answer.
      *
-     * **The tool name is the argument**, not a flag on `clone`: a result belongs to the call that
-     * asked for it, and the path is named after that call's own row. The work is started before the
-     * answer is written, so the file exists by the time the model could read it.
+     * **The tool name is the argument**: a result belongs to the call that asked for it, and the path
+     * is named after that call's own row. The work goes through [run], the same one the foreground
+     * uses, so the file's body is the body the agent would have read in the conversation and no
+     * command can exist on one path and not the other.
+     *
+     * Refused: the three that end a turn, because there is no result to file, and `background`
+     * itself, because a background of a background is a way to lose a result.
      */
     private fun background(args: JSONObject): String {
         val tool = args.optString("tool").trim()
         if (tool.isEmpty()) return refusal("Say which command to run in the background")
-        if (tool !in LONG) {
-            return refusal(
-                "${tool.ifEmpty { "That" }} finishes in milliseconds, so putting it in the background " +
-                    "would cost you a file to read for nothing. Call it directly."
-            )
+        if (tool in TERMINATING) {
+            return refusal("$tool ends the turn, so there is no result to put in a file")
         }
-        val inner = Call(id = args.optString("id", "0"), tool = tool, args = args.optJSONObject("args")?.toString() ?: "{}")
+        if (tool == "background") {
+            return refusal("A background command cannot be put in the background")
+        }
+        val inner = Call(
+            id = args.optString("id", "0"),
+            tool = tool,
+            args = args.optJSONObject("args")?.toString() ?: "{}",
+        )
         val dir = projectDir
-        return bg.start(dir, inner) {
-            // **The same path the foreground takes**, so the file's body is the body the agent would
-            // have read in the conversation — `0` or `1` first, and the same sentences. The one
-            // difference is the deadline: a background command gets the operator's longer number.
-            try {
-                when (tool) {
-                    "clone" -> clone(JSONObject(inner.args), Deadline(backgroundMs()))
-                    "restore" -> restore(JSONObject(inner.args), Deadline(backgroundMs()))
-                    else -> refusal("There is no slow command called $tool")
-                }
-            } catch (e: StoppedException) {
-                e.message ?: "stopped"
-            }
-        }
+        return bg.start(dir, inner) { run(inner, Deadline(backgroundMs())) }
     }
 
-    private fun tree(args: JSONObject): String {
+    private fun tree(args: JSONObject, deadline: Deadline): String {
         val root = resolve(args.optString("path", ""))
             .getOrElse { return refusal(it.message ?: "that path cannot be read") }
         if (!root.exists()) return refusal("There is nothing at " + rel(root))
@@ -286,33 +272,36 @@ class AgentTools(
             .getOrElse { return refusal("That is not a pattern: ${it.message}") }
         if (name == null && content == null) {
             val out = mutableListOf<String>()
-            walk(root, depth, out)
-            return success(if (out.isEmpty()) "${rel(root)} is empty" else out.joinToString("\n"))
+            walk(root, depth, out, deadline)
+            if (out.isEmpty()) return success("${rel(root)} is empty")
+            // **The "lines" here are paths.** A listing of four thousand names has to be narrowable
+            // once no cap of its own exists, and `from`/`to` is the same range every other command
+            // takes — the description says so, because a range over a path list whose unit a model
+            // has to guess is a trap.
+            val chosen = slice(out, args).getOrElse { return refusal(it.message ?: "that range cannot be used") }
+            if (chosen.isEmpty()) return success("nothing in that range: there are ${out.size} paths")
+            return success(chosen.joinToString("\n"))
         }
         // **A search, not a listing.** Once a pattern is given the answer is files, not folders:
         // a folder is in the result because something in it matched, and printing the folder adds
         // a line nobody asked about. What a person (and a model) wants is the path, and for a
         // content match, the line.
         val found = mutableListOf<String>()
-        search(root, depth, name, content, found)
+        search(root, depth, name, content, found, deadline)
         if (found.isEmpty()) return success("nothing matches in ${rel(root)}")
-        // **A search that stopped says so.** [search] stops at [MAX_MATCHES] rather than scanning a
-        // project to its end, so a full list is either complete or bounded — and a model told
-        // "here they are" about a bounded list will act as though it saw everything.
-        val note = if (found.size >= MAX_MATCHES) {
-            "\n(showing the first $MAX_MATCHES matches; narrow the pattern)"
-        } else {
-            ""
-        }
-        return success(found.joinToString("\n") + note)
+        // **No cap of its own.** The only limit a result has is the operator's, and a result past it
+        // is an error asking for a narrower pattern — not a list of the first N with a note, which a
+        // model reads as "here they all are".
+        val chosen = slice(found, args).getOrElse { return refusal(it.message ?: "that range cannot be used") }
+        if (chosen.isEmpty()) return success("nothing in that range: ${found.size} matches")
+        return success(chosen.joinToString("\n"))
     }
 
     /**
      * Files under [dir] that match [name] and [content], walking at most [left] levels.
      *
      * [content] is matched against the whole file and the result is the **matching lines**, so one
-     * search answers "where is this said" rather than "which file says it". A file too large to be
-     * worth reading is skipped and said so, rather than being read into memory on a phone.
+     * search answers "where is this said" rather than "which file says it".
      */
     private fun search(
         dir: File,
@@ -320,10 +309,12 @@ class AgentTools(
         name: Regex?,
         content: Regex?,
         out: MutableList<String>,
+        deadline: Deadline,
     ) {
         for (entry in ws.list(dir)) {
+            deadline.check("tree")
             if (entry.isFolder) {
-                if (left > 1) search(entry.file, left - 1, name, content, out)
+                if (left > 1) search(entry.file, left - 1, name, content, out, deadline)
                 continue
             }
             if (name != null && !name.containsMatchIn(entry.name)) continue
@@ -332,16 +323,11 @@ class AgentTools(
                 continue
             }
             if (ws.kindOf(entry.file) != EntryKind.TEXT) continue
-            if (entry.file.length() > MAX_SCAN) {
-                out.add("${rel(entry.file)} is too big to search")
-                continue
-            }
             val text = ws.read(entry.file)
             if (!content.containsMatchIn(text)) continue
             for ((index, line) in text.split("\n").withIndex()) {
                 if (!content.containsMatchIn(line)) continue
                 out.add("${rel(entry.file)}:${index + 1}: ${line.trim().take(200)}")
-                if (out.size >= MAX_MATCHES) return
             }
         }
     }
@@ -363,87 +349,194 @@ class AgentTools(
         }
     }
 
-    private fun walk(dir: File, left: Int, out: MutableList<String>) {
+    private fun walk(dir: File, left: Int, out: MutableList<String>, deadline: Deadline) {
         val entries = ws.list(dir)
         for (entry in entries) {
+            deadline.check("tree")
             out.add(rel(entry.file) + if (entry.isFolder) "/" else "")
-            if (entry.isFolder && left > 1) walk(entry.file, left - 1, out)
+            if (entry.isFolder && left > 1) walk(entry.file, left - 1, out, deadline)
         }
     }
 
-    private fun read(args: JSONObject): String {
+    private fun read(args: JSONObject, deadline: Deadline): String =
+        readInto(args, deadline).fold(
+            onSuccess = { success(it) },
+            onFailure = { refusal(it.message ?: "that file cannot be read") },
+        )
+
+    /**
+     * The text a `read` selects — **the body with no `0` or `1` on the front.**
+     *
+     * The prefix belongs to a result that enters the conversation, and one caller is not a result:
+     * `edit`'s `replace` may be a `read` call whose text goes straight into a file. That is also why
+     * nothing here is measured against the operator's limit — [read] puts its answer through
+     * [trim], and a replacement never does.
+     */
+    private fun readInto(args: JSONObject, deadline: Deadline): Result<String> {
         val file = resolve(args.optString("path"))
-            .getOrElse { return refusal(it.message ?: "that path cannot be read") }
+            .getOrElse { return Result.failure(IllegalArgumentException(it.message ?: "that path cannot be read")) }
         if (!file.exists()) {
             // **The one name an older instruction set still points at.** The record used to be two
             // files; this build folds the second into the first. An agent holding instructions from
             // before that (a prompt the person edited, so the app would not replace it) will ask for
             // `agent/context.log` — and "there is no file" would leave it guessing.
             if (file.name == AgentLog.CONTEXT) {
-                return refusal(
-                    "agent/${AgentLog.CONTEXT} was folded into agent/${AgentLog.SESSION}. " +
-                        "Read that; forget takes rows out of your context.",
+                return Result.failure(
+                    IllegalArgumentException(
+                        "agent/${AgentLog.CONTEXT} was folded into agent/${AgentLog.SESSION}. " +
+                            "Read that; forget takes rows out of your context.",
+                    ),
                 )
             }
-            return refusal("There is no file at ${rel(file)}")
+            return Result.failure(IllegalArgumentException("There is no file at ${rel(file)}"))
         }
-        if (file.isDirectory) return refusal("${rel(file)} is a folder; use tree")
+        if (file.isDirectory) {
+            return Result.failure(IllegalArgumentException("${rel(file)} is a folder; use tree"))
+        }
         if (ws.kindOf(file) != EntryKind.TEXT) {
-            return refusal("${rel(file)} is not a text file, so there is nothing to show you")
+            return Result.failure(
+                IllegalArgumentException("${rel(file)} is not a text file, so there is nothing to show you"),
+            )
         }
-        val text = ws.read(file)
-        // **The same grep as `tree`, on one file.** Line numbers, because the next thing the model
-        // does is edit what it found, and an edit needs a place; and no `from`/`lines` window on top
-        // of it, because two windows at once is a range that means two things.
-        val grep = pattern(args.optString("grep", ""))
-            .getOrElse { return refusal("That is not a pattern: ${it.message}") }
-        if (grep != null) {
-            val hits = text.split("\n").withIndex()
-                .filter { (_, line) -> grep.containsMatchIn(line) }
-                .take(MAX_MATCHES)
-            if (hits.isEmpty()) return success("nothing in ${rel(file)} matches that")
-            val body = hits.joinToString("\n") { (index, line) ->
-                "${index + 1}: ${line.trim().take(200)}"
-            }
-            val all = text.split("\n").count { grep.containsMatchIn(it) }
-            val note = if (all > hits.size) {
-                "\n(showing first ${hits.size} of $all matches; narrow the pattern)"
-            } else {
-                ""
-            }
-            return success(body + note)
-        }
-        val from = args.optInt("from", 1).coerceAtLeast(1)
-        val lines = text.split("\n")
-        val wanted = args.optInt("lines", 0)
-        val slice = if (wanted > 0) lines.drop(from - 1).take(wanted) else lines.drop(from - 1)
-        if (slice.isEmpty()) {
-            return success("nothing from line $from: the file has ${lines.size} lines")
-        }
-        val body = slice.joinToString("\n")
-        val note = if (from > 1 || slice.size < lines.size) {
-            "\n(showing lines $from to ${from + slice.size - 1} of ${lines.size})"
+        // **A version, when one is named.** `history` finds the id and `restore` puts it back; this
+        // is the step between them, and without it the middle of a version's life could only be
+        // guessed at by restoring it. The bytes come from the same function `restore` uses, so a
+        // revision is read exactly as it would be written back.
+        val revision = args.optString("revision").trim()
+        val text = if (revision.isEmpty()) {
+            readText(file, deadline)
         } else {
-            ""
+            val bytes = git.bytesAt(project, rel(file), revision)
+                ?: return Result.failure(
+                    IllegalArgumentException("There is no version $revision of ${rel(file)}"),
+                )
+            String(bytes, Charsets.UTF_8)
         }
-        return success(body + note)
+        val grep = pattern(args.optString("grep", ""))
+            .getOrElse { return Result.failure(IllegalArgumentException("That is not a pattern: ${it.message}")) }
+        val lines = text.split("\n")
+        val chosen = slice(lines, args)
+            .getOrElse { return Result.failure(IllegalArgumentException(it.message ?: "that range cannot be used")) }
+        val from = args.optInt("from", 1).coerceAtLeast(1)
+        if (chosen.isEmpty()) {
+            return Result.success("nothing from line $from: the file has ${lines.size} lines")
+        }
+        // **The same grep as `tree`, on one file, inside the range if there is one.** Each hit comes
+        // with its real line number, because the next thing the model does with a hit is change it
+        // and an edit needs a place — and the numbers are the file's, not the selection's, so a
+        // number read in one call means the same line in the next.
+        if (grep != null) {
+            val hits = chosen.withIndex().filter { (_, line) -> grep.containsMatchIn(line) }
+            if (hits.isEmpty()) {
+                return Result.success("nothing in ${rel(file)} matches that")
+            }
+            return Result.success(
+                hits.joinToString("\n") { (offset, line) ->
+                    "${from + offset}: ${line.trim().take(200)}"
+                },
+            )
+        }
+        return Result.success(chosen.joinToString("\n"))
     }
 
-    private fun edit(args: JSONObject): String {
+    /**
+     * The part of [lines] that the arguments select — `from` and `to`, both inclusive, 1-based.
+     *
+     * **One parser for `read`, `tree` and `history`,** so a range means the same thing in every
+     * command. `to` absent or zero is the end of the list. The answer is the selection, not a note
+     * about it: what is over the operator's limit is an error, and what is inside it is whole.
+     *
+     * A range that ends before it starts is a refusal — a model that wrote the two the wrong way
+     * round is asking a question nobody can answer, and an empty answer would look like an empty
+     * file. Everything else out of bounds is simply empty, which each caller words for itself.
+     */
+    private fun <T> slice(lines: List<T>, args: JSONObject): Result<List<T>> {
+        val from = args.optInt("from", 1).coerceAtLeast(1)
+        val to = args.optInt("to", 0)
+        if (to > 0 && to < from) {
+            return Result.failure(
+                IllegalArgumentException(
+                    "That range ends at line $to, before it starts at line $from. " +
+                        "`from` is the first line and `to` is the last.",
+                ),
+            )
+        }
+        val end = if (to <= 0) lines.size else to.coerceAtMost(lines.size)
+        if (from > end) return Result.success(emptyList())
+        return Result.success(lines.subList(from - 1, end))
+    }
+
+    private fun edit(args: JSONObject, deadline: Deadline): String {
         val file = resolve(args.optString("path"))
             .getOrElse { return refusal(it.message ?: "that path cannot be changed") }
         mayWrite(file)?.let { return refusal(it) }
         if (!file.isFile) return refusal("There is no file at ${rel(file)}")
-        val before = ws.read(file)
+        // **Exactly one way to say what changes.** Two selectors at once is two edits in one call,
+        // and a call that means two things is a call whose result the model cannot check. The
+        // refusal names all four shapes, because the model that sent two is guessing at the shape.
+        val hasText = args.has("text")
         val find = args.optString("find", "")
-        val text = if (find.isEmpty()) {
-            args.optString("text", "")
-        } else {
-            if (!before.contains(find)) return refusal("That text is not in ${rel(file)}")
-            if (!args.has("replace")) return refusal("Say what to put there")
-            before.replace(find, args.optString("replace"))
+        val hasFind = find.isNotEmpty()
+        val hasRange = args.has("from") || args.has("to")
+        val hasAt = args.has("at")
+        val given = listOf(hasText, hasFind, hasRange, hasAt).count { it }
+        if (given == 0) {
+            return refusal(
+                "Say what to change: `find` and `replace` for text, `from`/`to` for a block of " +
+                    "lines, `at` to insert a line, or `text` to write the whole file",
+            )
+        }
+        if (given > 1) {
+            return refusal(
+                "Give one of `text`, `find`, `from`/`to` or `at`, not two at once — " +
+                    "a call that means two edits cannot be checked",
+            )
+        }
+        val before = readText(file, deadline, "edit")
+        val lines = before.split("\n")
+        val text = when {
+            hasText -> args.optString("text")
+            hasFind -> {
+                if (!before.contains(find)) return refusal("That text is not in ${rel(file)}")
+                val put = replacementText(args, deadline).getOrElse { return refusal(it.message ?: "that replacement cannot be read") }
+                before.replace(find, put)
+            }
+            hasRange -> {
+                val from = args.optInt("from", 1).coerceAtLeast(1)
+                val asked = args.optInt("to", 0)
+                if (asked > 0 && asked < from) {
+                    return refusal(
+                        "That range ends at line $asked, before it starts at line $from. " +
+                            "`from` is the first line and `to` is the last.",
+                    )
+                }
+                val to = if (asked <= 0) lines.size else asked.coerceAtMost(lines.size)
+                if (from > to) {
+                    return refusal("There is no line $from: the file has ${lines.size} lines")
+                }
+                val put = replacementText(args, deadline).getOrElse { return refusal(it.message ?: "that replacement cannot be read") }
+                (lines.take(from - 1) + put.split("\n") + lines.drop(to)).joinToString("\n")
+            }
+            else -> {
+                // **`at` is a place between lines, which a range cannot say.** `from:11,to:10` would
+                // be an empty range that happens to mean "here", and a model that meant "here" would
+                // write that exactly once before it got it wrong. Zero prepends; the number of lines
+                // appends.
+                val at = args.optInt("at", -1)
+                if (at < 0 || at > lines.size) {
+                    return refusal(
+                        "`at` is the line to insert after, from 0 (the top) to ${lines.size} " +
+                            "(the end); $at is not one of them",
+                    )
+                }
+                val put = replacementText(args, deadline).getOrElse { return refusal(it.message ?: "that replacement cannot be read") }
+                (lines.take(at) + put.split("\n") + lines.drop(at)).joinToString("\n")
+            }
         }
         if (text == before) return success("${rel(file)} already said that, so nothing changed")
+        // **Asked before the one write, because the write is atomic.** A `write` either lands whole
+        // or not at all, so the question to ask is only whether there is still time to start it.
+        deadline.check("edit")
         // **Through the funnel.** A locked file, a hidden name, the record itself or a structural
         // folder is refused by `write`, and the refusal is the whole answer.
         //
@@ -453,6 +546,32 @@ class AgentTools(
         // to change it, so none of that has to be checked.
         if (!ws.write(file, text)) return refusal("${rel(file)} cannot be changed")
         return commit("Edited ${file.name}", "${rel(file)} changed")
+    }
+
+    /**
+     * What `replace` says: text, or the body of a `read` call.
+     *
+     * **Only `read` is allowed there.** A replacement that could name any tool would turn one call
+     * into a small program with an order nobody wrote down; `read` is the one tool whose whole job is
+     * to produce text, and it takes the same `from`/`to`/`grep` arguments it takes anywhere else —
+     * applied to the **source** file, which is the unambiguous direction.
+     *
+     * **The nested read is not measured against the result limit**, because its text goes into a
+     * file and never through the conversation. That is the whole point of the shape: a paste of two
+     * hundred kilobytes is exactly the case a tool must not refuse for being large.
+     */
+    private fun replacementText(args: JSONObject, deadline: Deadline): Result<String> {
+        val call = args.optJSONObject("replace") ?: return Result.success(args.optString("replace"))
+        val tool = call.optString("tool").trim()
+        if (tool != "read") {
+            return Result.failure(
+                IllegalArgumentException(
+                    "A replacement is text or a read call, and $tool is neither",
+                ),
+            )
+        }
+        val inner = call.optJSONObject("args") ?: JSONObject()
+        return readInto(inner, deadline)
     }
 
     /**
@@ -484,9 +603,10 @@ class AgentTools(
         return success("forgot ${gone} row${if (gone == 1) "" else "s"}.$left")
     }
 
-    private fun create(args: JSONObject): String {
+    private fun create(args: JSONObject, deadline: Deadline): String {
         val file = resolve(args.optString("path"))
             .getOrElse { return refusal(it.message ?: "that path cannot be made") }
+        deadline.check("create")
         if (file.exists()) return refusal("There is already something at ${rel(file)}")
         val parent = file.parentFile ?: return refusal("That path has no folder in it")
         mayWrite(file)?.let { return refusal(it) }
@@ -516,35 +636,48 @@ class AgentTools(
         return made.map { }
     }
 
-    private fun delete(args: JSONObject): String {
+    private fun delete(args: JSONObject, deadline: Deadline): String {
         val file = resolve(args.optString("path"))
             .getOrElse { return refusal(it.message ?: "that path cannot be deleted") }
         mayWrite(file)?.let { return refusal(it) }
         if (!file.exists()) return refusal("There is nothing at ${rel(file)}")
-        val wasFolder = file.isDirectory
-        val removed = ws.delete(file)
+        // **A folder is the one deletion that can stop half way.** Everything else removes one entry
+        // and is done; a tree removal walks, so the deadline is asked between entries, and the answer
+        // says what is still there rather than claiming nothing happened.
+        val removed = ws.delete(file, deadline)
         return removed.fold(
-            onSuccess = {
-                commit(
-                    if (wasFolder) "Deleted ${file.name}" else "Deleted ${file.name}",
-                    "deleted ${rel(file)}",
-                )
-            },
+            onSuccess = { commit("Deleted ${file.name}", "deleted ${rel(file)}") },
             onFailure = { refusal(it.message ?: "it could not be deleted") },
         )
     }
 
-    private fun move(args: JSONObject): String {
+    private fun move(args: JSONObject, deadline: Deadline): String {
         val file = resolve(args.optString("path"))
             .getOrElse { return refusal(it.message ?: "that path cannot be moved") }
         mayWrite(file)?.let { return refusal(it) }
         if (!file.exists()) return refusal("There is nothing at ${rel(file)}")
+        deadline.check("move")
         val into = resolve(args.optString("into", file.parentFile?.let { rel(it) } ?: ""))
             .getOrElse { return refusal(it.message ?: "that folder cannot be used") }
         if (!into.isDirectory) return refusal("${rel(into)} is not a folder")
         mayWrite(File(into, file.name))?.let { return refusal(it) }
         val name = args.optString("name", "").trim()
-        val moved = if (name.isEmpty()) {
+        // **`copy` is the one difference between the two acts.** Everything else — the destination
+        // checks, the refusal of a taken name, a folder into itself — is the same question, and it
+        // is asked in one place per act rather than in a second tool that would drift from this one.
+        // A copy may read a locked source, because it does not touch it.
+        val copy = args.optBoolean("copy", false)
+        if (copy && name.isNotEmpty()) {
+            // **Two calls, not one with two meanings.** Copying and renaming in one act can fail
+            // after the copy exists, and then the answer has to describe half of each. The model
+            // can copy, then move the copy — and each answer it gets is about one thing.
+            return refusal(
+                "A copy keeps its name. Copy it, then move the copy to the name you want",
+            )
+        }
+        val done = if (copy) {
+            ws.copy(file, into, deadline)
+        } else if (name.isEmpty()) {
             ws.move(file, into)
         } else {
             // Renaming into a different folder is two steps, in the order that cannot lose
@@ -556,40 +689,71 @@ class AgentTools(
                 ws.rename(file, name).mapCatching { renamed -> ws.move(renamed, into).getOrThrow() }
             }
         }
-        return moved.fold(
-            onSuccess = { commit("Moved ${file.name}", "moved ${rel(file)}") },
+        return done.fold(
+            onSuccess = { made ->
+                if (copy) {
+                    commit("Copied ${made.name}", "copied ${rel(file)} into ${rel(into)}/")
+                } else {
+                    commit("Moved ${file.name}", "moved ${rel(file)}")
+                }
+            },
             onFailure = { refusal(it.message ?: "it could not be moved") },
         )
     }
 
-    private fun clone(args: JSONObject, deadline: Deadline? = null): String {
-        val url = args.optString("url").trim()
-        if (url.isEmpty()) return refusal("Say which repository to clone")
-        val changes = git.changes(project)
-        if (!changes.isClean) {
-            return refusal(
-                "This project has ${changes.total} changes of its own. Cloning over them " +
-                    "would lose that work, so nothing happened."
-            )
-        }
-        val result = git.cloneInto(project, url, deadline)
-        return if (result.success) success("cloned into this project's folder") else refusal(result.message)
-    }
-
-    private fun history(args: JSONObject): String {
+    private fun history(args: JSONObject, deadline: Deadline): String {
         val file = resolve(args.optString("path"))
             .getOrElse { return refusal(it.message ?: "that path cannot be read") }
+        deadline.check("history")
         val path = rel(file)
-        val versions = git.versions(project, path)
+        val grep = pattern(args.optString("grep", ""))
+            .getOrElse { return refusal("That is not a pattern: ${it.message}") }
+        val versions = git.versions(project, path, deadline)
         if (versions.isEmpty()) return success("$path has no versions yet")
-        return success(
-            versions.take(20).joinToString("\n") { (commit, _) ->
-                "${commit.shortId}  ${commit.message}  ${stamp(commit.timestamp)}"
-            }
-        )
+        // **The range picks versions, then the pattern picks among those.** The same order as
+        // everywhere else, and it has to be this way round: a version is one line of this result, so
+        // a range over this result is a range over versions — never over the file's own lines.
+        val chosen = slice(versions, args).getOrElse { return refusal(it.message ?: "that range cannot be used") }
+        if (chosen.isEmpty()) return success("nothing in that range: ${versions.size} versions")
+        // **A version is shown when its own text matches.** [versionsOf] loads every version's bytes
+        // anyway, so asking is free — and it is the question a model actually has ("when did it say
+        // this?"), which a commit message cannot answer.
+        val matching = if (grep == null) {
+            chosen
+        } else {
+            chosen.filter { (_, text) -> text != null && grep.containsMatchIn(text) }
+        }
+        if (matching.isEmpty()) return success("no version of $path matches that")
+        return success(matching.joinToString("\n") { (commit, text) -> versionRow(commit, text) })
     }
 
-    private fun restore(args: JSONObject, deadline: Deadline? = null): String {
+    /**
+     * One version as a line: its id, its message, when it was made, and what the file said.
+     *
+     * **The excerpt is what makes a list of saves readable.** A commit message describes the change,
+     * and Save's is one word, so twenty versions of one file read as twenty identical rows. The
+     * file's own first non-blank line is the only thing that tells them apart, and it is already in
+     * hand. An empty version says so, and so does one that is not text — a picture's first line is
+     * not a sentence.
+     */
+    private fun versionRow(commit: GitService.CommitInfo, text: String?): String {
+        val line = text
+            ?.lineSequence()
+            ?.firstOrNull { it.isNotBlank() }
+            ?.filterNot { it < ' ' && it != '\t' }
+            ?.trim()
+        val said = if (line == null || line.isEmpty()) {
+            "empty"
+        } else if (line.length > EXCERPT) {
+            line.take(EXCERPT) + "\u2026"
+        } else {
+            line
+        }
+        return "${commit.shortId}  ${commit.message}  ${stamp(commit.timestamp)}  " +
+            (if (text == null) "not a text file" else said)
+    }
+
+    private fun restore(args: JSONObject, deadline: Deadline): String {
         val file = resolve(args.optString("path"))
             .getOrElse { return refusal(it.message ?: "that path cannot be restored") }
         val revision = args.optString("revision").trim()
@@ -632,13 +796,56 @@ class AgentTools(
     private fun refusal(said: String): String = trim("1\n$said")
 
     /**
-     * Never silently shortens. A model told "here is the file" and handed half of it will
-     * confidently edit the wrong half.
+     * A file's whole text, in chunks, so that the deadline can be asked part of the way through.
+     *
+     * `File.readText()` is one call nobody can interrupt: a phone reading a log of a hundred
+     * megabytes inside it would hold the turn for as long as the disk took, which is exactly what
+     * every foreground command is now forbidden to do. An [InputStreamReader] over a char buffer is
+     * the only shape that decodes multi-byte characters correctly across a chunk boundary.
+     *
+     * [tool] is the name the stopped sentence carries, because the caller is not always `read`.
+     *
+     * A file that cannot be read is the empty string, which is what `Workspace.read` has always
+     * answered — the checks above have already refused the cases that deserve a sentence.
+     */
+    private fun readText(file: File, deadline: Deadline, tool: String = "read"): String {
+        val out = StringBuilder()
+        try {
+            InputStreamReader(file.inputStream(), Charsets.UTF_8).use { reader ->
+                val buffer = CharArray(64 * 1024)
+                while (true) {
+                    deadline.check(tool)
+                    val got = reader.read(buffer)
+                    if (got < 0) break
+                    out.append(buffer, 0, got)
+                }
+            }
+        } catch (e: StoppedException) {
+            throw e
+        } catch (e: Throwable) {
+            return ""
+        }
+        return out.toString()
+    }
+
+    /**
+     * The one limit, and it is an error rather than a fragment.
+     *
+     * **A result is either whole or it is a refusal.** Handing a model the first 20,000 characters
+     * of a file with a note is how it confidently edits the wrong half; and a note at the bottom of
+     * a truncated body is the part it is least likely to read. An error is the one shape that says
+     * "you have not seen this" in a way that cannot be skimmed past, and it carries the numbers and
+     * the two ways to narrow, because "too big" alone leaves a model guessing by how much.
+     *
+     * The limit belongs to the operator (`result length`), and it is about **what enters the
+     * conversation**. Two results are deliberately not measured: one going to a file (`background`),
+     * and one going into another file (`edit`'s replacement).
      */
     private fun trim(body: String): String {
         if (body.length <= maxChars) return body
-        return "1\n" + body.take(maxChars) +
-            "\n\n(showing first $maxChars of ${body.length} characters; ask again with a range)"
+        return "1\nThat result was ${body.length} characters and the limit is $maxChars. " +
+            "Narrow it: give {\"from\":1,\"to\":200} for a line range, or {\"grep\":\"pattern\"} " +
+            "for the lines that match."
     }
 
     // ---- where the agent may stand ------------------------------------------

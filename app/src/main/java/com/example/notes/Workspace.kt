@@ -475,17 +475,19 @@ class Workspace(val accountDir: File) {
     /**
      * Copies [file] into the folder [into], leaving the original where it is.
      *
-     * **A copy is a new thing, so it takes a new name when the old one is taken.** A
-     * move into an occupied name is refused (above), because a move that silently
-     * renamed would mean the file a person asked for is somewhere they did not ask for.
-     * A copy has no such promise to keep: the source is untouched either way, and
-     * `milk.txt` becoming `milk 2.txt` is what a person does by hand. [freeName] is the
-     * same one the import uses, so the app has one idea of a free name rather than two.
+     * **A name that is taken is refused, in a copy as much as in a move.** `milk.txt` becoming
+     * `milk 2.txt` sounds helpful and is the opposite: the person asked for `milk.txt`, the answer
+     * said "copied", and the file is somewhere they did not ask for with a name they will not
+     * recognise in a list. The refusal is one sentence they can act on, and it is the same sentence
+     * a move gives, so the app has one answer to one question.
+     *
+     * An **import** is different and keeps [freeName]: there the person never chose the name, so
+     * there is nothing they asked for that a number could contradict.
      *
      * A folder cannot be copied into itself: the copy would contain the folder it was
      * made from, forever.
      */
-    fun copy(file: File, into: File): Result<File> {
+    fun copy(file: File, into: File, deadline: Deadline = Deadline.none()): Result<File> {
         // **A copy is a read of the source, so a lock does not stop it.** That is the whole
         // distinguishing line between a lock and a permission: copying a locked file is
         // how a person works on a draft of something they froze, and the original is
@@ -509,14 +511,25 @@ class Workspace(val accountDir: File) {
                 IllegalArgumentException("A folder cannot be copied inside itself")
             )
         }
-        val target = File(into, freeName(into, file.name))
+        val target = File(into, file.name)
+        if (target.exists()) {
+            return Result.failure(
+                IllegalArgumentException("There is already a \"${file.name}\" there"),
+            )
+        }
         return try {
             if (file.isDirectory) {
-                copyTree(file, target)
+                copyTree(file, target, deadline)
             } else {
                 file.copyTo(target, overwrite = false)
             }
             Result.success(target)
+        } catch (e: StoppedException) {
+            // **Half a folder is worse than none, and a stop must not leave one.** The copy is
+            // removed before the stop is passed on, which is what lets its sentence say that
+            // nothing was kept and be telling the truth.
+            target.deleteRecursively()
+            throw e
         } catch (e: Exception) {
             // Half a folder is worse than none: a tree copy that failed leaves the
             // destination looking complete from the outside.
@@ -526,10 +539,13 @@ class Workspace(val accountDir: File) {
     }
 
     /** Every file and folder under [from], into [to], keeping the shape. */
-    private fun copyTree(from: File, to: File) {
+    private fun copyTree(from: File, to: File, deadline: Deadline) {
         if (from.isDirectory) {
             to.mkdirs()
-            from.listFiles()?.forEach { child -> copyTree(child, File(to, child.name)) }
+            from.listFiles()?.forEach { child ->
+                if (deadline.expired) throw StoppedException(Stopped.body("copy", deadline))
+                copyTree(child, File(to, child.name), deadline)
+            }
         } else {
             to.parentFile?.mkdirs()
             from.copyTo(to, overwrite = false)
@@ -537,10 +553,28 @@ class Workspace(val accountDir: File) {
     }
 
     /** Deletes a file, or a folder and everything inside it. */
-    fun delete(file: File): Result<Unit> {
+    fun delete(file: File, deadline: Deadline = Deadline.none()): Result<Unit> {
         touchedProblem(file)?.let { return Result.failure(IllegalArgumentException(it)) }
-        return if (file.deleteRecursively()) Result.success(Unit)
+        return if (removeTree(file, deadline)) Result.success(Unit)
         else Result.failure(IllegalStateException("Could not delete \"${file.name}\""))
+    }
+
+    /**
+     * Deletes [file] and everything under it, asking the deadline between entries.
+     *
+     * **The one removal that can stop half way.** A single file is one call and is either gone or
+     * still there; a folder is a walk, and a walk interrupted leaves a folder that is neither. The
+     * question is asked per entry so the answer stays current, and the exception it throws says
+     * exactly that — [Stopped.partway], not "nothing was kept".
+     */
+    private fun removeTree(file: File, deadline: Deadline): Boolean {
+        if (deadline.expired) throw StoppedException(Stopped.partway("delete", deadline))
+        if (file.isDirectory) {
+            file.listFiles()?.forEach { child ->
+                if (!removeTree(child, deadline)) return false
+            }
+        }
+        return file.delete()
     }
 
     /** Why [name] cannot be used, or null when it can. */
@@ -804,8 +838,13 @@ class Workspace(val accountDir: File) {
          * expect it: `milk.txt` becomes `milk 2.txt`, never `milk.txt 2`.
          *
          * It is here, beside [cleanName], because it is a **naming rule** rather than
-         * something a particular account does — and because a copy and an import asking
-         * the same question have to get the same answer.
+         * something a particular account does.
+         *
+         * **An import is its only caller, and that is the point.** A copy or a move refuses an
+         * occupied name, because the person named the thing and a number on the end would put it
+         * somewhere they did not ask for. An import never had a name to contradict: the file
+         * arrived from outside and the app has to put it somewhere, so a free name is a service
+         * rather than a surprise.
          */
         fun freeName(dir: File, name: String): String {
             if (!File(dir, name).exists()) return name

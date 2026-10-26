@@ -7,13 +7,16 @@ import java.util.concurrent.atomic.AtomicBoolean
  * How long a command may run, and whether it must stop.
  *
  * **A deadline is a question the work asks, not a timer that kills it.** Nothing in this app is a
- * subprocess: `clone` is JGit reading sockets in this process, `restore` is a loop writing files. So
- * the only way to stop one honestly is for it to look at [expired] and stop itself — a timer that
- * merely stopped *waiting* would tell the agent a command had failed while the command carried on
- * writing into the project underneath the next request.
+ * subprocess: a clone is JGit reading sockets in this process, a restore is a loop writing files, a
+ * read is a stream of characters. So the only way to stop one honestly is for it to look at [expired]
+ * and stop itself — a timer that merely stopped *waiting* would tell the agent a command had failed
+ * while the command carried on writing into the project underneath the next request.
  *
- * Two commands can outlast a turn and only two: [AgentTools.LONG]. Everything else finishes or
- * throws in microseconds, which is why a deadline is never attached to them.
+ * **Every command gets one**, because any command can be slow on a phone: a `read` of a huge log, a
+ * `tree` of a huge project, a `history` of a file saved a thousand times. [Deadline.check] is what
+ * each of them calls inside its own loop. The commands that write once — `create`, `edit`, `move` —
+ * have either finished or not started when the time passes, so "nothing was kept" is true for them
+ * without their asking anything.
  */
 class Deadline(private val ms: Long) {
 
@@ -24,6 +27,18 @@ class Deadline(private val ms: Long) {
 
     /** How long it has been, for a sentence about it. */
     val elapsedMs: Long get() = System.currentTimeMillis() - started
+
+    /**
+     * Throws [StoppedException] when the time is up. **The one place a command asks.**
+     *
+     * A deadline of zero or less never throws, because [expired] is false for it — so "no limit"
+     * is [none] and not a null to be checked at every call site. Everything that can take time
+     * asks this inside its own loop: a timer over work that never looks at it would stop the
+     * *waiting* and leave the work running under the next request.
+     */
+    fun check(tool: String) {
+        if (expired) throw StoppedException(Stopped.body(tool, this))
+    }
 
     /**
      * The sentence a result carries when a command stopped because the time ran out.
@@ -96,4 +111,16 @@ object Stopped {
      */
     fun body(tool: String, deadline: Deadline): String =
         "${AgentLog.FAILURE} $tool stopped ${deadline.expiredIn()}; nothing was kept"
+
+    /**
+     * What a stopped command says when it had **already changed something**.
+     *
+     * Only a recursive delete can honestly say this. Every other command that can be stopped either
+     * writes nothing or writes all at once — a copy that stopped deletes the half it made before
+     * rethrowing — so "nothing was kept" is true for them. A folder removal stopped part of the way
+     * has removed part of the folder, and a sentence claiming otherwise is the one lie this app
+     * cannot afford to tell.
+     */
+    fun partway(tool: String, deadline: Deadline): String =
+        "${AgentLog.FAILURE} $tool stopped ${deadline.expiredIn()}; part of it is already gone"
 }
