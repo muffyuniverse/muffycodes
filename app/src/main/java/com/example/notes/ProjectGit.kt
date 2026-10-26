@@ -67,22 +67,26 @@ class ProjectGit(
         private set
 
     /**
-     * What the project has that GitHub does not: changes not yet committed, and commits
-     * not yet pushed.
+     * What the project has that GitHub does not: files not yet committed, and **files** not yet
+     * pushed.
      *
-     * **Both, because both are "not sent".** Committing happens by itself, so a project
-     * that has been edited and saved is clean in git's sense and stale in every sense a
-     * person cares about. The row's number and the Sync button are about the second.
+     * **Both, because both are "not sent".** Committing happens by itself, so a project that has
+     * been edited and saved is clean in git's sense and stale in every sense a person cares about.
+     *
+     * [GitService.Changes.ahead] is a count of **paths**, not of commits. A commit count said "1 to
+     * send" for a batch that moved ten files, and it had to be kept in a file of its own because the
+     * history prune renames every commit — a diff between two trees asks about content instead, so
+     * neither problem exists.
      */
     fun changes(project: String): GitService.Changes {
         val repo = open(project) ?: return GitService.Changes(0, 0, 0)
-        val unsent = workspace.unsentCount(project)
         return repo.use {
             try {
-                GitService.status(it).let { it.copy(ahead = unsent) }
+                val unsent = GitService.unsentPaths(it).size
+                GitService.status(it).copy(ahead = unsent)
             } catch (e: Throwable) {
                 lastError = Secrets.describe(e)
-                GitService.Changes(0, 0, 0, ahead = unsent)
+                GitService.Changes(0, 0, 0)
             }
         }
     }
@@ -125,14 +129,6 @@ class ProjectGit(
             val outcome = GitService.commitEverything(it, what, authorProvider())
             if (outcome.written) {
                 prune(it)
-                // **A committed change is still unsent.** Every change is committed as it
-                // happens and Sync is then only the push, so a version in this phone's
-                // history is work GitHub has never seen. Nothing recorded that, and the row
-                // counted only uncommitted files — so saving a file left the project
-                // reading `changed 0`, with Sync greyed out and the work going nowhere.
-                // Reported from the live log: "changed a file, saved but sync is still grey
-                // and inactive and new change isnt reported".
-                workspace.markUnsent(project)
             }
             outcome
         }
@@ -188,12 +184,11 @@ class ProjectGit(
                 // this phone's copy and leave the repository as long as it was —
                 // the length would only appear to take effect on the next sync.
                 prune(it)
-                val pushed = GitService.pushForce(it, tokenProvider())
-                // Only a push that landed clears the flag. A failed push leaves the row
-                // saying there is work to send, which is the truth, and is what makes the
-                // button something a person can press again.
-                if (pushed.success) workspace.markSent(project)
-                pushed
+                // A push that fails leaves the row saying there is work to send, which is the
+                // truth, and is what makes the button something a person can press again — nothing
+                // has to be recorded either way, because the count is asked of the repository
+                // (see [changes]).
+                GitService.pushForce(it, tokenProvider())
             } catch (e: Throwable) {
                 GitService.RemoteResult(Secrets.describe(e), false)
             }
@@ -216,10 +211,9 @@ class ProjectGit(
         val repo = open(project) ?: return GitService.RemoteResult(
             "This project has no repository yet", false
         )
-        val result = repo.use { GitService.resetToRemote(it, tokenProvider()) }
-        // The files are now GitHub's, so nothing of this phone's is waiting to go there.
-        if (result.success) workspace.markSent(project)
-        return result
+        // The files are now GitHub's, and nothing has to be noted down: the row's count is a diff
+        // against that same remote-tracking ref.
+        return repo.use { GitService.resetToRemote(it, tokenProvider()) }
     }
 
     /**
@@ -342,11 +336,8 @@ class ProjectGit(
         return repo.use {
             try {
                 GitService.restore(it, path, revisionId, deadline)
-                // **A version put back is work GitHub has not seen**, exactly like a save. The
-                // commit itself is made by the caller; what has to happen here is the count, or
-                // the restore leaves a project reading `changed 0` with Sync greyed out while
-                // the file on disk is different from the one on GitHub.
-                workspace.markUnsent(project)
+                // The commit is made by the caller, and the row's count comes from the repository
+                // itself ([changes]), so a version put back needs nothing recorded here.
                 Result.success(Unit)
             } catch (e: StoppedException) {
                 // **The operator's time ran out, which is not a fault.** Kept apart from the catch

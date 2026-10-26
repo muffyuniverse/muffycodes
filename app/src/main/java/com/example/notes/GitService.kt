@@ -4,8 +4,11 @@ import org.eclipse.jgit.api.Git
 import org.eclipse.jgit.api.ListBranchCommand
 import org.eclipse.jgit.api.ResetCommand
 import org.eclipse.jgit.api.Status
+import org.eclipse.jgit.diff.DiffEntry
+import org.eclipse.jgit.diff.DiffFormatter
 import org.eclipse.jgit.lib.AnyObjectId
 import org.eclipse.jgit.lib.FileMode
+import org.eclipse.jgit.lib.ObjectId
 import org.eclipse.jgit.lib.PersonIdent
 import org.eclipse.jgit.lib.Ref
 import org.eclipse.jgit.lib.Repository
@@ -17,6 +20,9 @@ import org.eclipse.jgit.transport.CredentialsProvider
 import org.eclipse.jgit.transport.RefSpec
 import org.eclipse.jgit.transport.RemoteRefUpdate
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider
+import org.eclipse.jgit.treewalk.AbstractTreeIterator
+import org.eclipse.jgit.treewalk.CanonicalTreeParser
+import org.eclipse.jgit.treewalk.EmptyTreeIterator
 import org.eclipse.jgit.treewalk.TreeWalk
 import org.eclipse.jgit.treewalk.filter.PathFilterGroup
 import java.io.File
@@ -71,10 +77,11 @@ object GitService {
      * first three alone read `changed 0` with the work unsent, so Sync stayed grey and
      * the file went nowhere.
      *
-     * [ahead] is a count, and it is kept as one rather than worked out from a commit id:
-     * the history is *rebuilt* when it is shortened, so every id changes and anything that
-     * remembered one would read the whole history as unsent after the next sync. A number
-     * that names nothing survives the rewrite.
+     * **[ahead] counts paths, not commits.** A commit count said "1 to send" for a batch that moved
+     * ten files. It was kept in a file of its own because the history is *rebuilt* when it is
+     * shortened — every id changes, so anything that remembered a commit was stale after the next
+     * sync — and a diff between two trees is the answer to that: commits are renamed by a rewrite,
+     * their contents are not (see [unsentPaths]).
      */
     data class Changes(
         val staged: Int,
@@ -390,6 +397,63 @@ object GitService {
      * The paths that changed in the working tree, as the repository names them.
      * This is what a commit message is written from: the names, not a count.
      */
+    /**
+     * The paths that differ between the last push and now — **files, not commits.**
+     *
+     * **Why a tree diff and not a commit walk.** The history is shortened by rebuilding it, so every
+     * kept commit gets a new id and a remembered commit is stale afterwards — that is why the app
+     * counted commits in a file for so long, and a count of commits says "1" for a batch that moved
+     * ten files. A diff between two trees asks about *content*, which a rewrite does not change: the
+     * commits are new, the files in them are the same.
+     *
+     * The other side of the comparison is `refs/remotes/origin/<branch>`, which git itself updates
+     * on a push. When it is missing — a project that has never been pushed — the comparison is
+     * against the empty tree, which is the truth: GitHub has none of these files yet.
+     *
+     * Only tracked paths appear (an excluded `agent/` never does), so nothing is filtered here.
+     */
+    fun unsentPaths(repo: Repository): List<String> {
+        val branch = repo.branch ?: return emptyList()
+        val head = repo.resolve("HEAD") ?: return emptyList()
+        // **No remote, nothing to send.** A project that stays on this phone has no GitHub to be up
+        // to date with, and comparing its history with the empty tree would make every file it holds
+        // read as unsent for ever.
+        val remote = repo.config.getString("remote", "origin", "url")
+        if (remote.isNullOrBlank()) return emptyList()
+        val pushed = repo.resolve("refs/remotes/origin/$branch")
+        return try {
+            val newer = treeOf(repo, head) ?: return emptyList()
+            val older: AbstractTreeIterator = pushed?.let { treeOf(repo, it) } ?: EmptyTreeIterator()
+            val out = sortedSetOf<String>()
+            DiffFormatter(java.io.OutputStream.nullOutputStream()).use { diff ->
+                diff.setRepository(repo)
+                for (entry in diff.scan(older, newer)) {
+                    val path = if (entry.changeType == DiffEntry.ChangeType.DELETE) {
+                        entry.oldPath
+                    } else {
+                        entry.newPath
+                    }
+                    if (path.isNotEmpty()) out += path
+                }
+            }
+            out.toList()
+        } catch (e: Throwable) {
+            // A repository mid-write is a repository that will answer next time; a row that reads
+            // "up to date" for one refresh is better than a screen that throws.
+            emptyList()
+        }
+    }
+
+    /** The tree of [id], as the parser a diff needs. Null when the object is gone. */
+    private fun treeOf(repo: Repository, id: ObjectId): CanonicalTreeParser? = try {
+        val commit = RevWalk(repo).use { it.parseCommit(id) }
+        val parser = CanonicalTreeParser()
+        repo.newObjectReader().use { reader -> parser.reset(reader, commit.tree.id) }
+        parser
+    } catch (e: Throwable) {
+        null
+    }
+
     fun changedPaths(repo: Repository): List<String> {
         val status: Status = Git(repo).use { it.status().call() }
         return (status.added + status.changed + status.modified +

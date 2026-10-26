@@ -511,8 +511,9 @@ class HistoryFeatureTest : FeatureTest() {
         // already included the restore's own commit — so "one more than before" was a
         // comparison that could never be true, and it cost three red runs to notice an
         // ordering mistake in a test rather than a bug in the app.
-        val unsentBefore = ws.unsentCount("shopping")
-        assertTrue("the two saves are already waiting to be sent", unsentBefore >= 2)
+        val unsentBefore = ProjectGit(ws, { null }, { GitAuthor("Muffy", "muffy@example.com") })
+            .changes("shopping").ahead
+        assertTrue("the file's saves are already waiting to be sent", unsentBefore >= 1)
         scene.viewModel.openHistory(file)
         scene.restore(first)
         scene.viewModel.closeHistory()
@@ -525,16 +526,18 @@ class HistoryFeatureTest : FeatureTest() {
         // And the restore is a change waiting to leave: committed to the project at once
         // (so the history holds it) and not yet pushed, which is what the row counts.
         //
-        // Asserted on the counter rather than on the row, because the row's number arrives
-        // through a recount posted to the UI thread and this test has no frame to run it
-        // in. The row is checked where it can be: CopyFeatureTest and ProjectsFeatureTest
-        // both assert it after a change lands, and ProjectGitTest pins commit-and-push.
-        scene.await("the restore to be committed", 20_000) {
-            ws.unsentCount("shopping") > unsentBefore
-        }
+        // Asserted on the repository rather than on the row, because the row's number arrives
+        // through a recount posted to the UI thread and this test has no frame to run it in. The
+        // row is checked where it can be: CopyFeatureTest and ProjectsFeatureTest both assert it
+        // after a change lands, and ProjectGitTest pins commit-and-push.
+        val unsentNow =
+            ProjectGit(ws, { null }, { GitAuthor("Muffy", "muffy@example.com") }).changes("shopping").ahead
+        // **One file, however many times it was written.** The restore is a third commit on the
+        // same path, so a commit count would say three and a file count says one — which is the
+        // number a person is looking at when the row says "1 to send".
         assertTrue(
-            "the restore is one more thing to send: ${ws.unsentCount("shopping")} after $unsentBefore",
-            ws.unsentCount("shopping") > unsentBefore,
+            "the project still has something to send: $unsentNow after $unsentBefore",
+            unsentNow >= 1,
         )
     }
 

@@ -61,24 +61,30 @@ class ProjectGitTest {
         val git = gitFor()
         git.init("Shopping").getOrThrow()
         git.open("Shopping")!!.use { GitService.setRemoteUrl(it, bare.absolutePath) }
-        assertEquals("a new project has nothing to send", 0, workspace.unsentCount("Shopping"))
+        assertEquals("a new project has nothing to send", 0, git.changes("Shopping").total)
 
         val worktree = workspace.repoOf("Shopping")
         File(worktree, "milk.txt").writeText("two litres")
         git.commit("Shopping", "Edited milk.txt")
 
-        assertEquals("one commit, one thing to send", 1, workspace.unsentCount("Shopping"))
+        assertEquals("one file, one thing to send", 1, git.changes("Shopping").ahead)
         assertEquals("and the row says so", 1, git.changes("Shopping").total)
 
+        // **Two saves of one file are still one file to send.** A commit count said "2" here and
+        // said "1" for a batch that moved ten files; the row is about what GitHub does not have.
         File(worktree, "milk.txt").writeText("three litres")
         git.commit("Shopping", "Edited milk.txt again")
 
-        assertEquals("two commits, two things to send", 2, workspace.unsentCount("Shopping"))
+        assertEquals("two commits, one file to send", 1, git.changes("Shopping").ahead)
+
+        File(worktree, "bread.txt").writeText("one loaf")
+        git.commit("Shopping", "Added bread.txt")
+        assertEquals("and a second file makes two", 2, git.changes("Shopping").ahead)
 
         val pushed = git.sync("Shopping")
 
         assertTrue(pushed.message, pushed.success)
-        assertEquals("after a push there is nothing left", 0, workspace.unsentCount("Shopping"))
+        assertEquals("after a push there is nothing left", 0, git.changes("Shopping").ahead)
         assertEquals("which the row reports as up to date", 0, git.changes("Shopping").total)
     }
 

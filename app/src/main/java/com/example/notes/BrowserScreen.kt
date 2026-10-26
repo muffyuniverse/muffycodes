@@ -435,21 +435,22 @@ private fun ProjectList(
                             .combinedClickable(onClick = { viewModel.open(listOf(name)) }),
                     ) {
                         Text(name, style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            // The same words as the row inside the project: what GitHub does not
-                            // have yet, which is the only reason a person opens this screen. A
-                            // local project has no GitHub to be up to date *with*, so it says the
-                            // fact rather than a number that would be a lie.
-                            text = if (viewModel.isLocalProject(name)) {
-                                "local · this phone only"
-                            } else {
-                                viewModel.changesOf(name).let {
+                        // **A local project has no second line.** The row exists to answer "how
+                        // much is unsent", and a project with no remote has no answer to give —
+                        // "local · this phone only" said the absence twice and made the row look
+                        // broken beside its neighbours. Reported from the live log: "still have
+                        // "local" word under filenames, should we really keep it?" — no.
+                        if (!viewModel.isLocalProject(name)) {
+                            Text(
+                                // The same words as the row inside the project: what GitHub does
+                                // not have yet, which is the only reason a person opens this screen.
+                                text = viewModel.changesOf(name).let {
                                     if (it > 0) "$it to send" else "up to date"
-                                }
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                     Box {
                         IconButton(onClick = { menu = true }) {

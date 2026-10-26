@@ -207,8 +207,12 @@ class BrowserChromeTest {
             ws.write(file, "first")
             scene.viewModel.openEditor(file)
             scene.viewModel.saveEditor("second")
+            // **One more file, one more to send.** Counted from the repository rather than from a
+            // number the app keeps: a diff against the last push, so a batch that moved ten files
+            // reads "10" and two saves of one file read "1".
             scene.await("save ${i + 1} to be recorded", 20_000) {
-                ws.unsentCount("groceries") == i + 1
+                ProjectGit(ws, { null }, { GitAuthor("Muffy", "muffy@example.com") })
+                    .changes("groceries").ahead == i + 1
             }
         }
         scene.viewModel.closeEditor()

@@ -203,94 +203,6 @@ fun SettingsScreen(
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
-            // ---- what the app did ----
-            //
-            // Here rather than behind a long press, because the moment a person wants
-            // it is the moment something did not work, and hunting for the screen that
-            // explains it is the last thing they should have to do.
-            TextButton(onClick = onOpenTrace) { Text("What the app did") }
-            Text(
-                "Every tap, what answered it, and anything that never got an answer.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            // **Only a debug build shows this at all.** A release build has no business
-            // writing a running log of a person's tapping into a folder other apps can
-            // read, so the switch does not exist there — not disabled, absent.
-            if (viewModel.settings.liveTraceAvailable) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Write the log to Downloads", style = MaterialTheme.typography.bodyMedium)
-                        // **The path is reported, not promised.** This used to read "at
-                        // Download/MuffyCodes log/trace.log" — a sentence true of the
-                        // intention and false of the phone, because a write can fall back
-                        // to the app's own folder. A line naming where the file really is
-                        // turns "I cannot find the log" into a path.
-                        Text(
-                            traceWhere(),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Switch(
-                        checked = viewModel.settings.liveTrace,
-                        onCheckedChange = { viewModel.keepLog(it) },
-                    )
-                }
-            }
-
-            // ---- the appearance (§10) ----
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Theme", style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f))
-                Text("Light", style = MaterialTheme.typography.labelSmall)
-                Spacer(Modifier.width(6.dp))
-                Switch(
-                    checked = settings.useDark,
-                    onCheckedChange = { settings.selectDarkVariant(it) },
-                )
-                Spacer(Modifier.width(6.dp))
-                Text("Dark", style = MaterialTheme.typography.labelSmall)
-            }
-            LazyRow(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                items(AppTheme.entries) { theme ->
-                    Swatch(
-                        theme = theme,
-                        selected = theme == settings.theme,
-                        onClick = { settings.selectTheme(theme) },
-                    )
-                }
-            }
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-
-            // ---- how much change history is kept ----
-            //
-            // **One sentence, and it is now true.** The old one described a local history "that
-            // holds everything outside one", and that repository is gone: every file on this phone
-            // is inside a project, and every project has its own history. Keeping the sentence
-            // would have been the app describing a repository that no longer exists.
-            Text("Change history", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "How many versions are kept in each project. Empty keeps all of them.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            LengthField(
-                label = "Versions kept",
-                value = settings.historyLength,
-                onValueChange = { settings.keepHistory(it) },
-            )
-            Spacer(Modifier.height(20.dp))
             // ---- everything the agent needs, in one place, on this screen once ----
             //
             // **A block, not six sections.** Every row below exists for the same machine: the key
@@ -398,7 +310,7 @@ fun SettingsScreen(
             // wrong words — a slow command was never a blip.
             Text("Checks and commands", style = MaterialTheme.typography.titleMedium)
             LengthField(
-                label = "Check an idle agent every (seconds)",
+                label = "Check on it every (seconds)",
                 value = settings.pollSeconds,
                 placeholder = "240",
                 onValueChange = { settings.keepPoll(it) },
@@ -526,6 +438,99 @@ fun SettingsScreen(
             )
             RowDivider()
 
+            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+            // ---- what the app did ----
+            //
+            // Here rather than behind a long press, because the moment a person wants
+            // it is the moment something did not work, and hunting for the screen that
+            // explains it is the last thing they should have to do.
+            TextButton(onClick = onOpenTrace) { Text("What the app did") }
+            Text(
+                "Every tap, what answered it, and anything that never got an answer.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            // **Only a debug build shows this at all.** A release build has no business
+            // writing a running log of a person's tapping into a folder other apps can
+            // read, so the switch does not exist there — not disabled, absent.
+            if (viewModel.settings.liveTraceAvailable) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Write the log to Downloads", style = MaterialTheme.typography.bodyMedium)
+                        // **The path is reported, not promised.** This used to read "at
+                        // Download/MuffyCodes log/trace.log" — a sentence true of the
+                        // intention and false of the phone, because a write can fall back
+                        // to the app's own folder. A line naming where the file really is
+                        // turns "I cannot find the log" into a path.
+                        Text(
+                            traceWhere(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = viewModel.settings.liveTrace,
+                        onCheckedChange = { viewModel.keepLog(it) },
+                    )
+                }
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+            // ---- the appearance (§10) ----
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Theme", style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f))
+                Text("Light", style = MaterialTheme.typography.labelSmall)
+                Spacer(Modifier.width(6.dp))
+                Switch(
+                    checked = settings.useDark,
+                    onCheckedChange = { settings.selectDarkVariant(it) },
+                )
+                Spacer(Modifier.width(6.dp))
+                Text("Dark", style = MaterialTheme.typography.labelSmall)
+            }
+            LazyRow(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                items(AppTheme.entries) { theme ->
+                    Swatch(
+                        theme = theme,
+                        selected = theme == settings.theme,
+                        onClick = { settings.selectTheme(theme) },
+                    )
+                }
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+            // ---- how much change history is kept ----
+            //
+            // **One sentence, and it is now true.** The old one described a local history "that
+            // holds everything outside one", and that repository is gone: every file on this phone
+            // is inside a project, and every project has its own history. Keeping the sentence
+            // would have been the app describing a repository that no longer exists.
+            Text("Change history", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "How many versions are kept in each project. Empty keeps all of them.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            LengthField(
+                label = "Versions kept",
+                value = settings.historyLength,
+                onValueChange = { settings.keepHistory(it) },
+            )
+            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
             // ---- every one on this phone, and one switch ----
             // The box has a Stop per project, and the strip says how many are on — but a person
             // who wants them all off should not have to open each project to do it.
@@ -543,6 +548,8 @@ fun SettingsScreen(
                 ) { Text("Stop all") }
             }
             RowDivider()
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
             // ---- what Android does to it in a pocket ----
             // One button, because nothing in the app can work around Doze and only the person can
@@ -574,6 +581,9 @@ fun SettingsScreen(
                     TextButton(onClick = onAskBattery) { Text("Ask Android") }
                 }
             }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
             // ---- whether a reminder can reach the tray at all ----
             // The battery exemption decides whether a poll can go out; this decides whether the
             // answer can be seen. From Android 13 a declared permission that was never granted

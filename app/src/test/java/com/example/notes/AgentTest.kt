@@ -188,8 +188,9 @@ class AgentTest {
         agent(door).burst("make it three litres")
 
         assertEquals("the file", "three litres", File(ws.repoOf("shopping"), "milk.txt").readText())
-        assertEquals("a version was written", 1, git.changes("shopping").ahead)
-        assertEquals("and it is work GitHub has not seen", 1, ws.unsentCount("shopping"))
+        // **The row's own count, asked of the repository.** It used to be a number kept in a file;
+        // a diff against the last push says the same thing and cannot drift from the disk.
+        assertEquals("a version was written, and it is work GitHub has not seen", 1, git.changes("shopping").ahead)
     }
 
     @Test
