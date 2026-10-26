@@ -32,17 +32,38 @@ interface LongRunner {
 
         fun real(): LongRunner = object : LongRunner {
             private val threads = AtomicInteger()
-            private val pool: ExecutorService = Executors.newFixedThreadPool(2) { task ->
+
+            /**
+             * **Made on the first command, not when the runner is built** — and null until then.
+             *
+             * A pool created eagerly is two threads per view model, and the suite builds hundreds
+             * that never run a slow command; that is what held a shard open. The threads are daemons,
+             * so nothing hangs in the app — it is the *test* fork that waits for them.
+             *
+             * `close` reads this field rather than any lazy property, because asking a `lazy` whether
+             * it was ever made makes it, and a close that builds the thing it is closing is the
+             * opposite of what closing is for.
+             */
+            @Volatile
+            private var live: ExecutorService? = null
+
+            override fun submit(block: () -> String): Future<String> {
+                val pool = synchronized(this) {
+                    live ?: newPool().also { live = it }
+                }
+                return pool.submit<String> { block() }
+            }
+
+            private fun newPool(): ExecutorService = Executors.newFixedThreadPool(2) { task ->
                 Thread(task, "muffy-long-${threads.incrementAndGet()}").apply {
                     isDaemon = true
                     priority = Thread.MIN_PRIORITY + 1
                 }
             }
 
-            override fun submit(block: () -> String): Future<String> = pool.submit<String> { block() }
-
             override fun close() {
-                pool.shutdownNow()
+                live?.shutdownNow()
+                live = null
             }
         }
 

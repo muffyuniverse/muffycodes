@@ -64,12 +64,16 @@ class LongCommandsTest {
 
     @Test
     fun `a command that finishes in time is answered with its body`() {
-        val answer = commands.answer("shopping", call(), 5_000) {
-            "0 cloned"
-        }
-        // Every command in this runner waits for the gate, so a wait of five seconds would be a
-        // five-second test. Released first, then asked.
-        runner.release()
+        // **The gate is opened from outside the wait.** Every command in this runner waits for it,
+        // so the release has to happen while `answer` is inside its own wait — releasing after the
+        // call would be releasing a command that had already been handed over, and the assertion
+        // would be about the handover rather than about a body arriving in time.
+        Thread {
+            Thread.sleep(30)
+            runner.release()
+        }.apply { isDaemon = true }.start()
+
+        val answer = commands.answer("shopping", call(), 5_000) { "0 cloned" }
         assertEquals("0 cloned", answer)
     }
 
