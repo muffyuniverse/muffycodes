@@ -710,11 +710,12 @@ class AgentTest {
     }
 
     @Test
-    fun `the record is read as id name body, so two numbers cannot be confused`() {
-        // **The columns serve four audiences and only one of them is the model.** `kind` rebuilds the
-        // conversation, `ctx` is the audit's, `size` is the person's measurement, and two numbers
-        // side by side in a record it is about to delete from invites forgetting row 412 instead of
-        // row 17.
+    fun `the record is read as the file holds it, columns and all`() {
+        // **There is no second view any more.** `read` answers with the file, so the agent sees the
+        // same characters a person sees: `id size kind ctx name body`. It used to be a projection of
+        // `id name body`, because two numbers side by side were thought to invite forgetting the
+        // wrong row — but a projection the model cannot check is worse than a column it can ignore,
+        // and `grep` needs the real columns to find a row by cost.
         log.told("make a list")
         val call = log.call("read", """{"path":"milk.txt"}""")
         log.got("read", "0\ntwo litres")
@@ -724,9 +725,8 @@ class AgentTest {
         assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
         assertTrue("the id is there: $body", Regex("^\\s*$call ", RegexOption.MULTILINE).containsMatchIn(body))
         assertTrue("and the words: $body", body.contains("two litres"))
-        assertFalse("but not the kind: $body", body.contains("CALL"))
-        assertFalse("nor the audit's column: $body", body.contains(" in  ") || body.contains(" out "))
-        assertFalse("nor a size: $body", Regex("^\\s*\\d+ +\\d+ ", RegexOption.MULTILINE).containsMatchIn(body))
+        assertTrue("the kind, because the file has it: $body", body.contains("CALL"))
+        assertTrue("and the ctx column: $body", body.contains(" in  "))
     }
 
     @Test
@@ -1716,9 +1716,12 @@ class AgentTest {
         })
         assertFalse(
             "and nowhere in the project's files",
-            File(ws.accountDir, "shopping").walkTopDown().filter { it.isFile }
-                .any { it.name != "session.log" &&
-                    it.readText().contains("only file") },
+            File(ws.accountDir, "shopping").walkTopDown()
+                // **Both record files, not just the evidence.** `reason` enters the context, so the
+                // sentence is in `context.log` as well — and the point of the test is that it is in
+                // neither of the agent's files *as a project file*.
+                .filter { it.isFile && it.parentFile?.name != AgentLog.DIR }
+                .any { it.readText().contains("only file") },
         )
     }
 
