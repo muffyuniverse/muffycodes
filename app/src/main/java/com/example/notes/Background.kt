@@ -24,12 +24,13 @@ class Background(
     /**
      * Starts the work and calls back when it lands. Injected so a test can hold a command unstarted,
      * or finish it inline, without a thread either way.
+     *
+     * **No default.** A default that starts a real thread would mean a test that never asked for one
+     * acquires a thread by constructing a `Background`, which is the class of bug this design exists
+     * to remove.
      */
-    private val launch: ((() -> String) -> Unit) = { work -> Thread(work).start() },
+    private val launch: (() -> String) -> Unit,
 ) {
-
-    /** Only used to name threads; a number is all it is for, so a process-wide counter is right. */
-    private val name = threads.incrementAndGet()
 
     /**
      * Starts [call] in the background and returns the sentence the agent reads.
@@ -92,7 +93,13 @@ class Background(
     companion object {
 
         /** What a test or a call with no threading gets: the work runs, and is finished on return. */
-        fun inline(): Background = Background { work -> work(); Unit }
+        /**
+         * Runs the work on the calling thread, so it has finished when `start` returns.
+         *
+         * For the app's non-agent paths and for tests that are not about the wait. Nothing is
+         * queued and nothing is deferred, which is the honest reading of "inline".
+         */
+        fun inline(): Background = Background { work -> work() }
 
         /** Nothing runs in the background; used where the parameter is not exercised. */
         fun none(): Background = inline()
@@ -104,12 +111,15 @@ class Background(
          * open. Its `Future` is deliberately ignored: the result's only home is the file.
          */
         fun real(): Background = Background { work ->
-            val thread = Thread({ runCatching { work() } }, "muffy-bg-$name")
+            // **`runCatching`, because the result's only home is the file.** An exception on a
+            // thread with nobody waiting would otherwise be invisible to everybody.
+            val thread = Thread({ runCatching { work() } }, "muffy-bg-${threads.incrementAndGet()}")
             thread.isDaemon = true
             thread.priority = Thread.MIN_PRIORITY + 1
             thread.start()
         }
 
+        /** A number for a thread's name, so two threads of one tool are told apart in a trace. */
         private val threads = AtomicInteger()
     }
 }
