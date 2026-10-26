@@ -29,11 +29,19 @@ conversation confusing.
 
 ## 2. The rules that hold everywhere
 
-**One limit, and it is where the result is going.** A result that enters the conversation is
-measured against the operator's `result length`; over it, the answer is a **refusal** naming its size,
-the limit, and the two ways to narrow it. A result is never a fragment. Two results are deliberately
-not measured, because they do not enter the conversation: one going to a file through `background`,
-and one going into another file as `edit`'s replacement.
+**One limit, and it is where the result is going.** A result that enters the conversation is measured
+against the operator's `result length`; over it the body is **written whole to a file** under
+`agent/background_results/` and the answer is that path — never a fragment, never a refusal that would
+have to be measured by the same limit. It is the same file, the same sentence and the same protocol as
+`background`, so there is one rule to learn instead of two. Two results are deliberately not measured,
+because they do not enter the conversation at all: one going to a file through `background`, and one
+going into another file as `edit`'s replacement. The limit itself is the operator's number clamped by
+the model's input window, because a result bigger than the window cannot be sent.
+
+**A key a command does not take stops it, before it runs.** Every command declares the arguments it
+takes; anything else is refused with the key named, the keys that work, and the command's own example.
+The alternative is silent misbehaviour — `read {"lines":40}` used to mean "everything from line 1",
+because `lines` was a retired name the parser had stopped looking at.
 
 **One range language.** `from` and `to` are line numbers, both inclusive, 1-based; `to` absent means
 the end. In `read`, `tree` and `history` they select from the result — lines, paths, versions. **A
@@ -45,7 +53,8 @@ call means the same line in the next.
 memory.
 
 **No foreground command outlasts its turn.** Every command runs under the operator's foreground
-limit and either answers inside it or is stopped with a sentence saying so. There is no list of "slow
+limit — three minutes unless the operator says otherwise — and either answers inside it or is stopped
+with a sentence saying so. There is no list of "slow
 commands" — a read of a huge log, a tree of a huge project and a history of a file saved a thousand
 times are all slow on a phone. Each asks `Deadline.check` inside its own loop. Commands that write
 once (`create`, `edit`, `move`) either finished or never started when the time passes; `delete` is the

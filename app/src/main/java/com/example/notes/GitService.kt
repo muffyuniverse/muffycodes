@@ -530,8 +530,10 @@ object GitService {
         val edits = try {
             org.eclipse.jgit.diff.HistogramDiff().diff(
                 org.eclipse.jgit.diff.RawTextComparator.DEFAULT,
-                org.eclipse.jgit.diff.RawText(before),
-                org.eclipse.jgit.diff.RawText(after),
+                // Bytes, not a string: this JGit's `RawText` has no `String` constructor, and the
+                // comparator works on bytes anyway.
+                org.eclipse.jgit.diff.RawText(before.toByteArray()),
+                org.eclipse.jgit.diff.RawText(after.toByteArray()),
             )
         } catch (e: Throwable) {
             // A diff that cannot be computed is still a file the person may want to read; the honest
