@@ -38,6 +38,7 @@ You are right that they do practically the same: `Workspace.move` (`Workspace.kt
 words. Options: keep `move` (the flag is explicit, and "move a copy" is a real English sentence);
 rename the tool to `put`/`place`/`transfer` (neutral, but a new word to learn). I lean to keeping
 `move`, because renaming costs the model a word for no gain, but it is your call.
+@ keep as move with copy flag, strict on collisions.
 
 ## 2. One selection language, everywhere: `from`/`to`/`grep`
 
@@ -59,6 +60,7 @@ meaning, in every tool.
 
 This is a real change to `read`, not a rename: `{"from":10,"lines":40}` today means 10–49 and
 becomes `{"from":10,"to":49}`. The tool description and the prompt change with it.
+@ correct
 
 ## 3. `edit` takes a read call as its replacement — and that absorbs paste
 
@@ -98,6 +100,7 @@ only, and insert becomes read-splice-write again.
 to the file, and the `edit` result is the one short sentence it always was (`Edited todo.txt`). So
 the char limit never applies to the replacement — which is the point: a 200 KB paste is exactly the
 case where a tool must not complain about size.
+@ good, at and the rest is approved. And no grep - edit is strictly per line, right?
 
 ## 4. `background` takes any command
 
@@ -116,6 +119,7 @@ say it, in those words, because the model is the one choosing.
 
 One consequence: after `clone` is removed, `restore` is the only command that was ever slow, so
 `background`'s remaining use is narrow. That is fine — it is one sentence of code and it is honest.
+@ it is fine, and you never know not weak the device is and big are the files, even a simple copy can take a while, and imagine grepping an enormose log - there are cases when background can be used with any command.
 
 ## 5. The rest, unchanged from counterproposal 1
 
