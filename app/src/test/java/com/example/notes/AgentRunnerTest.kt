@@ -644,10 +644,17 @@ class AgentRunnerTest {
         runner.tick(2_000 + 10 * 60_000)
         assertEquals("the ladder continues while nobody answers", 2, notices.size)
 
+        // **A tick can leave a poll in flight, and that poll writes the session when it finishes.**
+        // Answering while one is running let the worker put back the copy it had read before the
+        // answer — asked, reminders and all — and notify on it. Waiting here is waiting for the app
+        // to be quiet, which is what the next line is a statement about.
+        settle(runner)
+
         // Answering it — the session stops needing anybody — ends the ladder.
         val asked = runner.sessions().single()
         AgentSessions(ws.accountDir).put(asked.resumed(2_000 + 11 * 60_000))
         runner.tick(2_000 + 20 * 60_000)
+        settle(runner)
 
         assertEquals("nothing more once dealt with", 2, notices.size)
     }
