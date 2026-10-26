@@ -104,7 +104,7 @@ class TraceTest {
         Trace.tap("confirm delete", "3 items")
         val line = firstLine()
 
-        assertTrue("no spaces in the name field: $line", line.contains("confirm-delete-chosen"))
+        assertTrue("no spaces in the name field: $line", line.contains("confirm-delete"))
         // The detail is the tail. Splitting on the first double space would find the gap
         // after the time, which is why this asserts where the line ends instead.
         assertTrue("the detail keeps its own spelling: $line", line.endsWith("3 items"))
@@ -240,7 +240,7 @@ class TraceTest {
         assertTrue("it is a REPORT line: $report", report.contains("REPORT"))
         assertTrue(
             "carrying the sentence as written, spaces and all: $report",
-            report.contains("I pressed Save and nothing appeared in the history"),
+            report.contains("I pressed save and nothing appeared in the history"),
         )
         // And it sits after the taps, because a log is ordered: those lines are the
         // context, and nothing had to be captured for them to be.
@@ -385,7 +385,8 @@ class TraceTest {
 
         assertEquals(
             "the press that opened the picker is the one answered",
-            listOf("new folder"),
+            // `what` is the slug, so a name with a space is written with a hyphen.
+            listOf("new-folder"),
             Trace.report().waiting.map { it.what },
         )
         // The id column is padded to four characters in the file, and `split` collapses
