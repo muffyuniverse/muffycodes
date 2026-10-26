@@ -1693,14 +1693,15 @@ class AppViewModel @JvmOverloads constructor(
             main.post {
                 busy = false
                 message = clone.message
-                // **It does not move you inside.** A project appearing in the list is the
-                // result, and being teleported into an empty folder is how a person loses
-                // track of where they were — the row is right there when they want it.
-                  // **And the window is answered before the list is redrawn**, for the reason the
-                  // local-project path gives: the screen that waits is the add window, and a list
-                  // redrawn after it has closed reaches nobody.
-                  onDone(clone.success)
-                  refresh()
+                // **It does not move you inside.** A project appearing in the list is the result,
+                // and being teleported into an empty folder is how a person loses track of where
+                // they were — the row is right there when they want it.
+                //
+                // **And the window is answered before the list is redrawn**, for the reason the
+                // local-project path gives: the screen that waits is the add window, and a list
+                // redrawn after it has closed reaches nobody.
+                onDone(clone.success)
+                refresh()
             }
         }
     }
