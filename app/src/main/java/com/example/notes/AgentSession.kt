@@ -206,10 +206,14 @@ data class AgentSession(
      *
      * Three refusals. A stopped session is not waiting for anybody: the person said stop, and
      * spending their money to keep a conversation warm they switched off is the app arguing with
-     * them. A reconnecting one is already on its ladder, and a second request beside it would be two
-     * doors into one conversation. And past [forAt] the arithmetic has turned: a ping reads the whole
-     * prompt at cache price, so keeping it warm for longer than a dozen of them costs more than
-     * letting it go cold and paying for one fresh prompt later.
+     * them. A check that already fails eight times in a row needs no ninth. And past [forAt] the
+     * arithmetic has turned: a ping reads the whole prompt at cache price, so keeping it warm for
+     * longer than a dozen of them costs more than letting it go cold and paying for one fresh
+     * prompt later.
+     *
+     * **A reconnecting session is not refused.** Its ladder *is* the next check: `failed` moves
+     * `lastPollAt` to one, two, four seconds from now, and a tick that skipped it because it was
+     * reconnecting would make one dropped packet end the session.
      *
      * [keepAlive] is the operator's switch, passed in rather than stored here, so a switch flipped
      * while the app is running takes effect at the next tick.
@@ -223,7 +227,6 @@ data class AgentSession(
     ): Boolean = when {
         !keepAlive -> false
         state == State.STOPPED -> false
-        sub == Sub.RECONNECTING -> false
         forAt > 0 && from > 0 && at - from >= forAt -> false
         else -> at >= lastPollAt + every
     }

@@ -296,8 +296,13 @@ class Agent(
             onFailure = { t ->
                 val said = Secrets.explain(t, "The conversation could not be kept warm")
                 val code = (t as? Refused)?.code ?: (t.cause as? Refused)?.code
+                val stopping = code != null && code in KEY_REFUSALS
                 Trace.note("agent-warm-failed", "$project · $said")
-                Warm.Failed(said, stopping = code != null && code in KEY_REFUSALS)
+                // **The first failure of an outage is written down, and the rest are one outage.**
+                // Same rule as [blip]'s, for the same reason: a key that was refused eight times is
+                // one thing a person has to fix, and the runner's `retry` row carries the count.
+                if (stopping && !retrying) log.note("stopped", said)
+                Warm.Failed(said, stopping = stopping)
             },
         )
     }

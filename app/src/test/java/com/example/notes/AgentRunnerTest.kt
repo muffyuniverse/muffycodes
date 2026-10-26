@@ -152,10 +152,14 @@ class AgentRunnerTest {
     @Test
     fun `a session the phone was not running is written down as a gap, and goes on`() {
         // A force-stop, an OEM battery manager, a Doze window the system never lifted: none of them
-        // announce themselves, and all of them look the same from inside — a session whose last poll
-        // is hours old. The row is how a hole becomes visible instead of looking like a poll that
-        // took no time; the session then polls and carries on, because "it must never stop until the
-        // operator removes it" is the stronger rule.
+        // announce themselves, and all of them look the same from inside — a session whose last ping
+        // is hours old. The row is how a hole becomes visible instead of looking like a check that
+        // took no time; the session carries on, because "it must never stop until the operator
+        // removes it" is the stronger rule.
+        //
+        // **The row does not wait for a ping to be worth writing.** Three hours of absence is also
+        // past the keepalive's ceiling, so a gap read inside the ping path would have been lost —
+        // and the cache was gone hours ago, so there is nothing to warm either.
         on("shopping", now = 1_000)
         val door = PingDoor()
         val runner = runner(door)
@@ -171,7 +175,8 @@ class AgentRunnerTest {
             gap.body,
         )
         assertEquals("and it is the app's row, not the model's", AgentLog.APP, gap.ctx)
-        assertEquals("the agent goes on", 1, door.pings.size)
+        assertTrue("nothing was sent to a cache that has been cold for hours", door.pings.isEmpty())
+        assertEquals("and the wait starts again from the wake", 1_000 + 3 * 60 * 60 * 1000L + 12 * 60_000L, runner.sessions().single().lastPollAt)
         assertEquals("idle", AgentSession.State.IDLE, runner.sessions().single().state)
         assertTrue(
             "and the trace says it",

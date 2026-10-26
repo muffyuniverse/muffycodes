@@ -315,15 +315,23 @@ class AgentTest {
     }
 
     @Test
-    fun `words without a call end the turn instead of looping`() {
+    fun `words without a call are a conclusion, not a stopped session`() {
+        // **The operator's ruling, and the better one.** A model that answered in prose has answered;
+        // stopping the agent over the shape of its reply punishes the person for the model's grammar.
+        // It used to stop with `LOOP`, which is now only for a turn that cannot end at all.
         val door = ScriptedDoor(Reply("I have nothing to do."))
         val end = agent(door).burst("hello")
 
-        assertTrue("stopped", end is Agent.End.Stopped)
-        assertEquals("and it asked once, not twice", 1, door.asked.size)
-        assertTrue("with the reason on the record", rows().any {
-            it.name == "stopped" && it.body.contains("no tool call")
+        assertTrue("concluded: $end", end is Agent.End.Concluded)
+        assertEquals("with what it said", "I have nothing to do.", (end as Agent.End.Concluded).said)
+        assertEquals("and it was asked once, not twice", 1, door.asked.size)
+        assertTrue("the words are the agent's own text in the context", log.contextRows().any {
+            it.kind == AgentLog.NOTE && it.name == "agent" && it.body.contains("nothing to do")
         })
+        assertTrue("the box is told how it ended", rows().any {
+            it.kind == AgentLog.CONCLUDE && it.body.contains("nothing to do")
+        })
+        assertFalse("and nothing was stopped", rows().any { it.name == "stopped" })
     }
 
     @Test
@@ -457,24 +465,23 @@ class AgentTest {
     fun `the newest previous default is the text this build replaced`() {
         // **The entry that matters most, because it is what most phones are holding.** A phone that
         // ran the previous release has an ① file with its unedited default — which is this build's
-        // predecessor, and whose sentence about a result "coming back as a refusal" is now wrong,
-        // because a result too big is filed in a file instead. Recognising it needs those words
-        // exactly, so the entry is the old text rather than a paraphrase of it, and it is last
-        // because it is the most recent.
+        // predecessor, and which offers `wait` as a third way to end a turn: a tool this build no
+        // longer has. Recognising it needs those words exactly, so the entry is the old text rather
+        // than a paraphrase of it, and it is last because it is the most recent.
         val newest = AgentPrompt.PREVIOUS_SYSTEM.last()
         val older = AgentPrompt.PREVIOUS_SYSTEM[AgentPrompt.PREVIOUS_SYSTEM.size - 2]
         val now = AgentPrompt.SYSTEM_DEFAULT
 
         assertTrue(
-            "it is the text that described a result refused for its size",
-            newest.contains("comes back as a refusal naming its"),
+            "it is the text that told the model to say it was waiting",
+            newest.contains("wait      you are idle and the person has not spoken yet."),
         )
-        assertFalse("and this build files it instead", now.contains("comes back as a refusal"))
+        assertFalse("and this build has no such tool", now.contains("wait      you are idle"))
         assertTrue("the layout is the merge's", newest.contains("The project folder is the repository"))
         assertFalse("and it predates the handover rule", newest.contains("still running; call again"))
         assertTrue(
-            "the one before it is the cut-short text the round before replaced",
-            older.contains("showing first N of M"),
+            "the one before it is the text that refused a result for its size",
+            older.contains("comes back as a refusal naming its"),
         )
         assertTrue("a previous default is not the current one", newest != now)
     }

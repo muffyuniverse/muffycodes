@@ -102,8 +102,12 @@ class AgentSessionTest {
 
         val retrying = session().polled(0).failed(at = AgentSession.POLL_MS)
         assertFalse(
-            "and a reconnecting one is already trying",
+            "a reconnecting one waits for its ladder, which is seconds away",
             retrying.warmDue(AgentSession.POLL_MS + 500, keepAlive = true),
+        )
+        assertTrue(
+            "and is retried at the ladder's own time",
+            retrying.warmDue(AgentSession.POLL_MS + 1_000, keepAlive = true),
         )
     }
 

@@ -85,6 +85,18 @@ class AgentRunner(
                 Trace.note("agent-reminder", current.notice() ?: "")
                 notify(current)
             }
+            // **A gap is its own event, and it does not need a request to be worth writing.**
+            // The phone being off is a fact about the phone; the keepalive's ceiling is a fact
+            // about the bill, and a session that has been asleep for three hours has also passed
+            // its ceiling — so reading the gap inside the ping would have lost the one row that
+            // makes the hole visible. The wait restarts from the wake: the cache was lost hours
+            // ago, and a ping now would buy four minutes of warmth for someone who is not here.
+            val missed = current.missedBy(now, pollMs)
+            if (missed > 0) {
+                noteGap(current.project, missed)
+                current = current.polled(now)
+                put(current, speak = false)
+            }
             // **The setting decides, not the session's copy of it.** The person may have changed
             // the interval, the switch or the ceiling since this session was written, and a tick is
             // when that matters.
@@ -117,24 +129,7 @@ class AgentRunner(
             return
         }
         synchronized(inFlight) { inFlight += project }
-        // **What the phone took, said once.** A session whose last poll is hours old was not
-        // running, whatever the reason — a force-stop, an OEM battery manager, a Doze window the
-        // system never lifted. The app cannot be told that happened; it can see the clock, and a
-        // row is how a hole becomes visible instead of looking like a poll that took no time.
-        val missed = session.missedBy(now, pollMs)
-        if (missed > 0) {
-            try {
-                AgentLog.open(ws.projectDir(project)).bookkeeping(
-                    AgentLog.NOTE,
-                    "gap",
-                    "the phone did not run the agent for ${howLong(missed)}",
-                )
-            } catch (t: Throwable) {
-                // A row about a gap is not worth failing the poll that ended the gap for.
-            }
-            Trace.note("agent-gap", "$project · ${howLong(missed)}")
-        }
-        put(session.polled(now))
+        put(session.polled(now), speak = false)
         Trace.note("agent-warm-due", "$project · ${session.label(now)}")
         val active = model()
         // **The model's own window, read from the choice rather than guessed.** A poll builds the
@@ -187,14 +182,19 @@ class AgentRunner(
             // waiting; anything else is a ping missed and stays out of the session's story — a
             // provider that will not take a one-token answer must not stop the person's work.
             when (how) {
-                is Agent.Warm.Sent -> put(current.warmed(now))
+                // **A ping does not speak.** The session already needed the person (or did not) long
+                // before this check; posting the question again every four minutes is what the
+                // reminder ladder is for, and it counts its own.
+                is Agent.Warm.Sent -> put(current.warmed(now), speak = false)
                 is Agent.Warm.Failed -> {
                     if (how.stopping) {
                         // **The words travel with the ladder**, or the session stops saying only
-                        // "the pinned provider refused" when the provider said why.
+                        // "the pinned provider refused" when the provider said why. This one may
+                        // speak: it is the moment a session that was fine became one that needs
+                        // fixing.
                         put(current.copy(lastWords = how.why).failed(now))
                     } else {
-                        put(current.warmed(now))
+                        put(current.warmed(now), speak = false)
                     }
                 }
             }
@@ -248,13 +248,41 @@ class AgentRunner(
         return if (minutes < 60) "$minutes min" else "${minutes / 60} h ${minutes % 60} min"
     }
 
-    /** Writes a session to its file and says what changed. */
-    private fun put(session: AgentSession) {
+    /**
+     * Writes a session to its file and says what changed.
+     *
+     * **[speak] is false for a ping.** The notification rule is "a session that just started needing
+     * somebody speaks", and a ping is written every few minutes against a session that is already
+     * asked — so notifying here posted the question again on every check, and the reminder ladder
+     * counted them as its own.
+     */
+    private fun put(session: AgentSession, speak: Boolean = true) {
         sessions.put(session)
         Trace.note("agent-state", "${session.project} · ${session.label()}")
         // **Only a session that just started needing somebody speaks.** Otherwise every reminder
         // tick would also post here, and the reminder count would never leave the first one.
-        if (session.needsYou && session.reminders == 0) notify(session)
+        if (speak && session.needsYou && session.reminders == 0) notify(session)
+    }
+
+    /**
+     * What the phone took, said once.
+     *
+     * A session whose last ping is hours old was not running, whatever the reason — a force-stop, an
+     * OEM battery manager, a Doze window the system never lifted. The app cannot be told that
+     * happened; it can see the clock, and a row is how a hole becomes visible instead of looking
+     * like a check that took no time.
+     */
+    private fun noteGap(project: String, missed: Long) {
+        try {
+            AgentLog.open(ws.projectDir(project)).bookkeeping(
+                AgentLog.NOTE,
+                "gap",
+                "the phone did not run the agent for ${howLong(missed)}",
+            )
+        } catch (t: Throwable) {
+            // A row about a gap is not worth failing the tick that ended the gap for.
+        }
+        Trace.note("agent-gap", "$project · ${howLong(missed)}")
     }
 
     /** The session of [project] as the file has it, or null. */
