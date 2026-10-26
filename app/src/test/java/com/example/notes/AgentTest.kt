@@ -736,6 +736,52 @@ class AgentTest {
     }
 
     @Test
+    fun `the record is read as id name body, so two numbers cannot be confused`() {
+        // **The columns serve four audiences and only one of them is the model.** `kind` rebuilds the
+        // conversation, `ctx` is the audit's, `size` is the person's measurement, and two numbers
+        // side by side in a record it is about to delete from invites forgetting row 412 instead of
+        // row 17.
+        log.told("make a list")
+        val call = log.call("read", """{"path":"milk.txt"}""")
+        log.got("read", "0\ntwo litres")
+
+        val body = tool("read", """{"path":"agent/session.log"}""")
+
+        assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
+        assertTrue("the id is there: $body", Regex("^\\s*$call ", RegexOption.MULTILINE).containsMatchIn(body))
+        assertTrue("and the words: $body", body.contains("two litres"))
+        assertFalse("but not the kind: $body", body.contains("CALL"))
+        assertFalse("nor the audit's column: $body", body.contains(" in  ") || body.contains(" out "))
+        assertFalse("nor a size: $body", Regex("^\\s*\\d+ +\\d+ ", RegexOption.MULTILINE).containsMatchIn(body))
+    }
+
+    @Test
+    fun `raw shows the record's own columns, and a pattern can then find a size`() {
+        // **The size is worth reading even though it is not the default view.** It is the number the
+        // clear-up line quotes; a model that wants to rank rows itself has to be able to see it, and
+        // to search for it. One flag, and `grep` matches the columns again.
+        log.told("make a list")
+        log.got("read", "0\n" + "x".repeat(700))
+
+        val raw = tool("read", """{"path":"agent/session.log","raw":true}""")
+        val searched = tool("read", """{"path":"agent/session.log","raw":true,"grep":"^ +\\d+ +2\\d\\d "}""")
+
+        assertTrue("the columns are there: $raw", raw.contains("GOT"))
+        assertTrue("including the size: $raw", Regex("^\\s*\\d+ +\\d+ +GOT", RegexOption.MULTILINE).containsMatchIn(raw))
+        assertTrue("and a size is searchable: $searched", searched.contains("GOT"))
+    }
+
+    @Test
+    fun `raw on a file that is not the record is refused rather than silently the same`() {
+        // A key that quietly does nothing is the `lines` mistake: the model would believe it had
+        // asked for the columns and read a view instead.
+        val body = tool("read", """{"path":"milk.txt","raw":true}""")
+
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("saying what raw is for: $body", body.contains("record"))
+    }
+
+    @Test
     fun `a read of the file the record used to be says where it went`() {
         // The one name an older instruction set still points at. An agent whose prompt the person
         // edited keeps that prompt — so the app has to answer the question it will ask, rather than
@@ -1410,6 +1456,74 @@ class AgentTest {
     }
 
     @Test
+    fun `a forget takes a range, because that is how a person says twelve rows`() {
+        // **A range is the shape the work actually has.** Clearing up is never one row at a time:
+        // it is "everything I did before this task", which is a block of ids. Writing them out costs
+        // a line of JSON the model has to count, and counting is where a list gets one row wrong —
+        // and a call/tool pair with its halves split is refused by the pair rule.
+        log.told("task one")
+        val pairs = (1..6).map {
+            val c = log.call("read", """{"path":"milk.txt"}""")
+            log.got("read", "0\ntwo litres")
+            c to log.rows().last().id
+        }
+        log.told("task two")
+
+        // The first two pairs, named as one range: 2-7 is six rows, both ends included.
+        val answer = tool("forget", """{"ids":"${pairs[0].first}-${pairs[2].second}"}""")
+
+        assertTrue("accepted: $answer", answer.startsWith(AgentLog.SUCCESS))
+        assertTrue("and it says how many went: $answer", answer.contains("6 rows"))
+        val gone = log.thrownAway().map { it.id }
+        assertEquals("exactly the six named", pairs.take(3).flatMap { listOf(it.first, it.second) }.toSet(), gone.toSet())
+    }
+
+    @Test
+    fun `numbers and ranges can be mixed in one call, and both spellings of a range work`() {
+        log.told("task one")
+        repeat(4) {
+            log.call("read", """{"path":"milk.txt"}""")
+            log.got("read", "0\ntwo litres")
+        }
+        log.told("task two")
+        val rows = log.contextRows().map { it.id }
+        // rows: 1 TOLD, 2..9 four pairs, 10 TOLD. Forget 2, 3, then 4 through 7.
+        val named = rows.filter { it in setOf(2, 3) || it in 4..7 }.toSet()
+
+        val withHyphen = tool("forget", """{"ids":"2 3 4-7"}""")
+
+        assertTrue("accepted: $withHyphen", withHyphen.startsWith(AgentLog.SUCCESS))
+        assertEquals("every number and every edge of the range went", named, log.thrownAway().map { it.id }.toSet())
+    }
+
+    @Test
+    fun `a range written backwards is refused, and so is one nobody could have meant`() {
+        log.told("task one")
+
+        val backwards = tool("forget", """{"ids":"12-7"}""")
+        val huge = tool("forget", """{"ids":"1-100000"}""")
+
+        assertTrue("refused: $backwards", backwards.startsWith(AgentLog.FAILURE))
+        assertTrue("naming both ends: $backwards", backwards.contains("12") && backwards.contains("7"))
+        assertTrue("refused: $huge", huge.startsWith(AgentLog.FAILURE))
+        assertTrue("saying how many it was: $huge", huge.contains("100000 rows"))
+    }
+
+    @Test
+    fun `a negative number stays a number, so the answer is about the row and not the shape`() {
+        // **A hyphen is a range only between two digits.** Reading `-3` as a range from nothing to
+        // three would forget three rows the model never named; reading it as a number gets it the
+        // sentence it needs about a row that does not exist.
+        log.told("task one")
+
+        val body = tool("forget", """{"ids":"-3"}""")
+
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("about the row: $body", body.contains("-3") || body.contains("no row"))
+        assertTrue("and nothing was lost", log.thrownAway().isEmpty())
+    }
+
+    @Test
     fun `a forget that names nothing is a refusal, not an empty success`() {
         log.told("a task")
         val answer = tools().run(Call("c9", "forget", """{"ids":[]}"""))
@@ -1572,7 +1686,7 @@ class AgentTest {
         // success that happened to leave a note.
         val big = (1..400).joinToString("\n") { "line $it of the file" }
         ws.write(File(ws.repoOf("shopping"), "big.txt"), big)
-        val direct = AgentTools(ws, "shopping", git, log, maxChars = 200)
+        val direct = AgentTools(ws, "shopping", git, log, maxTokens = 200)
 
         val said = direct.forConversation(
             Call("c9", "read", """{"path":"big.txt"}"""),

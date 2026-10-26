@@ -156,8 +156,18 @@ class AgentLog private constructor(
          * The body is the only part that can hold a separator, and [LogFormat] escapes it — so
          * two spaces followed by anything is the detail, always.
          */
-        /** Six columns: the record as this build writes it. */
+        /**
+         * Five columns: the record as this build writes it — `id size kind ctx name  detail`.
+         *
+         * **No clock, so the old shape cannot be mistaken for this one**: a row of yesterday starts
+         * with `14:02`, and `\d+` stops at the colon, so the two regexes are disjoint by their first
+         * character rather than by a heuristic.
+         */
         private val ROW =
+            Regex("""^(\d+) +(\d+) +(\S+) +(\S+) +(\S+)(?:  (.*))?$""")
+
+        /** Six columns: the record as the build before this one wrote it, with a clock. */
+        private val TIMED_ROW =
             Regex("""^(\d\d:\d\d:\d\d\.\d\d\d) +(\d+) +(\S+) +(\S+) +(\S+)(?:  (.*))?$""")
 
         /**
@@ -173,6 +183,9 @@ class AgentLog private constructor(
 
         /** A row from before the column existed, waiting to be told what it was. */
         const val UNKNOWN = ""
+
+        /** True when [line] is a row in the shape this build writes, so it needs no re-rendering. */
+        fun isCurrentShape(line: String): Boolean = ROW.matches(line)
 
         /**
          * One lock per record file, for the whole process.
@@ -205,11 +218,12 @@ class AgentLog private constructor(
          */
         fun parseRow(line: String): Row = try {
             val match = ROW.matchEntire(line)
-            val legacy = if (match == null) LEGACY_ROW.matchEntire(line) else null
+            val timed = if (match == null) TIMED_ROW.matchEntire(line) else null
+            val legacy = if (match == null && timed == null) LEGACY_ROW.matchEntire(line) else null
             when {
                 match != null -> Row(
-                    time = match.groupValues[1],
-                    id = match.groupValues[2].toInt(),
+                    id = match.groupValues[1].toInt(),
+                    size = match.groupValues[2].toLong(),
                     kind = match.groupValues[3],
                     ctx = match.groupValues[4],
                     name = match.groupValues[5],
@@ -217,25 +231,39 @@ class AgentLog private constructor(
                     raw = line,
                 )
 
+                // **This one's size is measured, because the file does not hold it.** A row from the
+                // build with a clock is re-rendered in the new shape by [foldLegacy], so the number
+                // is only needed between the parse and that rewrite.
+                timed != null -> Row(
+                    id = timed.groupValues[2].toInt(),
+                    size = ContextBudget.tokens(LogFormat.unescaped(timed.groupValues[6])),
+                    kind = timed.groupValues[3],
+                    ctx = timed.groupValues[4],
+                    name = timed.groupValues[5],
+                    detail = timed.groupValues[6],
+                    raw = line,
+                )
+
                 legacy != null -> {
                     // Either shape of the old row: with a body, or ending at the name.
                     val hasBody = legacy.groupValues[1].isNotEmpty()
                     val at = if (hasBody) 0 else 5
+                    val detail = if (hasBody) legacy.groupValues[5] else ""
                     Row(
-                        time = legacy.groupValues[at + 1],
                         id = legacy.groupValues[at + 2].toInt(),
+                        size = ContextBudget.tokens(LogFormat.unescaped(detail)),
                         kind = legacy.groupValues[at + 3],
                         ctx = UNKNOWN,
                         name = legacy.groupValues[at + 4],
-                        detail = if (hasBody) legacy.groupValues[5] else "",
+                        detail = detail,
                         raw = line,
                     )
                 }
 
-                else -> Row("", 0, "?", "?", "?", line, broken = true)
+                else -> Row(0, 0, "?", "?", "?", line, broken = true)
             }
         } catch (t: Throwable) {
-            Row("", 0, "?", "?", "?", line, broken = true)
+            Row(0, 0, "?", "?", "?", line, broken = true)
         }
 
           /**
@@ -345,10 +373,16 @@ class AgentLog private constructor(
         }
     }
 
-    /** One row of the record. */
+    /**
+     * One row of the record.
+     *
+     * `size` is the row's cost in **tokens**, and it is stored rather than remembered: the agent
+     * chooses what to forget by it, the app measures a context by summing it, and the person's
+     * transcript shows it beside the row. Three readers, one number, written once.
+     */
     data class Row(
-        val time: String,
         val id: Int,
+        val size: Long,
         val kind: String,
         /** `in`, `out` or `app` — whether the model is sent this row, and whose decision that was. */
         val ctx: String,
@@ -372,7 +406,7 @@ class AgentLog private constructor(
          */
         val line: String
             get() = if (broken) detail else raw.ifEmpty {
-                LogFormat.recordRow(time, id, kind, ctx, name, detail)
+                LogFormat.recordRow(id, size, kind, ctx, name, detail)
             }
 
         /** This row with its ctx column changed, and every other byte the same. */
@@ -384,6 +418,31 @@ class AgentLog private constructor(
 
         /** The body as the agent wrote it, with its newlines back. */
         val body: String get() = LogFormat.unescaped(detail)
+
+        /**
+         * The row as **the model** reads it: `id name  body`.
+         *
+         * The columns a row carries serve four audiences: `kind` is how the app rebuilds a
+         * conversation, `ctx` is the audit's own column, `size` is the measurement the app and the
+         * person act on, and the padding is for an eye on a file. Only the id and the words are the
+         * model's — and the size is **not**, because two numbers side by side in a record it is
+         * about to delete from is a question it should not have to answer twice. `17 412 CALL read`
+         * invites it to forget row 412.
+         *
+         * What it needs to choose with is in front of it: the clear-up line names the rows taking the
+         * most room, and the transcript of its own conversation is what it reads. The size is a
+         * handle for the app's line, not for its arguments.
+         */
+        val shown: String
+            get() = buildString {
+                append(id.toString().padStart(4))
+                append(' ')
+                append(name)
+                if (detail.isNotEmpty()) {
+                    append("  ")
+                    append(detail)
+                }
+            }
     }
 
     /**
@@ -418,14 +477,8 @@ class AgentLog private constructor(
             // in the record, so a total maintained by reading the previous marker home would count
             // those rows again on every trim. Each row reports its own act; the total is the sum,
             // computed wherever it is wanted.
-            val marker = LogFormat.recordRow(
-                LogFormat.stamp(System.currentTimeMillis()),
-                nextId(),
-                NOTE,
-                APP,
-                "trimmed",
-                "${oldest.size} rows: the context was over its limit",
-            )
+            val said = "${oldest.size} rows: the context was over its limit"
+            val marker = LogFormat.recordRow(nextId(), ContextBudget.tokens(said), NOTE, APP, "trimmed", said)
             // **Taken out, not taken away.** The rows the app trims stay in the record, marked
             // `app` rather than `out` — the app's doing, not the agent's judgement — so a trim can
             // never be read as something the model decided. And the marker is `app` too, so it does
@@ -436,7 +489,7 @@ class AgentLog private constructor(
             // already taken out — the audit and the evidence, in one silent step.
             val kept = all.map { if (it.id in ids) it.flipped(APP) else it }
             try {
-                rewrite(kept.map { it.line } + marker)
+                store(kept, marker)
             } catch (t: Throwable) {
                 return 0
             }
@@ -465,19 +518,13 @@ class AgentLog private constructor(
      */
     fun reset(): Int = synchronized(guard) {
         val id = nextId()
-        val marker = LogFormat.recordRow(
-            LogFormat.stamp(System.currentTimeMillis()),
-            id,
-            NOTE,
-            APP,
-            "reset",
-            "the working context was cleared",
-        )
+        val said = "the working context was cleared"
+        val marker = LogFormat.recordRow(id, ContextBudget.tokens(said), NOTE, APP, "reset", said)
         // **Marked, not erased.** Every row that was in stays in the record and reads `app`: the
         // person's act is not the agent's judgement, and it is not a way to make history disappear
         // either. After this the next request is the instructions and the new task.
         val marked = rows().map { if (it.ctx == IN) it.flipped(APP) else it }
-        rewrite(marked.map { it.line } + marker)
+        store(marked, marker)
         seen = size()
         id
     }
@@ -495,13 +542,30 @@ class AgentLog private constructor(
      * 2. **The second file is deleted.** Once folded, nothing keeps it in step, and a file that
      *    claims to be the context while nothing writes it is a lie waiting to be believed.
      *
+     * 3. **The row lost its clock and gained a size**, so a row from the build before this one is
+     *    re-rendered in the shape this build writes — and its size is measured from its body, which
+     *    is the number the agent will choose by from now on.
+     *
      * Rows are re-rendered, not flipped: an old row's line has no ctx column to flip.
+     *
+     * **"Is it old" is asked of the line, not remembered.** A row is rewritten when its ctx is
+     * unknown *or* when the line it came from is not the shape this build writes — so a record left
+     * over from either earlier build is brought forward by the same test, and a row that is already
+     * current is never touched.
      */
     private fun foldLegacy() {
         val old = File(file.parentFile, CONTEXT)
         try {
             val rows = rows()
-            if (rows.none { it.ctx == UNKNOWN } && !old.isFile) return
+            // **A line that did not parse is left exactly as it is.** It is the evidence of
+            // something the app could not read, and re-rendering it would be the app replacing
+            // evidence with its own guess — and it would make every open rewrite the file, because
+            // such a line is never in the current shape.
+            if (rows.none { !it.broken && (it.ctx == UNKNOWN || !isCurrentShape(it.raw)) } &&
+                !old.isFile
+            ) {
+                return
+            }
             val inContext = if (old.isFile) {
                 old.readText().split("\n").filter { it.isNotBlank() }.mapNotNull { line ->
                     // The old context held the same rows in the same columns, so the id is the
@@ -513,19 +577,25 @@ class AgentLog private constructor(
                 null
             }
             val marked = rows.map { row ->
-                if (row.ctx != UNKNOWN) {
-                    row
-                } else {
-                    // `raw` is dropped so the line is written in the new shape, with the column.
-                    val ctx = when {
+                // `raw` is dropped for exactly the rows that are not in this build's shape, so the
+                // line is rendered again — with the column it gained, and the size it gained.
+                val ctx = if (row.ctx == UNKNOWN) {
+                    when {
                         inContext == null -> IN
                         row.id in inContext -> IN
                         else -> APP
                     }
-                    row.copy(ctx = ctx, raw = "")
+                } else {
+                    row.ctx
+                }
+                when {
+                    row.broken -> row
+                    isCurrentShape(row.raw) -> row.copy(ctx = ctx)
+                    else -> row.copy(ctx = ctx, raw = "")
                 }
             }
-            rewrite(marked.map { it.line })
+            // No marker: folding rewrites the rows it already has, and adds nothing.
+            rewrite(marked.asReversed().map { it.line })
             if (old.isFile) old.delete()
             seen = size()
         } catch (t: Throwable) {
@@ -578,15 +648,11 @@ class AgentLog private constructor(
     ): Int {
         synchronized(guard) {
             val id = nextId()
-            val line = LogFormat.recordRow(
-                LogFormat.stamp(System.currentTimeMillis()),
-                id,
-                kind,
-                ctx,
-                name,
-                detail,
-            )
-            append(line)
+            // **Measured once, here, and never again.** The body is what a request carries, so the
+            // cost of the body is what this row costs — not the formatted line, whose padding the
+            // model never sees.
+            val line = LogFormat.recordRow(id, ContextBudget.tokens(detail), kind, ctx, name, detail)
+            prepend(line)
             seen = size()
             return id
         }
@@ -602,16 +668,10 @@ class AgentLog private constructor(
     fun forget(ids: Set<Int>): Int = synchronized(guard) {
         val rows = rows()
         if (forgetProblem(rows, ids) != null) return 0
-        val marker = LogFormat.recordRow(
-            LogFormat.stamp(System.currentTimeMillis()),
-            nextId(),
-            NOTE,
-            APP,
-            "forgot",
-            ids.sorted().joinToString(","),
-        )
+        val said = ids.sorted().joinToString(",")
+        val marker = LogFormat.recordRow(nextId(), ContextBudget.tokens(said), NOTE, APP, "forgot", said)
         val changed = rows.map { if (it.id in ids) it.flipped(OUT) else it }
-        rewrite(changed.map { it.line } + marker)
+        store(changed, marker)
         seen = size()
         ids.size
     }
@@ -622,6 +682,27 @@ class AgentLog private constructor(
      * **Beside and renamed, as everything else here is.** A rewrite in place that stopped halfway
      * would leave a record whose last row is half a row — and this file is the evidence, so a
      * reader must see either the old one whole or the new one whole.
+     */
+    /**
+     * Puts [rows] on disk with [marker] as the newest, **newest first**.
+     *
+     * **The order is the whole point of the file's shape.** A record is read by something with a
+     * limit: a `read` of it, an eye on a phone, a model with a context that is already full. The
+     * newest rows are the ones that matter for every one of those, and newest-first means the first
+     * page is the useful one — where oldest-first put the whole conversation between a reader and
+     * what just happened.
+     *
+     * [rows] is oldest-first, the order every caller in this class thinks in. The reversal is here
+     * and nowhere else, so a new writer cannot get it wrong in one place while getting it right in
+     * another.
+     */
+    private fun store(rows: List<Row>, marker: String) =
+        rewrite(rows.asReversed().map { it.line } + marker)
+
+    /**
+     * Writes the file, lines already in the order the file keeps them.
+     *
+     * Called by [store] for a whole rewrite, and by [append] for one new row at the front.
      */
     private fun rewrite(lines: List<String>) =
         Beside.write(file, lines.joinToString("\n") + "\n")
@@ -650,10 +731,19 @@ class AgentLog private constructor(
         0L
     }
 
-    private fun append(line: String) {
+    /**
+     * Puts [line] at the top of the file — the newest row.
+     *
+     * **A rewrite, not an append**, because the file's newest row is its first. A row is a line and
+     * a session's file is tens of kilobytes, so this is a few milliseconds of a phone's flash; it is
+     * the price of the first page being the useful one, and it is paid once per row rather than once
+     * per read.
+     */
+    private fun prepend(line: String) {
         try {
             file.parentFile?.mkdirs()
-            file.appendText(line + "\n")
+            val old = if (file.isFile) file.readText() else ""
+            Beside.write(file, line + "\n" + old)
         } catch (t: Throwable) {
             // A record that cannot be written is worth more than the operation it describes:
             // the turn goes on, and the person still has the app. Recorded nowhere, because
@@ -663,7 +753,14 @@ class AgentLog private constructor(
 
     // ---- reading ------------------------------------------------------------
 
-    /** Every row of the record, oldest first. The box renders from this. */
+    /**
+     * Every row of the record, **oldest first** — the opposite of the file.
+     *
+     * The file keeps its newest row at the top, because a reader with a limit (a `read`, a person's
+     * eye, a model with a full context) wants what just happened on the first page. Everything that
+     * reasons about the conversation thinks oldest-first, so the reversal happens once, in [parse],
+     * and no caller has to know which way round the file is.
+     */
     fun rows(): List<Row> = parse(file)
 
     /**
@@ -702,12 +799,15 @@ class AgentLog private constructor(
             ""
         }
         if (text.isEmpty()) return emptyList()
-        // **The last line is only a row when it is finished.** The app appends while the box
-        // reads, so a line without its newline is one being written, and half a row shown as an
-        // event is showing something that did not happen. Splitting puts an empty string last
-        // when the file ends in a newline and the half-written row last when it does not, so
-        // dropping it is the same rule either way.
-        return text.split("\n").dropLast(1).map { parseRow(it) }
+        // **The last line is only a row when it is finished.** A file written by an older build was
+        // appended to while the box read it, so a line without its newline is one being written, and
+        // half a row shown as an event is showing something that did not happen. Splitting puts an
+        // empty string last when the file ends in a newline and the half-written row last when it
+        // does not, so dropping it is the same rule either way.
+        //
+        // **Then back to oldest-first**, which is the order every reader above thinks in. The file
+        // keeps its newest row at the top; nothing outside this function has to know that.
+        return text.split("\n").dropLast(1).map { parseRow(it) }.asReversed()
     }
 
     // ---- opening ------------------------------------------------------------
@@ -824,20 +924,18 @@ class AgentLog private constructor(
             // dropped nothing at all — the same "a limit that does nothing" as before, one
             // parameter to the left.
             val (kept, dropped) =
+                // Bytes of the line, because this cap is about the **file on disk** — it is a
+                // storage budget, not a context one, and a file has bytes.
                 keepNewest(rows, budget = limit / 2) { row -> row.line.length.toLong() + 1 }
             if (dropped == 0) return 0
-            val marker = LogFormat.recordRow(
-                LogFormat.stamp(System.currentTimeMillis()),
-                nextId(),
-                NOTE,
-                APP,
-                "trimmed",
-                "$dropped rows from before ${kept.firstOrNull()?.time ?: "now"}",
-            )
+            // **The id, not a clock.** The row this trim stopped above is named by the handle the
+            // record already uses, so the sentence is still checkable in the file.
+            val said = "$dropped rows older than #${kept.firstOrNull()?.id ?: 0}"
+            val marker = LogFormat.recordRow(nextId(), ContextBudget.tokens(said), NOTE, APP, "trimmed", said)
             try {
                 // The one place rows leave the record for good: this is the evidence's own limit,
                 // and the reason the audit has a horizon rather than a history.
-                rewrite(listOf(marker) + kept.map { it.line })
+                store(kept, marker)
             } catch (t: Throwable) {
                 return 0
             }

@@ -21,7 +21,7 @@ out clean.
 | element | agreed | code | test | trace |
 |---|---|---|---|---|
 | one file, `agent/session.log` | r6 §0 | `AgentLog` | `a turn is written once, and the ctx column says what the model is sent` | — |
-| six columns, fixed width, escaped body | r2 (format), r6 (ctx) | `LogFormat.recordRow` | `the columns stay aligned after a flip, so the file still greps and parses` | — |
+| `id size kind ctx name detail`, fixed width, escaped body, newest row first | r2 (format), r6 (ctx), r7 (size, order) | `LogFormat.recordRow` | `the columns stay aligned after a flip, so the file still greps and parses` · `the newest row is the first line of the file, and the rows come back oldest first` | — |
 | `ctx` = `in` / `out` / `app` | r6 §0 | `AgentLog.IN/OUT/APP` | `a forgotten row stays in the file and leaves the context` | — |
 | the request is ① + ② + the `in` rows | r3 §1.5, r6 §0 | `Agent.build` / `Agent.messages` | `the request carries the instructions, the project, the tools and the operator` | — |
 | a row carries its own line (no re-render) | r6 §1 | `Row.line`, `LogFormat.flipCtx` | `forgetting changes four characters and not one other byte` | — |

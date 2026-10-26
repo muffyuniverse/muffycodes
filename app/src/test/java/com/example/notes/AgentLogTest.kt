@@ -122,7 +122,7 @@ class AgentLogTest {
         // backslash-n that is not a newline, real newlines (escaped in the file), and a quote.
         val nasty = "a\\b and \\n literally, then a real\nnewline, and a \"quote\""
         val id = log.got("read", "0\n$nasty")
-        val before = linesIn(log.session).last()
+        val before = linesIn(log.session).first()
 
         log.forget(setOf(id))
 
@@ -139,8 +139,8 @@ class AgentLogTest {
         log.forget(setOf(id))
 
         val line = linesIn(log.session).first { it.contains("a note") }
-        // `14:02:11.410    2 NOTE    out agent    a note` — id padded to four, kind to seven,
-        // ctx to three, so every column starts where it started before.
+        // `   2     4 NOTE    out agent    a note` — id padded to four, size to five, kind to
+        // seven, ctx to three, so every column starts where it started before.
         assertTrue("ctx is the fourth column: $line", line.contains("NOTE    out "))
         assertEquals("and the row parses", id, AgentLog.parseRow(line).id)
         assertEquals("with its own name", "agent", AgentLog.parseRow(line).name)
@@ -202,9 +202,10 @@ class AgentLogTest {
     }
 
     @Test
-    fun `a half-written last line is not a row yet`() {
-        // The box reads a file the app is appending to. Half a row shown as an event is
-        // showing something that did not happen.
+    fun `a line with no newline after it is not a row yet`() {
+        // A file read while an older build was appending to it. Half a row shown as an event is
+        // showing something that did not happen, and this build writes every row whole, so the rule
+        // now exists only for the files it inherited.
         log.told("finished")
         // Half a row, with no brace in it: the repository's brace check counts braces in
         // text as well as in code, and a fixture is not a reason to weaken a check.
@@ -216,6 +217,40 @@ class AgentLogTest {
     }
 
     @Test
+    fun `the newest row is the first line of the file, and the rows come back oldest first`() {
+        // **The order is the file's whole point.** A record is read by something with a limit — a
+        // `read`, a person's eye, a model whose context is already full — so the newest rows are at
+        // the top. Everything that reasons about the conversation still thinks oldest-first, so the
+        // reversal is in `parse` and nowhere else.
+        val first = log.told("the first task")
+        val second = log.told("the second task")
+
+        val file = linesIn(log.session)
+        val rows = AgentLog.open(project).rows()
+
+        assertTrue("the newest is the first line: ${file.first()}", file.first().contains("the second task"))
+        assertTrue("the oldest is the last: ${file.last()}", file.last().contains("the first task"))
+        assertEquals("and the rows are oldest first", listOf(first, second), rows.map { it.id })
+    }
+
+    @Test
+    fun `a row carries its own size, and the size is what the body costs`() {
+        // **The number the agent chooses by, written once.** It is the cost of the body — what a
+        // request carries — and not of the formatted line, whose columns the model never sees.
+        val body = "x".repeat(700)
+        val id = log.got("read", body)
+
+        val row = AgentLog.open(project).rows().first { it.id == id }
+        val line = linesIn(log.session).first { it.contains("x".repeat(20)) }
+
+        assertEquals("the row's own number", ContextBudget.tokens(body), row.size)
+        assertTrue(
+            "and the file holds the same number in its column: $line",
+            line.split(Regex(" +"))[1] == row.size.toString(),
+        )
+    }
+
+    @Test
     fun `a line that does not parse is shown as a row that says so`() {
         // Never dropped: a log that silently loses the evidence is worse than one with a
         // blemish, because the blemish is the thing somebody needs to see.
@@ -224,8 +259,10 @@ class AgentLogTest {
 
         val rows = AgentLog.open(project).rows()
         assertEquals("both lines are rows", 2, rows.size)
-        assertTrue("the second one is marked", rows[1].broken)
-        assertEquals("and it keeps its text", "this is not a row", rows[1].detail)
+        // The unreadable line was added last, so it is the newest — which is now the first line of
+        // the file and the last row of the oldest-first list.
+        assertTrue("the unreadable one is marked", rows.last().broken)
+        assertEquals("and it keeps its text", "this is not a row", rows.last().detail)
     }
 
     @Test

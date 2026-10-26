@@ -11,7 +11,7 @@ followed it; the decisions in them are what this says, and the plan that impleme
 | tool | arguments | what it does |
 |---|---|---|
 | `tree` | `path`, `depth`, `name`, `grep`, `from`, `to` | lists a folder; with a pattern, answers with paths and matching lines. `from`/`to` pick a range of **paths** |
-| `read` | `path`, `revision`, `grep`, `from`, `to` | a text file, or one of its versions. With `grep`, the matching lines with their real line numbers, inside the range |
+| `read` | `path`, `revision`, `grep`, `from`, `to`, `raw` | a text file, or one of its versions. With `grep`, the matching lines with their real line numbers, inside the range. The record is shown as `id name body`; `raw` shows its own columns |
 | `edit` | `path`, and one of `find`+`replace`, `from`/`to`+`replace`, `at`+`replace`, `text` | changes part of a file. `replace` is text **or a `read` call** |
 | `create` | `path`, `text` | makes a file, and the folders above it |
 | `delete` | `path` | a file, or a folder and everything in it |
@@ -20,7 +20,7 @@ followed it; the decisions in them are what this says, and the plan that impleme
 | `restore` | `path`, `revision` | puts a version back; it becomes a new version |
 | `background` | `tool`, `args` | any command, with its result written to a file instead of into the conversation |
 | `reason` | `text` | the agent's own note in the record |
-| `forget` | `ids` | takes rows out of the context; the whole of compaction |
+| `forget` | `ids` | takes rows out of the context; the whole of compaction. One number, a list, or a range like `7-12` — `"2 5 7-12 14"` is ten rows in one call |
 | `ask`, `conclude` | — | end the turn. Called alone |
 
 There is no `clone`. Cloning a repository is the operator's, through the add-project window — the
@@ -52,6 +52,16 @@ because `lines` was a retired name the parser had stopped looking at.
 the end. In `read`, `tree` and `history` they select from the result — lines, paths, versions. **A
 pattern is always applied inside the range, never the other way round**, so a line number read in one
 call means the same line in the next.
+
+**A pattern is a per-line test, in every command, and nothing else.** `tree`, `read` and `history` ask
+the same question of the same text, so a line one of them finds, all of them find — anchors included,
+which was not true while `tree` and `history` first tested the whole file. It is case-insensitive in
+every script (`UNICODE_CASE`, not `CASE_INSENSITIVE` alone, which folds ASCII), a pattern holding a
+line break is refused rather than answered with "nothing matches", and a hit shows a window around
+the match rather than the first two hundred characters of the line. A pattern is also the one input
+that can take unbounded time in a single call, so the text is handed to the engine as a view that
+asks the deadline from inside `charAt`: `(a+)+$` stops at the operator's limit like any other
+command.
 
 **No command has a limit of its own.** There is no 200-match cap and no silent twentieth version.
 `MAX_SCAN` is gone: a phone has gigabytes, and the limit exists to protect the conversation, not the

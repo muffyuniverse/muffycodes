@@ -63,25 +63,32 @@ object LogFormat {
         }
 
     /**
-     * A **record** row: the same five columns with the record's own between kind and name.
+     * A **record** row: `id size kind ctx name  detail`.
      *
-     * `stamp id kind ctx name  detail`. The four places that made a rewritten file dangerous are
-     * gone with the second file: a row is no longer re-rendered to say whether it is in the
-     * context, so nothing has to be escaped twice, no line has to end in a newline to be whole,
-     * and no edit has to be compared row by row. A row is taken out of the context by [flipCtx],
-     * which touches four characters and nothing else.
+     * **No clock.** A row used to begin with `14:02:11.410`, and it was there for the person
+     * reading the file — but the app's own trace still carries a time for everything that happened,
+     * and the record's job is to be the conversation rather than a chronology of it. Five columns
+     * of which two are the app's, one is the measurement, and two are what the model is sent.
+     *
+     * **`size` is the row's cost in tokens**, stored rather than recomputed: it is the number the
+     * agent chooses what to forget by, and two places computing it was two numbers that could
+     * disagree. It is the cost of the **body** — what the row contributes to a request — and not of
+     * the formatted line, which carries column padding the model never sees.
+     *
+     * The columns still stand in fixed order, so [flipCtx] can change the ctx column by text surgery
+     * and no rewrite has to re-render a body that contains a backslash.
      */
     fun recordRow(
-        stamp: String,
         id: Int,
+        size: Long,
         kind: String,
         ctx: String,
         name: String,
         detail: String,
     ): String = buildString {
-        append(stamp)
-        append(' ')
         append(id.toString().padStart(4))
+        append(' ')
+        append(size.toString().padStart(5))
         append(' ')
         append(kind.padEnd(7))
         append(' ')
@@ -104,17 +111,17 @@ object LogFormat {
      */
     fun flipCtx(line: String, ctx: String): String {
         val match = HEAD.find(line) ?: return line
-        val stamp = match.groupValues[1]
-        val id = match.groupValues[2].padStart(4)
+        val id = match.groupValues[1].padStart(4)
+        val size = match.groupValues[2].padStart(5)
         val kind = match.groupValues[3].padEnd(7)
         // Everything after the separator belongs to the name and the body, and is carried over as
         // the same characters: this function has no way to touch them.
         val rest = line.substring(match.range.last + 1)
-        return "$stamp $id $kind ${ctx.padEnd(3)} $rest"
+        return "$id $size $kind ${ctx.padEnd(3)} $rest"
     }
 
     /** The four fixed columns, ending at the space before the name. */
-    private val HEAD = Regex("""^(\d\d:\d\d:\d\d\.\d\d\d) +(\d+) +(\S+) +(\S+) +""")
+    private val HEAD = Regex("""^(\d+) +(\d+) +(\S+) +(\S+) +""")
 
     /** The body's one escaping rule: a newline and a backslash, in that order. */
     fun escaped(text: String): String = text.replace("\\", "\\\\").replace("\n", "\\n")

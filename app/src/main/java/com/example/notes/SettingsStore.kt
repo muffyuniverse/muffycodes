@@ -318,19 +318,37 @@ class SettingsStore(context: Context, name: String = "settings") {
      *
      * It is also clamped by the model's own input window ([ContextBudget.resultLimit]), because a
      * result bigger than the window cannot be sent at all.
+     *
+     * **In tokens**, the same unit as every limit beside it. It was characters, which made the row a
+     * person types and the wall it is clamped by two different units — 20,000 characters had to be
+     * converted in the head to compare with a 128k window. A number from before this change is
+     * converted once, so nobody's setting changes meaning underneath them.
      */
     var maxResult: Int by mutableStateOf(
-        prefs.getInt(KEY_MAX_RESULT, DEFAULT_MAX_RESULT)
+        prefs.getInt(KEY_MAX_RESULT_TOKENS, -1).takeIf { it > 0 } ?: migratedResult(),
     )
         private set
 
-    /** Sets the longest result. Never zero: a tool that answers with nothing is a hang. */
-    fun keepMaxResult(chars: Int) {
-        val clean = chars.coerceIn(MIN_MAX_RESULT, MAX_MAX_RESULT)
+    /** Sets the longest result, in tokens. Never zero: a tool that answers with nothing is a hang. */
+    fun keepMaxResult(tokens: Int) {
+        val clean = tokens.coerceIn(MIN_MAX_RESULT, MAX_MAX_RESULT)
         Trace.tap("result length", "$clean")
         maxResult = clean
-        prefs.edit().putInt(KEY_MAX_RESULT, clean).apply()
-        Trace.said("one result may carry $clean characters")
+        prefs.edit().putInt(KEY_MAX_RESULT_TOKENS, clean).apply()
+        Trace.said("one result may carry about $clean tokens")
+    }
+
+    /**
+     * The result limit a build before tokens stored, as tokens.
+     *
+     * The old key held **characters**, so reading it as tokens would multiply every allowance by
+     * 3.5 in one upgrade — a person's 20,000 became a 70,000-character result entering the
+     * conversation. Dividing by the estimate's own ratio keeps the number they chose.
+     */
+    private fun migratedResult(): Int {
+        val old = prefs.getInt(KEY_MAX_RESULT, 0)
+        if (old <= 0) return DEFAULT_MAX_RESULT
+        return (old / ContextBudget.BYTES_PER_TOKEN).toInt().coerceIn(MIN_MAX_RESULT, MAX_MAX_RESULT)
     }
 
     /**
@@ -396,7 +414,11 @@ class SettingsStore(context: Context, name: String = "settings") {
     const val KEY_POLL = "agent_poll_seconds"
     const val KEY_FOREGROUND = "agent_foreground_seconds"
     const val KEY_BACKGROUND = "agent_background_seconds"
+    /** Characters, from a build before the row was in tokens. Read once, by [migratedResult]. */
     const val KEY_MAX_RESULT = "agent_max_result"
+
+    /** The result limit in tokens: the number the row shows and the agent is held to. */
+    const val KEY_MAX_RESULT_TOKENS = "agent_max_result_tokens"
     const val KEY_SESSION_MB = "agent_session_mb"
 
     /**
@@ -444,7 +466,9 @@ class SettingsStore(context: Context, name: String = "settings") {
     const val MAX_TIMEOUT_MINUTES = 30
 
     /**
-     * Twenty thousand characters is about a long source file, which is what a result is for.
+     * Six thousand tokens is about twenty thousand characters — a long source file, which is what a
+     * result is for. The number is the same allowance the app always had, said in the unit the
+     * limit beside it is in.
      *
      * **[MAX_MAX_RESULT] is not the ceiling that matters.** The number a person may actually ask for
      * is bounded by the model's input window (`ContextBudget.resultLimit`), because a result bigger
@@ -452,7 +476,7 @@ class SettingsStore(context: Context, name: String = "settings") {
      * bound before any model is known — and it is a million tokens in characters, the largest window
      * this app can be pointed at, so it never becomes the limit the window should be.
      */
-    const val DEFAULT_MAX_RESULT = 20_000
+    const val DEFAULT_MAX_RESULT = 6_000
     const val MIN_MAX_RESULT = 1_000
     const val MAX_MAX_RESULT = 4_194_304
 

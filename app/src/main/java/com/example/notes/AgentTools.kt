@@ -22,7 +22,7 @@ class AgentTools(
     private val project: String,
     private val git: ProjectGit,
     private val log: AgentLog,
-    private val maxChars: Int = MAX_RESULT,
+    private val maxTokens: Int = MAX_RESULT,
     /** Where a `background` call runs. Inline by default, so a test acquires no thread. */
     private val bg: Background = Background.inline(),
     /**
@@ -47,7 +47,7 @@ class AgentTools(
     val worktree: File get() = ws.repoOf(project)
 
     companion object {
-        /** The default result limit, for a caller that has no setting of its own. */
+        /** The default result limit in tokens, for a caller that has no setting of its own. */
         const val MAX_RESULT = SettingsStore.DEFAULT_MAX_RESULT
 
         /**
@@ -90,6 +90,25 @@ class AgentTools(
         const val HIT = 200
 
         /**
+         * How many rows one `forget` may name, after ranges are expanded.
+         *
+         * Generous against any real context — a row costs about a hundred bytes, so four thousand is
+         * four hundred kilobytes of conversation — and small enough that a range nobody meant is
+         * refused instead of built. It is a bound on the *work*, not on the answer: a call that
+         * named this many rows would be refused by `forget`'s own rules anyway.
+         */
+        const val MAX_IDS = 4_096
+
+        /**
+         * What a range may be written with, normalised to `..` before anything is split.
+         *
+         * A hyphen **between two digits**, so `7-19` and `7 - 19` are one range while `-3` stays a
+         * number. Done before the split, because splitting `7 - 19` on spaces would leave a piece
+         * that is a bare hyphen.
+         */
+        private val RANGE_SIGN = Regex("""(?<=\d)\s*(?:\.\.|-)\s*(?=\d)""")
+
+        /**
          * The folder a call's result is written into, under `agent/`.
          *
          * **Inside `agent/` and not at the project root**, because a file at the root is a change the
@@ -116,7 +135,7 @@ class AgentTools(
          */
         val KEYS: Map<String, Set<String>> = mapOf(
             "tree" to setOf("path", "depth", "name", "grep", "from", "to"),
-            "read" to setOf("path", "from", "to", "grep", "revision"),
+            "read" to setOf("path", "from", "to", "grep", "revision", "raw"),
             "edit" to setOf("path", "find", "replace", "from", "to", "at", "text"),
             "forget" to setOf("ids"),
             "create" to setOf("path", "text"),
@@ -177,7 +196,9 @@ class AgentTools(
                 "left out runs to the end. " +
                     "With `grep` only the lines that match are shown, each with its line number, " +
                     "and the pattern is applied inside `from`/`to` rather than to the whole file. " +
-                    "A pattern is a regular expression, case-insensitive, matched inside one line.",
+                    "A pattern is a regular expression, case-insensitive, matched inside one line. " +
+                    "Your record is shown as `id name body`; with `raw` it is shown as the file " +
+                    "holds it, `id size kind ctx name body`, so you can see and search the columns.",
                 "{\"path\":\"the file, relative to the project\",\"from\":1,\"to\":200," +
                     "\"grep\":\"a pattern to look for\",\"revision\":\"an id from history\"}",
             ),
@@ -193,8 +214,10 @@ class AgentTools(
             ),
             spec(
                 "forget",
-                "Take rows out of your context when it is too big. The rows stay in the record.",
-                """{"ids":[12,13]}""",
+                "Take rows out of your context when it is too big. The rows stay in the record. " +
+                    "`ids` names rows: one number, several, or a range like `7-12` — both ends " +
+                    "included — so \"2 5 7-12 14\" forgets ten rows in one call.",
+                """{"ids":"2 5 7-12 14"}""",
             ),
             spec(
                 "create",
@@ -684,7 +707,27 @@ class AgentTools(
         // revision is read exactly as it would be written back.
         val revision = args.optString("revision").trim()
         val text = if (revision.isEmpty()) {
-            readText(file, deadline)
+            // **The record is shown as the model's own view of it — unless it asks for the file.**
+            // Its columns belong to four audiences: `kind` is how the conversation is rebuilt, `ctx`
+            // is the audit's, `size` is the measurement the person and the app act on, and the
+            // padding is for an eye on a file. None of them is something the model can act on, and
+            // two numbers side by side invite it to forget the wrong one, so the view is
+            // `id name body`.
+            //
+            // **`raw` is the way back to the columns**, because the size *is* worth reading: it is
+            // the number the clear-up line quotes, and a model that wants to rank rows itself, or
+            // search the record for the expensive ones, needs the file rather than the view. One
+            // flag, and the same `grep` then matches the columns too.
+            val raw = args.optBoolean("raw", false)
+            when {
+                !raw -> if (ws.isRecord(file)) recordText(file, deadline) else readText(file, deadline)
+                ws.isRecord(file) -> readText(file, deadline)
+                else -> return Result.failure(
+                    IllegalArgumentException(
+                        "`raw` shows the columns of your own record, and ${rel(file)} is not it",
+                    ),
+                )
+            }
         } else {
             val bytes = git.bytesAt(project, rel(file), revision)
                 ?: return Result.failure(
@@ -719,6 +762,20 @@ class AgentTools(
         }
         return Result.success(chosen.joinToString("\n"))
     }
+
+    /**
+     * The record, line by line, as the model reads it — `id size name  body`.
+     *
+     * Read in chunks so the deadline is asked, and each line parsed once. A line the record cannot
+     * give meaning to is passed through **as it is** rather than dropped: the model is looking at
+     * evidence, and a row the app cannot parse is one more thing a person may need to be told about.
+     */
+    private fun recordText(file: File, deadline: Deadline): String =
+        readText(file, deadline)
+            .split("\n")
+            .joinToString("\n") { line ->
+                if (line.isBlank()) line else AgentLog.parseRow(line).shown
+            }
 
     /**
      * The part of [lines] that the arguments select — `from` and `to`, both inclusive, 1-based.
@@ -889,42 +946,86 @@ class AgentTools(
     }
 
     /**
-     * The row ids a `forget` call names: a list, one number, or numbers written as one string.
+     * The row ids a `forget` call names, in whichever of the shapes a model writes.
      *
-     * **Three shapes, because a model writes all three.** `{"ids":[12,13]}` is the description's,
-     * `{"ids":12}` is what a model that forgets one row writes sooner or later, and
-     * `{"ids":"12,13"}` is what one writes when it is thinking of a sentence. A refusal for the
-     * last two would be about the shape of the JSON rather than about the work.
+     * **Four shapes, because the model has four habits.** `{"ids":[12,13]}` is a list,
+     * `{"ids":12}` is what one writes when it forgets a single row, `{"ids":"12,13"}` is what one
+     * writes when it is thinking of a sentence, and `{"ids":"2 5 7..12 14"}` is the one a person
+     * would write — a range is how somebody says "the twelve rows from seven to eighteen" without
+     * counting them out. A refusal for any of them would be about the shape of the JSON rather than
+     * about the work, so all four are read.
      *
-     * Every number is read from the value: `optInt` answers the default on the phone and casts on
-     * the JVM, so a quoted id would be silently ignored on one and a crash on the other.
+     * **A range is expanded here, and that is why it is bounded.** `7..12` is six ids; `1..100000`
+     * is an expansion nobody meant, and a set that big is work the phone does for an answer that
+     * will be refused for naming rows that do not exist. [MAX_IDS] is the bound, and the refusal
+     * says how many it was.
+     *
+     * Every number is read from the value rather than through `optInt`, which answers the default
+     * on the phone and casts on the JVM — so a quoted id was silently ignored on one and a crash on
+     * the other. And nothing here drops a number it does not like: `0` and `-3` are kept, so the
+     * answer is `There is no row 0` rather than a count that quietly forgot it was asked.
      */
     private fun idsIn(args: JSONObject): Result<Set<Int>> {
-        val raw = args.opt("ids")
         val out = mutableSetOf<Int>()
-
-        fun take(value: Any?) {
-            val id = whole(value)
-                ?: throw IllegalArgumentException(
-                    "`ids` are row numbers, and ${quoted(value)} is not one",
-                )
-            out.add(id)
-        }
-
-        try {
-            when {
-                raw == null || raw === JSONObject.NULL -> return Result.success(emptySet())
-                raw is org.json.JSONArray -> for (i in 0 until raw.length()) take(raw.opt(i))
-                raw is String && (raw.contains(',') || raw.contains(' ')) ->
-                    for (piece in raw.split(',', ' ')) if (piece.isNotBlank()) take(piece)
-                else -> take(raw)
-            }
+        return try {
+            collectIds(args.opt("ids"), out)
+            Result.success(out)
         } catch (e: IllegalArgumentException) {
-            return Result.failure(e)
+            Result.failure(e)
         }
-        out.removeAll { it <= 0 }
-        return Result.success(out)
     }
+
+    /** Everything [value] names, added to [out] — a number, a string of them, or an array of both. */
+    private fun collectIds(value: Any?, out: MutableSet<Int>) {
+        when {
+            value == null || value === JSONObject.NULL -> Unit
+            value is org.json.JSONArray ->
+                for (i in 0 until value.length()) collectIds(value.opt(i), out)
+            // Comma, space, tab or newline: a list somebody typed. The range separator is normalised
+            // first, so `7-12`, `7 - 12` and `7..12` are one thing before anything is split.
+            value is String -> for (piece in RANGE_SIGN.replace(value, "..").split(',', ' ', '\t', '\n')) {
+                if (piece.isNotBlank()) collectRange(piece.trim(), out)
+            }
+            else -> out.add(idOf(value))
+        }
+    }
+
+    /**
+     * One piece: a number, or a range inclusive at both ends.
+     *
+     * **`7-19` and `7..19` are the same range, and the hyphen is the one a person writes.** The
+     * hyphen only counts **between two digits**, which is what keeps `-3` a number: a model sending
+     * a stray negative gets "there is no row -3" instead of a range from nothing to three.
+     */
+    private fun collectRange(piece: String, out: MutableSet<Int>) {
+        val dots = piece.indexOf("..")
+        if (dots < 0) {
+            out.add(idOf(piece))
+            return
+        }
+        val from = idOf(piece.substring(0, dots))
+        val to = idOf(piece.substring(dots + 2))
+        if (to < from) {
+            throw IllegalArgumentException(
+                "That range ends at $to, before it starts at $from. " +
+                    "`7-12` runs from the smaller number to the larger",
+            )
+        }
+        // In Long, because `to - from` in Int wraps: a range of the whole number line would come
+        // out negative, pass the bound, and then be expanded for ever.
+        val size = to.toLong() - from.toLong() + 1
+        if (size > MAX_IDS) {
+            throw IllegalArgumentException(
+                "That range names $size rows. Name the ones you mean, or a shorter range",
+            )
+        }
+        for (id in from..to) out.add(id)
+    }
+
+    /** One id, or a refusal naming the piece that was not one. */
+    private fun idOf(value: Any?): Int = whole(value) ?: throw IllegalArgumentException(
+        "`ids` are row numbers, or ranges like `7..12`, and ${quoted(value)} is neither",
+    )
 
     private fun create(args: JSONObject, deadline: Deadline): String {
         val file = resolveFile(args.optString("path"))
@@ -1152,15 +1253,19 @@ class AgentTools(
      * (`background`'s work), and one going into another file (`edit`'s replacement).
      */
     fun forConversation(call: Call, body: String): String {
-        if (body.length <= maxChars) return body
+        // **In tokens, like every other limit.** A character count was a second unit that had to be
+        // converted before it could be compared with the operator's window, and the sentence a model
+        // read named a number the limit beside it did not.
+        val size = ContextBudget.tokens(body)
+        if (size <= maxTokens) return body
         val status = if (body.startsWith("1\n")) "1" else "0"
         val text = body.substringAfter('\n')
         val path = bg.keep(projectDir, call, text)
-            ?: return "$status\nThat result was ${text.length} characters and the limit is $maxChars, " +
+            ?: return "$status\nThat result is about $size tokens and the limit is $maxTokens, " +
                 "and it could not be written to a file either. Narrow it instead: " +
                 "{\"from\":1,\"to\":200} or {\"grep\":\"pattern\"}."
         val asked = "{\"path\":\"$path\",\"from\":1,\"to\":200}"
-        return "$status\nThat result was ${text.length} characters and the limit is $maxChars, so it " +
+        return "$status\nThat result is about $size tokens and the limit is $maxTokens, so it " +
             "was written whole to $path. Read it in ranges: $asked, or " +
             "{\"path\":\"$path\",\"grep\":\"a pattern\"}."
     }

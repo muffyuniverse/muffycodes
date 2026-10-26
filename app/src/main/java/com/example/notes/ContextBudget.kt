@@ -80,19 +80,26 @@ object ContextBudget {
     /**
      * How much of one result may enter the conversation, in characters — asked, and in force.
      *
-     * **The input window, in the unit the field is typed in.** A result is a character count; the
-     * window is tokens; four bytes per token is the same estimate the rest of this file uses, so the
-     * clamp is `window × 4` characters and says so. A window nobody knows clamps nothing: the ask is
-     * the limit, which is what the app did before this number had a ceiling.
+     * **The input window, in the unit the field is typed in** — and it is typed in **tokens**, the
+     * same unit as every limit beside it. It used to be characters, which made the row a person
+     * types in one unit and the wall it is clamped by a second: the text had to convert 20,000
+     * characters to "5.7k tokens" in its head every time, and the clamp was `window × 4` bytes of a
+     * different thing again. A result is a token count now, and the clamp is the window itself.
+     *
+     * A window nobody knows clamps nothing: the ask is the limit, which is what the app did before
+     * this number had a ceiling.
      */
     fun resultLimit(asked: Int, contextLength: Int?): Limit = Limit(
         asked = asked.toLong(),
         ceiling = if (contextLength != null && contextLength > 0) {
-            contextLength.toLong() * BYTES_PER_TOKEN
+            contextLength.toLong()
         } else {
             Long.MAX_VALUE
         },
     )
+
+    /** How many tokens one result may carry, as the setting is stored: 20k by default. */
+    fun resultTokens(asked: Int): Long = asked.toLong()
 
     /** The session log's size in bytes, from the operator's megabytes; zero is "keep everything". */
     fun sessionBytes(megabytes: Int): Long =
@@ -103,14 +110,23 @@ object ContextBudget {
      *
      * **The app cannot tokenize.** A tokenizer is a model's vocabulary, it is not shipped in this
      * APK, and downloading one to count bytes would be a second failure mode in the path that has
-     * to work on a train. So the count is an estimate, and the direction of the error is chosen
-     * deliberately: `bytes / 4`, rounded **up**, because English and code average about four
-     * bytes per token and rounding up means the app asks the agent to clear up slightly early
-     * rather than sending a request the endpoint refuses for being too long.
+     * to work on a train. So the count is an estimate, and the constant is the one whose error lands
+     * in the safe direction for the text this app produces.
+     *
+     * **3.5 bytes a token, not 4.** The app pins `deepseek/deepseek-v4.1-flash`, and DeepSeek
+     * publishes its own ratio: about **0.3 token per English character**, which is one token per
+     * 3.33 bytes of ASCII, and about 0.3 for code and JSON too. Dividing by 4 therefore *under*
+     * counted English by 17% and code by 20-25% — the direction that says a context is smaller than
+     * it is, so the clear-up fires late and a request can be refused for being too long. Dividing
+     * by 3.5 errs by under 5% in that direction and over about 9% for Chinese (DeepSeek's 0.6
+     * token per character is 5 bytes a token), which is early rather than long.
      *
      * The number is therefore a *policy* number, not a bill. Every place it is shown says so.
      */
-    fun tokens(text: String): Long = (bytes(text) + BYTES_PER_TOKEN - 1) / BYTES_PER_TOKEN
+    fun tokens(text: String): Long =
+        // ceil(bytes / 3.5), in integers: (2 * bytes + 6) / 7. Shown rather than a floor division
+        // by a constant, because 3.5 is not an integer and rounding down is the unsafe direction.
+        (bytes(text) * 2L + 6L) / 7L
 
     /**
      * A text's exact size in bytes.
@@ -127,8 +143,14 @@ object ContextBudget {
      */
     fun bytes(text: String): Long = text.toByteArray().size.toLong()
 
-    /** Four bytes per token: the estimate's own constant, named so the arithmetic reads. */
-    const val BYTES_PER_TOKEN = 4L
+    /**
+     * Bytes per token, as a fact about the pinned model rather than a round number.
+     *
+     * `deepseek`'s own documentation gives 0.3 token per English character, which is 3.33 bytes of
+     * ASCII — so this is 3.5, and the share it errs by is named where it is used. It is also the
+     * unit a person is shown when a size has to be a count rather than a scale.
+     */
+    const val BYTES_PER_TOKEN = 3.5
 
     /** One text plus another, as one number. */
     fun tokens(vararg texts: String): Long = texts.sumOf { tokens(it) }
@@ -203,27 +225,6 @@ object ContextBudget {
             fun of(triggerAsked: Long, hardAsked: Long, ceiling: Long): Limits =
                 Limits(Limit(triggerAsked, ceiling), Limit(hardAsked, ceiling))
         }
-    }
-
-    /**
-     * A size a person reads, in **bytes**: `412 B`, `9.3k`, `1.2M`.
-     *
-     * The exact unit, shown where somebody could check it with `wc -c` — a row's caption in the
-     * box, for instance. The prompt uses [short] and its tokens instead, because the limit a model
-     * is working against is in tokens and making it convert is making it convert wrong.
-     */
-    fun sizeLabel(bytes: Long): String = when {
-        bytes < 1_000L -> "$bytes B"
-        bytes < 1_000_000L -> "${tenths(bytes, 1_000L)}k"
-        else -> "${tenths(bytes, 1_000_000L)}M"
-    }
-
-    /** A byte count over [unit], to one decimal place, without a trailing `.0`. */
-    private fun tenths(bytes: Long, unit: Long): String {
-        val scaled = bytes * 10 / unit
-        val whole = scaled / 10
-        val part = scaled % 10
-        return if (part == 0L) "$whole" else "$whole.$part"
     }
 
     /**

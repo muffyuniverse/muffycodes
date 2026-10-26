@@ -684,7 +684,7 @@ class Agent(
         val lineOf = log.rows().withIndex().associate { (index, row) -> row.id to index + 1 }
         val costs = log.contextRows()
             .map { row ->
-                RowCost(row.id, row.kind, row.name, ContextBudget.tokens(row.line), lineOf[row.id] ?: 0)
+                RowCost(row.id, row.kind, row.name, row.size, lineOf[row.id] ?: 0)
             }
             .filter { it.tokens > 0 }
             .sortedByDescending { it.tokens }
@@ -772,7 +772,11 @@ class Agent(
      */
     private fun measure(system: String, rows: List<AgentLog.Row>, tools: List<ToolSpec>): Long =
         ContextBudget.tokens(system) +
-            rows.sumOf { ContextBudget.tokens(it.line) } +
+            // **The number the row already carries.** It is measured once, when the row is written,
+            // as the cost of what a request actually carries — the body, not the formatted line with
+            // its columns. Summing a stored number also means the request is measured in one pass
+            // rather than two, and that no byte array is allocated to count a row.
+            rows.sumOf { it.size } +
             tools.sumOf { ContextBudget.tokens(it.description, it.parameters.toString()) }
 
     /**

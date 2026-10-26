@@ -658,7 +658,7 @@ class AgentRunnerTest {
         // characters for a result. The brief asked for them as fields, and the clamps are the part
         // that matters — a timeout of zero retries for ever, and a result of zero is a hang.
         assertEquals("four minutes by default", 4, settings.timeoutMinutes)
-        assertEquals("twenty thousand characters by default", 20_000, settings.maxResult)
+        assertEquals("six thousand tokens by default", 6_000, settings.maxResult)
 
         settings.keepTimeout(0)
         assertEquals("under a minute cannot finish", 1, settings.timeoutMinutes)
@@ -669,9 +669,9 @@ class AgentRunnerTest {
         assertEquals("a result of nothing is a hang", 1_000, settings.maxResult)
         settings.keepMaxResult(99_000_000)
         // **The field's own bound, not the one that matters.** What a result may really carry is the
-        // model's input window, applied where the agent is built; this is a million tokens in
-        // characters, so the field can never be the limit the window should be.
-        assertEquals("and the field stops at a million tokens' worth", 4_194_304, settings.maxResult)
+        // model's input window, applied where the agent is built; this is the largest window the app
+        // can be pointed at, so the field can never be the limit the window should be.
+        assertEquals("and the field stops at the largest window there is", 4_194_304, settings.maxResult)
     }
 
     @Test

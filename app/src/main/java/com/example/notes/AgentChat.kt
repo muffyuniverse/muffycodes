@@ -20,20 +20,22 @@ object AgentChat {
     /** The note a keepalive ping leaves behind. Four letters, named once. */
     const val PING = "ping"
 
-    /** One line as the box draws it. [detail] is what tapping the turn adds. */
     /**
-     * One drawn line.
+     * One drawn line. [detail] is what tapping the turn adds.
      *
-     * [bytes] is the row's own size, and it exists for a person: when a context is being cleared
+     * [tokens] is the row's own size, and it exists for a person: when a context is being cleared
      * up, "which of these is the expensive one" is a question a screen can answer at a glance.
-     * It is exact — the row's line as it stands in the file — and it is bytes rather than tokens
-     * because bytes are a fact and a token count from this app is an estimate.
+     *
+     * **It is the number the record stores, in the unit the limit is in.** It used to be counted
+     * here, in bytes, from the formatted line — a second computation of a number the record already
+     * held, in a unit nothing else in the app used, so a person's caption and the clear-up line could
+     * disagree about the same row.
      */
     data class Line(
         val caption: String,
         val body: String,
         val failed: Boolean = false,
-        val bytes: Long = 0,
+        val tokens: Long = 0,
         val detail: String = "",
         /** Out of the context: drawn struck through, so the conversation shows what it forgot. */
         val forgotten: Boolean = false,
@@ -139,9 +141,12 @@ object AgentChat {
             idle = if (idle.isEmpty()) {
                 null
             } else {
-                val since = idle.first().rows.firstOrNull { it.time.isNotEmpty() }?.time.orEmpty()
+                // **The id, because the record has no clock.** A row in a file is not where a time
+                // belongs — the app's own trace still says when everything happened — and the id is
+                // the handle the person can find the row by, so it is what the line names.
+                val since = idle.first().rows.firstOrNull()?.id
                 val checks = if (idle.size == 1) "1 check" else "${idle.size} checks"
-                "idle since ${since.take(5)} · $checks"
+                if (since == null) checks else "idle since #$since · $checks"
             },
         )
     }
@@ -160,15 +165,16 @@ object AgentChat {
         val out = mutableListOf<Line>()
         val pending = ArrayDeque<AgentLog.Row>()
         for (row in rows) {
-            // A row's size, exact, so a person can see which lines are the expensive ones — the
-            // question that matters when a context is being cleared up.
-            val size = ContextBudget.bytes(row.line)
+            // **The row's own number, from the row.** It is stored at write time, the agent chooses
+            // what to forget by it, and a second computation here is a second answer to the same
+            // question — which is what made a person's caption disagree with the clear-up line.
+            val size = row.size
             // **A row the agent forgot is still read here, and is marked.** The box shows the whole
             // record — that is what makes the forgetting visible instead of something to take on
             // trust — so the flag travels with the line and the row is drawn struck through.
             val forgot = row.ctx == AgentLog.OUT
             if (row.broken) {
-                out.add(Line("unreadable", oneLine(row.detail, 120), bytes = size, forgotten = forgot))
+                out.add(Line("unreadable", oneLine(row.detail, 120), tokens = size, forgotten = forgot))
                 continue
             }
             when (row.kind) {
@@ -186,7 +192,7 @@ object AgentChat {
                                 caption = row.name,
                                 body = summary(row.body),
                                 failed = failed(row.body),
-                                bytes = size,
+                                tokens = size,
                                 detail = row.body,
                                 forgotten = forgot,
                             ),
@@ -197,11 +203,11 @@ object AgentChat {
                 }
 
                 AgentLog.ASK -> out.add(
-                    Line("asked", row.body, bytes = size, detail = row.body, forgotten = forgot),
+                    Line("asked", row.body, tokens = size, detail = row.body, forgotten = forgot),
                 )
                 AgentLog.CONCLUDE -> out.add(
                     Line(
-                        "concluded", row.body, bytes = size, detail = row.body, forgotten = forgot,
+                        "concluded", row.body, tokens = size, detail = row.body, forgotten = forgot,
                     ),
                 )
                 AgentLog.NOTE -> when (row.name) {
@@ -211,7 +217,7 @@ object AgentChat {
                         Line(
                             row.name,
                             oneLine(row.body, 200),
-                            bytes = size,
+                            tokens = size,
                             detail = row.body,
                             forgotten = forgot,
                         ),
@@ -223,7 +229,7 @@ object AgentChat {
                         Line(
                             row.name,
                             oneLine(row.body, 200),
-                            bytes = size,
+                            tokens = size,
                             detail = row.body,
                             forgotten = forgot,
                         ),
@@ -234,7 +240,7 @@ object AgentChat {
                     Line(
                         row.kind.lowercase(),
                         oneLine(row.body, 120),
-                        bytes = size,
+                        tokens = size,
                         detail = row.body,
                         forgotten = forgot,
                     ),
@@ -250,7 +256,7 @@ object AgentChat {
                     call.name,
                     "no answer yet",
                     failed = true,
-                    bytes = ContextBudget.bytes(call.line),
+                    tokens = call.size,
                     detail = call.body,
                 ),
             )
@@ -266,8 +272,9 @@ object AgentChat {
         failed = failed(got.body),
         // **The pair's size, and the call's was the one that could be huge.** A call carries the
         // model's arguments — a whole file's text, when it used `edit` to write one — so the row a
-        // person most needs the size of is often the one with no visible body at all.
-        bytes = ContextBudget.bytes(call.line) + ContextBudget.bytes(got.line),
+        // person most needs the size of is often the one with no visible body at all. Both numbers
+        // are the rows' own, written once when each row was written.
+        tokens = call.size + got.size,
         detail = "called with ${call.body}\n\n${got.body}",
         // The pair is forgotten together or not at all — that is a rule the tool enforces — so
         // either row's state is the pair's.

@@ -255,7 +255,7 @@ fun SettingsScreen(
             // the one supposed to be choosing what to forget.
             Text("Context", style = MaterialTheme.typography.titleMedium)
             Text(
-                "In tokens, counted at about four bytes each — the phone has no tokenizer, so " +
+                "In tokens, counted at about three and a half bytes each — the phone has no tokenizer, so " +
                     "these are the app's own numbers rather than a bill. A pin smaller than your " +
                     "number lowers it rather than changing it: the number you typed stays.",
                 style = MaterialTheme.typography.bodySmall,
@@ -413,9 +413,9 @@ fun SettingsScreen(
                 onValueChange = { settings.keepTimeout(it) },
             )
             LengthField(
-                label = "One result may carry (characters)",
+                label = "One result may carry (tokens)",
                 value = settings.maxResult,
-                placeholder = "20000",
+                placeholder = "6000",
                 onValueChange = { settings.keepMaxResult(it) },
             )
             // **The clamp says which number is in force.** A result bigger than the model's input
@@ -427,7 +427,7 @@ fun SettingsScreen(
             )
             if (resultLimit.clamped) {
                 Text(
-                    "This model's input window is ${resultLimit.ceiling} characters, so that is " +
+                    "This model's input window is ${resultLimit.ceiling} tokens, so that is " +
                         "what is used.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

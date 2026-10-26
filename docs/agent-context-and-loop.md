@@ -42,23 +42,33 @@ exists.
 
 ## What the record's columns mean
 
+**Newest row first.** A record is read by something with a limit — a `read`, a person's eye, a model
+whose context is already full — so the first page is the useful one. `AgentLog.rows()` reverses it
+once, and everything that reasons about the conversation sees oldest-first.
+
 ```text
-14:02:11.410    1 TOLD    in  operator  rename milk.txt to dairy.txt
-14:02:18.902    2 CALL    in  tree      {"path":"GitHub"}
-14:02:18.955    3 GOT     in  tree      0 · GitHub/ GitHub/milk.txt
-14:06:11.007    4 NOTE    app ping      kept warm
-14:11:03.418    5 CALL    in  forget    {"ids":[2,3]}
-14:11:03.421    6 GOT     in  forget    0 · forgot 2 rows. The task is still 1.
+   6   142 GOT     in  forget    0 · forgot 2 rows. The task is still 1.
+   5    31 CALL    in  forget    {"ids":[2,3]}
+   4    14 NOTE    app ping      kept warm
+   3    22 GOT     in  tree      0 · GitHub/ GitHub/milk.txt
+   2    19 CALL    in  tree      {"path":"GitHub"}
+   1    12 TOLD    in  operator  rename milk.txt to dairy.txt
 ```
 
 | column | meaning |
 |---|---|
-| time | when the app wrote it. The model never sees it: `TURN`, the keepalive's `ping`, the gap row and the trim markers are `app` |
-| id | the row's handle. `forget` takes ids; the box and `read` take **lines**, which is why the clear-up index names both |
+| id | the row's handle, and the one the model is given. `forget` takes ids. |
+| size | **what the row costs a request, in tokens** — the body's cost, not the formatted line's. Written once, when the row is written: the agent chooses what to forget by it, `measure` sums it, and a person's caption shows it. Two computations of this number was two answers to one question. |
 | kind | `TOLD` · `TURN` · `CALL` · `GOT` · `ASK` · `CONCLUDE` · `NOTE` (`ping` and `woke` are the app's, and `woke` is the one note the model is sent) |
 | ctx | `in` — the model is sent it · `out` — the agent called `forget` on it · `app` — the app wrote it |
 | name | the tool, the operator, or the app's own word (`turn`, `trimmed`, `gap`, `retry`) |
 | detail | the body, escaped: a newline is `\n` |
+
+**The model sees `id name body`.** `kind` rebuilds the conversation, `ctx` is the audit's column, and
+`size` is the measurement the app and the person act on — none of them is something the model can
+change, and two numbers side by side in a record it is about to delete from invites it to forget row
+142 instead of row 6. `read {"path":"agent/session.log","raw":true}` shows the file's own columns, so
+the size is still readable and still searchable when the model wants to rank rows itself.
 
 ## Reset
 

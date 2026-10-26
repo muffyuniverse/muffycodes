@@ -89,12 +89,14 @@ class ContextBudgetTest {
 
     @Test
     fun `a result may not be bigger than the input window`() {
-        // Characters against tokens, and the file's own four bytes a token. A result bigger than the
-        // window cannot be sent at all, so an ask past it is not a bigger allowance.
+        // **Both numbers in tokens.** They used to be two units — the row in characters, the wall in
+        // tokens — so the clamp multiplied by an estimate and the text it produced named the wrong
+        // unit. A result bigger than the window cannot be sent at all, so an ask past it is not a
+        // bigger allowance.
         val limit = ContextBudget.resultLimit(asked = 40_000, contextLength = 8_000)
 
-        assertEquals("the window, in characters", 32_000L, limit.ceiling)
-        assertEquals("so that is what is in force", 32_000L, limit.inForce)
+        assertEquals("the window itself", 8_000L, limit.ceiling)
+        assertEquals("so that is what is in force", 8_000L, limit.inForce)
         assertEquals("while the ask is kept as typed", 40_000L, limit.asked)
         assertTrue("and the row can say it was clamped", limit.clamped)
     }
@@ -210,15 +212,18 @@ class ContextBudgetTest {
     // ---- the estimate, and which way it errs --------------------------------
 
     @Test
-    fun `the estimate rounds up, because early is the safe direction`() {
+    fun `the estimate rounds up, at three and a half bytes a token`() {
         assertEquals("empty", 0L, ContextBudget.tokens(""))
-        assertEquals("one token's worth", 1L, ContextBudget.tokens("abcd"))
-        assertEquals("and not 1.25 of them", 2L, ContextBudget.tokens("abcde"))
+        // 4 bytes / 3.5 = 1.14, rounded up.
+        assertEquals("one token's worth", 2L, ContextBudget.tokens("abcd"))
+        // 7 bytes is exactly two tokens.
+        assertEquals("and seven is two", 2L, ContextBudget.tokens("abcdefg"))
+        assertEquals("while eight is three", 3L, ContextBudget.tokens("abcdefgh"))
     }
 
     @Test
     fun `the estimate counts bytes, so a long body costs what it weighs`() {
-        assertEquals(1_000L, ContextBudget.tokens("x".repeat(4_000)))
+        assertEquals(1_143L, ContextBudget.tokens("x".repeat(4_000)))
         assertEquals(
             "and two texts add up rather than being measured separately",
             ContextBudget.tokens("abcd") + ContextBudget.tokens("efgh"),
@@ -236,31 +241,30 @@ class ContextBudgetTest {
         assertEquals("ascii", 4L, ContextBudget.bytes("abcd"))
         assertEquals("utf-8, not code units: an emoji is four bytes", 4L, ContextBudget.bytes("\uD83D\uDE00"))
         assertEquals("and a CJK character is three", 3L, ContextBudget.bytes("\u4E2D"))
-        assertEquals("a label a person reads", "412 B", ContextBudget.sizeLabel(412))
-        assertEquals("thousands", "9.3k", ContextBudget.sizeLabel(9_300))
-        assertEquals("without a pointless zero", "9k", ContextBudget.sizeLabel(9_000))
-        assertEquals("millions", "1.2M", ContextBudget.sizeLabel(1_200_000))
     }
 
     @Test
     fun `the estimate is built on the same bytes, so the two never disagree`() {
         val text = "a row with some words in it, and a number 42"
         assertEquals(
-            "tokens is bytes over four, rounded up",
-            (ContextBudget.bytes(text) + 3) / 4,
+            "tokens is bytes over three and a half, rounded up",
+            (ContextBudget.bytes(text) * 2 + 6) / 7,
             ContextBudget.tokens(text),
         )
     }
 
     @Test
-    fun `the estimate under-counts for text that is not Latin, and that is the known bound`() {
-        // Honest about the direction: four bytes a token is right for English and code, and wrong
-        // for CJK where a character is a token or less. The app may therefore trim late for a
-        // Chinese context rather than early — the opposite of the claim the Latin case supports.
+    fun `the estimate over-counts for text that is not Latin, and that is the safe bound`() {
+        // **Measured against the model this app pins.** DeepSeek publishes about 0.6 token per
+        // Chinese character, so a hundred characters are about sixty tokens. Three and a half bytes
+        // a token estimates eighty-six — over, which asks the agent to clear up early rather than
+        // sending a request the endpoint refuses. The old four bytes a token estimated 75, which was
+        // also over, but by luck rather than by choice: the same constant was 17% *under* for the
+        // English and JSON that this app is actually full of.
         val cjk = "\u4E2D".repeat(100)
         assertEquals("300 bytes", 300L, ContextBudget.bytes(cjk))
-        assertEquals("estimated at 75 tokens", 75L, ContextBudget.tokens(cjk))
-        assertTrue("while a real tokenizer would count ~100", ContextBudget.tokens(cjk) < 100)
+        assertEquals("estimated at 86 tokens", 86L, ContextBudget.tokens(cjk))
+        assertTrue("while the model would count about 60", ContextBudget.tokens(cjk) > 60)
     }
 
     @Test

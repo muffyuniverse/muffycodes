@@ -22,9 +22,9 @@ class AgentChatTest {
         kind: String,
         name: String,
         detail: String = "",
-        time: String = "14:02:11.410",
+        size: Long = 40,
         ctx: String = AgentLog.IN,
-    ): AgentLog.Row = AgentLog.Row(time, next++, kind, ctx, name, detail)
+    ): AgentLog.Row = AgentLog.Row(next++, size, kind, ctx, name, detail)
 
     private fun told(text: String) = row(AgentLog.TOLD, "operator", text)
     private fun turn() = row(AgentLog.TURN, "turn")
@@ -176,7 +176,7 @@ class AgentChatTest {
     /** One keepalive ping as the record keeps it: the app's turn row and its note, both `app`. */
     private fun ping() = listOf(
         row(AgentLog.TURN, "turn", "ping", ctx = AgentLog.APP),
-        row(AgentLog.NOTE, AgentChat.PING, "kept warm", time = "14:02:30.000", ctx = AgentLog.APP),
+        row(AgentLog.NOTE, AgentChat.PING, "kept warm", ctx = AgentLog.APP),
     )
 
     @Test
@@ -187,7 +187,7 @@ class AgentChatTest {
         val box = AgentChat.box(rows)
 
         assertEquals("no turn to step through", 0, box?.turns?.size)
-        assertEquals("one line, and its count", "idle since 14:02 · 3 checks", box?.idle)
+        assertEquals("one line, and its count", "idle since #7 · 3 checks", box?.idle)
     }
 
     @Test
@@ -206,7 +206,7 @@ class AgentChatTest {
         val box = AgentChat.box(rows)
 
         assertEquals("the work is a turn", 1, box?.turns?.size)
-        assertEquals("and the checks are the idle line", "idle since 14:02 · 2 checks", box?.idle)
+        assertEquals("and the checks are the idle line", "idle since #7 · 2 checks", box?.idle)
     }
 
     @Test
@@ -240,6 +240,6 @@ class AgentChatTest {
         val box = AgentChat.box(rows)
 
         assertEquals("the work is a turn", 1, box?.turns?.size)
-        assertEquals("the polls are not", "idle since 14:02 · 2 checks", box?.idle)
+        assertEquals("the polls are not", "idle since #6 · 2 checks", box?.idle)
     }
 }

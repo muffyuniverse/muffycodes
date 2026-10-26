@@ -211,7 +211,7 @@ fun AgentChatScreen(
                                         caption = line.caption,
                                         body = line.body,
                                         failed = line.failed,
-                                        size = line.bytes,
+                                        size = line.tokens,
                                         forgotten = line.forgotten,
                                     )
                                     if (expanded && line.detail.isNotBlank()) {
@@ -297,10 +297,11 @@ private fun Navigator(
 /**
  * One line: the caption and the row's size in a narrow column, the body beside it.
  *
- * **The size is bytes, and it is there for the clear-up.** A person looking at a context that is
- * over its limit needs to know which rows are the expensive ones, and a number beside each caption
- * answers that without opening anything. Bytes rather than tokens because bytes are the fact and
- * the app's token count is an estimate — and it is the file's own measurement, so `wc -c` agrees.
+ * **The size is in tokens, and it is there for the clear-up.** A person looking at a context that
+ * is over its limit needs to know which rows are the expensive ones, and a number beside each
+ * caption answers that without opening anything. Tokens rather than bytes because the limit beside
+ * it is in tokens, and it is the record's own stored number rather than a second measurement — so
+ * the caption and the agent's clear-up line cannot disagree.
  */
 @Composable
 private fun Line(
@@ -323,7 +324,10 @@ private fun Line(
             )
             if (size > 0) {
                 Text(
-                    ContextBudget.sizeLabel(size),
+                    // **Tokens, the one unit the limits are in.** A byte count beside a token limit
+                    // is a number a person has to convert before it means anything, and the row it
+                    // sits under is the app's statement of what the row costs its context.
+                    "${ContextBudget.short(size)} tok",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
