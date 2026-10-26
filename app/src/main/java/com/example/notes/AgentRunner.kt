@@ -232,5 +232,9 @@ class AgentRunner(
     /** Stops the runner's worker. Nothing else holds a thread, and closing twice is not an error. */
     fun close() {
         worker.shutdownNow()
+        // **The command pool too.** A runner without this leaves two threads alive after the test
+        // that made it, and Gradle's fork waits for every live thread — which is how a suite that
+        // finishes in four minutes holds a job open until it is cancelled.
+        long.close()
     }
 }

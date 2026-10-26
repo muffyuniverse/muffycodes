@@ -18,6 +18,16 @@ interface LongRunner {
 
     fun submit(block: () -> String): Future<String>
 
+    /**
+     * Gives up the threads.
+     *
+     * **A runner that is not closed is a thread nobody can stop.** The pool's threads are daemons,
+     * so a process still exits — but a *test* does not exit the process, and Gradle's executor waits
+     * for every live thread in the fork. One `AgentRunner` per test, each with a pool, was enough to
+     * hold a shard open until the job timed out.
+     */
+    fun close() {}
+
     companion object {
 
         fun real(): LongRunner = object : LongRunner {
@@ -30,6 +40,10 @@ interface LongRunner {
             }
 
             override fun submit(block: () -> String): Future<String> = pool.submit<String> { block() }
+
+            override fun close() {
+                pool.shutdownNow()
+            }
         }
 
         /**
@@ -186,4 +200,7 @@ class LongCommands(private val runner: LongRunner = LongRunner.real()) {
 
     private fun key(project: String, call: Call): String =
         "$project\u0000${call.tool}\u0000${call.args}"
+
+    /** Gives up the threads this registry was given. */
+    fun close() = runner.close()
 }

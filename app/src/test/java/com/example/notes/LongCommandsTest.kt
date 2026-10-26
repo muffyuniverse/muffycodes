@@ -57,6 +57,7 @@ class LongCommandsTest {
     @After
     fun stopWatching() {
         runner.release()
+        commands.close()
     }
 
     private fun call(tool: String = "clone", args: String = "{}") = Call("c1", tool, args)
