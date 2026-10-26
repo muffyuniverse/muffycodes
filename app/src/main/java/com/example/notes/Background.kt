@@ -87,7 +87,7 @@ class Background(
      * each other's result.
      */
     fun resultFile(project: File, call: Call): File =
-        File(File(File(project, AgentTools.LONG_DIR), "background_results"), "${call.tool}-${call.id}.txt")
+        File(File(File(project, AgentTools.RESULTS_DIR), "background_results"), "${call.tool}-${call.id}.txt")
 
     /**
      * Writes [body] so a reader sees either all of it or none of it.

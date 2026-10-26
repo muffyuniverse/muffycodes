@@ -300,9 +300,9 @@ fun SettingsScreen(
             // **Two waits, and they are different questions.** The first is how long an idle agent
             // is left alone between checks — the agent says only that it is idle, and this number is
             // the person's, because every check is a request that is paid for and a wake that costs
-            // battery. The second is how long the app waits for a *command* before it stops holding
-            // the conversation: past it the agent is told the command is still running and the work
-            // carries on beside the conversation, arriving with a later call's results.
+            // battery. The second is how long a *command* may run before it is stopped: past it the
+            // command is aborted, its result says "stopped after 180 s; nothing was kept", and the
+            // turn carries on — the model is told the truth rather than made to wait for ever.
             //
             // Reported from the live log: "what is agent pace description? I totally dont understand
             // what those words mean". "Pace" and "an answer that takes longer than the timeout is not

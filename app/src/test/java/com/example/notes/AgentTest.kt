@@ -437,21 +437,27 @@ class AgentTest {
 
     @Test
     fun `the newest previous default is the text this build replaced`() {
-        // **The entry that matters most, because it is what most phones are holding.** A phone that ran
-        // the previous release has an ① file with its unedited default — which is this build's
-        // predecessor, and whose sentence about a "showing first N of M" result is now wrong, because
-        // nothing is cut short any more. Recognising it needs those words exactly, so the entry is
-        // the old text rather than a paraphrase of it, and it is last because it is the most recent.
+        // **The entry that matters most, because it is what most phones are holding.** A phone that
+        // ran the previous release has an ① file with its unedited default — which is this build's
+        // predecessor, and whose sentence about a result "coming back as a refusal" is now wrong,
+        // because a result too big is filed in a file instead. Recognising it needs those words
+        // exactly, so the entry is the old text rather than a paraphrase of it, and it is last
+        // because it is the most recent.
         val newest = AgentPrompt.PREVIOUS_SYSTEM.last()
+        val older = AgentPrompt.PREVIOUS_SYSTEM[AgentPrompt.PREVIOUS_SYSTEM.size - 2]
         val now = AgentPrompt.SYSTEM_DEFAULT
 
         assertTrue(
-            "it is the text that described a cut-short result",
-            newest.contains("showing first N of M"),
+            "it is the text that described a result refused for its size",
+            newest.contains("comes back as a refusal naming its"),
         )
-        assertFalse("and this build no longer says that", now.contains("showing first N of M"))
+        assertFalse("and this build files it instead", now.contains("comes back as a refusal"))
         assertTrue("the layout is the merge's", newest.contains("The project folder is the repository"))
         assertFalse("and it predates the handover rule", newest.contains("still running; call again"))
+        assertTrue(
+            "the one before it is the cut-short text the round before replaced",
+            older.contains("showing first N of M"),
+        )
         assertTrue("a previous default is not the current one", newest != now)
     }
 

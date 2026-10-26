@@ -1,5 +1,10 @@
 # Implementation plan: the agent's commands
 
+**Historical: what was true when this plan was written.** Every step in it has since been built, and
+some of what it calls "the code as it stands" — `take(20)`, `MAX_SCAN`, the `LONG` set — has been
+deleted. It is kept because it records why the command layer was rewritten; the description of the
+code as it *is* is [agent-tools-review.md](agent-tools-review.md).
+
 *For review. Derived from [review](agent-tools-review.md) → [counterproposal 1](agent-tools-counterproposal.md)
 → [2](agent-tools-counterproposal-2.md) → [3](agent-tools-counterproposal-3.md).*
 

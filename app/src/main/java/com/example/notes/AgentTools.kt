@@ -81,13 +81,17 @@ class AgentTools(
         const val EXCERPT = 60
 
         /**
-         * The folder a `background` result is written into, under `agent/`.
+         * The folder a call's result is written into, under `agent/`.
          *
          * **Inside `agent/` and not at the project root**, because a file at the root is a change the
          * next save commits and the next Sync pushes. `agent/` is the app's own directory and is in
          * git's exclude list, so a result file is never mistaken for the person's work.
+         *
+         * `RESULTS_DIR` and not `LONG_DIR`: there is no `LONG` set any more — every command takes a
+         * deadline — and what lands here is any result too big to enter the conversation, not only a
+         * slow one's.
          */
-        const val LONG_DIR = AgentLog.DIR
+        const val RESULTS_DIR = AgentLog.DIR
 
         /**
          * What each command takes — **and the whole of what it takes.**

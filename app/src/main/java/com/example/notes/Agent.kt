@@ -23,6 +23,14 @@ class Agent(
     private val log: AgentLog,
     private val door: Door,
     private val model: ActiveModel,
+    /**
+     * How much of one tool result may enter the conversation, in characters.
+     *
+     * **A budget for the conversation, applied at the one boundary a result crosses** (see
+     * [AgentTools.forConversation]). Over it the body is written whole to a file and the answer is
+     * that path, so nothing is lost and nothing is cut. The caller has already clamped the operator's
+     * number to the model's input window — a result bigger than the window cannot be sent at all.
+     */
     maxResult: Int = AgentTools.MAX_RESULT,
     /**
      * The backstop from [MAX_REQUESTS], overridable so a test can reach it in three requests
@@ -65,9 +73,9 @@ class Agent(
      * Where a `background` call's work runs, and how long the foreground waits for a command.
      *
      * **The wait is the person's, not the model's.** [foregroundMs] is the operator's setting; a
-     * command that outlasts it is aborted, not handed over, and the call's own result says so. The
-     * default is zero, which means wait for ever — exactly what a turn did before this existed, so a
-     * test that is not about a slow command never acquires one.
+     * command that outlasts it is aborted and the call's own result says so. Zero means wait for
+     * ever, and it is what a test that is not about a slow command uses, so no test acquires a
+     * deadline it did not ask for.
      */
     private val bg: Background = Background.none(),
     private val foregroundMs: Long = 0L,

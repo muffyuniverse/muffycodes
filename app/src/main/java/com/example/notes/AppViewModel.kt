@@ -2133,9 +2133,10 @@ class AppViewModel @JvmOverloads constructor(
                 // window — a result larger than that cannot be sent, so it would be filed for ever.
                 maxResult = resultLimit.inForce.toInt(),
                 limits = limits,
-                // **The same registry the polls use.** A command handed over while somebody is
-                // typing is collected by their next message, and one handed over during a poll is
-                // collected here — one project, one record, one place the work finishes.
+                // **The same registry the polls use.** A `background` command started while
+                // somebody is typing keeps running beside the turn and lands its result in a file on
+                // its own thread; a turn and a poll share the one registry, so a command started by
+                // one is not invisible to the other.
                 bg = runner?.bg ?: Background.inline(),
                 foregroundMs = settings.foregroundMs,
                 backgroundMs = { settings.backgroundMs },
