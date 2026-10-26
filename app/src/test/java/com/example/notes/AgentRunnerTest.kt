@@ -221,7 +221,7 @@ class AgentRunnerTest {
     }
 
     @Test
-    fun `a project that is gone takes its session with it`() {
+    fun `the service's tick drops a session whose folder is gone, and says why`() {
         on("shopping", now = 1_000)
         val runner = runner()
         File(ws.accountDir, "shopping").deleteRecursively()

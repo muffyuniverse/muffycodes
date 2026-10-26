@@ -642,7 +642,7 @@ class AgentSessionFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `a project that is gone takes its session with it`() {
+    fun `the screen's tick drops a session whose folder was deleted`() {
         listening()
         scene.project("groceries")
         scene.viewModel.startAgent("groceries")
