@@ -246,7 +246,7 @@ class AgentLogTest {
         assertEquals("the row's own number", ContextBudget.tokens(body), row.size)
         assertTrue(
             "and the file holds the same number in its column: $line",
-            line.split(Regex(" +"))[1] == row.size.toString(),
+            line.split(Regex(" +"))[2] == row.size.toString(),
         )
     }
 
@@ -259,10 +259,11 @@ class AgentLogTest {
 
         val rows = AgentLog.open(project).rows()
         assertEquals("both lines are rows", 2, rows.size)
-        // The unreadable line was added last, so it is the newest — which is now the first line of
-        // the file and the last row of the oldest-first list.
-        assertTrue("the unreadable one is marked", rows.last().broken)
-        assertEquals("and it keeps its text", "this is not a row", rows.last().detail)
+        // **The unreadable line is the oldest, not the newest.** It was appended to the end of the
+        // file, and the file keeps its newest row at the top — so in the oldest-first list it is
+        // the first row.
+        assertTrue("the unreadable one is marked", rows.first().broken)
+        assertEquals("and it keeps its text", "this is not a row", rows.first().detail)
     }
 
     @Test

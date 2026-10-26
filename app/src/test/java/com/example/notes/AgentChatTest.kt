@@ -187,9 +187,12 @@ class AgentChatTest {
         val box = AgentChat.box(rows)
 
         assertEquals("no turn to step through", 0, box?.turns?.size)
+        // **The first row inside the turn, not the turn's own row.** A TURN row is the boundary that
+        // starts a turn and is not part of it, so the idle line names the first thing the check
+        // actually said — here the `kept warm` note.
         assertEquals(
             "one line, and its count",
-            "idle since #${poll.first().id} · 3 checks",
+            "idle since #${poll[1].id} · 3 checks",
             box?.idle,
         )
     }
@@ -199,20 +202,21 @@ class AgentChatTest {
         // **A conclusion ends the burst, so the pings that follow start a new one with no operator
         // message in it.** Reading only the last burst that has a TOLD would drop every check after
         // the agent finished — and the idle line is exactly what a person watches while it waits.
+        val poll = ping()
         val rows = listOf(
             told("look"),
             turn(),
             call("tree"),
             got("tree", "0\n"),
             row(AgentLog.CONCLUDE, "conclusion", "Nothing to change."),
-        ) + ping() + ping()
+        ) + poll + poll
 
         val box = AgentChat.box(rows)
 
         assertEquals("the work is a turn", 1, box?.turns?.size)
         assertEquals(
             "and the checks are the idle line",
-            "idle since #${ping().first().id} · 2 checks",
+            "idle since #${poll[1].id} · 2 checks",
             box?.idle,
         )
     }
@@ -238,19 +242,20 @@ class AgentChatTest {
 
     @Test
     fun `a turn that worked is still there beside the idle line`() {
+        val poll = ping()
         val rows = listOf(
             told("look"),
             turn(),
             call("tree"),
             got("tree", "0\n"),
-        ) + ping() + ping()
+        ) + poll + poll
 
         val box = AgentChat.box(rows)
 
         assertEquals("the work is a turn", 1, box?.turns?.size)
         assertEquals(
             "the polls are not",
-            "idle since #${ping().first().id} · 2 checks",
+            "idle since #${poll[1].id} · 2 checks",
             box?.idle,
         )
     }

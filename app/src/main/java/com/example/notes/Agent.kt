@@ -680,8 +680,11 @@ class Agent(
      */
     private fun readOpening(layers: AgentPrompt.Layers, log: AgentLog, tools: List<ToolSpec>): Opening {
         // The file's own line numbers, because that is what `read` pages through: the context is a
-        // filtered view, so a row's position in it is not its position in the file.
-        val lineOf = log.rows().withIndex().associate { (index, row) -> row.id to index + 1 }
+        // filtered view, so a row's position in it is not its position in the file. **And the file
+        // is newest-first**, so the row at the top of it is line 1 — numbering the oldest-first list
+        // instead pointed the model at a different row than the one the line named.
+        val lineOf = log.rows().asReversed().withIndex()
+            .associate { (index, row) -> row.id to index + 1 }
         val costs = log.contextRows()
             .map { row ->
                 RowCost(row.id, row.kind, row.name, row.size, lineOf[row.id] ?: 0)

@@ -697,7 +697,7 @@ class AgentLog private constructor(
      * another.
      */
     private fun store(rows: List<Row>, marker: String) =
-        rewrite(rows.asReversed().map { it.line } + marker)
+        rewrite(listOf(marker) + rows.asReversed().map { it.line })
 
     /**
      * Writes the file, lines already in the order the file keeps them.

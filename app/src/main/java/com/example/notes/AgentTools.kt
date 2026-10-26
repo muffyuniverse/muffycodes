@@ -586,18 +586,26 @@ class AgentTools(
     }
 
     /**
-     * The text a matcher walks, with the clock in it.
+     * Where [pattern] first matches [line] — **the one place any command runs a regular expression.**
      *
      * **A pattern is the only input to a command that can take unbounded time in one call.** Walking
      * a folder asks the deadline per entry and a read asks it per chunk, but `Regex.find` against one
-     * line is a single call: `(a+)+$` against forty `a`s is more work than the phone will ever
-     * finish, and no deadline *outside* the call can stop it. So the text is handed over through
-     * this, which asks the deadline every few thousand characters — the engine reaches the input
-     * through `charAt`, so the question is asked *inside* the match, and the answer is the same stop
-     * sentence every other command gives.
+     * line is a single call, and no deadline *outside* the call can stop it. So the text is handed
+     * over through [Timed], which asks the clock every few thousand characters — the engine reaches
+     * the input through `charAt`, so the question is asked *inside* the match, and the answer is the
+     * same stop sentence every other command gives.
      *
-     * It is a view of the text and not a copy, so a match is still asked about the file's own
-     * characters.
+     * Internal so a test can ask this question directly. It is a claim about a *call*, not about a
+     * pattern: which patterns a given engine finds hard is the engine's business, and a test that
+     * named one would be testing the JVM's optimiser rather than this app's clock.
+     */
+    internal fun hit(line: String, pattern: Regex, deadline: Deadline, tool: String): IntRange? =
+        pattern.find(Timed(line, deadline, tool))?.range
+
+    /**
+     * The text a matcher walks, with the clock in it.
+     *
+     * A view and not a copy, so a match is still asked about the file's own characters.
      */
     private class Timed(
         private val text: CharSequence,
@@ -609,8 +617,8 @@ class AgentTools(
         override val length: Int get() = text.length
 
         override fun get(index: Int): Char {
-            // Every 4096 characters: often enough that a runaway pattern is stopped in milliseconds,
-            // rare enough that the count costs nothing beside the matching itself.
+            // Every 4096 characters: often enough that a long scan is stopped in milliseconds, rare
+            // enough that the count costs nothing beside the matching itself.
             if ((++reads and 4095) == 0) deadline.check(tool)
             return text[index]
         }
@@ -620,10 +628,6 @@ class AgentTools(
 
         override fun toString(): String = text.toString()
     }
-
-    /** Where [pattern] first matches [line] — the one test every command asks, with the clock on. */
-    private fun hit(line: String, pattern: Regex, deadline: Deadline, tool: String): IntRange? =
-        pattern.find(Timed(line, deadline, tool))?.range
 
     /** The first line of [text] that [pattern] matches, and where in the line it matched. */
     private fun firstHit(

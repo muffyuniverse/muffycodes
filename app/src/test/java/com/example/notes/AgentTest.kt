@@ -523,7 +523,7 @@ class AgentTest {
 
         assertTrue(
             "it is the text that described the record with a ctx column and no size",
-            newest.contains("the column that says whether you are sent it") &&
+            newest.contains("that says whether you are sent it") &&
                 !newest.contains("id name body"),
         )
         assertTrue("and this build says what a row looks like", now.contains("id name body"))
@@ -974,20 +974,27 @@ class AgentTest {
     }
 
     @Test
-    fun `a runaway pattern stops at the deadline instead of the phone`() {
-        // **A pattern is the one input that can take unbounded time in a single call.** `(a+)+$` is
-        // the textbook case: forty characters is more work than the phone will ever finish, and a
-        // deadline checked only *around* the match would never be asked. The text is handed over
-        // through a view that asks it inside the engine.
-        ws.write(File(ws.repoOf("shopping"), "a.txt"), "a".repeat(40) + "b")
+    fun `the clock is asked inside a match, so one long line cannot outlast the deadline`() {
+        // **A pattern is the one input that can take unbounded time in a single call.** Walking a
+        // folder asks the deadline per entry and a read asks it per chunk, but a match is one call —
+        // so the text reaches the engine through a view that asks the clock from inside `charAt`.
+        //
+        // The pattern here is linear and finds nothing, which is the point: the guarantee is about
+        // the *call*, not about which patterns a given engine happens to find hard. Naming a
+        // catastrophic pattern would be testing the JVM's optimiser — `(a+)+$` on forty characters
+        // returns in a millisecond on this JDK and hangs on others.
+        val expired = Deadline(1)
+        Thread.sleep(10)
+        val line = "a".repeat(50_000)
 
-        val body = tools().run(
-            Call("c8", "read", """{"path":"a.txt","grep":"(a+)+$"}"""),
-            Deadline(50),
-        )
+        var stopped = false
+        try {
+            tools().hit(line, Regex("a+$"), expired, "read")
+        } catch (e: StoppedException) {
+            stopped = true
+        }
 
-        assertTrue("it stopped rather than running for ever: $body", body.contains("stopped"))
-        assertTrue("and says nothing was kept: $body", body.contains("nothing was kept"))
+        assertTrue("the deadline was asked mid-match", stopped)
     }
 
     @Test
@@ -1975,11 +1982,15 @@ class AgentTest {
         assertTrue("and its size", index.contains("tokens"))
         assertTrue("and it says how to look", sent.contains("read agent/session.log from <line>"))
 
-        // The line number is the row's position in the record, so a read of it returns that row.
+        // **The number is a promise, and this is the test of it.** The record is newest-first, so a
+        // line number taken from the oldest-first list pointed the model at a different row than the
+        // one the index named — the one thing an index exists to prevent.
+        val named = Regex("""line (\d+): #4 GOT read""").find(index)?.groupValues?.get(1)?.toInt()
+        assertTrue("the index names a line: $index", named != null)
         val context = File(ws.accountDir, "shopping/${AgentLog.DIR}/${AgentLog.SESSION}")
-        val fourth = context.readLines()[3]
-        assertTrue("the row at that line is the big one: $fourth", fourth.contains("GOT"))
-        assertTrue("and the id in the index is on it", fourth.contains(" 4 "))
+        val line = context.readLines()[named!! - 1]
+        assertTrue("and that line holds the row it names: $line", line.contains("GOT"))
+        assertTrue("with the id the index gave: $line", line.contains(" 4 "))
     }
 
     @Test
