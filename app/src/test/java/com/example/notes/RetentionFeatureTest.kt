@@ -68,7 +68,14 @@ class RetentionFeatureTest : FeatureTest() {
         scene.settings.keepHistory(3)
 
         scene.file("the_last_one.txt", "the last round")
-        scene.await("the history to be shortened") { historySize() <= 3 }
+        // **Waited for the number, not for "no more than" it.** A prune rewrites the history, so a
+        // moment mid-write can read low — and "<= 3" is true of that moment, which made the assertion
+        // below a coin toss between the rewrite and the answer.
+        try {
+            scene.await("the history to be exactly the length it was given") { historySize() == 3 }
+        } catch (e: AssertionError) {
+            throw AssertionError("the history is ${historySize()}, not 3", e)
+        }
 
         assertEquals("three versions are kept", 3, historySize())
     }
