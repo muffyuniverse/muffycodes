@@ -473,31 +473,33 @@ object GitService {
         null
     }
 
-    /**
-     * A file's text at one revision, or null when it is not there.
-     *
-     * **Null covers two cases that the caller treats the same way**: an absent path (a file that was
-     * added or deleted) and a file too big to read into a preview. Neither is an error.
-     */
     /** How big a file is at one revision, or null when it is not there. */
     fun blobSize(repo: Repository, revision: String, path: String): Long? = try {
         val id = repo.resolve("$revision:$path")
-        if (id == null) null else repo.open(id).use { obj -> if (obj.isLarge) -1L else obj.size.toLong() }
+        // `size` is the object's size whether or not its content has been loaded, so a large object
+        // is measured like any other — and that is the point: this is what decides not to read it.
+        if (id == null) null else repo.open(id).size
     } catch (e: Throwable) {
         null
     }
 
+    /**
+     * A file's text at one revision, or null when it is not there, not a file, or past [limit].
+     *
+     * **The three nulls are one answer on purpose**: a caller previewing a change does not act on
+     * them differently — an absent path is a file that was added or deleted, and both are `""` to a
+     * diff. What must not happen is reading a large object to find out that it is large.
+     */
     fun blobText(repo: Repository, revision: String, path: String, limit: Int = 512 * 1024): String? = try {
         val id = repo.resolve("$revision:$path")
         if (id == null) {
             null
         } else {
-            repo.open(id).use { obj ->
-                if (obj.type != org.eclipse.jgit.lib.Constants.OBJ_BLOB || obj.size > limit) {
-                    null
-                } else {
-                    String(obj.bytes, Charsets.UTF_8)
-                }
+            val obj = repo.open(id)
+            if (obj.type != org.eclipse.jgit.lib.Constants.OBJ_BLOB || obj.size > limit) {
+                null
+            } else {
+                String(obj.bytes, Charsets.UTF_8)
             }
         }
     } catch (e: Throwable) {
@@ -542,12 +544,12 @@ object GitService {
         var b = 0
         for (edit in edits) {
             while (a < edit.beginA) {
-                out += DiffLine(DiffLine.Kind.SAME, old.getOrElse(a) { "" })
+                out += DiffLine(DiffLine.Kind.SAME, old[a])
                 a++
                 b++
             }
-            for (i in edit.beginA until edit.endA) out += DiffLine(DiffLine.Kind.REMOVED, old.getOrElse(i) { "" })
-            for (i in edit.beginB until edit.endB) out += DiffLine(DiffLine.Kind.ADDED, new.getOrElse(i) { "" })
+            for (i in edit.beginA until edit.endA) out += DiffLine(DiffLine.Kind.REMOVED, old[i])
+            for (i in edit.beginB until edit.endB) out += DiffLine(DiffLine.Kind.ADDED, new[i])
             a = edit.endA
             b = edit.endB
         }
