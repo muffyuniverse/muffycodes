@@ -70,7 +70,9 @@ class RetentionFeatureTest : FeatureTest() {
         scene.file("the_last_one.txt", "the last round")
         // **Waited for the number, not for "no more than" it.** A prune rewrites the history, so a
         // moment mid-write can read low — and "<= 3" is true of that moment, which made the assertion
-        // below a coin toss between the rewrite and the answer.
+        // below a coin toss between the rewrite and the answer. The harness has already waited for
+        // the shortening its own change caused (`Scenario.awaitRecordedFor`), and this waits for the
+        // number the test is about rather than for a bound it happens to satisfy.
         try {
             scene.await("the history to be exactly the length it was given") { historySize() == 3 }
         } catch (e: AssertionError) {
