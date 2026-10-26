@@ -40,7 +40,7 @@ class ModelConfigTest {
     """.trimIndent()
 
     @Test
-    fun theShippedConfigReadsAndIsTheOneTheAppWrites() {
+    fun `the shipped config reads and is the one the app writes`() {
         val parsed = ModelConfigFile.parse(shipped()).getOrThrow()
 
         assertEquals("the model", ModelConfigFile.DEFAULT_MODEL, parsed.active.model)
@@ -54,7 +54,7 @@ class ModelConfigTest {
     }
 
     @Test
-    fun whatTheAppWritesIsWhatItCanRead() {
+    fun `what the app writes is what it can read`() {
         // A round trip, because a writer and a reader that disagree is the failure that only
         // shows up on somebody else's phone: the file is written by the forms and read by the
         // agent, so both directions are the same file.
@@ -92,7 +92,7 @@ class ModelConfigTest {
     }
 
     @Test
-    fun anAccountWithNoFileGetsTheShippedOne() {
+    fun `an account with no file gets the shipped one`() {
         // A new account has no config, and that is not an error: the app makes one, set up to
         // the model the operator asked for by default.
         val config = ModelConfigFile.load(account).getOrThrow()
@@ -102,7 +102,7 @@ class ModelConfigTest {
     }
 
     @Test
-    fun aFileThatWillNotParseIsRefusedWithItsLine() {
+    fun `a file that will not parse is refused with its line`() {
         // Not replaced with the defaults. A fallback would mean the agent quietly running on a
         // model the person did not choose, which is worse than a screen saying which line is
         // wrong — and `org.json` reports a character offset, which a person cannot use.
@@ -131,7 +131,7 @@ class ModelConfigTest {
     }
 
     @Test
-    fun aProviderThatIsNotOneOfTheModelsIsRefused() {
+    fun `a provider that is not one of the models is refused`() {
         // The check that keeps the file honest: an active provider that the model does not
         // list would be a pin to an endpoint the person had removed.
         val mistake = """
@@ -146,7 +146,7 @@ class ModelConfigTest {
     }
 
     @Test
-    fun aProviderTagThatEndsInASlashIsRefused() {
+    fun `a provider tag that ends in a slash is refused`() {
         // `deepinfra/` looks like a tag and is a prefix: it would match every endpoint of the
         // provider, which is exactly the autorouting the pin exists to prevent.
         val mistake = """
@@ -161,7 +161,7 @@ class ModelConfigTest {
     }
 
     @Test
-    fun anActiveModelThatIsNotInTheCatalogueIsRefused() {
+    fun `an active model that is not in the catalogue is refused`() {
         // The catalogue is the allow-list; the choice has to be inside it.
         val mistake = """
             { "version": 1,
@@ -175,7 +175,7 @@ class ModelConfigTest {
     }
 
     @Test
-    fun aModelWithNoProvidersIsRefused() {
+    fun `a model with no providers is refused`() {
         val mistake = """
             { "version": 1,
               "active": { "model": "m", "provider": "p", "effort": "high" },
@@ -188,7 +188,7 @@ class ModelConfigTest {
     }
 
     @Test
-    fun aVersionFromTheFutureIsRefusedRatherThanReadWrongly() {
+    fun `a version from the future is refused rather than read wrongly`() {
         val future = """{ "version": 9, "active": {}, "models": [] }"""
 
         val error = ModelConfigFile.parse(future).exceptionOrNull()?.message.orEmpty()
@@ -197,7 +197,7 @@ class ModelConfigTest {
     }
 
     @Test
-    fun aRepeatedProviderTagIsKeptOnce() {
+    fun `a repeated provider tag is kept once`() {
         // The forms can produce it (tick, untick, tick), and two identical rows in the picker
         // would read as two endpoints at the same price.
         val doubled = """
@@ -214,7 +214,7 @@ class ModelConfigTest {
     // ---- the effort ladder ---------------------------------------------------
 
     @Test
-    fun effortMovesDownToWhatTheModelSupports() {
+    fun `effort moves down to what the model supports`() {
         // The operator's rule: if the model does not declare the chosen effort, it moves down to
         // one it does, and the operator can raise it again. `max` is absent from this ladder —
         // which is the case the rule is for, since the ladder is the model's, not the app's.
@@ -228,7 +228,7 @@ class ModelConfigTest {
     }
 
     @Test
-    fun effortMovesUpWhenThereIsNothingBelow() {
+    fun `effort moves up when there is nothing below`() {
         // "Moves down" has no down when the model's ladder starts above what was asked: a model
         // offering only `high` and `max` has to answer `low` with `high`, and refusing would be
         // the app overruling a choice it was handed.
@@ -239,14 +239,14 @@ class ModelConfigTest {
     }
 
     @Test
-    fun aModelThatDeclaresNoLadderSendsNone() {
+    fun `a model that declares no ladder sends none`() {
         // Sending an effort a model never declared is a 400 from one provider and a silently
         // ignored parameter from another, and the second is worse.
         assertNull(ModelConfigFile.effortFor(emptyList(), "high"))
     }
 
     @Test
-    fun anEffortNameThisAppHasNeverSeenIsStillPlacedBelowTheKnownOnes() {
+    fun `an effort name this app has never seen is still placed below the known ones`() {
         // A model may add a name tomorrow; the app must place it rather than throw. An unknown
         // rung ranks below every known one, so a request for it falls to the lowest effort the
         // model does declare — which is the safe direction, since nothing is sent that the model
@@ -257,7 +257,7 @@ class ModelConfigTest {
     }
 
     @Test
-    fun nonesPlaceOnTheLadder() {
+    fun `none is a rung of the ladder, not an absence`() {
         // `none` is a real rung, not "unset": sliding to the left end of the effort control is
         // "no reasoning at all", which is a materially different agent and has to sort there.
         assertTrue(ModelConfigFile.effortRank("none") < ModelConfigFile.effortRank("low"))
@@ -266,7 +266,7 @@ class ModelConfigTest {
     }
 
     @Test
-    fun theVolumeForTheAgentIsNamedInOnePlace() {
+    fun `the volume for the agent is named in one place`() {
         // §1.1: it sits in the account's folder beside the config, so a person browsing an
         // account can see what their agent is. Nothing else needs the name, so nothing else
         // spells it.

@@ -45,7 +45,7 @@ class KeySafetyTest {
         readBytes().toString(Charsets.ISO_8859_1).contains(token)
 
     @Test
-    fun scrubMasksCredentialsInsideUrls() {
+    fun `scrub masks credentials inside urls`() {
         val message = "Cloned https://$token@github.com/muffyuniverse/muffycodes.git"
         val scrubbed = Secrets.scrub(message)
         assertFalse(scrubbed.contains(token))
@@ -54,20 +54,20 @@ class KeySafetyTest {
     }
 
     @Test
-    fun scrubMasksLooseTokens() {
+    fun `scrub masks loose tokens`() {
         val scrubbed = Secrets.scrub("failed with token $token, sorry")
         assertFalse(scrubbed.contains(token))
         assertTrue(scrubbed.contains("***"))
     }
 
     @Test
-    fun scrubLeavesOrdinaryTextAlone() {
+    fun `scrub leaves ordinary text alone`() {
         val message = "Cloned https://github.com/a/b.git — commit 1a2b3c4, 3 files"
         assertEquals(message, Secrets.scrub(message))
     }
 
     @Test
-    fun onlyGitHubIsGivenTheKey() {
+    fun `only GitHub is given the key`() {
         assertTrue(Secrets.isGitHubHost("https://github.com/a/b.git"))
         assertTrue(Secrets.isGitHubHost("https://$token@github.com/a/b.git"))
         assertTrue(Secrets.isGitHubHost("https://api.github.com"))
@@ -77,14 +77,14 @@ class KeySafetyTest {
     }
 
     @Test
-    fun secretCannotBePrintedByAccident() {
+    fun `secret cannot be printed by accident`() {
         val secret = Secret(token)
         assertEquals("***", secret.toString())
         assertEquals(token, secret.reveal())
     }
 
     @Test
-    fun clonePutsTheKeyNowhere() {
+    fun `clone puts the key nowhere`() {
         val remote = File(root, "remote")
         val remoteRepo = GitService.initOrOpen(remote, author)
         File(remote, "note.txt").writeText("milk")
@@ -101,7 +101,7 @@ class KeySafetyTest {
     }
 
     @Test
-    fun pushPutsTheKeyNowhere() {
+    fun `push puts the key nowhere`() {
         // A bare repository — the way a push target really is.
         val remote = File(root, "remote")
         org.eclipse.jgit.api.Git.init()
@@ -130,7 +130,7 @@ class KeySafetyTest {
     }
 
     @Test
-    fun anOldLeakingAddressIsHealedWhenSeen() {
+    fun `an old leaking address is healed when seen`() {
         val work = File(root, "work")
         val repo = GitService.initOrOpen(work, author)
         // What an older version of the app wrote to disk.
@@ -143,7 +143,7 @@ class KeySafetyTest {
     }
 
     @Test
-    fun aRefusedKeyIsSaidInWordsAndNotAsAnException() {
+    fun `a refused key is said in words and not as an exception`() {
         // Every sync that failed with "not authorized" and nothing else sent a person
         // looking for a broken app. The key is the thing to fix, so the key is what
         // the message has to be about.
@@ -157,7 +157,7 @@ class KeySafetyTest {
     }
 
     @Test
-    fun anOfflinePhoneIsSaidAsBeingOffline() {
+    fun `an offline phone is said as being offline`() {
         // The shape JGit reports it in: its own words first, the network failure
         // underneath as the cause.
         val offline = RuntimeException(
@@ -170,7 +170,7 @@ class KeySafetyTest {
     }
 
     @Test
-    fun anErrorRatherThanAnExceptionStillSaysWhatItSaw() {
+    fun `an error rather than an exception still says what it saw`() {
         // What a phone actually threw: a class JGit needs that the runtime cannot
         // resolve arrives as an Error, and `catch (Exception)` let it out of the
         // worker with no project, no file and no action in it.
@@ -181,7 +181,7 @@ class KeySafetyTest {
     }
 
     @Test
-    fun aFailureWithNothingToAddKeepsTheAppsOwnWords() {
+    fun `a failure with nothing to add keeps the app's own words`() {
         // The falsification of all of the above: a failure that is not one of the
         // four known shapes must not be swallowed into a friendly sentence that says
         // nothing. JGit's own words are what a person can search for.
@@ -191,7 +191,7 @@ class KeySafetyTest {
     }
 
     @Test
-    fun aNumberInAPathIsNotAnHttpStatus() {
+    fun `a number in a path is not an http status`() {
         // The bug this lives beside: the classifier matched a bare "401" anywhere in the
         // chain, and a lock's message is a path — `/tmp/projectgit-1761300401234/...`.
         // A nanosecond timestamp containing "401" told a person their key was wrong when
@@ -207,7 +207,7 @@ class KeySafetyTest {
     }
 
     @Test
-    fun aLockIsSaidAsSomethingThePersonCanDo() {
+    fun `a lock is said as something the person can do`() {
         // A lock is the one failure whose own words are useless here: "Ensure that no
         // other process has an open file handle on /data/user/0/..." is an instruction
         // for a terminal, and a phone has no terminal. It gets a sentence instead.
@@ -220,7 +220,7 @@ class KeySafetyTest {
     }
 
     @Test
-    fun aMessageFromAGitExceptionIsScrubbedBeforeItIsShown() {
+    fun `a message from a git exception is scrubbed before it is shown`() {
         // The shape of a JGit exception: it repeats the address it failed on.
         val exception = RuntimeException("https://$token@github.com/a/b.git: not authorized")
         val shown = Secrets.scrub(exception.message.orEmpty())

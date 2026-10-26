@@ -97,7 +97,7 @@ class ScenariosTest {
     }
 
     @Test
-    fun theAppBeforeAnybodyHasSignedIn() {
+    fun `the app before anybody has signed in`() {
         record(
             "01-first-open",
             "The app the first time it is opened.",
@@ -114,7 +114,7 @@ class ScenariosTest {
     }
 
     @Test
-    fun theSettingsScreenWithItsThemesAndHistoryLengths() {
+    fun `the settings screen with its themes and history lengths`() {
         scenario(
             compose, "02-settings", "Settings, before anything has been kept.",
             "the themes and how much change history is kept, at their defaults.",
@@ -131,7 +131,7 @@ class ScenariosTest {
     }
 
     @Test
-    fun aPhoneThatHasJustBeenSignedIn() {
+    fun `a phone that has just been signed in`() {
         record(
             "03-account-root",
             "The first thing after signing in.",
@@ -150,7 +150,7 @@ class ScenariosTest {
     }
 
     @Test
-    fun aProjectIsMadeAndItsFolderAppears() {
+    fun `a project is made and its folder appears`() {
         scene.signedIn()
         scene.open()
 
@@ -177,7 +177,7 @@ class ScenariosTest {
     }
 
     @Test
-    fun aProjectWithChangesWaitingToBeSynced() {
+    fun `a project with changes waiting to be synced`() {
         scene.signedIn()
         scene.project("groceries")
         scene.open("groceries")
@@ -206,7 +206,7 @@ class ScenariosTest {
     }
 
     @Test
-    fun aProjectFolderHoldingItsCodeAndItsRecord() {
+    fun `a project folder holding its code and its record`() {
         scene.signedIn()
         scene.project("groceries")
         scene.open("groceries")
@@ -234,7 +234,7 @@ class ScenariosTest {
     }
 
     @Test
-    fun aFileInsideTheCodeAndWhatTheSyncDoesWithIt() {
+    fun `a file inside the code and what the sync does with it`() {
         scene.signedIn()
         scene.project("groceries")
         scene.open("groceries")
@@ -258,7 +258,7 @@ class ScenariosTest {
     }
 
     @Test
-    fun whatAFileUsedToSay() {
+    fun `what a file used to say`() {
         scene.signedIn()
         // **A version belongs to a project**, because a project's folder is the repository. A
         // note at the account root has no history at all, so the note in this scenario lives in
@@ -295,7 +295,7 @@ class ScenariosTest {
     }
 
     @Test
-    fun theEditorsRow() {
+    fun `the editor's row`() {
         scene.signedIn()
         scene.open()
         val file = scene.file("milk.txt", "two litres")
@@ -330,7 +330,7 @@ class ScenariosTest {
     }
 
     @Test
-    fun theHistoryWithSelectOnTheRight() {
+    fun `the history with select on the right`() {
         scene.signedIn()
         scene.project("groceries")
         scene.open("groceries")
@@ -363,7 +363,7 @@ class ScenariosTest {
     }
 
     @Test
-    fun theHistoryOfAFolderThatWasDeleted() {
+    fun `the history of a folder that was deleted`() {
         scene.signedIn()
         scene.project("groceries")
         scene.open("groceries")
@@ -398,7 +398,7 @@ class ScenariosTest {
     }
 
     @Test
-    fun theHistoryOfAProjectThatWasNeverSynced() {
+    fun `the history of a project that was never synced`() {
         scene.signedIn()
         scene.project("groceries")
         scene.open("groceries")

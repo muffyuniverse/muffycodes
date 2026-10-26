@@ -76,7 +76,7 @@ class ModelCatalogueTest {
     """.trimIndent()
 
     @Test
-    fun theCatalogueFindsOneModelAndSaysWhenItIsMissing() {
+    fun `the catalogue finds one model and says when it is missing`() {
         val found = OpenRouterCatalogue.parseModels(models, "deepseek/deepseek-v4.1-flash-1017")
             .getOrThrow()
 
@@ -95,7 +95,7 @@ class ModelCatalogueTest {
     }
 
     @Test
-    fun modalitiesAreReadSeparatelyBecauseTheAgentNeedsTheInputsToHaveAGuiPane() {
+    fun `modalities are read separately because the agent needs the inputs to have a gui pane`() {
         val found = OpenRouterCatalogue.parseModels(models, "deepseek/deepseek-v4.1-flash-1017")
             .getOrThrow()
 
@@ -104,7 +104,7 @@ class ModelCatalogueTest {
     }
 
     @Test
-    fun theEffortLadderAndItsDefaultComeFromTheModelNotFromUs() {
+    fun `the effort ladder and its default come from the model not from us`() {
         val found = OpenRouterCatalogue.parseModels(models, "deepseek/deepseek-v4.1-flash-1017")
             .getOrThrow()
 
@@ -113,7 +113,7 @@ class ModelCatalogueTest {
     }
 
     @Test
-    fun aModelWithNoIntelligenceIndexHasNoneRatherThanZero() {
+    fun `a model with no intelligence index has none rather than zero`() {
         // 181 of the 467 models in the catalogue have no index. A `0` would rank them bottom of
         // a list they were never measured on.
         val scored = OpenRouterCatalogue.parseModels(models, "deepseek/deepseek-v4.1-flash-1017")
@@ -126,7 +126,7 @@ class ModelCatalogueTest {
     }
 
     @Test
-    fun pricesAreShownPerMillionTokens() {
+    fun `prices are shown per million tokens`() {
         // The API gives dollars per token as a string. `0.0000000784` in a column is a number
         // nobody can compare at a glance, so the conversion happens once, here.
         assertEquals(0.0784, OpenRouterCatalogue.perMillion("0.0000000784")!!, 1e-9)
@@ -137,7 +137,7 @@ class ModelCatalogueTest {
     }
 
     @Test
-    fun everyEndpointOfAModelIsKeptSeparatelyBecauseTheyAreNotInterchangeable() {
+    fun `every endpoint of a model is kept separately because they are not interchangeable`() {
         // On one model DeepSeek reports a 393,216-token reply and DeepInfra 131,072. Hiding two
         // of the three DeepInfra tiers would be picking for the operator without saying so.
         val list = OpenRouterCatalogue.parseEndpoints(endpoints).getOrThrow()
@@ -152,7 +152,7 @@ class ModelCatalogueTest {
     }
 
     @Test
-    fun aPercentileStatisticIsReadAtItsMedianAndAFlatNumberIsReadAsItself() {
+    fun `a percentile statistic is read at its median and a flat number is read as itself`() {
         // This is the shape that made "take .p50" necessary: one endpoint answers with an object
         // and another with a number, and a reader that assumed either would show `—` for half
         // the catalogue.
@@ -164,7 +164,7 @@ class ModelCatalogueTest {
     }
 
     @Test
-    fun aQuietEndpointHasNoThroughputRatherThanZero() {
+    fun `a quiet endpoint has no throughput rather than zero`() {
         // `throughput_last_30m: null` means OpenRouter has seen no traffic, not that the
         // provider is stopped. This is the exact cell that would read as an outage.
         val quiet = OpenRouterCatalogue.parseEndpoints(endpoints).getOrThrow()
@@ -176,7 +176,7 @@ class ModelCatalogueTest {
     }
 
     @Test
-    fun toolSupportIsReadPerEndpointBecauseAModelCanHaveBoth() {
+    fun `tool support is read per endpoint because a model can have both`() {
         // A provider that cannot call a tool cannot run this agent at all, and the add form
         // greys those out. Reading it per model would have been wrong: it is a property of the
         // endpoint, and it can differ between endpoints of one model.
@@ -188,7 +188,7 @@ class ModelCatalogueTest {
     }
 
     @Test
-    fun anEndpointListWithNothingInItIsAFailureNotAnEmptyScreen() {
+    fun `an endpoint list with nothing in it is a failure not an empty screen`() {
         val empty = """{ "data": { "id": "x", "endpoints": [] } }"""
 
         val result = OpenRouterCatalogue.parseEndpoints(empty)
@@ -201,7 +201,7 @@ class ModelCatalogueTest {
     }
 
     @Test
-    fun theCachePriceIsReadTooBecauseItIsAThirdOfTheCostOfAnIdleAgent() {
+    fun `the cache price is read too because it is a third of the cost of an idle agent`() {
         val list = OpenRouterCatalogue.parseEndpoints(endpoints).getOrThrow()
 
         assertEquals(0.002352, list.first { it.tag == "deepinfra/fp8" }.priceCache!!, 1e-9)

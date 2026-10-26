@@ -85,7 +85,7 @@ class ModelSectionTest {
     }
 
     @Test
-    fun theThreeValuesAreShownOnTheScreen() {
+    fun `the three values are shown on the screen`() {
         scene.viewModel.catalogue = scripted()
         compose.setContent { Section() }
 
@@ -98,7 +98,7 @@ class ModelSectionTest {
     }
 
     @Test
-    fun choosingAProviderWritesItIntoTheFile() {
+    fun `choosing a provider writes it into the file`() {
         // The file is the only store, so the claim is about the file: what the picker sets has to
         // land there rather than in a copy held by a screen.
         //
@@ -117,7 +117,7 @@ class ModelSectionTest {
     }
 
     @Test
-    fun aProviderThatCannotCallToolsIsNotOneTheAgentCanUse() {
+    fun `a provider that cannot call tools is not one the agent can use`() {
         // The add form greys these out, because a provider without tool support cannot run an
         // agent at all. The fact is on the endpoint, so this is where it is asserted.
         val noTools = listOf(
@@ -139,7 +139,7 @@ class ModelSectionTest {
     }
 
     @Test
-    fun aModelWithNothingInItsCatalogueCannotBeRead() {
+    fun `a model with nothing in its catalogue cannot be read`() {
         // A model whose endpoint list is empty is a failure, not an empty screen: "no providers"
         // and "no answer yet" look the same on a phone and mean different things.
         scene.viewModel.catalogue = object : Catalogue {
@@ -161,7 +161,7 @@ class ModelSectionTest {
     }
 
     @Test
-    fun aModelConfigTheAppCannotReadIsSaidOnTheScreenAndTheLastGoodChoiceStays() {
+    fun `a model config the app cannot read is said on the screen and the last good choice stays`() {
         // A damaged file does not quietly become the defaults: the screen says the file will not
         // read while still showing what the agent would use. Both are true at once, and a person
         // needs both.
@@ -178,7 +178,7 @@ class ModelSectionTest {
     }
 
     @Test
-    fun resetPutsBackTheModelTheAppShips() {
+    fun `reset puts back the model the app ships`() {
         // Not a history step: "reset" means the copy in the build, which is the one thing that
         // cannot itself be broken by the edit being undone.
         scene.viewModel.catalogue = scripted()
@@ -197,7 +197,7 @@ class ModelSectionTest {
     }
 
     @Test
-    fun theActiveModelCannotBeRemovedAndTheChoiceSaysWhy() {
+    fun `the active model cannot be removed and the choice says why`() {
         // Removing it would leave the agent with no model, which is not a state a person can fix
         // from this screen; choosing another first is.
         val refusal = scene.viewModel.removeModel(ModelConfigFile.DEFAULT_MODEL)
@@ -214,7 +214,7 @@ class ModelSectionTest {
     }
 
     @Test
-    fun addingAModelWithNoProvidersIsRefused() {
+    fun `adding a model with no providers is refused`() {
         assertTrue("nothing to pin to", scene.viewModel.addModel("x/y", emptyList()).isFailure)
         assertTrue(
             "and one that is already there",
@@ -223,7 +223,7 @@ class ModelSectionTest {
     }
 
     @Test
-    fun theKeyRowSaysPlainlyWhenThereIsNoKey() {
+    fun `the key row says plainly when there is no key`() {
         // The agent cannot read a model list or answer without it, so "no key" is not a detail:
         // it is the reason nothing on this screen can be chosen freely.
         scene.viewModel.catalogue = scripted()
@@ -233,7 +233,7 @@ class ModelSectionTest {
     }
 
     @Test
-    fun theKeyRowChangesWhenAKeyIsKept() {
+    fun `the key row changes when a key is kept`() {
         scene.viewModel.catalogue = scripted()
         scene.viewModel.saveModelKey("sk-or-v1-test-key-not-a-real-one")
         compose.setContent { Section() }
@@ -243,7 +243,7 @@ class ModelSectionTest {
     }
 
     @Test
-    fun theKeyItselfIsNeverOnTheScreen() {
+    fun `the key itself is never on the screen`() {
         // The same rule as the GitHub token: it can be typed and kept, and it is never shown
         // back. A screen that could show it is a screenshot away from a spend.
         scene.viewModel.catalogue = scripted()

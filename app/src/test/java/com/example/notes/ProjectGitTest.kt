@@ -218,7 +218,7 @@ class ProjectGitTest {
     }
 
     @Test
-    fun aSyncCanSayWhatItWasFor() {
+    fun `a sync can say what it was for`() {
         // Every other commit in a project is the app narrating a file — "Edited
         // milk.txt" — which is the right message for an undo step and the wrong one
         // for the history on GitHub, where the question is why a push happened.
@@ -349,7 +349,7 @@ class ProjectGitTest {
     }
 
     @Test
-    fun aSyncWithNothingToSayMakesNoEmptyCommit() {
+    fun `a sync with nothing to say makes no empty commit`() {
         // A marker is a landmark, not a habit: pressing sync with no note, and
         // nothing waiting, must not add one commit per press.
         workspace.createProjectFolders("Shopping").getOrThrow()
@@ -369,7 +369,7 @@ class ProjectGitTest {
     }
 
     @Test
-    fun replacingUsesWhateverBranchGitHubActuallyHas() {
+    fun `replacing uses whatever branch GitHub actually has`() {
         // The reported failure: replace a local project with the remote one, and get
         // an exception. A repository made before GitHub's own default changed has
         // `master`, and asking for `origin/main` threw `RefNotFoundException: Ref
@@ -420,7 +420,7 @@ class ProjectGitTest {
     }
 
     @Test
-    fun aSyncPushesTheBranchGitHubActuallyHas() {
+    fun `a sync pushes the branch GitHub actually has`() {
         // Given a time-shaped failure: the phone said "synced", and GitHub's default
         // branch never moved, because the push went to `main` while the repository
         // answers to `master` — leaving a second branch on GitHub that nobody is
@@ -476,7 +476,7 @@ class ProjectGitTest {
     }
 
     @Test
-    fun replacingAProjectBringsThePhoneOntoGitHubsBranch() {
+    fun `replacing a project brings the phone onto GitHub's branch`() {
         // Replacing the files is the visible half. The other half is the branch
         // name: a phone left on `main` after taking a `master` repository pushes a
         // branch GitHub does not show, so the next sync is a silent no-op as far as
@@ -522,7 +522,7 @@ class ProjectGitTest {
     }
 
     @Test
-    fun replacingAProjectGitHubHasNothingOnSaysSo() {
+    fun `replacing a project GitHub has nothing on says so`() {
         // A project this phone made and never synced: there is no remote branch at
         // all. That is not an exception, it is an answer — and the answer has to say
         // what to do instead.
@@ -544,7 +544,7 @@ class ProjectGitTest {
     }
 
     @Test
-    fun syncingCommitsAndPushesWhatChanged() {
+    fun `syncing commits and pushes what changed`() {
         workspace.createProjectFolders("Shopping").getOrThrow()
         val git = gitFor()
         val repo = git.open("Shopping") ?: run {
@@ -565,7 +565,7 @@ class ProjectGitTest {
     }
 
     @Test
-    fun theCommitMessageNamesTheFiles() {
+    fun `the commit message names the files`() {
         workspace.createProjectFolders("Shopping").getOrThrow()
         val git = gitFor()
         git.init("Shopping").getOrThrow()
@@ -581,7 +581,7 @@ class ProjectGitTest {
     }
 
     @Test
-    fun aCleanProjectSaysNothingChanged() {
+    fun `a clean project says nothing changed`() {
         workspace.createProjectFolders("Shopping").getOrThrow()
         val git = gitFor()
         git.init("Shopping").getOrThrow()
@@ -592,7 +592,7 @@ class ProjectGitTest {
     }
 
     @Test
-    fun aProjectsHistoryIsShortenedAfterASync() {
+    fun `a project's history is shortened after a sync`() {
         workspace.createProjectFolders("Shopping").getOrThrow()
         val git = gitFor()
         git.init("Shopping").getOrThrow()
@@ -609,7 +609,7 @@ class ProjectGitTest {
     }
 
     @Test
-    fun aSyncWithNoRepositorySaysSo() {
+    fun `a sync with no repository says so`() {
         workspace.createProjectFolders("Shopping").getOrThrow()
         val result = gitFor().sync("Shopping")
         assertFalse(result.success)
@@ -617,7 +617,7 @@ class ProjectGitTest {
     }
 
     @Test
-    fun theAppsOwnFolderIsNeitherAChangeNorASync() {
+    fun `the app's own folder is neither a change nor a sync`() {
         // **A project's folder is its repository**, so the only thing here that must not travel is
         // what the app put in it: `agent/` (the record) and `.muffy/` (its flags). The two lines
         // `ensureIgnore` writes into `.git/info/exclude` are what make that true, and this asks git

@@ -97,7 +97,7 @@ class WorkspaceTest {
     }
 
     @Test
-    fun hiddenThingsAreNeverListed() {
+    fun `hidden things are never listed`() {
         val dir = workspace.accountDir
         File(dir, "visible.txt").writeText("hi")
         File(dir, ".gitignore").writeText("x")
@@ -111,7 +111,7 @@ class WorkspaceTest {
     }
 
     @Test
-    fun foldersComeBeforeFiles() {
+    fun `folders come before files`() {
         val dir = workspace.accountDir
         File(dir, "zebra.txt").writeText("")
         File(dir, "Alpha").mkdirs()
@@ -120,7 +120,7 @@ class WorkspaceTest {
     }
 
     @Test
-    fun aPictureIsKnownByItsExtension() {
+    fun `a picture is known by its extension`() {
         val dir = workspace.accountDir
         assertEquals(EntryKind.IMAGE, workspace.kindOf(File(dir, "photo.PNG")))
         assertEquals(EntryKind.TEXT, workspace.kindOf(File(dir, "notes.txt")))
@@ -129,14 +129,14 @@ class WorkspaceTest {
     }
 
     @Test
-    fun aNameWithNoExtensionGetsTxt() {
+    fun `a name with no extension gets txt`() {
         assertEquals("notes.txt", Workspace.withDefaultExtension("notes"))
         assertEquals("notes.md", Workspace.withDefaultExtension("notes.md"))
         assertEquals("photo.png", Workspace.withDefaultExtension("photo.png"))
     }
 
     @Test
-    fun aNameStartingWithADotIsRefused() {
+    fun `a name starting with a dot is refused`() {
         assertTrue(workspace.nameProblem(".ssh") != null)
         assertTrue(workspace.nameProblem("a/b") != null)
         assertTrue(workspace.nameProblem("  ") != null)
@@ -144,7 +144,7 @@ class WorkspaceTest {
     }
 
     @Test
-    fun theRecordsFolderCannotBeTouched() {
+    fun `the records folder cannot be touched`() {
         // **One thing is structural now.** The two folders the app used to own — `projects/` at the
         // root and a repository folder inside each project — are gone, because the project *is* the
         // folder. What is left is the record's own `agent/`, and it is refused the same way.
@@ -158,7 +158,7 @@ class WorkspaceTest {
     }
 
     @Test
-    fun aFolderCannotBeMovedInsideItself() {
+    fun `the workspace refuses to move a folder inside itself, or onto itself`() {
         val outer = File(workspace.accountDir, "outer").apply { mkdirs() }
         val inner = File(outer, "inner").apply { mkdirs() }
         assertTrue(workspace.move(outer, inner).isFailure)
@@ -167,7 +167,7 @@ class WorkspaceTest {
     }
 
     @Test
-    fun aFileCanBeMovedBetweenTheFilesAndAFolderOfAProject() {
+    fun `a file can be moved between the files and a folder of a project`() {
         // The move that used to cross the worktree boundary — out of the repository and back — is
         // now an ordinary move between two folders of one repository, and it must still work.
         val project = workspace.createProjectFolders("Shopping").getOrThrow()
@@ -183,7 +183,7 @@ class WorkspaceTest {
     }
 
     @Test
-    fun theProjectOfAPathIsFound() {
+    fun `the project of a path is found`() {
         val project = aProject("Shopping")
         val file = File(project, "Milk.txt")
         assertEquals("Shopping", workspace.projectOf(file))
@@ -193,7 +193,7 @@ class WorkspaceTest {
     }
 
     @Test
-    fun projectsAreListedByName() {
+    fun `projects are listed by name`() {
         aProject("beta")
         aProject("Alpha")
         assertEquals(listOf("Alpha", "beta"), workspace.projectNames())
@@ -215,7 +215,7 @@ class WorkspaceTest {
     }
 
     @Test
-    fun pinsAreKeptInTheAppStateAndSurviveARestart() {
+    fun `pins are kept in the app state and survive a restart`() {
         val file = File(workspace.accountDir, "ideas.txt").apply { writeText("x") }
         val path = workspace.pathString(workspace.relative(file)!!)
         workspace.setPins(setOf(path))
@@ -226,7 +226,7 @@ class WorkspaceTest {
     }
 
     @Test
-    fun writingReplacesAFileWhole() {
+    fun `writing replaces a file whole`() {
         val file = File(workspace.accountDir, "note.txt")
         workspace.write(file, "one")
         workspace.write(file, "two")
@@ -235,7 +235,7 @@ class WorkspaceTest {
     }
 
     @Test
-    fun aNameIsTakenAndSaysSo() {
+    fun `a name is taken and says so`() {
         workspace.createFile(workspace.accountDir, "note.txt", "a")
         val second = workspace.createFile(workspace.accountDir, "note.txt", "b")
         assertTrue(second.isFailure)
@@ -243,7 +243,7 @@ class WorkspaceTest {
     }
 
     @Test
-    fun aProjectIsItsOwnRepositoryAndItsFilesAreTracked() {
+    fun `a project is its own repository and its files are tracked`() {
         // The merge, stated as a test: the folder a person sees *is* the repository — and the
         // app's two lines are in git's own exclude list, so nothing of the app's is ever committed
         // and nothing of the person's is excluded by accident.
@@ -264,7 +264,7 @@ class WorkspaceTest {
     }
 
     @Test
-    fun aPersonsIgnoreFileIsNeverTouchedByTheApp() {
+    fun `a person's ignore file is never touched by the app`() {
         // **The app's two lines are not in the person's `.gitignore`.** They are a rule of this
         // phone's app, not a fact about their repository: they go in `.git/info/exclude`, which
         // git never commits and cannot push. A `.gitignore` is a tracked file, so writing there
@@ -292,7 +292,7 @@ class WorkspaceTest {
     }
 
     @Test
-    fun readingAMissingFileIsEmptyRatherThanACrash() {
+    fun `reading a missing file is empty rather than a crash`() {
         assertEquals("", workspace.read(File(workspace.accountDir, "gone.txt")))
     }
 
@@ -309,7 +309,7 @@ class WorkspaceTest {
     }
 
     @Test
-    fun aLockedFileIsNotWrittenByTheFunnel() {
+    fun `a locked file is not written by the funnel`() {
         val file = File(workspace.accountDir, "milk.txt")
         workspace.write(file, "two litres")
         lock("milk.txt")
@@ -319,7 +319,7 @@ class WorkspaceTest {
     }
 
     @Test
-    fun aLockOnAFolderCoversWhatIsInsideIt() {
+    fun `a lock on a folder covers what is inside it`() {
         // The bug this is for: locking a folder protected the folder and nothing in it, so
         // the files a person had just frozen were all still editable.
         val folder = File(workspace.accountDir, "drafts")
@@ -340,7 +340,7 @@ class WorkspaceTest {
     }
 
     @Test
-    fun aLockOnAFileDoesNotLockTheOneBesideItWithALongerName() {
+    fun `a lock on a file does not lock the one beside it with a longer name`() {
         // A prefix comparison without its separator: locking `milk.txt` would also lock
         // `milk.txt.bak`, which is the kind of bug that reads as "the app is random".
         val file = File(workspace.accountDir, "milk.txt")
@@ -355,7 +355,7 @@ class WorkspaceTest {
     }
 
     @Test
-    fun copyingALockedFileOutIsAllowedBecauseCopyingDoesNotChangeIt() {
+    fun `copying a locked file out is allowed because copying does not change it`() {
         // A lock is "read only", not "keep away": a copy is a read of the source, and the
         // source is untouched. Writing *into* a locked folder is the change that is refused.
         val folder = File(workspace.accountDir, "drafts")
@@ -385,7 +385,7 @@ class WorkspaceTest {
     }
 
     @Test
-    fun theLockIsRememberedAcrossAWorkspaceThatHasNotReadItYet() {
+    fun `the lock is remembered across a workspace that has not read it yet`() {
         // The flags live in `.muffy`, so a second Workspace over the same account sees the
         // lock without being told: the cache is a cache, not the truth.
         val file = File(workspace.accountDir, "milk.txt")

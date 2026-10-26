@@ -218,7 +218,7 @@ class FilesFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `a folder cannot be moved inside itself`() {
+    fun `the screen refuses to move a folder inside itself`() {
         val outer = scene.folder("outer")
         scene.open("outer")
         val inner = scene.folder("inner")

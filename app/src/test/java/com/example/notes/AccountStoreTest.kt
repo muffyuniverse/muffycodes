@@ -31,7 +31,7 @@ class AccountStoreTest {
     }
 
     @Test
-    fun anAccountLivesInItsOwnFolderWithItsDetails() {
+    fun `an account lives in its own folder with its details`() {
         store.save(Account("muffyuniverse", "Muffy World", "muffyworld365@gmail.com"))
 
         assertTrue(
@@ -44,14 +44,14 @@ class AccountStoreTest {
     }
 
     @Test
-    fun severalAccountsAreListedAndNoneIsHidden() {
+    fun `several accounts are listed and none is hidden`() {
         store.save(Account("beta", "B", "b@example.com"))
         store.save(Account("Alpha", "A", "a@example.com"))
         assertEquals(listOf("Alpha", "beta"), store.accounts().map { it.login })
     }
 
     @Test
-    fun removingAnAccountTakesItsFolderAway() {
+    fun `removing an account takes its folder away`() {
         store.save(Account("muffyuniverse", "M", "m@example.com"))
         assertTrue(store.exists("muffyuniverse"))
 
@@ -62,7 +62,7 @@ class AccountStoreTest {
     }
 
     @Test
-    fun anAccountWithNoDetailsIsNotAnAccount() {
+    fun `an account with no details is not an account`() {
         // A folder left behind by a half-finished sign-in is not shown as one.
         store.dirOf("ghost").mkdirs()
         assertTrue(store.accounts().isEmpty())
@@ -70,7 +70,7 @@ class AccountStoreTest {
     }
 
     @Test
-    fun aWrittenNullIsNotTheWordNull() {
+    fun `a written null is not the word null`() {
         // `org.json`'s `optString` stringifies a JSON null into the four-letter word
         // "null", so an account whose email was stored as null showed that word where a
         // person's address belongs — and committed as it. Absent and null both mean
@@ -92,14 +92,14 @@ class AccountStoreTest {
     }
 
     @Test
-    fun theCommitIdentityFallsBackToTheLogin() {
+    fun `the commit identity falls back to the login`() {
         val account = Account("muffyuniverse", "", "")
         assertEquals("muffyuniverse", account.author().name)
         assertEquals("muffyuniverse@users.noreply.github.com", account.author().email)
     }
 
     @Test
-    fun theCommitIdentityIsUsedWhenItIsSet() {
+    fun `the commit identity is used when it is set`() {
         val account = Account("someone", "Muffy World", "muffyworld365@gmail.com")
         assertEquals("Muffy World", account.author().name)
         assertEquals("muffyworld365@gmail.com", account.author().email)
