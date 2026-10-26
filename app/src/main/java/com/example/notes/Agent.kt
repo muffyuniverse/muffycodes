@@ -228,13 +228,15 @@ class Agent(
          */
         data class Failed(val why: String, val stopping: Boolean = false) : Warm()
 
-        /**
-         * What a ping that could not be built says, **in the one place it can be changed.**
-         *
-         * It is written by the turn as well as by the runner, and two copies of a sentence a person
-         * reads is two sentences the day one of them is edited.
-         */
-        const val NOT_WARM = "The conversation could not be kept warm"
+        companion object {
+            /**
+             * What a ping that could not be built says, **in the one place it can be changed.**
+             *
+             * It is written by the turn as well as by the runner, and two copies of a sentence a
+             * person reads is two sentences the day one of them is edited.
+             */
+            const val NOT_WARM = "The conversation could not be kept warm"
+        }
     }
 
     companion object {
