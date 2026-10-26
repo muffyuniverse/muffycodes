@@ -2569,7 +2569,7 @@ class AppViewModel @JvmOverloads constructor(
             Account(
                 login = login,
                 commitName = commitName.ifBlank { login },
-                commitEmail = commitEmail.ifBlank { "$login@users.noreply.github.com" },
+                commitEmail = commitEmail.ifBlank { noreplyEmail(login) },
             )
         )
         credentials.activeLogin = login

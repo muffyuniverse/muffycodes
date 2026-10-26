@@ -20,8 +20,22 @@ data class Account(
 ) {
     fun author(): GitAuthor = GitAuthor(
         name = commitName.ifBlank { login },
-        email = commitEmail.ifBlank { "$login@users.noreply.github.com" },
+        email = commitEmail.ifBlank { noreplyEmail(login) },
     )
+}
+
+/**
+ * The address a commit by [login] gets when GitHub gives us none.
+ *
+ * **GitHub's own form**, and one rule rather than three: the account screen, the sign-in wrote it,
+ * and a fetched identity. It carries the numeric id when one is known, because that is what GitHub
+ * itself puts in a commit's address and what makes the address belong to the account rather than to
+ * whoever took the login later.
+ */
+internal fun noreplyEmail(login: String, id: Long = 0L): String = if (id > 0) {
+    "$id+$login@users.noreply.github.com"
+} else {
+    "$login@users.noreply.github.com"
 }
 
 /**

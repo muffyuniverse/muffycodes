@@ -138,8 +138,7 @@ class HttpGitHub(private val api: String = DEFAULT_API) : GitHub {
         // expose a real one.
         val name = user?.optString("name").orEmpty().ifBlank { login }
         val email = user?.optString("email").orEmpty().ifBlank {
-            val id = user?.optLong("id", 0L) ?: 0L
-            if (id > 0) "$id+$login@users.noreply.github.com" else "$login@users.noreply.github.com"
+            noreplyEmail(login, user?.optLong("id", 0L) ?: 0L)
         }
         return GitHubResult(value = Identity(login = login, name = name, email = email))
     }
