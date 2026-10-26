@@ -123,6 +123,80 @@ class ProjectGitTest {
     }
 
     @Test
+    fun `a file too big to preview is refused before it is read`() {
+        // **The limit is the difference between a window and a stalled phone.** The size is asked of
+        // the repository first, because reading 40 MB in order to discover it is 40 MB is the failure
+        // the limit exists to avoid — and an answer that only said "failed" would send a person
+        // looking for a bug in a file that is simply large.
+        workspace.createProjectFolders("Shopping").getOrThrow()
+        val git = gitFor()
+        git.init("Shopping").getOrThrow()
+        git.open("Shopping")!!.use { GitService.setRemoteUrl(it, bare.absolutePath) }
+        val worktree = workspace.repoOf("Shopping")
+        val big = File(worktree, "ledger.txt")
+        // Over half a megabyte: the limit the preview refuses past.
+        big.writeText(buildString { repeat(600) { append("x".repeat(1_000)).append("\n") } })
+        git.commit("Shopping", "a long file")
+
+        val preview = git.diff("Shopping", "ledger.txt")
+
+        assertTrue("no preview: ${preview.exceptionOrNull()?.message}", preview.isFailure)
+        assertTrue(
+            "and it says the reason is size: ${preview.exceptionOrNull()?.message}",
+            preview.exceptionOrNull()?.message.orEmpty().contains("too big"),
+        )
+    }
+
+    @Test
+    fun `a file that has never been sent is all additions`() {
+        // **There is nothing to compare it with, and that is not an error.** A new file's diff is its
+        // own lines, painted as added; answering "no preview" would hide the work a person is about
+        // to send, which is exactly what the window is for.
+        workspace.createProjectFolders("Shopping").getOrThrow()
+        val git = gitFor()
+        git.init("Shopping").getOrThrow()
+        git.open("Shopping")!!.use { GitService.setRemoteUrl(it, bare.absolutePath) }
+        val worktree = workspace.repoOf("Shopping")
+        File(worktree, "milk.txt").writeText("one\ntwo")
+        git.commit("Shopping", "first")
+
+        val diff = git.diff("Shopping", "milk.txt").getOrThrow()
+
+        assertEquals(
+            "both lines came, and neither was removed",
+            listOf(GitService.DiffLine.Kind.ADDED, GitService.DiffLine.Kind.ADDED),
+            diff.map { it.kind },
+        )
+        assertEquals("with their text", listOf("one", "two"), diff.map { it.text })
+    }
+
+    @Test
+    fun `a file deleted here is all removals`() {
+        // The other side of the same coin: the repository still holds it, the phone does not. The
+        // window has to be able to say what a sync would remove from GitHub.
+        workspace.createProjectFolders("Shopping").getOrThrow()
+        val git = gitFor()
+        git.init("Shopping").getOrThrow()
+        git.open("Shopping")!!.use { GitService.setRemoteUrl(it, bare.absolutePath) }
+        val worktree = workspace.repoOf("Shopping")
+        File(worktree, "milk.txt").writeText("one\ntwo")
+        git.commit("Shopping", "first")
+        assertTrue(git.sync("Shopping").success)
+
+        File(worktree, "milk.txt").delete()
+        git.commit("Shopping", "gone")
+
+        val diff = git.diff("Shopping", "milk.txt").getOrThrow()
+
+        assertEquals(
+            "both lines went, and none came",
+            listOf(GitService.DiffLine.Kind.REMOVED, GitService.DiffLine.Kind.REMOVED),
+            diff.map { it.kind },
+        )
+        assertEquals("with their text", listOf("one", "two"), diff.map { it.text })
+    }
+
+    @Test
     fun `a file that is not text has no preview, and says so`() {
         // Rendering a picture's bytes as lines is convincing nonsense, and a person reading the
         // window has no way to tell it from the file.
