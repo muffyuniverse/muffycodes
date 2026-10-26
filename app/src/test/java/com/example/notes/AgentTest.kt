@@ -748,6 +748,115 @@ class AgentTest {
         assertEquals("and nothing was written", "text", ws.read(File(ws.repoOf("shopping"), "todo.txt")))
     }
 
+    @Test
+    fun `delete takes the whole folder, which is what its description says`() {
+        // **The tool does what the spec promises.** The spec said "one file or an empty folder" while
+        // the tool removed any folder and everything in it — and no test called `delete` at all, which
+        // is why the two could drift apart for a release without anything noticing.
+        val folder = File(ws.repoOf("shopping"), "notes")
+        ws.write(File(folder, "one.txt"), "one")
+        ws.write(File(folder, "inner/two.txt"), "two")
+        git.commit("shopping", "notes")
+
+        val body = tool("delete", """{"path":"notes"}""")
+
+        assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
+        assertFalse("the folder is gone", folder.exists())
+    }
+
+    // ---- a key the command does not take --------------------------------------
+
+    @Test
+    fun `a key a command does not take is refused, and the refusal teaches the command`() {
+        // **`lines` is the one that matters.** It was a real argument in a shipped description, so a
+        // model will keep sending it — and it used to be ignored, which turned "forty lines from
+        // here" into "everything from here". A refusal that names the key, the keys that work and
+        // the command's own example is the only answer that repairs the model's idea of it.
+        ws.write(File(ws.repoOf("shopping"), "milk.txt"), (1..40).joinToString("\n") { "line $it" })
+
+        val body = tool("read", """{"path":"milk.txt","from":10,"lines":5}""")
+
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("naming the key: $body", body.contains("`lines`"))
+        assertTrue("and the ones that work: $body", body.contains("`from`"))
+        assertTrue("and that it was renamed: $body", body.contains("not a key any more"))
+        assertTrue(
+            "and its own example, so the answer shows the shape: $body",
+            body.contains("relative to the project"),
+        )
+        assertFalse("nothing of the file came through", body.contains("line 40"))
+    }
+
+    @Test
+    fun `a wrong key stops the command before it does anything`() {
+        // The check is before the work, not inside it: a `create` with a misspelled key must leave
+        // no file, and an `edit` with one must leave the file as it stood.
+        val file = File(ws.repoOf("shopping"), "milk.txt")
+        ws.write(file, "one\ntwo")
+
+        val edited = tool("edit", """{"path":"milk.txt","find":"one","replce":"three"}""")
+        val created = tool("create", """{"path":"new.txt","text":"hi","force":true}""")
+
+        assertTrue("the edit is refused: $edited", edited.startsWith(AgentLog.FAILURE))
+        assertTrue("the create is refused: $created", created.startsWith(AgentLog.FAILURE))
+        assertEquals("and the file is untouched", "one\ntwo", file.readText())
+        assertFalse("and nothing was made", File(ws.repoOf("shopping"), "new.txt").exists())
+    }
+
+    @Test
+    fun `a background command is checked before the work starts`() {
+        // Otherwise the refusal lands in the result file, and the model reads it only once it thinks
+        // the command has finished — a wrong key answered minutes after it was sent.
+        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "one")
+
+        val body = tool("background", """{"tool":"read","args":{"path":"milk.txt","lines":5}}""")
+
+        assertTrue("refused at once: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("naming the key: $body", body.contains("`lines`"))
+    }
+
+    @Test
+    fun `a conclude with a key it does not take does not end the turn`() {
+        // **An ending nobody asked for is worse than a refusal.** `conclude {"txt":"done"}` used to
+        // fall back to the reply's own prose and end the turn, so the model was told nothing and the
+        // person was told whatever the model happened to say in passing.
+        val door = ScriptedDoor(
+            Reply("", listOf(call("conclude", """{"txt":"done"}"""))),
+            Reply("", listOf(call("conclude", """{"text":"all done"}"""))),
+        )
+
+        val end = agent(door).burst("do the thing")
+
+        assertEquals(
+            "the second conclude is the one that ended it",
+            "all done",
+            (end as Agent.End.Concluded).said,
+        )
+        val got = gotRows().first()
+        assertTrue("the first was refused: ${got.body}", got.body.contains("`txt`"))
+    }
+
+    @Test
+    fun `every tool says which keys it takes, and its example uses no other`() {
+        // The pair that keeps a description honest: a command with no key list cannot be checked,
+        // and an example showing a key the command refuses is a description that teaches a refusal.
+        val specs = AgentTools.specs()
+        for (spec in specs) {
+            val took = AgentTools.KEYS[spec.name] ?: error("${spec.name} declares no keys")
+            val shown = spec.parameters.keys().asSequence().toSet()
+            assertEquals(
+                "${spec.name}'s example shows only keys it takes",
+                emptySet<String>(),
+                shown - took,
+            )
+        }
+        assertEquals(
+            "and no key list names a command that is not offered",
+            emptySet<String>(),
+            AgentTools.KEYS.keys - specs.map { it.name }.toSet(),
+        )
+    }
+
     // ---- read at a version --------------------------------------------------
 
     @Test
@@ -862,6 +971,24 @@ class AgentTest {
             "and that file is already there: $path",
             File(ws.projectDir("shopping"), path).isFile,
         )
+    }
+
+    @Test
+    fun `two backgrounded commands keep two results, even of the same tool`() {
+        // **The path is named after the call, and the inner call used to have no id of its own.** It
+        // took one from the arguments, defaulting to "0", so two backgrounded reads both wrote
+        // `read-0.txt` — the second answer replaced the first, silently, and the agent read it as the
+        // answer to its own question.
+        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "the milk")
+        ws.write(File(ws.repoOf("shopping"), "bread.txt"), "the bread")
+        val tools = tools()
+
+        val one = tools.run(Call("c1", "background", """{"tool":"read","args":{"path":"milk.txt"}}"""))
+        val two = tools.run(Call("c2", "background", """{"tool":"read","args":{"path":"bread.txt"}}"""))
+
+        assertTrue("both worked: $one / $two", one.startsWith(AgentLog.SUCCESS) && two.startsWith(AgentLog.SUCCESS))
+        assertEquals("the first answer", "0\nthe milk", File(ws.projectDir("shopping"), "agent/background_results/read-c1.txt").readText())
+        assertEquals("the second answer", "0\nthe bread", File(ws.projectDir("shopping"), "agent/background_results/read-c2.txt").readText())
     }
 
     @Test
@@ -1120,11 +1247,12 @@ class AgentTest {
     }
 
     @Test
-    fun `a result over the limit is an error that says how to narrow it`() {
-        // **Whole or refused, never a fragment.** A model handed the first half of a file with a
-        // note at the bottom edits the wrong half with complete confidence — and the note is at
-        // the bottom, which is the part it is least likely to read. The answer carries the number
-        // it asked about and the two ways to ask again.
+    fun `a result over the limit is written to a file, and the answer is its path`() {
+        // **Filed, not cut and not refused.** The body already exists when the limit is asked about,
+        // so the whole of it goes to the same folder a background command uses and the conversation
+        // gets the path. Nothing is lost and nothing is decided twice: a model that is shown half a
+        // file edits the wrong half with complete confidence, and a model told only "too big, narrow
+        // it" has to guess by how much.
         val big = (1..400).joinToString("\n") { "line $it of the file" }
         ws.write(File(ws.repoOf("shopping"), "big.txt"), big)
         git.commit("shopping", "big")
@@ -1142,10 +1270,33 @@ class AgentTest {
         ).burst("read the whole thing")
 
         val got = gotRows().first()
-        assertTrue("it is refused: ${got.body.takeLast(80)}", got.body.startsWith(AgentLog.FAILURE))
+        assertTrue("it worked, and was filed: ${got.body}", got.body.startsWith(AgentLog.SUCCESS))
         assertTrue("it says the limit it passed: ${got.body}", got.body.contains("500"))
-        assertTrue("and how to narrow it: ${got.body}", got.body.contains("Narrow it"))
         assertFalse("nothing of the file came through", got.body.contains("line 400 of the file"))
+
+        val path = Regex("agent/background_results/read-\\S+\\.txt").find(got.body)
+            ?.value ?: error("the answer names the file it was written to: ${got.body}")
+        val filed = File(ws.accountDir, "shopping/$path")
+        assertTrue("and the file is there: $path", filed.isFile)
+        assertEquals("holding the whole result", big, filed.readText())
+    }
+
+    @Test
+    fun `a refusal too big to fit is filed too, and keeps its failure`() {
+        // The status belongs to the call, not to the filing. A refusal that had to be filed is
+        // still a refusal — otherwise a failed edit that quoted a lot of the file would read as a
+        // success that happened to leave a note.
+        val big = (1..400).joinToString("\n") { "line $it of the file" }
+        ws.write(File(ws.repoOf("shopping"), "big.txt"), big)
+        val tools = AgentTools(ws, "shopping", git, log, maxChars = 200)
+
+        val said = tools.forConversation(
+            Call("c9", "read", """{"path":"big.txt"}"""),
+            tools.run(Call("c9", "read", """{"path":"big.txt"}""")).replaceFirst("0\n", "1\n"),
+        )
+
+        assertTrue("still a refusal: $said", said.startsWith(AgentLog.FAILURE))
+        assertTrue("and it says where: $said", said.contains("background_results/read-c9.txt"))
     }
 
     // ---- the context is the sources, not a copy of them ----------------------

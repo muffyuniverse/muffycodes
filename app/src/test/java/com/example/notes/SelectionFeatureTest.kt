@@ -101,6 +101,57 @@ class SelectionFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `a move that stops halfway keeps what moved, records it, and says how far it got`() {
+        // **A batch has two kinds of failure.** A name that is taken, or a lock, is answered before
+        // anything moves. The other kind cannot be: the disk fills, a folder vanishes, a folder is
+        // asked to move inside itself. Stopping there with nothing recorded would leave files that
+        // moved and no repository that knows about them — the one state this app exists to prevent.
+        // So what moved is committed, counted, and said out loud, and the rest stays selected.
+        scene.project("groceries")
+        scene.open("groceries")
+        scene.file("milk.txt", "two litres")
+        val recipes = scene.folder("recipes")
+        val cakes = File(recipes, "cakes").apply { mkdirs() }
+        scene.viewModel.refresh()
+        chooseAll("milk.txt", "recipes")
+
+        // `milk.txt` sorts first and moves; `recipes` cannot move inside its own `cakes`.
+        assertFalse("the batch did not finish", scene.viewModel.moveSelected(cakes))
+
+        assertTrue("the first one moved", File(cakes, "milk.txt").isFile)
+        assertTrue("the one that could not move is where it was", recipes.isDirectory)
+        val said = scene.viewModel.message.orEmpty()
+        assertTrue("it counts what happened: $said", said.contains("Moved 1 of 2"))
+        assertTrue("and says why it stopped: $said", said.contains("inside itself"))
+        assertTrue(
+            "and the remainder is still chosen, so a second try is one touch",
+            scene.viewModel.selected.size == 1 && scene.viewModel.isSelected(recipes),
+        )
+        // The project recorded the one that moved: a file on disk and in no repository is the
+        // half-done state this change is about.
+        assertTrue(
+            "and the project recorded the one that moved",
+            scene.awaitCommits("groceries", 1) { paths -> paths.any { it.endsWith("milk.txt") } },
+        )
+    }
+
+    @Test
+    fun `a batch that fails on its first item commits nothing and says nothing moved`() {
+        scene.file("milk.txt", "two litres")
+        val recipes = scene.folder("recipes")
+        val cakes = File(recipes, "cakes").apply { mkdirs() }
+        scene.viewModel.refresh()
+        scene.viewModel.toggleSelected(recipes)
+
+        assertFalse(scene.viewModel.moveSelected(cakes))
+
+        assertTrue("still where it was", recipes.isDirectory)
+        val said = scene.viewModel.message.orEmpty()
+        assertTrue("it says nothing happened: $said", said.contains("Nothing was moved"))
+        assertFalse("and does not claim a partial move: $said", said.contains("Moved 0"))
+    }
+
+    @Test
     fun `several files delete together, and the selection goes with them`() {
         scene.file("milk.txt")
         scene.file("bread.txt")

@@ -89,6 +89,63 @@ class AgentTools(
          */
         const val LONG_DIR = AgentLog.DIR
 
+        /**
+         * What each command takes — **and the whole of what it takes.**
+         *
+         * A key that is not here is refused before the command runs, because the alternative is
+         * silent misbehaviour: `read {"lines":40}` used to mean "everything", since `lines` was the
+         * old name for a count and the parser had stopped looking at it. A typo that changes the
+         * answer without saying so is the worst kind of answer.
+         *
+         * `ask`, `conclude` and `wait` are here even though [run] never dispatches them: the loop
+         * ends the turn on them, and it asks this same table first, so a `conclude` with a
+         * misspelled key is refused rather than turned into an ending with the wrong words.
+         */
+        val KEYS: Map<String, Set<String>> = mapOf(
+            "tree" to setOf("path", "depth", "name", "grep", "from", "to"),
+            "read" to setOf("path", "from", "to", "grep", "revision"),
+            "edit" to setOf("path", "find", "replace", "from", "to", "at", "text"),
+            "forget" to setOf("ids"),
+            "create" to setOf("path", "text"),
+            "delete" to setOf("path"),
+            "move" to setOf("path", "into", "name", "copy"),
+            "history" to setOf("path", "grep", "from", "to"),
+            "restore" to setOf("path", "revision"),
+            "background" to setOf("tool", "args"),
+            "reason" to setOf("text"),
+            "ask" to setOf("question"),
+            "conclude" to setOf("text"),
+            "wait" to emptySet(),
+        )
+
+        /** The keys [args] carries that [tool] does not take, in the order the model wrote them. */
+        fun unknownIn(tool: String, args: JSONObject): List<String> {
+            val took = KEYS[tool] ?: return emptyList()
+            return args.keys().asSequence().filterNot { it in took }.toList()
+        }
+
+        /**
+         * The answer a wrong key gets: which key, which keys this command does take, and its shape.
+         *
+         * The example is read from [specs] rather than written again here, so a command's refusal
+         * cannot describe a command that no longer exists.
+         */
+        fun refuseKeys(tool: String, unknown: List<String>): String = "1\n" + keysSaid(tool, unknown)
+
+        /** [refuseKeys] without the status line, for a caller that is a `Result` rather than a result. */
+        fun keysSaid(tool: String, unknown: List<String>): String {
+            val took = KEYS[tool] ?: return "There is no tool called $tool"
+            val keys = if (took.isEmpty()) "no arguments" else "only " + took.sorted().joinToString(", ") { "`$it`" }
+            val shape = specs().firstOrNull { it.name == tool }?.parameters?.toString() ?: "{}"
+            val renamed = if ("lines" in unknown) {
+                " `lines` is not a key any more: `from` and `to` are line numbers, both included."
+            } else {
+                ""
+            }
+            return "`$tool` does not take " + unknown.joinToString(", ") { "`$it`" } +
+                ". It takes $keys.$renamed\nIts shape: $shape"
+        }
+
         fun specs(): List<ToolSpec> = listOf(
             spec(
                 "tree",
@@ -103,7 +160,8 @@ class AgentTools(
             spec(
                 "read",
                 "Read a text file, or one of its versions. Always read before you change one. " +
-                    "`from` and `to` are line numbers, both included; `to` alone means the end. " +
+                "`from` and `to` are line numbers, both included; `from` starts at 1 and `to` " +
+                "left out runs to the end. " +
                     "With `grep` only the lines that match are shown, each with its line number, " +
                     "and the pattern is applied inside `from`/`to` rather than to the whole file.",
                 "{\"path\":\"the file, relative to the project\",\"from\":1,\"to\":200," +
@@ -129,7 +187,7 @@ class AgentTools(
                 "Make a new file, with its folders if they do not exist.",
                 """{"path":"the file","text":"its contents"}""",
             ),
-            spec("delete", "Delete one file or an empty folder.", """{"path":"what to delete"}"""),
+            spec("delete", "Delete a file, or a folder and everything in it.", """{"path":"what to delete"}"""),
             spec(
                 "move",
                 "Move a file into a folder, or rename it inside its own folder. With `copy` the " +
@@ -205,6 +263,12 @@ class AgentTools(
      */
     fun run(call: Call, deadline: Deadline = Deadline.none()): String = try {
         val args = JSONObject(call.args.ifBlank { "{}" })
+        // **Before the command, not inside it.** A key a command does not take means the model and
+        // the description disagree, and answering as if they did not is how `lines` silently became
+        // "everything". Nothing has happened yet at this point, which is the only moment a refusal
+        // can leave everything exactly as it was.
+        val unknown = unknownIn(call.tool, args)
+        if (unknown.isNotEmpty()) return refuseKeys(call.tool, unknown)
         when (call.tool) {
             "tree" -> tree(args, deadline)
             "read" -> read(args, deadline)
@@ -215,7 +279,7 @@ class AgentTools(
             "move" -> move(args, deadline)
             "history" -> history(args, deadline)
             "restore" -> restore(args, deadline)
-            "background" -> background(args)
+            "background" -> background(call, args)
             "reason" -> reason(args)
             else -> refusal("There is no tool called ${call.tool}")
         }
@@ -237,10 +301,15 @@ class AgentTools(
      * uses, so the file's body is the body the agent would have read in the conversation and no
      * command can exist on one path and not the other.
      *
+     * **The inner call inherits the outer one's id**, which is what makes the path unique. It used to
+     * take an `id` from the arguments, defaulting to `"0"` — so two backgrounded reads both wrote
+     * `read-0.txt` and the second answer replaced the first, silently, while the agent read it as the
+     * answer to its own question.
+     *
      * Refused: the three that end a turn, because there is no result to file, and `background`
      * itself, because a background of a background is a way to lose a result.
      */
-    private fun background(args: JSONObject): String {
+    private fun background(call: Call, args: JSONObject): String {
         val tool = args.optString("tool").trim()
         if (tool.isEmpty()) return refusal("Say which command to run in the background")
         if (tool in TERMINATING) {
@@ -249,11 +318,14 @@ class AgentTools(
         if (tool == "background") {
             return refusal("A background command cannot be put in the background")
         }
-        val inner = Call(
-            id = args.optString("id", "0"),
-            tool = tool,
-            args = args.optJSONObject("args")?.toString() ?: "{}",
-        )
+        // **The command it names is checked now, not when it runs.** Otherwise the wrong key would
+        // be found by the work, and the answer would be a file containing a refusal the model does
+        // not look at until it thinks the command finished.
+        if (tool !in KEYS) return refusal("There is no tool called $tool")
+        val innerArgs = args.optJSONObject("args") ?: JSONObject()
+        val unknown = unknownIn(tool, innerArgs)
+        if (unknown.isNotEmpty()) return refuseKeys(tool, unknown)
+        val inner = Call(id = call.id, tool = tool, args = innerArgs.toString())
         val dir = projectDir
         return bg.start(dir, inner) { run(inner, Deadline(backgroundMs())) }
     }
@@ -569,6 +641,13 @@ class AgentTools(
             )
         }
         val inner = call.optJSONObject("args") ?: JSONObject()
+        // **The nested read is checked like a real one.** It is not dispatched through [run] — its
+        // text goes into a file, not into the conversation — so without this the one place a model
+        // could send a key nobody reads would be the one place a large paste is built from.
+        val unknown = unknownIn("read", inner)
+        if (unknown.isNotEmpty()) {
+            return Result.failure(IllegalArgumentException(keysSaid("read", unknown)))
+        }
         return readInto(inner, deadline)
     }
 
@@ -789,9 +868,42 @@ class AgentTools(
         }
     }
 
-    private fun success(body: String): String = trim("0\n$body")
+    private fun success(body: String): String = "0\n$body"
 
-    private fun refusal(said: String): String = trim("1\n$said")
+    private fun refusal(said: String): String = "1\n$said"
+
+    /**
+     * What the conversation gets to see of one call's answer.
+     *
+     * **A result larger than the operator's limit is not cut short and it is not refused: it is
+     * filed.** The body already exists by the time the limit is asked about, so writing it whole to
+     * `agent/background_results/<tool>-<callId>.txt` and answering with that path costs nothing and
+     * loses nothing — and it is the same file, the same sentence and the same protocol as
+     * `background`, so the agent has one rule to learn instead of two.
+     *
+     * Two earlier shapes were wrong. Cutting the body is how a model confidently edits the half it
+     * was shown. Refusing with "too big, narrow it" tells a model what it already knows and hands it
+     * nothing — and a refusal measured by the same limit could be longer than the limit, so the
+     * complaint about the size replaced the cause.
+     *
+     * **A refusal keeps its `1`** when it is filed: the status is the call's, not the filing's.
+     *
+     * Two results are deliberately not measured, and neither passes through here: one going to a file
+     * (`background`'s work), and one going into another file (`edit`'s replacement).
+     */
+    fun forConversation(call: Call, body: String): String {
+        if (body.length <= maxChars) return body
+        val status = if (body.startsWith("1\n")) "1" else "0"
+        val text = body.substringAfter('\n')
+        val path = Background.keep(projectDir, call, text)
+            ?: return "$status\nThat result was ${text.length} characters and the limit is $maxChars, " +
+                "and it could not be written to a file either. Narrow it instead: " +
+                "{\"from\":1,\"to\":200} or {\"grep\":\"pattern\"}."
+        val asked = "{\"path\":\"$path\",\"from\":1,\"to\":200}"
+        return "$status\nThat result was ${text.length} characters and the limit is $maxChars, so it " +
+            "was written whole to $path. Read it in ranges: $asked, or " +
+            "{\"path\":\"$path\",\"grep\":\"a pattern\"}."
+    }
 
     /**
      * A file's whole text, in chunks, so that the deadline can be asked part of the way through.
@@ -824,26 +936,6 @@ class AgentTools(
             return ""
         }
         return out.toString()
-    }
-
-    /**
-     * The one limit, and it is an error rather than a fragment.
-     *
-     * **A result is either whole or it is a refusal.** Handing a model the first 20,000 characters
-     * of a file with a note is how it confidently edits the wrong half; and a note at the bottom of
-     * a truncated body is the part it is least likely to read. An error is the one shape that says
-     * "you have not seen this" in a way that cannot be skimmed past, and it carries the numbers and
-     * the two ways to narrow, because "too big" alone leaves a model guessing by how much.
-     *
-     * The limit belongs to the operator (`result length`), and it is about **what enters the
-     * conversation**. Two results are deliberately not measured: one going to a file (`background`),
-     * and one going into another file (`edit`'s replacement).
-     */
-    private fun trim(body: String): String {
-        if (body.length <= maxChars) return body
-        return "1\nThat result was ${body.length} characters and the limit is $maxChars. " +
-            "Narrow it: give {\"from\":1,\"to\":200} for a line range, or {\"grep\":\"pattern\"} " +
-            "for the lines that match."
     }
 
     // ---- where the agent may stand ------------------------------------------

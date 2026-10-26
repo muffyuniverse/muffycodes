@@ -73,7 +73,7 @@ reads it as the answer to its own question. Nothing in the record shows the swap
 **Proposal:** pass the outer call into `background` so the inner id is the outer id — one line plus
 its signature — and a test that two backgrounded reads of two files keep two results.
 
-@
+@ ok
 
 ### A2. `read`'s description says the range backwards
 
@@ -86,7 +86,7 @@ nothing refuses.
 **Proposal:** `"`from` and `to` are line numbers, both included; `from` starts at 1 and `to` left out
 runs to the end."`
 
-@
+@ ok
 
 ### A3. `delete`'s description is narrower than the tool
 
@@ -98,7 +98,7 @@ nothing caught it.
 **Proposal:** "Delete a file, or a folder and everything in it.", plus one test — the shape that is
 already asserted for `Workspace.delete` but not for the tool.
 
-@
+@ ok
 
 ### A4. Settings still promises a truncated result
 
@@ -109,7 +109,7 @@ last.
 
 **Proposal:** `"A result longer than this is refused, and says its size and how to narrow it."`
 
-@
+@ ok
 
 ### A5. A refusal is measured by the limit it is complaining about
 
@@ -121,7 +121,7 @@ refusal today, but the failure mode is exactly backwards: the bigger the problem
 **Proposal:** `refusal()` bypasses the limit; only results are measured. A refusal is capped by its
 authors, not by the operator's number.
 
-@
+@ I think that if the error is too big then the initial command should run in background. no divergence - more simplicity and uniformity.
 
 ### A6. Unknown arguments are silently ignored
 
@@ -138,7 +138,7 @@ learned it will keep sending it, and its meaning flipped from "how many" to "not
 **Proposal:** reject any key a command does not take, naming the ones it does — the same rule every
 other refusal in this app follows. `lines` gets its own sentence for one release ("use `to`").
 
-@
+@ any wrong key should error command out before any other part of it is called, error contains instruction on how to use this command.
 
 ### A7. `moveSelected`'s doc argues against its body
 
@@ -149,7 +149,7 @@ other refusal in this app follows. `lines` gets its own sentence for one release
 **Proposal:** replace the doc block with the rule the body follows, and keep the note about commits
 happening once.
 
-@
+@ ok
 
 ### A8. "All or nothing" is a pre-check, not a transaction
 
@@ -172,7 +172,7 @@ What actually runs is: check every name → move one at a time → stop at the f
 I would take 2 — it never loses work, and it is the only one that leaves the history matching the
 disk.
 
-@
+@ 2 + precheck
 
 ---
 
@@ -192,7 +192,7 @@ call `ContextBudget.ceiling(provider)` with no window, so any pin that is not in
 **Proposal:** read the catalogue in both places, the way the screen does. The number the agent is
 held to and the number on the screen become the same call.
 
-@
+@ context ceiling is is limited by the selected model/provider's max context, and selected by operator (0;limit). session ceiling is not limited (0;inf). and max message size is a separate one and limited by max input window (0;limit).
 
 ### B2. "N to send" counts commits, not changes
 
@@ -211,7 +211,7 @@ batch case, and the doc calls the number "how many changes this project has" (`W
 
 I would take 1: the person is looking at files, and the number should be files.
 
-@
+@ 1, and I want to the left of sync to add a button "see changes" and for a window with a list of files being opened when you touch it, and you can touch every of the listed files and see them inside the editor (and when you exit editor you return back to the window of changed files). And I want preview to show diffs between head and latest synced commit (deletions in read, additions in dark green, unchanged in text color of the theme) - only for text files.
 
 ### B3. The session-log limit has no field
 
@@ -224,7 +224,7 @@ They are named apart in prose (`SettingsScreen.kt:476-488`) and the number is th
 **Proposal:** a `LengthField` under "The record", keyed like the others, defaulting to the current
 constant; `0`/blank keeps everything.
 
-@
+@ ok
 
 ### B4. The agent block is not directly under the account
 
@@ -235,7 +235,7 @@ happened.
 **Proposal:** account → AGENT → Theme → Change history → The record → Running/Background/Reminders.
 The agent block is the one people come to Settings for.
 
-@
+@ ok, and separate the blocks (preferably with horizontal lines or any standard compose bestpractice).
 
 ### B5. One label still begins with "agent"
 
@@ -244,7 +244,7 @@ Ruling: *"remove agent from every field title except the title of the block"*.
 
 **Proposal:** `"Check on it every (seconds)"`.
 
-@
+@ ok
 
 ### B6. "local · this phone only" is still there
 
@@ -258,7 +258,7 @@ already says so, and the row exists to answer "how much is unsent").
 **Proposal:** drop the word and say the useful half — `"this phone only · no GitHub"`. Or nothing at
 all, if you would rather the row only ever show a count.
 
-@
+@ nothing
 
 ---
 
@@ -271,13 +271,13 @@ Ruling 13 in the logs asked for the **handover**. It was built and then erased: 
 is *stopped, and says so* (`Agent.kt:66-70`, `AgentPrompt.kt:78-81`, `SettingsScreen.kt:414-428`).
 The code matches the later ruling; nothing to do.
 
-@
+@ right
 
 ### C2. "Rename `GitHub/` into `<project>_repository`"
 
 Ten minutes later the same session asked for the merge that removed the folder. Moot.
 
-@
+@ right
 
 ---
 
@@ -301,7 +301,7 @@ describes behaviour that cannot happen.
 **Proposal:** say what the setting does now: the command is stopped, its result says so, the turn
 carries on. Rename the test to `a command limit is off on a phone that never chose one`.
 
-@
+@ set default to 180 sec
 
 ### D2. `LONG_DIR` names a deleted concept
 
@@ -310,7 +310,7 @@ only the name is a relic of `LONG`.
 
 **Proposal:** `RESULTS_DIR`, or just `AgentLog.DIR` at the one use.
 
-@
+@ `RESULTS_DIR`
 
 ### D3. The plan speaks in the present about deleted code
 
@@ -321,7 +321,7 @@ describes the code (`2118d35`).
 **Proposal:** one line at the top — *"Historical: what was true when this plan was written. The
 reference is [agent-tools-review.md]."* — rather than editing its findings into the past.
 
-@
+@ ok
 
 ### D4. A comment still explains `maxResult` by truncation
 
@@ -331,7 +331,7 @@ the 20000"*. That sentence is why the field exists; the field now reports a refu
 **Proposal:** keep the field, rewrite the reason: the limit is a conversation budget, so it is a
 field rather than a constant.
 
-@
+@ ok
 
 ---
 

@@ -333,7 +333,23 @@ class Agent(
                     progress()
                 }
 
-                ending != null -> return finish(leave(ending, reply))
+                ending != null -> {
+                    // **A terminating call with a key it does not take never happens.** It is
+                    // answered as a refusal and the turn carries on, exactly as a `read` with a
+                    // misspelled key is: the model can then call it again with the words it meant.
+                    // It used to be obeyed, with the missing text quietly replaced by the reply's
+                    // own prose — an ending nobody asked for, described by a sentence nobody wrote.
+                    val unknown = AgentTools.unknownIn(ending.tool, argsOf(ending))
+                    if (unknown.isNotEmpty()) {
+                        val id = log.call(ending.tool, ending.args)
+                        log.got(ending.tool, AgentTools.refuseKeys(ending.tool, unknown))
+                        Trace.note("agent", "$project call ${ending.tool} #$id")
+                        idle++
+                        progress()
+                    } else {
+                        return finish(leave(ending, reply))
+                    }
+                }
 
                 else -> {
                     // **Measured, not asked.** Whether the clear-up happened is the context
@@ -374,16 +390,25 @@ class Agent(
 
     /** Idle until the person speaks: [waited], which is the whole of what a poll does. */
     private fun leave(call: Call, reply: Reply): End {
-        val args = try {
-            org.json.JSONObject(call.args.ifBlank { "{}" })
-        } catch (e: Exception) {
-            org.json.JSONObject()
-        }
+        val args = argsOf(call)
         return when (call.tool) {
             "ask" -> asked(call, args, reply)
             "conclude" -> concluded(call, args, reply)
             else -> waited(call)
         }
+    }
+
+    /**
+     * A call's arguments, tolerated rather than thrown.
+     *
+     * A reply whose arguments are not JSON at all is a reply the loop still has to answer — the
+     * conversation refuses an unanswered call — so the parse failure is `{}` here and the command's
+     * own refusals do the complaining.
+     */
+    private fun argsOf(call: Call): org.json.JSONObject = try {
+        org.json.JSONObject(call.args.ifBlank { "{}" })
+    } catch (e: Exception) {
+        org.json.JSONObject()
     }
 
     /**
@@ -513,7 +538,6 @@ class Agent(
 
     /** Runs one call and returns its body with its `0` or `1` already on the front. */
     private fun runTool(call: Call): String = tools.run(call)
-
     /**
      * A call's result, **with the operator's deadline on it.**
      *
@@ -528,8 +552,12 @@ class Agent(
      * disk, so the deadline is attached to the dispatch itself and each command asks it where it can.
      */
     private fun answer(call: Call): String {
-        if (foregroundMs <= 0L) return runTool(call)
-        return tools.run(call, Deadline(foregroundMs))
+        val body = if (foregroundMs <= 0L) runTool(call) else tools.run(call, Deadline(foregroundMs))
+        // **The one place the result limit applies**, because this is the one place a result enters
+        // the conversation. A backgrounded command's body goes straight to its file, and so does the
+        // text an `edit` copies out of one, so neither is measured — the limit is a conversation
+        // budget, not a size cap on work.
+        return tools.forConversation(call, body)
     }
 
     /**

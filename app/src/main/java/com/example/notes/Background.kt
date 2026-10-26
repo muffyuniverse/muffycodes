@@ -61,6 +61,25 @@ class Background(
     }
 
     /**
+     * Writes [body] as [call]'s result, and returns its path relative to [project] — or null when it
+     * could not be written.
+     *
+     * The same file [start] uses, deliberately: a result too big for the conversation and a result
+     * that was asked for in the background are the same result in the same place, so there is one
+     * answer the agent has to learn ("the body is in that file") rather than two.
+     */
+    fun keep(project: File, call: Call, body: String): String? {
+        val file = resultFile(project, call)
+        return try {
+            file.parentFile?.mkdirs()
+            write(file, body)
+            relativeName(project, file)
+        } catch (e: Throwable) {
+            null
+        }
+    }
+
+    /**
      * The file a call's result belongs in.
      *
      * **Named after the call, not after the moment**, so the path in the result row names the same

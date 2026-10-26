@@ -1149,11 +1149,19 @@ class AppViewModel @JvmOverloads constructor(
     /**
      * Moves everything selected into [into], and records both sides of every cross.
      *
-     * The files are moved one at a time so that a single refusal — a name already
-     * taken in the destination, a folder into itself — does not take the rest with
-     * it. The commits happen after the moves, not per move: a commit takes
-     * everything that is waiting anyway, so per-move commits would fold into one and
-     * cost a repository walk each.
+     * **Checked first, then committed as it goes.** Two questions are answered before anything
+     * moves — is a name already taken there, and is anything involved locked — because those are the
+     * two a person cannot see from where they are standing, and a batch that fails halfway through
+     * because of one of them is a surprise found later.
+     *
+     * **A failure that could not be checked for commits what did move.** A disk that filled, a
+     * folder that vanished: the files that already moved are on disk, and a return with no commit
+     * would leave work that no repository knows about — the one state this app exists to make
+     * impossible. So the batch stops, records what happened, says "Moved 3 of 5", and leaves the
+     * rest selected for a second try.
+     *
+     * The commits happen after the moves, not per move: a commit takes everything that is waiting
+     * anyway, so per-move commits would fold into one and cost a repository walk each.
      */
     fun moveSelected(into: File): Boolean {
         val ws = workspace ?: return false
@@ -1162,46 +1170,58 @@ class AppViewModel @JvmOverloads constructor(
             message = "Nothing is selected"
             return false
         }
-        // **All or nothing, decided before anything moves.** Moving what can be moved reads as one
-        // act that worked, and the one that was left behind is a surprise found later; the same is
-        // true of a name that silently grew a number. Both checks happen first, they name what is
-        // wrong, and a batch that fails leaves the folder exactly as it was.
         blocked(files, into, "moved")?.let { message = it; return false }
         // Which repositories the things came out of. A move that crosses the
         // boundary has to be recorded on both sides, and with several things at once
         // the sources can be more than one.
         val was = mutableSetOf<String>()
-        files.forEach { file ->
+        val moved = mutableListOf<File>()
+        var failure: String? = null
+        for (file in files) {
             ws.projectOf(file)?.takeIf { ws.inWorktree(file) }?.let { was += it }
             val result = ws.move(file, into)
             if (result.isFailure) {
-                message = result.exceptionOrNull()?.message ?: "One file could not be moved"
-                return false
+                failure = result.exceptionOrNull()?.message ?: "One file could not be moved"
+                break
             }
+            moved += file
         }
-        selected = emptySet()
+        // **What moved leaves the selection; everything else stays as it was.** A person whose batch
+        // stopped halfway has the rest still marked, so the second try is one touch and not a hunt.
+        val movedKeys = moved.mapNotNull { ws.relative(it) }.map { ws.pathString(it) }.toSet()
+        selected = selected - movedKeys
         refresh()
-        val what = if (files.size == 1) {
-            "Moved 1 item into ${into.name}/"
-        } else {
-            "Moved ${files.size} items into ${into.name}/"
+        val what = when {
+            moved.isEmpty() -> null
+            moved.size == 1 -> "Moved 1 item into ${into.name}/"
+            moved.size == files.size -> "Moved ${moved.size} items into ${into.name}/"
+            else -> "Moved ${moved.size} of ${files.size} items into ${into.name}/"
         }
         // Both sides of the boundary, as for one move: the destination gains what
-        // arrived, and every source repository records what left it.
-        val arriving = ws.projectOf(into)?.takeIf { ws.inWorktree(into) }
-        val leaving = was - setOfNotNull(arriving)
-        leaving.forEach { commitProject(it, what) }
-        if (arriving != null) commitProject(arriving, what)
-        historyGeneration++
-        message = what
-        return true
+        // arrived, and every source repository records what left it. Only where something moved —
+        // a batch that failed on its first file has nothing to record and must not commit.
+        if (what != null) {
+            val arriving = ws.projectOf(into)?.takeIf { ws.inWorktree(into) }
+            val leaving = was - setOfNotNull(arriving)
+            leaving.forEach { commitProject(it, what) }
+            if (arriving != null) commitProject(arriving, what)
+            historyGeneration++
+        }
+        message = when {
+            failure == null -> what ?: "Nothing was moved"
+            moved.isEmpty() -> "Nothing was moved — $failure"
+            else -> "$what, and then $failure. The rest are still selected."
+        }
+        return failure == null
     }
 
     /**
-     * Copies everything selected into [into], or nothing at all.
+     * Copies everything selected into [into].
      *
-     * The same pre-check as [moveSelected], and the same reason. **Only the receiving side is
-     * committed** — nothing left any source, so there is nothing to record on the other side.
+     * The same pre-check as [moveSelected], the same reason, and the same honesty when one copy
+     * fails: what was copied is committed and counted, and the rest stay selected. **Only the
+     * receiving side is committed** — nothing left any source, so there is nothing to record on the
+     * other side.
      */
     fun copySelected(into: File): Boolean {
         val ws = workspace ?: return false
@@ -1211,24 +1231,35 @@ class AppViewModel @JvmOverloads constructor(
             return false
         }
         blocked(files, into, "copied")?.let { message = it; return false }
-        files.forEach { file ->
+        val copied = mutableListOf<File>()
+        var failure: String? = null
+        for (file in files) {
             val result = ws.copy(file, into)
             if (result.isFailure) {
-                message = result.exceptionOrNull()?.message ?: "One thing could not be copied"
-                return false
+                failure = result.exceptionOrNull()?.message ?: "One thing could not be copied"
+                break
             }
+            copied += file
         }
-        selected = emptySet()
+        val copiedKeys = copied.mapNotNull { ws.relative(it) }.map { ws.pathString(it) }.toSet()
+        selected = selected - copiedKeys
         refresh()
-        val what = if (files.size == 1) {
-            "Copied 1 item into ${into.name}/"
-        } else {
-            "Copied ${files.size} items into ${into.name}/"
+        val what = when {
+            copied.isEmpty() -> null
+            copied.size == 1 -> "Copied 1 item into ${into.name}/"
+            copied.size == files.size -> "Copied ${copied.size} items into ${into.name}/"
+            else -> "Copied ${copied.size} of ${files.size} items into ${into.name}/"
         }
-        ws.projectOf(into)?.takeIf { ws.inWorktree(into) }?.let { commitProject(it, what) }
-        historyGeneration++
-        message = what
-        return true
+        if (what != null) {
+            ws.projectOf(into)?.takeIf { ws.inWorktree(into) }?.let { commitProject(it, what) }
+            historyGeneration++
+        }
+        message = when {
+            failure == null -> what ?: "Nothing was copied"
+            copied.isEmpty() -> "Nothing was copied — $failure"
+            else -> "$what, and then $failure. The rest are still selected."
+        }
+        return failure == null
     }
 
     /**

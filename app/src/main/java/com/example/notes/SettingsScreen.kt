@@ -449,7 +449,8 @@ fun SettingsScreen(
             // ---- how long the app waits for the model itself ----
             Text(
                 "An answer from the model that takes longer than this is a blip: the app " +
-                    "reconnects. A result longer than the length is cut and says how much it showed.",
+                    "reconnects. A result longer than the length below is never cut: it is written " +
+                    "whole to a file in the agent's folder, and its path is the answer.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
