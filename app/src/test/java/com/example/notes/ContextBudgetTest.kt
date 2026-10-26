@@ -62,6 +62,59 @@ class ContextBudgetTest {
         assertEquals(ContextBudget.UNKNOWN_CEILING, ContextBudget.ceiling("deepinfra"))
     }
 
+    @Test
+    fun `a pin the table does not name is held to the model's window, not to the floor`() {
+        // **The bug this exists for.** The runner used to ask for the ceiling with the pin alone, so
+        // every endpoint the table did not name got the 96,000 floor — and a person whose model holds
+        // a million tokens watched it trimmed at 96k. The window travels with the choice now, and this
+        // is the arithmetic that says the floor is no longer reached when it is known.
+        assertEquals(
+            "an unmeasured pin with a model window of a million",
+            800_000L,
+            ContextBudget.ceiling("someone/new", contextLength = 1_000_000, maxOutput = 200_000),
+        )
+        assertTrue(
+            "which is not the floor: the whole point",
+            ContextBudget.ceiling("someone/new", contextLength = 1_000_000, maxOutput = 200_000) >
+                ContextBudget.UNKNOWN_CEILING,
+        )
+        assertEquals(
+            "and the floor is still what a model nobody knows gets",
+            ContextBudget.UNKNOWN_CEILING,
+            ContextBudget.ceiling("someone/new", contextLength = null, maxOutput = null),
+        )
+    }
+
+    // ---- one result's own limit ----------------------------------------------
+
+    @Test
+    fun `a result may not be bigger than the input window`() {
+        // Characters against tokens, and the file's own four bytes a token. A result bigger than the
+        // window cannot be sent at all, so an ask past it is not a bigger allowance.
+        val limit = ContextBudget.resultLimit(asked = 40_000, contextLength = 8_000)
+
+        assertEquals("the window, in characters", 32_000L, limit.ceiling)
+        assertEquals("so that is what is in force", 32_000L, limit.inForce)
+        assertEquals("while the ask is kept as typed", 40_000L, limit.asked)
+        assertTrue("and the row can say it was clamped", limit.clamped)
+    }
+
+    @Test
+    fun `a result limit on a model nobody measured is the number the operator typed`() {
+        val limit = ContextBudget.resultLimit(asked = 40_000, contextLength = null)
+
+        assertEquals("nothing to clamp against", 40_000L, limit.inForce)
+        assertFalse("so the row says nothing", limit.clamped)
+    }
+
+    @Test
+    fun `a session log with no number keeps everything`() {
+        // Zero is the default and it means the evidence is not deleted: the app used to drop the
+        // oldest turns at four megabytes without anybody asking.
+        assertEquals("blank keeps it all", 0L, ContextBudget.sessionBytes(0))
+        assertEquals("a number is megabytes", 8L * 1024 * 1024, ContextBudget.sessionBytes(8))
+    }
+
     // ---- the clamp must not eat the number ----------------------------------
 
     @Test

@@ -601,15 +601,64 @@ class AppViewModel @JvmOverloads constructor(
      * cannot answer `high`, and sending a rung it never declared is a 400 from one provider and
      * a silently ignored parameter from another.
      */
-    fun chooseModel(model: String, provider: String, effort: String, supported: List<String>) {
+    fun chooseModel(
+        model: String,
+        provider: String,
+        effort: String,
+        supported: List<String>,
+        contextLength: Int? = null,
+        maxOutput: Int? = null,
+    ) {
         val clamped = ModelConfigFile.effortFor(supported, effort) ?: effort
         val before = modelConfig.active.effort
+        // **The window travels with the choice.** Two readers build an agent — this screen's turn and
+        // the service's poll — and neither can reach a catalogue, so the numbers the picker saw are
+        // written beside the model they belong to. A pick made without them (a catalogue that was not
+        // read, a provider change from a stale sheet) keeps whatever was stored rather than erasing
+        // it: null here means "not told", not "no window".
+        val same = model == modelConfig.active.model
+        val active = ActiveModel(
+            model = model,
+            provider = provider,
+            effort = clamped,
+            contextLength = contextLength ?: if (same) modelConfig.active.contextLength else null,
+            maxOutput = maxOutput ?: if (same) modelConfig.active.maxOutput else null,
+        )
         writeModelConfig(
-            modelConfig.copy(active = ActiveModel(model, provider, clamped)),
+            modelConfig.copy(active = active),
             "Chose $model on $provider at $clamped",
         )
+        // **A model picked by name has no window yet**, and the app cannot ask the endpoint for it
+        // while a turn is running. So the catalogue is asked once, here, and the answer is written
+        // into the choice — the same place the next poll reads it from.
+        if (active.contextLength == null) learnWindow(model)
         if (clamped != before && supported.isNotEmpty()) {
             Trace.said("effort: $before -> $clamped, this model's way of saying it")
+        }
+    }
+
+    /**
+     * Asks the catalogue for one model's window, once, and writes it beside the choice.
+     *
+     * **A file write, not a field.** The poll that builds an agent runs in another process and
+     * cannot see this view model, so a number held in memory would be a number the service never
+     * has. Nothing is written if the catalogue answers nothing, and nothing is written over a window
+     * that has arrived in the meantime.
+     */
+    private fun learnWindow(model: String) {
+        val source = catalogue
+        onWorker {
+            val info = source.model(model).getOrNull() ?: return@onWorker
+            main.post {
+                val now = modelConfig.active
+                if (now.model != model || now.contextLength != null) return@main
+                writeModelConfig(
+                    modelConfig.copy(
+                        active = now.copy(contextLength = info.contextLength, maxOutput = info.maxOutput),
+                    ),
+                    "Read ${model}'s window",
+                )
+            }
         }
     }
 
@@ -2063,19 +2112,26 @@ class AppViewModel @JvmOverloads constructor(
         val door = doorFor(model)
         // The two limits, with this pin's ceiling — read once per turn, because the pin does not
         // change mid-turn and a settings read per request would be the same number twice.
+        //
+        // **The ceiling is the model's own window, which the choice stores** (see [ActiveModel]).
+        // Asking for the pin alone used to reach a 96,000-token floor for every endpoint the table
+        // did not name, so a million-token model was trimmed at 96k while the screen promised its
+        // real size.
         val limits = ContextBudget.Limits.of(
             triggerAsked = settings.triggerTokens.toLong(),
             hardAsked = settings.hardTokens.toLong(),
-            ceiling = ContextBudget.ceiling(model.provider),
+            ceiling = ContextBudget.ceiling(model.provider, model.contextLength, model.maxOutput),
         )
+        // One result may not be bigger than the model's input window: bigger than that cannot be
+        // sent at all, so the ask is clamped and the settings row says which number is in force.
+        val resultLimit = ContextBudget.resultLimit(settings.maxResult, model.contextLength)
         onWorker {
             val log = AgentLog.open(ws.projectDir(project))
             val agent = Agent(
                 ws.accountDir, project, ws, g, log, door, model,
-                // How much of one result the model may be handed. A field rather than a constant:
-                // the brief asked for it, and a person who is told "showing first 20000 of 40000"
-                // should be able to raise the 20000 rather than tell the agent to work in pieces.
-                maxResult = settings.maxResult,
+                // How much of one result may enter the conversation, clamped by the model's input
+                // window — a result larger than that cannot be sent, so it would be filed for ever.
+                maxResult = resultLimit.inForce.toInt(),
                 limits = limits,
                 // **The same registry the polls use.** A command handed over while somebody is
                 // typing is collected by their next message, and one handed over during a poll is
@@ -2083,6 +2139,7 @@ class AppViewModel @JvmOverloads constructor(
                 bg = runner?.bg ?: Background.inline(),
                 foregroundMs = settings.foregroundMs,
                 backgroundMs = { settings.backgroundMs },
+                sessionBytes = settings.sessionBytes,
                 // Read at every boundary rather than captured: the person may speak or stop while
                 // this turn is waiting for an answer, and the loop has to see that when it comes.
                 cut = { interrupt },

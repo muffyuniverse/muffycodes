@@ -125,10 +125,13 @@ class AgentRunner(
         put(session.polled(now))
         Trace.note("agent-poll", "$project · ${session.label(now)}")
         val active = model()
+        // **The model's own window, read from the choice rather than guessed.** A poll builds the
+        // same limits a turn does, and a ceiling the screen and the runner disagree about is a trim
+        // nobody can explain.
         val limits = ContextBudget.Limits.of(
             triggerAsked = settings.triggerTokens.toLong(),
             hardAsked = settings.hardTokens.toLong(),
-            ceiling = ContextBudget.ceiling(active.provider),
+            ceiling = ContextBudget.ceiling(active.provider, active.contextLength, active.maxOutput),
         )
         val doorFor = door(active)
         worker.execute {
@@ -142,16 +145,17 @@ class AgentRunner(
                     log,
                     doorFor,
                     active,
-                    maxResult = settings.maxResult,
+                    maxResult = ContextBudget.resultLimit(settings.maxResult, active.contextLength)
+                        .inForce.toInt(),
                     limits = limits,
                     // The ladder's position, so a repeated failure is not written down again.
                     retrying = session.retries > 0,
-                    // A command that outlasts the wait finishes beside the conversation, and the
-                    // agent is told the truth: still running, come back for it with the same
-                    // arguments. The wait is the operator's setting, not the agent's choice.
+                    // A command that outlasts the wait is stopped, and its result says so. The
+                    // wait is the operator's setting, not the agent's choice.
                     bg = bg,
                     foregroundMs = settings.foregroundMs,
                     backgroundMs = { settings.backgroundMs },
+                    sessionBytes = settings.sessionBytes,
                 )
                 agent.poll() to log.rows()
             } catch (t: Throwable) {

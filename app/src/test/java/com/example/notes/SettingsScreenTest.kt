@@ -169,19 +169,34 @@ class SettingsScreenTest {
     }
 
     @Test
-    fun `the command handover is off on a phone that never chose it`() {
-        // **The setting's own default, read through the store**, which is where the number lives.
-        // Zero is "wait for the command however long it takes", and that is what this app did before
-        // the handover existed — so an update must not change an agent nobody configured.
-        assertEquals("off", 0, scene.viewModel.settings.foregroundSeconds)
-        assertEquals("and no limit, which means wait for it", 0L, scene.viewModel.settings.foregroundMs)
-        assertEquals("off for a background command too", 0, scene.viewModel.settings.backgroundSeconds)
-        assertEquals("and no limit there either", 0L, scene.viewModel.settings.backgroundMs)
+    fun `a command in the conversation stops after three minutes, and one going to a file does not`() {
+        // **The two defaults are different because the two acts are.** A foreground result is a row
+        // the model is waiting to read, so three minutes is the operator's number; a background
+        // result is a file nothing is waiting on, so it is left to finish.
+        assertEquals("three minutes", 180, scene.viewModel.settings.foregroundSeconds)
+        assertEquals("which is a limit", 180_000L, scene.viewModel.settings.foregroundMs)
+        assertEquals("off for a background command", 0, scene.viewModel.settings.backgroundSeconds)
+        assertEquals("and no limit there", 0L, scene.viewModel.settings.backgroundMs)
         settings()
         compose.onNodeWithText("Stop a command after", substring = true)
             .performScrollTo()
             .assertIsDisplayed()
         compose.onNodeWithText("Stop a background command after", substring = true)
+            .performScrollTo()
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun `the record's own limit is a row, and it starts as "keep everything"`() {
+        // The question from the live log — "where is max session log size? because context trim just
+        // switches row out of context, and session log limit removes them altogether" — was a
+        // question about a field that did not exist. It exists now, it defaults to keeping the whole
+        // record, and the screen says which act is which.
+        assertEquals("keeping everything", 0, scene.viewModel.settings.sessionMb)
+        assertEquals("which is no bytes at all", 0L, scene.viewModel.settings.sessionBytes)
+        settings()
+        compose.onNodeWithText("The record").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Keep the record under", substring = true)
             .performScrollTo()
             .assertIsDisplayed()
     }

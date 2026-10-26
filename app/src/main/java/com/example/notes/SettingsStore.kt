@@ -193,9 +193,9 @@ class SettingsStore(context: Context, name: String = "settings") {
      *
      * **Two waits, because the two results land in two places.** A foreground result is a row the
      * agent reads next turn, so a command that never returns holds the whole conversation still; a
-     * result that goes to a file holds nothing, so it can be given more room. Timer starts when the
-     * command is handed to the tool, and zero means no limit at all — which is what the app did
-     * before either number existed, and therefore what an update must keep doing.
+     * result that goes to a file holds nothing, so it can be given more room. The clock starts when
+     * the command is handed to the tool: past it the command is stopped, the result says so, and the
+     * turn carries on — nothing is handed over and nothing is asked again.
      */
     var foregroundSeconds: Int by mutableStateOf(prefs.getInt(KEY_FOREGROUND, DEFAULT_FOREGROUND_SECONDS))
         private set
@@ -260,9 +260,13 @@ class SettingsStore(context: Context, name: String = "settings") {
     /**
      * The most one tool result may carry, in characters.
      *
-     * The brief asked for this as a field, and the reason is the same as the timeout's: a result
-     * longer than the limit says so — `1`, and how much of it was shown — and the person can raise
-     * the number rather than being told by an agent that cannot read its own file.
+     * **A conversation budget, not a cap on work.** The brief asked for this as a field: what enters
+     * the context is the operator's to decide, and a model that cannot read a large file in one go
+     * should be told to work in ranges rather than be handed a fragment. A result over it is not cut
+     * short — it is written whole to a file and the answer is the path.
+     *
+     * It is also clamped by the model's own input window ([ContextBudget.resultLimit]), because a
+     * result bigger than the window cannot be sent at all.
      */
     var maxResult: Int by mutableStateOf(
         prefs.getInt(KEY_MAX_RESULT, DEFAULT_MAX_RESULT)
@@ -277,6 +281,31 @@ class SettingsStore(context: Context, name: String = "settings") {
         prefs.edit().putInt(KEY_MAX_RESULT, clean).apply()
         Trace.said("one result may carry $clean characters")
     }
+
+    /**
+     * How big the session log may get, in megabytes — **and zero is "keep everything".**
+     *
+     * The record is the evidence: it is what the app can show about what the agent did, and it is
+     * the only copy of the conversation that outlives the process. Context trimming is a different
+     * act — it takes a row out of what the model is *sent* — and neither implies the other, which is
+     * why they are two rows and not one. The app used to delete the oldest turns at four megabytes
+     * without asking; a person who never set a number had no way to know, so the default is now
+     * "keep it".
+     */
+    var sessionMb: Int by mutableStateOf(prefs.getInt(KEY_SESSION_MB, DEFAULT_SESSION_MB))
+        private set
+
+    /** Sets the session log's ceiling in megabytes; zero keeps everything. */
+    fun keepSession(megabytes: Int) {
+        val clean = megabytes.coerceIn(0, MAX_SESSION_MB)
+        Trace.tap("session log", if (clean == 0) "kept whole" else "$clean MB")
+        sessionMb = clean
+        prefs.edit().putInt(KEY_SESSION_MB, clean).apply()
+        Trace.said(if (clean == 0) "the record is kept whole" else "the record is kept under $clean MB")
+    }
+
+    /** The session log's ceiling in bytes; zero is "keep everything". */
+    val sessionBytes: Long get() = ContextBudget.sessionBytes(sessionMb)
 
     /**
      * The two lengths older builds stored separately, read once for the migration.
@@ -308,11 +337,12 @@ class SettingsStore(context: Context, name: String = "settings") {
     /** How long one answer may take, in minutes, and how much one result may carry. */
     const val KEY_TIMEOUT = "agent_timeout_minutes"
 
-    /** How often an idle agent is polled, and how long a command may run before a handover. */
+    /** How often an idle agent is polled, and how long a command may run before it is stopped. */
     const val KEY_POLL = "agent_poll_seconds"
     const val KEY_FOREGROUND = "agent_foreground_seconds"
     const val KEY_BACKGROUND = "agent_background_seconds"
     const val KEY_MAX_RESULT = "agent_max_result"
+    const val KEY_SESSION_MB = "agent_session_mb"
 
     /**
      * A million tokens. Past this the number is larger than any window this app can be pointed at,
@@ -328,18 +358,19 @@ class SettingsStore(context: Context, name: String = "settings") {
     const val MAX_POLL_SECONDS = 250
 
     /**
-     * Command limits, **off by default.**
+     * Command limits: **three minutes in the conversation, off for work that goes to a file.**
      *
-     * Zero is "let it run however long it takes", which is exactly what this app did before the
-     * limits existed. A default of one minute would have changed the behaviour of every agent on
-     * every phone without anybody asking, and a command stopped when nobody wanted it stopped throws
-     * away work that had nearly finished. The rows exist so a person whose commands run long can set
-     * a limit; the app does not set one for them.
+     * The two are different acts and get different answers. A foreground command is a row the model
+     * is waiting to read, and the person is waiting on the turn: three minutes is the operator's
+     * number, and past it the command is stopped and its result says so. A background command's
+     * result is a file nothing is waiting on, so its default stays zero — let it run, because there
+     * is no conversation held open.
      *
-     * The ceiling is a quarter of an hour: past that it is not a command, it is a hung connection,
-     * and the tool's own socket timeout answers first.
+     * Zero is still allowed in both, and still means "however long it takes". The ceiling is a
+     * quarter of an hour: past that it is not a command, it is a hung connection, and the tool's own
+     * socket timeout answers first.
      */
-    const val DEFAULT_FOREGROUND_SECONDS = 0
+    const val DEFAULT_FOREGROUND_SECONDS = 180
     const val DEFAULT_BACKGROUND_SECONDS = 0
     const val MAX_COMMAND_SECONDS = 900
 
@@ -347,10 +378,22 @@ class SettingsStore(context: Context, name: String = "settings") {
     const val MIN_TIMEOUT_MINUTES = 1
     const val MAX_TIMEOUT_MINUTES = 30
 
-    /** Twenty thousand characters is about a long source file, which is what a result is for. */
+    /**
+     * Twenty thousand characters is about a long source file, which is what a result is for.
+     *
+     * **[MAX_MAX_RESULT] is not the ceiling that matters.** The number a person may actually ask for
+     * is bounded by the model's input window (`ContextBudget.resultLimit`), because a result bigger
+     * than the window cannot be sent at all. The constant exists only so the field has an upper
+     * bound before any model is known — and it is a million tokens in characters, the largest window
+     * this app can be pointed at, so it never becomes the limit the window should be.
+     */
     const val DEFAULT_MAX_RESULT = 20_000
     const val MIN_MAX_RESULT = 1_000
-    const val MAX_MAX_RESULT = 200_000
+    const val MAX_MAX_RESULT = 4_194_304
+
+    /** The session log is kept whole unless the operator says otherwise. */
+    const val DEFAULT_SESSION_MB = 0
+    const val MAX_SESSION_MB = 512
 
         /** One hour: the design's default. */
         const val DEFAULT_REMIND_MINUTES = 60

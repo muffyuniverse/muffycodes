@@ -52,11 +52,19 @@ object ContextBudget {
     private const val REPLY_SHARE = 4
 
     /**
-     * The input ceiling for [pin], given whatever the catalogue knows.
+     * The input ceiling for [pin], given the model's own window.
      *
-     * Four steps, most certain first: the measured table, then the pin's own live numbers
-     * (context minus the largest reply it promises), then three quarters of a known window, then
-     * the floor. Each step is only reached when the one above it has nothing to say.
+     * Four steps, most certain first: **the measured pin** (a fact about that endpoint, which is
+     * deliberately allowed to be tighter than the model's own window — `cloudflare` is), then the
+     * pin's own live numbers (window minus the largest reply it promises), then three quarters of a
+     * known window, then the floor. Each step is only reached when the one above it has nothing to
+     * say.
+     *
+     * **The floor is the last resort and must stay rare.** It is reached only when the pin is not
+     * measured *and* the model's window is unknown — and it used to be reached for every pin the
+     * table did not name, because nobody passed a window: a million-token model was trimmed at
+     * 96,000 while the screen promised its real size. The window now travels with the choice
+     * ([ActiveModel.contextLength]) so both callers can pass it.
      */
     fun ceiling(pin: String, contextLength: Int? = null, maxOutput: Int? = null): Long {
         CEILINGS[pin]?.let { return it }
@@ -68,6 +76,27 @@ object ContextBudget {
         }
         return UNKNOWN_CEILING
     }
+
+    /**
+     * How much of one result may enter the conversation, in characters — asked, and in force.
+     *
+     * **The input window, in the unit the field is typed in.** A result is a character count; the
+     * window is tokens; four bytes per token is the same estimate the rest of this file uses, so the
+     * clamp is `window × 4` characters and says so. A window nobody knows clamps nothing: the ask is
+     * the limit, which is what the app did before this number had a ceiling.
+     */
+    fun resultLimit(asked: Int, contextLength: Int?): Limit = Limit(
+        asked = asked.toLong(),
+        ceiling = if (contextLength != null && contextLength > 0) {
+            contextLength.toLong() * BYTES_PER_TOKEN
+        } else {
+            Long.MAX_VALUE
+        },
+    )
+
+    /** The session log's size in bytes, from the operator's megabytes; zero is "keep everything". */
+    fun sessionBytes(megabytes: Int): Long =
+        if (megabytes <= 0) 0L else megabytes.toLong() * 1024L * 1024L
 
     /**
      * What one text costs, estimated in tokens.

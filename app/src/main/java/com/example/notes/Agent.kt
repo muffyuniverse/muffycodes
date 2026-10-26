@@ -73,6 +73,15 @@ class Agent(
     private val foregroundMs: Long = 0L,
     /** The operator's limit for a `background` command; zero is "no limit". */
     private val backgroundMs: () -> Long = { 0L },
+    /**
+     * How big the record may get, in bytes; **zero keeps everything, which is the default.**
+     *
+     * A different act from [limits]: trimming the context takes a row out of what the model is sent
+     * and leaves the evidence alone, while this removes the row. The app used to do this at four
+     * megabytes without being asked, so a person trimming their context could watch rows disappear
+     * from a file they had understood as append-only.
+     */
+    private val sessionBytes: Long = 0L,
 ) {
 
     private val tools = AgentTools(ws, project, git, log, maxResult, bg, backgroundMs)
@@ -266,9 +275,10 @@ class Agent(
         try {
             return loop(layers, opening, operator, progress)
         } finally {
-            // The evidence is the app's to keep to size, and a turn boundary is the only place a
-            // trim cannot cut a conversation in half.
-            log.trimSession()
+            // The evidence is kept to the size the operator asked for, and a turn boundary is the
+            // only place a trim cannot cut a conversation in half. Zero means they asked for nothing
+            // to be removed, and then nothing is.
+            log.trimSession(sessionBytes)
             progress()
         }
     }

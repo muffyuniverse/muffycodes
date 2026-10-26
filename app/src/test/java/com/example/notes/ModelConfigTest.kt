@@ -68,6 +68,30 @@ class ModelConfigTest {
     }
 
     @Test
+    fun `a model's own window is stored with the choice, and a file without one says nothing`() {
+        // **The number two callers need and neither can look up.** The screen's turn and the
+        // service's poll both build an agent hours apart, and neither has a catalogue; a window held
+        // in memory would be a window the service never has. It travels in the same file as the
+        // choice it belongs to.
+        val withWindow = ModelConfigFile.default().let { config ->
+            config.copy(active = config.active.copy(contextLength = 1_048_576, maxOutput = 393_216))
+        }
+        ModelConfigFile.write(account, withWindow)
+        val read = ModelConfigFile.load(account).getOrThrow()
+
+        assertEquals("the window", 1_048_576, read.active.contextLength)
+        assertEquals("and the reply it promises", 393_216, read.active.maxOutput)
+        assertEquals("round trip, whole", withWindow.active, read.active)
+
+        // **Absent is null, not zero.** A file written by an older build has no such key, and a
+        // window of zero tokens would be a claim the catalogue never made.
+        ModelConfigFile.file(account).writeText(shipped())
+        val old = ModelConfigFile.load(account).getOrThrow()
+        assertNull("nothing is claimed about the window", old.active.contextLength)
+        assertNull("nor about the reply", old.active.maxOutput)
+    }
+
+    @Test
     fun anAccountWithNoFileGetsTheShippedOne() {
         // A new account has no config, and that is not an error: the app makes one, set up to
         // the model the operator asked for by default.

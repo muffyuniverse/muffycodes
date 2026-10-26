@@ -380,8 +380,11 @@ class AgentRunnerTest {
 
         settings.keepMaxResult(0)
         assertEquals("a result of nothing is a hang", 1_000, settings.maxResult)
-        settings.keepMaxResult(999_999)
-        assertEquals("and a megabyte is not a result", 200_000, settings.maxResult)
+        settings.keepMaxResult(99_000_000)
+        // **The field's own bound, not the one that matters.** What a result may really carry is the
+        // model's input window, applied where the agent is built; this is a million tokens in
+        // characters, so the field can never be the limit the window should be.
+        assertEquals("and the field stops at a million tokens' worth", 4_194_304, settings.maxResult)
     }
 
     @Test

@@ -20,11 +20,24 @@ data class ModelChoice(
     val providers: List<String>,
 )
 
-/** The three values the agent is built from: which model, which endpoint, how hard it thinks. */
+/**
+ * The three values the agent is built from: which model, which endpoint, how hard it thinks.
+ *
+ * **[contextLength] and [maxOutput] are the model's own window, stored with the choice.** They are
+ * not a fourth setting: they are what the catalogue said about this model when it was picked, kept
+ * beside it because the two places that build an agent — the screen's turn and the service's poll —
+ * have no catalogue to ask. Without them a pin nobody measured fell back to a 96,000-token floor,
+ * which is how a million-token model came to be trimmed at 96k.
+ *
+ * `null` means "not known yet": a config written by an older build, or a model chosen by hand.
+ * Both readers then answer with the measured table or the floor, exactly as before.
+ */
 data class ActiveModel(
     val model: String,
     val provider: String,
     val effort: String,
+    val contextLength: Int? = null,
+    val maxOutput: Int? = null,
 )
 
 /**
@@ -132,6 +145,10 @@ object ModelConfigFile {
             put("model", config.active.model)
             put("provider", config.active.provider)
             put("effort", config.active.effort)
+            // Only when known, so a file this app writes stays the file it wrote before: a null
+            // written as 0 would tell the ceiling that the model holds nothing.
+            config.active.contextLength?.let { put("contextLength", it) }
+            config.active.maxOutput?.let { put("maxOutput", it) }
         })
         put("models", JSONArray().apply {
             config.models.forEach { choice ->
@@ -234,7 +251,11 @@ object ModelConfigFile {
             return Result.failure(IllegalArgumentException("active.effort is empty"))
         }
 
-        return Result.success(ModelConfig(ActiveModel(model, provider, effort), models))
+        // Absent is null, not zero: `optInt` answers 0 for a missing key, and a window of zero
+        // tokens is a claim the catalogue never made.
+        val window = if (activeObject.has("contextLength")) activeObject.optInt("contextLength", -1).takeIf { it > 0 } else null
+        val reply = if (activeObject.has("maxOutput")) activeObject.optInt("maxOutput", -1).takeIf { it > 0 } else null
+        return Result.success(ModelConfig(ActiveModel(model, provider, effort, window, reply), models))
     }
 
     /**

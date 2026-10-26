@@ -282,7 +282,17 @@ private fun ModelPicker(
                             } else {
                                 providers.firstOrNull().orEmpty()
                             }
-                            viewModel.chooseModel(pick, provider, active.effort, info?.efforts.orEmpty())
+                            // The numbers the sheet holds are the **active** model's, so they are
+                            // only handed over when the pick is that same model. A different model
+                            // is asked for its own window by the view model, once.
+                            viewModel.chooseModel(
+                                pick,
+                                provider,
+                                active.effort,
+                                info?.efforts.orEmpty(),
+                                contextLength = info?.contextLength.takeIf { pick == active.model },
+                                maxOutput = info?.maxOutput.takeIf { pick == active.model },
+                            )
                         }
                         PROVIDER -> viewModel.chooseModel(
                             active.model, pick, active.effort, info?.efforts.orEmpty(),

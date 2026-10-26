@@ -466,6 +466,21 @@ fun SettingsScreen(
                 placeholder = "20000",
                 onValueChange = { settings.keepMaxResult(it) },
             )
+            // **The clamp says which number is in force.** A result bigger than the model's input
+            // window cannot be sent at all, so a bigger ask is not a bigger allowance — and a row
+            // that showed only the ask would be the same "96k" mistake in a second unit.
+            val resultLimit = ContextBudget.resultLimit(
+                settings.maxResult,
+                viewModel.modelInfo?.contextLength,
+            )
+            if (resultLimit.clamped) {
+                Text(
+                    "This model's input window is ${resultLimit.ceiling} characters, so that is " +
+                        "what is used.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             RowDivider()
 
             // ---- how much of the record is kept ----
@@ -476,12 +491,18 @@ fun SettingsScreen(
             // and session log limit removes them altogether" — so they are named apart here.
             Text("The record", style = MaterialTheme.typography.titleMedium)
             Text(
-                "agent/session.log is kept until it reaches " +
-                    "${ContextBudget.sizeLabel(AgentLog.SESSION_LIMIT)}, then the oldest turns go " +
-                    "and a row says how many. What goes there is gone; what clearing up does is " +
-                    "take a row out of the conversation and leave it in the file.",
+                "agent/session.log is the evidence: every event, in order. Empty keeps all of it. " +
+                    "Given a number, the oldest turns go once it passes that size and a row says how " +
+                    "many — what goes there is gone, while clearing up only takes a row out of the " +
+                    "conversation and leaves it in the file.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            LengthField(
+                label = "Keep the record under (MB, blank = everything)",
+                value = settings.sessionMb,
+                placeholder = "everything",
+                onValueChange = { settings.keepSession(it) },
             )
             RowDivider()
 

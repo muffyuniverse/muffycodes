@@ -342,6 +342,21 @@ class AgentLogTest {
     }
 
     @Test
+    fun `no limit keeps the whole record, which is what the app now does by default`() {
+        // **Zero is not "the default constant", it is "do not delete".** The evidence is the only
+        // copy of the conversation that outlives the process, and the app used to drop its oldest
+        // turns at 4 MB without anybody being asked: a person who had just trimmed their *context*
+        // would watch rows vanish from a file they read as append-only.
+        repeat(50) { n -> log.told("task $n " + "x".repeat(200)) }
+        val before = sessionLines()
+
+        val dropped = log.trimSession(limit = 0)
+
+        assertEquals("nothing dropped", 0, dropped)
+        assertEquals("and every row is still there", before, sessionLines())
+    }
+
+    @Test
     fun `trimming before the limit does nothing at all`() {
         log.told("a task")
         val before = sessionLines()
