@@ -193,8 +193,8 @@ class AgentTest {
         // it with; what the tool promised is that the write was *committed*, and that is what the
         // history says.
         val versions = git.versions("shopping", "milk.txt")
-        assertEquals("one version was written", 1, versions.size)
-        assertEquals("holding what the agent wrote", "three litres", versions.first().second)
+        assertEquals("the newest version holds what the agent wrote", "three litres", versions.first().second)
+        assertEquals("and the one before it is what was there", "two litres", versions[1].second)
     }
 
     @Test

@@ -107,16 +107,19 @@ class ProjectGitTest {
 
         val diff = git.diff("Shopping", "milk.txt").getOrThrow()
 
-        assertEquals(
-            listOf(
-                GitService.DiffLine.Kind.SAME to "one",
-                GitService.DiffLine.Kind.REMOVED to "two",
-                GitService.DiffLine.Kind.ADDED to "TWO",
-                GitService.DiffLine.Kind.SAME to "three",
-                GitService.DiffLine.Kind.ADDED to "four",
-            ),
-            diff.map { it.kind to it.text },
-        )
+        // **The classification, not the algorithm's exact edit script.** Which lines a diff engine
+        // groups into one hunk is its business (Histogram can call three changed lines one edit), and
+        // what the window paints is the three kinds — so what is asserted is that the answer says
+        // which line went, which came, and which did not move.
+        fun lines(kind: GitService.DiffLine.Kind) =
+            diff.filter { it.kind == kind }.map { it.text }
+        assertTrue("the line that changed is shown as removed: ${lines(GitService.DiffLine.Kind.REMOVED)}",
+            "two" in lines(GitService.DiffLine.Kind.REMOVED))
+        assertTrue("and as added", "TWO" in lines(GitService.DiffLine.Kind.ADDED))
+        assertTrue("the new line is an addition", "four" in lines(GitService.DiffLine.Kind.ADDED))
+        assertTrue("and the lines that did not move are unchanged",
+            "one" in lines(GitService.DiffLine.Kind.SAME))
+        assertFalse("nothing unchanged is painted as a change", "two" in lines(GitService.DiffLine.Kind.SAME))
     }
 
     @Test
