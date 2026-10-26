@@ -66,9 +66,9 @@ class AgentTools(
         /**
          * How many calls in a row may change nothing and answer nothing before the loop stops.
          *
-         * **Not a turn count.** An idle agent calls `wait` for ever by design, so a limit on
-         * turns would stop every healthy session; a limit on *unproductive* turns trips in
-         * minutes on an agent that is spinning and never on one that is waiting.
+         * **Not a turn count.** An idle agent waits for ever by design, so a limit on turns would
+         * stop every healthy session; a limit on *unproductive* turns trips in minutes on an agent
+         * that is spinning and never on one that is waiting.
          */
         const val IDLE_CALLS = 20
 
@@ -79,6 +79,15 @@ class AgentTools(
          * still leave one of twenty rows recognisable at a glance.
          */
         const val EXCERPT = 60
+
+        /**
+         * How much of a line a `grep` hit shows.
+         *
+         * A hit's line is evidence, not a row: it has to hold enough of the line to recognise the
+         * place and be short enough that twenty hits fit in one answer. [EXCERPT] is for a version's
+         * first line, which is a label; this is for the line that matched, which is the finding.
+         */
+        const val HIT = 200
 
         /**
          * The folder a call's result is written into, under `agent/`.
@@ -101,9 +110,9 @@ class AgentTools(
          * old name for a count and the parser had stopped looking at it. A typo that changes the
          * answer without saying so is the worst kind of answer.
          *
-         * `ask`, `conclude` and `wait` are here even though [run] never dispatches them: the loop
-         * ends the turn on them, and it asks this same table first, so a `conclude` with a
-         * misspelled key is refused rather than turned into an ending with the wrong words.
+         * `ask` and `conclude` are here even though [run] never dispatches them: the loop ends the
+         * turn on them, and it asks this same table first, so a `conclude` with a misspelled key is
+         * refused rather than turned into an ending with the wrong words.
          */
         val KEYS: Map<String, Set<String>> = mapOf(
             "tree" to setOf("path", "depth", "name", "grep", "from", "to"),
@@ -153,9 +162,10 @@ class AgentTools(
             spec(
                 "tree",
                 "List the files in a folder of this project. Folders end with a slash. " +
-                    "`name` keeps only paths whose name matches; `grep` keeps only files whose " +
-                    "text matches, and shows the matching lines. `from`/`to` pick a range of the " +
-                    "result's lines, which here are paths.",
+                    "`name` keeps only paths whose own name matches, and may answer with a folder; " +
+                    "`grep` keeps only files whose text matches, and shows the matching lines. " +
+                    "A pattern is a regular expression, case-insensitive, matched inside one line. " +
+                    "`from`/`to` pick a range of the result's lines, which here are paths.",
                 "{\"path\":\"where to look, relative to the project\",\"depth\":2," +
                     "\"name\":\"a pattern for file names\",\"grep\":\"a pattern for their text\"," +
                     "\"from\":1,\"to\":200}",
@@ -166,7 +176,8 @@ class AgentTools(
                 "`from` and `to` are line numbers, both included; `from` starts at 1 and `to` " +
                 "left out runs to the end. " +
                     "With `grep` only the lines that match are shown, each with its line number, " +
-                    "and the pattern is applied inside `from`/`to` rather than to the whole file.",
+                    "and the pattern is applied inside `from`/`to` rather than to the whole file. " +
+                    "A pattern is a regular expression, case-insensitive, matched inside one line.",
                 "{\"path\":\"the file, relative to the project\",\"from\":1,\"to\":200," +
                     "\"grep\":\"a pattern to look for\",\"revision\":\"an id from history\"}",
             ),
@@ -202,7 +213,8 @@ class AgentTools(
                 "history",
                 "List the versions of a file, newest first: the id each is restored from, and the " +
                     "first line it contained. `from`/`to` pick a range of versions; `grep` keeps " +
-                    "only the versions whose text matches.",
+                    "only the versions with a matching line, and shows that line instead. A pattern " +
+                    "is a regular expression, case-insensitive, matched inside one line.",
                 "{\"path\":\"the file\",\"grep\":\"a pattern\",\"from\":1,\"to\":20}",
             ),
             spec(
@@ -248,8 +260,8 @@ class AgentTools(
     /**
      * Runs one call and returns its body, `0` or `1` first.
      *
-     * `ask`, `conclude` and `wait` are not run here: the loop ends the turn on them, because
-     * the turn is what they end. Everything else is answered here, including the refusal.
+     * `ask` and `conclude` are not run here: the loop ends the turn on them, because the turn is
+     * what they end. Everything else is answered here, including the refusal.
      *
      * **One `when`, and every command gets the deadline.** There used to be a short list of "slow"
      * commands with a deadline and a second dispatch beside this one for them; a `read` of a huge
@@ -259,7 +271,17 @@ class AgentTools(
      * either finished or not started by the time it passes.
      */
     fun run(call: Call, deadline: Deadline = Deadline.none()): String = try {
-        val args = JSONObject(call.args.ifBlank { "{}" })
+        // **The arguments, or a sentence about them.** `JSONObject(...)` throws on anything that is
+        // not one — a model that sends `[]`, or a bare string where the object should be — and
+        // "that tool could not be run" would leave it guessing at which part of the call was wrong.
+        val args = try {
+            JSONObject(call.args.ifBlank { "{}" })
+        } catch (e: Throwable) {
+            return refusal(
+                "The arguments must be a JSON object, like {\"path\":\"a file\"}. " +
+                    "This call's were: ${call.args.take(160)}",
+            )
+        }
         // **Before the command, not inside it.** A key a command does not take means the model and
         // the description disagree, and answering as if they did not is how `lines` silently became
         // "everything". Nothing has happened yet at this point, which is the only moment a refusal
@@ -319,7 +341,8 @@ class AgentTools(
         // be found by the work, and the answer would be a file containing a refusal the model does
         // not look at until it thinks the command finished.
         if (tool !in KEYS) return refusal("There is no tool called $tool")
-        val innerArgs = args.optJSONObject("args") ?: JSONObject()
+        val innerArgs = innerArgsOf(args)
+            .getOrElse { return refusal(it.message ?: "`args` must be a JSON object") }
         val unknown = unknownIn(tool, innerArgs)
         if (unknown.isNotEmpty()) return refuseKeys(tool, unknown)
         val inner = Call(id = call.id, tool = tool, args = innerArgs.toString())
@@ -327,12 +350,40 @@ class AgentTools(
         return bg.start(dir, inner) { run(inner, Deadline(backgroundMs())) }
     }
 
+    /**
+     * The `args` of a `background` call: an object, or a string that holds one.
+     *
+     * **Both shapes, because models write both.** The string form used to be read as "no arguments
+     * at all", so `{"tool":"read","args":"{\\"path\\":\\"milk.txt\\"}"}` ran a `read` of the
+     * project's own folder and answered with a sentence about a folder — a command that quietly
+     * dropped what it was told, which is the same class of mistake as a wrong key.
+     */
+    private fun innerArgsOf(args: JSONObject): Result<JSONObject> {
+        val raw = args.opt("args")
+        return when {
+            raw == null || raw === JSONObject.NULL -> Result.success(JSONObject())
+            raw is JSONObject -> Result.success(raw)
+            raw is String -> try {
+                Result.success(JSONObject(raw))
+            } catch (e: Throwable) {
+                Result.failure(
+                    IllegalArgumentException(
+                        "`args` must be a JSON object, like {\"path\":\"a file\"}",
+                    ),
+                )
+            }
+            else -> Result.failure(IllegalArgumentException("`args` must be a JSON object"))
+        }
+    }
+
     private fun tree(args: JSONObject, deadline: Deadline): String {
         val root = resolve(args.optString("path", ""))
             .getOrElse { return refusal(it.message ?: "that path cannot be read") }
         if (!root.exists()) return refusal("There is nothing at " + rel(root))
         if (!root.isDirectory) return refusal("${rel(root)} is a file, not a folder")
-        val depth = args.optInt("depth", 3).coerceIn(1, 8)
+        val depth = count(args, "depth", 3)
+            .getOrElse { return refusal(it.message ?: "that depth cannot be used") }
+            .coerceIn(1, 8)
         val name = pattern(args.optString("name", ""))
             .getOrElse { return refusal("That is not a pattern: ${it.message}") }
         val content = pattern(args.optString("grep", ""))
@@ -349,10 +400,11 @@ class AgentTools(
             if (chosen.isEmpty()) return success("nothing in that range: there are ${out.size} paths")
             return success(chosen.joinToString("\n"))
         }
-        // **A search, not a listing.** Once a pattern is given the answer is files, not folders:
-        // a folder is in the result because something in it matched, and printing the folder adds
-        // a line nobody asked about. What a person (and a model) wants is the path, and for a
-        // content match, the line.
+        // **A search, not a listing.** With `name` the answer is the paths whose own name matches,
+        // and a folder can be one of them. With `grep` the answer is files and lines: a folder in the
+        // result would be there because something inside it matched, and printing the folder adds a
+        // line nobody asked about. What a person (and a model) wants is the path, and for a content
+        // match, the line.
         val found = mutableListOf<String>()
         search(root, depth, name, content, found, deadline)
         if (found.isEmpty()) return success("nothing matches in ${rel(root)}")
@@ -365,10 +417,12 @@ class AgentTools(
     }
 
     /**
-     * Files under [dir] that match [name] and [content], walking at most [left] levels.
+     * The paths under [dir] that match [name] and [content], walking at most [left] levels.
      *
-     * [content] is matched against the whole file and the result is the **matching lines**, so one
-     * search answers "where is this said" rather than "which file says it".
+     * [name] is asked of each entry's **own name** — one short string, so a folder can match it —
+     * and [content] is asked of each **line** of every text file, so one search answers "where is
+     * this said" rather than "which file says it". The line test is the same one `read` uses, on
+     * the same text, which is what makes the two commands agree.
      */
     private fun search(
         dir: File,
@@ -380,27 +434,103 @@ class AgentTools(
     ) {
         for (entry in ws.list(dir)) {
             deadline.check("tree")
+            // **A link is followed only while it stays in the project.** The rule `resolve` enforces
+            // for the path a model wrote is the same rule here, for every entry a walk meets: a link
+            // inside the project can point anywhere, and a search that followed one would read files
+            // the instructions promise it cannot see.
+            if (!withinProject(entry.file)) continue
             if (entry.isFolder) {
+                // **A folder is named, not read.** With `name` alone a folder can be the answer —
+                // `{"name":"agent"}` used to answer nothing, which reads as "there is no such
+                // folder" when there is. With `grep` the answer is files only: a folder would be
+                // there because something in it matched, and it adds a line nobody asked about.
+                if (content == null && name != null && hit(entry.name, name, deadline, "tree") != null) {
+                    out.add(rel(entry.file) + "/")
+                }
                 if (left > 1) search(entry.file, left - 1, name, content, out, deadline)
                 continue
             }
-            if (name != null && !name.containsMatchIn(entry.name)) continue
+            if (name != null && hit(entry.name, name, deadline, "tree") == null) continue
             if (content == null) {
                 out.add(rel(entry.file))
                 continue
             }
             if (ws.kindOf(entry.file) != EntryKind.TEXT) continue
-            val text = ws.read(entry.file)
-            if (!content.containsMatchIn(text)) continue
+            // **One read, in chunks, and the pattern asked per line** — the same shape `read` uses,
+            // so the two commands cannot disagree about whether a file matches. There used to be a
+            // whole-file test first, and it is what made `^milk` miss a file whose second line was
+            // `milk`: an anchor matches at the start of what it is given, and it was given the file.
+            val text = readText(entry.file, deadline, "tree")
             for ((index, line) in text.split("\n").withIndex()) {
-                if (!content.containsMatchIn(line)) continue
-                out.add("${rel(entry.file)}:${index + 1}: ${line.trim().take(200)}")
+                val at = hit(line, content, deadline, "tree") ?: continue
+                out.add("${rel(entry.file)}:${index + 1}: ${excerpt(line, at, HIT)}")
             }
         }
     }
 
+    /** True while [file] is inside the project once the phone's own links are followed. */
+    private fun withinProject(file: File): Boolean = try {
+        val base = projectDir.canonicalFile
+        val target = file.canonicalFile
+        target == base || target.path.startsWith(base.path + File.separator)
+    } catch (e: Exception) {
+        false
+    }
+
     /**
-     * A pattern from the model, or null when it gave none.
+     * A whole number from the model, or a refusal that names it.
+     *
+     * **Read from the value, never through `optInt`.** The phone's `org.json` answers the default
+     * where the JVM's casts and throws, so `{"from":"2"}` meant "from 1" on a phone and "that tool
+     * could not be run" in a test — one call, two behaviours, and no way to see either from the
+     * other side. Reading the value makes both say the same thing, and it accepts a number written
+     * as a string, which models do.
+     */
+    private fun count(args: JSONObject, key: String, fallback: Int): Result<Int> {
+        if (!args.has(key) || args.isNull(key)) return Result.success(fallback)
+        val raw = args.opt(key)
+        val number = whole(raw)
+            ?: return Result.failure(
+                IllegalArgumentException(
+                    "`$key` is a whole number, and ${quoted(raw)} is not one",
+                ),
+            )
+        return Result.success(number)
+    }
+
+    /** [value] as a whole number, or null when it is not one — a number, or a string holding one. */
+    private fun whole(value: Any?): Int? {
+        val number = when (value) {
+            is Number -> value.toDouble()
+            is String -> value.trim().toDoubleOrNull()
+            else -> null
+        } ?: return null
+        if (number != Math.floor(number)) return null
+        if (number < Int.MIN_VALUE.toDouble() || number > Int.MAX_VALUE.toDouble()) return null
+        return number.toInt()
+    }
+
+    /** A value from the arguments, short enough to quote back inside a sentence. */
+    private fun quoted(value: Any?): String = "\"" + value.toString().take(30) + "\""
+
+    /**
+     * A pattern from the model, or null when it gave none — **and the one meaning every command
+     * gives it.**
+     *
+     * **Per line, always.** `tree`, `read` and `history` ask the same question of the same text, so
+     * a pattern that finds a line in one finds that line in the others. It used to have two
+     * meanings: `read` matched line by line, while `tree` and `history` first matched the whole
+     * file and only then the lines. Anchors were the difference — `^milk` matches only at the very
+     * start of the text it is given, so a file whose *second* line was `milk` was skipped by `tree`
+     * and found by `read`, and the model had no way to know which answer it would get.
+     *
+     * **Case-insensitive in every script.** `CASE_INSENSITIVE` on its own folds US-ASCII only, so
+     * `Kraków` and `kraków` were two different words; `UNICODE_CASE` is what makes "ignore case"
+     * mean what it says for a name with an accent in it.
+     *
+     * A pattern holding a line break is refused, because no line contains one: it would answer
+     * "nothing matches" about a file that plainly holds the text, and the model would go looking
+     * for a mistake in its path. `from`/`to` is how a block of lines is read.
      *
      * **A refusal, not a crash.** A model writing `[` is making a mistake about a regular
      * expression, and the answer it needs is that sentence — not an exception turned into "that
@@ -409,17 +539,100 @@ class AgentTools(
     private fun pattern(raw: String): Result<Regex?> {
         val text = raw.trim()
         if (text.isEmpty()) return Result.success(null)
+        if (text.any { it == '\n' || it == '\r' }) {
+            return Result.failure<Regex?>(
+                IllegalArgumentException(
+                    "it holds a line break, and a pattern looks inside one line. " +
+                        "Use `from`/`to` for a block of lines, or search for one of its lines",
+                ),
+            )
+        }
         return try {
-            Result.success(Regex(text, RegexOption.IGNORE_CASE))
+            Result.success(Regex(text, setOf(RegexOption.IGNORE_CASE, RegexOption.UNICODE_CASE)))
         } catch (e: Throwable) {
             Result.failure<Regex?>(IllegalArgumentException("that is not a regular expression"))
         }
+    }
+
+    /**
+     * The text a matcher walks, with the clock in it.
+     *
+     * **A pattern is the only input to a command that can take unbounded time in one call.** Walking
+     * a folder asks the deadline per entry and a read asks it per chunk, but `Regex.find` against one
+     * line is a single call: `(a+)+$` against forty `a`s is more work than the phone will ever
+     * finish, and no deadline *outside* the call can stop it. So the text is handed over through
+     * this, which asks the deadline every few thousand characters — the engine reaches the input
+     * through `charAt`, so the question is asked *inside* the match, and the answer is the same stop
+     * sentence every other command gives.
+     *
+     * It is a view of the text and not a copy, so a match is still asked about the file's own
+     * characters.
+     */
+    private class Timed(
+        private val text: CharSequence,
+        private val deadline: Deadline,
+        private val tool: String,
+    ) : CharSequence {
+        private var reads = 0
+
+        override val length: Int get() = text.length
+
+        override fun get(index: Int): Char {
+            // Every 4096 characters: often enough that a runaway pattern is stopped in milliseconds,
+            // rare enough that the count costs nothing beside the matching itself.
+            if ((++reads and 4095) == 0) deadline.check(tool)
+            return text[index]
+        }
+
+        override fun subSequence(startIndex: Int, endIndex: Int): CharSequence =
+            Timed(text.subSequence(startIndex, endIndex), deadline, tool)
+
+        override fun toString(): String = text.toString()
+    }
+
+    /** Where [pattern] first matches [line] — the one test every command asks, with the clock on. */
+    private fun hit(line: String, pattern: Regex, deadline: Deadline, tool: String): IntRange? =
+        pattern.find(Timed(line, deadline, tool))?.range
+
+    /** The first line of [text] that [pattern] matches, and where in the line it matched. */
+    private fun firstHit(
+        text: String,
+        pattern: Regex,
+        deadline: Deadline,
+        tool: String,
+    ): Pair<String, IntRange>? {
+        for (line in text.split("\n")) {
+            val at = hit(line, pattern, deadline, tool) ?: continue
+            return line to at
+        }
+        return null
+    }
+
+    /**
+     * The part of [line] a hit shows: a window around the match, with a mark where it was cut.
+     *
+     * **The window is placed around the match, not at the start of the line.** A minified line can
+     * be a hundred thousand characters; the answer is a path, a line number and enough text to
+     * recognise the place, and a hit reported at character 40 000 beside the first two hundred
+     * characters would be an answer that does not contain the thing it answers about.
+     */
+    private fun excerpt(line: String, at: IntRange, width: Int): String {
+        val start = if (line.length <= width) {
+            0
+        } else {
+            (at.first - width / 4).coerceIn(0, line.length - width)
+        }
+        val end = (start + width).coerceAtMost(line.length)
+        val window = line.substring(start, end).filterNot { it < ' ' && it != '\t' }.trim()
+        if (window.isEmpty()) return "\u2026"
+        return (if (start > 0) "\u2026" else "") + window + (if (end < line.length) "\u2026" else "")
     }
 
     private fun walk(dir: File, left: Int, out: MutableList<String>, deadline: Deadline) {
         val entries = ws.list(dir)
         for (entry in entries) {
             deadline.check("tree")
+            if (!withinProject(entry.file)) continue
             out.add(rel(entry.file) + if (entry.isFolder) "/" else "")
             if (entry.isFolder && left > 1) walk(entry.file, left - 1, out, deadline)
         }
@@ -440,7 +653,7 @@ class AgentTools(
      * [trim], and a replacement never does.
      */
     private fun readInto(args: JSONObject, deadline: Deadline): Result<String> {
-        val file = resolve(args.optString("path"))
+        val file = resolveFile(args.optString("path"))
             .getOrElse { return Result.failure(IllegalArgumentException(it.message ?: "that path cannot be read")) }
         if (!file.exists()) {
             // **The one name an older instruction set still points at.** The record used to be two
@@ -484,7 +697,9 @@ class AgentTools(
         val lines = text.split("\n")
         val chosen = slice(lines, args)
             .getOrElse { return Result.failure(IllegalArgumentException(it.message ?: "that range cannot be used")) }
-        val from = args.optInt("from", 1).coerceAtLeast(1)
+        val from = count(args, "from", 1)
+            .getOrElse { return Result.failure(IllegalArgumentException(it.message ?: "that range cannot be used")) }
+            .coerceAtLeast(1)
         if (chosen.isEmpty()) {
             return Result.success("nothing from line $from: the file has ${lines.size} lines")
         }
@@ -493,15 +708,14 @@ class AgentTools(
         // and an edit needs a place — and the numbers are the file's, not the selection's, so a
         // number read in one call means the same line in the next.
         if (grep != null) {
-            val hits = chosen.withIndex().filter { (_, line) -> grep.containsMatchIn(line) }
-            if (hits.isEmpty()) {
+            val found = chosen.withIndex().mapNotNull { (offset, line) ->
+                val at = hit(line, grep, deadline, "read") ?: return@mapNotNull null
+                "${from + offset}: ${excerpt(line, at, HIT)}"
+            }
+            if (found.isEmpty()) {
                 return Result.success("nothing in ${rel(file)} matches that")
             }
-            return Result.success(
-                hits.joinToString("\n") { (offset, line) ->
-                    "${from + offset}: ${line.trim().take(200)}"
-                },
-            )
+            return Result.success(found.joinToString("\n"))
         }
         return Result.success(chosen.joinToString("\n"))
     }
@@ -518,8 +732,11 @@ class AgentTools(
      * file. Everything else out of bounds is simply empty, which each caller words for itself.
      */
     private fun <T> slice(lines: List<T>, args: JSONObject): Result<List<T>> {
-        val from = args.optInt("from", 1).coerceAtLeast(1)
-        val to = args.optInt("to", 0)
+        val from = count(args, "from", 1)
+            .getOrElse { return Result.failure(IllegalArgumentException(it.message ?: "that range cannot be used")) }
+            .coerceAtLeast(1)
+        val to = count(args, "to", 0)
+            .getOrElse { return Result.failure(IllegalArgumentException(it.message ?: "that range cannot be used")) }
         if (to > 0 && to < from) {
             return Result.failure(
                 IllegalArgumentException(
@@ -534,7 +751,7 @@ class AgentTools(
     }
 
     private fun edit(args: JSONObject, deadline: Deadline): String {
-        val file = resolve(args.optString("path"))
+        val file = resolveFile(args.optString("path"))
             .getOrElse { return refusal(it.message ?: "that path cannot be changed") }
         mayWrite(file)?.let { return refusal(it) }
         if (!file.isFile) return refusal("There is no file at ${rel(file)}")
@@ -569,8 +786,11 @@ class AgentTools(
                 before.replace(find, put)
             }
             hasRange -> {
-                val from = args.optInt("from", 1).coerceAtLeast(1)
-                val asked = args.optInt("to", 0)
+                val from = count(args, "from", 1)
+                    .getOrElse { return refusal(it.message ?: "that range cannot be used") }
+                    .coerceAtLeast(1)
+                val asked = count(args, "to", 0)
+                    .getOrElse { return refusal(it.message ?: "that range cannot be used") }
                 if (asked > 0 && asked < from) {
                     return refusal(
                         "That range ends at line $asked, before it starts at line $from. " +
@@ -589,7 +809,8 @@ class AgentTools(
                 // be an empty range that happens to mean "here", and a model that meant "here" would
                 // write that exactly once before it got it wrong. Zero prepends; the number of lines
                 // appends.
-                val at = args.optInt("at", -1)
+                val at = count(args, "at", -1)
+                    .getOrElse { return refusal(it.message ?: "that place cannot be used") }
                 if (at < 0 || at > lines.size) {
                     return refusal(
                         "`at` is the line to insert after, from 0 (the top) to ${lines.size} " +
@@ -658,17 +879,7 @@ class AgentTools(
      * and [AgentLog.forget] flips the named rows.
      */
     private fun forget(args: JSONObject): String {
-        val ids = mutableSetOf<Int>()
-        val raw = args.optJSONArray("ids")
-        if (raw != null) {
-            for (i in 0 until raw.length()) ids.add(raw.optInt(i, -1))
-        } else {
-            // A single id is accepted, because a model that forgets one row will write `"ids": 12`
-            // sooner or later — and a refusal there would be about the shape of the JSON rather
-            // than about the work.
-            args.optInt("ids", -1).takeIf { it > 0 }?.let { ids.add(it) }
-        }
-        ids.removeAll { it <= 0 }
+        val ids = idsIn(args).getOrElse { return refusal(it.message ?: "those ids cannot be used") }
         val problem = AgentLog.forgetProblem(log.rows(), ids)
         if (problem != null) return refusal(problem)
         val gone = log.forget(ids)
@@ -677,8 +888,46 @@ class AgentTools(
         return success("forgot ${gone} row${if (gone == 1) "" else "s"}.$left")
     }
 
+    /**
+     * The row ids a `forget` call names: a list, one number, or numbers written as one string.
+     *
+     * **Three shapes, because a model writes all three.** `{"ids":[12,13]}` is the description's,
+     * `{"ids":12}` is what a model that forgets one row writes sooner or later, and
+     * `{"ids":"12,13"}` is what one writes when it is thinking of a sentence. A refusal for the
+     * last two would be about the shape of the JSON rather than about the work.
+     *
+     * Every number is read from the value: `optInt` answers the default on the phone and casts on
+     * the JVM, so a quoted id would be silently ignored on one and a crash on the other.
+     */
+    private fun idsIn(args: JSONObject): Result<Set<Int>> {
+        val raw = args.opt("ids")
+        val out = mutableSetOf<Int>()
+
+        fun take(value: Any?) {
+            val id = whole(value)
+                ?: throw IllegalArgumentException(
+                    "`ids` are row numbers, and ${quoted(value)} is not one",
+                )
+            out.add(id)
+        }
+
+        try {
+            when {
+                raw == null || raw === JSONObject.NULL -> return Result.success(emptySet())
+                raw is org.json.JSONArray -> for (i in 0 until raw.length()) take(raw.opt(i))
+                raw is String && (raw.contains(',') || raw.contains(' ')) ->
+                    for (piece in raw.split(',', ' ')) if (piece.isNotBlank()) take(piece)
+                else -> take(raw)
+            }
+        } catch (e: IllegalArgumentException) {
+            return Result.failure(e)
+        }
+        out.removeAll { it <= 0 }
+        return Result.success(out)
+    }
+
     private fun create(args: JSONObject, deadline: Deadline): String {
-        val file = resolve(args.optString("path"))
+        val file = resolveFile(args.optString("path"))
             .getOrElse { return refusal(it.message ?: "that path cannot be made") }
         deadline.check("create")
         if (file.exists()) return refusal("There is already something at ${rel(file)}")
@@ -711,7 +960,7 @@ class AgentTools(
     }
 
     private fun delete(args: JSONObject, deadline: Deadline): String {
-        val file = resolve(args.optString("path"))
+        val file = resolveFile(args.optString("path"))
             .getOrElse { return refusal(it.message ?: "that path cannot be deleted") }
         mayWrite(file)?.let { return refusal(it) }
         if (!file.exists()) return refusal("There is nothing at ${rel(file)}")
@@ -726,7 +975,7 @@ class AgentTools(
     }
 
     private fun move(args: JSONObject, deadline: Deadline): String {
-        val file = resolve(args.optString("path"))
+        val file = resolveFile(args.optString("path"))
             .getOrElse { return refusal(it.message ?: "that path cannot be moved") }
         mayWrite(file)?.let { return refusal(it) }
         if (!file.exists()) return refusal("There is nothing at ${rel(file)}")
@@ -776,7 +1025,7 @@ class AgentTools(
     }
 
     private fun history(args: JSONObject, deadline: Deadline): String {
-        val file = resolve(args.optString("path"))
+        val file = resolveFile(args.optString("path"))
             .getOrElse { return refusal(it.message ?: "that path cannot be read") }
         deadline.check("history")
         val path = rel(file)
@@ -792,13 +1041,20 @@ class AgentTools(
         // **A version is shown when its own text matches.** [versionsOf] loads every version's bytes
         // anyway, so asking is free — and it is the question a model actually has ("when did it say
         // this?"), which a commit message cannot answer.
-        val matching = if (grep == null) {
-            chosen
-        } else {
-            chosen.filter { (_, text) -> text != null && grep.containsMatchIn(text) }
+        val rows = mutableListOf<String>()
+        for ((commit, text) in chosen) {
+            if (grep == null) {
+                rows.add(versionRow(commit, text))
+                continue
+            }
+            // **The row shows the line that matched.** A saved version is identified by its id, its
+            // message and its time; the excerpt is what makes twenty saves of one file readable, and
+            // the first line of the file is not the answer to "which save said this".
+            val found = if (text == null) null else firstHit(text, grep, deadline, "history")
+            if (found != null) rows.add(versionRow(commit, text, found))
         }
-        if (matching.isEmpty()) return success("no version of $path matches that")
-        return success(matching.joinToString("\n") { (commit, text) -> versionRow(commit, text) })
+        if (rows.isEmpty()) return success("no version of $path matches that")
+        return success(rows.joinToString("\n"))
     }
 
     /**
@@ -810,25 +1066,32 @@ class AgentTools(
      * hand. An empty version says so, and so does one that is not text — a picture's first line is
      * not a sentence.
      */
-    private fun versionRow(commit: GitService.CommitInfo, text: String?): String {
-        val line = text
-            ?.lineSequence()
-            ?.firstOrNull { it.isNotBlank() }
-            ?.filterNot { it < ' ' && it != '\t' }
-            ?.trim()
-        val said = if (line == null || line.isEmpty()) {
-            "empty"
-        } else if (line.length > EXCERPT) {
-            line.take(EXCERPT) + "\u2026"
-        } else {
-            line
+    private fun versionRow(
+        commit: GitService.CommitInfo,
+        text: String?,
+        found: Pair<String, IntRange>? = null,
+    ): String {
+        val said = when {
+            text == null -> "not a text file"
+            found != null -> excerpt(found.first, found.second, EXCERPT)
+            else -> {
+                val line = text
+                    .lineSequence()
+                    .firstOrNull { it.isNotBlank() }
+                    ?.filterNot { it < ' ' && it != '\t' }
+                    ?.trim()
+                when {
+                    line.isNullOrEmpty() -> "empty"
+                    line.length > EXCERPT -> line.take(EXCERPT) + "\u2026"
+                    else -> line
+                }
+            }
         }
-        return "${commit.shortId}  ${commit.message}  ${stamp(commit.timestamp)}  " +
-            (if (text == null) "not a text file" else said)
+        return "${commit.shortId}  ${commit.message}  ${stamp(commit.timestamp)}  $said"
     }
 
     private fun restore(args: JSONObject, deadline: Deadline): String {
-        val file = resolve(args.optString("path"))
+        val file = resolveFile(args.optString("path"))
             .getOrElse { return refusal(it.message ?: "that path cannot be restored") }
         val revision = args.optString("revision").trim()
         mayWrite(file)?.let { return refusal(it) }
@@ -945,6 +1208,27 @@ class AgentTools(
      * the model's side ("I will just look one folder up"), and the answer to all three is one
      * sentence rather than three mechanisms.
      */
+    /**
+     * A path that has to name something **inside** this project — not the project itself.
+     *
+     * `""` is a legitimate path for `tree`: the project's own folder is a folder to list. It is a
+     * dangerous one for every command that changes something, and it was accepted by all of them:
+     * `delete {"path":""}` resolved to the project folder and removed it, `.git` and the record
+     * with it, then answered with a refusal about the history it could not write. `.` did the same.
+     * A command that needs a file says so before it does anything.
+     */
+    private fun resolveFile(raw: String): Result<File> {
+        val file = resolve(raw).getOrElse { return Result.failure(it) }
+        if (rel(file).isEmpty()) {
+            return Result.failure(
+                IllegalArgumentException(
+                    "That is the project's own folder, and this command needs a file inside it",
+                ),
+            )
+        }
+        return Result.success(file)
+    }
+
     fun resolve(raw: String): Result<File> {
         val clean = raw.trim().replace('\\', '/').trimStart('/')
         if (clean.isEmpty()) return Result.success(projectDir)
@@ -983,20 +1267,30 @@ class AgentTools(
      * is the case that matters — the agent may read the instructions it is given and may not
      * rewrite them, which is the difference between following a brief and editing it.
      */
-    private fun mayWrite(file: File): String? = when {
+    private fun mayWrite(file: File): String? {
+        val path = rel(file)
         // **The record is not yours to change.** `forget` is the one thing you may do to the
         // context, and it is a column and not a text edit; the evidence itself is the app's, so an
         // agent cannot make a failure disappear from it. The same rule the person is under.
-        ws.isRecord(file) ->
-            "${rel(file)} is the record of what happened. You may read it and not change it"
+        if (ws.isRecord(file)) {
+            return "$path is the record of what happened. You may read it and not change it"
+        }
         // **Your own instructions are the person's.** Reading the brief is how a turn starts;
         // rewriting it is a different act, and one that would let one turn quietly change what
         // the next turn is told to do. The paragraph above says so and the rule did not: the
         // merged layout made this an ordinary file inside the project, and it stopped refusing.
-        rel(file) == AgentPrompt.PROJECT_FILE ->
-            "${rel(file)} is the person's instructions to you. You may read it and not change it"
-        insideWorktreeOrAgent(file) -> null
-        else -> "You may only write inside this project, and ${rel(file)} is outside it"
+        if (path == AgentPrompt.PROJECT_FILE) {
+            return "$path is the person's instructions to you. You may read it and not change it"
+        }
+        if (insideWorktreeOrAgent(file)) return null
+        // **Why, and not "outside this project".** That sentence was given for a path that is
+        // inside the project, so a model read it as "my path is wrong" and tried another spelling
+        // of the same path. What it needs is the rule it broke.
+        return if (path.substringBefore('/') == AgentLog.DIR) {
+            "${AgentLog.DIR}/ is the app's own folder. Read it; `forget` takes rows out of your context"
+        } else {
+            "A name that starts with a dot belongs to the app, and $path has one"
+        }
     }
 
 

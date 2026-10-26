@@ -659,7 +659,7 @@ class Agent(
      * One row and what it costs, for the index the clear-up line carries.
      *
      * [line] is the row's position in `session.log` counted from one — the handle the `read` tool
-     * takes, so `read agent/session.log from 7 lines 1` returns exactly this row, with its ctx
+     * takes, so `read agent/session.log from 7 to 7` returns exactly this row, with its ctx
      * column and its id. [id] is the handle `forget` takes. Two tools, two handles on one row: one
      * to look, one to act.
      */
@@ -808,10 +808,15 @@ class Agent(
                 // **The index, because the file cannot be read in one go.** A `read` of a large
                 // context stops at the tool's own limit, so a model deciding what to remove either
                 // pages through it — a request per 20k characters — or guesses. Naming the biggest
-                // rows costs a line and saves the paging: `read from N lines 1` is one request for
+                // rows costs a line and saves the paging: `read from 7 to 7` is one request for
                 // the exact text of the row that matters most.
-                append("\nThe rows taking the most room — `read agent/session.log from <line> `")
-                append("`lines 1` shows one, with its ctx column and its id: ")
+                //
+                // **`to <line>`, not `lines 1`.** This sentence is an instruction the model obeys,
+                // and `lines` is a key `read` refuses — so the app was telling it to make a call
+                // that comes back as a refusal, at the one moment it is over its limit and has the
+                // least room to work out why. A sentence that names a command has to be a command.
+                append("\nThe rows taking the most room — `read agent/session.log from <line> to ")
+                append("<line>` shows one, with its ctx column and its id: ")
                 append(biggest.joinToString("; ") {
                     "line ${it.line}: #${it.id} ${it.kind} ${it.name}, about " +
                         "${ContextBudget.short(it.tokens)} tokens"

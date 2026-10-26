@@ -792,6 +792,167 @@ class AgentTest {
         assertTrue("naming both numbers: $body", body.contains("3") && body.contains("1"))
     }
 
+    // ---- one pattern, one meaning, in every command --------------------------
+
+    @Test
+    fun `an anchored pattern finds the same line in tree and in read`() {
+        // **The bug this replaces.** `tree` tested the whole file before testing the lines, and `^`
+        // only matches at the start of what it is given — so a file whose *second* line was `milk`
+        // was skipped by a search and found by a read, with nothing in either answer to say why.
+        val file = File(ws.repoOf("shopping"), "list.txt")
+        ws.write(file, "bread\nmilk\neggs\n")
+
+        val found = tool("tree", """{"path":"","grep":"^milk$"}""")
+        val read = tool("read", """{"path":"list.txt","grep":"^milk$"}""")
+
+        assertTrue("the search finds it: $found", found.contains("list.txt:2: milk"))
+        assertTrue("and the read finds it: $read", read.contains("2: milk"))
+    }
+
+    @Test
+    fun `a pattern ignores case in any script, not only in ascii`() {
+        // `CASE_INSENSITIVE` alone folds US-ASCII, so `Kraków` and `kraków` were two words while the
+        // description promised one rule. `UNICODE_CASE` is what makes the promise true.
+        val file = File(ws.repoOf("shopping"), "places.txt")
+        ws.write(file, "Kraków\nZürich\n")
+
+        val lower = tool("read", """{"path":"places.txt","grep":"kraków"}""")
+        val upper = tool("read", """{"path":"places.txt","grep":"ZÜRICH"}""")
+
+        assertTrue("the accented name is found either way: $lower", lower.contains("1: Kraków"))
+        assertTrue("and so is the umlaut: $upper", upper.contains("2: Zürich"))
+    }
+
+    @Test
+    fun `a pattern with a line break in it is refused, and points at the range`() {
+        // No line contains a line break, so this pattern can only ever answer "nothing matches" about
+        // a file that plainly holds the text — and the model would go looking for a mistake in its
+        // path. Naming the tool that does what it wanted is what repairs the call.
+        val body = tool("read", """{"path":"milk.txt","grep":"two\nlitres"}""")
+
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("saying why: $body", body.contains("line break"))
+        assertTrue("and what to use instead: $body", body.contains("from"))
+    }
+
+    @Test
+    fun `a search can answer with a folder's name, and a content search never can`() {
+        // **A folder is a name, not a text.** `{"name":"agent"}` used to answer nothing, which reads
+        // as "there is no such folder". `grep` stays files-only: a folder would be in the result
+        // because something inside it matched, and that is a line nobody asked about.
+        ws.write(File(ws.repoOf("shopping"), "notes/inner.txt"), "a needle here")
+
+        val named = tool("tree", """{"path":"","name":"^notes$"}""")
+        val grepped = tool("tree", """{"path":"","grep":"needle"}""")
+
+        assertTrue("the folder is named: $named", named.lines().any { it.trim() == "notes/" })
+        assertTrue("and the hit is a file and a line: $grepped", grepped.contains("notes/inner.txt:1: a needle here"))
+        assertFalse(
+            "but no bare folder rides along with a content search: $grepped",
+            grepped.lines().any { it.trim().endsWith("/") },
+        )
+    }
+
+    @Test
+    fun `the excerpt is placed around the hit, not at the start of the line`() {
+        // A minified line can be a hundred thousand characters. An answer that prints the first two
+        // hundred of them beside a hit at character 250 does not contain the thing it answers about.
+        val file = File(ws.repoOf("shopping"), "long.txt")
+        ws.write(file, "x".repeat(250) + "NEEDLE" + "y".repeat(250))
+
+        val body = tool("read", """{"path":"long.txt","grep":"NEEDLE"}""")
+
+        assertTrue("the hit is in the answer: $body", body.contains("NEEDLE"))
+        assertTrue("with a mark that it was cut: $body", body.contains("\u2026"))
+    }
+
+    @Test
+    fun `a range written as text is read, and one that is not a number names its key`() {
+        // **`optInt` answered the default on the phone and cast on the JVM**, so one call had two
+        // behaviours and neither was visible from the other side. Every number is read from the
+        // value now, and a number written as a string is a number.
+        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "one\ntwo\nthree\nfour\n")
+
+        assertEquals("0\ntwo\nthree", tool("read", """{"path":"milk.txt","from":"2","to":"3"}"""))
+        val bad = tool("read", """{"path":"milk.txt","from":"two"}""")
+        assertTrue("refused: $bad", bad.startsWith(AgentLog.FAILURE))
+        assertTrue("naming the key: $bad", bad.contains("`from`"))
+        assertTrue("and what it must be: $bad", bad.contains("whole number"))
+    }
+
+    @Test
+    fun `every command that changes something refuses the project's own folder`() {
+        // **`{"path":""}` resolved to the project and `delete` removed it** — `.git`, the record and
+        // every file, and then answered with a refusal about the history it could not write. `.` was
+        // the same path by another name. A command that needs a file says so before it does anything.
+        val before = File(ws.repoOf("shopping"), "milk.txt").readText()
+
+        for (name in listOf("edit", "delete", "create", "move", "restore", "history")) {
+            for (path in listOf("", ".")) {
+                val body = tool(name, """{"path":"$path"}""")
+                assertTrue(
+                    "$name with \"$path\" is refused: $body",
+                    body.startsWith(AgentLog.FAILURE),
+                )
+                assertTrue(
+                    "$name with \"$path\" says what is wrong: $body",
+                    body.contains("project's own folder"),
+                )
+            }
+        }
+        assertTrue("and the project is still there", File(ws.repoOf("shopping"), "milk.txt").isFile)
+        assertEquals("as it was", before, File(ws.repoOf("shopping"), "milk.txt").readText())
+    }
+
+    @Test
+    fun `a background command whose arguments are a string runs them`() {
+        // `args` as a string used to be read as "no arguments at all", so the command ran against the
+        // project's own folder and answered about a folder — a call that quietly dropped what it was
+        // told, which is the same class of mistake as a wrong key.
+        val body = tool(
+            "background",
+            """{"tool":"read","args":"{\"path\":\"milk.txt\"}"}""",
+        )
+
+        assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
+        val made = Regex("agent/background_results/read-\\S+\\.txt")
+            .find(body)
+            ?.value
+            ?.let { File(ws.repoOf("shopping"), it) }
+        assertTrue("with the path it was written to: $body", made != null)
+        val wrote = made?.readText().orEmpty()
+        assertTrue("and the work ran with the arguments it was given: $wrote", wrote.contains("two litres"))
+    }
+
+    @Test
+    fun `a runaway pattern stops at the deadline instead of the phone`() {
+        // **A pattern is the one input that can take unbounded time in a single call.** `(a+)+$` is
+        // the textbook case: forty characters is more work than the phone will ever finish, and a
+        // deadline checked only *around* the match would never be asked. The text is handed over
+        // through a view that asks it inside the engine.
+        ws.write(File(ws.repoOf("shopping"), "a.txt"), "a".repeat(40) + "b")
+
+        val body = tools().run(
+            Call("c8", "read", """{"path":"a.txt","grep":"(a+)+$"}"""),
+            Deadline(50),
+        )
+
+        assertTrue("it stopped rather than running for ever: $body", body.contains("stopped"))
+        assertTrue("and says nothing was kept: $body", body.contains("nothing was kept"))
+    }
+
+    @Test
+    fun `history with a pattern shows the line that matched, not the first line`() {
+        val file = File(ws.repoOf("shopping"), "milk.txt")
+        ws.write(file, "intro\ntwo litres of bread\noutro")
+        git.commit("shopping", CommitMessage.SAVE)
+
+        val body = tool("history", """{"path":"milk.txt","grep":"bread"}""")
+
+        assertTrue("the line that matched: $body", body.contains("two litres of bread"))
+        assertFalse("and not the line above it: $body", body.contains("intro"))
+    }
+
     // ---- edit: one shape at a time -----------------------------------------
 
     @Test
