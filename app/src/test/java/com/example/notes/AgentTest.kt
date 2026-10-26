@@ -1063,7 +1063,9 @@ class AgentTest {
         val body = tool("edit", """{"path":"blank.txt","at":0,"replace":"first line"}""")
 
         assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
-        assertEquals("and the line is the file", "first line", File(ws.repoOf("shopping"), "blank.txt").readText())
+        // An empty file is one empty line, so inserting above it keeps the newline that line ends
+        // with — the file gains a line and loses none.
+        assertEquals("and the line is the file", "first line\n", File(ws.repoOf("shopping"), "blank.txt").readText())
     }
 
     @Test
