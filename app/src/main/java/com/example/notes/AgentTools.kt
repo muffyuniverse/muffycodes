@@ -117,9 +117,7 @@ class AgentTools(
                     "which copies that call's answer out of another file without it passing " +
                     "through this conversation.",
                 "{\"path\":\"the file\",\"find\":\"text to look for\",\"replace\":\"what to " +
-                    "put there\"} — or {\"path\":\"the file\",\"from\":10,\"to\":12,\"replace\":" +
-                    "{\"tool\":\"read\",\"args\":{\"path\":\"notes.txt\"}}} — or {\"path\":\"the " +
-                    "file\",\"at\":11,\"replace\":\"a new line\"}",
+                    "put there\"}",
             ),
             spec(
                 "forget",

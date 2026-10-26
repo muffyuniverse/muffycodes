@@ -550,6 +550,25 @@ class AgentTest {
         assertFalse("and the answer is not streamed", body.getBoolean("stream"))
     }
 
+    @Test
+    fun `every tool the app offers is one the dispatch answers`() {
+        // **The list and the `when` drift apart in both directions.** A tool the specs advertise and
+        // nothing answers is a model calling something that always fails; a tool the `when` answers
+        // and the specs do not mention is code no model can reach. Both were possible while there
+        // were three dispatch tables, and one of them was written twice.
+        //
+        // A path that does not exist is used for every call, because `delete` and `create` would act
+        // on the project folder if they were handed nothing.
+        for (spec in AgentTools.specs()) {
+            if (spec.name in AgentTools.TERMINATING) continue
+            val answer = tool(spec.name, """{"path":"no-such-thing"}""")
+            assertFalse(
+                "${spec.name} is answered rather than unknown: $answer",
+                answer.contains("There is no tool called"),
+            )
+        }
+    }
+
     // ---- the agent's search: tree and read with grep -------------------------
 
     /** One call, answered the way the loop answers it. */

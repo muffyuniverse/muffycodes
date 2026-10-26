@@ -371,11 +371,17 @@ class WorkspaceTest {
         assertTrue("the copy is made", copy.isSuccess)
         assertEquals("with the same text", "two litres", copy.getOrThrow().readText())
 
+        // A *different* source, so the second refusal can only be about the lock: the first copy
+        // already put a `milk.txt` in `inbox`, and a taken name would refuse for another reason and
+        // make this assertion pass while the lock had stopped working.
+        val bread = File(folder, "bread.txt")
+        workspace.write(bread, "one loaf")
         lock("inbox")
         assertTrue(
             "but copying into a locked folder is refused",
-            workspace.copy(original, elsewhere).isFailure,
+            workspace.copy(bread, elsewhere).isFailure,
         )
+        assertFalse("and nothing of it arrived", File(elsewhere, "bread.txt").exists())
     }
 
     @Test
