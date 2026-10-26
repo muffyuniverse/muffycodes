@@ -210,7 +210,7 @@ class AgentChatTest {
     }
 
     @Test
-    fun `a new question ends the tail: its checks are its own`() {
+    fun `a new question ends the tail, and its checks are its own`() {
         // The other half of the rule: a burst that holds an ending is a new answer to the person, not
         // a check on the old one.
         val rows = listOf(
