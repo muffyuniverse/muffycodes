@@ -26,6 +26,7 @@ on `read` and a separate `insert` tool. The tools divide like this:
 
 So the rename-and-add is one move, not two: `clone` disappears, `copy` takes the name's place with
 the meaning the name always had, and paste is a new thing beside it.
+@ maybe copy should be just a flag on move command? they do practically the same.
 
 ---
 
@@ -64,6 +65,7 @@ gone, and the folder keeps one meaning instead of two.
 **Same rule everywhere, including `tree`'s 200-cap and `read`'s 200-match cap.** Both become the
 char limit. A `tree` that matches 4,000 paths is an error asking for a narrower `name`/`grep`/
 `depth`; it is not a list of the first 200. That deletes `MAX_MATCHES` and its two notes.
+@ make it so background can take any other command - it is simple.
 
 ## 2. One limit, applied to whatever the selection returns
 
@@ -136,6 +138,7 @@ copy {
 **This kills the separate `insert` tool I proposed**, and it kills the "fourth shape on `edit`"
 question — both were answers to a question about `copy`. Insertion is not an operation on a file; it
 is a mode of paste.
+@ make this as paste command. lines and grep apply separately and sequentially (can be either either or both), lines take a range, from and to (both inclusive) - and standardize that.
 
 ### The one open question I still have
 
@@ -152,6 +155,7 @@ by a pattern. Do you want:
 I lean to keeping `edit` and restricting `copy`'s `replace` to mean *between two different files* —
 because that is the case `edit` cannot do, and the one you actually asked about. But it is your call,
 and it is the only decision left in this document.
+@ we can actually merge paste into edit by allowing edit to take read command as replace argument so that replace can take both pure content and read output.
 
 ---
 
