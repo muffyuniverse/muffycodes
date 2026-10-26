@@ -368,7 +368,14 @@ class HistoryFeatureTest : FeatureTest() {
         scene.openIn("letters", "deeper")
         scene.file("two.txt", "second")
         scene.openIn()
-        scene.await("the versions") { scene.versionsOfFolder("letters").isNotEmpty() }
+        // **The version that has the file in it, not merely the first one listed.** `createFile`
+        // commits an empty file and the text is a second commit, so "there is a version" is true a
+        // moment before the version this test is about exists — and restoring that one put an empty
+        // `two.txt` back, which is the failure this await removes.
+        scene.await("a folder version holding both files", 20_000) {
+            val newest = scene.versionsOfFolder("letters").firstOrNull()?.first?.id ?: return@await false
+            scene.repo("work").fileAt("letters/deeper/two.txt", newest) == "second"
+        }
 
         val version = scene.versionsOfFolder("letters").first().first.id
         val letters = File(scene.workspace!!.projectDir("work"), "letters")
