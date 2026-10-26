@@ -120,8 +120,8 @@ object LogFormat {
         return "$id $size $kind ${ctx.padEnd(3)} $rest"
     }
 
-    /** The four fixed columns, ending at the space before the name. */
-    private val HEAD = Regex("""^(\d+) +(\d+) +(\S+) +(\S+) +""")
+    /** The four fixed columns, ending at the space before the name. The id is padded, hence ` *`. */
+    private val HEAD = Regex("""^ *(\d+) +(\d+) +(\S+) +(\S+) +""")
 
     /** The body's one escaping rule: a newline and a backslash, in that order. */
     fun escaped(text: String): String = text.replace("\\", "\\\\").replace("\n", "\\n")

@@ -187,7 +187,11 @@ class AgentChatTest {
         val box = AgentChat.box(rows)
 
         assertEquals("no turn to step through", 0, box?.turns?.size)
-        assertEquals("one line, and its count", "idle since #7 · 3 checks", box?.idle)
+        assertEquals(
+            "one line, and its count",
+            "idle since #${poll.first().id} · 3 checks",
+            box?.idle,
+        )
     }
 
     @Test
@@ -206,7 +210,11 @@ class AgentChatTest {
         val box = AgentChat.box(rows)
 
         assertEquals("the work is a turn", 1, box?.turns?.size)
-        assertEquals("and the checks are the idle line", "idle since #7 · 2 checks", box?.idle)
+        assertEquals(
+            "and the checks are the idle line",
+            "idle since #${ping().first().id} · 2 checks",
+            box?.idle,
+        )
     }
 
     @Test
@@ -240,6 +248,10 @@ class AgentChatTest {
         val box = AgentChat.box(rows)
 
         assertEquals("the work is a turn", 1, box?.turns?.size)
-        assertEquals("the polls are not", "idle since #6 · 2 checks", box?.idle)
+        assertEquals(
+            "the polls are not",
+            "idle since #${ping().first().id} · 2 checks",
+            box?.idle,
+        )
     }
 }

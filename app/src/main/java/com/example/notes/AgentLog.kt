@@ -159,12 +159,12 @@ class AgentLog private constructor(
         /**
          * Five columns: the record as this build writes it — `id size kind ctx name  detail`.
          *
-         * **No clock, so the old shape cannot be mistaken for this one**: a row of yesterday starts
-         * with `14:02`, and `\d+` stops at the colon, so the two regexes are disjoint by their first
-         * character rather than by a heuristic.
+         * **` *` and not `^` before the id**, because the id is padded to four and the size to five:
+         * the first character of a row is a space. A row of yesterday starts with `14:02`, so the
+         * two shapes are still disjoint by their first character.
          */
         private val ROW =
-            Regex("""^(\d+) +(\d+) +(\S+) +(\S+) +(\S+)(?:  (.*))?$""")
+            Regex("""^ *(\d+) +(\d+) +(\S+) +(\S+) +(\S+)(?:  (.*))?$""")
 
         /** Six columns: the record as the build before this one wrote it, with a clock. */
         private val TIMED_ROW =

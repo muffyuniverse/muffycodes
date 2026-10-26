@@ -514,24 +514,26 @@ class AgentTest {
     fun `the newest previous default is the text this build replaced`() {
         // **The entry that matters most, because it is what most phones are holding.** A phone that
         // ran the previous release has an ① file with its unedited default — which is this build's
-        // predecessor, and which offers `wait` as a third way to end a turn: a tool this build no
-        // longer has. Recognising it needs those words exactly, so the entry is the old text rather
-        // than a paraphrase of it, and it is last because it is the most recent.
+        // predecessor, and which describes the record as five columns that include a clock and a ctx
+        // flag and no size. Recognising it needs those words exactly, so the entry is the old text
+        // rather than a paraphrase of it, and it is last because it is the most recent.
         val newest = AgentPrompt.PREVIOUS_SYSTEM.last()
         val older = AgentPrompt.PREVIOUS_SYSTEM[AgentPrompt.PREVIOUS_SYSTEM.size - 2]
         val now = AgentPrompt.SYSTEM_DEFAULT
 
         assertTrue(
-            "it is the text that did not know a finished command could wake it",
-            newest.contains("Do not start the same command twice.") &&
-                !newest.contains("wakes you with a note naming the file"),
+            "it is the text that described the record with a ctx column and no size",
+            newest.contains("the column that says whether you are sent it") &&
+                !newest.contains("id name body"),
         )
-        assertTrue("and this build does say so", now.contains("wakes you with a note naming the file"))
+        assertTrue("and this build says what a row looks like", now.contains("id name body"))
         assertTrue("the layout is the merge's", newest.contains("The project folder is the repository"))
-        assertFalse("and it predates the handover rule", newest.contains("still running; call again"))
+        assertTrue("and it knows a wake", newest.contains("wakes you with a note naming the file"))
+        assertFalse("but it predates the size", newest.contains("id size"))
         assertTrue(
-            "the one before it is the text that offered wait as an ending",
-            older.contains("wait      you are idle and the person has not spoken yet."),
+            "the one before it is the text that did not know a wake",
+            older.contains("Do not start the same command twice.") &&
+                !older.contains("wakes you with a note naming the file"),
         )
         assertTrue("a previous default is not the current one", newest != now)
     }
