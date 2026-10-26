@@ -1971,14 +1971,23 @@ class AgentTest {
         log.call("read", """{"path":"milk.txt"}""")
         log.got("read", "0\n" + "x".repeat(4_000))
         val limits = ContextBudget.Limits.of(triggerAsked = 100, hardAsked = 0, ceiling = 100_000)
-        val door = ScriptedDoor(Reply("", listOf(call("conclude", """{"text":"done"}"""))))
+        // **The file as it stood when the request was made.** Every row the turn writes afterwards is
+        // prepended, so a line number read from the file at the end of the test names a different row
+        // — the request itself is the only moment the promise can be checked at.
+        val context = File(ws.accountDir, "shopping/${AgentLog.DIR}/${AgentLog.SESSION}")
+        var atRequest: List<String>? = null
+        val door = object : Door {
+            override fun turn(request: Request): Result<Reply> {
+                if (atRequest == null) atRequest = context.readLines()
+                return Result.success(Reply("", listOf(call("conclude", """{"text":"done"}"""))))
+            }
+        }
 
         agent(door, limits).burst("clear up please")
 
         val sent = door.asked.first().system
         val index = sent.substringAfter("The rows taking the most room")
         assertTrue("the biggest row is named first: $index", index.contains("#4 GOT read"))
-        assertTrue("with its line to read", index.contains("line 4:"))
         assertTrue("and its size", index.contains("tokens"))
         assertTrue("and it says how to look", sent.contains("read agent/session.log from <line>"))
 
@@ -1987,8 +1996,7 @@ class AgentTest {
         // one the index named — the one thing an index exists to prevent.
         val named = Regex("""line (\d+): #4 GOT read""").find(index)?.groupValues?.get(1)?.toInt()
         assertTrue("the index names a line: $index", named != null)
-        val context = File(ws.accountDir, "shopping/${AgentLog.DIR}/${AgentLog.SESSION}")
-        val line = context.readLines()[named!! - 1]
+        val line = atRequest!![named!! - 1]
         assertTrue("and that line holds the row it names: $line", line.contains("GOT"))
         assertTrue("with the id the index gave: $line", line.contains(" 4 "))
     }

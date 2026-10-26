@@ -823,7 +823,7 @@ class Agent(
                 // that comes back as a refusal, at the one moment it is over its limit and has the
                 // least room to work out why. A sentence that names a command has to be a command.
                 append("\nThe rows taking the most room — `read agent/session.log from <line> to ")
-                append("<line>` shows one, with its ctx column and its id: ")
+                append("<line>` shows one, as `id name body`: ")
                 append(biggest.joinToString("; ") {
                     "line ${it.line}: #${it.id} ${it.kind} ${it.name}, about " +
                         "${ContextBudget.short(it.tokens)} tokens"
