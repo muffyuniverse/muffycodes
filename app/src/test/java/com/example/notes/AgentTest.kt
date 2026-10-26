@@ -930,6 +930,27 @@ class AgentTest {
     }
 
     @Test
+    fun `a link out of the project is not followed, in a listing or a search`() {
+        // **`resolve` refuses `..` for a path a model wrote; a link is the same escape with no path
+        // to check.** The rule has to hold for every entry a walk meets, or a search reads files the
+        // instructions promise the agent cannot see.
+        val outside = File(account, "elsewhere").apply { mkdirs() }
+        ws.write(File(outside, "secret.txt"), "a needle outside the project")
+        val link = File(ws.repoOf("shopping"), "escape")
+        try {
+            java.nio.file.Files.createSymbolicLink(link.toPath(), outside.toPath())
+        } catch (e: Throwable) {
+            return // a filesystem that cannot make one cannot be escaped through one either
+        }
+
+        val listed = tool("tree", """{"path":""}""")
+        val found = tool("tree", """{"path":"","grep":"needle"}""")
+
+        assertFalse("the link is not listed: $listed", listed.contains("escape"))
+        assertFalse("and nothing behind it is read: $found", found.contains("needle"))
+    }
+
+    @Test
     fun `every command that changes something refuses the project's own folder`() {
         // **`{"path":""}` resolved to the project and `delete` removed it** — `.git`, the record and
         // every file, and then answered with a refusal about the history it could not write. `.` was
@@ -1007,6 +1028,62 @@ class AgentTest {
 
         assertTrue("the line that matched: $body", body.contains("two litres of bread"))
         assertFalse("and not the line above it: $body", body.contains("intro"))
+    }
+
+    // ---- the edges of the commands a model writes by hand ---------------------
+
+    @Test
+    fun `depth is read as a number and clamped, so a silly one still lists something`() {
+        // A model writes `"depth":"2"` and `"depth":99`. The first is a number it typed as text, and
+        // the second is a request to walk the phone: the answer is a listing, not a refusal.
+        ws.write(File(ws.repoOf("shopping"), "a/b/c/deep.txt"), "deep")
+
+        val text = tool("tree", """{"path":"","depth":"3"}""")
+        val silly = tool("tree", """{"path":"","depth":99}""")
+
+        assertTrue("a depth written as text is read: $text", text.contains("a/b/c/"))
+        assertTrue("and a huge one is clamped rather than refused: $silly", silly.startsWith(AgentLog.SUCCESS))
+    }
+
+    @Test
+    fun `create will not write over a file, and says what is there`() {
+        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "two litres")
+
+        val body = tool("create", """{"path":"milk.txt","text":"three"}""")
+
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("naming the path: $body", body.contains("milk.txt"))
+        assertEquals("and nothing was written", "two litres", File(ws.repoOf("shopping"), "milk.txt").readText())
+    }
+
+    @Test
+    fun `at zero inserts at the top of an empty file`() {
+        ws.write(File(ws.repoOf("shopping"), "blank.txt"), "")
+
+        val body = tool("edit", """{"path":"blank.txt","at":0,"replace":"first line"}""")
+
+        assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
+        assertEquals("and the line is the file", "first line", File(ws.repoOf("shopping"), "blank.txt").readText())
+    }
+
+    @Test
+    fun `history of a file that has never been saved says so instead of refusing`() {
+        ws.write(File(ws.repoOf("shopping"), "fresh.txt"), "not committed yet")
+
+        val body = tool("history", """{"path":"fresh.txt"}""")
+
+        assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
+        assertTrue("and it says what is true: $body", body.contains("no versions yet"))
+    }
+
+    @Test
+    fun `a folder cannot be moved into itself, and the answer names the rule`() {
+        ws.write(File(ws.repoOf("shopping"), "notes/inner.txt"), "x")
+
+        val body = tool("move", """{"path":"notes","into":"notes"}""")
+
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("for the reason it happened: $body", body.contains("inside itself"))
     }
 
     // ---- edit: one shape at a time -----------------------------------------
@@ -1992,6 +2069,41 @@ class AgentTest {
         assertTrue("and it is the big one: $byId", byId.contains("x".repeat(50)))
         assertFalse("in the model's own view, without the columns: $byId", byId.contains("GOT"))
         assertFalse("and without a second number: $byId", Regex("^\\s*\\d+ +\\d+ ", RegexOption.MULTILINE).containsMatchIn(byId))
+    }
+
+    @Test
+    fun `a row's size is its body's cost, and the line it is stored in costs more`() {
+        // **The size is a request's cost, not the file's.** A row's line carries an id, a size, a
+        // kind, a ctx flag and padding that the model never sees; if the column measured those, the
+        // app would ask the agent to clear up a context that is smaller than the number it quoted,
+        // and the number would disagree with the wire every turn.
+        log.told("a task")
+        val body = "y".repeat(600)
+        val id = log.got("read", body)
+
+        val row = AgentLog.open(File(ws.accountDir, "shopping")).rows().first { it.id == id }
+
+        assertEquals("the body's cost, exactly", ContextBudget.tokens(body), row.size)
+        assertTrue(
+            "and the line it lives in costs more, which is what it must not count: " +
+                "${ContextBudget.tokens(row.line)} vs ${row.size}",
+            ContextBudget.tokens(row.line) > row.size,
+        )
+    }
+
+    @Test
+    fun `raw with an id gives the row's own line, because a key that is ignored is a lie`() {
+        // `raw` on the record shows the columns. Returning the view to a model that asked for the
+        // columns would be exactly the `lines` mistake: a key that quietly does nothing.
+        log.told("a task")
+        val id = log.note("agent", "a note")
+
+        val view = tool("read", """{"path":"agent/session.log","id":$id}""")
+        val raw = tool("read", """{"path":"agent/session.log","id":$id,"raw":true}""")
+
+        assertFalse("the view has no kind: $view", view.contains("NOTE"))
+        assertTrue("the raw line does: $raw", raw.contains("NOTE"))
+        assertTrue("and its ctx column: $raw", raw.contains(" in "))
     }
 
     @Test

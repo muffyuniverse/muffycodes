@@ -782,7 +782,9 @@ class AgentTools(
                 .map { AgentLog.parseRow(it) }
                 .firstOrNull { it.id == only && !it.broken }
                 ?: return Result.failure(IllegalArgumentException("There is no row $only"))
-            val row = parsed.shown
+            // **`raw` is honoured here too.** Returning the view to a model that asked for the
+            // columns would be the silent-ignore this file refuses everywhere else.
+            val row = if (raw) parsed.line else parsed.shown
             val at = if (grep == null) null else hit(row, grep, deadline, "read")
             if (grep != null && at == null) return Result.success("row $only does not match that")
             return Result.success(if (grep == null) row else excerpt(row, at!!, HIT))
