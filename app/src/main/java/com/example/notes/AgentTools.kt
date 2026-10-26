@@ -22,6 +22,15 @@ class AgentTools(
     private val git: ProjectGit,
     private val log: AgentLog,
     private val maxChars: Int = MAX_RESULT,
+    /** Where a `background` call runs. Inline by default, so a test acquires no thread. */
+    private val bg: Background = Background.inline(),
+    /**
+     * The operator's limit for a **background** command, in milliseconds; zero is "no limit".
+     *
+     * Read per call rather than captured here, because the setting can change while an agent is
+     * idle and the number that applies is the one in force when somebody asked for the work.
+     */
+    private val backgroundMs: () -> Long = { 0L },
 ) {
 
     /** The project's own folder: what the agent stands in. */
@@ -80,6 +89,15 @@ class AgentTools(
          */
         const val IDLE_CALLS = 20
 
+        /**
+         * The folder a `background` result is written into, under `agent/`.
+         *
+         * **Inside `agent/` and not at the project root**, because a file at the root is a change the
+         * next save commits and the next Sync pushes. `agent/` is the app's own directory and is in
+         * git's exclude list, so a result file is never mistaken for the person's work.
+         */
+        const val LONG_DIR = AgentLog.DIR
+
         fun specs(): List<ToolSpec> = listOf(
             spec(
                 "tree",
@@ -134,6 +152,13 @@ class AgentTools(
                 """{"path":"the file","revision":"the id history gave you"}""",
             ),
             spec(
+                "background",
+                "Run a slow command and have its result written to a file instead of into this " +
+                    "conversation. The answer is the path; read it to see whether it finished. " +
+                    "Only the slow commands can be run this way.",
+                """{"tool":"clone","args":{"url":"https://github.com/owner/repo"}}""",
+            ),
+            spec(
                 "reason",
                 "Write down what you are thinking, so the person can read it later. It goes in " +
                     "your record, not in their files.",
@@ -185,11 +210,68 @@ class AgentTools(
             "clone" -> clone(args)
             "history" -> history(args)
             "restore" -> restore(args)
+            "background" -> background(args)
             "reason" -> reason(args)
             else -> refusal("There is no tool called ${call.tool}")
         }
     } catch (e: Throwable) {
         refusal(Secrets.explain(e, "That tool could not be run"))
+    }
+
+    /**
+     * Runs [call] with a deadline, and stops it if the operator's time runs out.
+     *
+     * **Only for [LONG].** Everything else finishes or throws in microseconds, so a deadline there
+     * would be a sentence about a wait that cannot happen.
+     */
+    fun runWithin(call: Call, deadline: Deadline): String {
+        if (call.tool !in LONG) return run(call)
+        return try {
+            val args = JSONObject(call.args.ifBlank { "{}" })
+            when (call.tool) {
+                "clone" -> clone(args, deadline)
+                "restore" -> restore(args, deadline)
+                else -> run(call)
+            }
+        } catch (e: StoppedException) {
+            e.message ?: Stopped.body(call.tool, deadline)
+        } catch (e: Throwable) {
+            refusal(Secrets.explain(e, "That tool could not be run"))
+        }
+    }
+
+    /**
+     * `background` — a slow command whose result lands in a file instead of in the conversation.
+     *
+     * **The tool name is the argument**, not a flag on `clone`: a result belongs to the call that
+     * asked for it, and the path is named after that call's own row. The work is started before the
+     * answer is written, so the file exists by the time the model could read it.
+     */
+    private fun background(args: JSONObject): String {
+        val tool = args.optString("tool").trim()
+        if (tool.isEmpty()) return refusal("Say which command to run in the background")
+        if (tool !in LONG) {
+            return refusal(
+                "${tool.ifEmpty { "That" }} finishes in milliseconds, so putting it in the background " +
+                    "would cost you a file to read for nothing. Call it directly."
+            )
+        }
+        val inner = Call(id = args.optString("id", "0"), tool = tool, args = args.optJSONObject("args")?.toString() ?: "{}")
+        val dir = projectDir
+        return bg.start(dir, inner) {
+            // **The same path the foreground takes**, so the file's body is the body the agent would
+            // have read in the conversation — `0` or `1` first, and the same sentences. The one
+            // difference is the deadline: a background command gets the operator's longer number.
+            try {
+                when (tool) {
+                    "clone" -> clone(JSONObject(inner.args), Deadline(backgroundMs()))
+                    "restore" -> restore(JSONObject(inner.args), Deadline(backgroundMs()))
+                    else -> refusal("There is no slow command called $tool")
+                }
+            } catch (e: StoppedException) {
+                e.message ?: "stopped"
+            }
+        }
     }
 
     private fun tree(args: JSONObject): String {
@@ -480,7 +562,7 @@ class AgentTools(
         )
     }
 
-    private fun clone(args: JSONObject): String {
+    private fun clone(args: JSONObject, deadline: Deadline? = null): String {
         val url = args.optString("url").trim()
         if (url.isEmpty()) return refusal("Say which repository to clone")
         val changes = git.changes(project)
@@ -490,7 +572,7 @@ class AgentTools(
                     "would lose that work, so nothing happened."
             )
         }
-        val result = git.cloneInto(project, url)
+        val result = git.cloneInto(project, url, deadline)
         return if (result.success) success("cloned into this project's folder") else refusal(result.message)
     }
 
@@ -507,14 +589,14 @@ class AgentTools(
         )
     }
 
-    private fun restore(args: JSONObject): String {
+    private fun restore(args: JSONObject, deadline: Deadline? = null): String {
         val file = resolve(args.optString("path"))
             .getOrElse { return refusal(it.message ?: "that path cannot be restored") }
         val revision = args.optString("revision").trim()
         mayWrite(file)?.let { return refusal(it) }
         if (revision.length < 7) return refusal("Give the version id that history showed you")
         if (ws.isLocked(file)) return refusal("${rel(file)} is locked, so it is read-only")
-        val restored = git.restore(project, rel(file), revision)
+        val restored = git.restore(project, rel(file), revision, deadline)
         return restored.fold(
             onSuccess = { commit("Restored ${file.name}", "put ${rel(file)} back") },
             onFailure = { refusal(it.message ?: "it could not be restored") },
@@ -628,7 +710,7 @@ class AgentTools(
      * True when [file] is somewhere in the project the agent may write.
      *
      * **Everything in the project is writable except the record's own folder.** The app's
-     * `.gitignore` keeps `agent/` out of the repository, and the record inside it is [mayWrite]'s
+     * git's exclude list keeps `agent/` out of the repository, and the record inside it is [mayWrite]'s
      * first refusal. Dot-names were never the agent's and still are not: `.git` is a folder whose
      * contents would destroy the repository, and it is refused here rather than by each tool.
      */

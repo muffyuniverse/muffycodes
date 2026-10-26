@@ -173,10 +173,15 @@ class SettingsScreenTest {
         // **The setting's own default, read through the store**, which is where the number lives.
         // Zero is "wait for the command however long it takes", and that is what this app did before
         // the handover existed — so an update must not change an agent nobody configured.
-        assertEquals("off", 0, scene.viewModel.settings.commandSeconds)
-        assertEquals("and no wait, which means wait for it", 0L, scene.viewModel.settings.commandMs)
+        assertEquals("off", 0, scene.viewModel.settings.foregroundSeconds)
+        assertEquals("and no limit, which means wait for it", 0L, scene.viewModel.settings.foregroundMs)
+        assertEquals("off for a background command too", 0, scene.viewModel.settings.backgroundSeconds)
+        assertEquals("and no limit there either", 0L, scene.viewModel.settings.backgroundMs)
         settings()
-        compose.onNodeWithText("Hand a command over after", substring = true)
+        compose.onNodeWithText("Stop a command after", substring = true)
+            .performScrollTo()
+            .assertIsDisplayed()
+        compose.onNodeWithText("Stop a background command after", substring = true)
             .performScrollTo()
             .assertIsDisplayed()
     }

@@ -616,6 +616,27 @@ class AgentTest {
         assertTrue("about the pattern: $body", body.contains("pattern"))
     }
 
+    // ---- background: a result that lands in a file ---------------------------
+
+    @Test
+    fun `a command that finishes in milliseconds is refused by background, and told to be called directly`() {
+        // **A file for a call that takes no time is a cost with no saving.** The model would pay a
+        // read to learn "created", and the app would carry a file nobody needs. The refusal has to
+        // say what to do instead, or the model tries the same thing again.
+        val body = tool("background", """{"tool":"read","args":{"path":"milk.txt"}}""")
+
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("it says to call it directly: $body", body.contains("Call it directly"))
+    }
+
+    @Test
+    fun `background with no command named is refused, and says what is missing`() {
+        val body = tool("background", """{"args":{"url":"https://github.com/o/r"}}""")
+
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("it asks for the command: $body", body.contains("which command"))
+    }
+
     // ---- the agent's own compaction: forget, by id ---------------------------
 
     private fun tools() = AgentTools(ws, "shopping", git, log)

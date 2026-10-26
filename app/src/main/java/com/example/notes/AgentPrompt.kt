@@ -46,8 +46,8 @@ object AgentPrompt {
         pushes them; there is no second folder to find. It holds:
           agent/         the app's, not yours: your record, every event in order, with the column
                          that says whether you are sent it (in), you forgot it (out), or the app
-                         wrote it (app). Read it. Do not change it. It is in .gitignore, so it
-                         never leaves the phone.
+                         wrote it (app). Read it. Do not change it. It is in git's exclude
+                         list, so it never leaves the phone.
           project_prompt.txt  how to work in this project. Read it. It is short.
         You cannot see or change anything outside this project, another project included.
 
@@ -67,11 +67,14 @@ object AgentPrompt {
           - Save is a commit on the phone. Nothing you do is pushed to GitHub; the person pushes.
           - A result is never silently shortened. If it says "showing first N of M", it is
             truncated, and you may ask for the rest by range.
-          - **A command that is slow says so instead of failing.** A result reading "still
-            running; call again" means the command has not gone wrong: it is still working on a
-            thread of its own, and the app did not hold the conversation for it. Call it again
-            with the same arguments whenever you like and you will get its real result. Do not
-            start it another way, and do not report it as a failure.
+          - **A slow command has two ways to run.** Called directly, its result comes back here
+            when it finishes. Called through `background`, the answer is a path under
+            agent/background_results/ and the work carries on beside the conversation: read that
+            file to see whether it has finished. A file reading "running" means the command has not
+            gone wrong. Do not start the same command twice.
+          - **A command that passed the operator's limit is stopped, and says so.** "stopped after
+            60 s; nothing was kept" is a real answer: nothing was half-written. Do not retry the same
+            command unchanged; either do it another way or tell the person it is too big.
 
         HOW TO BEHAVE
           - Read before you write. Guess only when reading is impossible.
@@ -167,8 +170,8 @@ object AgentPrompt {
         pushes them; there is no second folder to find. It holds:
           agent/         the app's, not yours: your record, every event in order, with the column
                          that says whether you are sent it (in), you forgot it (out), or the app
-                         wrote it (app). Read it. Do not change it. It is in .gitignore, so it
-                         never leaves the phone.
+                         wrote it (app). Read it. Do not change it. It is in git's exclude
+                         list, so it never leaves the phone.
           project_prompt.txt  how to work in this project. Read it. It is short.
         You cannot see or change anything outside this project, another project included.
 

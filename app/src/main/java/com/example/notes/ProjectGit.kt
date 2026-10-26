@@ -7,7 +7,7 @@ import java.io.File
  * The git side of one project.
  *
  * A project's repository **is** the project's folder: it tracks exactly what is there, and the
- * app's own `agent/` is named in `.gitignore` by the app so the record is never shipped. There is
+ * app's own `agent/` is named in git's exclude list so the record is never shipped. There is
  * no second history to fall back on, which is what makes "where did this file's versions come
  * from" a question with one answer.
  *
@@ -229,12 +229,22 @@ class ProjectGit(
      * folder that already holds anything — and they go in `.git/info/exclude`, so they are not a
      * change to the person's repository and a project that has just arrived has nothing to send.
      */
-    fun cloneInto(project: String, remoteUrl: String): GitService.RemoteResult {
+    fun cloneInto(
+        project: String,
+        remoteUrl: String,
+        deadline: Deadline? = null,
+    ): GitService.RemoteResult {
         val dir = repoDir(project)
         if (GitService.isRepository(dir)) {
             return GitService.RemoteResult("This project already has a repository", false)
         }
-        val result = GitService.clone(remoteUrl, dir, authorProvider(), tokenProvider())
+        val result = GitService.clone(
+            remoteUrl,
+            dir,
+            authorProvider(),
+            tokenProvider(),
+            deadline,
+        )
         if (result.success) {
             open(project)?.use { repo -> GitService.scrubRemoteUrls(repo) }
             workspace.ensureIgnore(dir)
@@ -311,19 +321,28 @@ class ProjectGit(
     }
 
     /** Puts an old version of a file back into the worktree. */
-    fun restore(project: String, path: String, revisionId: String): Result<Unit> {
+    fun restore(
+        project: String,
+        path: String,
+        revisionId: String,
+        deadline: Deadline? = null,
+    ): Result<Unit> {
         val repo = open(project) ?: return Result.failure(
             IllegalStateException("This project has no repository yet")
         )
         return repo.use {
             try {
-                GitService.restore(it, path, revisionId)
+                GitService.restore(it, path, revisionId, deadline)
                 // **A version put back is work GitHub has not seen**, exactly like a save. The
                 // commit itself is made by the caller; what has to happen here is the count, or
                 // the restore leaves a project reading `changed 0` with Sync greyed out while
                 // the file on disk is different from the one on GitHub.
                 workspace.markUnsent(project)
                 Result.success(Unit)
+            } catch (e: StoppedException) {
+                // **The operator's time ran out, which is not a fault.** Kept apart from the catch
+                // below so the agent is told it was stopped rather than that something broke.
+                Result.failure(e)
             } catch (e: Throwable) {
                 Result.failure(e)
             }

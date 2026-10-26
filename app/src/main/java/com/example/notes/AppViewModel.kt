@@ -2041,8 +2041,9 @@ class AppViewModel @JvmOverloads constructor(
                 // **The same registry the polls use.** A command handed over while somebody is
                 // typing is collected by their next message, and one handed over during a poll is
                 // collected here — one project, one record, one place the work finishes.
-                long = runner?.long ?: LongCommands(LongRunner.direct()),
-                toolWaitMs = settings.commandMs,
+                bg = runner?.bg ?: Background.inline(),
+                foregroundMs = settings.foregroundMs,
+                backgroundMs = { settings.backgroundMs },
                 // Read at every boundary rather than captured: the person may speak or stop while
                 // this turn is waiting for an answer, and the loop has to see that when it comes.
                 cut = { interrupt },

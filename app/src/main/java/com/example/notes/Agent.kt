@@ -62,19 +62,20 @@ class Agent(
      */
     private val retrying: Boolean = false,
     /**
-     * Where a command that outlasts its turn goes to finish, and how long a turn waits for one.
+     * Where a `background` call's work runs, and how long the foreground waits for a command.
      *
-     * **The wait is the person's, not the model's.** [toolWaitMs] is the same number as the
-     * "a command may take" setting; before this existed a slow command was not handled at all — a
-     * `clone` of a large repository held the app's only worker for minutes and the trace said
-     * nothing. The default here waits for ever, which is exactly the behaviour a turn had before:
-     * a test that is not about a slow command must not acquire one.
+     * **The wait is the person's, not the model's.** [foregroundMs] is the operator's setting; a
+     * command that outlasts it is aborted, not handed over, and the call's own result says so. The
+     * default is zero, which means wait for ever — exactly what a turn did before this existed, so a
+     * test that is not about a slow command never acquires one.
      */
-    private val long: LongCommands = LongCommands(LongRunner.direct()),
-    private val toolWaitMs: Long = 0L,
+    private val bg: Background = Background.none(),
+    private val foregroundMs: Long = 0L,
+    /** The operator's limit for a `background` command; zero is "no limit". */
+    private val backgroundMs: () -> Long = { 0L },
 ) {
 
-    private val tools = AgentTools(ws, project, git, log, maxResult)
+    private val tools = AgentTools(ws, project, git, log, maxResult, bg, backgroundMs)
 
     /** How a turn ended. */
     sealed class End {
@@ -514,22 +515,21 @@ class Agent(
     private fun runTool(call: Call): String = tools.run(call)
 
     /**
-     * A call's result — **inline, or handed over if it outlasts the wait.**
+     * A call's result, **with the operator's deadline on it.**
      *
      * The conversation has one shape that is legal and it is unforgiving: every tool call in an
-     * assistant message must be answered before the next request. So a command that is still running
-     * is answered *now*, with the truth — still running, come back for it with the same arguments —
-     * and the work goes on beside the conversation. The model then decides when to ask again, and
-     * when it does the answer is already finished and is handed over without running anything twice.
+     * assistant message must be answered before the next request. So a command that outlasts the
+     * deadline is answered now, with the truth — it was stopped, and nothing was kept — and the turn
+     * carries on. Nothing is handed over and nothing is asked again.
      *
-     * **A writing call is never handed over.** `edit`, `create`, `delete`, `move` are the ones that
-     * change files: answering "still running" for one of those and letting the turn carry on would
-     * mean the next request reads a tree that is being written underneath it. Those finish or the
-     * turn does not go on.
+     * **The deadline is honoured by the command, not imposed on it.** `clone` asks JGit's
+     * `ProgressMonitor` whether it may continue and `restore` checks between files, so a timeout
+     * really stops the work; a timer over code that never looks at it would only stop the *waiting*,
+     * leaving a thread writing into the project after the agent had been told it failed.
      */
     private fun answer(call: Call): String {
-        if (call.tool !in AgentTools.LONG || toolWaitMs <= 0L) return runTool(call)
-        return long.answer(project, call, toolWaitMs) { runTool(call) }
+        if (call.tool !in AgentTools.LONG || foregroundMs <= 0L) return runTool(call)
+        return tools.runWithin(call, Deadline(foregroundMs))
     }
 
     /**

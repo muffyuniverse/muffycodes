@@ -53,7 +53,7 @@ data class Gone(
  * - **A name starting with `.` belongs to the app and is never shown.** That is
  *   where `.git` and the `.muffy` state live, so the rule covers all of them at once.
  * - **`agent/` inside a project is the app's** — the record's folder, named in the
- *   project's `.gitignore` by the app itself — so it cannot be renamed, moved or deleted,
+ *   project's `.git/info/exclude` by the app itself — so it cannot be renamed, moved or deleted,
  *   and its `session.log` cannot be written by anyone but [AgentLog].
  */
 class Workspace(val accountDir: File) {
@@ -439,8 +439,37 @@ class Workspace(val accountDir: File) {
                 IllegalArgumentException("There is already a \"${file.name}\" there")
             )
         }
-        return if (file.renameTo(target)) Result.success(target)
-        else Result.failure(IllegalStateException("Could not move \"${file.name}\""))
+        // **A rename first, because it is atomic and instant** — and then bytes, because a rename
+        // cannot move anything between two filesystems. Android has more than one: a project on the
+        // phone's own storage and one on a card are different volumes, and `renameTo` reports that by
+        // returning false rather than throwing, so the old code said "could not move" for a move that
+        // a copy would have made.
+        //
+        // Copy-then-delete is not atomic, and that is accepted knowingly: a crash in between leaves
+        // the file in both places, which a person can see and fix. Refusing the move leaves them with
+        // no way to do it at all.
+        if (file.renameTo(target)) return Result.success(target)
+        return try {
+            if (file.isDirectory) {
+                file.copyRecursively(target, overwrite = false)
+            } else {
+                file.copyTo(target, overwrite = false)
+            }
+            if (!file.deleteRecursively()) {
+                // Both copies exist. Reporting a move that did not happen would hide a duplicate.
+                target.deleteRecursively()
+                return Result.failure(
+                    IllegalStateException(
+                        "Could not move \"${file.name}\" — the copy would not delete from where it was"
+                    )
+                )
+            }
+            Result.success(target)
+        } catch (e: Throwable) {
+            // The copy failed part way: what was written is not the file, so none of it is kept.
+            target.deleteRecursively()
+            Result.failure(IllegalStateException("Could not move \"${file.name}\""))
+        }
     }
 
     /**

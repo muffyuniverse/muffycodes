@@ -189,32 +189,49 @@ class SettingsStore(context: Context, name: String = "settings") {
         }
 
     /**
-     * How long a **command** may take before the turn stops waiting for it, in seconds.
+     * How long a **command whose result goes into the conversation** may run, in seconds.
      *
-     * **The other wait, and it is a different question.** [timeoutMinutes] is how long the app waits
-     * for the model's *answer*; this is how long it waits for a tool the model asked for to finish.
-     * A `clone` of a large repository takes minutes, and holding the conversation for it means the
-     * person sees nothing and the agent can do nothing else. Past this the agent is told the command
-     * is still running, and the work carries on beside the conversation.
-     *
-     * Zero means wait for it however long it takes, which is what the app did before this existed.
+     * **Two waits, because the two results land in two places.** A foreground result is a row the
+     * agent reads next turn, so a command that never returns holds the whole conversation still; a
+     * result that goes to a file holds nothing, so it can be given more room. Timer starts when the
+     * command is handed to the tool, and zero means no limit at all — which is what the app did
+     * before either number existed, and therefore what an update must keep doing.
      */
-    var commandSeconds: Int by mutableStateOf(prefs.getInt(KEY_COMMAND, DEFAULT_COMMAND_SECONDS))
+    var foregroundSeconds: Int by mutableStateOf(prefs.getInt(KEY_FOREGROUND, DEFAULT_FOREGROUND_SECONDS))
         private set
 
-    /** Sets the command's soft timeout, clamped. */
-    fun keepCommand(seconds: Int) {
+    /** Sets the foreground command's limit, clamped. */
+    fun keepForeground(seconds: Int) {
         val clean = seconds.coerceIn(0, MAX_COMMAND_SECONDS)
-        Trace.tap("command timeout", if (clean == 0) "wait for ever" else "$clean s")
-        commandSeconds = clean
-        prefs.edit().putInt(KEY_COMMAND, clean).apply()
-        Trace.said(
-            if (clean == 0) "a command may take as long as it takes" else "a command may take $clean s"
-        )
+        Trace.tap("foreground timeout", if (clean == 0) "no limit" else "$clean s")
+        foregroundSeconds = clean
+        prefs.edit().putInt(KEY_FOREGROUND, clean).apply()
+        Trace.said(if (clean == 0) "a command may take as long as it takes" else "a command may take $clean s")
     }
 
-    /** The command's soft timeout in milliseconds; zero is "wait for it". */
-    val commandMs: Long get() = commandSeconds * 1000L
+    /** The foreground limit in milliseconds; zero is "no limit". */
+    val foregroundMs: Long get() = foregroundSeconds * 1000L
+
+    /**
+     * How long a **`background` command** may run before it is stopped, in seconds.
+     *
+     * Its result is a file rather than a row, so nothing is waiting on it: the number can be larger,
+     * and the default is larger for that reason. Zero still means no limit.
+     */
+    var backgroundSeconds: Int by mutableStateOf(prefs.getInt(KEY_BACKGROUND, DEFAULT_BACKGROUND_SECONDS))
+        private set
+
+    /** Sets the background command's limit, clamped. */
+    fun keepBackground(seconds: Int) {
+        val clean = seconds.coerceIn(0, MAX_COMMAND_SECONDS)
+        Trace.tap("background timeout", if (clean == 0) "no limit" else "$clean s")
+        backgroundSeconds = clean
+        prefs.edit().putInt(KEY_BACKGROUND, clean).apply()
+        Trace.said(if (clean == 0) "a background command may take as long as it takes" else "a background command may take $clean s")
+    }
+
+    /** The background limit in milliseconds; zero is "no limit". */
+    val backgroundMs: Long get() = backgroundSeconds * 1000L
 
     /**
      * How long the app waits for the model's answer, in minutes.
@@ -293,7 +310,8 @@ class SettingsStore(context: Context, name: String = "settings") {
 
     /** How often an idle agent is polled, and how long a command may run before a handover. */
     const val KEY_POLL = "agent_poll_seconds"
-    const val KEY_COMMAND = "agent_command_seconds"
+    const val KEY_FOREGROUND = "agent_foreground_seconds"
+    const val KEY_BACKGROUND = "agent_background_seconds"
     const val KEY_MAX_RESULT = "agent_max_result"
 
     /**
@@ -310,15 +328,19 @@ class SettingsStore(context: Context, name: String = "settings") {
     const val MAX_POLL_SECONDS = 250
 
     /**
-     * A command's soft timeout, **off by default.**
+     * Command limits, **off by default.**
      *
-     * Zero is "wait for the command however long it takes", which is exactly what this app did
-     * before the handover existed. A default of one minute would have changed the behaviour of every
-     * agent on every phone without anybody asking — and a command that is handed over when nobody
-     * wanted it costs a whole extra request. The row exists so a person whose commands are slow can
-     * choose it; the app does not choose it for them.
+     * Zero is "let it run however long it takes", which is exactly what this app did before the
+     * limits existed. A default of one minute would have changed the behaviour of every agent on
+     * every phone without anybody asking, and a command stopped when nobody wanted it stopped throws
+     * away work that had nearly finished. The rows exist so a person whose commands run long can set
+     * a limit; the app does not set one for them.
+     *
+     * The ceiling is a quarter of an hour: past that it is not a command, it is a hung connection,
+     * and the tool's own socket timeout answers first.
      */
-    const val DEFAULT_COMMAND_SECONDS = 0
+    const val DEFAULT_FOREGROUND_SECONDS = 0
+    const val DEFAULT_BACKGROUND_SECONDS = 0
     const val MAX_COMMAND_SECONDS = 900
 
     /** Under a minute a real request cannot finish; half an hour holds a worker too long. */

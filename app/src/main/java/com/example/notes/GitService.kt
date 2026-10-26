@@ -128,7 +128,7 @@ object GitService {
             if (repo.resolve("HEAD") == null) {
                 Git(repo).use { git ->
                     // **Whatever is already on disk goes in the first commit.** The caller wrote
-                    // the app's `.gitignore` before asking for the repository, so that the first
+                    // the app's exclude list once the repository exists, so that the first
                     // commit already ignores `agent/` and `.muffy/` — and committing an *empty*
                     // first commit instead left the ignore file untracked, which made a project
                     // that had just been made say "1 changed" before anybody touched it.
@@ -157,18 +157,35 @@ object GitService {
      * Credentials are only attached for GitHub; anything else is cloned without
      * them.
      */
+    /**
+     * Clones into [dir] — **into a partial folder first, and moved into place only when it worked.**
+     *
+     * This is what lets a stopped clone say "nothing was kept" and mean it. JGit writes the pack and
+     * then the working tree as it goes; a fetch abandoned half way used to leave a directory with a
+     * `.git` in it that Git could not open and the app could not list. Building beside the target and
+     * renaming at the end makes the whole clone one move: it is there or it is not.
+     *
+     * The [deadline] reaches JGit as a `ProgressMonitor`, which is checked between objects — a real
+     * stop, not an abandoned thread. Null means no limit, which is what every caller that is not the
+     * agent wants: a person cloning from the add window is not on a clock.
+     */
     fun clone(
         remoteUrl: String,
         dir: File,
         author: GitAuthor,
         token: String? = null,
+        deadline: Deadline? = null,
     ): RemoteResult {
+        val partial = File(dir.parentFile, dir.name + ".partial")
         return try {
             dir.parentFile?.mkdirs()
+            partial.deleteRecursively()
+            partial.mkdirs()
             val command = Git.cloneRepository()
                 .setURI(remoteUrl)
-                .setDirectory(dir)
+                .setDirectory(partial)
                 .setCloneAllBranches(true)
+            deadline?.let { command.setProgressMonitor(it.monitor()) }
             if (Secrets.isGitHubHost(remoteUrl)) {
                 credentials(token)?.let { command.setCredentialsProvider(it) }
             }
@@ -181,8 +198,24 @@ object GitService {
                     save()
                 }
             }
+            if (deadline?.expired == true) {
+                // The clone finished as the time ran out. Nothing was asked for any more, so nothing
+                // is kept — the same rule a clone stopped half way follows.
+                partial.deleteRecursively()
+                return RemoteResult(Stopped.body("clone", deadline), false)
+            }
+            if (!partial.renameTo(dir)) {
+                partial.deleteRecursively()
+                return RemoteResult("Could not move the clone into this project's folder", false)
+            }
             RemoteResult("Cloned ${Secrets.scrub(remoteUrl)}", true)
         } catch (e: Throwable) {
+            partial.deleteRecursively()
+            // A cancelled fetch throws out of JGit rather than returning; the deadline is what tells
+            // the two apart, because "it was stopped" is a different answer from "it failed".
+            if (deadline?.expired == true) {
+                return RemoteResult(Stopped.body("clone", deadline), false)
+            }
             RemoteResult(Secrets.scrub(e.message ?: "Could not clone"), false)
         }
     }
@@ -710,7 +743,19 @@ object GitService {
      * removed. The removal is committed like any other change, so it is as reversible as the
      * restore itself.
      */
-    fun restore(repo: Repository, path: String, revisionId: String) {
+    /**
+     * Puts [path] back as it was at [revisionId] — **or stops cleanly and leaves the tree alone.**
+     *
+     * A folder version is written into a partial directory beside the target and moved into place
+     * only once every file is there. Without that, stopping half way would leave the person with a
+     * folder of some of its files and no way to know which, and the sentence "nothing was kept"
+     * would be false. A file version is one write, so it needs no such care.
+     *
+     * [deadline] is checked between files, which is the granularity this loop has. It is not a hard
+     * limit on any single write — a 4 MB file is written whole — but a version is many files, and
+     * that is where the time goes.
+     */
+    fun restore(repo: Repository, path: String, revisionId: String, deadline: Deadline? = null) {
         val clean = path.trim('/')
         val target = File(repo.workTree, clean)
         val walk = RevWalk(repo)
@@ -737,15 +782,35 @@ object GitService {
                 treeWalk.filter = PathFilterGroup.createFromStrings(listOf(clean))
                 while (treeWalk.next()) {
                     if (treeWalk.getFileMode(0) == FileMode.GITLINK) continue
+                    if (deadline?.expired == true) {
+                        throw StoppedException(Stopped.body("restore", deadline))
+                    }
                     keep[treeWalk.pathString] = repo.open(treeWalk.getObjectId(0)).bytes
                 }
             }
-            target.deleteRecursively()
-            target.mkdirs()
-            for ((pathInTree, bytes) in keep) {
-                val file = File(repo.workTree, pathInTree)
-                file.parentFile?.mkdirs()
-                file.writeBytes(bytes)
+            val partial = File(target.parentFile, target.name + ".partial")
+            partial.deleteRecursively()
+            try {
+                partial.mkdirs()
+                for ((pathInTree, bytes) in keep) {
+                    if (deadline?.expired == true) {
+                        throw StoppedException(Stopped.body("restore", deadline))
+                    }
+                    val file = File(repo.workTree, pathInTree)
+                    // **Inside the partial folder, not the real one.** The tree path is the full
+                    // path in the project; the partial folder takes the place of the target, so the
+                    // part after it is what is written.
+                    val inside = File(partial, pathInTree.removePrefix(clean).trimStart('/'))
+                    inside.parentFile?.mkdirs()
+                    inside.writeBytes(bytes)
+                }
+                target.deleteRecursively()
+                if (!partial.renameTo(target)) {
+                    throw IllegalStateException("Could not put the version back into place")
+                }
+            } catch (e: Throwable) {
+                partial.deleteRecursively()
+                throw e
             }
         } finally {
             walk.close()

@@ -41,7 +41,14 @@ class AgentRunner(
      * during a poll is collected by the next poll, and one handed over while somebody is typing is
      * collected by their next message.
      */
-    val long: LongCommands = LongCommands(LongRunner.real()),
+    /**
+     * Where a `background` call's work runs — **one thread per call, made when it is asked for.**
+     *
+     * The previous design kept a fixed pool here and held the test suite open for eighteen minutes
+     * after the last test had finished; a thread that exists only for work that exists has nothing
+     * to close and nothing to leak.
+     */
+    val bg: Background = Background.real(),
 ) {
 
     private val sessions = AgentSessions(ws.accountDir)
@@ -149,8 +156,9 @@ class AgentRunner(
                     // A command that outlasts the wait finishes beside the conversation, and the
                     // agent is told the truth: still running, come back for it with the same
                     // arguments. The wait is the operator's setting, not the agent's choice.
-                    long = long,
-                    toolWaitMs = settings.commandMs,
+                    bg = bg,
+                    foregroundMs = settings.foregroundMs,
+                    backgroundMs = { settings.backgroundMs },
                 )
                 agent.poll() to log.rows()
             } catch (t: Throwable) {
@@ -235,6 +243,6 @@ class AgentRunner(
         // **The command pool too.** A runner without this leaves two threads alive after the test
         // that made it, and Gradle's fork waits for every live thread — which is how a suite that
         // finishes in four minutes holds a job open until it is cancelled.
-        long.close()
+
     }
 }

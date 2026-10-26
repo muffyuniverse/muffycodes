@@ -411,18 +411,35 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.primary,
             )
             LengthField(
-                label = "Hand a command over after (seconds, blank = never)",
-                value = settings.commandSeconds,
+                label = "Stop a command after (seconds, blank = never)",
+                value = settings.foregroundSeconds,
                 placeholder = "never",
-                onValueChange = { settings.keepCommand(it) },
+                onValueChange = { settings.keepForeground(it) },
             )
             Text(
-                text = if (settings.commandSeconds <= 0) {
-                    "Now: the agent waits for every command however long it takes. This is the " +
-                        "app's own behaviour; a number here is a choice."
+                text = if (settings.foregroundSeconds <= 0) {
+                    "Now: a command runs until it finishes. This is the app's own behaviour; a " +
+                        "number here is a choice."
                 } else {
-                    "Now: past ${settings.commandSeconds} s the agent is told the command is still " +
-                        "running, and the work carries on beside the conversation."
+                    "Now: past ${settings.foregroundSeconds} s a command is stopped and its result " +
+                        "says so. Nothing half-written is kept."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            LengthField(
+                label = "Stop a background command after (seconds, blank = never)",
+                value = settings.backgroundSeconds,
+                placeholder = "never",
+                onValueChange = { settings.keepBackground(it) },
+            )
+            Text(
+                text = if (settings.backgroundSeconds <= 0) {
+                    "Now: a background command runs until it finishes. Its result is a file, so " +
+                        "nothing is waiting on it."
+                } else {
+                    "Now: past ${settings.backgroundSeconds} s a background command is stopped, and " +
+                        "the file it was writing says so."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

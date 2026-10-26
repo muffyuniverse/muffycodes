@@ -67,7 +67,8 @@ AgentTest  app/src/main/java/com/example/notes/Agent.kt app/src/main/java/com/ex
 AgentChatTest  app/src/main/java/com/example/notes/AgentChat.kt app/src/main/java/com/example/notes/AgentLog.kt
 AgentChatScreenTest  app/src/main/java/com/example/notes/AgentChatScreen.kt app/src/main/java/com/example/notes/AgentChat.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/BrowserScreen.kt
 AgentSessionTest  app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentSessions.kt
-LongCommandsTest  app/src/main/java/com/example/notes/LongRunner.kt app/src/main/java/com/example/notes/Agent.kt app/src/main/java/com/example/notes/AgentTools.kt
+BackgroundTest  app/src/main/java/com/example/notes/Background.kt app/src/main/java/com/example/notes/Timeouts.kt app/src/main/java/com/example/notes/AgentTools.kt
+TimeoutsTest  app/src/main/java/com/example/notes/Timeouts.kt
 AgentSessionsTest  app/src/main/java/com/example/notes/AgentSessions.kt app/src/main/java/com/example/notes/AgentSession.kt
 AgentSessionFeatureTest  app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentSessions.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/Agent.kt app/src/main/java/com/example/notes/SettingsStore.kt app/src/main/java/com/example/notes/AgentRunner.kt
 ContextBudgetTest  app/src/main/java/com/example/notes/ContextBudget.kt
