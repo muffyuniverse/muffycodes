@@ -154,6 +154,69 @@ class SettingsStore(context: Context, name: String = "settings") {
     }
 
     /**
+     * How often an idle agent is checked on, in seconds — **the operator's number.**
+     *
+     * The agent says only that it is idle; how often the app comes back is a decision about this
+     * person's phone: a poll is a request that is paid for and a wake that costs battery, and a
+     * shorter interval is a faster agent on both counts. It is not the agent's to choose, because an
+     * agent has no way of knowing what a request costs the person paying for it.
+     *
+     * Zero means the design's own four minutes. The ceiling is 250 seconds, which is short enough
+     * that an idle session is never far from being seen.
+     */
+    var pollSeconds: Int by mutableStateOf(prefs.getInt(KEY_POLL, 0))
+        private set
+
+    /** Sets the idle interval, clamped. */
+    fun keepPoll(seconds: Int) {
+        val clean = if (seconds <= 0) {
+            0
+        } else {
+            seconds.coerceIn(MIN_POLL_SECONDS, MAX_POLL_SECONDS)
+        }
+        Trace.tap("poll interval", if (clean == 0) "the app's own" else "$clean s")
+        pollSeconds = clean
+        prefs.edit().putInt(KEY_POLL, clean).apply()
+        Trace.said(if (clean == 0) "polled at the app's own four minutes" else "polled every $clean s")
+    }
+
+    /** The interval in milliseconds, with the design's own when the person set none. */
+    val pollMs: Long
+        get() = if (pollSeconds <= 0) {
+            AgentSession.POLL_MS
+        } else {
+            (pollSeconds * 1000L).coerceAtMost(AgentSession.MAX_IDLE_MS)
+        }
+
+    /**
+     * How long a **command** may take before the turn stops waiting for it, in seconds.
+     *
+     * **The other wait, and it is a different question.** [timeoutMinutes] is how long the app waits
+     * for the model's *answer*; this is how long it waits for a tool the model asked for to finish.
+     * A `clone` of a large repository takes minutes, and holding the conversation for it means the
+     * person sees nothing and the agent can do nothing else. Past this the agent is told the command
+     * is still running, and the work carries on beside the conversation.
+     *
+     * Zero means wait for it however long it takes, which is what the app did before this existed.
+     */
+    var commandSeconds: Int by mutableStateOf(prefs.getInt(KEY_COMMAND, DEFAULT_COMMAND_SECONDS))
+        private set
+
+    /** Sets the command's soft timeout, clamped. */
+    fun keepCommand(seconds: Int) {
+        val clean = seconds.coerceIn(0, MAX_COMMAND_SECONDS)
+        Trace.tap("command timeout", if (clean == 0) "wait for ever" else "$clean s")
+        commandSeconds = clean
+        prefs.edit().putInt(KEY_COMMAND, clean).apply()
+        Trace.said(
+            if (clean == 0) "a command may take as long as it takes" else "a command may take $clean s"
+        )
+    }
+
+    /** The command's soft timeout in milliseconds; zero is "wait for it". */
+    val commandMs: Long get() = commandSeconds * 1000L
+
+    /**
      * How long the app waits for the model's answer, in minutes.
      *
      * **This is what turns "the provider is not answering" into a blip.** The door's read timeout

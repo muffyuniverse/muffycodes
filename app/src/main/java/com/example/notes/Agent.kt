@@ -61,21 +61,20 @@ class Agent(
      * it is passed in.
      */
     private val retrying: Boolean = false,
-) {
-
-    private val tools = AgentTools(ws, project, git, log, maxResult)
-
     /**
      * Where a command that outlasts its turn goes to finish, and how long a turn waits for one.
      *
      * **The wait is the person's, not the model's.** [toolWaitMs] is the same number as the
-     * "wait for an answer" setting; before this existed it was the socket's read timeout and
-     * nothing else, so a `clone` that took five minutes held the app's only worker for five minutes
-     * and the trace said nothing at all. The default here waits for ever, which is exactly the
-     * behaviour a turn had before — a test that is not about a slow command must not acquire one.
+     * "a command may take" setting; before this existed a slow command was not handled at all — a
+     * `clone` of a large repository held the app's only worker for minutes and the trace said
+     * nothing. The default here waits for ever, which is exactly the behaviour a turn had before:
+     * a test that is not about a slow command must not acquire one.
      */
     private val long: LongCommands = LongCommands(LongRunner.direct()),
     private val toolWaitMs: Long = 0L,
+) {
+
+    private val tools = AgentTools(ws, project, git, log, maxResult)
 
     /** How a turn ended. */
     sealed class End {
