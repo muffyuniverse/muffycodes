@@ -98,6 +98,17 @@ class AgentRunner(
      */
     fun tick(now: Long = System.currentTimeMillis()) {
         for (session in sessions.read()) {
+            // **The folder is the project, and a tick can see whether it is there for free.** This
+            // used to be asked only on the way into a request, so a session the keepalive had no
+            // reason to poll — switched off, its ceiling reached, asked too recently — outlived the
+            // folder it was for, and the screen kept offering a conversation with nothing behind it.
+            // It is not a poll and does not wait for one: the person may delete the folder, another
+            // app may, and the phone may tidy it away.
+            if (!ws.projectDir(session.project).isDirectory) {
+                Trace.note("agent-gone", session.project)
+                sessions.remove(session.project)
+                continue
+            }
             var current = session
             if (current.reminderDue(now, reminderMs)) {
                 current = current.reminded()

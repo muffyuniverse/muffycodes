@@ -650,6 +650,7 @@ class AgentSessionFeatureTest : FeatureTest() {
         val due = scene.viewModel.sessionOf("groceries")!!.nextPollAt
 
         project.deleteRecursively()
+        assertFalse("the folder is really gone before the tick", project.isDirectory)
         scene.viewModel.tickAgents(due)
 
         assertEquals("the session is gone", null, scene.viewModel.sessionOf("groceries"))
