@@ -119,8 +119,15 @@ class AgentRunner(
             }
             // **A finished command outranks a ping, and does not wait for the interval.** Its own work
             // coming back is the one thing worth spending a turn on that the person did not ask for.
-            // A stopped session is not woken — the person switched it off — but an `asked` one is:
-            // the result may be exactly what it was waiting for, and the operator chose that.
+            //
+            // A stopped session is not woken, and "stopped" is four things: the person's Stop, a
+            // provider that refused eight times, the loop guard, and an error. Three of those already
+            // ask the person to look, and a wake on the fourth would spend a request against the
+            // provider that just refused it. An `asked` session *is* woken: the result may be exactly
+            // what it was waiting for.
+            //
+            // Nothing is thrown away by the skip. The completion stays in the registry, so a session
+            // switched back on has no watermark and collects it on the next tick.
             val finished = if (current.state == AgentSession.State.STOPPED) {
                 emptyList()
             } else {

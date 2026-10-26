@@ -358,6 +358,41 @@ class AgentRunnerTest {
     }
 
     @Test
+    fun `a result that landed while the agent was stopped is collected when it is switched on`() {
+        // **Stopping pauses the debt; switching on collects it.** The completion stays in the registry
+        // while the session is off, so a command that landed in that gap is not lost — the fresh
+        // session `startAgent` writes carries no watermark, and the next tick wakes it with the file.
+        // Nobody has to remember that a result was waiting.
+        on("shopping", now = 1_000)
+        var at = 5_000L
+        val bg = Background(launch = { it() }, now = { at })
+        val door = ScriptedDoor(Reply("", listOf(Call("c1", "conclude", """{"text":"read it"}"""))))
+        val runner = AgentRunner(
+            ws = ws, git = git, settings = settings,
+            model = { ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high") },
+            door = { door }, notify = { notices += it }, bg = bg,
+        ).also { runners += it }
+
+        runner.stop("shopping")
+        bg.start(ws.projectDir("shopping"), Call("c1", "tree", "{}")) { "0 one" }
+        runner.tick(5_001)
+        settle(runner)
+        assertEquals("a stopped session spends nothing", 0, door.asked.size)
+
+        // The person switches it back on: a new session record, which is what `startAgent` writes.
+        on("shopping", now = 60_000)
+        runner.tick(60_001)
+        settle(runner)
+
+        assertEquals("switching on collects it", 1, door.asked.size)
+        assertTrue(
+            "and names the file that arrived while it was off: " +
+                door.asked.single().messages.last().text,
+            door.asked.single().messages.last().text.contains("tree-c1.txt"),
+        )
+    }
+
+    @Test
     fun `a wake outranks a ping, and the ping waits its own interval afterwards`() {
         // Both are due at once — a command landed and four minutes have passed — and the wake is the
         // one worth paying for. Afterwards the clock has moved, so the ping is not fired on its heels.
