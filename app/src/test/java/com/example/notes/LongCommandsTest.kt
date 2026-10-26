@@ -123,6 +123,16 @@ class LongCommandsTest {
     }
 
     @Test
+    fun `the app hands nothing over unless a person asked it to`() {
+        // **The shipped default is zero, and zero means wait.** A default of a minute would have
+        // changed every agent on every phone without anybody choosing it, and each handover costs a
+        // whole extra request — so the feature is a choice, not a behaviour that arrives with an
+        // update. Asserted on the constant because this is a plain JUnit test: the store's own
+        // reading of it is pinned in SettingsScreenTest, where a Robolectric app exists.
+        assertEquals("off until somebody says so", 0, SettingsStore.DEFAULT_COMMAND_SECONDS)
+    }
+
+    @Test
     fun `no wait means wait for it, which is the behaviour a turn had before this existed`() {
         // **Zero is not "hand it over immediately".** An app with no soft timeout set must behave
         // exactly as it did, or the person who never opened Settings would get a different agent.

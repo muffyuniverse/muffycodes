@@ -192,10 +192,11 @@ class LongCommands(private val runner: LongRunner = LongRunner.real()) {
      * A thread of its own, doing nothing but waiting: the alternative is a turn polling every
      * command it once handed over, which is the kind of timer this app has spent its life removing.
      *
-     * The watcher removes nothing. A body that arrives while the turn that asked is still waiting is
-     * handed to that turn by [answer]; a body that arrives afterwards is left for the turn that comes
-     * back for it. Removing the entry here would take the result away from the caller that is
-     * sitting on the same future.
+     * **The watcher removes nothing the caller is still holding.** A body that arrives while the
+     * turn that asked is still waiting is handed to that turn by [answer]. A body that arrives
+     * afterwards is filed under its key for the turn that comes back for it — and the running entry
+     * is dropped at the same moment, because the result now lives in `finished` and a second copy in
+     * `running` would be a future nobody collects.
      */
     private fun collect(key: String, body: Future<String>) {
         if (!watching.add(key)) return

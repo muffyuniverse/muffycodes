@@ -411,17 +411,18 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.primary,
             )
             LengthField(
-                label = "A command may take (seconds, blank = any)",
+                label = "Hand a command over after (seconds, blank = never)",
                 value = settings.commandSeconds,
-                placeholder = "any",
+                placeholder = "never",
                 onValueChange = { settings.keepCommand(it) },
             )
             Text(
                 text = if (settings.commandSeconds <= 0) {
-                    "Now: the agent waits for every command however long it takes."
+                    "Now: the agent waits for every command however long it takes. This is the " +
+                        "app's own behaviour; a number here is a choice."
                 } else {
                     "Now: past ${settings.commandSeconds} s the agent is told the command is still " +
-                        "running and the work carries on beside the conversation."
+                        "running, and the work carries on beside the conversation."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

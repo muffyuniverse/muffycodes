@@ -309,8 +309,16 @@ class SettingsStore(context: Context, name: String = "settings") {
     const val MIN_POLL_SECONDS = 15
     const val MAX_POLL_SECONDS = 250
 
-    /** A command's soft timeout. Past fifteen minutes it is not a conversation any more. */
-    const val DEFAULT_COMMAND_SECONDS = 60
+    /**
+     * A command's soft timeout, **off by default.**
+     *
+     * Zero is "wait for the command however long it takes", which is exactly what this app did
+     * before the handover existed. A default of one minute would have changed the behaviour of every
+     * agent on every phone without anybody asking — and a command that is handed over when nobody
+     * wanted it costs a whole extra request. The row exists so a person whose commands are slow can
+     * choose it; the app does not choose it for them.
+     */
+    const val DEFAULT_COMMAND_SECONDS = 0
     const val MAX_COMMAND_SECONDS = 900
 
     /** Under a minute a real request cannot finish; half an hour holds a worker too long. */

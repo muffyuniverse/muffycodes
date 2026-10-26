@@ -169,6 +169,19 @@ class SettingsScreenTest {
     }
 
     @Test
+    fun `the command handover is off on a phone that never chose it`() {
+        // **The setting's own default, read through the store**, which is where the number lives.
+        // Zero is "wait for the command however long it takes", and that is what this app did before
+        // the handover existed — so an update must not change an agent nobody configured.
+        assertEquals("off", 0, scene.viewModel.settings.commandSeconds)
+        assertEquals("and no wait, which means wait for it", 0L, scene.viewModel.settings.commandMs)
+        compose.setContent { Frame { SettingsScreen(viewModel = scene.viewModel, onBack = {}) } }
+        compose.onNodeWithText("Hand a command over after", substring = true)
+            .performScrollTo()
+            .assertIsDisplayed()
+    }
+
+    @Test
     fun `every agent can be switched off from settings`() {
         // The brief assumed this existed. The button is there when there is nothing on, and it is
         // greyed out — a switch that does nothing is worse than no switch.
