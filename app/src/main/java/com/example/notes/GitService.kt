@@ -574,9 +574,17 @@ object GitService {
         path: String?,
         revisionId: String?,
     ): RevTree {
-        val start = revisionId?.takeIf { it.isNotBlank() }?.let { repo.resolve(it) }
-            ?: repo.resolve("HEAD")
-            ?: throw IllegalStateException("The repository has no commits yet")
+        val asked = revisionId?.takeIf { it.isNotBlank() }
+        val start = if (asked == null) {
+            repo.resolve("HEAD") ?: throw IllegalStateException("The repository has no commits yet")
+        } else {
+            // **A version that is not there is not HEAD.** This used to fall back, so a wrong id
+            // answered with the *current* file: a `read` at a version showed something the version
+            // never said, and a `restore` committed "Restored milk.txt" while the file had never
+            // moved. A refusal is the only honest answer to an id that resolves to nothing.
+            repo.resolve(asked)
+                ?: throw IllegalArgumentException("There is no version $asked")
+        }
         val commit = walk.parseCommit(start)
         val tree = commit.tree
         val clean = path?.trim('/').orEmpty()
