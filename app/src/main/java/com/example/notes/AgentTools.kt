@@ -3,6 +3,7 @@ package com.example.notes
 import org.json.JSONObject
 import java.io.File
 import java.io.InputStreamReader
+import java.util.regex.Pattern
 
 /**
  * What the agent can do, and what it is refused.
@@ -571,7 +572,14 @@ class AgentTools(
             )
         }
         return try {
-            Result.success(Regex(text, setOf(RegexOption.IGNORE_CASE, RegexOption.UNICODE_CASE)))
+            // **`Pattern`, not `Regex`, because Kotlin has no Unicode case option.** `RegexOption`
+            // has `IGNORE_CASE` and nothing that goes with it, and `CASE_INSENSITIVE` alone folds
+            // US-ASCII: it makes `k` and `K` one letter while leaving `ó` and `Ó` two, so a search
+            // for "KRAKÓW" missed "Kraków". The engine underneath is the same one; only the flag is
+            // out of reach from the Kotlin wrapper.
+            Result.success(
+                Pattern.compile(text, Pattern.CASE_INSENSITIVE or Pattern.UNICODE_CASE).toRegex(),
+            )
         } catch (e: Throwable) {
             Result.failure<Regex?>(IllegalArgumentException("that is not a regular expression"))
         }

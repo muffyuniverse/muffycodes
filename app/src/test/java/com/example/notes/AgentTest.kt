@@ -857,13 +857,14 @@ class AgentTest {
 
     @Test
     fun `a pattern ignores case in any script, not only in ascii`() {
-        // `CASE_INSENSITIVE` alone folds US-ASCII, so `Kraków` and `kraków` were two words while the
-        // description promised one rule. `UNICODE_CASE` is what makes the promise true.
+        // `CASE_INSENSITIVE` alone folds US-ASCII, so an accented letter kept its case and the
+        // description's one rule was two. The **accent** is what the test has to change case on:
+        // `kraków` against `Kraków` is matched by ASCII folding alone and would prove nothing.
         val file = File(ws.repoOf("shopping"), "places.txt")
         ws.write(file, "Kraków\nZürich\n")
 
-        val lower = tool("read", """{"path":"places.txt","grep":"kraków"}""")
-        val upper = tool("read", """{"path":"places.txt","grep":"ZÜRICH"}""")
+        val lower = tool("read", """{"path":"places.txt","grep":"KRAKÓW"}""")
+        val upper = tool("read", """{"path":"places.txt","grep":"zÜRICH"}""")
 
         assertTrue("the accented name is found either way: $lower", lower.contains("1: Kraków"))
         assertTrue("and so is the umlaut: $upper", upper.contains("2: Zürich"))
