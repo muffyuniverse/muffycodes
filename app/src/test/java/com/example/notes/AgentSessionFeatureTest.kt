@@ -516,9 +516,10 @@ class AgentSessionFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `an agent that answers with words and no call stops, and a person turns it back on`() {
-        // The loop's fourth ending, seen from the person's side: it stops itself, the strip says
-        // so, and speaking is the switch — because there is no other control they would have used.
+    fun `an agent that answers with words and no call concludes, and the box shows the words`() {
+        // **It used to stop the session.** The operator's ruling is that a reply in prose is an
+        // answer: the words are the conclusion, nothing needs the person, and the strip says the
+        // agent finished instead of asking to be resolved.
         listening()
         val door = ScriptedDoor(
             Reply("I think the milk is fine.", emptyList()),
@@ -528,23 +529,25 @@ class AgentSessionFeatureTest : FeatureTest() {
         scene.viewModel.startAgent("groceries")
 
         scene.viewModel.sendChat("is the milk still good?")
-        scene.await("the turn to stop") {
-            scene.viewModel.sessionOf("groceries")?.state == AgentSession.State.STOPPED
+        scene.await("the turn to end") {
+            scene.viewModel.sessionOf("groceries")
+                ?.let { it.state == AgentSession.State.IDLE && it.sub == AgentSession.Sub.FINISHED } == true
         }
 
         val session = scene.viewModel.sessionOf("groceries")!!
-        assertEquals("it stops itself", AgentSession.StopReason.LOOP, session.reason)
-        assertEquals("and is silent, because nobody chose it", true, session.needsYou)
-        assertTrue("and the strip says somebody is needed", AgentSession.strip(scene.viewModel.agentSessions).contains("needs you"))
-        assertTrue(
-            "with the model's own words as the reason: ${session.lastWords}",
-            session.lastWords.contains("no tool call"),
+        assertEquals("nothing is wrong", null, session.reason)
+        assertFalse("and it is not asking to be resolved", session.needsYou)
+        assertEquals("the box draws the words as the conclusion", "I think the milk is fine.",
+            record("groceries").rows().single { it.kind == AgentLog.CONCLUDE }.body)
+        assertFalse(
+            "and nothing was written down as a stop",
+            record("groceries").rows().any { it.name == "stopped" },
         )
 
         scene.viewModel.sendChat("try again")
         scene.await("the second turn") { door.asked.size == 2 }
 
-        assertTrue("the person is the switch", scene.viewModel.sessionOf("groceries")?.running == true)
+        assertTrue("and the agent is still on", scene.viewModel.sessionOf("groceries")?.running == true)
     }
 
     @Test

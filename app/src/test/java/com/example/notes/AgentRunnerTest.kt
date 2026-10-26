@@ -247,7 +247,9 @@ class AgentRunnerTest {
         settings.keepWarm(false)
         val runner = runner(door)
 
-        runner.tick(1_000 + 10 * AgentSession.POLL_MS)
+        // **Two intervals, not ten.** Ten would be a gap — the phone having been asleep — and the
+        // gap's own row moves the clock whatever the switch says.
+        runner.tick(1_000 + 2 * AgentSession.POLL_MS)
         settle(runner)
 
         assertTrue("nothing was sent", door.pings.isEmpty())
@@ -255,7 +257,7 @@ class AgentRunnerTest {
 
         // Back on, and the same tick that did nothing now warms.
         settings.keepWarm(true)
-        runner.tick(1_000 + 10 * AgentSession.POLL_MS)
+        runner.tick(1_000 + 2 * AgentSession.POLL_MS)
         settle(runner)
         assertEquals("one ping", 1, door.pings.size)
     }
