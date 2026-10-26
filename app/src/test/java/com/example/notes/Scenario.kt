@@ -182,7 +182,8 @@ class Scenario(
     private fun awaitRecordedFor(file: File, before: String?, what: String) {
         val project = projectOf(file) ?: return
         val history = repo(project)
-        val relative = workspace!!.relative(file).orEmpty()
+        // The path inside the project's repository, which is what git stores — not the account's.
+        val relative = file.relativeTo(workspace!!.projectDir(project)).invariantSeparatorsPath
         // **The file's own version, not merely a newer head.** Commits coalesce, so a head that moved
         // may belong to the previous file's save while this one is still queued — and a caller that
         // took the new head as "this change is recorded" went on to read a history that was still
