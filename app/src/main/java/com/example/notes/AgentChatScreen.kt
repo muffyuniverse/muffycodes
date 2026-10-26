@@ -51,7 +51,7 @@ import androidx.compose.ui.unit.dp
  *        edit      0 · renamed, 1 commit
  *        asked     The README still links to milk.txt. Fix that too?
  *        ──────────────────────────────────────
- *        idle since 14:02 · 37 checks
+ *        idle since #412 · 37 checks
  *        ──────────────────────────────────────
  *        [ Write to the agent ]      [ Send ]
  * ```

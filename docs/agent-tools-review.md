@@ -11,7 +11,7 @@ followed it; the decisions in them are what this says, and the plan that impleme
 | tool | arguments | what it does |
 |---|---|---|
 | `tree` | `path`, `depth`, `name`, `grep`, `from`, `to` | lists a folder; with a pattern, answers with paths and matching lines. `from`/`to` pick a range of **paths** |
-| `read` | `path`, `revision`, `grep`, `from`, `to`, `raw` | a text file, or one of its versions. With `grep`, the matching lines with their real line numbers, inside the range. The record is shown as `id name body`; `raw` shows its own columns |
+| `read` | `path`, `revision`, `grep`, `from`, `to`, `raw`, `id` | a text file, or one of its versions. With `grep`, the matching lines with their real line numbers, inside the range. The record is shown as `id name body`; `id` picks exactly one row and `raw` shows the file's own columns |
 | `edit` | `path`, and one of `find`+`replace`, `from`/`to`+`replace`, `at`+`replace`, `text` | changes part of a file. `replace` is text **or a `read` call** |
 | `create` | `path`, `text` | makes a file, and the folders above it |
 | `delete` | `path` | a file, or a folder and everything in it |

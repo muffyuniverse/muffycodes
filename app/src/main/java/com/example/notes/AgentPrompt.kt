@@ -44,9 +44,11 @@ object AgentPrompt {
         WHERE YOU ARE
         **The project folder is the repository.** Its files are the ones on GitHub, and the person
         pushes them; there is no second folder to find. It holds:
-          agent/         the app's, not yours: your record, every event, newest first. Each row
-                         is `id name body`, and the id is what `forget` takes. Read it. Do not
-                         change it. It is in git's exclude list, so it never leaves the phone.
+          agent/         the app's, not yours: your record, every event, newest first. Read it
+                         as `id name body`; `read` one with {"id": a number}, which is the same
+                         id `forget` takes. `raw` shows the file's own columns, including the
+                         size of each row in tokens. Read it. Do not change it. It is in git's
+                         exclude list, so it never leaves the phone.
           project_prompt.txt  how to work in this project. Read it. It is short.
         You cannot see or change anything outside this project, another project included.
 
