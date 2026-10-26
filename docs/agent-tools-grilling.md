@@ -56,6 +56,39 @@ container, and CI is the only compiler.
 
 ---
 
+## Built
+
+Everything answered below was built and the suite is green (`75748a5`; all five CI jobs).
+
+| id | what landed |
+| --- | --- |
+| A1 | the inner call takes the outer call's id, so two backgrounded reads keep two results |
+| A2 | `read`'s description says `from` starts at 1 and `to` left out runs to the end |
+| A3 | `delete` says it takes the whole folder, and a test now calls it |
+| A4 | the Settings sentence says a big result is filed, not cut |
+| A5 | **filed, not refused**: over the limit the body goes whole to `agent/background_results/` and the path is the answer, for successes and refusals alike; `refusal()` is no longer measured |
+| A6 | every command declares its keys; anything else stops it before it runs, naming the key, the keys that work and the command's example; `lines` gets its own sentence |
+| A7 | `moveSelected`'s doc describes pre-check-then-commit, which is what the body does |
+| A8 | pre-check first, then commit what moved and say `Moved 3 of 5`; the rest stay selected; `copy` the same |
+| B1 | the model's window is stored with the choice and read by both callers; the context ceiling is the operator's number clamped by it; one result is clamped by the input window; the session log is unlimited unless set |
+| B2 | the count is a tree diff against `refs/remotes/origin/<branch>` — **files**, so ten moved files read 10; the `.muffy/unsent` counter is gone |
+| B2b | **See changes** to the left of Sync: a window of the paths, each with its diff (additions dark green, removals red, unchanged the theme's text), touching one opens the editor and closing it returns to the window; not-text and too-big are named |
+| B3 | the record's size is a field in megabytes, blank = keep everything (it was 4 MB, unasked) |
+| B4 | account → AGENT → what the app did → Theme → Change history → Running → Background → notifications, each under its own line |
+| B5 | "Check on it every (seconds)" |
+| B6 | a local project's row has no second line at all |
+| D1 | the four handover comments and the test name say what the setting does; the foreground limit defaults to **180 s** |
+| D2 | `RESULTS_DIR` |
+| D3 | `plan-commands.md` opens with a historical line; `agent-tools-review.md` — the reference — now describes filing, unknown keys and the 180 s default |
+| D4 | `maxResult`'s doc is a conversation budget, not a truncation |
+
+Three failures in the suite were **tests asserting the wrong thing**, and each was fixed where the
+mistake was: an exact diff edit-script (an engine's grouping is not a contract), a version count that
+included the file's own creation commit, and two races (`historySize() <= 3` read mid-rewrite;
+`versionsOfFolder` read before the text's commit). None of them was the app.
+
+---
+
 ## A. What I broke in the change I just shipped
 
 ### A1. Two background calls of the same tool write the same file
