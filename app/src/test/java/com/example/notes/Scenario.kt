@@ -181,7 +181,17 @@ class Scenario(
      */
     private fun awaitRecordedFor(file: File, before: String?, what: String) {
         val project = projectOf(file) ?: return
-        await("the project's history to record $what", 20_000) { projectHead(project) != before }
+        val history = repo(project)
+        val relative = workspace!!.relative(file).orEmpty()
+        // **The file's own version, not merely a newer head.** Commits coalesce, so a head that moved
+        // may belong to the previous file's save while this one is still queued — and a caller that
+        // took the new head as "this change is recorded" went on to read a history that was still
+        // growing. Asking the newest version for this file's own text cannot be answered by another
+        // file's commit.
+        await("the project's history to record $what", 20_000) {
+            val newest = history.head()
+            newest != null && newest != before && history.fileAt(relative, newest) == file.readText()
+        }
         // **And for the length to be applied, when one is set.** The length is applied by shortening
         // the history *after* the commit is written, so the newest version exists for a moment in a
         // history that is one too long. A test that read at that moment and then asserted "three are
