@@ -651,13 +651,19 @@ class AppViewModel @JvmOverloads constructor(
             val info = source.model(model).getOrNull() ?: return@onWorker
             main.post {
                 val now = modelConfig.active
-                if (now.model != model || now.contextLength != null) return@main
-                writeModelConfig(
-                    modelConfig.copy(
-                        active = now.copy(contextLength = info.contextLength, maxOutput = info.maxOutput),
-                    ),
-                    "Read ${model}'s window",
-                )
+                // Nothing is written when the choice moved on, or when a window has arrived
+                // already: the second answer to the same question is not news.
+                if (now.model == model && now.contextLength == null) {
+                    writeModelConfig(
+                        modelConfig.copy(
+                            active = now.copy(
+                                contextLength = info.contextLength,
+                                maxOutput = info.maxOutput,
+                            ),
+                        ),
+                        "Read ${model}'s window",
+                    )
+                }
             }
         }
     }

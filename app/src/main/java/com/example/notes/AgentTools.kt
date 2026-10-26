@@ -899,7 +899,7 @@ class AgentTools(
         if (body.length <= maxChars) return body
         val status = if (body.startsWith("1\n")) "1" else "0"
         val text = body.substringAfter('\n')
-        val path = Background.keep(projectDir, call, text)
+        val path = bg.keep(projectDir, call, text)
             ?: return "$status\nThat result was ${text.length} characters and the limit is $maxChars, " +
                 "and it could not be written to a file either. Narrow it instead: " +
                 "{\"from\":1,\"to\":200} or {\"grep\":\"pattern\"}."

@@ -988,10 +988,10 @@ class AgentTest {
         // answer to its own question.
         ws.write(File(ws.repoOf("shopping"), "milk.txt"), "the milk")
         ws.write(File(ws.repoOf("shopping"), "bread.txt"), "the bread")
-        val tools = tools()
+        val direct = tools()
 
-        val one = tools.run(Call("c1", "background", """{"tool":"read","args":{"path":"milk.txt"}}"""))
-        val two = tools.run(Call("c2", "background", """{"tool":"read","args":{"path":"bread.txt"}}"""))
+        val one = direct.run(Call("c1", "background", """{"tool":"read","args":{"path":"milk.txt"}}"""))
+        val two = direct.run(Call("c2", "background", """{"tool":"read","args":{"path":"bread.txt"}}"""))
 
         assertTrue("both worked: $one / $two", one.startsWith(AgentLog.SUCCESS) && two.startsWith(AgentLog.SUCCESS))
         assertEquals("the first answer", "0\nthe milk", File(ws.projectDir("shopping"), "agent/background_results/read-c1.txt").readText())
@@ -1295,11 +1295,11 @@ class AgentTest {
         // success that happened to leave a note.
         val big = (1..400).joinToString("\n") { "line $it of the file" }
         ws.write(File(ws.repoOf("shopping"), "big.txt"), big)
-        val tools = AgentTools(ws, "shopping", git, log, maxChars = 200)
+        val direct = AgentTools(ws, "shopping", git, log, maxChars = 200)
 
-        val said = tools.forConversation(
+        val said = direct.forConversation(
             Call("c9", "read", """{"path":"big.txt"}"""),
-            tools.run(Call("c9", "read", """{"path":"big.txt"}""")).replaceFirst("0\n", "1\n"),
+            direct.run(Call("c9", "read", """{"path":"big.txt"}""")).replaceFirst("0\n", "1\n"),
         )
 
         assertTrue("still a refusal: $said", said.startsWith(AgentLog.FAILURE))
