@@ -1,9 +1,12 @@
 # Implementation plan: the agent's commands
 
 *For review. Derived from [review](agent-tools-review.md) → [counterproposal 1](agent-tools-counterproposal.md)
-→ [2](agent-tools-counterproposal-2.md) → [3](agent-tools-counterproposal-3.md). Everything below is
-settled. §1 lists what re-reading those four documents added to the first draft of this plan — one
-item of it is a hole that would hang a turn.*
+→ [2](agent-tools-counterproposal-2.md) → [3](agent-tools-counterproposal-3.md).*
+
+**Rule applied throughout: where the code contradicts the design, the code is rewritten.** The
+previous draft of this plan did the opposite once — it split commands into three buckets to justify
+attaching a deadline only where the work already checked for one. That is deleted below; §2 is the
+rewrite.
 
 ---
 
@@ -11,159 +14,112 @@ item of it is a hole that would hang a turn.*
 
 | # | command | after | change |
 |---|---|---|---|
-| 1 | `tree` | `path`, `depth`, `name`, `grep`, `from`, `to` | the 200-match cap becomes the char limit |
+| 1 | `tree` | `path`, `depth`, `name`, `grep`, `from`, `to` | 200-match cap → the char limit |
 | 2 | `read` | `path`, `revision`, `grep`, `from`, `to` | +`revision`; **`lines` → `to`**; grep inside the range |
 | 3 | `edit` | `path`, `find`/`replace`, `from`/`to`, `at`, `text` | +range, +`at`, +`replace` may be a `read` call |
 | 4 | `create` | `path`, `text` | unchanged |
 | 5 | `delete` | `path` | unchanged |
-| 6 | `move` | `path`, `into`, `name`, **`copy`** | +`copy:true`; **strict in both modes** |
+| 6 | `move` | `path`, `into`, `name`, **`copy`** | +`copy:true`; strict collisions |
 | 7 | ~~`clone`~~ | — | **removed** |
-| 8 | `history` | `path`, `grep`, `from`, `to` | content grep; no silent 20; **a distinguishing line per row** |
+| 8 | `history` | `path`, `grep`, `from`, `to` | content grep; no silent 20; a distinguishing line per row |
 | 9 | `restore` | `path`, `revision` | unchanged |
 | 10 | `background` | `tool`, `args` | **any** command, one dispatch |
 | 11 | `reason` | `text` | unchanged |
 | 12 | `forget` | `ids` | unchanged |
 | — | `ask`, `conclude`, `wait` | — | unchanged |
 
-14 → 12 commands. One limit, one range language, one dispatch table, no `MAX_SCAN`, no `LONG`.
+14 → 12 commands. One limit, one range language, one dispatch table, no `MAX_SCAN`, no `MAX_MATCHES`,
+no `LONG`.
 
 ---
 
-## 1. What the re-read found that the first draft of this plan missed
+## 1. First, what is already true — and what I got wrong about it
 
-### 1.1 The turn can hang — `LONG` gates the deadline, and `read` is not in it
+**Background commands never hang a turn.** `Background.start` (`Background.kt:43`) writes `"running"`
+to the result file, hands the work to the launcher, and returns the path **before the work starts**.
+That is not a design goal to reach; it is the code as it stands. The hang I described was a
+*foreground* `read` of an unbounded file — and it is real for that reason alone.
 
-`Agent.kt:531`:
+**A background command already has its own limit, applied to the work it started.** The background
+branch builds `Deadline(backgroundMs())` (`AgentTools.kt:267`), reads the setting per call, and
+`backgroundMs() == 0` means no limit. Nothing to change; it survives the dispatch collapse in §3.
 
-```kotlin
-if (call.tool !in AgentTools.LONG || foregroundMs <= 0L) return runTool(call)
+**There is no handover. It was burned.** `LongRunner.kt` is gone — deleted in `b0c4b15` ("A slow
+command's result can land in a file, and a limit can stop it"). Nothing in the tree lets a foreground
+command keep running past its turn and be asked for again. `AgentTest.kt:448` still asserts the
+absence of that sentence, which is the test that caught it.
+
+**`take(20)` is still in the tree**, and no commit ever removed it:
+
+```text
+AgentTools.kt:586    versions.take(20).joinToString("\n") { … }
+$ git log -S "take(20)" -- AgentTools.kt   →  9104295 (where it was introduced)
 ```
 
-**Only `LONG` commands get a deadline.** `LONG` is `setOf("clone", "restore")`. So the moment
-`MAX_SCAN` is deleted, `read {"path":"huge.log"}` in the foreground loads hundreds of megabytes with
-**no deadline at all** and the turn never returns — and `wait` cannot help, because the loop is
-inside the call.
+So if "burned" meant the handover — burned, and §1 above says so. If it meant `take(20)`, it is
+step 2 of §9 and it is the one silent shortening left in the file.
 
-This is the one item that changes the shape of the work, and it is why `MAX_SCAN` cannot be deleted
-on its own.
+## 2. The deadline rule, rewritten — not adapted
 
-**Fix: delete `LONG` and attach the deadline to every command.** `runWithin` loses its
-`if (call.tool !in LONG) return run(call)` line, and `background` loses its speed refusal.
+**Every foreground command runs under the operator's foreground limit. It returns a result inside
+that time, or it errors on timeout. No foreground command outlasts its turn.**
 
-**The safety argument has to be split in two**, because `Timeouts.kt:10–15` and `Agent.kt:526–531`
-both argue that a deadline may only be attached to code that *checks* it:
+Two consequences, and the second is where the previous draft cheated:
 
-| command | writes? | a stop means |
-|---|---|---|
-| `restore`, (`clone`) | yes, incrementally | checked inside — real stop, nothing half-kept |
-| `read`, `tree`, `history` | **no** | the answer is abandoned; the work carries on harmlessly |
-| `edit`, `create`, `delete`, `move`/copy, `forget` | yes, **atomically** | it either finished or never started |
+1. **`LONG` is deleted.** `Agent.kt:531`'s `if (call.tool !in AgentTools.LONG || foregroundMs <= 0L)
+   return runTool(call)` becomes `if (foregroundMs <= 0L) runTool(call) else
+   tools.runWithin(call, Deadline(foregroundMs))`. `LONG` (`AgentTools.kt:81`), its two dispatch
+   entries, and its use as `background`'s gate all go. `Timeouts.kt:15`'s "Two commands can outlast a
+   turn and only two" is deleted — it stops being true.
+2. **Every command that can take time checks the deadline itself.** Not "the answer is abandoned, and
+   that is safe because this command writes nothing" — that was the adaptation. The loops get a
+   check:
 
-So the rule becomes: *a deadline is honoured inside the work where the work can be interrupted; where
-it cannot, a stop abandons the answer, which is safe exactly when the command writes nothing or writes
-all at once.* Both doc comments (`Timeouts.kt:10`, `Agent.kt:526`) are rewritten to say that, and
-`Timeouts.kt:15`'s "Two commands can outlast a turn and only two" is deleted — it stops being true.
+   | where | what is added |
+   |---|---|
+   | `read` | read the file in chunks, `if (deadline.expired) throw StoppedException(...)` between them |
+   | `tree` / `search` (`walk`, `:366`) | check per entry |
+   | `history` | check per version (it loads every version's bytes — §5) |
+   | `edit` / `create` | check before the write; the write itself is `.new` + rename |
+   | `delete` | check between entries of the recursive delete |
+   | `restore` | already checks between files |
+   | `move` / copy | check before the move; a tree copy checks per file |
 
-### 1.2 There are three dispatch tables, not one
+   Then `Deadline`'s existing sentence is honest for all of them. For the atomic writers
+   (`create`, `edit`, `move`, copy) "nothing was kept" is true by construction. For `delete` it is
+   **not** — a recursive delete stopped halfway leaves half a folder — so a stopped delete says what
+   it left instead of claiming nothing was kept. That is the one command whose sentence changes.
 
-The first draft said "share the foreground dispatch, not a second table". Rereading: the drift already
-happened.
+`Stopped.body(tool, deadline)` (`Timeouts.kt:120`) already produces the right words
+(`1\n<tool> stopped after N s; nothing was kept`), and `StoppedException` is already caught first
+everywhere. This is where the throw becomes reachable for commands that never threw it before.
+
+**`WRITING` loses `clone`** (6 → 5): `AgentTools.kt:69`. It needs no `copy` entry — the flag rides on
+`move`, which is already there, so `Agent.kt:492`'s "did this turn change anything" keeps working
+untouched. That is a concrete benefit of the flag over a new tool name.
+
+## 3. One dispatch table
+
+The drift already happened — there are three:
 
 - `run(call)` — `AgentTools.kt:200`, a full `when`.
 - `runWithin(call, deadline)` — `:227`, its own `when` with two branches and `else -> run(call)`.
 - `background(args)` — `:262`, a third `when` with two branches and `else` → refusal.
 
-Each tool must therefore be added in up to three places, and `clone` appears in all three. **Collapse
-to one `when`, with the deadline as a parameter** — `run(call, deadline: Deadline?)` — and `background`
-calls it. That is what makes "any command in the background" one line instead of a table.
+Every tool has to be added up to three times, and `clone` appears in all three. **Collapse to one
+`when` with the deadline as a parameter** — `run(call, deadline: Deadline?)`. `background` then calls
+that same function with `Deadline(backgroundMs())` instead of growing a second table, which is what
+makes "any command in the background" one line rather than a table that drifts.
 
-### 1.3 `history`'s rows are indistinguishable, and that is a separate defect from `take(20)`
+`background` still refuses `ask`/`conclude`/`wait` (they end a turn — there is no result to file) and
+itself (a background of a background loses a result). Its description gains the hazard in plain words:
+*a writing command in the background changes the project while the turn carries on.*
 
-From the review, §1: since Save commits `Saved`, twenty versions of one file now read as
+## 4. The one limit
 
-```text
-a1b2c3d  Saved  14:02:11
-9f8e7d6  Saved  13:41:02
-```
-
-Content grep (§5) lets the model *find* a version by text, but the list itself still cannot be told
-apart, so every candidate needs a `read` to identify. The fix is nearly free: **`versionsOf` already
-returns each version's contents** (`GitService.kt:657`, `List<Pair<CommitInfo, String?>>`), which is
-what content grep needs anyway. Each row gains one distinguishing fact — the first non-blank line,
-trimmed to a width, or the line count when the version is empty. No extra read, no new call.
-
-### 1.4 `clone` has nine references, and the capability behind it must survive
-
-Removing the *tool* is not removing the *feature*: `GitService.clone` (`:172`) and
-`ProjectGit.cloneInto` (`:232`) are the operator's add-project and pull-in paths
-(`AppViewModel.kt:1691`, `:1852`). They stay untouched.
-
-The tool's own references:
-
-| where | what |
-|---|---|
-| `AgentTools.kt:69` | `WRITING` set — `clone` out, 6 → 5 |
-| `AgentTools.kt:81` | `LONG` — **deleted entirely** (§1.1) |
-| `AgentTools.kt:139`, `:159` | spec entry and its example |
-| `AgentTools.kt:210`, `:232`, `:267` | three dispatch entries |
-| `AgentTools.kt:565` | the body |
-| `Agent.kt:525`, `AgentRunner.kt:40` | doc comments naming it |
-| `Timeouts.kt:10`, `:40`, `:85` | doc comments naming it |
-| `Dialogs.kt:569` | a quoted live-log report — **left alone**, it is history |
-
-`WRITING` needs no entry for `copy`: the flag rides on `move`, which is already in the set. That is a
-real benefit of the flag over a new tool name — `Agent.kt:492` keeps working with no change.
-
-### 1.5 Strict collisions, for the person too (your comment)
-
-`Workspace.copy` stops calling `freeName` and refuses like `move` does, reusing `move`'s sentence
-(`Workspace.kt:440`, `There is already a "milk.txt" there`) so the app has one refusal, not two. The
-consequences the first draft did not price:
-
-- **The doc block at `Workspace.kt:476–487` argues for the behaviour being removed** ("a copy has no
-  such promise to keep… `milk.txt` becoming `milk 2.txt` is what a person does by hand"). It is
-  rewritten, not deleted — the reasoning is wrong now and should say why.
-- **`AppViewModel.copy` (`:975`) loses its `as ${made.name}` branch** — dead the moment names never
-  change.
-- **`AppViewModel.copySelected` (`:1226`) loses its `renamed` counter**, and a batch needs a rule.
-  Recommendation: **per item** — copy what can be copied and name what was refused, using the
-  `refused` list the method already builds. Refusing a whole selection because one name is taken would
-  punish the person for something they cannot see.
-- **`freeName` survives for imports only** (`Imports.kt:91`, `:133`, `:169`), and its doc comment
-  (`Workspace.kt:805`, "a copy and an import asking the same question have to get the same answer")
-  stops being true and must be reworded. An import is different on purpose: the person did not choose
-  the target name, so there is no collision to report against a name they typed.
-
-### 1.6 `tree`'s `from`/`to` need their unit stated
-
-The range language (§3) is line numbers. For `tree` the "lines" are **result lines, i.e. paths**, and
-`depth`/`name`/`grep` narrow better. Keeping `from`/`to` is still right — a 4,000-path listing must be
-narrowable once the 200-cap is gone — but the tool description has to say "the first N paths", not
-leave the model to guess that a path list has lines.
-
-### 1.7 `read`'s grep line numbers are now part of the contract
-
-`read`'s grep prints `N: line` with real line numbers (`AgentTools.kt:404–409`). §3 depends on them:
-the scattered-edit recipe is *grep with `read`, then edit by `from`/`to`*. The first draft treated the
-format as incidental. It is load-bearing now and gets a test.
-
-### 1.8 Two constants mean one number
-
-`AgentTools.MAX_RESULT = 20_000` (`:50`) is the default of the `maxChars` constructor parameter, and
-`SettingsStore.DEFAULT_MAX_RESULT = 20_000` (`:351`) is the setting's default. `Agent.kt:78` already
-passes the setting through, so the behaviour is right — but the number is written twice. Keep one: the
-`AgentTools` parameter becomes required, or its default reads `SettingsStore.DEFAULT_MAX_RESULT`.
-
----
-
-## 2. The one limit
-
-**Rule.** Every result that enters the conversation is measured against the operator's `result length`
-(`SettingsStore.maxResult`, already plumbed via `Agent.kt:78`). Over it → **an error asking for a
-narrower selection.**
-
-Where: `trim()` (`:638`), the only place any result is shortened. Its doc comment ("Never silently
-shortens") stays true and gains the second half.
+Every result that enters the conversation is measured against `SettingsStore.maxResult`, already
+plumbed through `Agent.kt:78`. Over it → **an error asking for a narrower selection**. Where:
+`trim()` (`AgentTools.kt:638`), the only place any result is shortened.
 
 ```text
 1
@@ -171,26 +127,25 @@ That result was 41,289 characters, and the limit is 20,000. Narrow it:
   add {"from":1,"to":200} for a line range, or {"grep":"pattern"} for matching lines.
 ```
 
-`trim()`'s current body does `body.take(maxChars)` and appends "(showing first N of M…)". The take
-goes; the message replaces it — the result is either whole or an error, never a fragment.
+`trim()`'s `body.take(maxChars)` goes, along with its "(showing first N of M…)" tail. A result is whole
+or it is an error.
 
-**Deleted:** `MAX_MATCHES = 200` (`:53`) and its two uses (`:302`, `:410`); `versions.take(20)`
-(`:586`); `MAX_SCAN` (`:56`) with the check at `:335` and the "too big to search" sentence — **after
-§1.1**, never before.
+**Deleted:** `MAX_MATCHES = 200` (`:53`) with its two uses (`:302`, `:410`); `versions.take(20)`
+(`:586`); `MAX_SCAN` (`:56`) with the check at `:335` and the "too big to search" sentence. **Step 1
+of §9 lands the deadline first**, so deleting `MAX_SCAN` removes a limit without removing the only stop
+in front of it.
 
-**Two things are deliberately not measured**, and they are the same rule from the other side — the
-limit is about what enters the conversation, not about what a command may touch:
+**Two results are deliberately not measured** — the same rule from the other side, since the limit is
+about what enters the conversation rather than what a command may touch:
 
-1. **A result going to a file.** `background` writes the full body at any size; reading that file back
-   *is* measured.
-2. **A nested `read` in `edit`.** Its text goes to the file; the `edit` result stays one sentence. (The
-   literal `text`/`replace` form is bounded for free — the model had to put those characters through
-   the context to call it.)
+1. A result going to a **file** (`background`). Reading that file back *is* measured.
+2. A nested `read` in `edit`. Its text goes to the file; the `edit` result stays one sentence. (The
+   literal `text` form is bounded for free — those characters had to come through the context first.)
 
-## 3. The one selection language
+## 5. The one selection language
 
-**`from` and `to` are line numbers, both inclusive. `to` absent = to the end. `grep` applies inside the
-range, never outside it. Order is always range first.**
+**`from`/`to` are line numbers, both inclusive. `to` absent = to the end. `grep` applies inside the
+range, never outside it. Range first, always.**
 
 ```json
 {"from":10,"to":49}                  lines 10–49
@@ -200,22 +155,26 @@ range, never outside it. Order is always range first.**
 {"from":10,"to":49,"grep":"TODO"}    matching lines, inside 10–49
 ```
 
-In `read`, `history`, `tree`. **`edit` gets `from`/`to` and never `grep`** — a pattern on the
-destination is "N scattered lines", which is two different edits in one call (delete each, or delete
-one span swallowing everything between matches), and the model has no way to say which. Scattered
-edits are two calls: `read {"grep":…}` prints the numbers (§1.7), `edit {"from":N,"to":M}` uses them.
+In `read`, `history`, `tree`. For `tree` the "lines" are result lines, i.e. paths, and the tool
+description must say so — a path list with a `from`/`to` the model is left to guess the unit of is a
+trap.
 
-**`lines` disappears.** `read {"from":10,"lines":40}` today means 10–49, and becomes
+**`edit` gets `from`/`to` and never `grep`.** A pattern on the destination means "N scattered lines",
+which is two different edits in one call — replace each, or replace one span that swallows everything
+between matches — and the model cannot say which. Scattered edits are two calls by design:
+`read {"grep":…}` prints real line numbers (`AgentTools.kt:404–409`), `edit {"from":N,"to":M}` uses
+them. That output format is load-bearing now, so it gets a test.
+
+**`lines` disappears**: `read {"from":10,"lines":40}` means 10–49 today and becomes
 `{"from":10,"to":49}`.
 
-Work: one helper — `window(text, from, to, grep)` — used by all three. `read`'s current grep block
-(`:400–413`) and slice block (`:414–425`) collapse into it.
+Work: one helper, `window(text, from, to, grep)`, used by all three. `read`'s grep block (`:400–413`)
+and its slice block (`:414–425`) collapse into it.
 
-## 4. `read` gains `revision`
+## 6. `read` gains `revision`
 
 `{"path":"milk.txt","revision":"a1b2c3d"}` — same filters, the text as it stood at that commit.
-`ProjectGit.bytesAt` already wraps `GitService.bytesAt` (`restore` uses it), so this is plumbing, not
-new logic. Non-text is refused exactly as `read` refuses it today.
+`ProjectGit.bytesAt` already wraps `GitService.bytesAt` (`restore` uses it), so this is plumbing.
 
 ```text
 history {"path":"milk.txt","grep":"two litres"}   → the hashes whose text matched
@@ -223,16 +182,20 @@ read    {"path":"milk.txt","revision":"a1b2c3d"}  → what it said
 restore {"path":"milk.txt","revision":"a1b2c3d"}  → put it back
 ```
 
-## 5. `history`
+## 7. `history`
 
-- `grep` matches **the file's content at each version**; a version that does not match does not appear.
-  Free: `versionsOf` already loads every version's bytes.
+- `grep` matches **the file's content at each version**; a non-matching version does not appear.
+  `versionsOf` already loads every version's bytes, so it costs no extra read.
 - `from`/`to` select versions (newest first), then grep inside that window.
-- No default 20. Whatever fits under the limit; over it, the too-big error.
-- **Each row carries one distinguishing fact** (§1.3), because `Saved` on every row is unreadable on
-  its own.
+- No default 20 — whatever fits under the limit, else the too-big error.
+- **Each row carries one distinguishing fact** — the first non-blank line, trimmed, or the line count
+  when the version is empty. Since Save commits `Saved`, twenty versions of one file are otherwise
+  twenty identical rows (`a1b2c3d  Saved  14:02:11`), and content grep alone only lets the model
+  *find* a version, not tell candidates apart.
 
-## 6. `edit`: range, insertion, a `read` call as the replacement
+## 8. `edit`, `move`, and the batch rule
+
+### `edit`
 
 ```json
 {"path":"x","find":"old","replace":"new"}                             every occurrence (today)
@@ -242,14 +205,14 @@ restore {"path":"milk.txt","revision":"a1b2c3d"}  → put it back
 {"path":"x","text":"whole file"}                                      overwrite (today)
 ```
 
-- **`at`** is the insertion point: after line `at`; `at:0` prepends, last+1 appends. Not expressible
-  as a range — an empty range that happens to mean "here" is a trap a model will fall into.
-- **`replace` is a string or a call.** Only `read` is accepted; anything else is refused with a
-  sentence saying so, because another tool there turns one call into a small program.
-- **The nested `read` runs unbounded** (§2, second rule) and may itself use `from`/`to`/`grep`.
-- Direction is unambiguous: the selection is always in the **source**, the range in the **destination**.
+- **`at`** inserts after line `at`; `at:0` prepends, last+1 appends. Not expressible as a range — an
+  empty range meaning "here" is a trap.
+- **`replace` is a string or a call**, and only `read` is accepted there; anything else is refused with
+  a sentence saying so, because another tool turns one call into a small program.
+- The nested `read` runs unbounded (§4) and may itself use `from`/`to`/`grep`.
+- Direction is unambiguous: the selection is in the **source**, the range in the **destination**.
 
-## 7. `move` absorbs `copy`; `clone` goes; `background` takes anything
+### `move` absorbs `copy`
 
 ```json
 {"path":"milk.txt","into":"archive"}                    move
@@ -257,44 +220,71 @@ restore {"path":"milk.txt","revision":"a1b2c3d"}  → put it back
 {"path":"milk.txt","into":"archive","name":"x.txt"}     move and rename
 ```
 
-- **Strict in both modes** (your ruling, applying to the person too): an occupied destination is
-  refused. `Workspace.copy` stops finding a free name; §1.5 lists what falls out.
-- A locked **source** is refused for `move` and allowed for `copy` — a copy only reads the source. That
-  difference stays, and it is the flag's other job.
-- **`clone` deleted** (§1.4); the git capability behind it stays.
+An occupied destination is **refused in both modes**, with `move`'s existing sentence
+(`Workspace.kt:440`, `There is already a "milk.txt" there`). A locked *source* is refused for `move`
+and allowed for `copy` — a copy only reads the source.
 
-**`background` takes any command**, except `ask`/`conclude`/`wait` (they end a turn — no result to
-file) and itself (a background of a background loses a result). It calls the one `run(call, deadline)`
-rather than its own table (§1.2), and its description gains the hazard in plain words: *a writing
-command in the background changes the project while the turn carries on.*
+### Batches: all or nothing — copy and move alike
 
-## 8. The deadline, everywhere
+`moveSelected` (`AppViewModel.kt:1162`) and `copySelected` (`:1215`) are per-item today: they move or
+copy what they can and report the first refusal. Both change to **all-or-nothing**:
 
-`run(call, deadline: Deadline?)`; `Agent.kt:531` becomes `if (foregroundMs <= 0L) runTool(call) else
-tools.runWithin(call, Deadline(foregroundMs))`. `LONG` is deleted; `WRITING` loses `clone`. The two
-doc comments that argue "only these two can outlast a turn" are replaced by the honest split in §1.1.
+1. **Check every destination first**, before touching anything: for each selected file, whether
+   `into/<name>` already exists.
+2. **Any collision → nothing happens**, and the message names the taken ones:
+   `Nothing was moved — there is already "milk.txt" and "notes.txt" there`. For one, the singular
+   sentence `move` already uses.
+3. Only when every name is free does the work start.
 
-## 9. The shipped prompt
+The check-first shape also makes the commit rule simpler: a batch either has something to commit or it
+did nothing. `copySelected`'s `renamed` counter (`:1240`) and its `as ${made.name}` branch in
+`AppViewModel.copy` (`:975`) both die, and `Workspace.copy` stops calling `freeName` — its doc block
+(`Workspace.kt:476–487`) argues *for* the behaviour being removed, so it is rewritten to say why, not
+deleted quietly.
 
-Three edits to `SYSTEM_DEFAULT` (`AgentPrompt.kt:40`), and the same in every `PREVIOUS_SYSTEM` text
-where the sentence is unchanged (a phone holding an unedited default gets the new one; an edited file
-is never touched).
+`freeName` survives for imports only (`Imports.kt:91`, `:133`, `:169`), and its doc claim
+(`Workspace.kt:805`) that "a copy and an import asking the same question have to get the same answer"
+stops being true and is reworded: an import's target name was not chosen by the person, so a free name
+there is a service, not a surprise.
 
-1. `"A result is never silently shortened. If it says 'showing first N of M'…"` →
-   **`"A result bigger than the operator's limit is an error that asks you to narrow the selection."`**
-2. **`clone` leaves the tool list**; `move` is described as taking `copy:true`.
-3. Add: **`"A file too big for a result can still be read with background, which writes it to a file
-   instead of here."`**
+## 9. Order of work
+
+Each step is one commit CI can measure.
+
+1. **One dispatch and the deadline everywhere** (§2, §3). Behaviour-preserving where a deadline
+   already existed; it removes the hang risk *before* anything becomes unbounded. Includes the
+   per-loop `deadline.expired` checks and the delete sentence.
+2. **The limit** (§4) — `trim()` errors; delete `MAX_MATCHES`, `take(20)`, `MAX_SCAN`. Safe now
+   because of step 1.
+3. **`window()`** (§5) — `from`/`to`/grep in `read`, then `history`, then `tree`; delete `lines`; test
+   the grep line numbers.
+4. **`read` + `revision`** (§6).
+5. **`edit`** (§8) — range, `at`, nested `read` replacement.
+6. **`move` + `copy`, strict in both modes, batches all-or-nothing** (§8).
+7. **`history` rows distinguishable** (§7).
+8. **`clone` removed** — the tool only; `GitService.clone` and `ProjectGit.cloneInto` are the
+   operator's add-project and pull-in paths and stay.
+9. **Prompt + docs.** Three edits to `SYSTEM_DEFAULT` (`AgentPrompt.kt:40`) and the same in every
+   `PREVIOUS_SYSTEM` where the sentence is unchanged: the "never silently shortened" line becomes
+   *"a result bigger than the operator's limit is an error that asks you to narrow the selection"*;
+   `clone` leaves the tool list; `move` is described as taking `copy:true`; and *"a file too big for a
+   result can be read with `background`, which writes it to a file"*. Then `tools/test-map.txt`.
+
+`clone`'s nine references, so step 8 does not miss one: `AgentTools.kt:69` (`WRITING`), `:81` (`LONG`,
+deleted in step 1), `:139`/`:159` (spec + example), `:210`/`:232`/`:267` (three dispatch entries),
+`:565` (body); `Agent.kt:525`, `AgentRunner.kt:40`, `Timeouts.kt:10`/`:40`/`:85` (doc comments).
+`Dialogs.kt:569` quotes a live-log report containing the word — left as written, it is a record of
+what was reported.
 
 ## 10. Tests
 
 | file | change |
 |---|---|
-| `AgentTest` (63) | `lines` → `to` everywhere; the 200-cap tests become limit tests; new: `at` insertion, paste from a `read` call, range replace, `copy` flag, strict collision, `read` at a revision, `history` rows distinguishable |
-| `BackgroundTest` (5) | its example command is `clone` → `create`; a backgrounded `read` of a large file is written whole |
-| `TimeoutsTest` (5) | `clone` → a command that still exists; a foreground `read` gets a deadline |
+| `AgentTest` (63) | `lines` → `to`; the 200-cap tests become limit tests; new: `at`, paste from a `read` call, range replace, `copy` flag, strict collision, `read` at a revision, `history` rows distinguishable |
+| `BackgroundTest` (5) | its example command is `clone` → `create`; a backgrounded `read` of a large file is written whole; the call returns the path before the work starts |
+| `TimeoutsTest` (5) | `clone` → a command that still exists; every foreground command gets a deadline; a stopped `delete` says what it left |
 | `AgentSessionFeatureTest` (20) | any assumption that a slow command is `clone` |
-| `FilesFeatureTest`, `CopyFeatureTest` | strict copy: refusal, not `milk 2.txt`; batch partial success |
+| `FilesFeatureTest`, `CopyFeatureTest` | strict copy refuses rather than renames; batches are all-or-nothing and name the taken ones |
 | `HistoryFeatureTest` | content grep, `from`/`to`, the too-big error |
 | `WorkspaceTest` | `copy` refuses an occupied destination; a locked source is still copyable |
 
@@ -302,39 +292,20 @@ Named tests worth writing:
 
 - `a result over the limit is an error, and the error names the selection to add`
 - `grep is applied inside the range, not the other way round`
+- `every foreground command stops on the operator's deadline, not only the slow ones`
 - `a backgrounded read of any size is written in full, and reading it back is measured`
 - `an edit whose replacement is a read call keeps the paste out of the conversation`
 - `at inserts between lines and never replaces one`
 - `a copy onto an occupied name is refused rather than renamed`
-- `a foreground read of a huge file stops on the operator's deadline`
+- `a batch with one taken name moves nothing`
 - `clone is not a tool any more`
 
-## 11. Order of work
+## 11. Nothing left open
 
-Each step is one commit CI can measure.
+Every question from the four discussion documents is answered above. The two things I would otherwise
+have raised, and their rulings:
 
-1. **One dispatch, deadline everywhere** (§1.2, §8) — behaviour-preserving for the tools that already
-   have a deadline, and it removes the hang risk *before* anything is unbounded.
-2. **The limit** — `trim()` errors; delete `MAX_MATCHES`, `take(20)`, `MAX_SCAN` (§2). Safe now
-   because of step 1.
-3. **`window()`** — `from`/`to`/grep in `read`, then `history`, then `tree`; delete `lines`; keep and
-   test the grep line numbers.
-4. **`read` + `revision`.**
-5. **`edit`** — range, `at`, nested `read` replacement.
-6. **`move` + `copy`, strict in both modes** — `Workspace.copy`, `AppViewModel.copy`,
-   `copySelected`, `freeName`'s doc (§1.5).
-7. **`history` rows distinguishable** (§1.3).
-8. **`clone` removed** (§1.4); `WRITING` updated.
-9. **Prompt + docs** — the review and the three counterproposals fold into `docs/agent-tools-review.md`
-   as the reference; `tools/test-map.txt` updated with each source change.
-
-## 12. Open, and only one
-
-**Batch copy on the person's screen**: per item with a refused-name report (my recommendation, §1.5),
-or all-or-nothing? Everything else in this document is decided.
-
-Two things I flagged rather than assumed:
-- `Dialogs.kt:569` quotes a live-log report containing the old word "clone". Left as written — it is a
-  record of what was reported, not a reference to a tool.
-- After `clone` goes, nothing in the ordinary path is slow except `restore`. `background` then looks
-  unnecessary — until a large `read` or `grep` on a weak phone, which is exactly your case for it.
+- **`delete` cannot say "nothing was kept"** if it is stopped mid-recursion — its sentence changes
+  (§2). Not adapted: the command keeps its deadline like every other, and tells the truth.
+- **After `clone` goes, nothing in the ordinary path is slow except `restore`.** `background` is then
+  for large reads and greps on a weak phone — which is exactly the case that mattered.
