@@ -337,7 +337,9 @@ class AgentLogTest {
 
         val rows = AgentLog.open(project).rows()
         assertTrue("something went", dropped > 0)
-        assertTrue("and it says what: ${rows.first().detail}", rows.first().detail.contains("rows"))
+        // **The marker is the newest row, so it is the last of the oldest-first list.** Everything
+        // the file's own order says has to agree with everything `rows()` hands out.
+        assertTrue("and it says what: ${rows.last().detail}", rows.last().detail.contains("rows"))
         assertEquals("the newest conversation is whole", 4, rows.count { it.kind != AgentLog.NOTE })
         assertTrue("less than before", rows.size < before)
         // Every row kept is a whole burst: a TOLD followed by three, three times.
