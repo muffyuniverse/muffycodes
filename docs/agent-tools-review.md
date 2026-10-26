@@ -88,6 +88,7 @@ not true of a filter and a range.
 
 **Same rule for `tree`:** its match list is capped at 200 (`AgentTools.kt:410`). One behaviour for
 both, or the model has to learn which tool truncates and which files.
+@ lets simplify even further - if content is bigger than the limit the result is error that asks to narrow selection, that is all.
 
 ### B. `history`
 
@@ -99,6 +100,7 @@ both, or the model has to learn which tool truncates and which files.
 version**? Content is the useful one — "which version still had `TODO` in it" — and
 `GitService.versionsOf` already loads every version's bytes (`GitService.kt:657–680`), so it costs
 nearly nothing. Message-only would mostly match the word `Saved`.
+@ (default 20) - did I ever ask to make any other limit than content char limit!? MY CONTENT LIMIT applies to every command results. dont think up your own! agent can select however many lines he wants - but if response is bigger than the limit then he gets error. grep against file contents for each version, if grep fails then version line doesnt show. grep applies after lines filter. Everywhere - if both lines and grep are used then grep is applied to the selected lines.
 
 ### C. `read` at a version
 
@@ -120,6 +122,7 @@ version, read shows it, restore puts it back — and today the middle step is mi
   put them into another.
 - **Insert without replacing** — `edit` today is `find`→`replace` or whole-file `text`. A line-based
   form (`{"path":"x","at_line":12,"insert":"…"}`) is the missing primitive.
+  @ I thought that clone is about cloning folders/files, and copy is about copying content from one file into another. And that is why I asked whether grep can be used in this case for prepend/append/insert/replace - those questions were about copy command? I dont even know where you get the idea about cloning remote repo - it is what operator does and we already have this functionality!!!
 
 ---
 
