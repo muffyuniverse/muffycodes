@@ -68,6 +68,9 @@ VOCABULARY = {
     # the agent itself, how often it reminds, and the numbers it runs with
     "start agent", "stop agent", "stop all agents", "reset agent", "remind me",
     "answer timeout", "result length",
+    # the two waits the operator owns: how often an idle agent is checked on, and how long a
+    # command may take before the agent is told it is still running
+    "poll interval", "command timeout",
     # the two system settings this app needs, both asked for from settings
     "battery", "notifications",
     "clear up", "trim context",
