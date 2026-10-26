@@ -50,7 +50,7 @@ class BackgroundTest {
         // rather than an empty folder. The work here is captured and never run, which is exactly the
         // moment in question: the call has returned and the command has not finished.
         var held: (() -> String)? = null
-        val bg = Background { work -> held = work }
+        val bg = Background(launch = { work -> held = work })
         val said = bg.start(project, call("restore", id = "4")) { "landed" }
 
         val file = File(project, "agent/background_results/restore-4.txt")
