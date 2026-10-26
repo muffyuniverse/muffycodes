@@ -25,8 +25,14 @@ class Deadline(private val ms: Long) {
     /** How long it has been, for a sentence about it. */
     val elapsedMs: Long get() = System.currentTimeMillis() - started
 
-    /** The sentence a result carries when a command stopped because the time ran out. */
-    fun expiredIn(): String = "after ${seconds(ms)}"
+    /**
+     * The sentence a result carries when a command stopped because the time ran out.
+     *
+     * **Seconds, always**, because seconds are what the operator typed in the row. Converting 60 s
+     * to "1 min" made a person who set one minute read a sentence about a different unit than the
+     * one in front of them, and made two limits that are the same length read differently.
+     */
+    fun expiredIn(): String = "after ${ms / 1000} s"
 
     /**
      * The same deadline as JGit's own stop button.
@@ -52,12 +58,13 @@ class Deadline(private val ms: Long) {
         /** A deadline that never passes, for a caller with no time limit. */
         fun none(): Deadline = Deadline(0L)
 
-        /** "60 s" or "2 min", because a person reads the sentence this ends up in. */
-        fun seconds(ms: Long): String = when {
-            ms < 60_000L -> "${ms / 1000} s"
-            ms % 60_000L == 0L -> "${ms / 60_000L} min"
-            else -> "${ms / 1000} s"
-        }
+        /**
+         * A length of time in the unit the operator chose, which is seconds.
+         *
+         * Minutes are not offered: the row asks for seconds, and a limit of 900 is written `900 s`.
+         * One unit in one sentence is the whole point.
+         */
+        fun seconds(ms: Long): String = "${ms / 1000} s"
     }
 }
 

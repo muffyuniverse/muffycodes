@@ -45,9 +45,12 @@ class TimeoutsTest {
     }
 
     @Test
-    fun `a limit of minutes reads as minutes`() {
-        assertEquals("2 min", Deadline.seconds(120_000L))
-        assertEquals("90 s", Deadline.seconds(90_000L))
+    fun `a limit reads in the unit the operator typed, which is seconds`() {
+        // **One unit, and it is the one in the row.** A limit of one minute was reported as
+        // "1 min" while the field the person filled in says seconds, and two limits of the same
+        // length then read differently depending on which branch of a `when` they fell into.
+        assertEquals("60 s", Deadline.seconds(60_000L))
+        assertEquals("180 s", Deadline.seconds(180_000L))
         assertEquals("45 s", Deadline.seconds(45_000L))
     }
 }
