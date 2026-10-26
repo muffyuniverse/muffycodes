@@ -707,9 +707,9 @@ class AgentTools(
         // guessed at by restoring it. The bytes come from the same function `restore` uses, so a
         // revision is read exactly as it would be written back.
         val revision = args.optString("revision").trim()
-        // **A file is shown as it is.** There is no second view of any file here: a `grep` is how a
+        // **A file is shown as it is.** There is no second view of any file here: `grep` is how a
         // model finds the row it wants, in the columns the file actually has, and a projection would
-        // make what it reads differ from what it can check with `wc`.
+        // make what it reads differ from what a person sees when they open the file themselves.
         val text = if (revision.isEmpty()) {
             readText(file, deadline)
         } else {
