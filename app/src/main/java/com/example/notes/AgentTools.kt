@@ -136,7 +136,7 @@ class AgentTools(
          */
         val KEYS: Map<String, Set<String>> = mapOf(
             "tree" to setOf("path", "depth", "name", "grep", "from", "to"),
-            "read" to setOf("path", "from", "to", "grep", "revision", "raw"),
+            "read" to setOf("path", "from", "to", "grep", "revision", "raw", "id"),
             "edit" to setOf("path", "find", "replace", "from", "to", "at", "text"),
             "forget" to setOf("ids"),
             "create" to setOf("path", "text"),
@@ -198,8 +198,9 @@ class AgentTools(
                     "With `grep` only the lines that match are shown, each with its line number, " +
                     "and the pattern is applied inside `from`/`to` rather than to the whole file. " +
                     "A pattern is a regular expression, case-insensitive, matched inside one line. " +
-                    "Your record is shown as `id name body`; with `raw` it is shown as the file " +
-                    "holds it, `id size kind ctx name body`, so you can see and search the columns.",
+                    "Your record is shown as `id name body`; `id` picks exactly that row, " +
+                    "which is how the clear-up line tells you to look at one. With `raw` the " +
+                    "record is shown as the file holds it, `id size kind ctx name body`.",
                 "{\"path\":\"the file, relative to the project\",\"from\":1,\"to\":200," +
                     "\"grep\":\"a pattern to look for\",\"revision\":\"an id from history\"}",
             ),
@@ -718,6 +719,37 @@ class AgentTools(
         // guessed at by restoring it. The bytes come from the same function `restore` uses, so a
         // revision is read exactly as it would be written back.
         val revision = args.optString("revision").trim()
+        val record = ws.isRecord(file)
+        // **One row, by the handle that does not move.** A line number in this file is a position,
+        // and the file's newest row is its first — so every row written after the question was asked
+        // shifts every line below it. An id is the row's own, and it is the same handle `forget`
+        // takes, so what the clear-up line names is what the agent can open a turn later.
+        val only = count(args, "id", 0)
+            .getOrElse { return Result.failure(IllegalArgumentException(it.message ?: "that id cannot be used")) }
+        if (only > 0 && !record) {
+            return Result.failure(
+                IllegalArgumentException(
+                    "`id` selects a row of your record, and ${rel(file)} is not it. " +
+                        "For lines of a file use `from`/`to`, and for versions `revision`",
+                ),
+            )
+        }
+        if (only > 0 && (args.has("from") || args.has("to"))) {
+            return Result.failure(
+                IllegalArgumentException(
+                    "Give `id` or `from`/`to`, not both: an id is one row, and a range is " +
+                        "already exactly what it says",
+                ),
+            )
+        }
+        val raw = args.optBoolean("raw", false)
+        if (raw && !record) {
+            return Result.failure(
+                IllegalArgumentException(
+                    "`raw` shows the columns of your own record, and ${rel(file)} is not it",
+                ),
+            )
+        }
         val text = if (revision.isEmpty()) {
             // **The record is shown as the model's own view of it — unless it asks for the file.**
             // Its columns belong to four audiences: `kind` is how the conversation is rebuilt, `ctx`
@@ -730,16 +762,11 @@ class AgentTools(
             // the number the clear-up line quotes, and a model that wants to rank rows itself, or
             // search the record for the expensive ones, needs the file rather than the view. One
             // flag, and the same `grep` then matches the columns too.
-            val raw = args.optBoolean("raw", false)
-            when {
-                !raw -> if (ws.isRecord(file)) recordText(file, deadline) else readText(file, deadline)
-                ws.isRecord(file) -> readText(file, deadline)
-                else -> return Result.failure(
-                    IllegalArgumentException(
-                        "`raw` shows the columns of your own record, and ${rel(file)} is not it",
-                    ),
-                )
-            }
+            //
+            // **An `id` reads the file, and answers in the view.** The row has to be found by its
+            // own id, which only the file carries; what comes back is the row as every other read
+            // of the record shows it, so one row and a pageful are the same shape.
+            if (record && !raw && only <= 0) recordText(file, deadline) else readText(file, deadline)
         } else {
             val bytes = git.bytesAt(project, rel(file), revision)
                 ?: return Result.failure(
@@ -749,6 +776,17 @@ class AgentTools(
         }
         val grep = pattern(args.optString("grep", ""))
             .getOrElse { return Result.failure(IllegalArgumentException("That is not a pattern: ${it.message}")) }
+        if (only > 0) {
+            val parsed = text.split("\n")
+                .filter { it.isNotBlank() }
+                .map { AgentLog.parseRow(it) }
+                .firstOrNull { it.id == only && !it.broken }
+                ?: return Result.failure(IllegalArgumentException("There is no row $only"))
+            val row = parsed.shown
+            val at = if (grep == null) null else hit(row, grep, deadline, "read")
+            if (grep != null && at == null) return Result.success("row $only does not match that")
+            return Result.success(if (grep == null) row else excerpt(row, at!!, HIT))
+        }
         val lines = text.split("\n")
         val chosen = slice(lines, args)
             .getOrElse { return Result.failure(IllegalArgumentException(it.message ?: "that range cannot be used")) }

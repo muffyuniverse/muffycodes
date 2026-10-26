@@ -1960,47 +1960,59 @@ class AgentTest {
     }
 
     @Test
-    fun `the clear-up index names a line a read can open, and the biggest rows first`() {
+    fun `the clear-up index names an id a read can open, and the biggest rows first`() {
         // **How the agent actually chooses.** A `read` of a large context stops at the tool's own
         // limit, so a model deciding what to remove either pages through it — a request per twenty
-        // thousand characters — or guesses. The index gives the line number the read tool takes and
-        // the row's id as a stable label, ordered by what each costs.
+        // thousand characters — or guesses. The index gives the row's id — a handle that works a
+        // turn later, which a line number cannot be in a newest-first file — ordered by cost.
         log.told("a small task")
         log.note("agent", "short note")
         // One big row: a result carrying a file's worth of text.
         log.call("read", """{"path":"milk.txt"}""")
         log.got("read", "0\n" + "x".repeat(4_000))
         val limits = ContextBudget.Limits.of(triggerAsked = 100, hardAsked = 0, ceiling = 100_000)
-        // **The file as it stood when the request was made.** Every row the turn writes afterwards is
-        // prepended, so a line number read from the file at the end of the test names a different row
-        // — the request itself is the only moment the promise can be checked at.
-        val context = File(ws.accountDir, "shopping/${AgentLog.DIR}/${AgentLog.SESSION}")
-        val requests = mutableListOf<Request>()
-        var atRequest: List<String>? = null
-        val door = object : Door {
-            override fun turn(request: Request): Result<Reply> {
-                requests += request
-                if (atRequest == null) atRequest = context.readLines()
-                return Result.success(Reply("", listOf(call("conclude", """{"text":"done"}"""))))
-            }
-        }
+        val door = ScriptedDoor(Reply("", listOf(call("conclude", """{"text":"done"}"""))))
 
         agent(door, limits).burst("clear up please")
 
-        val sent = requests.first().system
+        val sent = door.asked.first().system
         val index = sent.substringAfter("The rows taking the most room")
         assertTrue("the biggest row is named first: $index", index.contains("#4 GOT read"))
-        assertTrue("and its size", index.contains("tokens"))
-        assertTrue("and it says how to look", sent.contains("read agent/session.log from <line>"))
+        assertTrue("with what it costs", index.contains("tokens"))
+        assertTrue(
+            "and the exact call to see it: $index",
+            index.contains("{\"path\":\"agent/session.log\",\"id\":<id>}"),
+        )
 
-        // **The number is a promise, and this is the test of it.** The record is newest-first, so a
-        // line number taken from the oldest-first list pointed the model at a different row than the
-        // one the index named — the one thing an index exists to prevent.
-        val named = Regex("""line (\d+): #4 GOT read""").find(index)?.groupValues?.get(1)?.toInt()
-        assertTrue("the index names a line: $index", named != null)
-        val line = atRequest!![named!! - 1]
-        assertTrue("and that line holds the row it names: $line", line.contains("GOT"))
-        assertTrue("with the id the index gave: $line", line.contains(" 4 "))
+        // **The handle has to work a turn later.** A line number could not: the newest row is the
+        // file's first, so every row written after this sentence moves every line below it — the id
+        // is the row's own, and it is what this reads.
+        val byId = tool("read", """{"path":"agent/session.log","id":4}""")
+        assertTrue("the id reads that row: $byId", byId.startsWith(AgentLog.SUCCESS))
+        assertTrue("and it is the big one: $byId", byId.contains("x".repeat(50)))
+        assertFalse("in the model's own view, without the columns: $byId", byId.contains("GOT"))
+        assertFalse("and without a second number: $byId", Regex("^\\s*\\d+ +\\d+ ", RegexOption.MULTILINE).containsMatchIn(byId))
+    }
+
+    @Test
+    fun `an id reads one row of the record, and is refused where there are no rows`() {
+        // The refusal matters as much as the read: `id` on an ordinary file would silently mean
+        // nothing, and a key that quietly does nothing is the `lines` mistake again.
+        log.told("a task")
+        val big = log.got("read", "0\n" + "x".repeat(200))
+
+        val found = tool("read", """{"path":"agent/session.log","id":$big}""")
+        val missing = tool("read", """{"path":"agent/session.log","id":999}""")
+        val wrongFile = tool("read", """{"path":"milk.txt","id":$big}""")
+        val both = tool("read", """{"path":"agent/session.log","id":$big,"from":1}""")
+
+        assertTrue("the row is read: $found", found.startsWith(AgentLog.SUCCESS))
+        assertTrue("with its words: $found", found.contains("x".repeat(50)))
+        assertTrue("a missing row is refused: $missing", missing.startsWith(AgentLog.FAILURE))
+        assertTrue("naming it: $missing", missing.contains("999"))
+        assertTrue("and a file with no rows: $wrongFile", wrongFile.startsWith(AgentLog.FAILURE))
+        assertTrue("says what id is for: $wrongFile", wrongFile.contains("record"))
+        assertTrue("and one row or a range, not both: $both", both.startsWith(AgentLog.FAILURE))
     }
 
     @Test

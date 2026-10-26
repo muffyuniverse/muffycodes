@@ -86,7 +86,7 @@ out clean.
 | the pin's ceiling clamps, the number typed survives | r3 §2.4 | `ContextBudget.Limit` | `a big number on a small pin is clamped in force and kept as asked` | `said: … asked … in force` |
 | trigger 0 follows the pin, hard 0 is never | r3 §1.8 | `Limits.triggerAt/hardAt` | `a trigger of zero follows the pin …`, `a hard limit of zero is never` | — |
 | over the trigger the request ends with the app's line | r3 §1.8 | `clearUpLine` | `over the trigger the request ends with the app's clear-up line` | `agent-clear-up` |
-| the line names sizes, a target, and the biggest rows by line and id | audit fix | `readOpening` | `the clear-up index names a line a read can open, and the biggest rows first` | — |
+| the line names sizes, a target, and the biggest rows by id | audit fix | `readOpening` | `the clear-up index names an id a read can open, and the biggest rows first` | — |
 | the same line on every request of a turn | r5 §2.1 | `Opening` | `the system message is the same bytes on every request of one turn` | — |
 | over the hard limit the app trims one conversation and says so | r3 `@`, r6 | `Agent.build` → `trimContext` | `over the hard limit the app trims the oldest conversations and says how many` | `agent-trim` |
 | bytes are exact, tokens are the estimate | audit fix | `ContextBudget.bytes/tokens` | `bytes are exact, and are what a person is shown`, `the estimate rounds up` | — |

@@ -658,17 +658,16 @@ class Agent(
     /**
      * One row and what it costs, for the index the clear-up line carries.
      *
-     * [line] is the row's position in `session.log` counted from one — the handle the `read` tool
-     * takes, so `read agent/session.log from 7 to 7` returns exactly this row, with its ctx
-     * column and its id. [id] is the handle `forget` takes. Two tools, two handles on one row: one
-     * to look, one to act.
+     * [id] is the handle both tools take — `read {"id":8}` shows that row and `forget {"ids":"8"}`
+     * removes it — and it is the only one that survives being named. A **line** was the handle for
+     * looking, and it cannot be: the record's newest row is its first, so every row written after
+     * the index was built moves every line below it.
      */
     private data class RowCost(
         val id: Int,
         val kind: String,
         val name: String,
         val tokens: Long,
-        val line: Int,
     )
 
     /**
@@ -679,15 +678,9 @@ class Agent(
      * convert wrong. The exact bytes are what a *person* is shown, where they can check it.
      */
     private fun readOpening(layers: AgentPrompt.Layers, log: AgentLog, tools: List<ToolSpec>): Opening {
-        // The file's own line numbers, because that is what `read` pages through: the context is a
-        // filtered view, so a row's position in it is not its position in the file. **And the file
-        // is newest-first**, so the row at the top of it is line 1 — numbering the oldest-first list
-        // instead pointed the model at a different row than the one the line named.
-        val lineOf = log.rows().asReversed().withIndex()
-            .associate { (index, row) -> row.id to index + 1 }
         val costs = log.contextRows()
             .map { row ->
-                RowCost(row.id, row.kind, row.name, row.size, lineOf[row.id] ?: 0)
+                RowCost(row.id, row.kind, row.name, row.size)
             }
             .filter { it.tokens > 0 }
             .sortedByDescending { it.tokens }
@@ -815,17 +808,22 @@ class Agent(
                 // **The index, because the file cannot be read in one go.** A `read` of a large
                 // context stops at the tool's own limit, so a model deciding what to remove either
                 // pages through it — a request per 20k characters — or guesses. Naming the biggest
-                // rows costs a line and saves the paging: `read from 7 to 7` is one request for
-                // the exact text of the row that matters most.
+                // rows costs a line and saves the paging: one `read` by id is one request for the
+                // exact row that matters most.
                 //
-                // **`to <line>`, not `lines 1`.** This sentence is an instruction the model obeys,
-                // and `lines` is a key `read` refuses — so the app was telling it to make a call
-                // that comes back as a refusal, at the one moment it is over its limit and has the
-                // least room to work out why. A sentence that names a command has to be a command.
-                append("\nThe rows taking the most room — `read agent/session.log from <line> to ")
-                append("<line>` shows one, as `id name body`: ")
+                // **By id, not by line.** A line number is a position, and this file's newest row
+                // is its first: every row written after this sentence moves every line below it, so
+                // a line named here opens a different row a turn later. The id is the row's own, and
+                // it is the same handle `forget` takes.
+                //
+                // And it names the call the model has to make, exactly: **`{"id":8}`, not `lines
+                // 1`** — `lines` is a key `read` refuses, so the old sentence was an instruction
+                // that came back as a refusal at the moment the context had least room to spare.
+                append("\nThe rows taking the most room — `read` one with ")
+                append("{\"path\":\"agent/session.log\",\"id\":<id>}, which shows it as ")
+                append("`id name body`: ")
                 append(biggest.joinToString("; ") {
-                    "line ${it.line}: #${it.id} ${it.kind} ${it.name}, about " +
+                    "#${it.id} ${it.kind} ${it.name}, about " +
                         "${ContextBudget.short(it.tokens)} tokens"
                 })
                 append(". Forget the ones that do not serve the task, by id.")
