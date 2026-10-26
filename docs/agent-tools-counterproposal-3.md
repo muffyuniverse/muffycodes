@@ -98,6 +98,7 @@ That sentence is about **searching**, and it is wrong the moment the intent is "
 Decision needed: does `background` bypass `MAX_SCAN` (stream the bytes to the file instead of reading
 them into memory), or does `MAX_SCAN` remain a hard wall and the error re-worded? The first is more
 work; the second makes "grep an enormous log" — your example — still impossible at 2 MB and above.
+@ remove max scan altogether. phones have gigs of memory, not mb
 
 ## 3. The work, in order
 
