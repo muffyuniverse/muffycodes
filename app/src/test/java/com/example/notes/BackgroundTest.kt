@@ -87,7 +87,7 @@ class BackgroundTest {
         // **The app's own clock has to know a command landed**, or nothing can wake the agent for it.
         // The path is the same relative one the tool's answer named, so the note that wakes it and
         // the file it reads are the same address.
-        val bg = Background({ work -> work() }, now = { 4_000 })
+        val bg = Background(launch = { work -> work() }, now = { 4_000 })
 
         val answer = bg.start(project, call("tree", id = "7")) { "${AgentLog.SUCCESS} three files" }
 

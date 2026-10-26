@@ -246,7 +246,7 @@ class AgentRunnerTest {
         on("shopping", now = 1_000)
         // **The registry's clock is the test's**, so a completion's time and a tick's are the same
         // axis: the watermark is a comparison of two numbers that have to mean the same thing.
-        val bg = Background({ it() }, now = { 1_001 })
+        val bg = Background(launch = { it() }, now = { 1_001 })
         val door = ScriptedDoor(Reply("", listOf(Call("c1", "conclude", """{"text":"three files"}"""))))
         val runner = AgentRunner(
             ws = ws,
@@ -287,7 +287,7 @@ class AgentRunnerTest {
         // second command, which is the ordinary case for a model that starts work in parallel.
         on("shopping", now = 1_000)
         var at = 5_000L
-        val bg = Background({ it() }, now = { at })
+        val bg = Background(launch = { it() }, now = { at })
         val door = ScriptedDoor(
             Reply("", listOf(Call("c1", "conclude", """{"text":"one"}"""))),
             Reply("", listOf(Call("c2", "conclude", """{"text":"two"}"""))),
@@ -323,7 +323,7 @@ class AgentRunnerTest {
         // because the result may be exactly what it was waiting for.
         on("shopping", now = 1_000)
         var at = 5_000L
-        val bg = Background({ it() }, now = { at })
+        val bg = Background(launch = { it() }, now = { at })
         val door = ScriptedDoor(
             Reply("", listOf(Call("c1", "ask", """{"question":"Which branch?"}"""))),
             Reply("", listOf(Call("c2", "conclude", """{"text":"fine"}"""))),
@@ -360,7 +360,7 @@ class AgentRunnerTest {
         // Both are due at once — a command landed and four minutes have passed — and the wake is the
         // one worth paying for. Afterwards the clock has moved, so the ping is not fired on its heels.
         on("shopping", now = 1_000)
-        val bg = Background({ it() }, now = { 1_000 + 2 * AgentSession.POLL_MS })
+        val bg = Background(launch = { it() }, now = { 1_000 + 2 * AgentSession.POLL_MS })
         val door = ScriptedDoor(Reply("", listOf(Call("c1", "conclude", """{"text":"done"}"""))))
         val runner = AgentRunner(
             ws = ws, git = git, settings = settings,
