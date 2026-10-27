@@ -25,6 +25,14 @@ class AgentTest {
     private lateinit var git: ProjectGit
     private lateinit var log: AgentLog
 
+    /**
+     * The id of the last call this test made, so a result can name the call it answers.
+     *
+     * The record says the pairing now rather than leaving it to position, which means a result
+     * written without one is a record the app cannot produce. Every `log.got(...)` here names this.
+     */
+    private var lastCall = 0
+
     private val author = GitAuthor("Muffy", "muffy@example.com")
 
     @Before
@@ -883,13 +891,16 @@ class AgentTest {
         // wrong row — but a projection the model cannot check is worse than a column it can ignore,
         // and `grep` needs the real columns to find a row by cost.
         log.told("make a list")
-        val call = log.call("read", """{"path":"milk.txt"}""")
-        log.got("read", "0\ntwo litres")
+        val call = (log.call("read", """{"path":"milk.txt"}""")).also { lastCall = it }
+        log.got("read", "0\ntwo litres", answers = lastCall)
 
         val body = tool("read", """{"path":"agent/session.log"}""")
 
         assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
-        assertTrue("the id is there: $body", Regex("^\\s*$call ", RegexOption.MULTILINE).containsMatchIn(body))
+        // **The row now begins with its stamp**, so the id is no longer at the start of the line.
+        // The assertion is what it always was — the row is findable by its id — and it is written to
+        // say where the id sits rather than assuming it is first.
+        assertTrue("the id is there: $body", Regex("""^\S+ +$call """, RegexOption.MULTILINE).containsMatchIn(body))
         assertTrue("and the words: $body", body.contains("two litres"))
         assertTrue("the kind, because the file has it: $body", body.contains("CALL"))
         assertTrue("and the ctx column: $body", body.contains(" in  "))
@@ -901,14 +912,20 @@ class AgentTest {
         // `wc -c` and a person's editor see, so the size column is searchable with the same `grep`
         // that searches anything else.
         log.told("make a list")
-        log.got("read", "0\n" + "x".repeat(700))
+        log.got("read", "0\n" + "x".repeat(700), answers = lastCall)
 
         val raw = tool("read", """{"path":"agent/session.log"}""")
         // A whole-line pattern, so the answer is `number: line` and the columns come with it.
         val searched = tool("read", """{"path":"agent/session.log","grep":".*2\\d\\d.*"}""")
 
         assertTrue("the columns are there: $raw", raw.contains("GOT"))
-        assertTrue("including the size: $raw", Regex("^\\s*\\d+ +\\d+ +GOT", RegexOption.MULTILINE).containsMatchIn(raw))
+        // **A stamp, then the id, then the size.** The size is still the column the pattern finds;
+        // the row simply has a time in front of it now, and a pattern anchored to the line's start
+        // would have been searching for a shape the file no longer has.
+        assertTrue(
+            "including the size: $raw",
+            Regex("""^\S+ +\d+ +\d+ +GOT""", RegexOption.MULTILINE).containsMatchIn(raw),
+        )
         assertTrue("and a size is searchable: $searched", searched.contains("GOT"))
     }
 
@@ -919,7 +936,7 @@ class AgentTest {
         // column would say the same word on every line. A row the app wrote for itself never enters
         // it — that is what keeps a repeated poll out of the request.
         log.told("a task")
-        val kept = log.got("read", "0  one file")
+        val kept = log.got("read", "0  one file", answers = lastCall)
         val out = log.note("agent", "a note")
         log.bookkeeping(AgentLog.TURN, "turn", "1")
         log.forget(setOf(out))
@@ -1691,8 +1708,8 @@ class AgentTest {
     @Test
     fun `forgetting a pair takes it out of the context and leaves the text on the record`() {
         log.told("task one")
-        val call = log.call("read", """{"path":"milk.txt"}""")
-        val got = log.got("read", "0\ntwo litres")
+        val call = (log.call("read", """{"path":"milk.txt"}""")).also { lastCall = it }
+        val got = log.got("read", "0\ntwo litres", answers = lastCall)
         log.told("task two")
 
         val answer = forget(call, got)
@@ -1737,8 +1754,8 @@ class AgentTest {
     @Test
     fun `the newest task cannot be forgotten`() {
         log.told("task one")
-        log.call("tree", "{}")
-        log.got("tree", "0\nnothing")
+        (log.call("tree", "{}")).also { lastCall = it }
+        log.got("tree", "0\nnothing", answers = lastCall)
         val task = log.told("task two")
 
         val answer = forget(task)
@@ -1751,8 +1768,8 @@ class AgentTest {
     @Test
     fun `a call and its result are forgotten together`() {
         log.told("a task")
-        val call = log.call("tree", "{}")
-        val got = log.got("tree", "0\nnothing")
+        val call = (log.call("tree", "{}")).also { lastCall = it }
+        val got = log.got("tree", "0\nnothing", answers = lastCall)
 
         val onlyCall = forget(call)
         assertTrue("the call alone is refused: $onlyCall", onlyCall.startsWith(AgentLog.FAILURE))
@@ -1769,8 +1786,8 @@ class AgentTest {
     @Test
     fun `a row that is already out is told so rather than quietly skipped`() {
         log.told("a task")
-        val call = log.call("read", """{"path":"milk.txt"}""")
-        val got = log.got("read", "0\ntwo litres")
+        val call = (log.call("read", """{"path":"milk.txt"}""")).also { lastCall = it }
+        val got = log.got("read", "0\ntwo litres", answers = lastCall)
         forget(call, got)
 
         val again = forget(call, got)
@@ -1787,7 +1804,7 @@ class AgentTest {
         // the list was fine.
         log.told("a task")
         log.note("agent", "a note that can go")
-        val inFlight = log.call("forget", """{"ids":[]}""")
+        val inFlight = (log.call("forget", """{"ids":[]}""")).also { lastCall = it }
 
         val answer = forget(inFlight)
 
@@ -1803,8 +1820,8 @@ class AgentTest {
         // and a call/tool pair with its halves split is refused by the pair rule.
         log.told("task one")
         val pairs = (1..6).map {
-            val c = log.call("read", """{"path":"milk.txt"}""")
-            log.got("read", "0\ntwo litres")
+            val c = (log.call("read", """{"path":"milk.txt"}""")).also { lastCall = it }
+            log.got("read", "0\ntwo litres", answers = lastCall)
             c to log.rows().last().id
         }
         log.told("task two")
@@ -1822,8 +1839,8 @@ class AgentTest {
     fun `numbers and ranges can be mixed in one call, and both spellings of a range work`() {
         log.told("task one")
         repeat(4) {
-            log.call("read", """{"path":"milk.txt"}""")
-            log.got("read", "0\ntwo litres")
+            (log.call("read", """{"path":"milk.txt"}""")).also { lastCall = it }
+            log.got("read", "0\ntwo litres", answers = lastCall)
         }
         log.told("task two")
         val rows = log.contextRows().map { it.id }
@@ -1879,8 +1896,8 @@ class AgentTest {
         // model two turns where there was one, and the calls would look unprompted.
         log.told("do it")
         log.note("agent", "I will look first.")
-        log.call("tree", """{"path":""}""")
-        log.got("tree", "0\nmilk.txt")
+        (log.call("tree", """{"path":""}""")).also { lastCall = it }
+        log.got("tree", "0\nmilk.txt", answers = lastCall)
 
         val messages = agent(ScriptedDoor()).messages(log.contextRows())
 
@@ -1893,10 +1910,10 @@ class AgentTest {
     @Test
     fun `a tool result is matched to its own call`() {
         log.told("do two")
-        log.call("read", """{"path":"milk.txt"}""")
-        log.call("tree", """{"path":""}""")
-        log.got("read", "0\nfile contents")
-        log.got("tree", "0\nmilk.txt")
+        (log.call("read", """{"path":"milk.txt"}""")).also { lastCall = it }
+        (log.call("tree", """{"path":""}""")).also { lastCall = it }
+        log.got("read", "0\nfile contents", answers = lastCall)
+        log.got("tree", "0\nmilk.txt", answers = lastCall)
 
         val messages = agent(ScriptedDoor()).messages(log.contextRows())
         val toolMessages = messages.filter { it.role == "tool" }
@@ -2302,8 +2319,8 @@ class AgentTest {
         log.told("a small task")
         log.note("agent", "short note")
         // One big row: a result carrying a file's worth of text.
-        log.call("read", """{"path":"milk.txt"}""")
-        log.got("read", "0\n" + "x".repeat(4_000))
+        (log.call("read", """{"path":"milk.txt"}""")).also { lastCall = it }
+        log.got("read", "0\n" + "x".repeat(4_000), answers = lastCall)
         val limits = ContextBudget.Limits.of(triggerAsked = 100, hardAsked = 0, ceiling = 100_000)
         val door = ScriptedDoor(Reply("", listOf(call("conclude", """{"text":"done"}"""))))
 
@@ -2334,7 +2351,7 @@ class AgentTest {
         // and the number would disagree with the wire every turn.
         log.told("a task")
         val body = "y".repeat(600)
-        val id = log.got("read", body)
+        val id = log.got("read", body, answers = lastCall)
 
         val row = AgentLog.open(File(ws.accountDir, "shopping")).rows().first { it.id == id }
 

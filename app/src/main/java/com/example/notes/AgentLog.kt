@@ -315,30 +315,34 @@ class AgentLog private constructor(
               if (task != null && task.id in ids) {
                   return "The newest task stays: it is what you are working on"
               }
-              var open: Row? = null
-              for (row in inContext) {
-                  when (row.kind) {
-                      CALL -> {
-                          val left = open
-                          if (left != null && left.id in ids) {
-                              return "The call to ${left.name} has no result left: forget the pair"
-                          }
-                          open = row
-                      }
-
-                      GOT -> {
-                          val call = open
-                          open = null
-                          if (call != null && (call.id in ids) != (row.id in ids)) {
-                              return "The call to ${call.name} and its result go together"
-                          }
+              // **By id, not by position.** This used to walk a running `open` row and assume the
+              // next result belonged to the last call — the same assumption the two readers made,
+              // in the one function that decides whether a forget is legal. A result now says which
+              // call it answers, so a wrong pair is a wrong id rather than a wrong order.
+              val calls = inContext.filter { it.kind == CALL }.associateBy { it.id }
+              val answered = inContext.filter { it.kind == GOT }
+                  .map { it.answers }
+                  .toSet()
+              for (call in calls.values) {
+                  if (call.id !in ids) continue
+                  if (call.id !in answered) {
+                      // An unanswered call at the end is the one being made now: its result is
+                      // written the moment this returns, so forgetting it would leave the
+                      // conversation illegal.
+                      val last = inContext.lastOrNull { it.kind == CALL }
+                      return if (last?.id == call.id) {
+                          "That is the call you are making now"
+                      } else {
+                          "The call to ${call.name} has no result left: forget the pair"
                       }
                   }
               }
-              // An unanswered call at the end is the one being made now: its result is written the
-              // moment this returns, so forgetting it would leave the conversation illegal.
-              val now = open
-              if (now != null && now.id in ids) return "That is the call you are making now"
+              for (result in inContext.filter { it.kind == GOT }) {
+                  val call = calls[result.answers]
+                  if (call != null && (call.id in ids) != (result.id in ids)) {
+                      return "The call to ${call.name} and its result go together"
+                  }
+              }
               return null
           }
 
@@ -581,10 +585,12 @@ class AgentLog private constructor(
      * the oldest. That is right only while the writer interleaves calls and results, which it does
      * — but nothing said it had to, and a reply may carry several calls.
      *
-     * A result with no call is possible and means something: the record can hold one after a reset,
-     * and it names no call because there is none to name.
+     * **There is no default, and that is deliberate.** A default of "answers nothing" would let a
+     * caller who forgot write an orphan result — which readers then refuse to send, so the failure
+     * would appear as a conversation with a hole in it rather than as a mistake at the call site.
+     * The caller has just taken the id; making it say so costs one argument and removes the class.
      */
-    fun got(tool: String, body: String, answers: Int = 0): Int =
+    fun got(tool: String, body: String, answers: Int): Int =
         record(GOT, tool, body, answers = answers)
 
     /** The terminating question, and the terminating statement. */

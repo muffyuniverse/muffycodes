@@ -18,21 +18,38 @@ class AgentChatTest {
 
     private var next = 1
 
+    /** The last call this test made, so a result can name it — as the writer names it. */
+    private var lastCall = 0
+
     private fun row(
         kind: String,
         name: String,
         detail: String = "",
         size: Long = 40,
         ctx: String = AgentLog.IN,
+        answers: Int = 0,
         // **A stamp, because a row without one cannot be rendered.** These rows are the shape of a
         // conversation rather than a file's characters, so the stamp is a fixed one: a test that
         // needed distinct times would be testing the clock, not the box.
-    ): AgentLog.Row = AgentLog.Row("10:00:00.000", next++, size, kind, ctx, name = name, detail = detail)
+    ): AgentLog.Row = AgentLog.Row(
+        "10:00:00.000", next++, size, kind, ctx, answers, name = name, detail = detail,
+    )
 
     private fun told(text: String) = row(AgentLog.TOLD, "operator", text)
     private fun turn() = row(AgentLog.TURN, "turn")
-    private fun call(tool: String, args: String = "{}") = row(AgentLog.CALL, tool, args)
-    private fun got(tool: String, body: String) = row(AgentLog.GOT, tool, body)
+    private fun call(tool: String, args: String = "{}") = row(AgentLog.CALL, tool, args).also {
+        lastCall = it.id
+    }
+
+    /**
+     * A result, **naming the call it answers**.
+     *
+     * The box joins by id now rather than by position, so a result that named no call would be a
+     * result with no line — and a test that built one would be testing a record the app cannot
+     * write. `answers = 0` is still available for the tests that are *about* an orphan.
+     */
+    private fun got(tool: String, body: String, answers: Int = lastCall) =
+        row(AgentLog.GOT, tool, body, answers = answers)
     private fun ask(question: String) = row(AgentLog.ASK, "question", question)
 
     // ---- what a conversation is ---------------------------------------------
