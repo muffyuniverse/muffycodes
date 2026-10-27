@@ -133,7 +133,7 @@ class ProjectsFeatureTest : FeatureTest() {
             "the app says why",
             scene.viewModel.message!!.contains("already a project"),
         )
-        assertEquals("and made nothing", 1, scene.viewModel.projectNames.size)
+        assertEquals("and made nothing", listOf("system", "Shopping"), scene.viewModel.projectNames)
     }
 
     @Test
@@ -141,7 +141,7 @@ class ProjectsFeatureTest : FeatureTest() {
         scene.viewModel.createProject("bad/name", "mit")
 
         assertTrue("the app says no", scene.viewModel.message != null)
-        assertTrue("and made nothing", scene.viewModel.projectNames.isEmpty())
+        assertEquals("and made nothing but the settings project", listOf("system"), scene.viewModel.projectNames)
     }
 
     @Test

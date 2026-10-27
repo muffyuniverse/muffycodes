@@ -142,16 +142,14 @@ object AgentPrompt {
      * true and unreachable. It lives in the system project now, which is a row like any other and
      * opens in the editor like any other.
      *
-     * The root is still read first, so an account made before the project existed keeps the text
-     * the person may already have edited there. That is not a migration with a version number — it
-     * is the same rule this class already holds: **a file that exists is the person's.**
+     * **One place, and no fallback.** A second path to the same prompt — "read the project's file,
+     * or the one at the root if that is missing" — is compatibility machinery for a release nobody
+     * runs: this app is being developed, not shipped, so there is no account holding an older
+     * layout. Two places to look would also be two places to disagree, and the question "which
+     * prompt is the agent given" would need a rule instead of a path.
      */
-    fun system(accountDir: File): String {
-        val inProject = File(File(accountDir, Workspace.SYSTEM_PROJECT), SYSTEM_FILE)
-        val atRoot = File(accountDir, SYSTEM_FILE)
-        val file = if (inProject.isFile || !atRoot.isFile) inProject else atRoot
-        return layer(file, SYSTEM_DEFAULT)
-    }
+    fun system(accountDir: File): String =
+        layer(File(File(accountDir, Workspace.SYSTEM_PROJECT), SYSTEM_FILE), SYSTEM_DEFAULT)
 
     /** ② for the project in [projectDir]. */
     fun project(projectDir: File): String =

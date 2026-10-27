@@ -92,7 +92,10 @@ class AccountsFeatureTest : FeatureTest() {
         scene.signedIn()
 
         assertTrue("the account's folder is there", scene.workspace!!.accountDir.isDirectory)
-        assertEquals("and no project yet", emptyList<String>(), scene.names())
+        // **One row, and it is the settings project.** A brand-new account has no projects of its
+        // own; it has the folder where the whole account's settings live, because that is where the
+        // system prompt is written and a prompt with nowhere to live is one nobody can edit.
+        assertEquals("and no project of their own yet", listOf("system"), scene.names())
     }
 
     @Test

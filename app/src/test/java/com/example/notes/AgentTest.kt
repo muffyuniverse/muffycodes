@@ -480,7 +480,7 @@ class AgentTest {
         // so a file on the phone was written by this build or by a person — and comparing it
         // against half-remembered defaults would rewrite somebody's instructions to fix a phon
         // that does not exist.
-        val file = File(account, AgentPrompt.SYSTEM_FILE)
+        val file = File(File(account, Workspace.SYSTEM_PROJECT), AgentPrompt.SYSTEM_FILE)
         val theirs = "Work only in src/. Never touch the README.\n"
         file.writeText(theirs)
 
@@ -493,8 +493,9 @@ class AgentTest {
     @Test
     fun `a missing instructions file is written from the default, once`() {
         // The one thing the file system has to do here: a fresh account has no instructions, and an
-        // agent with none is an agent inventing its own rules.
-        val file = File(account, AgentPrompt.SYSTEM_FILE)
+        // agent with none is an agent inventing its own rules. **The file is in the system project**
+        // — the one place the prompt lives, with no second path to fall back to.
+        val file = File(File(account, Workspace.SYSTEM_PROJECT), AgentPrompt.SYSTEM_FILE)
         file.delete()
 
         assertEquals("the shipped text", AgentPrompt.SYSTEM_DEFAULT, AgentPrompt.system(account))
@@ -1959,7 +1960,7 @@ class AgentTest {
         // ① is shipped as a default but it is the account's file from the first turn on, so a
         // person can correct the app's own instructions — and the next turn is answered under
         // the correction. Anything else would make the file a decoration.
-        val file = File(account, AgentPrompt.SYSTEM_FILE)
+        val file = File(File(account, Workspace.SYSTEM_PROJECT), AgentPrompt.SYSTEM_FILE)
         file.writeText("You are working inside a phone app. Answer in Latin.")
         val first = ScriptedDoor(Reply("", listOf(Call("c1", "conclude", """{"text":"ok"}"""))))
         agent(first).burst("go")

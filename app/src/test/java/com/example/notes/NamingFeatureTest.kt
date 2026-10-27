@@ -25,7 +25,15 @@ class NamingFeatureTest : FeatureTest() {
      * The account's root is the projects list, and it holds nothing the app made, so asking
      * for the only entry would count it too.
      */
-    private fun made(): String = scene.names().single()
+    /**
+     * The one thing the test made.
+     *
+     * **`system` is always there**, because the account root holds the project that keeps the
+     * account's settings. So "the one name" is the one that is not the system project — asking for
+     * `.single()` over the whole list would be asking a question whose answer changed when the
+     * system project arrived.
+     */
+    private fun made(): String = scene.names().single { it != Workspace.SYSTEM_PROJECT }
 
     @Test
     fun `a name typed with capitals and spaces is written the one way`() {
