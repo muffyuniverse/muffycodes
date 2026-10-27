@@ -635,6 +635,10 @@ private fun ProjectList(
 private fun EntryList(viewModel: AppViewModel, actions: BrowserActions) {
     val entries = viewModel.visibleEntries
     val pinnedPaths = viewModel.pins
+    // **Read here, outside the item lambda, so the list redraws when it changes.** A row that asked
+    // the file on every draw did not: the lock was written, the answer changed, and Compose had
+    // nothing observable to recompose for.
+    val lockedPaths = viewModel.lockedPaths
     if (entries.isEmpty()) {
         EmptyState(
             title = if (viewModel.isSearching) "Nothing matches" else "Nothing here yet",
