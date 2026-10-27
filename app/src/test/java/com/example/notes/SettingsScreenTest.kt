@@ -192,6 +192,51 @@ class SettingsScreenTest {
     }
 
     @Test
+    fun `the agent's settings are one block, bounded by a rule at each end`() {
+        // **Reports 20 and 21, which are one complaint about the same thing:** the screen said
+        // "everything the agent needs is in one place" and then drew reminders, the trace and the
+        // theme at the same rhythm, so the block had a beginning nobody could see and no end at all.
+        //
+        // What can be checked from a test is that the block still *reads* as a block: its title, the
+        // sentence that names the rules, and the first thing outside it. A rule's colour and weight
+        // are not visible to `onNodeWithText`, so this pins the words - which is what tells a person
+        // where the block starts and stops. The divider itself is checked by the eye, and the sentence
+        // is the thing that must not drift out of step with it.
+        settings()
+
+        compose.onNodeWithText("AGENT").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Everything between this rule", substring = true)
+            .performScrollTo()
+            .assertIsDisplayed()
+        // The first thing the block does not own. It is on the same screen and after the block's
+        // closing rule, which is what the sentence above promises.
+        compose.onNodeWithText("Reminders").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun `the signed-in rows are one block, so the buttons sit with the name`() {
+        // **Report 21, twice reported:** "between user account and buttons below it is too much
+        // space", then "signed in as block still has gaps between rows that should be halved at
+        // least". The second is the useful one: what was left was the gap between the three *lines*.
+        //
+        // A spacing value is not visible to a text query, so what this pins is that all three lines
+        // are present and in order - the name, the address, the buttons - which is the grouping the
+        // spacing exists to express. A change that separated them again would have to move one of
+        // these out of the column.
+        settings()
+
+        // **The signed-in scene, not the signed-out one.** `Scenario` signs in, so the two fallback
+        // strings ("Nobody yet", "Sign in to create projects") never render here - and asserting
+        // them would have been a test that passes only by never being run against this scene. What
+        // the grouping promises is that the label, the account and the buttons are one thing, and
+        // that is checkable with what is on the screen.
+        compose.onNodeWithText("Signed in as").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Switch").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Remove").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Add").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
     fun `the two clocks are named, so a person can tell which one they are setting`() {
         // **Report 23 was a question, not a complaint:** "how wait for the model is different from
         // stop command after?". Three timeouts in a row, in two units, with "wait" and "stop" used
