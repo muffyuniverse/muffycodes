@@ -135,9 +135,13 @@ result is read by turning pages rather than by scrolling a tall box inside a tal
 
 ## Order of work
 
-1. **One format change to `session.log`: a time column and an `answers` column.** `LogFormat`, the
-   row regex, `Row`, the writer, and the two deques that guess the pairing. Old rows read as
-   unknown-rather-than-wrong for the time and `-` for `answers`.
+1. ~~One format change to `session.log`: a time column and an `answers` column~~ — **done**
+   (`ee3e6ec`, `c306152`, `a720fea`, `9af5ab5`, `a70a4e0`). Rows are now
+   `time id size kind ctx answers name detail`. Four readers were pairing by position and all four
+   now join by id: `AgentChat.lines()`, `Agent.messages()`, `AgentLog.forgetProblem()` and
+   `AgentLog.dangling()`. `got()` has **no default** for `answers` — a default would let a caller
+   write an orphan result, which readers then refuse to send, so the mistake would surface as a hole
+   in a conversation rather than at the call site.
 2. **`ask`/`conclude` removed** — tools, sets, kinds, message building, rendering. Rows of those
    kinds are refused.
 3. **`AgentChat` rebuilt as bubbles**: a call and its result are one bubble, joined by `answers`
