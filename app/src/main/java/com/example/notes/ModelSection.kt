@@ -41,6 +41,15 @@ fun ModelSection(viewModel: AppViewModel) {
     val problem = viewModel.modelConfigProblem
     var picking by remember { mutableStateOf<String?>(null) }
 
+    // **The numbers are read on arrival and on every change of model or provider, because that is
+    // when they change.** `readCatalogue` is keyed on the model, so re-entering this screen with
+    // the same pin costs nothing and a different pin costs one request. Before this the screen
+    // never asked, so the row showed the floor — and the button beside it was the only way to find
+    // out what the endpoint actually allows.
+    LaunchedEffect(config.active.model, config.active.provider) {
+        viewModel.readCatalogue(config.active.model)
+    }
+
     if (problem != null) {
         // Named with its line, because the file is the operator's and they are the one who can
         // fix it. The choice in force is still shown below — "your file is wrong" and "here is
@@ -93,12 +102,26 @@ fun ModelSection(viewModel: AppViewModel) {
     )
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
-            text = "Context: ${ContextBudget.short(ceiling)}" +
+            // **How much room there is, said as room.** "900k of 1000k" was read as "900 used of
+            // 1000" — a context that looked 90% full when nothing was in it. The first number is
+            // what the app will actually send and the second is what the model advertises, so the
+            // line says *available* and names the window it is out of.
+            text = "Context: ${ContextBudget.short(ceiling)} available" +
                 (info?.contextLength?.let { " of ${ContextBudget.short(it.toLong())}" } ?: ""),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1f),
         )
+        if (viewModel.catalogueReading) {
+            // **The read happens by itself; this only says it is happening.** The button is for
+            // asking again — the numbers are a fact about the endpoint that can change while the
+            // screen is open, and before this there was no way to ask without leaving it.
+            Text(
+                text = "reading…",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         TextButton(
             onClick = {
                 // Only this press is an act: the sheet's own read is the app doing its job, and a

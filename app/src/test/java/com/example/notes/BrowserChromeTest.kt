@@ -7,6 +7,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -258,6 +259,42 @@ class BrowserChromeTest {
         // refused, is not
         assertTrue("copy is offered on a locked file", there("Copy…"))
         assertFalse("rename is not, because it would be refused", there("Rename…"))
+    }
+
+    @Test
+    fun `the lock icon changes on the tap, not on the next visit`() {
+        // **Reported from the live log:** "lock button changes show only after reentering the
+        // screen". The row asked `.muffy/locked.json` on every draw, so the icon it showed was a
+        // fact Compose had no reason to recompose for: the file changed, nothing observable did,
+        // and the answer only appeared when the screen was rebuilt.
+        //
+        // This test is the recomposition, not the write — `isLocked` already passed while the
+        // screen was wrong, which is why the bug survived.
+        scene.signedIn()
+        scene.project("groceries")
+        scene.open("groceries")
+        val file = scene.worktreeFile("milk.txt", "two litres")
+        browser()
+        compose.waitUntil(20_000) { there("milk.txt") }
+
+        // Before: unlocked, so the content description offers the lock.
+        assertTrue(
+            "the row starts unlocked",
+            there("Lock milk.txt, so it can only be viewed"),
+        )
+
+        // The tap, made on the screen rather than through the view model, because the bug was
+        // that the screen did not notice. No `refresh()` after it: that is the thing a person
+        // could not do.
+        compose.onNodeWithContentDescription("Lock milk.txt, so it can only be viewed")
+            .performClick()
+        compose.waitForIdle()
+
+        assertTrue("and it is locked", scene.viewModel.isLocked(file))
+        assertTrue(
+            "the row says so without leaving the screen",
+            there("milk.txt is locked; tap to unlock"),
+        )
     }
 
     @Test

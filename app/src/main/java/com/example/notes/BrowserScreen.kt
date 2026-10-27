@@ -661,10 +661,17 @@ private fun EntryList(viewModel: AppViewModel, actions: BrowserActions) {
             EntryRow(
                 entry = entry,
                 pinned = pinned,
-                // The switch, not the rule: a file inside a locked folder is read-only
-                // but nobody locked *it*, and a folder of twenty lock icons would read as
-                // twenty things the person did.
-                locked = viewModel.isLockedHere(entry.file),
+                // **The switch, read from state, not from the file.** `isLockedHere` asks
+                // `.muffy/locked.json` every time it is called, so the row's icon did not change
+                // when the lock changed — Compose had no reason to redraw it, and a person had to
+                // leave the screen and come back. Reported from the live log: "lock button changes
+                // show only after reentering the screen". `lockedPaths` is the same answer, held in
+                // state, so the row redraws the moment the set changes.
+                //
+                // A file inside a locked folder is read-only but nobody locked *it*, and a folder
+                // of twenty lock icons would read as twenty things the person did — hence
+                // `isLockedHere`'s own rule rather than `isLocked`'s.
+                locked = path != null && path in lockedPaths,
                 selected = viewModel.isSelected(entry.file),
                 choosing = viewModel.selected.isNotEmpty(),
                 // A hidden folder and the record's `agent/` are the app's

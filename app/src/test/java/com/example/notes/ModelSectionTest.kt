@@ -223,6 +223,41 @@ class ModelSectionTest {
     }
 
     @Test
+    fun `the context line says how much room there is, not how much is used`() {
+        // **Reported from the live log:** "text against read button says context 900k of 1000k —
+        // what does that mean? I somehow have the context full or what?" It read as a tank 90%
+        // full, when the first number is what the app will send and the second is what the model
+        // advertises. The word *available* is the whole fix, and this test is what keeps it.
+        scene.viewModel.catalogue = scripted()
+        compose.setContent { Section() }
+
+        scene.await("the catalogue", 5_000) { scene.viewModel.modelInfo != null }
+
+        // 1048576 window with 393216 of reply promised leaves 655360, which is also the measured
+        // deepseek pin — the label must agree with the number the agent is actually clamped by.
+        compose.onNodeWithText("available", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun `the numbers are read on arrival, without pressing anything`() {
+        // The button used to be the only way to find out, which meant a screen that showed the
+        // floor — the same floor that once had a million-token model trimmed at 96k. Arriving at
+        // the screen is now enough.
+        scene.viewModel.catalogue = scripted()
+        compose.setContent { Section() }
+
+        scene.await("the read the screen does for itself", 5_000) {
+            scene.viewModel.modelInfo?.contextLength == 1048576
+        }
+
+        assertEquals(
+            "and it is the model in use that was asked about",
+            ModelConfigFile.DEFAULT_MODEL,
+            scene.viewModel.modelInfo!!.id,
+        )
+    }
+
+    @Test
     fun `the key row says plainly when there is no key`() {
         // The agent cannot read a model list or answer without it, so "no key" is not a detail:
         // it is the reason nothing on this screen can be chosen freely.
