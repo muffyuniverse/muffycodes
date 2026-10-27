@@ -503,7 +503,8 @@ class AgentSessionFeatureTest : FeatureTest() {
             "it gave up: $last · ticks=$ticks retries=${session?.retries} " +
                 "retryFrom=${session?.retryFrom} window=${scene.settings.reconnectMs} " +
                 "asked=${broken.attempts} lastPollAt=${session?.lastPollAt} " +
-                "nextPollAt=${session?.nextPollAt} keepAlive=${scene.settings.keepAlive}",
+                "nextPollAt=${session?.nextPollAt} keepAlive=${scene.settings.keepAlive} " +
+                "trail=${Trace.report().lines.filter { it.contains("agent-") }.takeLast(6)}",
             AgentSession.State.STOPPED,
             session?.state,
         )
