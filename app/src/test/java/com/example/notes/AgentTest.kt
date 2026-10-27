@@ -2495,13 +2495,15 @@ class AgentTest {
 
     @Test
     fun `a reset leaves the next request with the new task and nothing before it`() {
-        // **Two bursts, and the second one is not the same conversation.** Each burst ends with the
-        // model saying something and calling nothing, so this needs two of those — one for each.
+        // **Two bursts, each one call and then words.** Each burst ends with the model saying
+        // something and calling nothing, so each needs its own pair: a call to act on, then the
+        // plain reply that ends it. Three replies would have left the second burst without a call,
+        // which is the thing this test counts.
         val door = ScriptedDoor(
             Reply("", listOf(call("tree", """{"path":""}"""))),
             Reply("done"),
+            Reply("", listOf(call("tree", """{"path":"milk.txt"}"""))),
             Reply("done again"),
-            Reply("and once more"),
         )
         val agent = agent(door)
         agent.burst("look at the folder")
