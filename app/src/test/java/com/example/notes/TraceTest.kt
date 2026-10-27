@@ -26,6 +26,10 @@ class TraceTest {
     @Before
     fun fresh() {
         Trace.resetForTest()
+        // **A known pair for every test.** Both columns are set from outside, by the app; a test
+        // that left them at `-` would be asserting the format against a line the app never writes.
+        Trace.build = "149"
+        Trace.state = "open"
         Trace.staleMs = 2_000
         dir = File(System.getProperty("java.io.tmpdir"), "trace-${System.nanoTime()}")
         file = File(dir, "trace.log")
@@ -109,15 +113,19 @@ class TraceTest {
     }
 
     @Test
-    fun `a line is time, id, kind, name, detail`() {
+    fun `a line is time, build, state, id, kind, name, detail`() {
         val id = Trace.tap("save", "milk.txt")
         val line = firstLine()
 
         val fields = line.split(Regex("\\s+"))
         assertTrue("the time is first: $line", Regex("""^\d\d:\d\d:\d\d\.\d\d\d""").containsMatchIn(line))
-        assertEquals("the id is second, which is what a shell counts", id.toString(), fields[1])
-        assertEquals("the kind is third", "TAP", fields[2])
-        assertEquals("the name is fourth", "save", fields[3])
+        // `time build state id kind name detail` — the two facts come before the id, so the
+        // shell's field numbers moved by two and these are the numbers the header documents.
+        assertEquals("the build is second", "149", fields[1])
+        assertEquals("the state is third", "open", fields[2])
+        assertEquals("the id is fourth, which is what a shell counts", id.toString(), fields[3])
+        assertEquals("the kind is fifth", "TAP", fields[4])
+        assertEquals("the name is sixth", "save", fields[5])
         assertTrue("and the detail is the tail, spaces and all", line.contains("milk.txt"))
     }
 
@@ -149,7 +157,7 @@ class TraceTest {
         Trace.note("app-opened", "Muffy Codes 91")
         val line = firstLine()
 
-        assertTrue("id zero: $line", line.split(Regex("\\s+"))[1] == "0")
+        assertTrue("id zero: $line", line.split(Regex("\\s+"))[3] == "0")
         assertTrue("and the kind says it answers nothing", line.contains("NOTE"))
     }
 
@@ -168,9 +176,9 @@ class TraceTest {
         val lines = settle()
         val ids = lines.mapNotNull { line ->
             val fields = line.split(Regex("\\s+"))
-            if (fields.size > 2 && fields[2] == "TAP") fields[1].toIntOrNull() else null
+            if (fields.size > 4 && fields[4] == "TAP") fields[3].toIntOrNull() else null
         }
-        val counts = lines.mapNotNull { it.split(Regex("\\s+")).getOrNull(1)?.toIntOrNull() }
+        val counts = lines.mapNotNull { it.split(Regex("\\s+")).getOrNull(3)?.toIntOrNull() }
             .groupingBy { it }.eachCount()
 
         assertEquals("both taps are in the log, in order", listOf(older, newer), ids)
@@ -380,10 +388,11 @@ class TraceTest {
         Trace.changed("at / · 2 rows · new_folder/")
         Trace.said("Created new_folder/ (was \"New folder\")")
 
-        // `time id kind name detail`, so the id is the second field of every line.
-        val byKind = settle().groupBy { it.split(Regex("\\s+"))[2] }
+        // `time build state id kind name detail`, so the kind is the fifth field and the id the
+        // fourth.
+        val byKind = settle().groupBy { it.split(Regex("\\s+"))[4] }
         fun idsOf(kind: String) = byKind[kind].orEmpty()
-            .map { it.split(Regex("\\s+"))[1].toInt() }
+            .map { it.split(Regex("\\s+"))[3].toInt() }
 
         assertEquals("the redraw answered the press that caused it", listOf(create), idsOf("CHANGED"))
         // The sentence is the app talking after the press was already served.
@@ -414,7 +423,7 @@ class TraceTest {
         // The id column is padded to four characters in the file, and `split` collapses
         // whitespace, so the field to compare is the number itself.
         val line = settle().last { it.contains("SAID") }
-        assertEquals("and it quotes the picker's own id", picker, line.split(Regex("\\s+"))[1].toInt())
+        assertEquals("and it quotes the picker's own id", picker, line.split(Regex("\\s+"))[3].toInt())
     }
 
     @Test

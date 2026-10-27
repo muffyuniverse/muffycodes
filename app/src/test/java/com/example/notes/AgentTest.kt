@@ -161,7 +161,7 @@ class AgentTest {
             Reply(
                 "",
                 listOf(
-                    call("edit", """{"path":"milk.txt","find":"two","replace":"three"}""")
+                    call("edit", """{"path":"milk.txt","grep":"two","replace":"three"}""")
                 ),
             ),
             Reply("", listOf(call("conclude", """{"text":"could not"}"""))),
@@ -179,7 +179,7 @@ class AgentTest {
             Reply(
                 "",
                 listOf(
-                    call("edit", """{"path":"milk.txt","find":"two","replace":"three"}""")
+                    call("edit", """{"path":"milk.txt","grep":"two","replace":"three"}""")
                 ),
             ),
             Reply("", listOf(call("conclude", """{"text":"done"}"""))),
@@ -207,7 +207,7 @@ class AgentTest {
                 listOf(
                     call(
                         "edit",
-                        """{"path":"project_prompt.txt","find":"Nothing","replace":"Everything"}""",
+                        """{"path":"project_prompt.txt","grep":"Nothing","replace":"Everything"}""",
                     )
                 ),
             ),
@@ -776,7 +776,8 @@ class AgentTest {
         log.got("read", "0\n" + "x".repeat(700))
 
         val raw = tool("read", """{"path":"agent/session.log"}""")
-        val searched = tool("read", """{"path":"agent/session.log","grep":"^ +\\d+ +2\\d\\d "}""")
+        // A whole-line pattern, so the answer is `number: line` and the columns come with it.
+        val searched = tool("read", """{"path":"agent/session.log","grep":".*2\\d\\d.*"}""")
 
         assertTrue("the columns are there: $raw", raw.contains("GOT"))
         assertTrue("including the size: $raw", Regex("^\\s*\\d+ +\\d+ +GOT", RegexOption.MULTILINE).containsMatchIn(raw))
@@ -851,9 +852,11 @@ class AgentTest {
         // number it was printed beside.
         ws.write(File(ws.repoOf("shopping"), "milk.txt"), "milk\nbread\nmilk again\neggs\nmilk last\n")
 
-        val body = tool("read", """{"path":"milk.txt","from":2,"to":4,"grep":"milk \\w+"}""")
+        // **`again` is part of the line, not of the match**, so this is a part-of-line pattern and
+        // the answer is the text it selected.
+        val body = tool("read", """{"path":"milk.txt","from":2,"to":4,"grep":"again"}""")
 
-        assertEquals("only the one inside the window", "0\nmilk again", body)
+        assertEquals("only the one inside the window", "0\nagain", body)
     }
 
     @Test
@@ -1236,20 +1239,23 @@ class AgentTest {
         val file = File(ws.repoOf("shopping"), "milk.txt")
         ws.write(file, "first\ntwo litres\nthird\n")
 
-        val selected = tool("read", """{"path":"milk.txt","grep":"two litres"}""")
+        // **A part-of-line pattern**, because that is the shape whose answer is meant to be
+        // pasted: `two litres` as a whole line would be answered `2: two litres`, and the
+        // whole-line case has its own test below.
+        val selected = tool("read", """{"path":"milk.txt","grep":"litres"}""")
         // The body's second line is the selection, with the status line above it — the same
         // "0 or 1, then the answer" shape every result has.
-        assertEquals("what the selector answered", "0\ntwo litres", selected)
+        assertEquals("what the selector answered", "0\nlitres", selected)
         val text = selected.substringAfter('\n')
 
         val args = org.json.JSONObject()
             .put("path", "milk.txt")
-            .put("grep", "two litres")
+            .put("grep", "litres")
             .put("replace", text)
         val body = tool("edit", args.toString())
 
         assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
-        assertEquals("the file says the words, not a number", "first\ntwo litres\nthird\n", ws.read(file))
+        assertEquals("the file says the word, not a number", "first\ntwo litres\nthird\n", ws.read(file))
     }
 
     @Test
@@ -1330,7 +1336,7 @@ class AgentTest {
         val file = File(ws.repoOf("shopping"), "milk.txt")
         ws.write(file, "one\ntwo")
 
-        val edited = tool("edit", """{"path":"milk.txt","find":"one","replce":"three"}""")
+        val edited = tool("edit", """{"path":"milk.txt","grep":"one","replce":"three"}""")
         val created = tool("create", """{"path":"new.txt","text":"hi","force":true}""")
 
         assertTrue("the edit is refused: $edited", edited.startsWith(AgentLog.FAILURE))
