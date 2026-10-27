@@ -330,7 +330,7 @@ class AgentRunner(
             // person (or did not) long before this check, and posting the question again every four
             // minutes is what the reminder ladder is for, and it counts its own.
             if (how is Agent.End) {
-                put(how.onto(current, now))
+                put(how.onto(current, now, reconnectMs = settings.reconnectMs))
                 polled(
                     project,
                     // **One line when an outage ends, with the count.** The outage is bracketed — the

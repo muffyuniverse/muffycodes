@@ -191,25 +191,35 @@ class Agent(
          * The rule is the operator's own: it must never stop until they remove it, and it must never
          * be restarted by anything but them either.
          */
-        fun onto(session: AgentSession, now: Long): AgentSession =
+        fun onto(
+            session: AgentSession,
+            now: Long,
+            reconnectMs: Long = AgentSession.DEFAULT_RECONNECT_MS,
+        ): AgentSession =
             if (session.state == AgentSession.State.STOPPED &&
                 session.reason == AgentSession.StopReason.BY_OPERATOR
             ) {
                 session
             } else {
-                after(session, now)
+                after(session, now, reconnectMs)
             }
 
-        fun after(session: AgentSession, now: Long): AgentSession = when (this) {
+        /**
+         * [reconnectMs] is **the operator's window**, passed in rather than read here: this is a
+         * nested class, so it has no `Agent` to ask, and the number that applies is the one in force
+         * when the turn began.
+         */
+        fun after(
+            session: AgentSession,
+            now: Long,
+            reconnectMs: Long = AgentSession.DEFAULT_RECONNECT_MS,
+        ): AgentSession = when (this) {
             is Concluded -> session.concluded(now)
             // **The person speaking does not change the session.** The agent is still on and the
             // words that interrupted it are the next turn; a stop is the only thing here that
             // switches anything off.
             is Interrupted -> session
             is Stopped -> if (retryable) {
-                // **The operator's window, not the app's.** How long a failing connection is
-                // retried is a question only they can answer: a tunnel is minutes, a dead key is
-                // never.
                 session.copy(lastWords = why).failed(now, forMs = reconnectMs)
             } else {
                 session.stopped(reason, why)

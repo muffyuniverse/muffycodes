@@ -2540,7 +2540,9 @@ class AppViewModel @JvmOverloads constructor(
      */
     private fun applyEnd(project: String, end: Agent.End, now: Long) {
         val current = sessionOf(project) ?: return
-        val next = end.onto(current, now)
+        // **The window in force for this turn**, not the one in Settings now: a person changing it
+        // mid-turn should not have the turn it started with reinterpreted.
+        val next = end.onto(current, now, reconnectMs = settings.reconnectMs)
         if (next != current) putSession(next)
     }
 
