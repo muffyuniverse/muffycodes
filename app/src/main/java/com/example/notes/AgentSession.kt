@@ -410,6 +410,35 @@ data class AgentSession(
     // ---- the endings --------------------------------------------------------
 
     /**
+     * Started with the operator's interval.
+     *
+     * **The interval travels with the session**, so a tick after a reboot knows how often this one
+     * is checked on without reading the settings — and so a person changing the number affects the
+     * sessions that exist, through the runner passing its own value to [warmDue].
+     */
+    fun withInterval(every: Long): AgentSession = copy(idleMs = every)
+
+    /**
+     * The model said something and called nothing: **idle, and silent.**
+     *
+     * There is nothing wrong with finishing, so this is not a state anybody is told about. The
+     * keepalive picks it up from here — which is what `warmFrom` is: the ceiling in Settings runs
+     * from the moment the wait began rather than from the last ping, which would push it along for
+     * ever.
+     */
+    fun concluded(at: Long): AgentSession = copy(
+        state = State.IDLE,
+        sub = Sub.FINISHED,
+        reason = null,
+        retries = 0,
+        retryFrom = 0,
+        askedAt = 0,
+        reminders = 0,
+        lastPollAt = at,
+        warmFrom = at,
+    )
+
+    /**
      * The session stopped.
      *
      * A turn that ends in `Stopped` is not always the session stopping: a refusal the agent can
