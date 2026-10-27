@@ -35,7 +35,21 @@ data class AgentSession(
     val reason: StopReason? = null,
     /** Consecutive failed polls, which is what the reconnect label counts. */
     val retries: Int = 0,
-    /** When the agent last ended a turn in `ask`. */
+    /**
+     * When this session's ladder started, or 0 when it is not reconnecting.
+     *
+     * **Its own field, not a reading of `lastPollAt`.** A failure rewrites `lastPollAt` to the next
+     * attempt, so it moves forward with every try — deriving the start from it would make the window
+     * infinite, which is the bug this field exists to prevent.
+     */
+    val retryFrom: Long = 0,
+    /**
+     * When this session last started needing a person, or 0.
+     *
+     * It was "when the agent ended a turn in `ask`". With no `ask` it is the moment the reconnect
+     * ladder gave up — which is when a session becomes something to be reminded about, and so the
+     * same clock for the same purpose.
+     */
     val askedAt: Long = 0,
     /** Reminders already sent for this ask, so the second one says "2nd". */
     val reminders: Int = 0,
@@ -77,7 +91,20 @@ data class AgentSession(
 ) {
 
     /** The three states of §2.3, and the two the operator did not choose are the ones that speak. */
-    enum class State { IDLE, ASKED, STOPPED }
+    /**
+     * **Two states, not three.**
+     *
+     * `ASKED` was the third: the agent had called `ask`, and the session waited for a person to
+     * answer. The tool is gone — an agent that needs something says it in its own words and goes
+     * idle — so two situations are left, and they are the operator's own words for them:
+     *
+     * 1. **Something went wrong** — a network error, a provider refusing, a balance that ran out.
+     *    The app reconnects on its own ladder and **tells somebody only when the ladder is spent**,
+     *    because a notification about a tunnel is noise.
+     * 2. **Idle**, waiting for the operator to answer. Not a problem and not something to be
+     *    notified about: the keepalive covers it, and the person comes back when they come back.
+     */
+    enum class State { IDLE, STOPPED }
 
     /** The idle agent's three sub-labels. */
     enum class Sub { WAITING, FINISHED, RECONNECTING }
@@ -130,8 +157,20 @@ data class AgentSession(
         /** The reconnect ladder: one second, then doubling to four, and no further. */
         const val RETRY_CAP_MS = 4_000L
 
-        /** How many times a failing poll reconnects before the session admits it is a wall. */
-        const val MAX_RETRIES = 8
+        /**
+         * **How long the ladder keeps trying, and it is the operator's number.**
+         *
+         * Ten minutes by default, which is the answer to "a tunnel, a lift, a network change, a
+         * provider having a bad afternoon" — and it is a *duration* rather than a count of tries.
+         * A count was the old shape (eight attempts at one, two and four seconds: half a minute),
+         * and it had a property nobody would choose: the window it covered depended on the backoff
+         * schedule, so changing the schedule silently changed how long the app tried.
+         *
+         * A duration says what it means. It also makes the two situations the operator named
+         * distinct by construction: **something went wrong** is retried for this long and then
+         * somebody is told; **idle** is not a problem and is never retried against a clock.
+         */
+        const val DEFAULT_RECONNECT_MS = 10 * 60 * 1000L
 
         /**
          * How many intervals late a poll has to be before the app says the phone was not running it.
@@ -184,7 +223,7 @@ data class AgentSession(
      * kept asking about it would be arguing with them.
      */
     val needsYou: Boolean
-        get() = state == State.ASKED || (state == State.STOPPED && reason != StopReason.BY_OPERATOR)
+        get() = state == State.STOPPED && reason != StopReason.BY_OPERATOR
 
     // ---- the poll's clock ---------------------------------------------------
 
@@ -300,6 +339,9 @@ data class AgentSession(
         // only a session that was reconnecting is moved: one that asked a question is still asked,
         // and one that finished is still finished.
         retries = 0,
+        // **The ladder is over, so its clock is cleared.** A stale start would make the *next*
+        // outage inherit this one's window and give up almost immediately.
+        retryFrom = 0,
         sub = if (sub == Sub.RECONNECTING) Sub.WAITING else sub,
     )
 
@@ -314,6 +356,7 @@ data class AgentSession(
         sub = Sub.WAITING,
         reason = null,
         retries = 0,
+        retryFrom = 0,
         askedAt = 0,
         reminders = 0,
         lastPollAt = at,
@@ -321,22 +364,35 @@ data class AgentSession(
         lastWords = "",
     )
 
-    /** A ping could not be sent, or was refused: the ladder decides when to try again. */
-    fun failed(at: Long): AgentSession {
+    /**
+     * A ping could not be sent, or was refused: the ladder decides when to try again.
+     *
+     * **The limit is a duration, and it is the operator's.** [forMs] is how long this session has
+     * been trying; once that is spent the session admits it is a wall and stops, which is the moment
+     * somebody is told. A count of tries was the old shape and it meant the same thing less
+     * honestly — the window depended on the backoff schedule, so changing the schedule changed how
+     * long the app tried without anybody choosing it.
+     *
+     * [began] is when the ladder started. It is carried on the session rather than passed in,
+     * because a failure is recorded by whoever noticed it — the runner for a ping, the agent for a
+     * turn — and neither of them holds the clock this session has been running against.
+     */
+    fun failed(at: Long, forMs: Long = DEFAULT_RECONNECT_MS): AgentSession {
         val tries = retries + 1
-        // **A blip reconnects; a wall stops.** Eight attempts at one, two and four seconds is
-        // half a minute of trying — long enough to survive a tunnel, an elevator, a network
-        // change, and short enough that a key that will never work is not retried for ever at
-        // four seconds a time on somebody's battery.
-        if (tries > MAX_RETRIES) {
+        val began = if (retryFrom > 0) retryFrom else at
+        val spent = forMs > 0 && at - began >= forMs
+        if (spent) {
             return stopped(
                 StopReason.PIN_REFUSED,
-                lastWords.ifBlank { "the provider refused $tries times" },
-            )
+                lastWords.ifBlank {
+                    "the provider refused for ${forMs / 60_000} minutes ($tries tries)"
+                },
+            ).copy(askedAt = at)
         }
         return copy(
             sub = Sub.RECONNECTING,
             retries = tries,
+            retryFrom = began,
             lastPollAt = at - POLL_MS + retryDelay(tries),
         )
     }
@@ -348,47 +404,11 @@ data class AgentSession(
     }
 
     /** The agent is back: whatever the ladder was doing, it is over. */
-    fun reconnected(at: Long): AgentSession = copy(sub = Sub.WAITING, retries = 0, lastPollAt = at)
+    fun reconnected(at: Long): AgentSession =
+        copy(sub = Sub.WAITING, retries = 0, retryFrom = 0, lastPollAt = at)
 
     // ---- the endings --------------------------------------------------------
 
-    /** `ask` ended a turn: the person is needed, and the reminder clock starts now. */
-    fun asked(at: Long): AgentSession = copy(
-        state = State.ASKED,
-        sub = Sub.WAITING,
-        reason = null,
-        retries = 0,
-        askedAt = at,
-        reminders = 0,
-        // **The keepalive starts here.** An answered question is the likeliest thing to be answered
-        // next, and the ceiling in Settings runs from the moment the wait began rather than from the
-        // last ping — which would push the ceiling along for ever.
-        lastPollAt = at,
-        warmFrom = at,
-    )
-
-    /**
-     * Started with the operator's interval.
-     *
-     * **The interval travels with the session**, so a tick after a reboot knows how often this one
-     * is checked on without reading the settings — and so a person changing the number affects the
-     * sessions that exist, through the runner passing its own value to [warmDue].
-     */
-    fun withInterval(every: Long): AgentSession = copy(idleMs = every)
-
-    /** `conclude` ended a turn: idle, and silent — there is nothing wrong with finishing. */
-    fun concluded(at: Long): AgentSession = copy(
-        state = State.IDLE,
-        sub = Sub.FINISHED,
-        reason = null,
-        retries = 0,
-        askedAt = 0,
-        reminders = 0,
-        lastPollAt = at,
-        warmFrom = at,
-    )
-
-    /** `wait` ended a turn: idle and polling. */
     /**
      * The session stopped.
      *
@@ -400,6 +420,7 @@ data class AgentSession(
         state = State.STOPPED,
         reason = why,
         retries = 0,
+        retryFrom = 0,
         lastWords = words,
     )
 
@@ -440,13 +461,14 @@ data class AgentSession(
             Sub.RECONNECTING -> "reconnecting (${retryDelay(retries) / 1000} s)"
         }
 
-        State.ASKED -> "asked" + if (askedAt > 0 && at > askedAt) {
+        // **"stopped" carries how long it tried.** A session that stopped after ten minutes of
+        // reconnecting should say so: it tells the person the app did its part, which is the
+        // difference between "it broke" and "it tried and then told me".
+        State.STOPPED -> "stopped · " + stopWords(this) + if (askedAt > 0 && at > askedAt) {
             " · ${(at - askedAt) / 60_000} min"
         } else {
             ""
         }
-
-        State.STOPPED -> "stopped · " + stopWords(this)
     }
 
     /**
@@ -459,7 +481,6 @@ data class AgentSession(
     fun notice(): String? {
         if (!needsYou) return null
         val said = when (state) {
-            State.ASKED -> "$project: the agent asked something"
             State.STOPPED -> "$project: stopped, ${stopWords(this)}"
             State.IDLE -> return null
         }

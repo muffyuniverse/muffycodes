@@ -2285,6 +2285,7 @@ class AppViewModel @JvmOverloads constructor(
                     // one is not invisible to the other.
                     bg = runner?.bg ?: Background.inline(),
                     foregroundMs = settings.foregroundMs,
+                    reconnectMs = settings.reconnectMs,
                     backgroundMs = { settings.backgroundMs },
                     sessionBytes = settings.sessionBytes,
                     // Read at every boundary rather than captured: the person may speak or stop while

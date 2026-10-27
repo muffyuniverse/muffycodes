@@ -359,10 +359,15 @@ class AgentSessionFeatureTest : FeatureTest() {
     @Test
     fun `a key the provider refuses ends the session with words`() {
         // **The one ping failure that is the person's to fix.** A blip reconnects; a wall stops. The
-        // difference is eight tries, and what a person reads afterwards is the provider's own
-        // sentence rather than the app's guess at it. A 5xx is not this case: that is a ping missed.
+        // difference is how long the ladder tried, and what a person reads afterwards is the
+        // provider's own sentence rather than the app's guess at it. A 5xx is not this case: that is
+        // a ping missed.
         listening()
         scene.project("groceries")
+        // **The floor, because this test drives real ticks.** The window is a duration now, so a
+        // default of ten minutes would mean ten minutes of real time before the session gave up —
+        // the shortest the setting allows is the old eight-try window, which is what this needs.
+        scene.settings.keepReconnect(SettingsStore.MIN_RECONNECT_SECONDS)
         // **One door, not a new one per poll.** A lambda that built a door on every call would
         // reset its own attempt count, and a failure count that resets is not a failure count.
         val broken = FlakyDoor(times = Int.MAX_VALUE, code = 401)
@@ -372,7 +377,10 @@ class AgentSessionFeatureTest : FeatureTest() {
         var last = ""
         var ticks = 0
         while (scene.viewModel.sessionOf("groceries")?.state != AgentSession.State.STOPPED &&
-            ticks < AgentSession.MAX_RETRIES + 4
+            // **A count of ticks, because the ladder's own limit is a duration.** Each tick moves
+            // the clock by the retry delay, so half a minute of window is a handful of ticks; the
+            // ceiling here is what stops the loop if the ladder never gives up.
+            ticks < 40
         ) {
             tick("groceries")
             ticks++

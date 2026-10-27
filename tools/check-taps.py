@@ -74,6 +74,10 @@ VOCABULARY = {
     # the agent itself, how often it reminds, and the numbers it runs with
     "start agent", "stop agent", "stop all agents", "reset agent", "remind me",
     "answer timeout", "result length",
+    # **how long a failing connection is retried before somebody is told.** Its own name rather than
+    # folded into "answer timeout": they bound different things, and a log that could not tell them
+    # apart would not answer "did it give up, or was it still trying".
+    "reconnect window",
     # the three waits the operator owns: the keepalive that keeps a waiting conversation warm (its
     # switch, its interval and its ceiling), and the two command limits — how long a command whose
     # result goes into the conversation may run, and how long one whose result goes to a file may

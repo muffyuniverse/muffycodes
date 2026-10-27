@@ -80,6 +80,15 @@ class Agent(
     private val bg: Background = Background.none(),
     private val foregroundMs: Long = 0L,
     /**
+     * How long a failing connection is retried before the session stops and says a person is
+     * needed — **the operator's window**, from Settings.
+     *
+     * Passed in rather than read here for the same reason every other limit is: the agent is built
+     * with the numbers in force when the turn began, so a setting changed mid-turn cannot make one
+     * turn follow two rules.
+     */
+    private val reconnectMs: Long = AgentSession.DEFAULT_RECONNECT_MS,
+    /**
      * The clock a foreground deadline is measured against.
      *
      * **Injected so a test can say the wait is over** without sleeping for it. The deadline itself
@@ -198,7 +207,10 @@ class Agent(
             // switches anything off.
             is Interrupted -> session
             is Stopped -> if (retryable) {
-                session.copy(lastWords = why).failed(now)
+                // **The operator's window, not the app's.** How long a failing connection is
+                // retried is a question only they can answer: a tunnel is minutes, a dead key is
+                // never.
+                session.copy(lastWords = why).failed(now, forMs = reconnectMs)
             } else {
                 session.stopped(reason, why)
             }

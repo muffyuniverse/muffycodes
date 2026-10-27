@@ -346,7 +346,7 @@ class AgentRunner(
                 // **The words travel with the ladder**, or the session stops saying only "the pinned
                 // provider refused" when the provider said why. This one may speak: it is the moment
                 // a session that was fine became one that needs fixing.
-                put(current.copy(lastWords = how.why).failed(now))
+                put(current.copy(lastWords = how.why).failed(now, forMs = settings.reconnectMs))
                 polled(project, rows)
             } else {
                 put(current.warmed(now), speak = false)

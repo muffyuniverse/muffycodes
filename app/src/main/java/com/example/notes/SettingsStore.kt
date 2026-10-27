@@ -285,6 +285,39 @@ class SettingsStore(context: Context, name: String = "settings") {
     val backgroundMs: Long get() = backgroundSeconds * 1000L
 
     /**
+     * **How long a failing connection is retried before somebody is told, in seconds.**
+     *
+     * The two situations this app can be in are the operator's own words for them: *something went
+     * wrong* — a network error, a provider refusing, a balance that ran out — and *idle*, waiting
+     * for an answer. The first is retried on the ladder at one, two and four seconds; this is how
+     * long that goes on before the session stops and says a person is needed.
+     *
+     * **Ten minutes by default.** Long enough for a tunnel, a lift, a network change and a provider
+     * having a bad afternoon; short enough that a key which will never work is not retried all night
+     * on somebody's battery.
+     *
+     * **A duration rather than a count of tries.** The old shape was eight attempts, and the window
+     * it covered was whatever the backoff schedule happened to add up to — so changing the schedule
+     * silently changed how long the app tried. A duration says what it means.
+     */
+    var reconnectSeconds: Int by mutableStateOf(
+        prefs.getInt(KEY_RECONNECT, DEFAULT_RECONNECT_SECONDS)
+    )
+        private set
+
+    /** Sets how long the ladder tries, clamped to a window a person would recognise. */
+    fun keepReconnect(seconds: Int) {
+        val clean = seconds.coerceIn(MIN_RECONNECT_SECONDS, MAX_RECONNECT_SECONDS)
+        Trace.tap("reconnect window", "$clean s")
+        reconnectSeconds = clean
+        prefs.edit().putInt(KEY_RECONNECT, clean).apply()
+        Trace.said("the app retries a failing connection for $clean seconds")
+    }
+
+    /** The reconnect window in milliseconds, which is what the ladder is given. */
+    val reconnectMs: Long get() = reconnectSeconds * 1000L
+
+    /**
      * How long the app waits for the model's answer, **in seconds**.
      *
      * **This is what turns "the provider is not answering" into a blip.** The door's read timeout
@@ -427,6 +460,9 @@ class SettingsStore(context: Context, name: String = "settings") {
      */
     const val KEY_TIMEOUT = "agent_timeout_seconds"
 
+    /** How long a failing connection is retried. A new key: it is a new number, not a renamed one. */
+    const val KEY_RECONNECT = "agent_reconnect_seconds"
+
     /** Whether a waiting conversation is kept warm, how often, and for how long. */
     const val KEY_KEEPALIVE = "agent_keepalive"
     const val KEY_WARM_MINUTES = "agent_warm_minutes"
@@ -450,6 +486,9 @@ class SettingsStore(context: Context, name: String = "settings") {
 
     /** Four minutes: the brief's own number, and long enough for a turn that does real work. */
     const val DEFAULT_TIMEOUT_SECONDS = 240
+
+    /** Ten minutes of trying, which is what the operator asked for. */
+    const val DEFAULT_RECONNECT_SECONDS = 600
 
     /** The keepalive interval: a floor below which pinging is a loop of its own, and the 250 s cap. */
     const val MIN_POLL_SECONDS = 15
@@ -489,6 +528,18 @@ class SettingsStore(context: Context, name: String = "settings") {
      * **The same numbers the minutes version had** — 1 minute to 30 — expressed in the unit the rest
      * of the screen uses. A person who wants four minutes types 240.
      */
+    /**
+     * **Half a minute is the floor, and it is the old behaviour's own window.**
+     *
+     * Eight tries at one, two and four seconds added up to about half a minute; a person who wants
+     * the app to give up quickly can ask for exactly that, and no less — below it the ladder barely
+     * completes one round trip.
+     */
+    const val MIN_RECONNECT_SECONDS = 30
+
+    /** An hour: past this the app is retrying something that will not heal while the phone sleeps. */
+    const val MAX_RECONNECT_SECONDS = 3_600
+
     const val MIN_TIMEOUT_SECONDS = 60
     const val MAX_TIMEOUT_SECONDS = 1_800
 

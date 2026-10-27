@@ -399,6 +399,24 @@ fun SettingsScreen(
                 placeholder = "${SettingsStore.DEFAULT_TIMEOUT_SECONDS}",
                 onValueChange = { settings.keepTimeout(it) },
             )
+            // **The other half of the same question**, and it is a different number: the one above
+            // bounds a single request, and this bounds how long a *failure* is retried before the
+            // agent stops and asks for help. A dropped request is not a stopped agent — the ladder
+            // at one, two and four seconds exists so a tunnel does not end a session — so the
+            // window is how long that is allowed to go on.
+            LengthField(
+                label = "Keep trying a failing connection for (seconds)",
+                value = settings.reconnectSeconds,
+                placeholder = "${SettingsStore.DEFAULT_RECONNECT_SECONDS}",
+                onValueChange = { settings.keepReconnect(it) },
+            )
+            Text(
+                text = "Now: retried for ${settings.reconnectSeconds / 60} min, then the agent " +
+                    "stops and says it needs help. An agent waiting for your answer is not " +
+                    "failing - it is idle, and is kept warm instead.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
             Text(
                 text = "Now: past ${settings.timeoutSeconds} s the request is dropped and tried " +
                     "again on another provider. An answer longer than this is never cut: a result " +
