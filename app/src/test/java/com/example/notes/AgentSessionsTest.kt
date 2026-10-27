@@ -47,6 +47,29 @@ class AgentSessionsTest {
     }
 
     @Test
+    fun `the reconnect ladder's start survives the file, or the window never ends`() {
+        // **The bug this pins was a field that existed only in memory.** `retryFrom` is when the
+        // ladder began, and `failed()` measures the operator's window from it. Every tick reads the
+        // session from this file — so a `retryFrom` that was never written came back as 0, `failed()`
+        // read that as "the ladder began just now", and the window could never elapse: the session
+        // retried for ever and nobody was ever told.
+        //
+        // It was found by a test that waited for a stop and never got one, with the session still
+        // saying "idle · waiting" after forty attempts.
+        val retrying = AgentSession("shopping")
+            .polled(1_000)
+            .failed(at = 2_000)
+            .failed(at = 3_000)
+
+        store.put(retrying)
+        val read = store.read().single()
+
+        assertEquals("the ladder is still in progress", AgentSession.Sub.RECONNECTING, read.sub)
+        assertEquals("and it remembers when it began", 2_000, read.retryFrom)
+        assertEquals("so the count of tries came too", 2, read.retries)
+    }
+
+    @Test
     fun `a session survives a restart, so an agent does not quietly forget it was asked`() {
         // The failure this exists for: the app is killed while the agent is waiting for an
         // answer, and on the next open the session has to still be `asked` with its clock — or

@@ -64,6 +64,11 @@ class AgentSessions(private val accountDir: File) {
             reason = json.optString("reason").takeIf { it.isNotEmpty() }
                 ?.let { enumOr<AgentSession.StopReason>(it, AgentSession.StopReason.ERROR) },
             retries = json.optInt("retries", 0).coerceAtLeast(0),
+            // **When the ladder started, and it has to be on disk or it means nothing.** Every
+            // tick reads the session from this file, so a `retryFrom` that lived only in memory
+            // would reset to 0 on the next read — and `failed()` would take "the ladder began just
+            // now" every time, which is a window that never elapses.
+            retryFrom = json.optLong("retryFrom", 0).coerceAtLeast(0),
             askedAt = json.optLong("askedAt", 0),
             reminders = json.optInt("reminders", 0).coerceAtLeast(0),
             lastPollAt = json.optLong("lastPollAt", 0),
@@ -122,6 +127,7 @@ class AgentSessions(private val accountDir: File) {
         .put("sub", s.sub.name)
         .put("reason", s.reason?.name ?: "")
         .put("retries", s.retries)
+        .put("retryFrom", s.retryFrom)
         .put("askedAt", s.askedAt)
         .put("reminders", s.reminders)
         .put("lastPollAt", s.lastPollAt)
