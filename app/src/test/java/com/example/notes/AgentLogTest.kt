@@ -571,10 +571,11 @@ class AgentLogTest {
 
     @Test
     fun `two writers at once never hand out the same number`() {
-        // **Two `AgentLog` objects, two threads.** The guard inside the class is per instance, so
-        // two of them over one project do not exclude each other: both can look at the file, both
-        // see it unchanged since they opened, and both take the same next id. The counter has to be
-        // checked against the file under a lock the *file* owns, not the object.
+        // **Four `AgentLog` objects, four threads, one file.** The lock and the sequence behind it
+        // belong to the file rather than to the object: with a counter per instance, two writers
+        // opened on an empty file both take id 1, and one number on two rows is the thing that
+        // breaks this record — `forget` takes ids, so it would remove the wrong row. The whole
+        // sequence is asserted, because "no duplicate" is also true of 75 rows with 25 gaps.
         val threads = 4
         val each = 25
         val start = java.util.concurrent.CountDownLatch(1)
@@ -593,9 +594,9 @@ class AgentLogTest {
         val ids = log.rows().map { it.id }
         assertEquals("every row written", threads * each, ids.size)
         assertEquals(
-            "and every id distinct: ${ids.sorted().take(8)}…",
-            ids.size,
-            ids.toSet().size,
+            "one sequence, one row per number: ${ids.sorted().take(8)}…",
+            (1..(threads * each)).toList(),
+            ids.sorted(),
         )
     }
 

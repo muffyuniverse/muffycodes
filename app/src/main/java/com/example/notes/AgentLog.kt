@@ -53,20 +53,24 @@ class AgentLog private constructor(
      */
     private val file: File get() = session
 
-    private val guard: Any get() = lockFor(file)
+    private val guard: Any get() = gateFor(file)
 
-    /** The id the next row gets. **One file, so one sequence** — a row's id means one row. */
-    private var next = 1
+    /** The file's numbers: the lock, and the id sequence that goes with it. */
+    private val gate: Gate get() = gateFor(file)
 
     /**
-     * The session's length after this instance's own last append; `-1` until it writes.
+     * The sequence and the file length it was worked out from — **one of these per file.**
      *
-     * **A counter in memory goes stale the moment another writer touches the file**, and two rows
-     * with one id is the one thing that breaks this record: an id is how a row is taken out of the
-     * context, so an id that meant two rows would forget the wrong one. [nextId] compares the file
-     * against what this instance left and re-reads the highest id when they differ.
+     * Held in the process's map rather than in an instance because the file has one sequence, and
+     * because the numbers and the lock that protects them should not be two different things.
      */
-    private var seen = -1L
+    private class Gate {
+        /** The id the next row gets; `0` until the file has been read. */
+        var next: Int = 0
+
+        /** The session's length when [next] was last checked against the file. */
+        var seen: Long = -1L
+    }
 
     companion object {
 
@@ -173,28 +177,41 @@ class AgentLog private constructor(
             Regex("""^ *(\d+) +(\d+) +(\S+) +(\S+) +(\S+)(?:  (.*))?$""")
 
         /**
-         * One lock per record file, for the whole process.
+         * The one gate per record file, for the whole process — **and the id sequence with it.**
          *
          * Keyed by the file rather than by the project so two `AgentLog`s from two threads share
          * it — and never removed, because a lock that is dropped while somebody holds it is worse
          * than a map that keeps a few strings.
+         *
+         * **The numbers live here rather than in an instance, because the file has one sequence.**
+         * A counter per instance is a counter per reader: two of them over one file each believe
+         * they are the one that wrote last, and both hand out the same id. Keeping [Gate.next] and
+         * [Gate.seen] behind the file's own lock means there is one answer to "what is the next id"
+         * for everybody writing that file.
          */
-        private val locks = java.util.concurrent.ConcurrentHashMap<String, Any>()
+        private val gates = java.util.concurrent.ConcurrentHashMap<String, Gate>()
 
-        private fun lockFor(session: File): Any =
-            locks.computeIfAbsent(session.absolutePath) { Any() }
+        private fun gateFor(session: File): Gate =
+            gates.computeIfAbsent(session.absolutePath) { Gate() }
 
         /** Opens the record of the project in [projectDir], making the folder on first use. */
         fun open(projectDir: File): AgentLog {
             val dir = File(projectDir, DIR)
             dir.mkdirs()
             val log = AgentLog(File(dir, SESSION), File(dir, CONTEXT))
-            val rows = log.parse(log.session)
-            log.load(rows)
-            // **The context file is written when it is absent, and never compared.** A record whose
-            // second file was deleted has rows the model is meant to read and no place to read them
-            // from; every other open finds it in step because every whole-record write writes both.
-            if (!log.context.isFile) log.writeContext(rows)
+            // **Read and sized under one hold of the lock.** Parsing outside it and then asking the
+            // file's length inside is the race this class exists to prevent: another writer appends
+            // between the two, and this instance adopts a length that describes rows it never saw —
+            // so it thinks the file is unchanged and mints an id that is already taken.
+            synchronized(log.guard) {
+                val rows = log.parse(log.session)
+                log.adopt(rows)
+                // **The context file is written when it is absent, and never compared.** A record
+                // whose second file was deleted has rows the model is meant to read and no place to
+                // read them from; every other open finds it in step because every whole-record write
+                // writes both.
+                if (!log.context.isFile) log.writeContext(rows)
+            }
             return log
         }
 
@@ -446,7 +463,6 @@ class AgentLog private constructor(
             } catch (t: Throwable) {
                 return 0
             }
-            seen = size()
             return oldest.size
         }
     }
@@ -479,7 +495,6 @@ class AgentLog private constructor(
         // either. After this the next request is the instructions and the new task.
         val marked = rows().map { if (it.ctx == IN) it.flipped(APP) else it }
         store(marked, marker)
-        seen = size()
         id
     }
 
@@ -536,7 +551,7 @@ class AgentLog private constructor(
             // for itself (`app`) never enters it, which is what keeps a repeated `wait` out of the
             // request and the request byte-identical between polls.
             if (ctx == IN) append(context, LogFormat.contextRow(id, cost, name, detail))
-            seen = size()
+            gate.seen = size()
             return id
         }
     }
@@ -556,7 +571,6 @@ class AgentLog private constructor(
         val marker = LogFormat.recordRow(nextId(), ContextBudget.tokens(said), NOTE, APP, "forgot", said)
         val changed = rows.map { if (it.id in ids) it.flipped(OUT) else it }
         store(changed, marker)
-        seen = size()
         ids.size
     }
 
@@ -573,10 +587,14 @@ class AgentLog private constructor(
      * reader must see either the old one whole or the new one whole.
      *
      * [rows] is in the order it happened, and [marker] is appended as the newest row.
+     *
+     * **Called with the lock held**, and it leaves the gate describing the file it just wrote — so
+     * a caller cannot rewrite the record and then hand out an id from the version before it.
      */
     private fun store(rows: List<Row>, marker: String) {
         Beside.write(file, (rows.map { it.line } + marker).joinToString("\n") + "\n")
         writeContext(rows)
+        gate.seen = size()
     }
 
     /** The context file's lines for [rows]: the rows that are `in`, as `id size name body`. */
@@ -596,23 +614,28 @@ class AgentLog private constructor(
     }
 
     /**
-     * The next id, checked against the file rather than trusted from memory.
+     * The next id — **from the file's own sequence, under the file's own lock.**
      *
-     * The cheap case — this instance wrote last — is one `length()` call. The expensive case is
-     * one re-read, and it happens only when somebody else appended: a second `AgentLog` for the
-     * same project (the box reading while a poll writes), or the agent's own `forget` having
-     * rewritten the file. Reusing an id there would make two different rows share one number — and
-     * an id is the handle `forget` takes, so that would be a compaction that removes the wrong row.
+     * *Next* is not a number this object keeps: it belongs to the file, in [Gate], so two `AgentLog`s
+     * over one project cannot each believe they are the one that wrote last. That was the bug this
+     * used to have: the counter was per instance, so two writers opened on an empty file both took
+     * id 1 and two rows shared a number — and an id is the handle `forget` takes, so a compaction
+     * could remove the wrong row.
+     *
+     * The file is still asked, once per write, because a length is the only cheap way to tell that
+     * something moved that this process did not do. Re-reading is the expensive case and it happens
+     * only then.
      */
     private fun nextId(): Int {
+        val g = gate
         val length = size()
-        if (length != seen) {
-            // **Re-read rather than trust.** The file moved under this instance — another writer
-            // appended, or a whole-record write rewrote it — so the highest id is asked of the file.
-            next = maxOf(next, parse(file).maxOfOrNull { it.id }?.plus(1) ?: next)
-            seen = length
+        if (g.next == 0 || g.seen != length) {
+            // **Re-read rather than trust.** The file moved outside this process, or a whole-record
+            // write rewrote it — so the highest id is asked of the file and the gate taken from it.
+            g.next = maxOf(g.next, (parse(file).maxOfOrNull { it.id } ?: 0) + 1)
+            g.seen = length
         }
-        return next++
+        return g.next++
     }
 
     private fun size(): Long = try {
@@ -700,16 +723,17 @@ class AgentLog private constructor(
     // ---- opening ------------------------------------------------------------
 
     /**
-     * Numbers the next row from the rows [open] read.
+     * Takes the numbers of the rows [open] read into the file's gate.
      *
-     * **Nothing is written here.** Sealing a dangling call belongs to [beginSession], and making
-     * the context file when it is absent belongs to [open].
+     * **Called with the lock held, in the same hold as the parse.** That is the whole point: a
+     * parse taken outside the lock and a length taken inside it describe two different files, so
+     * the instance would believe it had seen rows it had not and would hand out an id already
+     * written. Nothing is written here; sealing a dangling call belongs to [beginSession].
      */
-    private fun load(rows: List<Row>) {
-        synchronized(guard) {
-            next = (rows.maxOfOrNull { it.id } ?: 0) + 1
-            seen = size()
-        }
+    private fun adopt(rows: List<Row>) {
+        val g = gate
+        g.next = (rows.maxOfOrNull { it.id } ?: 0) + 1
+        g.seen = size()
     }
 
     /**
@@ -818,7 +842,6 @@ class AgentLog private constructor(
             } catch (t: Throwable) {
                 return 0
             }
-            seen = size()
             return dropped
         }
     }
