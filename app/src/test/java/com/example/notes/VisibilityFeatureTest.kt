@@ -257,9 +257,12 @@ class VisibilityFeatureTest : FeatureTest() {
         assertTrue("agent/ is structural", ws.isStructural(records))
         assertFalse("an ordinary file is not", ws.isStructural(target))
 
+        // **The picker's own rule, asked of the app rather than re-implemented here.** This test
+        // used to rebuild the filter by hand, which meant it could agree with a broken picker; it
+        // asks `canHoldFiles`, the function the dialog actually calls.
         val offered = (target.parentFile!!.listFiles() ?: emptyArray())
             .filter { it.isDirectory && it.name != target.name }
-            .filterNot { ws.isHidden(it.name) || ws.isStructural(it) }
+            .filter { scene.viewModel.canHoldFiles(it) }
             .map { it.name }
 
         // **Still not a destination, and now for a stated reason.** Report 28 made `.muffy` a row, so

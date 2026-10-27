@@ -97,7 +97,7 @@ class WorkspaceTest {
     }
 
     @Test
-    fun `hidden things are never listed`() {
+    fun `only git's store and the folder marker are never listed`() {
         val dir = workspace.accountDir
         File(dir, "visible.txt").writeText("hi")
         File(dir, ".gitignore").writeText("x")
@@ -112,7 +112,9 @@ class WorkspaceTest {
         //
         // Two names are still not listed, and neither is information: `.git` is git's own store, and
         // `.gitkeep` exists only so git can record an empty folder.
-        assertEquals(listOf(".muffy", "dotfile.txt", "visible.txt"), names)
+        // `.gitignore` is a person's file - it is the document they edit to decide what does not
+        // travel - so it is listed like any other. Folders first, then files, each by lowercase name.
+        assertEquals(listOf(".muffy", ".gitignore", "dotfile.txt", "visible.txt"), names)
     }
 
     @Test
