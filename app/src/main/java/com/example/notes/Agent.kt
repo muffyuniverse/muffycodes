@@ -324,7 +324,13 @@ class Agent(
         val request = try {
             build(layers, readOpening(layers, log, AgentTools.specs()), clearedUp = false)
         } catch (t: Throwable) {
-            return Warm.Failed(Secrets.explain(t, Warm.NOT_WARM))
+            // **A request that could not be built is not a ping that got through.** This said
+            // `stopping = false`, and the runner's false branch calls `warmed()` — which clears the
+            // ladder, because a ping that *arrived* is proof the transport is back. A build failure
+            // proves nothing of the kind: it is the app's own machinery, and it is very often the
+            // very thing that is wrong (a context that will not trim, a log that will not open).
+            // So it takes the same branch a refusal does, which is where a repeated failure belongs.
+            return Warm.Failed(Secrets.explain(t, Warm.NOT_WARM), stopping = true)
         }
         return door.ping(request).fold(
             onSuccess = {
