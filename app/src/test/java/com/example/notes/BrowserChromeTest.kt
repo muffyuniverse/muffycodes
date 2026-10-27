@@ -66,7 +66,11 @@ class BrowserChromeTest {
                             onCopy = {},
                             onDelete = {},
                             onTogglePin = {},
-                            onToggleLock = {},
+                            // **The real act, not an empty one.** This harness stubs every
+                            // callback, and a stub here made the lock test tap a no-op and then
+                            // assert the app had done nothing — which it had. The bug being tested
+                            // is that the *screen* does not redraw, so the write has to happen.
+                            onToggleLock = { scene.viewModel.toggleLocked(it.file) },
                             onHistory = {},
                             onSelect = {},
                         ),
