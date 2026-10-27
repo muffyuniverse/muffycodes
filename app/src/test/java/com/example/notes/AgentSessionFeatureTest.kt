@@ -495,7 +495,9 @@ class AgentSessionFeatureTest : FeatureTest() {
         // is the difference between another round of reading and an answer.
         assertEquals(
             "it gave up: $last · ticks=$ticks retries=${session?.retries} " +
-                "retryFrom=${session?.retryFrom} window=${scene.settings.reconnectMs}",
+                "retryFrom=${session?.retryFrom} window=${scene.settings.reconnectMs} " +
+                "asked=${broken.attempts} lastPollAt=${session?.lastPollAt} " +
+                "nextPollAt=${session?.nextPollAt} keepAlive=${scene.settings.keepAlive}",
             AgentSession.State.STOPPED,
             session?.state,
         )
