@@ -570,6 +570,21 @@ class AgentLogTest {
     }
 
     @Test
+    fun `opening a record does not make the project folder`() {
+        // **A reader must not create what it reads.** `open()` used to `mkdirs()` the whole path, so
+        // the chat box reading a conversation recreated a project folder the person had deleted —
+        // and a deleted project that reappears as an empty folder is one the screen offers a
+        // conversation for. Found as an intermittent failure: "the folder is really gone before the
+        // tick", where something had put it back between the delete and the assertion.
+        project.deleteRecursively()
+        assertFalse("the project is gone first", project.isDirectory)
+
+        AgentLog.open(project)
+
+        assertFalse("and reading its record does not bring it back", project.isDirectory)
+    }
+
+    @Test
     fun `two writers at once never hand out the same number`() {
         // **Four `AgentLog` objects, four threads, one file.** The lock and the sequence behind it
         // belong to the file rather than to the object: with a counter per instance, two writers

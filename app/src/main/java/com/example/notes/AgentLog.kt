@@ -194,10 +194,20 @@ class AgentLog private constructor(
         private fun gateFor(session: File): Gate =
             gates.computeIfAbsent(session.absolutePath) { Gate() }
 
-        /** Opens the record of the project in [projectDir], making the folder on first use. */
+        /**
+         * Opens the record of the project in [projectDir], **without making the project.**
+         *
+         * `agent/` is made when it is written to ([append] makes its parent), so opening a record
+         * has no reason to make anything. It used to `mkdirs()` the whole path, which meant **any
+         * reader recreated a project folder the person had deleted** — the chat box reading a
+         * conversation, a tick about to notice the folder was gone, a background result being
+         * filed. A deleted project that reappears as an empty folder is a project the screen then
+         * offers a conversation for, which is exactly the state `AgentRunner.tick` exists to
+         * remove. Reported as an intermittent test failure: "the folder is really gone before the
+         * tick", where the folder had been recreated between the delete and the assert.
+         */
         fun open(projectDir: File): AgentLog {
             val dir = File(projectDir, DIR)
-            dir.mkdirs()
             val log = AgentLog(File(dir, SESSION), File(dir, CONTEXT))
             // **Read and sized under one hold of the lock.** Parsing outside it and then asking the
             // file's length inside is the race this class exists to prevent: another writer appends
