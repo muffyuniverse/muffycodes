@@ -125,7 +125,10 @@ class AgentServiceTest {
             AgentSession("a", state = AgentSession.State.IDLE, lastPollAt = 1_000),
             AgentSession("b", state = AgentSession.State.STOPPED, reason = AgentSession.StopReason.PIN_REFUSED, askedAt = 2_000),
         )
-        assertEquals("2 sessions · 1 needs you", AgentSession.strip(sessions))
+        // **One is on and one needs you, and they are different sessions.** A session that needs
+        // help is stopped, so it is not also counted as on: the strip's first number is agents
+        // working, its second is agents wanting somebody.
+        assertEquals("1 session · 1 needs you", AgentSession.strip(sessions))
     }
 
     // ---- what the tray offers ----------------------------------------------

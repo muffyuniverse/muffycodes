@@ -370,7 +370,7 @@ class AgentRunnerTest {
     }
 
     @Test
-    fun `a stopped session is not woken, and an asked one is`() {
+    fun `a session that needs help is not woken, and one the person stopped is not either`() {
         // **The person's stop wins, and an answered question does not block its own answer.** A
         // session they switched off is not woken for anything; one waiting on an answer is woken,
         // because the result may be exactly what it was waiting for.
@@ -403,7 +403,10 @@ class AgentRunnerTest {
         settle(runner)
 
         assertEquals("a session that needs help is not woken", 0, door.asked.size)
-        assertEquals("and the wake's ending replaced it", AgentSession.Sub.FINISHED, runner.sessions().single().sub)
+        // **Nothing moved it, so it is still waiting to be fixed.** The old assertion checked that
+        // the wake's ending had replaced the state — which was true when a session waiting on an
+        // answer *was* woken. With no questions, waking it is the thing that must not happen.
+        assertEquals("and it still needs help", AgentSession.State.STOPPED, runner.sessions().single().state)
 
         // Stopped, and then a command lands: nothing is spent.
         runner.stop("shopping")
@@ -412,7 +415,11 @@ class AgentRunnerTest {
         runner.tick(9_001)
         settle(runner)
 
-        assertEquals("a stopped session is left alone", 1, door.asked.size)
+        // **Both halves prove the same thing now, and that is worth saying rather than hiding.**
+        // A session that needs help and one the person stopped are both stopped, so neither is woken;
+        // the two cases used to differ because a question *was* woken by a landing result. The
+        // assertion stays because it is the one that would fail if waking ever came back.
+        assertEquals("and a session the person stopped is left alone too", 0, door.asked.size)
     }
 
     @Test

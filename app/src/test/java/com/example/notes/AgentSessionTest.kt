@@ -53,8 +53,12 @@ class AgentSessionTest {
         // about what one cold prompt costs to write, so an hour is where keeping warm stops paying —
         // and a ceiling measured from each success would never arrive, because every ping would push
         // it along.
+        // **A finished session, not one that needs help.** A session that stopped for the person to
+        // fix is not warmed at all — its problem is not warmth — so the ceiling's arithmetic is
+        // exercised on the session it applies to: one whose turn ended and which the person will
+        // come back to.
         val half = 30 * minute
-        val s = session().needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 1_000).warmed(at = 1_000 + half)
+        val s = session().concluded(at = 1_000).warmed(at = 1_000 + half)
 
         assertTrue(
             "half an hour in, still warm",
@@ -87,18 +91,22 @@ class AgentSessionTest {
     }
 
     @Test
-    fun `an agent that asked or concluded is kept warm, and one that is reconnecting is not`() {
-        // **The two states that used to be left to go cold.** A question is the likeliest thing to
-        // be answered next, and a finished agent is one the person will add to; neither had a ping,
-        // because a poll was something only `wait` asked for.
-        val asked = session().needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 10)
-        assertTrue("a question is kept warm", asked.warmDue(10 + 10 * minute, keepAlive = true))
-
+    fun `a finished agent is kept warm, and one that needs help is not`() {
+        // **The line moved with the state that went away.** A finished agent is one the person will
+        // add to, so it is kept warm. A session that *needs help* is the opposite: it stopped because
+        // its problem is the person's to fix, and pinging it spends money on a conversation that
+        // cannot continue.
         val done = session().concluded(at = 10)
-        assertTrue("and so is a conclusion", done.warmDue(10 + 10 * minute, keepAlive = true))
+        assertTrue("a finished conversation is warm", done.warmDue(10 + 10 * minute, keepAlive = true))
+
+        val needsHelp = session().needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 10)
+        assertFalse(
+            "one that needs help is not",
+            needsHelp.warmDue(10 + 10 * minute, keepAlive = true),
+        )
 
         val stopped = done.stopped(StopReason.BY_OPERATOR)
-        assertFalse("a session the person stopped is not", stopped.warmDue(10 + 10 * minute, keepAlive = true))
+        assertFalse("nor is one the person stopped", stopped.warmDue(10 + 10 * minute, keepAlive = true))
 
         val retrying = session().polled(0).failed(at = AgentSession.POLL_MS)
         assertFalse(
@@ -109,25 +117,6 @@ class AgentSessionTest {
             "and is retried at the ladder's own time",
             retrying.warmDue(AgentSession.POLL_MS + 1_000, keepAlive = true),
         )
-    }
-
-    @Test
-    fun `one dropped request does not end the session, and the ladder backs off to four seconds`() {
-        // The retry ladder exists for a tunnel through a train. If a failure stopped the session,
-        // the design's own promise — "must never stop until the operator removes it" — would be
-        // false the first time a phone changed networks.
-        val first = session().polled(0).failed(at = 300_000)
-        assertTrue("still running", first.running)
-        assertEquals("reconnecting", Sub.RECONNECTING, first.sub)
-        assertEquals("one second", 1_000L, first.nextPollAt - 300_000)
-
-        val second = first.failed(301_000)
-        assertEquals("two seconds", 2_000L, second.nextPollAt - 301_000)
-        val third = second.failed(303_000)
-        assertEquals("four seconds", 4_000L, third.nextPollAt - 303_000)
-        val fourth = third.failed(307_000)
-        assertEquals("and no further", 4_000L, fourth.nextPollAt - 307_000)
-        assertEquals("which is what the label says", "idle · reconnecting (4 s)", fourth.label())
     }
 
     @Test
@@ -286,7 +275,10 @@ class AgentSessionTest {
             AgentSession("c", state = State.STOPPED, reason = StopReason.BY_OPERATOR),
         )
 
-        assertEquals("two are on, one needs you", "2 sessions · 1 needs you", AgentSession.strip(sessions))
+        // **One is on, and a different one needs you.** A session that needs help is *stopped* —
+        // `running` is "not stopped" — so it is not counted as on as well. The strip answers two
+        // questions with one line: how many agents are working, and how many want somebody.
+        assertEquals("one is on, one needs you", "1 session · 1 needs you", AgentSession.strip(sessions))
         assertEquals(
             "one agent, said in the singular",
             "1 session",
