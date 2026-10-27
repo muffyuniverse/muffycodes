@@ -301,7 +301,18 @@ class AgentTools(
      * the ones that can ask inside a loop do ([Deadline.check]), and the ones that write once have
      * either finished or not started by the time it passes.
      */
-    fun run(call: Call, deadline: Deadline = Deadline.none()): String = try {
+    fun run(
+        call: Call,
+        deadline: Deadline = Deadline.none(),
+        /**
+         * Whether a command that runs out of time is handed to the background instead of stopped.
+         *
+         * **False for a background call's own work**, because there is nowhere left to hand it to -
+         * a background of a background is how a result gets lost. True for the foreground, which is
+         * where report 13 lives.
+         */
+        canHandOver: Boolean = false,
+    ): String = try {
         // **The arguments, or a sentence about them.** `JSONObject(...)` throws on anything that is
         // not one — a model that sends `[]`, or a bare string where the object should be — and
         // "that tool could not be run" would leave it guessing at which part of the call was wrong.
@@ -334,6 +345,14 @@ class AgentTools(
             else -> refusal("There is no tool called ${call.tool}")
         }
     } catch (e: StoppedException) {
+        // **Report 13: the work carries on and its result arrives later.** A command that outlasts
+        // the operator's wait is restarted in the background - restarted, not resumed, because
+        // nothing here can carry on from the middle - and the turn is told where the result will be.
+        // A folder delete keeps its own sentence instead: part of it is already gone, and running it
+        // again would be a second delete reported as the interrupted one.
+        if (canHandOver) {
+            handOver(call, deadline)?.let { return it }
+        }
         e.message ?: Stopped.body(call.tool, deadline)
     } catch (e: Throwable) {
         refusal(Secrets.explain(e, "That tool could not be run"))
@@ -359,6 +378,52 @@ class AgentTools(
      * Refused: the three that end a turn, because there is no result to file, and `background`
      * itself, because a background of a background is a way to lose a result.
      */
+    /**
+     * A call the foreground ran out of time for, restarted in the background.
+     *
+     * **The sentence names the file the result will land in**, because that file already exists —
+     * [Background.start] writes it before the work begins — so the model can read it on any later
+     * turn. The operator's words for this were "will be returned on one of the next turns with
+     * other call results", and the wake that does it is the one `background` already uses: a
+     * completion wakes the agent for a real turn naming the file.
+     *
+     * Returns null for a call that must not be restarted, which is only a command that has already
+     * changed something part of the way (see [Stopped.partway]).
+     */
+    fun handOver(call: Call, deadline: Deadline): String? {
+        if (call.tool in TERMINATING || call.tool == "background") return null
+        if (call.tool !in KEYS) return null
+        val args = try {
+            JSONObject(call.args.ifBlank { "{}" })
+        } catch (e: Throwable) {
+            return null
+        }
+        // A **folder** delete that got part of the way is the one act that cannot be repeated: its
+        // paths are already gone, and running it again would be a second delete rather than the
+        // interrupted one. Everything else removes one entry and is done, or writes all at once.
+        if (call.tool == "delete" && isFolder(args)) return null
+        val dir = projectDir
+        // **The background's own limit, and no second handover.** A background of a background is
+        // how a result gets lost, so this work is bounded by the operator's background number and
+        // dies honestly when it runs out.
+        bg.start(dir, call) { run(call, Deadline(backgroundMs())) }
+        val file = bg.resultFile(dir, call)
+        val path = file.relativeTo(dir).invariantSeparatorsPath
+        Trace.note("agent", "${dir.name} · ${call.tool} handed over after ${deadline.expiredIn()}")
+        return Stopped.stillRunning(call.tool, deadline, path)
+    }
+
+    /**
+     * Whether a delete's target is a folder — **asked before the work, not after it stopped.**
+     *
+     * The question a handover needs is not "did it stop part of the way" (only knowable afterwards)
+     * but "could it have". Removing one file happens in the last instant and is done; a tree removal
+     * walks, so it can stop in the middle of a folder and leave part of it gone. Only the second is
+     * unsafe to repeat, and `isDirectory` is what tells them apart — not a key the tool does not take.
+     */
+    private fun isFolder(args: JSONObject): Boolean =
+        resolveFile(args.optString("path")).getOrNull()?.isDirectory == true
+
     private fun background(call: Call, args: JSONObject): String {
         val tool = args.optString("tool").trim()
         if (tool.isEmpty()) return refusal("Say which command to run in the background")

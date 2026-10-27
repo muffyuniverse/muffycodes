@@ -40,7 +40,14 @@ class AgentTest {
         log = AgentLog.open(projectDir)
     }
 
-    private fun agent(door: Door, limits: ContextBudget.Limits? = null) = Agent(
+    private fun agent(
+        door: Door,
+        limits: ContextBudget.Limits? = null,
+        // **Zero means wait for ever**, which is what a test that is not about a slow command wants:
+        // no test acquires a deadline it did not ask for.
+        foregroundMs: Long = 0L,
+        bg: Background = Background.none(),
+    ) = Agent(
         accountDir = account,
         project = "shopping",
         ws = ws,
@@ -51,6 +58,8 @@ class AgentTest {
         // No limits means the defaults: no trigger, no trim, which is what most of these tests
         // want — a request that behaves as if the context had all the room in the world.
         limits = limits ?: ContextBudget.Limits.of(0, 0, ContextBudget.UNKNOWN_CEILING),
+        foregroundMs = foregroundMs,
+        bg = bg,
     )
 
     private fun call(name: String, args: String, id: String = "c1") = Call(id, name, args)
@@ -518,6 +527,62 @@ class AgentTest {
         assertTrue("with the context's own columns", now.contains("id size name body"))
         assertTrue("and the order they are written in", now.contains("oldest line first"))
         assertFalse("and no projection key that read no longer takes", now.contains("`raw`"))
+    }
+
+    // ---- a command that outlasts the wait ------------------------------------
+
+    @Test
+    fun `a command that outlasts the wait is handed over, and says when its result will arrive`() {
+        // **Report 13, in the operator's own words:** "when command takes more than the timeout,
+        // agent gets a result that tells that this command takes longer than the timeout allows and
+        // will be returned on one of the next turns with other call results".
+        //
+        // What the app used to say was "stopped after 60 s; nothing was kept" - the app treating a
+        // limit on how long it *waits* as a limit on the work. The deadline here is zero seconds,
+        // so the very first check expires and the handover is what the turn is told about.
+        val bg = Background.inline()
+        val door = ScriptedDoor(
+            Reply("", listOf(Call("c1", "tree", """{"path":""}"""))),
+            Reply("", listOf(Call("c2", "conclude", """{"text":"done"}"""))),
+        )
+        // **A folder with enough in it that the walk cannot finish inside the deadline.** One
+        // millisecond is a real deadline, but a walk of one file can beat it on a fast machine, and
+        // a test that passes because the machine was slow is not a test of the handover.
+        repeat(400) { File(ws.projectDir("shopping"), "bulk/file-$it.txt").apply { parentFile?.mkdirs() }.writeText("x") }
+        val slow = agent(door, foregroundMs = 1L, bg = bg)
+
+        slow.burst("go")
+
+        val got = gotRows().first { it.name == "tree" }.body
+        assertTrue("it says the command is still running: $got", "still running" in got)
+        assertTrue("and how long was allowed: $got", "1 s" in got)
+        assertTrue("and where the result will be: $got", "background_results/tree-c1.txt" in got)
+        assertTrue(
+            "and that it arrives with other results, not alone: $got",
+            "next turns with other call results" in got,
+        )
+        assertFalse("it does not claim the work was thrown away: $got", "nothing was kept" in got)
+        // The file exists from the moment the work starts, which is what makes the path worth naming.
+        assertTrue("and the result file is there to read", File(ws.projectDir("shopping"), "agent/background_results/tree-c1.txt").isFile)
+    }
+
+    @Test
+    fun `a folder delete that ran out of time is not handed over, because part of it is gone`() {
+        // **The one act that cannot be repeated.** A tree removal walks, so a stopped one has
+        // removed part of the folder - and running it again would be a second delete of paths that
+        // are already gone, reported as if it were the interrupted one. It keeps the sentence that
+        // says part of it is already gone.
+        val door = ScriptedDoor(
+            Reply("", listOf(Call("c1", "delete", """{"path":"Shopping"}"""))),
+            Reply("", listOf(Call("c2", "conclude", """{"text":"done"}"""))),
+        )
+        repeat(400) { File(ws.projectDir("shopping"), "Shopping/inner-$it.txt").apply { parentFile?.mkdirs() }.writeText("x") }
+        val slow = agent(door, foregroundMs = 1L)
+
+        slow.burst("go")
+
+        val got = gotRows().first { it.name == "delete" }.body
+        assertFalse("it is not claimed to be running: $got", "still running" in got)
     }
 
     // ---- the key that is sent ------------------------------------------------

@@ -46,6 +46,25 @@ class TimeoutsTest {
     }
 
     @Test
+    fun `a command that is still running says where its result will be, and when it arrives`() {
+        // **Report 13's sentence.** A command that outlasts the wait is not thrown away: the work
+        // carries on in the background and its result arrives with the next batch of results. The
+        // sentence has to name the file, because the file already exists by the time this is said.
+        val said = Stopped.stillRunning("read", Deadline(60_000L), "agent/background_results/read-c1.txt")
+
+        assertTrue("it is not a failure: $said", said.startsWith(AgentLog.SUCCESS))
+        assertTrue("it names the command: $said", said.contains("read"))
+        assertTrue("and how long was allowed: $said", said.contains("60 s"))
+        assertTrue("it says the work carries on: $said", said.contains("still running"))
+        assertTrue("and where the result will be: $said", said.contains("agent/background_results/read-c1.txt"))
+        assertTrue(
+            "and that it arrives with other results: $said",
+            said.contains("next turns with other call results"),
+        )
+        assertFalse("it does not say the work was lost: $said", said.contains("nothing was kept"))
+    }
+
+    @Test
     fun `a limit that ran out is a throw, so every command can ask the same question`() {
         val past = Deadline(1L)
         Thread.sleep(5)

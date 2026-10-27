@@ -123,4 +123,23 @@ object Stopped {
      */
     fun partway(tool: String, deadline: Deadline): String =
         "${AgentLog.FAILURE} $tool stopped ${deadline.expiredIn()}; part of it is already gone"
+
+    /**
+     * What a command that **ran past the operator's wait but is still running** says.
+     *
+     * This is the sentence report 13 asked for, and it is a different sentence from the two above
+     * because it describes a different thing. "Stopped, nothing was kept" was the app choosing to
+     * throw the work away because the *waiting* ran out — which is not what the person asked for.
+     * They asked for the work to carry on and the result to arrive with the next batch of results,
+     * so the command is moved to the background and this is what the turn is told.
+     *
+     * **It says the path**, because the file already exists — [Background.start] writes it before
+     * the work starts — so the model can read it on any later turn, and knows exactly which file.
+     * And it says it will arrive **with other call results**, which is the phrase the operator used
+     * and the thing the model needs to know in order not to sit and wait for it.
+     */
+    fun stillRunning(tool: String, deadline: Deadline, path: String): String =
+        "${AgentLog.SUCCESS} $tool is taking longer than the ${deadline.expiredIn()} allowed for a " +
+            "command in the conversation, so it is still running. Its result will be written to " +
+            "$path and will arrive on one of the next turns with other call results."
 }

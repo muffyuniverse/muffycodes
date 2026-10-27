@@ -637,7 +637,21 @@ class Agent(
      * disk, so the deadline is attached to the dispatch itself and each command asks it where it can.
      */
     private fun answer(call: Call): String {
-        val body = if (foregroundMs <= 0L) runTool(call) else tools.run(call, Deadline(foregroundMs))
+        // **A command that outlasts the wait is handed over, not thrown away** - report 13. The
+        // handover lives inside `tools.run`, because that is where the stop is caught: the deadline
+        // is asked inside each command's own loop, `StoppedException` travels up through it, and
+        // `run` is the one place that turns it into a sentence. A `catch` here would never fire.
+        //
+        // What the app used to say was "stopped after 60 s; nothing was kept", which is the app
+        // treating a limit on how long it *waits* as a limit on the work. The operator asked for the
+        // other half: the command carries on and its result arrives with the next batch. That
+        // machinery already exists and is already proven by `background`, so a slow foreground
+        // command joins it rather than getting a second mechanism of its own.
+        val body = if (foregroundMs <= 0L) {
+            runTool(call)
+        } else {
+            tools.run(call, Deadline(foregroundMs), canHandOver = true)
+        }
         // **The one place the result limit applies**, because this is the one place a result enters
         // the conversation. A backgrounded command's body goes straight to its file, and so does the
         // text an `edit` copies out of one, so neither is measured — the limit is a conversation
