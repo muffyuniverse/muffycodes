@@ -43,7 +43,10 @@ class VisibilityFeatureTest : FeatureTest() {
         File(dir, "shown.txt").writeText("c")
         scene.viewModel.refresh()
 
-        assertEquals(listOf("shown.txt"), scene.names())
+        // **The system project is the one folder that is always there**, so "only what the test
+        // made" is `system` plus the file. What the test is about is the three dot-names above:
+        // none of them appears, which is what the assertion below would catch.
+        assertEquals(listOf("system", "shown.txt"), scene.names())
     }
 
     @Test
