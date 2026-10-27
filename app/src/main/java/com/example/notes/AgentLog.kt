@@ -216,11 +216,11 @@ class AgentLog private constructor(
             synchronized(log.guard) {
                 val rows = log.parse(log.session)
                 log.adopt(rows)
-                // **The context file is written when it is absent, and never compared.** A record
-                // whose second file was deleted has rows the model is meant to read and no place to
-                // read them from; every other open finds it in step because every whole-record write
-                // writes both.
-                if (!log.context.isFile) log.writeContext(rows)
+                // **The context file is written when it is absent, and never compared** — but only
+                // where there is a record to write it from. A project whose folder is gone has no
+                // rows, and making the folder to write an empty file into it is a reader creating
+                // the project it was reading.
+                if (!log.context.isFile && rows.isNotEmpty()) log.writeContext(rows)
             }
             return log
         }
