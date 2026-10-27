@@ -479,6 +479,11 @@ class AgentSessionFeatureTest : FeatureTest() {
         // **One door, not a new one per poll.** A lambda that built a door on every call would
         // reset its own attempt count, and a failure count that resets is not a failure count.
         val broken = FlakyDoor(times = Int.MAX_VALUE, code = 401)
+        // **And it has to be installed, or the real door runs.** Without this the runner built an
+        // `OpenRouterDoor` with no key on the test account, so every ping failed at "No OpenRouter
+        // key on this account yet" — a true sentence about a fixture that never reached the door it
+        // meant to. The test then read `asked=0` and blamed the ladder.
+        scene.viewModel.chatDoor = { broken }
         scene.viewModel.startAgent("groceries")
 
         var last = ""
