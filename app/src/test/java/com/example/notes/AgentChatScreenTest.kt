@@ -134,10 +134,10 @@ class AgentChatScreenTest {
             "and the ending is the agent's words",
             log.rows().any { it.kind == AgentLog.NOTE && it.name == "agent" },
         )
-        // The box counted two turns, so the record has to say where one request ended.
+        // The box counted three turns, so the record has to say where one request ended.
         assertEquals(
             "one boundary per request",
-            2,
+            3,
             log.rows().count { it.kind == AgentLog.TURN },
         )
         assertEquals(

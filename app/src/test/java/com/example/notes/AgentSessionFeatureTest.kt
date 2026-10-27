@@ -117,6 +117,26 @@ class AgentSessionFeatureTest : FeatureTest() {
         }
     }
 
+    /**
+     * Polls until the session gives up, **by moving the clock past the operator's window.**
+     *
+     * Two ticks, and the reason is the ladder's own shape: the first failure is the moment the
+     * window starts, so `failed()` measures zero elapsed on it and only records `retryFrom`. The
+     * second tick is the one that can see the window has been spent. A single jump to the end
+     * cannot work, and a loop of forty ticks spends the window by accident — at one to four
+     * seconds a pass, which is the schedule's business and not this test's.
+     */
+    private fun giveUp(project: String) {
+        tick(project)
+        val session = scene.viewModel.sessionOf(project) ?: return
+        val past = (if (session.retryFrom > 0) session.retryFrom else session.lastPollAt) +
+            scene.settings.reconnectMs + 1_000
+        scene.viewModel.tickAgents(past)
+        scene.await("it to give up") {
+            scene.viewModel.sessionOf(project)?.state == AgentSession.State.STOPPED
+        }
+    }
+
     @Test
     fun `one switch in settings stops every agent on the phone`() {
         // **The brief assumed this existed and it never did.** Each box has its own Stop, and the
@@ -275,22 +295,19 @@ class AgentSessionFeatureTest : FeatureTest() {
         scene.await("the turn to finish") {
             scene.viewModel.sessionOf("groceries")?.sub == AgentSession.Sub.FINISHED
         }
-        // Now the ladder: each tick is one attempt, and the window is the floor.
-        var guard = 0
-        while (scene.viewModel.sessionOf("groceries")?.state != AgentSession.State.STOPPED &&
-            guard++ < 40
-        ) {
-            tick("groceries")
-        }
+        giveUp("groceries")
 
         assertEquals(
             "one sentence, immediately",
             listOf("groceries: stopped, OpenRouter answered 401"),
             notices,
         )
+        // **"0 sessions" is the right count and it reads oddly**, so it is worth saying why: the
+        // session gave up, and a stopped session is not one the app is working on. What the strip
+        // is for is the second half — somebody has to do something about this key.
         assertEquals(
             "and the strip says somebody is needed",
-            "1 session · 1 needs you",
+            "0 sessions · 1 needs you",
             AgentSession.strip(scene.viewModel.agentSessions),
         )
 
@@ -332,12 +349,7 @@ class AgentSessionFeatureTest : FeatureTest() {
         scene.await("the turn to finish") {
             scene.viewModel.sessionOf("groceries")?.sub == AgentSession.Sub.FINISHED
         }
-        var guard = 0
-        while (scene.viewModel.sessionOf("groceries")?.state != AgentSession.State.STOPPED &&
-            guard++ < 40
-        ) {
-            tick("groceries")
-        }
+        giveUp("groceries")
         val askedAt = scene.viewModel.sessionOf("groceries")!!.askedAt
 
         scene.viewModel.tickAgents(askedAt + 4 * 60_000)
@@ -371,12 +383,7 @@ class AgentSessionFeatureTest : FeatureTest() {
         scene.await("the turn to finish") {
             scene.viewModel.sessionOf("groceries")?.sub == AgentSession.Sub.FINISHED
         }
-        var guard = 0
-        while (scene.viewModel.sessionOf("groceries")?.state != AgentSession.State.STOPPED &&
-            guard++ < 40
-        ) {
-            tick("groceries")
-        }
+        giveUp("groceries")
         val asked = broken.attempts
 
         repeat(10) { tick("groceries") }
