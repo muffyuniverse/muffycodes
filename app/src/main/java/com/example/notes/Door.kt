@@ -153,6 +153,22 @@ class OpenRouterDoor(
     private val effort: String,
     private val timeoutMs: Int = 120_000,
     /**
+     * How long after sending, until **anything at all** comes back.
+     *
+     * Not tight, and it must not be: an upstream that is queueing holds the connection open and
+     * sends nothing, and OpenRouter buffers the first delta. A stream that fails here produced
+     * nothing, which is what makes retrying it free.
+     */
+    private val ackMs: Int = 90_000,
+    /**
+     * The gap allowed **between** chunks, once the answer has begun.
+     *
+     * A model thinking about a long answer is quiet for a while and must not be killed; a
+     * connection that has died is quiet for ever. This is the number that tells them apart, and it
+     * is why the two waits are separate settings rather than one.
+     */
+    private val gapMs: Int = 120_000,
+    /**
      * What the store can say about the key, for the sentence when there is no token.
      *
      * Defaulted from [key] so the two cannot disagree in a test that only supplies a key, and
@@ -162,8 +178,29 @@ class OpenRouterDoor(
         { if (key() != null) KeyState.READABLE else KeyState.NONE },
 ) : Door {
 
+    /**
+     * How a person is told what is happening **while it is happening.**
+     *
+     * Null by default, which is the same answer as "nobody is watching": a turn run for the
+     * background, or by a test, has no screen to draw a footer on, and a listener that was required
+     * would make every caller write an empty one.
+     *
+     * Called from the reading thread, once per chunk, **with the stream itself** — so a listener
+     * that wants the running character count reads it rather than being handed a number that would
+     * then be a second copy of the same fact.
+     */
+    var listener: ((Streamed) -> Unit)? = null
+
+    /**
+     * The turn, **read as it arrives.**
+     *
+     * The request asks for `stream: true` and the body is a sequence of events rather than one
+     * JSON document. Everything the answer is made of is joined by [Streamed], so the reply this
+     * returns is the same shape a non-streamed one would have been — the difference is that it was
+     * assembled instead of parsed, and that the listener saw it happen.
+     */
     override fun turn(request: Request): Result<Reply> = try {
-        Result.success(parseReply(exchange(request, maxTokens = null)))
+        Result.success(streamed(request))
     } catch (e: Exception) {
         Result.failure(
             IllegalStateException(Secrets.explain(e, "The model could not be asked"))
@@ -251,6 +288,77 @@ class OpenRouterDoor(
             connection?.disconnect()
         }
         return text
+    }
+
+    /**
+     * One turn, read off the socket as it arrives.
+     *
+     * **Three clocks, because there are three different waits** and one number cannot describe
+     * them:
+     *
+     *  - the **connect** timeout, unchanged at twenty seconds: a socket that will not open is a
+     *    network that is not there;
+     *  - the **ack**: how long after the request is sent until *anything at all* comes back. This
+     *    may be long — an upstream that is queueing holds the connection and sends nothing — so it
+     *    is not tight, and a stream that fails here has cost one refused request and no answer,
+     *    which is what makes retrying it cheap;
+     *  - the **idle**: the gap *between* chunks once the answer has begun. A model thinking hard
+     *    about a long answer can go quiet for a while, but a connection that has died goes quiet
+     *    for ever, and this is the number that tells them apart.
+     *
+     * The read timeout on the connection is set to the **idle** one, because that is the gap the
+     * socket itself can see. The ack is enforced by the first read having its own deadline: the
+     * connection's read timeout starts when the socket is opened, so ack and idle are the same
+     * mechanism with different numbers, and the first read is the one that uses the ack's.
+     */
+    private fun streamed(request: Request): Reply {
+        val token = token()
+        val body = body(request, maxTokens = null).put("stream", true)
+
+        var connection: HttpURLConnection? = null
+        val stream = Streamed()
+        try {
+            connection = (URL(ENDPOINT).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = CONNECT_MS
+                // **The ack's number for the first read.** It is replaced by the idle one as soon
+                // as the stream has said anything, because from then on the question is a
+                // different one.
+                readTimeout = ackMs
+                doOutput = true
+                headers(token).forEach { (name, value) -> setRequestProperty(name, value) }
+            }
+            connection.outputStream.use { it.write(body.toString().toByteArray()) }
+            val code = connection.responseCode
+            if (code !in 200..299) {
+                val said = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                throw Refused(code, "OpenRouter answered $code${why(said)}")
+            }
+            connection.readTimeout = gapMs
+            connection.inputStream.bufferedReader().use { reader ->
+                while (true) {
+                    val line = try {
+                        reader.readLine()
+                    } catch (t: java.net.SocketTimeoutException) {
+                        // **A stall has two names and they are not the same problem.** Before the
+                        // first chunk the provider never acknowledged the request, so nothing was
+                        // produced and the whole attempt is cheap to repeat. After it, an answer
+                        // was being written and has stopped — which is a different sentence to a
+                        // person, and a different decision about whether to try again.
+                        throw if (stream.acknowledged) {
+                            Idle(gapMs, stream)
+                        } else {
+                            Unacknowledged(ackMs, stream)
+                        }
+                    } ?: break
+                    stream.line(line)
+                    listener?.invoke(stream)
+                }
+            }
+        } finally {
+            connection?.disconnect()
+        }
+        return stream.reply()
     }
 
     /**

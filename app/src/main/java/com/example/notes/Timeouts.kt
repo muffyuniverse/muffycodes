@@ -154,3 +154,28 @@ object Stopped {
             "command in the conversation, so it is still running. Its result will be written to " +
             "$path and will arrive on one of the next turns with other call results."
 }
+
+/**
+ * The provider never acknowledged the request, **so nothing was produced.**
+ *
+ * Separate from [Idle] because the two are different facts and lead to different sentences. This
+ * one means the request may not have been read at all: no tokens were generated, nothing was
+ * billed as an answer, and repeating the attempt costs the same as the first one. That is what
+ * makes an ack timeout safe to retry without thinking about it.
+ *
+ * [stream] is carried so the sentence can say what was *not* received, which is the part a person
+ * can act on — "no answer started" is checkable, "the request timed out" is not.
+ */
+class Unacknowledged(val waitedMs: Long, val stream: Streamed) :
+    java.io.IOException("The provider did not begin an answer within ${waitedMs / 1000} seconds")
+
+/**
+ * An answer had begun and then stopped arriving, **which is a connection that died.**
+ *
+ * The distinction from [Unacknowledged] is the whole reason the two clocks exist: a model thinking
+ * hard is quiet, and killing it would throw away a long answer that was being written. This is only
+ * raised after the first chunk, so a quiet stream is never mistaken for a dead one until the idle
+ * number has actually passed.
+ */
+class Idle(val waitedMs: Long, val stream: Streamed) :
+    java.io.IOException("The answer stopped for ${waitedMs / 1000} seconds")

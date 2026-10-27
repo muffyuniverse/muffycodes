@@ -2116,6 +2116,20 @@ class AppViewModel @JvmOverloads constructor(
         private set
 
     /**
+     * What has arrived of the answer being written, **as the footer shows it.**
+     *
+     * Empty when nothing is in flight. It is a *description*, not a fraction: there is no
+     * denominator, because nobody knows how long an answer will be until it is finished — so this
+     * is elapsed and produced, and it is deliberately not a progress bar. A bar would imply a
+     * proportion the app cannot know.
+     *
+     * **Characters, not tokens.** A per-chunk `usage` block is not guaranteed, so a token count
+     * here would be an estimate dressed as a measurement; the real totals arrive once, at the end.
+     */
+    var chatLive: String by mutableStateOf("")
+        private set
+
+    /**
      * Where the agent's requests go.
      *
      * Swappable for the same reason [catalogue] is: no test opens a socket, so the box has to be
@@ -2139,6 +2153,7 @@ class AppViewModel @JvmOverloads constructor(
         chatBox = null
         chatTurn = 0
         chatWorking = false
+        chatLive = ""
     }
 
     /**
@@ -2219,6 +2234,10 @@ class AppViewModel @JvmOverloads constructor(
         runTurn(project, said) { rows, end ->
             applyChat(rows, follow = true)
             chatWorking = false
+            // **The footer goes when the answer does.** It described an answer in flight; once the
+            // turn is over the record holds the answer itself, and a live line left behind would be
+            // a description of something that already finished.
+            chatLive = ""
             message = end.plainly()
             applyEnd(project, end, System.currentTimeMillis())
             refresh()
@@ -2565,11 +2584,21 @@ class AppViewModel @JvmOverloads constructor(
             model = active.model,
             provider = active.provider,
             effort = active.effort,
-            // **The person's number, not the app's.** Four minutes by default; a slow network is a
-            // fact only they know, and a timeout that is too short turns a long turn into a ladder of
-            // retries that never let it finish.
+            // **The person's numbers, not the app's.** A slow network is a fact only they know, and
+            // a timeout that is too short turns a long turn into a ladder of retries that never let
+            // it finish. Three of them now: the ping still has one wait, because it is not streamed
+            // and reads no answer; a turn has the ack and the gap, which are the two silences
+            // streaming made different.
             timeoutMs = settings.timeoutSeconds * 1000,
-        )
+            ackMs = settings.ackMs,
+            gapMs = settings.gapMs,
+        ).also { door ->
+            // **The footer's feed, and only while somebody is looking.** The listener is set where
+            // the door is built, so a turn run for the background draws nothing and costs nothing;
+            // and it is handed the stream itself rather than a number, so the count it shows is
+            // always the one that just arrived.
+            door.listener = { stream -> chatLive = stream.shape() }
+        }
     })(model)
 
     /** Hands a freshly read conversation to the screen, keeping the turn in range. */

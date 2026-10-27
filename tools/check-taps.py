@@ -74,6 +74,10 @@ VOCABULARY = {
     # the agent itself, how often it reminds, and the numbers it runs with
     "start agent", "stop agent", "stop all agents", "reset agent", "remind me",
     "answer timeout", "result length",
+    # **The two clocks streaming made out of one answer timeout.** Named apart because they bound
+    # different silences - nothing came back at all, versus it went quiet halfway through - and a
+    # log that called both "answer timeout" could not answer which one tripped.
+    "ack timeout", "idle timeout",
     # **how long a failing connection is retried before somebody is told.** Its own name rather than
     # folded into "answer timeout": they bound different things, and a log that could not tell them
     # apart would not answer "did it give up, or was it still trying".

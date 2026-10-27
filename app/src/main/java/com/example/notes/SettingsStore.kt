@@ -330,11 +330,14 @@ class SettingsStore(context: Context, name: String = "settings") {
      * same kind of number. Reported as: "how wait for the model is different from stop command
      * after?". One unit is part of that answer.
      *
-     * **What it actually bounds is one HTTP exchange, whole.** With `stream: false` the provider
-     * sends nothing until the completion is finished, so this covers connect, queue, generation and
-     * transfer as one block — which means **the app cannot currently tell a dropped request from a
-     * model that is thinking hard.** Both are silence. That is why this is one number and not two;
-     * see `docs/PLAN-streaming.md` for the change that splits them.
+     * **Two numbers now, because streaming made the silence two different things.** A streamed
+     * answer says so as it arrives, so "nothing has come back at all" and "it went quiet halfway
+     * through" stopped being the same wait: the first means nothing was produced and the attempt is
+     * free to repeat, the second means an answer was being written and the connection died. They
+     * want different limits and they deserve different sentences.
+     *
+     * See [ackSeconds] and [gapSeconds]; this one is kept for the ping, which is not streamed and
+     * still has exactly one wait.
      */
     var timeoutSeconds: Int by mutableStateOf(
         prefs.getInt(KEY_TIMEOUT, DEFAULT_TIMEOUT_SECONDS)
@@ -349,6 +352,59 @@ class SettingsStore(context: Context, name: String = "settings") {
         prefs.edit().putInt(KEY_TIMEOUT, clean).apply()
         Trace.said("the app waits $clean seconds for an answer")
     }
+
+    /**
+     * **How long before the first thing arrives** counts as "the provider never took it".
+     *
+     * Deliberately generous, and it must be. An upstream that is queueing holds the connection open
+     * and sends nothing at all, and OpenRouter buffers the first delta — so a tight number here
+     * would kill working requests at the busiest moment. The cost of waiting too long is a slow
+     * failure; the cost of not waiting long enough is refusing an answer that was about to begin.
+     *
+     * Nothing has been generated when this expires, so the retry is free — which is why this clock
+     * can be long without being expensive.
+     */
+    var ackSeconds: Int by mutableStateOf(
+        prefs.getInt(KEY_ACK, DEFAULT_ACK_SECONDS)
+    )
+        private set
+
+    /** Sets the ack wait, clamped. */
+    fun keepAck(seconds: Int) {
+        val clean = seconds.coerceIn(MIN_ACK_SECONDS, MAX_ACK_SECONDS)
+        Trace.tap("ack timeout", "$clean s")
+        ackSeconds = clean
+        prefs.edit().putInt(KEY_ACK, clean).apply()
+        Trace.said("the app waits $clean seconds for an answer to begin")
+    }
+
+    /** The ack wait in milliseconds. */
+    val ackMs: Int get() = ackSeconds * 1000
+
+    /**
+     * **How long a gap between chunks is allowed** before the answer is treated as cut off.
+     *
+     * The other half of the split, and the reason a long answer is possible at all: a model thinking
+     * hard about its next sentence goes quiet, and one number covering the whole exchange would have
+     * killed exactly the answers worth waiting for. Only the *gap* is bounded here, so nineteen
+     * minutes of steady work trips nothing while a connection that died mid-sentence is caught.
+     */
+    var gapSeconds: Int by mutableStateOf(
+        prefs.getInt(KEY_GAP, DEFAULT_GAP_SECONDS)
+    )
+        private set
+
+    /** Sets the gap allowed between chunks, clamped. */
+    fun keepGap(seconds: Int) {
+        val clean = seconds.coerceIn(MIN_GAP_SECONDS, MAX_GAP_SECONDS)
+        Trace.tap("idle timeout", "$clean s")
+        gapSeconds = clean
+        prefs.edit().putInt(KEY_GAP, clean).apply()
+        Trace.said("the app waits $clean seconds between pieces of an answer")
+    }
+
+    /** The gap in milliseconds. */
+    val gapMs: Int get() = gapSeconds * 1000
 
     /**
      * The most one tool result may carry, in characters.
@@ -459,6 +515,26 @@ class SettingsStore(context: Context, name: String = "settings") {
      * thing it stores changed meaning.
      */
     const val KEY_TIMEOUT = "agent_timeout_seconds"
+
+    /**
+     * The two clocks streaming made out of one.
+     *
+     * **New keys rather than a migration.** Nothing runs an older build of this app, so a key that
+     * only an older build wrote is a key with no reader — and the defaults below are what a person
+     * who has never set either should get.
+     */
+    const val KEY_ACK = "agent_ack_seconds"
+    const val KEY_GAP = "agent_gap_seconds"
+
+    /** Long enough for a queue and a buffered first delta; see [ackSeconds]. */
+    const val DEFAULT_ACK_SECONDS = 90
+    const val MIN_ACK_SECONDS = 30
+    const val MAX_ACK_SECONDS = 600
+
+    /** A model thinking is quiet, so this is the number that must not be tight. */
+    const val DEFAULT_GAP_SECONDS = 120
+    const val MIN_GAP_SECONDS = 30
+    const val MAX_GAP_SECONDS = 1_800
 
     /** How long a failing connection is retried. A new key: it is a new number, not a renamed one. */
     const val KEY_RECONNECT = "agent_reconnect_seconds"
