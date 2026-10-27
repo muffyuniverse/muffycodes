@@ -171,7 +171,7 @@ class SettingsScreenTest {
     }
 
     @Test
-    fun `a command in the conversation stops after three minutes, and one going to a file does not`() {
+    fun `a command in the conversation holds the turn for three minutes, and one going to a file is left alone`() {
         // **The two defaults are different because the two acts are.** A foreground result is a row
         // the model is waiting to read, so three minutes is the operator's number; a background
         // result is a file nothing is waiting on, so it is left to finish.
@@ -180,10 +180,36 @@ class SettingsScreenTest {
         assertEquals("off for a background command", 0, scene.viewModel.settings.backgroundSeconds)
         assertEquals("and no limit there", 0L, scene.viewModel.settings.backgroundMs)
         settings()
-        compose.onNodeWithText("Stop a command after", substring = true)
+        // **The words say what the numbers bound, which is the whole of report 23.** "Stop a
+        // command after" described a stop that no longer happens - a command past this now carries
+        // on in the background - and neither label said which machine was being timed.
+        compose.onNodeWithText("A command may hold the conversation for", substring = true)
             .performScrollTo()
             .assertIsDisplayed()
         compose.onNodeWithText("Stop a background command after", substring = true)
+            .performScrollTo()
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun `the two clocks are named, so a person can tell which one they are setting`() {
+        // **Report 23 was a question, not a complaint:** "how wait for the model is different from
+        // stop command after?". Three timeouts in a row, in two units, with "wait" and "stop" used
+        // for both, could not answer it. Two named groups and one unit can.
+        settings()
+
+        compose.onNodeWithText("While the app works on this phone").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("While it talks to the model").performScrollTo().assertIsDisplayed()
+        // And the model wait is in seconds, like its neighbours rather than minutes apart from them.
+        compose.onNodeWithText("Wait for an answer for (seconds)", substring = true)
+            .performScrollTo()
+            .assertIsDisplayed()
+        // **The limit of the number is said, not hidden.** With `stream: false` a dropped request and
+        // a thinking model really are the same silence, so the screen says so rather than implying
+        // the number is enough. When streaming lands this sentence is deleted - and deleting it is
+        // part of that work, recorded in docs/PLAN-streaming.md, not something this test should
+        // silently require.
+        compose.onNodeWithText("look the same from here", substring = true)
             .performScrollTo()
             .assertIsDisplayed()
     }
