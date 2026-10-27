@@ -58,22 +58,28 @@ tools, and it is one sentence.
 | 16 | 129 | hidden files visible but read-only, system lock a distinct non-interactive colour | `BrowserScreen.kt:819` region — lock rendering |
 | 21 | 149 | gitignore as a per-row button, not a 3-dot item | `BrowserScreen.kt:819` — confirmed still in the menu |
 | 22 | 149 | lock button changes only show after re-entering the screen | `7f540ca` claims this; **needs verification, may be closed** |
+@ from 103 and 104 builds are probably closed already
 
 ### Group C · Medium — one feature each
 
 | # | Build | Report | Shape |
 |---|---|---|---|
 | 18 | 129 | chat icon inside the project | `BrowserScreen.kt:591` has a Chat item — **is it in the menu or on the row?** The report wants it visible |
+@ this likely closed
 | 23 | 149 | "see changes" should be a list you can enter; editor needs a diff mode; view/edit/diff as separate buttons | `BrowserScreen.kt:374` opens a dialog. Wants a screen + an editor mode machine |
+@ yes, currently editor can only switch between view and edit.
 | 24 | 149 | remove "n to send", put it in the button as "see n changes" | `BrowserScreen.kt:495` still says "$changes to send" as text beside a "See changes" button |
 | 25 | 149 | `find` should be `grep`; grep and from/to must compose | **Done** — `2b98531` |
 | 26 | 149 | grep answers leak line numbers into edit | **Done** — `bf60d60` |
 | 27 | 149 | are grep and find separate engines? | **Done** — one selector, `2b98531` |
 | 29 | 149 | grep only gives lines, why not precise selection | **Done** — the answer shape now follows the pattern |
+@ and there is lines flag for grep to show line numbers, right?
 | 30 | 149 | where is the system project with global settings | `AgentPrompt.kt:194` reads a system layer from `accountDir`, but there is **no folder the person can edit** |
 | 31 | 149 | remove `ask`/`conclude`; message box ends with a plain message | `AgentTools.kt:149,150` — both still registered |
 | 32 | 149 | chat is many bubbles, not one box | `AgentChatScreen.kt` |
+@ yes, how chat is currently presented is wrong, every burst should be a paged bubble that ends with message and every page is a separate toolcall. operator's messages each is a separate bubble. And give to agent and operator bubbles (or rather rows - each bubble is a full screen width row) of different colour so that it is easy to distinguish what is written by whom. 
 | 33 | 149 | remove the token column; footer with time, date, id; add time/date back to session log | `AgentChatScreen.kt:214,327` — tokens are still the column |
+@ understood that you need to just remove token per message column from chat screen? not size from logs.
 | 34 | 149 | system prompt is outdated — another reason it should be a file in the system project | same as #30 |
 | 35 | 149 | what does the context "read" button do, what are the numbers | **Done** — `7e4ed5a` |
 | 36 | 149 | context 900k of 1000k — does that mean it is full? | **Done** — `7e4ed5a` |
@@ -104,6 +110,7 @@ project is not a project — it has no repository, no sync, no chat. Options:
 
 I lean (b): the prompt is about the app, not about an account, and (a) makes a folder that looks
 like a project but refuses every project act.
+@ b, I thought that making linked folders in each account's system folder will be good - so that it is still one per app, but it can be edited from any account. Can it be done here simply?
 
 **Q2 · Is the system prompt per account or per app?**
 Follows from Q1, but it is a separate decision: if two accounts share one prompt, editing it in
@@ -115,23 +122,27 @@ calls `conclude` (a result the app reads) or stops calling tools (a plain messag
 `conclude` leaves only the second — so **is a turn that ends with text but no tool call
 successful, and does it get shown as the reply?** I believe yes, but this is the load-bearing
 assumption and I will not build on a guess.
+@ message = end of turn (message bubble).
 
 **Q4 · `ask` removal — what happens to the question it used to carry?**
 If a model wants to ask the person something, after this change it writes it as ordinary text.
 Does the app treat that as "needs you" (a notification, a paused session), or is it just a
 message the person sees when they open the chat? The old `ask` made it a distinct state; that
 state has to go somewhere or the feature is lost.
+@ lost
 
 **Q5 · The diff mode — two commits, chosen how?**
 The report says "by default between HEAD and the last synced hash". That is a default, not a
 chooser. **Can the person pick the two commits, and if so, from where?** The history screen
 already lists commits; my assumption is "tap one, it becomes the left side of the diff", but
 that is a design decision, not an inference.
+@ when you tap left hash field you can select from ordered list of hashes, when you tap right hash field you can select from the list of hashes older than the one selected on the left. by defalt those are head on the left and last sync on the right for the project.
 
 **Q6 · "See changes" as a screen — what can you do on it?**
 The report says "a list of changed files that I can enter". Entering a file shows its diff
 (presumably). **Can you also commit, discard, or ignore from that screen** — or is it read-only
 and every act stays where it is now?
+@ I would like to integrate android keyboard text selection of the in-app text so that I can copy it and then paste what i need in edit mode. Is it a difficult feature? I want diff mode to be readonly.
 
 **Q7 · Order.**
 I propose: **A** (the stale prompt, minutes) → **D1** (remove ask/conclude, because it changes

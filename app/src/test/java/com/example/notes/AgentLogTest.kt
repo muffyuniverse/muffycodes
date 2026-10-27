@@ -152,6 +152,10 @@ class AgentLogTest {
         // somebody may need to be told about; throwing the file away because of one line would
         // lose the conversation to report a typo.
         val record = File(project, "agent/${AgentLog.SESSION}")
+        // **The folder is the test's to make.** It used to come into being as a side effect of
+        // `AgentLog.open`, which is the side effect that made a reader recreate a project the
+        // person had deleted. A test that leans on it is a test of that bug.
+        record.parentFile!!.mkdirs()
         record.writeText(
             "   1     4 TOLD    in  operator  the first thing\n" +
                 "this line is not a row\n" +

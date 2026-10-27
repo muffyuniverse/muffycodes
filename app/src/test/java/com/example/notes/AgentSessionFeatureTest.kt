@@ -652,6 +652,12 @@ class AgentSessionFeatureTest : FeatureTest() {
         project.deleteRecursively()
         assertFalse("the folder is really gone before the tick", project.isDirectory)
         scene.viewModel.tickAgents(due)
+        // **The tick answers on the main thread.** It posts the new session list there, so the
+        // screen's own state is only true once that post has run — asserting straight after the
+        // call was asserting against the list from before it.
+        scene.await("the tick to drop the session") {
+            scene.viewModel.sessionOf("groceries") == null
+        }
 
         assertEquals("the session is gone", null, scene.viewModel.sessionOf("groceries"))
         assertFalse(
