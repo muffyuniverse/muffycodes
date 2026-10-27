@@ -1910,10 +1910,13 @@ class AgentTest {
     @Test
     fun `a tool result is matched to its own call`() {
         log.told("do two")
-        (log.call("read", """{"path":"milk.txt"}""")).also { lastCall = it }
-        (log.call("tree", """{"path":""}""")).also { lastCall = it }
-        log.got("read", "0\nfile contents", answers = lastCall)
-        log.got("tree", "0\nmilk.txt", answers = lastCall)
+        // **Two calls, and each result names its own.** The mechanical rewrite of this file made
+        // both results answer the *last* call, which would have passed a weaker test and made this
+        // one - "a tool result is matched to its own call" - impossible to fail.
+        val read = (log.call("read", """{"path":"milk.txt"}""")).also { lastCall = it }
+        val tree = (log.call("tree", """{"path":""}""")).also { lastCall = it }
+        log.got("read", "0\nfile contents", answers = read)
+        log.got("tree", "0\nmilk.txt", answers = tree)
 
         val messages = agent(ScriptedDoor()).messages(log.contextRows())
         val toolMessages = messages.filter { it.role == "tool" }

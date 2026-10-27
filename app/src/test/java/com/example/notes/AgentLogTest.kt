@@ -131,6 +131,10 @@ class AgentLogTest {
         // exactly as they were. The body here is chosen to be hostile: backslashes, a literal
         // backslash-n that is not a newline, real newlines (escaped in the file), and a quote.
         val nasty = "a\\b and \\n literally, then a real\nnewline, and a \"quote\""
+        // **A call, because a result answers one.** This test wrote a bare result before the
+        // record had an `answers` column; a result with no call is a row the app cannot produce,
+        // and the fixture should not be one either.
+        (log.call("read", """{"path":"milk.txt"}""")).also { lastCall = it }
         val id = log.got("read", "0\n$nasty", answers = lastCall)
         val before = linesIn(log.session).first { it.contains(" GOT ") }
 
