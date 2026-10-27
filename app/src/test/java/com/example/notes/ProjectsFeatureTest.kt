@@ -316,6 +316,68 @@ class ProjectsFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `the system project is a row you can open, and the one project you cannot delete`() {
+        // **A project, not a hidden folder.** The settings that belong to the whole account live in
+        // it, and the report that asked for it was explicit about why: "system prompt is outdated.
+        // Another reason why it should be an editable file inside system project instead of a
+        // hidden one". A hidden file is one nobody edits, and a prompt nobody edits goes stale.
+        assertTrue("the account has a system project", scene.viewModel.projectNames.any {
+            it.equals("system", ignoreCase = true)
+        })
+        assertTrue("it is local, so nothing in it is ever pushed", scene.viewModel.isLocalProject("system"))
+
+        scene.viewModel.message = null
+        scene.viewModel.deleteProject("system", everywhere = false)
+        assertTrue("and it cannot be deleted", scene.viewModel.message != null)
+        assertTrue(
+            "the row is still there",
+            scene.viewModel.projectNames.any { it.equals("system", ignoreCase = true) },
+        )
+    }
+
+    @Test
+    fun `the system project keeps its name in both directions`() {
+        // **Renaming it away is one half; renaming another project *to* it is the other.** Without
+        // the second, an account ends up with two folders called `system`, and the delete guard
+        // then refuses both — which is worse than refusing the rename.
+        scene.viewModel.message = null
+        scene.viewModel.renameProject("system", "settings")
+        assertTrue("it cannot be renamed away", scene.viewModel.message != null)
+        assertTrue(
+            "and it still has its own name",
+            scene.viewModel.projectNames.any { it.equals("system", ignoreCase = true) },
+        )
+
+        scene.project("groceries")
+        scene.viewModel.message = null
+        scene.viewModel.renameProject("groceries", "System")
+        assertTrue("nor can another project take it", scene.viewModel.message != null)
+        assertTrue(
+            "and groceries is still groceries",
+            scene.viewModel.projectNames.contains("groceries"),
+        )
+    }
+
+    @Test
+    fun `the system prompt is a file in the system project, where the editor can reach it`() {
+        // The prompt is a file, not a constant, so a person can change what their agent is told.
+        // It used to live at the account's root — a place the app draws as the project list, with
+        // nothing in the interface leading to it. A file nothing leads to is a file nobody edits.
+        val ws = scene.workspace!!
+        val prompt = File(File(ws.accountDir, "system"), AgentPrompt.SYSTEM_FILE)
+
+        assertTrue("the system prompt is written where the project is", prompt.isFile)
+        assertTrue(
+            "and what the agent is given is what that file says",
+            AgentPrompt.system(ws.accountDir).isNotBlank(),
+        )
+
+        // The file is the person's: editing it changes the prompt, with no second copy winning.
+        prompt.writeText("Say only the word: milk.")
+        assertEquals("the file is the prompt", "Say only the word: milk.", AgentPrompt.system(ws.accountDir))
+    }
+
+    @Test
     fun `ignoring a file takes it out of the repository, so its edits stop being sent`() {
         // **The defect this test was written for.** `.gitignore` is not a commit filter; it only
         // stops git from *starting* to track a path. A file already in the repository ignores the

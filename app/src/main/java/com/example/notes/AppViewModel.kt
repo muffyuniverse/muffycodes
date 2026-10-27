@@ -1902,6 +1902,17 @@ class AppViewModel @JvmOverloads constructor(
             return
         }
         if (clean == project) return
+        // **Both directions.** Renaming it away would leave the settings in a folder called
+        // something else, and renaming another project *to* it would give the account two — one of
+        // which the delete guard would then refuse, which is worse than refusing the rename.
+        if (Workspace.isSystem(project) || Workspace.isSystem(clean)) {
+            message = if (Workspace.isSystem(project)) {
+                "\"$project\" is where this account's settings live, so it keeps its name"
+            } else {
+                "\"$clean\" is reserved for this account's settings"
+            }
+            return
+        }
         if (ws.projectNames().any { it.equals(clean, ignoreCase = true) }) {
             message = "There is already a project called \"$clean\""
             return
@@ -1955,6 +1966,14 @@ class AppViewModel @JvmOverloads constructor(
      */
     fun deleteProject(project: String, everywhere: Boolean) {
         val ws = workspace ?: return
+        // **The system project is not deletable.** It holds the settings that belong to the whole
+        // account, and a person who deletes it loses the prompt with no way to notice until the
+        // agent behaves differently. Refused in the view model rather than greyed out on the row:
+        // a screen-only guard is one the next screen will not honour.
+        if (Workspace.isSystem(project)) {
+            message = "\"$project\" is where this account's settings live, so it stays"
+            return
+        }
         val api = github
         val token = activeLogin?.let { credentials.token(it) }.orEmpty()
         val login = activeLogin

@@ -71,6 +71,28 @@ class Workspace(val accountDir: File) {
      */
     fun ensure() {
         accountDir.mkdirs()
+        ensureSystemFolder()
+    }
+
+    /**
+     * Makes the system project's folder, **once, and only its folder.**
+     *
+     * Deliberately not a project: the repository is made by [ProjectGit.init], which needs an
+     * author and a git library, and neither belongs here. This is the part that has to exist for
+     * the prompt to have somewhere to live — the folder — and it is called from `refresh()`, which
+     * runs on every screen change, so it must be a `mkdirs()` that finds the folder already there.
+     *
+     * A person who deletes the folder outside the app gets it back on the next refresh, with a
+     * fresh prompt. That is the right recovery: the alternative is an account whose settings have
+     * nowhere to live and an agent that refuses to start.
+     */
+    private fun ensureSystemFolder() {
+        try {
+            File(accountDir, SYSTEM_PROJECT).mkdirs()
+        } catch (t: Throwable) {
+            // A folder that cannot be made is a phone problem, and every write that needs it will
+            // say so on its own. Nothing to report from here.
+        }
     }
 
     /**
@@ -201,7 +223,13 @@ class Workspace(val accountDir: File) {
      */
     fun isProjectFolder(file: File): Boolean =
         file.isDirectory && file.parentFile?.canonicalFile == accountDir.canonicalFile &&
-            !isHidden(file.name) && File(file, ".git").exists()
+            !isHidden(file.name) &&
+            // **The system project is a project before it has a repository.** Its folder is made
+            // by [ensure], which runs on every refresh and has no author or git library to make a
+            // repository with; the repository follows the first time a file in it is saved. Without
+            // this clause the row would be missing from the list for exactly as long as nobody had
+            // written anything in it, which reads as "the system project does not exist yet".
+            (File(file, ".git").exists() || isSystem(file.name))
 
     /** The names of the projects on this phone, in display order. */
     fun projectNames(): List<String> =
@@ -797,6 +825,25 @@ class Workspace(val accountDir: File) {
         }
 
         const val STATE_DIR = ".muffy"
+
+        /**
+         * The one project the person cannot delete, rename or sync away.
+         *
+         * **A project, not a hidden folder.** It holds the settings that belong to the whole
+         * account rather than to any one project — the system prompt, and whatever else grows a
+         * scope wider than a project — and the report that asked for it said the right thing:
+         * "system prompt is outdated. Another reason why it should be an editable file inside
+         * system project instead of a hidden one". A hidden file is one nobody edits, and a prompt
+         * nobody edits goes stale and stays stale.
+         *
+         * It is a **local** project: no remote, so nothing it holds is ever pushed. The guards
+         * that keep it are in [isSystem], and they are case-insensitive because a filesystem that
+         * folds case would otherwise offer a second `System` that can be deleted.
+         */
+        const val SYSTEM_PROJECT = "system"
+
+        /** True for [name] when it is the system project's — **whatever its case.** */
+        fun isSystem(name: String): Boolean = name.equals(SYSTEM_PROJECT, ignoreCase = true)
 
         /** A project's ignore file, and the two lines the app keeps in it. */
         const val IGNORE = ".gitignore"

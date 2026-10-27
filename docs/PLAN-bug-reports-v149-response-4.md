@@ -43,6 +43,7 @@ time in a worse way.
   stops it being sent from now on; it does not take back what was sent."*
 
 That sentence is the honest one, and it is the reason I am glad you asked.
+@ ok
 
 ---
 
@@ -69,6 +70,7 @@ commit**. Two things follow, and they are why this is better than a message:
    the moment it opens**, not remember a hash from earlier.
 
 The commit *message* never enters it. Two commits can share a message; only a ref is a position.
+@ so a better mechanism, ok
 
 ---
 
@@ -123,6 +125,7 @@ in `.gitignore`.** A person opening `.gitignore` sees only their own decisions.
   pushed, and the longer one when it was. The app can tell the difference (`unsentPaths` already
   knows whether the path is in the remote's tree).
 - The diff picker resolves `refs/remotes/origin/<branch>` when it opens — never a remembered hash.
+@ no need for clarifications
 
 ## What I am doing now, in this turn
 

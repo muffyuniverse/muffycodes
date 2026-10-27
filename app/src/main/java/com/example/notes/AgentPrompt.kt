@@ -134,9 +134,24 @@ object AgentPrompt {
         }
     }
 
-    /** ① for [accountDir]. */
-    fun system(accountDir: File): String =
-        layer(File(accountDir, SYSTEM_FILE), SYSTEM_DEFAULT)
+    /**
+     * ① for [accountDir] — **read from the system project, where a person can open it.**
+     *
+     * It used to be a file at the account's root, which is a place the app draws as the project
+     * list: nothing in the interface led to it, so "the system prompt is a file you can edit" was
+     * true and unreachable. It lives in the system project now, which is a row like any other and
+     * opens in the editor like any other.
+     *
+     * The root is still read first, so an account made before the project existed keeps the text
+     * the person may already have edited there. That is not a migration with a version number — it
+     * is the same rule this class already holds: **a file that exists is the person's.**
+     */
+    fun system(accountDir: File): String {
+        val inProject = File(File(accountDir, Workspace.SYSTEM_PROJECT), SYSTEM_FILE)
+        val atRoot = File(accountDir, SYSTEM_FILE)
+        val file = if (inProject.isFile || !atRoot.isFile) inProject else atRoot
+        return layer(file, SYSTEM_DEFAULT)
+    }
 
     /** ② for the project in [projectDir]. */
     fun project(projectDir: File): String =
