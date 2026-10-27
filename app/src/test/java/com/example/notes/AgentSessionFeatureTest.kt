@@ -166,6 +166,21 @@ class AgentSessionFeatureTest : FeatureTest() {
         error("the session never gave up, which is the failure this test is for")
     }
 
+    /**
+     * The session as the screen would draw it, after a tick has been waited out.
+     *
+     * **A tick refreshes the view model's list *before* its worker writes the outcome**, so the
+     * list a test reads straight afterwards is the moment before the poll finished. Every
+     * assertion in this class about what a poll decided goes through here: one more tick at the
+     * same time is due (it changes nothing — the session is stopped and a stopped session is not
+     * polled), and it is what re-reads the store into the list the screen draws.
+     */
+    private fun shown(project: String): AgentSession? {
+        val now = scene.viewModel.readSession(project)?.lastPollAt ?: 0L
+        scene.viewModel.tickAgents(now)
+        return scene.viewModel.sessionOf(project)
+    }
+
     @Test
     fun `one switch in settings stops every agent on the phone`() {
         // **The brief assumed this existed and it never did.** Each box has its own Stop, and the
@@ -340,7 +355,7 @@ class AgentSessionFeatureTest : FeatureTest() {
             AgentSession.strip(scene.viewModel.agentSessions),
         )
 
-        val askedAt = scene.viewModel.sessionOf("groceries")!!.askedAt
+        val askedAt = shown("groceries")!!.askedAt
         scene.viewModel.tickAgents(askedAt + 30 * 60_000)
         assertEquals("half an hour is not an hour", 1, notices.size)
 
@@ -357,7 +372,7 @@ class AgentSessionFeatureTest : FeatureTest() {
         assertEquals(
             "and it is still waiting for the person",
             AgentSession.State.STOPPED,
-            scene.viewModel.sessionOf("groceries")?.state,
+            shown("groceries")?.state,
         )
     }
 
@@ -379,7 +394,7 @@ class AgentSessionFeatureTest : FeatureTest() {
             scene.viewModel.sessionOf("groceries")?.sub == AgentSession.Sub.FINISHED
         }
         giveUp("groceries")
-        val askedAt = scene.viewModel.sessionOf("groceries")!!.askedAt
+        val askedAt = shown("groceries")!!.askedAt
 
         scene.viewModel.tickAgents(askedAt + 4 * 60_000)
         assertEquals("four minutes is not five", 1, notices.size)
@@ -433,7 +448,7 @@ class AgentSessionFeatureTest : FeatureTest() {
         assertEquals(
             "stopped by the person",
             AgentSession.StopReason.BY_OPERATOR,
-            scene.viewModel.sessionOf("groceries")?.reason,
+            shown("groceries")?.reason,
         )
         assertTrue("and nothing was said about it", notices.isEmpty())
         assertEquals("and the strip is gone", "", AgentSession.strip(scene.viewModel.agentSessions))
