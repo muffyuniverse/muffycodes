@@ -107,7 +107,13 @@ class AgentSessionFeatureTest : FeatureTest() {
      * the app had already decided `reconnecting`.
      */
     private fun tick(project: String) {
-        val session = scene.viewModel.sessionOf(project) ?: return
+        // **From the store, because the screen's copy is one write behind.** `sessionOf` returns the
+        // list the view model took when the last tick *started*, so its `nextPollAt` is the time
+        // before that poll moved the clock — and a tick taken at that time is in the past, which
+        // `warmDue` rightly declines. The loop then ticks at the same stale instant forty times and
+        // the session never moves at all. This is why the tests read `retries=0` after forty ticks
+        // while every individual link in the ladder was correct.
+        val session = scene.viewModel.readSession(project) ?: return
         tickAt(project, session.nextPollAt)
     }
 
