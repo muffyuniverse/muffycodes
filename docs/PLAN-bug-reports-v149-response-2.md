@@ -52,7 +52,7 @@ So it is a **visible** project with a plain name. Two candidates:
 I propose **`system`, lowercase**, because every other project name in this app is lowercase and
 a capitalised one would be the only exception. But the guard has to be case-insensitive either
 way, or `System` and `system` are two projects and one of them can be deleted.
-
+@ lowercase, and make it so .files are visible in the app - there should be no hidden files - even system ones should be readable (but system locked: no delete, move, clone, rename, edit etc - only read). And if system files are inside github projects then they should be gitignored. And maybe I dont understand what gitignore does - it does commit locally but doesnt push to remote, right? or if it doesnt commit at all then I was misinformed and we instead need syncignored file and mechanism that prevents certain files from being pushed to remote only.
 ---
 
 ## 2 · No hidden files — this is the larger half, and I want to be sure I read it right
@@ -82,6 +82,7 @@ Options, and this is the one place I want your call:
 
 I recommend **(i)**: your sentence is about *files you might want to see*, and a marker whose only
 job is to make git notice a folder is not one of those. But it is your rule, so it is your call.
+@ ok, i
 
 ### What "locked" and "gitignored" become
 
@@ -93,6 +94,7 @@ You said the distinction should be **locked** and **gitignored**, not hidden. Bo
 What is missing is that **a gitignored file does not look different from any other file.** If the
 rule is "there are locked files and gitignored files", then a person needs to see which is which —
 which is report #16, still open. So this and #16 are the same change, and I will do them together.
+@ locked files have lock button, syncignored have syncignore button.
 
 ---
 
@@ -114,9 +116,11 @@ Two things your rule needs that it does not yet say:
    after the last push has no synced commit. I propose: right = the file's **first** version, so
    the diff is "everything this file has ever been". If that is wrong, the alternative is to
    leave it unset and Done stays greyed — which is honest, and your rule already covers it.
+   @ unset
 2. **Changing the left field resets the right.** You said that, and I will make it a rule in the
    code rather than a habit in the screen: the right list is computed *from* the left, so it
    cannot contain something the left rule forbids.
+   @ ok
 
 ---
 
@@ -132,72 +136,53 @@ list".
 **I am going to assume it means the former: delete the state, the notification, and the paused
 indicator along with `ask`.** If you meant something else, say so before I start D1 — this is a
 deletion, and a deletion on a wrong reading is the expensive kind.
+@ delete all three rather than leave them unreachable
 
 ---
 
-## 5 · Closing reports in the trace log
+## 5 · Closing reports in the trace log — this is the new instruction, and here is how I read it
 
 > "ensure that closed reports are marked as closed in trace log"
 
 I read this as: **a report a person wrote should be able to end.** Today a `REPORT` line is a
 checkpoint with no counterpart — the person says "sync is grey", and the log never records that it
 was answered. That is why 20 of the 38 reports in the file you sent were already fixed: nothing in
-the log says so, so every pass over it re-reads them as open.
+the log says so, so every pass over the log re-reads them as open.
 
-### What the log already gives us for free
-
-Every line now carries the build (`149`, field 2), so a report is already dated by the version it
-came from. That is half the answer: I can see at a glance that a report is from 103 and the app is
-153. What is missing is the other half — *whether that particular one was answered*.
-
-### Two mechanisms, and only one of them can be true by construction
-
-**(a) The app ships a list of closed reports.** A file in the repo, read at startup, and the app
-writes one `NOTE closed` line per report whose text it recognises.
-
-- *For:* automatic — the log describes itself with no work from the person.
-- *Against:* it recognises by matching the person's free text, and a report typed slightly
-  differently is silently not matched. It is also a build artifact that goes stale the moment I
-  forget to update it, and a stale one is worse than none: it says "closed" about something that
-  is not.
-
-**(b) The person marks it, with one tap.** The observability screen already lists every line. A
-`REPORT` line gets one action — "answered" — which appends `NOTE closed` with the report's own
-words.
-
-- *For:* **true by construction.** The person is the only one who knows whether the thing they
-  reported still happens. No matching, no build artifact, nothing to go stale.
-- *Against:* it is a tap the person has to remember.
-
-**I recommend (b), and I recommend it for the same reason this app refuses to guess elsewhere:**
-the alternative writes "closed" from a place that cannot know. A log that says a bug is fixed when
-it is not is worse than a log that says nothing — it is the one lie that costs a whole debugging
-session.
-
-The screen's KDoc says it is "read-only except for two acts: share" (`ObservabilityScreen.kt:36`).
-This makes it three, and the KDoc changes with it.
-
-### The shape of the line
+The mechanism I propose, in the log's own vocabulary:
 
 ```
 16:03:20.001  149 open    0 REPORT   report  changed a file, saved but sync is still grey
-17:41:02.553  153 open    0 NOTE     closed  changed a file, saved but sync is still grey
+...
+17:41:02.553  153 open    0 NOTE     fixed   sync counts paths, not commits (6f734cb)
 ```
 
-The report's words are repeated **exactly**, so the pair is findable by the same `grep` the person
-would use to find their own sentence. `closed` is the name column, so `grep " closed "` finds every
-closed report and nothing else.
+A **`NOTE fixed`** line, written by the app, naming the commit. It answers nothing (id 0, like
+every NOTE), it is in the same stream, and the pairing is by *what* the person said — a reader
+can see "that report, then later this fix".
 
-### One property this must not break
+**Three things this needs that I will not invent:**
 
-The log is append-only — `Trace` writes whole lines and never rewrites one (`Trace.kt:583` rotates
-by taking the tail, it does not edit). So "marking as closed" is **a new line, never an edit of the
-report line**. If you meant "edit the report line to add a state", say so — but it would break the
-one property the file has, and the rotation would eventually drop the pairing anyway.
+1. **Who writes it.** The app cannot know which report a commit closes — that is a judgement. So
+   either the person marks it, or a build ships with a list of closed reports in it. I propose the
+   second: a small file the app reads at startup, holding the commits since the last build, and
+   the app writes one `NOTE fixed` per commit. That is mechanical and honest, and it means the
+   log says what changed between the version a report came from and the version now running.
+2. **What "closed" attaches to.** A report line has no id. If a fix closes three reports, it is
+   three lines or one line naming three. I propose **one line per report it closes**, because a
+   reader searching for their own words should find a line right after them.
+3. **That it does not rewrite history.** The log is append-only (`AgentLog` and `Trace` both say
+   so). "Marking as closed" must be **a new line**, never an edit of the report line. If you meant
+   "edit the report line to add a state", say so — but it breaks the one property the log has.
 
-**The doc keeps its table too.** `docs/PLAN-bug-reports-v149.md` is my audit and it stays; this is
-the app's own record, and they answer different questions ("what did I check" vs "what did the
-person accept").
+**The alternative reading** is that you mean the *report list I am keeping* — `docs/PLAN-bug-reports-v149.md`
+— should mark closed ones as closed. It already does, and I will keep it that way.
+
+**Both are cheap. I will do both unless you say otherwise**: the doc keeps its table, and the app
+gains the `NOTE fixed` line.
+@ you just replace open with closed by hand when you are done with the report so that it doesnt dangle.
+
+---
 
 ## Order, updated for your answers
 

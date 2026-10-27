@@ -316,6 +316,46 @@ class ProjectsFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `ignoring a file takes it out of the repository, so its edits stop being sent`() {
+        // **The defect this test was written for.** `.gitignore` is not a commit filter; it only
+        // stops git from *starting* to track a path. A file already in the repository ignores the
+        // ignore line completely: git keeps committing it. And every file a person has saved is
+        // already tracked, because a save commits — so "Add to .gitignore" wrote a line, committed
+        // it, said "Ignoring x", and the file went on being pushed.
+        //
+        // The act is completed by taking the path out of the index. The file stays on the phone,
+        // editable, and stops being sent.
+        scene.project("groceries")
+        val dir = scene.workspace!!.projectDir("groceries")
+        val file = File(dir, "secret.txt")
+        scene.workspace!!.write(file, "the first version")
+        scene.repo("groceries").commitOutcome("groceries", "a save")
+
+        // It really is in the repository, or the rest of this proves nothing.
+        assertEquals(
+            "the file is in the history before it is ignored",
+            "the first version",
+            scene.repo("groceries").versions("groceries", "secret.txt").firstOrNull()?.second,
+        )
+
+        scene.viewModel.ignoreInGit(file)
+        scene.await("the ignore to be committed", 30_000) {
+            scene.repo("groceries").versions("groceries", "secret.txt").isEmpty()
+        }
+
+        // And now the edit that used to sneak in.
+        scene.workspace!!.write(file, "the second version")
+        scene.repo("groceries").commitOutcome("groceries", "another save")
+
+        assertTrue("the file is still on the phone", file.isFile)
+        assertEquals("with the edit in it", "the second version", file.readText())
+        assertTrue(
+            "and the edit never reached the repository",
+            scene.repo("groceries").versions("groceries", "secret.txt").isEmpty(),
+        )
+    }
+
+    @Test
     fun `a local project keeps its versions like any other`() {
         scene.viewModel.createLocalProject("scratch")
         scene.await("the local project", 30_000) {

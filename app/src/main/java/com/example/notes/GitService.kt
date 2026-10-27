@@ -258,6 +258,40 @@ object GitService {
     }
 
     /**
+     * Stops tracking [path], **leaving the file where it is.**
+     *
+     * ## Why an ignore line is not enough, and this is the whole reason this exists
+     *
+     * `.gitignore` is not a commit filter; it is an *untracked* filter. It stops git from
+     * beginning to track a path and does nothing at all to a path already in the repository —
+     * verified against a real repository: a tracked file, ignored, edited, committed, still had
+     * its edit in the commit. Git has no "commit but do not push" mechanism either: a commit is
+     * a whole tree, so a commit without a file is a *different* commit, and "synced" cannot mean
+     * "the phone's commit minus a file".
+     *
+     * So "stop sending this" has to mean "take it out of the repository", and that is this:
+     * `git rm --cached`, which unstages and untracks while the working copy stays on the disk,
+     * editable and untouched.
+     *
+     * Without this, "Add to .gitignore" wrote a line, committed it, said "Ignoring x" — and the
+     * file went on being committed and pushed. Every file a person has saved is already tracked,
+     * because a save commits, so the button was wrong for exactly the files people use it on.
+     *
+     * @return true when the path is no longer tracked afterwards — including when it never was.
+     */
+    fun untrack(repo: Repository, path: String): Boolean = try {
+        Git(repo).use { git ->
+            git.rm().addFilepattern(path).setCached(true).call()
+        }
+        // **The index is asked, because the index is what "tracked" means.** A status report has
+        // an entry for every kind of change and reading the right one out of it is a guess; a path
+        // with no index entry cannot be committed, and that is the whole question.
+        repo.readDirCache().getEntry(path) == null
+    } catch (t: Throwable) {
+        false
+    }
+
+    /**
      * What became of an attempt to write a change into a repository.
      *
      * Three outcomes, not two. Returning `String?` — an id, or null — made "there was

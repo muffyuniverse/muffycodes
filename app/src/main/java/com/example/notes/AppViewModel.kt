@@ -1163,7 +1163,20 @@ class AppViewModel @JvmOverloads constructor(
             message = "Could not change .gitignore here"
             return
         }
-        message = "Ignoring $inside"
+        // **The line alone does not stop a file that is already in the repository.** `.gitignore`
+        // is an *untracked* filter: git tested against itself keeps committing a path it already
+        // knows, and every file a person has saved is already tracked because a save commits. So
+        // the ignore is completed by taking the path out of the index — the file stays on the
+        // phone, editable, and stops being sent. Without this the button wrote a line, committed
+        // it, and said "Ignoring x" while x went on being pushed.
+        val stillTracked = git?.open(project)?.use { repo ->
+            !GitService.untrack(repo, inside)
+        } ?: false
+        message = if (stillTracked) {
+            "Ignoring $inside, but it is still in the repository"
+        } else {
+            "Ignoring $inside"
+        }
         refresh()
         commitProject(project, "Ignored $inside")
     }
