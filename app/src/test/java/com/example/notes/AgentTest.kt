@@ -699,14 +699,29 @@ class AgentTest {
     }
 
     @Test
-    fun `read with grep answers with numbered lines and leaves the rest out`() {
+    fun `read with grep answers with the text the pattern matched, and nothing around it`() {
+        // **Reported from the live log, three times.** "grep only gives lines!!! why not precise
+        // selection!? it has freaking regex in the name", then "when you use grep as an argument to
+        // edit the line numbers get passed as well — they shouldn't". A pattern selects text, so
+        // the answer is the text: no line, no number, no window cut around it. That is also what
+        // makes the answer pasteable into `edit`'s `replace`.
         ws.write(File(ws.repoOf("shopping"), "milk.txt"), "first\ntwo litres\nthird\n")
 
         val body = tool("read", """{"path":"milk.txt","grep":"litres"}""")
 
-        assertTrue("the line and its number: $body", body.contains("2: two litres"))
-        assertFalse("and not the lines that did not match: $body", body.contains("first"))
-        assertFalse("nor the one after it: $body", body.contains("third"))
+        assertEquals("the match itself, alone", "0\nlitres", body)
+    }
+
+    @Test
+    fun `every match on a line is selected, not just the first`() {
+        // A selector that answers one of the three numbers in a line is the "grep only gives
+        // lines" complaint wearing a different hat: the pattern said what it wanted, and the
+        // command answered part of it.
+        ws.write(File(ws.repoOf("shopping"), "n.txt"), "a1 b22 c333\n")
+
+        val body = tool("read", """{"path":"n.txt","grep":"\\d+"}""")
+
+        assertEquals("all three", "0\n1\n22\n333", body)
     }
 
     @Test
@@ -806,17 +821,16 @@ class AgentTest {
     }
 
     @Test
-    fun `grep is applied inside the range, and the line numbers are the file's`() {
-        // **The order is the whole contract.** The range says which part of the file you are looking
-        // at; the pattern says which lines of that part. If grep ran first, the numbers it printed
-        // would be numbers in the *result*, and the `edit` that followed would change the wrong line.
+    fun `grep is applied inside the range, so the selection is what the range holds`() {
+        // **The order is the whole contract, and it is unchanged.** The range says which part of the
+        // file you are looking at; the pattern says what in that part is selected. What the answer
+        // no longer carries is a position, so the proof is which text came back rather than which
+        // number it was printed beside.
         ws.write(File(ws.repoOf("shopping"), "milk.txt"), "milk\nbread\nmilk again\neggs\nmilk last\n")
 
-        val body = tool("read", """{"path":"milk.txt","from":2,"to":4,"grep":"milk"}""")
+        val body = tool("read", """{"path":"milk.txt","from":2,"to":4,"grep":"milk \\w+"}""")
 
-        assertTrue("the hit inside the window: $body", body.contains("3: milk again"))
-        assertFalse("not the one before it: $body", body.contains("1: milk"))
-        assertFalse("nor the one after it: $body", body.contains("5: milk last"))
+        assertEquals("only the one inside the window", "0\nmilk again", body)
     }
 
     @Test
@@ -842,8 +856,9 @@ class AgentTest {
         val found = tool("tree", """{"path":"","grep":"^milk$"}""")
         val read = tool("read", """{"path":"list.txt","grep":"^milk$"}""")
 
+        // `tree` answers where it is; `read` answers what the pattern selected.
         assertTrue("the search finds it: $found", found.contains("list.txt:2: milk"))
-        assertTrue("and the read finds it: $read", read.contains("2: milk"))
+        assertEquals("and the read selects it", "0\nmilk", read)
     }
 
     @Test
@@ -857,8 +872,8 @@ class AgentTest {
         val lower = tool("read", """{"path":"places.txt","grep":"KRAKÓW"}""")
         val upper = tool("read", """{"path":"places.txt","grep":"zÜRICH"}""")
 
-        assertTrue("the accented name is found either way: $lower", lower.contains("1: Kraków"))
-        assertTrue("and so is the umlaut: $upper", upper.contains("2: Zürich"))
+        assertEquals("the accented name is found either way", "0\nKraków", lower)
+        assertEquals("and so is the umlaut", "0\nZürich", upper)
     }
 
     @Test
@@ -892,16 +907,18 @@ class AgentTest {
     }
 
     @Test
-    fun `the excerpt is placed around the hit, not at the start of the line`() {
-        // A minified line can be a hundred thousand characters. An answer that prints the first two
-        // hundred of them beside a hit at character 250 does not contain the thing it answers about.
+    fun `a hit in a very long line is selected whole, with no window around it`() {
+        // **There is no excerpt any more.** The old answer cut a two-hundred-character window
+        // around the match and marked the cut with an ellipsis, which meant a match could arrive
+        // with characters the file does not contain beside it — and a `replace` built from that
+        // answer wrote the ellipsis and the window into the file. A selector answers with the
+        // match; how long the line was is `read from`/`to`'s business.
         val file = File(ws.repoOf("shopping"), "long.txt")
         ws.write(file, "x".repeat(250) + "NEEDLE" + "y".repeat(250))
 
         val body = tool("read", """{"path":"long.txt","grep":"NEEDLE"}""")
 
-        assertTrue("the hit is in the answer: $body", body.contains("NEEDLE"))
-        assertTrue("with a mark that it was cut: $body", body.contains("\u2026"))
+        assertEquals("the match, and only the match", "0\nNEEDLE", body)
     }
 
     @Test
@@ -1117,11 +1134,71 @@ class AgentTest {
     fun `edit will not take two shapes at once`() {
         ws.write(File(ws.repoOf("shopping"), "milk.txt"), "one\ntwo")
 
-        val body = tool("edit", """{"path":"milk.txt","find":"one","at":1,"replace":"x"}""")
+        val body = tool("edit", """{"path":"milk.txt","grep":"one","at":1,"replace":"x"}""")
 
         assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
         assertTrue("and it says why: $body", body.contains("one of"))
         assertEquals("with nothing changed", "one\ntwo", ws.read(File(ws.repoOf("shopping"), "milk.txt")))
+    }
+
+    @Test
+    fun `edit replaces every match of a pattern, not a literal`() {
+        // **The key was called `find` and behaved like one.** `before.replace(find, put)` took a
+        // literal, so a model that wrote a regular expression had its metacharacters matched as
+        // characters — and the description promised "wherever it appears", which a literal cannot
+        // do for a pattern.
+        ws.write(File(ws.repoOf("shopping"), "n.txt"), "a1 b22 c333\n")
+
+        val body = tool("edit", """{"path":"n.txt","grep":"\\d+","replace":"N"}""")
+
+        assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
+        assertEquals("every number, each replaced", "aN bN cN\n", ws.read(File(ws.repoOf("shopping"), "n.txt")))
+    }
+
+    @Test
+    fun `edit can narrow its pattern to a range of lines`() {
+        // **Reported from the live log:** "grep and from-to cant be used together (should have been
+        // grep within from-to selection)". One selection with a bound is not two edits: the range
+        // says where to look and the pattern says what to change, exactly as `read` composes them.
+        val file = File(ws.repoOf("shopping"), "milk.txt")
+        ws.write(file, "milk\nbread\nmilk again\neggs\nmilk last\n")
+
+        val body = tool(
+            "edit",
+            """{"path":"milk.txt","from":2,"to":4,"grep":"milk","replace":"WATER"}""",
+        )
+
+        assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
+        assertEquals(
+            "only the line inside the range changed",
+            "milk\nbread\nWATER again\neggs\nmilk last\n",
+            ws.read(file),
+        )
+    }
+
+    @Test
+    fun `a replacement built from a grep answer carries no line number into the file`() {
+        // **Reported from the live log:** "when you use grep as an argument to edit the line numbers
+        // get passed as well — they shouldn't". The old answer was `2: litres`, so pasting it wrote
+        // the number. The selector answers with the match now, and this is the test that keeps the
+        // two ends agreeing: what `read grep` gives is exactly what `edit replace` can take.
+        val file = File(ws.repoOf("shopping"), "milk.txt")
+        ws.write(file, "first\ntwo litres\nthird\n")
+
+        val selected = tool("read", """{"path":"milk.txt","grep":"two litres"}""")
+        // The body's second line is the selection, with the status line above it — the same
+        // "0 or 1, then the answer" shape every result has.
+        assertEquals("what the selector answered", "0\ntwo litres", selected)
+        val text = selected.substringAfter('\n')
+
+        val args = org.json.JSONObject()
+            .put("path", "milk.txt")
+            .put("grep", "two litres")
+            .put("replace", text)
+        val body = tool("edit", args.toString())
+
+        assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
+        assertEquals("the file says the words, not a number", "first\ntwo litres\nthird\n", ws.read(file))
     }
 
     @Test

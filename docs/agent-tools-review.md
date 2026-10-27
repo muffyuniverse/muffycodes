@@ -11,8 +11,8 @@ followed it; the decisions in them are what this says, and the plan that impleme
 | tool | arguments | what it does |
 |---|---|---|
 | `tree` | `path`, `depth`, `name`, `grep`, `from`, `to` | lists a folder; with a pattern, answers with paths and matching lines. `from`/`to` pick a range of **paths** |
-| `read` | `path`, `revision`, `grep`, `from`, `to` | a text file, or one of its versions, **exactly as it is stored**. With `grep`, the matching lines with their real line numbers, inside the range. The agent's own `agent/context.log` is the rows in its context as `id size name body`; `agent/session.log` is every event, with `kind` and `ctx` |
-| `edit` | `path`, and one of `find`+`replace`, `from`/`to`+`replace`, `at`+`replace`, `text` | changes part of a file. `replace` is text **or a `read` call** |
+| `read` | `path`, `revision`, `grep`, `from`, `to` | a text file, or one of its versions, **exactly as it is stored**. With `grep`, **the text the pattern matched** — every match, nothing around it, no line number — inside the range. `tree` is the command that says where a match is. The agent's own `agent/context.log` is the rows in its context as `id size name body`; `agent/session.log` is every event, with `kind` and `ctx` |
+| `edit` | `path`, and one of `grep`+`replace` (optionally narrowed by `from`/`to`), `from`/`to`+`replace`, `at`+`replace`, `text` | changes part of a file. `grep` selects with the same pattern `read` takes and replaces every match. `replace` is text **or a `read` call** |
 | `create` | `path`, `text` | makes a file, and the folders above it |
 | `delete` | `path` | a file, or a folder and everything in it |
 | `move` | `path`, `into`, `name`, `copy` | moves, renames, or — with `copy: true` — copies |
@@ -112,13 +112,20 @@ is a member that cannot go, and moving the others would leave the act half done.
 
 ## 3. Why `edit` is per line and has no `grep`
 
-A range renames a block; a pattern matches scattered lines. `grep:"TODO"` on a file means N
-disconnected lines, and one call could mean "replace each of them" or "replace one span that swallows
-everything between two matches". The model cannot say which, so the tool does not offer it.
+A range names a block; a pattern matches scattered text. `grep:"TODO"` on a file means N
+disconnected matches, and one call could mean "replace each of them" or "replace one span that
+swallows everything between two matches". **The tool offers the first**, because a selector that
+answers with the matches is already saying "each of these", and replacing every one of them is one
+meaning a model can check by reading the file afterwards.
 
-The scattered case is handled by **deriving** the lines rather than editing them: `read {"grep":…}`
-prints real line numbers, then `edit {"from":N,"to":M}` uses them. Two calls, each with one meaning.
-`find`/`replace` remains because replacing every occurrence of a string is exactly one meaning.
+**There is one selector, and it is `grep`.** It used to be two — `grep` for lines and a `find` key on
+`edit` for a literal — which meant the same word meant two things, a pattern on one command and
+characters on the other, and the command a model reached for after a search took a literal. Reported
+from the live log: *"agent says that grep is called find (should be grep)"*, *"do we have grep and
+find as separate engines? I thought that we just have just grep and it can do any kind of selection"*,
+*"why did you limit grep and introduced find and made both crippled? we just need a fully functional
+grep selector, no find."* `find` is gone; `edit` takes `grep`, and a range narrows it rather than
+competing with it.
 
 ## 4. Why a paste is an argument, not a tool
 

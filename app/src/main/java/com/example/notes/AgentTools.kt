@@ -137,7 +137,7 @@ class AgentTools(
         val KEYS: Map<String, Set<String>> = mapOf(
             "tree" to setOf("path", "depth", "name", "grep", "from", "to"),
             "read" to setOf("path", "from", "to", "grep", "revision"),
-            "edit" to setOf("path", "find", "replace", "from", "to", "at", "text"),
+            "edit" to setOf("path", "grep", "replace", "from", "to", "at", "text"),
             "forget" to setOf("ids"),
             "create" to setOf("path", "text"),
             "delete" to setOf("path"),
@@ -195,24 +195,28 @@ class AgentTools(
                 "Read a text file, or one of its versions. Always read before you change one. " +
                 "`from` and `to` are line numbers, both included; `from` starts at 1 and `to` " +
                 "left out runs to the end. " +
-                    "With `grep` only the lines that match are shown, each with its line number, " +
-                    "and the pattern is applied inside `from`/`to` rather than to the whole file. " +
-                    "A pattern is a regular expression, case-insensitive, matched inside one line. " +
-                    "A file is shown exactly as it is stored, columns and all. Your own " +
-                    "`agent/context.log` is the rows in your context as `id size name body`, and " +
-                    "`agent/session.log` is everything that happened, with `kind` and `ctx`.",
+                    "**`grep` is the selector: it answers with the text the pattern matched**, " +
+                    "every match, exactly as matched — not the line it was on and not its number, " +
+                    "so the answer can be pasted straight into `edit`'s `replace`. It is applied " +
+                    "inside `from`/`to` rather than to the whole file. A pattern is a regular " +
+                    "expression, case-insensitive, matched inside one line. Use `tree` to learn " +
+                    "where a match is. A file is shown exactly as it is stored, columns and all. " +
+                    "Your own `agent/context.log` is the rows in your context as " +
+                    "`id size name body`, and `agent/session.log` is everything that happened, " +
+                    "with `kind` and `ctx`.",
                 "{\"path\":\"the file, relative to the project\",\"from\":1,\"to\":200," +
-                    "\"grep\":\"a pattern to look for\",\"revision\":\"an id from history\"}",
+                    "\"grep\":\"a pattern to select\",\"revision\":\"an id from history\"}",
             ),
             spec(
                 "edit",
-                "Change part of a file. `find`/`replace` replaces text wherever it appears; " +
-                    "`from`/`to` replaces that block of lines; `at` inserts after that line (0 puts " +
-                    "it at the top); `text` writes the whole file. `replace` may be a `read` call, " +
-                    "which copies that call's answer out of another file without it passing " +
-                    "through this conversation.",
-                "{\"path\":\"the file\",\"find\":\"text to look for\",\"replace\":\"what to " +
-                    "put there\"}",
+                "Change part of a file. `grep` selects what is replaced: every match of the " +
+                    "pattern, the same one `read` takes, and `from`/`to` narrows it to those lines. " +
+                    "`from`/`to` alone replaces that whole block of lines; `at` inserts after that " +
+                    "line (0 puts it at the top); `text` writes the whole file. `replace` may be a " +
+                    "`read` call, which copies that call's answer out of another file without it " +
+                    "passing through this conversation.",
+                "{\"path\":\"the file\",\"grep\":\"the text to replace\",\"replace\":\"what " +
+                    "to put there\"}",
             ),
             spec(
                 "forget",
@@ -604,6 +608,21 @@ class AgentTools(
         pattern.find(Timed(line, deadline, tool))?.range
 
     /**
+     * **Every** match of [pattern] in [line], in the order they appear — the selector's answer.
+     *
+     * The same [Timed] view as [hit], for the same reason: `findAll` walks the text through
+     * `charAt`, so handing it the view keeps the clock *inside* the scan. A line of ten thousand
+     * numbers and a pattern that backtracks is exactly the call this exists to interrupt, and it is
+     * the call a selector invites.
+     */
+    internal fun hits(line: String, pattern: Regex, deadline: Deadline, tool: String): List<String> {
+        val timed = Timed(line, deadline, tool)
+        val out = ArrayList<String>()
+        for (match in pattern.findAll(timed)) out.add(match.value)
+        return out
+    }
+
+    /**
      * The text a matcher walks, with the clock in it.
      *
      * A view and not a copy, so a match is still asked about the file's own characters.
@@ -730,15 +749,26 @@ class AgentTools(
         if (chosen.isEmpty()) {
             return Result.success("nothing from line $from: the file has ${lines.size} lines")
         }
-        // **The same grep as `tree`, on one file, inside the range if there is one.** Each hit comes
-        // with its real line number, because the next thing the model does with a hit is change it
-        // and an edit needs a place — and the numbers are the file's, not the selection's, so a
-        // number read in one call means the same line in the next.
+        // **`grep` answers with what the pattern matched, not with the line it matched on.**
+        //
+        // This is the selector the whole command is built around, and it was answering the wrong
+        // question twice over. Reported from the live log: "grep only gives lines!!! why not precise
+        // selection!? it has freaking regex in the name", and then "when you use grep as an argument
+        // to edit the line numbers get passed as well — they shouldn't". Both come from the same
+        // decision: the old answer was `12: …the whole line, cut to a window…`, so a model that
+        // wanted the matching text had to strip a number and a truncation mark off it, and a model
+        // that pasted the answer into `edit` wrote `12:` into the file.
+        //
+        // A pattern selects **the text it matches**, so that is the answer: every match, one per
+        // line, exactly the characters the regex matched and nothing around them. `findAll` rather
+        // than the first hit, because `\d+` in a line of numbers is several selections and a selector
+        // that silently answers one of them is the "grep only gives lines" complaint again.
+        //
+        // **What this costs is the line number**, deliberately. `tree` is the command that answers
+        // "where" — it says `path:line: text` — and `from`/`to` is how a model names a place. A
+        // selector that also reports a position is a selector whose answer cannot be pasted.
         if (grep != null) {
-            val found = chosen.withIndex().mapNotNull { (offset, line) ->
-                val at = hit(line, grep, deadline, "read") ?: return@mapNotNull null
-                "${from + offset}: ${excerpt(line, at, HIT)}"
-            }
+            val found = chosen.flatMap { line -> hits(line, grep, deadline, "read") }
             if (found.isEmpty()) {
                 return Result.success("nothing in ${rel(file)} matches that")
             }
@@ -785,22 +815,30 @@ class AgentTools(
         // **Exactly one way to say what changes.** Two selectors at once is two edits in one call,
         // and a call that means two things is a call whose result the model cannot check. The
         // refusal names all four shapes, because the model that sent two is guessing at the shape.
+        // **One selector, and `grep` may be narrowed by a range.** The old rule refused two
+        // selectors outright, which made "replace this pattern, but only between these lines"
+        // impossible to say — reported from the live log: "grep and from-to cant be used together
+        // (should have been grep within from-to selection)". That is one selection with a bound,
+        // not two edits: the range says where to look and the pattern says what to change, exactly
+        // as `read` composes them. Every other pair is still refused.
         val hasText = args.has("text")
-        val find = args.optString("find", "")
-        val hasFind = find.isNotEmpty()
+        val find = pattern(args.optString("grep", ""))
+            .getOrElse { return refusal("That is not a pattern: ${it.message}") }
+        val hasFind = find != null
         val hasRange = args.has("from") || args.has("to")
         val hasAt = args.has("at")
         val given = listOf(hasText, hasFind, hasRange, hasAt).count { it }
         if (given == 0) {
             return refusal(
-                "Say what to change: `find` and `replace` for text, `from`/`to` for a block of " +
-                    "lines, `at` to insert a line, or `text` to write the whole file",
+                "Say what to change: `grep` and `replace` for a pattern, `from`/`to` for a block " +
+                    "of lines, `at` to insert a line, or `text` to write the whole file",
             )
         }
-        if (given > 1) {
+        // A range beside a pattern is the one allowed pair; a range on its own is a block edit.
+        if (given > 1 && !(hasFind && hasRange)) {
             return refusal(
-                "Give one of `text`, `find`, `from`/`to` or `at`, not two at once — " +
-                    "a call that means two edits cannot be checked",
+                "Give one of `text`, `grep`, `from`/`to` or `at` — `grep` may be narrowed by " +
+                    "`from`/`to`, and nothing else pairs: a call that means two edits cannot be checked",
             )
         }
         val before = readText(file, deadline, "edit")
@@ -808,9 +846,56 @@ class AgentTools(
         val text = when {
             hasText -> args.optString("text")
             hasFind -> {
-                if (!before.contains(find)) return refusal("That text is not in ${rel(file)}")
+                // **The match is the replacement's whole extent, and it is a pattern.** `before
+                // .replace(find, put)` took a literal, so the key was called `find` and behaved
+                // like one — a model that wrote a regular expression had it matched as characters.
+                //
+                // **The replacement is text, never a rendered hit.** The old `grep` in `read`
+                // answered `12: the line`, and a model that fed that answer back as `replace`
+                // wrote the line number into the file. Nothing here goes through a formatter: the
+                // argument is the text, and a nested `read` is that call's body.
                 val put = replacementText(args, deadline).getOrElse { return refusal(it.message ?: "that replacement cannot be read") }
-                before.replace(find, put)
+                // **Per line, like every other command.** A pattern is a test of one line here, as
+                // it is in `read` and `tree`; applying it to the whole file would make `^milk`
+                // match only at position 0, which is the bug that made `tree` miss a file whose
+                // second line was `milk`. Splitting and rejoining is exact — the file's own
+                // newlines are the separators, and nothing is normalised.
+                //
+                // **The range narrows it, and only lines inside the range are rewritten.** The
+                // bounds are the file's own line numbers, so a model that read `read from 5 to 9`
+                // and then asked to replace inside that range is talking about the lines it saw.
+                val first = if (hasRange) {
+                    count(args, "from", 1)
+                        .getOrElse { return refusal(it.message ?: "that range cannot be used") }
+                        .coerceAtLeast(1)
+                } else {
+                    1
+                }
+                val last = if (hasRange) {
+                    val asked = count(args, "to", 0)
+                        .getOrElse { return refusal(it.message ?: "that range cannot be used") }
+                    when {
+                        asked > 0 && asked < first -> return refusal(
+                            "That range ends at line $asked, before it starts at line $first. " +
+                                "`from` is the first line and `to` is the last.",
+                        )
+                        asked <= 0 -> lines.size
+                        else -> asked.coerceAtMost(lines.size)
+                    }
+                } else {
+                    lines.size
+                }
+                val escaped = Regex.escapeReplacement(put)
+                var changed = false
+                val rewritten = lines.mapIndexed { index, line ->
+                    // 1-based, and only inside the range the model named.
+                    if (index + 1 < first || index + 1 > last) return@mapIndexed line
+                    if (!find.containsMatchIn(line)) return@mapIndexed line
+                    changed = true
+                    find.replace(line, escaped)
+                }
+                if (!changed) return refusal("Nothing in ${rel(file)} matches that")
+                rewritten.joinToString("\n")
             }
             hasRange -> {
                 val from = count(args, "from", 1)
