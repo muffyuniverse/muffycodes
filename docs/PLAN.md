@@ -194,9 +194,15 @@ what is left starts at 4.
 3. ~~The two clocks and one unit~~ — done (`96eef42`, `ec918fd`).
 4. ~~The small three~~ — done. **#17** was already fixed (`5434a89`); **#20** and **#21** landed in
    `f833d54` with tests in `a735bcb`.
-5. **The chat rebuild** — `PLAN-chat.md`. Bubbles, footer (id and time; thinking and output when
-   streaming lands), the line cap, the fullscreen pages, `ask`/`conclude` gone, the token column
-   gone, `session.log`'s time column back.
+5. **The chat rebuild** — `PLAN-chat.md`, complete and unambiguous. Bubbles, footer (id and time;
+   thinking and output when streaming lands), the line cap, the fullscreen pages, `ask`/`conclude`
+   gone, the token column gone, `session.log`'s time column and `answers` column back.
+
+   **The ending is already right and needs no new mechanism.** A reply with text and no calls is a
+   conclusion (`wordsWithoutCalls`), which moves the session to idle — which is what the keepalive
+   polls. The session stops for exactly two reasons, both implemented: the operator presses Stop, or
+   the wait limit runs out (`warmDue`'s `forAt`). Removing `ask`/`conclude` removes a *duplicate* row,
+   not a behaviour.
 6. **Streaming** — `PLAN-streaming.md`. This is where the footer's thinking and output numbers come
    from; it is also the ack/idle split that the timeout question opened.
 7. **Diff mode** — the picker, `versionsOf`, right unset, Done greyed.

@@ -18,11 +18,31 @@ and the list lasts as long as the session.
 | A working bubble | One tool call **and its result** — they are one bubble because they are one act |
 | The last bubble | The agent's own words, with no call. Rendered as **markdown**, not as a line. |
 
+**The conversation ends with the agent's words, and then it is idle.** That is not a new behaviour to
+build — it is what the loop already does. `wordsWithoutCalls()` sees a reply with text and no calls,
+records the words as the agent's own note, and returns `End.Concluded`, which moves the session to
+`IDLE`/`FINISHED` with `warmFrom = now`. Idle is exactly what the keepalive polls. So the last bubble
+is followed by warmth, not by a stop.
+
+**The session stops for exactly two reasons**, both already implemented:
+
+- **The operator presses Stop the agent** — `End.Stopped(BY_OPERATOR)` → `state = STOPPED`, and
+  `End.onto()` refuses to move a session the operator stopped, so nothing can quietly switch it back on.
+- **The wait limit is reached** — `warmDue(..., forAt = warmMs)` answers false once the wait has run
+  its length, and polling simply stops. Deliberately *not* the same as stopping: a session that ran out
+  of warmth is not a session that failed.
+
 **`ask` and `conclude` go entirely.** The tools, the `TERMINATING` set, the `SPEAKING` set, the
-`ASK`/`CONCLUDE` row kinds, their handling in `Agent.messages()`, and their rendering. A turn now
-ends the way a conversation ends: with the agent saying something. The rows those tools wrote are
-**refused, not migrated** — a `session.log` containing one shows an unreadable row, which is the
-honest outcome and consistent with there being no previous release to be compatible with.
+`ASK`/`CONCLUDE` row kinds, `End.Asked`, their handling in `Agent.messages()`, and their rendering.
+A turn now ends the way a conversation ends: with the agent saying something. The rows those tools
+wrote are **refused, not migrated** — a `session.log` containing one shows an unreadable row, which
+is the honest outcome and consistent with there being no previous release to be compatible with.
+
+**Removing `CONCLUDE` removes a duplicate, and that is worth stating.** The words of a conclusion are
+already on the record as the agent's own note (`log.note("agent", …)`), which is what the model reads
+back. The `CONCLUDE` row was bookkeeping written beside them *on purpose* so the box and the evidence
+got an ending — and a second row carrying the same paragraph is exactly the duplication the app
+avoids elsewhere. So the ending does not lose its words; it stops saying them twice.
 
 **The token column goes.** It was there for the clear-up, and the clear-up is a sentence in the
 context, not a number beside every line.
