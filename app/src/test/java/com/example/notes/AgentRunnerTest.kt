@@ -179,6 +179,11 @@ class AgentRunnerTest {
         // in flight at the same time: a ping buys warmth cheaply, and three at once is three times
         // the bill for the same warmth.
         on("shopping", now = 1_000)
+        // **The second project has to exist.** A session for a folder that is not there is dropped by
+        // the tick before any request — which is its own rule, and would have made this test pass
+        // with one ping for the wrong reason.
+        ws.repoOf("work").mkdirs()
+        git.init("work")
         on("work", now = 1_000)
         val door = HeldDoor()
         val runner = runner(door)
