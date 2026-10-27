@@ -108,7 +108,12 @@ class AgentSessionFeatureTest : FeatureTest() {
      */
     private fun tick(project: String) {
         val session = scene.viewModel.sessionOf(project) ?: return
-        scene.viewModel.tickAgents(session.nextPollAt)
+        tickAt(project, session.nextPollAt)
+    }
+
+    /** One tick at [at], waited out — the shape every tick in this class takes. */
+    private fun tickAt(project: String, at: Long) {
+        scene.viewModel.tickAgents(at)
         scene.await("the poll to finish", 20_000) {
             // **Asked, not compared.** The runner's set holds agent ids, which equal project names
             // today; a test that compared them directly would keep passing after they stopped being
@@ -126,33 +131,39 @@ class AgentSessionFeatureTest : FeatureTest() {
      * cannot work, and a loop of forty ticks spends the window by accident — at one to four
      * seconds a pass, which is the schedule's business and not this test's.
      */
+    /**
+     * Polls until the session gives up, **at the session's own due time every time.**
+     *
+     * Two things make this less obvious than it looks, and both were bugs here first:
+     *
+     * **A tick has two deadlines, not one.** It must be past the operator's window *and* past the
+     * session's own `nextPollAt` — the poll interval is four minutes and the floor window is thirty
+     * seconds, so a jump to "the window spent" is still minutes early and `warmDue` declines it.
+     * A declined tick does nothing at all, and the test then waits for a poll the app rightly did
+     * not take.
+     *
+     * **And a tick is not always a ping.** If the burst left finished work behind, the tick takes
+     * the wake path — a full turn — and a turn that succeeds *clears* the ladder. So the loop asks
+     * the session what it did rather than assuming, and goes round again when the ladder restarted.
+     * The jump only past the window happens once a failure is on the record, because that is the
+     * moment the window is measured from.
+     */
     private fun giveUp(project: String) {
-        // **Two ticks, and neither is a count of tries.** The ladder's window starts at the first
-        // *failure*, so the test has to see one before it can jump past the window: the tick that
-        // produces it may be a wake (the burst left work behind) rather than a ping, and a wake
-        // that succeeds writes no failure at all. So: tick until a failure is on the record, then
-        // jump past the window and tick once more.
-        //
-        // **The record, not the screen.** A poll's failure is written by a worker, so the view
-        // model's list is one write behind the poll `tick` just watched finish — reading it would
-        // see `retryFrom` as 0 and jump to the wrong second.
-        var tries = 0
-        var began = 0L
-        while (began == 0L && tries++ < 10) {
-            tick(project)
-            began = scene.viewModel.readSession(project)?.retryFrom ?: 0L
+        var guard = 0
+        while (guard++ < 50) {
+            // **Read from the store, not the screen.** A poll's outcome is written by a worker, so
+            // the view model's list is one write behind the poll `tick` just watched finish.
+            val session = scene.viewModel.readSession(project) ?: return
+            if (session.state == AgentSession.State.STOPPED) return
+            val due = session.nextPollAt
+            val at = if (session.retryFrom > 0) {
+                maxOf(due, session.retryFrom + scene.settings.reconnectMs + 1_000)
+            } else {
+                due
+            }
+            tickAt(project, at)
         }
-        check(began > 0) { "no failure was ever recorded, so there is no window to spend" }
-        // **Past both deadlines, not just the window.** A tick that is not due does nothing at all,
-        // and the poll interval is four minutes while the floor window is thirty seconds — so a jump
-        // to "the window spent" is still three minutes before the session is due, and the test would
-        // sit waiting for a tick the app had correctly declined to take. The session's own
-        // `nextPollAt` is the other deadline, and it is asked rather than assumed.
-        val due = scene.viewModel.readSession(project)?.nextPollAt ?: 0L
-        scene.viewModel.tickAgents(maxOf(due, began + scene.settings.reconnectMs + 1_000))
-        scene.await("it to give up") {
-            scene.viewModel.sessionOf(project)?.state == AgentSession.State.STOPPED
-        }
+        error("the session never gave up, which is the failure this test is for")
     }
 
     @Test
