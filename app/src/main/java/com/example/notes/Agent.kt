@@ -445,7 +445,7 @@ class Agent(
                     val unknown = AgentTools.unknownIn(ending.tool, argsOf(ending))
                     if (unknown.isNotEmpty()) {
                         val id = log.call(ending.tool, ending.args)
-                        log.got(ending.tool, AgentTools.refuseKeys(ending.tool, unknown))
+                        log.got(ending.tool, AgentTools.refuseKeys(ending.tool, unknown), answers = id)
                         Trace.note("agent", "$project call ${ending.tool} #$id")
                         idle++
                         progress()
@@ -530,8 +530,8 @@ class Agent(
      */
     private fun cutShort(why: String, calls: List<Call>): End {
         for (call in calls) {
-            log.call(call.tool, call.args)
-            log.got(call.tool, "${AgentLog.FAILURE} interrupted: $why")
+            val id = log.call(call.tool, call.args)
+            log.got(call.tool, "${AgentLog.FAILURE} interrupted: $why", answers = id)
         }
         log.note("stopped", why)
         // A person speaking is not a session stopping; a person stopping is.
@@ -606,7 +606,9 @@ class Agent(
             val id = log.call(call.tool, call.args)
             Trace.note("agent", "$project call ${call.tool} #$id")
             val body = answer(call)
-            log.got(call.tool, body)
+            // **The id the result is for.** Written by the caller that just took it, so the record
+            // says which call this answers rather than leaving a reader to infer it from position.
+            log.got(call.tool, body, answers = id)
             if (call.tool in AgentTools.WRITING && !body.startsWith(AgentLog.FAILURE)) changed = true
         }
         // A call that wrote nothing and left the project as it was is a call that did nothing —
@@ -624,7 +626,7 @@ class Agent(
             } else {
                 answer(call)
             }
-            log.got(call.tool, body)
+            log.got(call.tool, body, answers = id)
             Trace.note("agent", "$project call ${call.tool} #$id")
         }
     }
@@ -896,7 +898,14 @@ class Agent(
         val out = mutableListOf<Msg>()
         val text = StringBuilder()
         val calls = mutableListOf<Call>()
-        val awaiting = ArrayDeque<String>()
+        /**
+         * The call ids still waiting for a result.
+         *
+         * A **set**, not a queue: the result names the call it answers, so the order results arrive
+         * in stops being load-bearing. What remains is the one thing that is: a result may only be
+         * sent if its call is still unanswered, which is what keeps the array legal.
+         */
+        val awaiting = mutableSetOf<String>()
 
         fun flush() {
             if (text.isEmpty() && calls.isEmpty()) return
@@ -925,14 +934,20 @@ class Agent(
                 }
                 AgentLog.GOT -> {
                     flush()
-                    // **An answer with no call above it is not sent.** Every request needs each
-                    // tool message to answer a call the model made; an orphan result is a message
-                    // it cannot place and an endpoint will refuse. The clear-up rules cannot
-                    // produce one, but a reset can: the evidence keeps a call the context no
-                    // longer has, and the app's own seal then answers that call in the evidence
+                    // **The result says which call it answers.** It used to be inferred: a queue of
+                    // unanswered calls, and the next result took the oldest. That is right only
+                    // while the writer interleaves calls and results — it does, but nothing said it
+                    // had to, and a reply may carry several calls.
+                    //
+                    // A result that names no call, or names one this conversation no longer has, is
+                    // **not sent**: every request needs each tool message to answer a call the model
+                    // made, and an orphan result is a message an endpoint refuses. The clear-up
+                    // rules cannot produce one, but a reset can — the evidence keeps a call the
+                    // context no longer has, and the app's own seal then answers it in the evidence
                     // alone.
-                    val id = awaiting.removeFirstOrNull() ?: continue
-                    out.add(Msg.tool(id, row.body))
+                    val call = callId(row.answers)
+                    if (row.answers <= 0 || !awaiting.remove(call)) continue
+                    out.add(Msg.tool(call, row.body))
                 }
 
                 AgentLog.ASK, AgentLog.CONCLUDE -> {

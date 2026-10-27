@@ -24,7 +24,10 @@ class AgentChatTest {
         detail: String = "",
         size: Long = 40,
         ctx: String = AgentLog.IN,
-    ): AgentLog.Row = AgentLog.Row(next++, size, kind, ctx, name, detail)
+        // **A stamp, because a row without one cannot be rendered.** These rows are the shape of a
+        // conversation rather than a file's characters, so the stamp is a fixed one: a test that
+        // needed distinct times would be testing the clock, not the box.
+    ): AgentLog.Row = AgentLog.Row("10:00:00.000", next++, size, kind, ctx, name = name, detail = detail)
 
     private fun told(text: String) = row(AgentLog.TOLD, "operator", text)
     private fun turn() = row(AgentLog.TURN, "turn")

@@ -173,8 +173,16 @@ class AgentLog private constructor(
          * **` *` and not `^` before the id**, because the id is padded to four and the size to five:
          * the first character of a row is a space.
          */
+        /**
+         * A record row: `time id size kind ctx answers name  detail`.
+         *
+         * **The stamp is `\S+` and kept as text.** It is carried back out verbatim on a rewrite, so
+         * parsing it into a number and formatting it again would be two chances to change it. A row
+         * that cannot be parsed is a row this reader says it could not read, rather than one it
+         * guesses at.
+         */
         private val ROW =
-            Regex("""^ *(\d+) +(\d+) +(\S+) +(\S+) +(\S+)(?:  (.*))?$""")
+            Regex("""^(\S+) +(\d+) +(\d+) +(\S+) +(\S+) +(\S+) +(\S+)(?:  (.*))?$""")
 
         /**
          * The one gate per record file, for the whole process — **and the id sequence with it.**
@@ -236,12 +244,14 @@ class AgentLog private constructor(
             val match = ROW.matchEntire(line)
             if (match != null) {
                 Row(
-                    id = match.groupValues[1].toInt(),
-                    size = match.groupValues[2].toLong(),
-                    kind = match.groupValues[3],
-                    ctx = match.groupValues[4],
-                    name = match.groupValues[5],
-                    detail = match.groupValues[6],
+                    stamp = match.groupValues[1],
+                    id = match.groupValues[2].toInt(),
+                    size = match.groupValues[3].toLong(),
+                    kind = match.groupValues[4],
+                    ctx = match.groupValues[5],
+                    answers = match.groupValues[6].toIntOrNull() ?: 0,
+                    name = match.groupValues[7],
+                    detail = match.groupValues[8],
                     raw = line,
                 )
             } else {
@@ -371,11 +381,32 @@ class AgentLog private constructor(
      * the only version of the number that `wc -c` on the file can confirm.
      */
     data class Row(
+        /**
+         * When it happened, as `14:02:11.410` — **text, not a number.**
+         *
+         * The row is rewritten whole by a forget, a trim or a reset, and a rewrite must not restate
+         * when something happened. Keeping the stamp as the characters the file holds makes that a
+         * copy; parsing it into epoch millis and formatting it back would be two chances to change
+         * it, in the one file whose job is to be the evidence.
+         *
+         * Empty for a row the app built in memory and has not written yet, and for a row that did
+         * not parse.
+         */
+        val stamp: String = "",
         val id: Int,
         val size: Long,
         val kind: String,
         /** `in`, `out` or `app` — whether the model is sent this row, and whose decision that was. */
         val ctx: String,
+        /**
+         * The id of the call this row answers, or 0 when it answers nothing.
+         *
+         * **The pairing is a column now, not a queue.** A result used to say only the tool's name,
+         * so both readers assumed the next result belonged to the oldest unanswered call — which
+         * holds only while the writer interleaves calls and results. It does, today; nothing said it
+         * had to, and a reply may carry several calls.
+         */
+        val answers: Int = 0,
         val name: String,
         val detail: String,
         /** The line exactly as the file holds it, so a rewrite never has to re-render one. */
@@ -396,7 +427,10 @@ class AgentLog private constructor(
          */
         val line: String
             get() = if (broken) detail else raw.ifEmpty {
-                LogFormat.recordRow(id, size, kind, ctx, name, detail)
+                // **A row with no line yet is stamped as it is rendered.** Nothing builds one of
+                // these except a test, which is why there is no clock to ask: every row the app
+                // writes goes through `record`, which stamps it on the way into the file.
+                LogFormat.recordRow(stamp, id, size, kind, ctx, answers, name, detail)
             }
 
         /** This row with its ctx column changed, and every other byte the same. */
@@ -458,7 +492,7 @@ class AgentLog private constructor(
             // those rows again on every trim. Each row reports its own act; the total is the sum,
             // computed wherever it is wanted.
             val said = "${oldest.size} rows: the context was over its limit"
-            val marker = LogFormat.recordRow(nextId(), ContextBudget.tokens(said), NOTE, APP, "trimmed", said)
+            val marker = LogFormat.recordRow(System.currentTimeMillis(), nextId(), ContextBudget.tokens(said), NOTE, APP, 0, "trimmed", said)
             // **Taken out, not taken away.** The rows the app trims stay in the record, marked
             // `app` rather than `out` — the app's doing, not the agent's judgement — so a trim can
             // never be read as something the model decided. And the marker is `app` too, so it does
@@ -499,7 +533,7 @@ class AgentLog private constructor(
     fun reset(): Int = synchronized(guard) {
         val id = nextId()
         val said = "the working context was cleared"
-        val marker = LogFormat.recordRow(id, ContextBudget.tokens(said), NOTE, APP, "reset", said)
+        val marker = LogFormat.recordRow(System.currentTimeMillis(), id, ContextBudget.tokens(said), NOTE, APP, 0, "reset", said)
         // **Marked, not erased.** Every row that was in stays in the record and reads `app`: the
         // person's act is not the agent's judgement, and it is not a way to make history disappear
         // either. After this the next request is the instructions and the new task.
@@ -520,10 +554,20 @@ class AgentLog private constructor(
      * The answer to a call. Its first line is `0` or `1`, always.
      *
      * Written as its own row under the tool's name rather than folded into the call, because the
-     * two happen at different times: the gap between them is how long the tool took, and a
-     * session that stopped between them is exactly what a dangling call looks like.
+     * two happen at different times: **the gap between them is how long the tool took** — which is
+     * why the rows now carry a time — and a session that stopped between them is exactly what a
+     * dangling call looks like.
+     *
+     * **[answers] is the id of the call this result is for**, and it is what makes the pairing a
+     * fact. Readers used to pair by position: a queue of unanswered calls, and the next result took
+     * the oldest. That is right only while the writer interleaves calls and results, which it does
+     * — but nothing said it had to, and a reply may carry several calls.
+     *
+     * A result with no call is possible and means something: the record can hold one after a reset,
+     * and it names no call because there is none to name.
      */
-    fun got(tool: String, body: String): Int = record(GOT, tool, body)
+    fun got(tool: String, body: String, answers: Int = 0): Int =
+        record(GOT, tool, body, answers = answers)
 
     /** The terminating question, and the terminating statement. */
     fun ask(question: String): Int = record(ASK, "question", question)
@@ -549,6 +593,8 @@ class AgentLog private constructor(
         name: String,
         detail: String,
         ctx: String = IN,
+        answers: Int = 0,
+        now: Long = System.currentTimeMillis(),
     ): Int {
         synchronized(guard) {
             val id = nextId()
@@ -556,7 +602,7 @@ class AgentLog private constructor(
             // cost of the body is what this row costs — not the formatted line, whose padding the
             // model never sees.
             val cost = ContextBudget.tokens(detail)
-            append(file, LogFormat.recordRow(id, cost, kind, ctx, name, detail))
+            append(file, LogFormat.recordRow(now, id, cost, kind, ctx, answers, name, detail))
             // **The context file grows with the evidence, one row at a time.** A row the app wrote
             // for itself (`app`) never enters it, which is what keeps a repeated `wait` out of the
             // request and the request byte-identical between polls.
@@ -578,7 +624,7 @@ class AgentLog private constructor(
         val rows = rows()
         if (forgetProblem(rows, ids) != null) return 0
         val said = ids.sorted().joinToString(",")
-        val marker = LogFormat.recordRow(nextId(), ContextBudget.tokens(said), NOTE, APP, "forgot", said)
+        val marker = LogFormat.recordRow(System.currentTimeMillis(), nextId(), ContextBudget.tokens(said), NOTE, APP, 0, "forgot", said)
         val changed = rows.map { if (it.id in ids) it.flipped(OUT) else it }
         store(changed, marker)
         ids.size
@@ -841,7 +887,7 @@ class AgentLog private constructor(
             // **The id, not a clock.** The row this trim stopped above is named by the handle the
             // record already uses, so the sentence is still checkable in the file.
             val said = "$dropped rows older than #${kept.firstOrNull()?.id ?: 0}"
-            val marker = LogFormat.recordRow(nextId(), ContextBudget.tokens(said), NOTE, APP, "trimmed", said)
+            val marker = LogFormat.recordRow(System.currentTimeMillis(), nextId(), ContextBudget.tokens(said), NOTE, APP, 0, "trimmed", said)
             try {
                 // The one place rows leave the record for good: this is the evidence's own limit,
                 // and the reason the audit has a horizon rather than a history. Rows that go also

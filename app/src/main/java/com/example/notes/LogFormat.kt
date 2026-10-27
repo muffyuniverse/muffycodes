@@ -94,12 +94,26 @@ object LogFormat {
         }
 
     /**
-     * A **record** row: `id size kind ctx name  detail`.
+     * A **record** row: `time id size kind ctx answers name  detail`.
      *
-     * **No clock.** A row used to begin with `14:02:11.410`, and it was there for the person
-     * reading the file — but the app's own trace still carries a time for everything that happened,
-     * and the record's job is to be the conversation rather than a chronology of it. Five columns
-     * of which two are the app's, one is the measurement, and two are what the model is sent.
+     * **The clock is back, and the reason it left was wrong.** The row used to begin with
+     * `14:02:11.410` and it was dropped on the argument that the record is a conversation rather
+     * than a chronology — but `session.log` is described in its own words as *"the evidence: every
+     * event, in the order it happened"*, and a chronology with no times cannot say when. The
+     * question "how long did that tool take" had no answer in the file that exists to answer it,
+     * because the gap between a call and its result is the time between two rows.
+     *
+     * **`answers` is which call a result is answering**, and it makes the pairing a fact instead of
+     * a convention. A `GOT` row used to say only the tool's name, so both readers — `AgentChat` and
+     * [Agent.messages] — kept a queue of unanswered calls and assumed the next result belonged to
+     * the oldest one. That holds only because the writer interleaves `CALL GOT CALL GOT`; a reply
+     * may carry several calls, and a writer that batched them would pair call 1 with result 3 with
+     * nothing to show it had. `-` means "this row answers nothing", which is every row that is not
+     * a result.
+     *
+     * **Neither column goes in the body.** The model is sent a row's body, and both of these are
+     * facts about the record rather than things the model needs in order to work — the same
+     * argument that put `ctx` in a column.
      *
      * **`size` is the row's cost in tokens**, stored rather than recomputed: it is the number the
      * agent chooses what to forget by, and two places computing it was two numbers that could
@@ -110,13 +124,35 @@ object LogFormat {
      * and no rewrite has to re-render a body that contains a backslash.
      */
     fun recordRow(
+        at: Long,
         id: Int,
         size: Long,
         kind: String,
         ctx: String,
+        answers: Int = 0,
+        name: String,
+        detail: String,
+    ): String = recordRow(stamp(at), id, size, kind, ctx, answers, name, detail)
+
+    /**
+     * The same record row from a stamp that is already text.
+     *
+     * Needed by anything that **rewrites** a record it did not read through this class: a forget,
+     * both trims and a reset rewrite the whole file, and a row that came back with a fresh
+     * timestamp would say the whole conversation happened at the moment it was rewritten.
+     */
+    fun recordRow(
+        stamp: String,
+        id: Int,
+        size: Long,
+        kind: String,
+        ctx: String,
+        answers: Int,
         name: String,
         detail: String,
     ): String = buildString {
+        append(stamp)
+        append(' ')
         append(id.toString().padStart(4))
         append(' ')
         append(size.toString().padStart(5))
@@ -124,6 +160,10 @@ object LogFormat {
         append(kind.padEnd(7))
         append(' ')
         append(ctx.padEnd(3))
+        append(' ')
+        // Five wide like the id it names, and `-` where there is nothing to name: a column that is
+        // sometimes blank and sometimes an id is a column nobody can scan.
+        append(if (answers > 0) answers.toString().padStart(4) else "-".padStart(4))
         append(' ')
         append(name)
         if (detail.isNotEmpty()) {
@@ -163,17 +203,27 @@ object LogFormat {
      */
     fun flipCtx(line: String, ctx: String): String {
         val match = HEAD.find(line) ?: return line
-        val id = match.groupValues[1].padStart(4)
-        val size = match.groupValues[2].padStart(5)
-        val kind = match.groupValues[3].padEnd(7)
+        // **Rebuilt from the columns the caller may not touch, taken as they stand.** The stamp is
+        // carried over verbatim rather than reformatted: a rewrite must not restate when something
+        // happened, and a `SimpleDateFormat` round trip is a chance to change it.
+        val stamp = match.groupValues[1]
+        val id = match.groupValues[2].padStart(4)
+        val size = match.groupValues[3].padStart(5)
+        val kind = match.groupValues[4].padEnd(7)
+        val answers = match.groupValues[5].padStart(4)
         // Everything after the separator belongs to the name and the body, and is carried over as
         // the same characters: this function has no way to touch them.
         val rest = line.substring(match.range.last + 1)
-        return "$id $size $kind ${ctx.padEnd(3)} $rest"
+        return "$stamp $id $size $kind ${ctx.padEnd(3)} $answers $rest"
     }
 
-    /** The four fixed columns, ending at the space before the name. The id is padded, hence ` *`. */
-    private val HEAD = Regex("""^ *(\d+) +(\d+) +(\S+) +(\S+) +""")
+    /**
+     * The fixed columns before the name: stamp, id, size, kind, ctx, answers.
+     *
+     * **`ctx` is three wide and may be padded, so it is `\S+`** — the same rule as the other columns
+     * — and the trailing space group ends the match immediately before the name.
+     */
+    private val HEAD = Regex("""^(\S+) +(\d+) +(\d+) +(\S+) +(\S+) +(\S+) +""")
 
     /** The body's one escaping rule: a newline and a backslash, in that order. */
     fun escaped(text: String): String = text.replace("\\", "\\\\").replace("\n", "\\n")

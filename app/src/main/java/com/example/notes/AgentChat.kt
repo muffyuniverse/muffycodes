@@ -163,7 +163,14 @@ object AgentChat {
      */
     fun lines(rows: List<AgentLog.Row>): List<Line> {
         val out = mutableListOf<Line>()
-        val pending = ArrayDeque<AgentLog.Row>()
+        /**
+         * The calls still waiting for a result, **by id** — not a queue.
+         *
+         * The result names the call it answers, so the order results arrive in stops being
+         * load-bearing. A queue was right only while the writer interleaved calls and results; it
+         * does, but the record no longer has to be read that way.
+         */
+        val pending = mutableMapOf<Int, AgentLog.Row>()
         for (row in rows) {
             // **The row's own number, from the row.** It is stored at write time, the agent chooses
             // what to forget by it, and a second computation here is a second answer to the same
@@ -179,9 +186,9 @@ object AgentChat {
             }
             when (row.kind) {
                 AgentLog.TURN, AgentLog.TOLD -> Unit
-                AgentLog.CALL -> pending.addLast(row)
+                AgentLog.CALL -> pending[row.id] = row
                 AgentLog.GOT -> {
-                    val call = pending.removeFirstOrNull()
+                    val call = pending.remove(row.answers)
                     if (call == null) {
                         // A result whose call is not in this conversation: a seal written when
                         // the app was reopened, answering a call from the conversation before.
@@ -247,7 +254,9 @@ object AgentChat {
                 )
             }
         }
-        for (call in pending) {
+        // **A map iterates in no useful order**, and these are the calls that never got an answer —
+        // which is a sequence a person reads. Sorted by id, which is the order they were made.
+        for (call in pending.values.sortedBy { it.id }) {
             // A terminating call is drawn from its own ASK/CONCLUDE row, and `wait` from the
             // idle line, so a call still waiting here is one the turn never got to answer.
             if (call.name in AgentLog.TERMINATING) continue
