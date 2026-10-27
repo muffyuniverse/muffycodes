@@ -95,10 +95,12 @@ class AgentChatScreenTest {
         say("what is in the project")
         awaitTurns(2)
 
-        // The box opens at the end of the conversation, so the conclusion is what it shows.
+        // The box opens at the end of the conversation, so the agent's last words are what it shows.
         compose.onNodeWithText("what is in the project", substring = true).assertExists()
         compose.onNodeWithText("2 of 2").assertExists()
-        compose.onNodeWithText("concluded").assertExists()
+        // **The caption is `agent`, not `concluded`.** The `CONCLUDE` row is gone; the ending is the
+        // model's own note, which is drawn under the same caption as any other thing it said.
+        compose.onNodeWithText("agent").assertExists()
         compose.onNodeWithText("There is one file.", substring = true).assertExists()
 
         // And the turn before it is one press away, with the call and its result on one line.
@@ -162,7 +164,7 @@ class AgentChatScreenTest {
         compose.onNodeWithText("‹").assertIsEnabled()
         compose.onNodeWithText("›").assertIsNotEnabled()
         compose.onNodeWithText("»").assertIsNotEnabled()
-        compose.onNodeWithText("concluded").assertExists()
+        compose.onNodeWithText("agent").assertExists()
 
         compose.onNodeWithText("‹").performClick()
         compose.waitForIdle()
@@ -170,7 +172,7 @@ class AgentChatScreenTest {
         compose.onNodeWithText("1 of 2").assertExists()
         compose.onNodeWithText("‹").assertIsNotEnabled()
         compose.onNodeWithText("»").assertIsEnabled()
-        // The first turn is the call; the conclusion belongs to the second.
+        // The first turn is the call; the agent's words belong to the second.
         compose.onNodeWithText("tree").assertExists()
     }
 

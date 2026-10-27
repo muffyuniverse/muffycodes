@@ -45,18 +45,19 @@ class AgentSessionFeatureTest : FeatureTest() {
     /**
      * A door that refuses, for [times] attempts.
      *
-     * **[failTurn] makes `turn` refuse too**, which is what a person's own message needs: a session
-     * that gives up on a *ping* takes several ticks to get there, and a test about what happens
-     * afterwards should not have to drive those ticks first.
+     * **[refusePings] leaves `turn` alone**, which is the shape of the failure that actually stops a
+     * session: the work went fine, then the provider started refusing, and the keepalive's own
+     * attempts are what run out. A *turn* failure is retryable by design — the ladder owns it.
      */
     private class FlakyDoor(
         private val times: Int,
         private val code: Int = 503,
-        private val failTurn: Boolean = false,
+        /** When true, `turn` answers and only the pings fail — "the provider went away", not "the work failed". */
+        private val refusePings: Boolean = false,
     ) : Door {
         var attempts = 0
         override fun turn(request: Request): Result<Reply> {
-            if (!failTurn) return Result.success(Reply("nothing to change", emptyList()))
+            if (refusePings) return Result.success(Reply("nothing to change", emptyList()))
             attempts++
             return if (attempts <= times) {
                 Result.failure(Refused(code, "OpenRouter answered $code"))
@@ -264,9 +265,11 @@ class AgentSessionFeatureTest : FeatureTest() {
         // failure this state is for: the work went fine, then the provider started refusing, the
         // ladder tried, and it gave up. A *turn* failure is retryable by design — the ladder owns it
         // — so a session only stops when the keepalive's own attempts are spent.
-        openChat("groceries", ScriptedDoor(Reply("done")))
+        // **One door for both halves, installed before the runner is built.** `openChat` sets
+        // `chatDoor` and then builds the runner, so a door set afterwards leaves the runner with the
+        // one it was made with — and the pings would go to a door that never refuses.
+        openChat("groceries", FlakyDoor(times = Int.MAX_VALUE, code = 401, refusePings = true))
         scene.settings.keepReconnect(SettingsStore.MIN_RECONNECT_SECONDS)
-        scene.viewModel.chatDoor = { FlakyDoor(times = Int.MAX_VALUE, code = 401) }
         scene.viewModel.startAgent("groceries")
         scene.viewModel.sendChat("do it")
         scene.await("the turn to finish") {
@@ -319,9 +322,11 @@ class AgentSessionFeatureTest : FeatureTest() {
         listening()
         scene.project("groceries")
         scene.settings.keepRemind(5)
-        openChat("groceries", ScriptedDoor(Reply("done")))
+        // **One door for both halves, installed before the runner is built.** `openChat` sets
+        // `chatDoor` and then builds the runner, so a door set afterwards leaves the runner with the
+        // one it was made with — and the pings would go to a door that never refuses.
+        openChat("groceries", FlakyDoor(times = Int.MAX_VALUE, code = 401, refusePings = true))
         scene.settings.keepReconnect(SettingsStore.MIN_RECONNECT_SECONDS)
-        scene.viewModel.chatDoor = { FlakyDoor(times = Int.MAX_VALUE, code = 401) }
         scene.viewModel.startAgent("groceries")
         scene.viewModel.sendChat("do it")
         scene.await("the turn to finish") {
@@ -358,10 +363,9 @@ class AgentSessionFeatureTest : FeatureTest() {
         // cannot work while charging somebody to be reminded of it.
         listening()
         scene.project("groceries")
-        openChat("groceries", ScriptedDoor(Reply("done")))
+        val broken = FlakyDoor(times = Int.MAX_VALUE, code = 401, refusePings = true)
+        openChat("groceries", broken)
         scene.settings.keepReconnect(SettingsStore.MIN_RECONNECT_SECONDS)
-        val broken = FlakyDoor(times = Int.MAX_VALUE, code = 401)
-        scene.viewModel.chatDoor = { broken }
         scene.viewModel.startAgent("groceries")
         scene.viewModel.sendChat("do it")
         scene.await("the turn to finish") {
@@ -417,8 +421,7 @@ class AgentSessionFeatureTest : FeatureTest() {
         scene.settings.keepReconnect(SettingsStore.MIN_RECONNECT_SECONDS)
         // **One door, not a new one per poll.** A lambda that built a door on every call would
         // reset its own attempt count, and a failure count that resets is not a failure count.
-        val broken = FlakyDoor(times = Int.MAX_VALUE, code = 401, failTurn = true)
-        scene.viewModel.chatDoor = { broken }
+        val broken = FlakyDoor(times = Int.MAX_VALUE, code = 401)
         scene.viewModel.startAgent("groceries")
 
         var last = ""

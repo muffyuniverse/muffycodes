@@ -101,7 +101,10 @@ class AgentChatTest {
         assertEquals("one request", 1, box?.turns?.size)
         assertEquals(
             "two tool lines and the ending, in the order they happened",
-            listOf("tree", "read", "concluded"),
+            // **The ending's caption is `agent`.** It used to be `concluded`, drawn from a
+            // `CONCLUDE` row; the ending is the model's own note now, and a note is drawn under the
+            // name it was written with.
+            listOf("tree", "read", "agent"),
             box?.turns?.first()?.lines?.map { it.caption },
         )
     }
