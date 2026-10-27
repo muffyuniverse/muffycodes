@@ -142,15 +142,21 @@ result is read by turning pages rather than by scrolling a tall box inside a tal
    `AgentLog.dangling()`. `got()` has **no default** for `answers` — a default would let a caller
    write an orphan result, which readers then refuse to send, so the mistake would surface as a hole
    in a conversation rather than at the call site.
-2. **`ask`/`conclude` removed** — tools, sets, kinds, message building, rendering. Rows of those
-   kinds are refused.
-3. **`AgentChat` rebuilt as bubbles**: a call and its result are one bubble, joined by `answers`
-   rather than by position; the last bubble is the agent's words.
-4. **The footer**: id and time.
-5. **The height cap** in settings, in lines, with the truncation sentence.
-6. **The fullscreen page view** from a bubble's header.
-7. **The token column removed.**
-8. **thinking/output in the footer** — when streaming lands, not before.
+2. ~~**`ask`/`conclude` removed**~~ — **done**. Tools, sets, kinds, message building, rendering.
+   Rows of those kinds are refused.
+3. ~~**`AgentChat` rebuilt as bubbles**~~ — **done** (`f8068bc`). `AgentChat.Bubble` and
+   `AgentChat.bubbles()`; a call and its result are one bubble, joined by `answers` rather than by
+   position; the last bubble is the agent's words, drawn as markdown. The navigator, `chatTurn`,
+   `chatTurnBy` and `chatLatestTurn` are gone: a list scrolls, so the position is the scroll's.
+4. ~~**The footer**: id and time~~ — **done**, and it also carries thinking and output (step 8).
+   `id · time · thinking · output`, with an unknown part left out rather than filled with a zero.
+5. ~~**The height cap** in settings, in lines, with the truncation sentence~~ — **done**
+   (`bubbleLines`, `DEFAULT_BUBBLE_LINES = 0` = no cap). The sentence says how many lines are not
+   shown, because a bubble that simply stopped would be indistinguishable from one that finished.
+6. ~~**The fullscreen page view** from a bubble's header~~ — **done**. The same bubble, fullscreen,
+   one scroll rather than a tall box inside a taller list.
+7. ~~**The token column removed**~~ — **done**, and its space carries the id and time.
+8. ~~**thinking/output in the footer**~~ — **done**, with streaming (`docs/PLAN-streaming.md`).
 
 ## What this is not
 
