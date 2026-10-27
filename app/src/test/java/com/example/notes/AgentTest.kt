@@ -548,12 +548,18 @@ class AgentTest {
             Reply("", listOf(Call("c1", "tree", """{"path":""}"""))),
             Reply("", listOf(Call("c2", "conclude", """{"text":"done"}"""))),
         )
-        // **The clock is the test's, so the wait is over before the command starts.** The deadline
-        // is one second; the clock is wound forward by two before `burst` is called, so the very
-        // first `check` inside the walk expires - on any machine, at any speed, with no sleep.
-        var clock = 1_000_000L
-        val slow = agent(door, foregroundMs = 1_000L, bg = bg, clock = { clock })
-        clock += 2_000
+        // **The clock is the test's, and it jumps after the deadline is made.** `Deadline` reads the
+        // clock once when it is constructed - that is "when the wait started" - so the jump has to
+        // happen on a *later* read, or the deadline would begin already expired and the test would
+        // be proving nothing. Two reads is exactly the shape of it: start, then a check that is two
+        // seconds late.
+        var reads = 0
+        val clock = {
+            // One jump, and it stays jumped: `expired` and the sentence's `expiredIn()` read the
+            // clock separately, and a clock that went back would make the two disagree.
+            if (reads++ == 0) 1_000_000L else 1_002_000L
+        }
+        val slow = agent(door, foregroundMs = 1_000L, bg = bg, clock = clock)
 
         slow.burst("go")
 
@@ -581,11 +587,13 @@ class AgentTest {
             Reply("", listOf(Call("c2", "conclude", """{"text":"done"}"""))),
         )
         File(ws.projectDir("shopping"), "Shopping/inner.txt").apply { parentFile?.mkdirs() }.writeText("x")
-        // The same wound-forward clock: the walk asks the deadline between entries, so it stops
-        // before the first one - and this is the act that must NOT be handed over.
-        var clock = 1_000_000L
-        val slow = agent(door, foregroundMs = 1_000L, clock = { clock })
-        clock += 2_000
+        // The same clock: it is read once to start the deadline, then late on every check - so the
+        // walk stops before its first entry, and this is the act that must NOT be handed over.
+        var reads = 0
+        val clock = {
+            if (reads++ == 0) 1_000_000L else 1_002_000L
+        }
+        val slow = agent(door, foregroundMs = 1_000L, clock = clock)
 
         slow.burst("go")
 
