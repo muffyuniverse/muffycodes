@@ -255,11 +255,29 @@ class AgentLog private constructor(
                     raw = line,
                 )
             } else {
-                Row(0, 0, "?", "?", "?", line, broken = true)
+                unreadable(line)
             }
         } catch (t: Throwable) {
-            Row(0, 0, "?", "?", "?", line, broken = true)
+            unreadable(line)
         }
+
+        /**
+         * A row that could not be read, kept whole.
+         *
+         * **Named arguments, and that is the point.** This constructor sat positionally and the
+         * format gained two columns — so `Row(0, 0, "?", …)` became an `Int` where a `String` was
+         * expected, in the one function whose job is to survive a row it cannot parse. A named call
+         * cannot be silently re-pointed by a format change.
+         */
+        private fun unreadable(line: String) = Row(
+            id = 0,
+            size = 0,
+            kind = "?",
+            ctx = "?",
+            name = "?",
+            detail = line,
+            broken = true,
+        )
 
           /**
            * Why [ids] is not something the agent may forget, or null when it may.
