@@ -713,6 +713,32 @@ class AgentTest {
     }
 
     @Test
+    fun `lines true answers with the number and the line, for when the next call names a place`() {
+        // **Two shapes, one selector.** The default answer is the matched text, which is what
+        // `replace` takes; `lines:true` is the whole line with its number, which is what a call
+        // that names a place needs. The alternative was two commands — which is what `find` was,
+        // and the live log said three times that a model cannot choose between them before it
+        // knows what it wants.
+        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "first\ntwo litres\nthird\n")
+
+        val body = tool("read", """{"path":"milk.txt","grep":"litres","lines":true}""")
+
+        assertEquals("the line and its number", "0\n2: two litres", body)
+    }
+
+    @Test
+    fun `lines that is neither true nor false is refused, not read as false`() {
+        // A key that quietly does nothing is the lie this table exists to prevent: `{"lines":"yes"}`
+        // would have meant "no", and the model would have been handed the other shape in silence.
+        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "two litres\n")
+
+        val body = tool("read", """{"path":"milk.txt","grep":"litres","lines":"yes"}""")
+
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("and it names the key: $body", body.contains("lines"))
+    }
+
+    @Test
     fun `every match on a line is selected, not just the first`() {
         // A selector that answers one of the three numbers in a line is the "grep only gives
         // lines" complaint wearing a different hat: the pattern said what it wanted, and the

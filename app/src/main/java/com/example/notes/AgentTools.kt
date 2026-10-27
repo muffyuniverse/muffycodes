@@ -136,7 +136,7 @@ class AgentTools(
          */
         val KEYS: Map<String, Set<String>> = mapOf(
             "tree" to setOf("path", "depth", "name", "grep", "from", "to"),
-            "read" to setOf("path", "from", "to", "grep", "revision"),
+            "read" to setOf("path", "from", "to", "grep", "lines", "revision"),
             "edit" to setOf("path", "grep", "replace", "from", "to", "at", "text"),
             "forget" to setOf("ids"),
             "create" to setOf("path", "text"),
@@ -195,17 +195,20 @@ class AgentTools(
                 "Read a text file, or one of its versions. Always read before you change one. " +
                 "`from` and `to` are line numbers, both included; `from` starts at 1 and `to` " +
                 "left out runs to the end. " +
-                    "**`grep` is the selector: it answers with the text the pattern matched**, " +
-                    "every match, exactly as matched — not the line it was on and not its number, " +
-                    "so the answer can be pasted straight into `edit`'s `replace`. It is applied " +
+                    "**`grep` is the selector.** By default it answers with the text the pattern " +
+                    "matched — every match, exactly as matched, no line number — so the answer can " +
+                    "be pasted straight into `edit`'s `replace`. With `lines:true` it answers " +
+                    "`number: line` instead: the whole line, with the file's own line number, for " +
+                    "when the next call names a place rather than a paste. Either way it is applied " +
                     "inside `from`/`to` rather than to the whole file. A pattern is a regular " +
-                    "expression, case-insensitive, matched inside one line. Use `tree` to learn " +
-                    "where a match is. A file is shown exactly as it is stored, columns and all. " +
+                    "expression, case-insensitive, matched inside one line. A file is shown " +
+                    "exactly as it is stored, columns and all. " +
                     "Your own `agent/context.log` is the rows in your context as " +
                     "`id size name body`, and `agent/session.log` is everything that happened, " +
                     "with `kind` and `ctx`.",
                 "{\"path\":\"the file, relative to the project\",\"from\":1,\"to\":200," +
-                    "\"grep\":\"a pattern to select\",\"revision\":\"an id from history\"}",
+                    "\"grep\":\"a pattern to select\",\"lines\":false," +
+                    "\"revision\":\"an id from history\"}",
             ),
             spec(
                 "edit",
@@ -527,6 +530,22 @@ class AgentTools(
         return Result.success(number)
     }
 
+    /**
+     * A yes or no from a key, and **never a silent default**.
+     *
+     * `optBoolean` answers `false` for anything it does not understand, so `{"lines":"yes"}` would
+     * have meant "no" — a key that quietly does nothing is the failure this whole table exists to
+     * prevent. Absent is `false`; anything present must be a boolean or one of the two words a
+     * person writes in JSON by habit.
+     */
+    private fun truth(value: Any?): Boolean? = when {
+        value == null || value == JSONObject.NULL -> false
+        value is Boolean -> value
+        value is String && value.trim().equals("true", ignoreCase = true) -> true
+        value is String && value.trim().equals("false", ignoreCase = true) -> false
+        else -> null
+    }
+
     /** [value] as a whole number, or null when it is not one — a number, or a string holding one. */
     private fun whole(value: Any?): Int? {
         val number = when (value) {
@@ -764,10 +783,32 @@ class AgentTools(
         // than the first hit, because `\d+` in a line of numbers is several selections and a selector
         // that silently answers one of them is the "grep only gives lines" complaint again.
         //
-        // **What this costs is the line number**, deliberately. `tree` is the command that answers
-        // "where" — it says `path:line: text` — and `from`/`to` is how a model names a place. A
-        // selector that also reports a position is a selector whose answer cannot be pasted.
+        // **Where** a match is, when the model asks for it. `lines` is the second shape of the
+        // same answer: `false` (the default) is the matched text alone, which is what `edit`'s
+        // `replace` takes; `true` is `number: line`, the whole line with the file's own number,
+        // which is what a model wants when its next call names a place rather than a paste.
+        //
+        // **Two shapes, one selector.** The alternative was two commands — which is what `find`
+        // was — and a model that has to choose between `grep` and `find` before it knows what it
+        // wants gets the choice wrong, as the live log said three times over. A key says which
+        // answer it wants; the pattern means the same thing either way.
         if (grep != null) {
+            val withLines = truth(args.opt("lines"))
+                ?: return Result.failure(
+                    IllegalArgumentException(
+                        "`lines` is true or false, and ${quoted(args.opt("lines"))} is neither",
+                    ),
+                )
+            if (withLines) {
+                val found = chosen.withIndex().mapNotNull { (offset, line) ->
+                    val at = hit(line, grep, deadline, "read") ?: return@mapNotNull null
+                    "${from + offset}: ${excerpt(line, at, HIT)}"
+                }
+                if (found.isEmpty()) {
+                    return Result.success("nothing in ${rel(file)} matches that")
+                }
+                return Result.success(found.joinToString("\n"))
+            }
             val found = chosen.flatMap { line -> hits(line, grep, deadline, "read") }
             if (found.isEmpty()) {
                 return Result.success("nothing in ${rel(file)} matches that")
