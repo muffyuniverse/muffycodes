@@ -133,7 +133,7 @@ class ProjectsFeatureTest : FeatureTest() {
             "the app says why",
             scene.viewModel.message!!.contains("already a project"),
         )
-        assertEquals("and made nothing", listOf("system", "Shopping"), scene.viewModel.projectNames)
+        assertEquals("and made nothing", listOf("system", "shopping", "Shopping"), scene.viewModel.projectNames)
     }
 
     @Test
@@ -247,7 +247,7 @@ class ProjectsFeatureTest : FeatureTest() {
         scene.project("Shopping")
         scene.viewModel.deleteProject("Shopping", everywhere = false)
         scene.await("the delete to finish") { !scene.viewModel.busy }
-        assertTrue("nothing is here", scene.viewModel.projectNames.isEmpty())
+        assertEquals("nothing but the settings project", listOf("system"), scene.viewModel.projectNames)
 
         val url = scene.github.cloneUrlFor(scene.login, "Shopping")
         scene.viewModel.pullRepository(Repo("Shopping", "${scene.login}/Shopping", false, url))
@@ -294,7 +294,7 @@ class ProjectsFeatureTest : FeatureTest() {
                 !File(dir, ".gitignore").exists(),
         )
         assertTrue("and no remote at all", scene.viewModel.isLocalProject("scratch"))
-        assertEquals("its name is the one typed", listOf("scratch"), scene.viewModel.projectNames)
+        assertEquals("its name is the one typed", listOf("system", "scratch"), scene.viewModel.projectNames)
     }
 
     @Test
@@ -366,11 +366,11 @@ class ProjectsFeatureTest : FeatureTest() {
         val ws = scene.workspace!!
         val prompt = File(File(ws.accountDir, "system"), AgentPrompt.SYSTEM_FILE)
 
+        // **Asked first, because asking is what writes it.** The shipped text becomes a file the
+        // first time the agent needs it — the same rule the project layer already follows, and the
+        // reason a missing file is not an agent with no instructions.
+        assertEquals("the shipped text to begin with", AgentPrompt.SYSTEM_DEFAULT, AgentPrompt.system(ws.accountDir))
         assertTrue("the system prompt is written where the project is", prompt.isFile)
-        assertTrue(
-            "and what the agent is given is what that file says",
-            AgentPrompt.system(ws.accountDir).isNotBlank(),
-        )
 
         // The file is the person's: editing it changes the prompt, with no second copy winning.
         prompt.writeText("Say only the word: milk.")
