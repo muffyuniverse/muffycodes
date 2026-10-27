@@ -425,6 +425,11 @@ class AppViewModel @JvmOverloads constructor(
         // account's `.muffy/` — outside both histories, so a run can never appear as a
         // version, and in one folder with the settings.
         attachTrace()
+        // **Every line carries the build, so the line about the build is the one that sets it.**
+        // The file holds several builds at once — nine of them at the time this was written — and a
+        // report from one is not a report about another. `buildName` is the short form: the version
+        // name the phone installed, which is what a person says when they say "on 149".
+        Trace.build = buildName
         Trace.note("app-opened", versionLine)
         refresh()
     }
@@ -812,6 +817,16 @@ class AppViewModel @JvmOverloads constructor(
      * what makes "it crashes on mine" reproducible by somebody who is not holding it.
      * Nothing here identifies the person or the account.
      */
+    /** The version name alone — `149`, `1.4` — for the trace's build column. */
+    val buildName: String
+        get() = try {
+            getApplication<android.app.Application>().packageManager
+                .getPackageInfo(getApplication<android.app.Application>().packageName, 0)
+                .versionName.orEmpty()
+        } catch (t: Throwable) {
+            "-"
+        }
+
     val versionLine: String
         get() = try {
             val info = getApplication<android.app.Application>().packageManager

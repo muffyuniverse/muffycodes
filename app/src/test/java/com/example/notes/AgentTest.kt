@@ -713,29 +713,26 @@ class AgentTest {
     }
 
     @Test
-    fun `lines true answers with the number and the line, for when the next call names a place`() {
-        // **Two shapes, one selector.** The default answer is the matched text, which is what
-        // `replace` takes; `lines:true` is the whole line with its number, which is what a call
-        // that names a place needs. The alternative was two commands — which is what `find` was,
-        // and the live log said three times that a model cannot choose between them before it
-        // knows what it wants.
-        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "first\ntwo litres\nthird\n")
+    fun `a pattern that matches a whole line answers with the line and its number`() {
+        // **The shape follows from the pattern.** `^milk$` is a question about a line, so the
+        // answer is that line with its number — the model is about to name a place. `milk` is a
+        // question about text, so the answer is the text — the model is about to paste it. Asking
+        // for a key would be asking the model to classify its own pattern, which is the choice
+        // `find` got wrong three times in the live log.
+        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "first\nmilk\nthird\n")
 
-        val body = tool("read", """{"path":"milk.txt","grep":"litres","lines":true}""")
+        val body = tool("read", """{"path":"milk.txt","grep":"^milk$"}""")
 
-        assertEquals("the line and its number", "0\n2: two litres", body)
+        assertEquals("the whole line, and where it is", "0\n2: milk", body)
     }
 
     @Test
-    fun `lines that is neither true nor false is refused, not read as false`() {
-        // A key that quietly does nothing is the lie this table exists to prevent: `{"lines":"yes"}`
-        // would have meant "no", and the model would have been handed the other shape in silence.
-        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "two litres\n")
+    fun `a pattern that matches part of a line answers with the matched text`() {
+        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "first\ntwo litres\nthird\n")
 
-        val body = tool("read", """{"path":"milk.txt","grep":"litres","lines":"yes"}""")
+        val body = tool("read", """{"path":"milk.txt","grep":"litres"}""")
 
-        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
-        assertTrue("and it names the key: $body", body.contains("lines"))
+        assertEquals("the match alone, with no number to paste", "0\nlitres", body)
     }
 
     @Test
@@ -882,9 +879,10 @@ class AgentTest {
         val found = tool("tree", """{"path":"","grep":"^milk$"}""")
         val read = tool("read", """{"path":"list.txt","grep":"^milk$"}""")
 
-        // `tree` answers where it is; `read` answers what the pattern selected.
+        // `tree` answers where it is; `read` answers where it is too, because `^milk$` matches a
+        // whole line and a whole-line question is a question about a place.
         assertTrue("the search finds it: $found", found.contains("list.txt:2: milk"))
-        assertEquals("and the read selects it", "0\nmilk", read)
+        assertEquals("and the read agrees", "0\n2: milk", read)
     }
 
     @Test
@@ -898,8 +896,9 @@ class AgentTest {
         val lower = tool("read", """{"path":"places.txt","grep":"KRAKÓW"}""")
         val upper = tool("read", """{"path":"places.txt","grep":"zÜRICH"}""")
 
-        assertEquals("the accented name is found either way", "0\nKraków", lower)
-        assertEquals("and so is the umlaut", "0\nZürich", upper)
+        // Both patterns match a whole line, so both answers are `number: line`.
+        assertEquals("the accented name is found either way", "0\n1: Kraków", lower)
+        assertEquals("and so is the umlaut", "0\n2: Zürich", upper)
     }
 
     @Test
@@ -1200,6 +1199,32 @@ class AgentTest {
             "milk\nbread\nWATER again\neggs\nmilk last\n",
             ws.read(file),
         )
+    }
+
+    @Test
+    fun `a whole-line answer pasted back as a replacement loses its number`() {
+        // The whole-line shape is `2: milk`, and the obvious next move is to paste it. Writing it
+        // verbatim would put the number in the file — the same bug as before, arriving by the other
+        // shape. The number is stripped only for a whole-line replacement, so a numbered list pasted
+        // in as a part-of-line replacement keeps its numbers.
+        val file = File(ws.repoOf("shopping"), "milk.txt")
+        ws.write(file, "first\nmilk\nthird\n")
+
+        val selected = tool("read", """{"path":"milk.txt","grep":"^milk$"}""")
+        assertEquals("the whole-line answer", "0\n2: milk", selected)
+        val text = selected.substringAfter('\n')
+
+        // The pasted answer, with the word changed — so the assertion can tell "stripped the
+        // number" from "wrote the same thing back and changed nothing".
+        val pasted = text.replace("milk", "WATER")
+        val args = org.json.JSONObject()
+            .put("path", "milk.txt")
+            .put("grep", "^milk$")
+            .put("replace", pasted)
+        val body = tool("edit", args.toString())
+
+        assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
+        assertEquals("the file has the word, not the number", "first\nWATER\nthird\n", ws.read(file))
     }
 
     @Test

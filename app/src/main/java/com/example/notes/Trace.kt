@@ -9,17 +9,26 @@ import java.util.concurrent.Executors
  * ## The shape, and why this one
  *
  * ```
- * 16:03:11.412  41 TAP      open-file  milk.txt
- * 16:03:11.418  42 TAP      Save       milk.txt
- * 16:03:11.455  42 CHANGED  state      at / · 3 rows · milk.txtL
- * 16:03:20.001   0 REPORT   I-pressed-Save-and-nothing-appeared
+ * 16:03:11.412  149  open   41 TAP      open-file  milk.txt
+ * 16:03:11.418  149  open   42 TAP      Save       milk.txt
+ * 16:03:11.455  149  open   42 CHANGED  state      at / · 3 rows · milk.txtL
+ * 16:03:20.001  149  open    0 REPORT   I-pressed-Save-and-nothing-appeared
+ * 16:05:02.310  149  cls     0 NOTE     app-hidden
  * ```
  *
- * Fixed columns: **time, id, kind, name, detail**. `id` is the second field precisely so
- * that a shell can count it:
+ * Fixed columns: **time, build, state, id, kind, name, detail**. `id` is the fourth field, after
+ * the two facts every line carries — which build wrote it, and whether the app was in front of
+ * somebody — so a shell can count it:
  *
  * ```
- * awk '$3=="TAP"{print $2}' trace.log | sort | uniq -c | awk '$1==1'
+ * awk '$5=="TAP"{print $4}' trace.log | sort | uniq -c | awk '$1==1'
+ * ```
+ *
+ * and the same file can be split by build, which is the query that was impossible while the
+ * version was prose inside one NOTE:
+ *
+ * ```
+ * awk '$2=="149"' trace.log
  * ```
  *
  * That prints the ids of every tap that appears exactly once — a thing a person asked
@@ -80,7 +89,7 @@ object Trace {
         val detail: String = "",
     ) {
         /** The line as it is written, and as it is read. */
-        fun line(): String = LogFormat.row(at, id, kind.name, what, detail)
+        fun line(): String = LogFormat.row(at, id, kind.name, what, detail, Trace.build, Trace.state)
     }
 
     /** An intent that nothing answered. */
@@ -151,6 +160,28 @@ object Trace {
     private var next = 1
     private var answered = 0
     private var taps = 0
+
+    /**
+     * The build that is writing, and whether the app is in front of the person.
+     *
+     * **Two facts every line carries, because they are what a reader asks first.** Nine builds were
+     * interleaved in one file, and a report from v103 and a report from v149 are two different
+     * reports about two different apps — the file could not tell them apart, so neither could I.
+     * The second is the state: `open` when the app is in front, `cls` when it is behind something
+     * else or gone, and `-` before either is known.
+     *
+     * Set from outside rather than read here, because `Trace` has no context and no lifecycle —
+     * and a class that reaches for a `Context` to format a line is a class a test cannot run.
+     */
+    @Volatile
+    var build: String = "-"
+        set(value) {
+            field = value.ifBlank { "-" }.take(4)
+        }
+
+    /** `open`, `cls`, or `-` before the app has said which. */
+    @Volatile
+    var state: String = "-"
 
     /**
      * The id of the last tap that was answered.

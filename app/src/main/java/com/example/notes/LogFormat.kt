@@ -30,15 +30,34 @@ object LogFormat {
     fun stamp(at: Long): String = clock.get()!!.format(Date(at))
 
     /**
-     * One row, in the fixed columns.
+     * One row of the trace, in the fixed columns: `time build state id kind name  detail`.
      *
-     * The id is padded to four so that a file read with its eyes has its columns straight,
-     * and the kind is padded to seven for the same reason. [name] is never padded: it is the
-     * one column whose width cannot be known, and padding it would push the body out of
-     * alignment for the long names and not the short ones.
+     * **The build and the state are columns, not words in the detail.** A report from a phone is
+     * only actionable if it says which build produced it — the trace held nine builds at once, and
+     * "sync is broken" from v103 and from v149 are two different reports — and the first thing
+     * anybody asks of a log is whether the app was open when the line was written. Both were being
+     * written as prose (`Muffy Codes 149 (1793077053)` inside one NOTE), which is a column in the
+     * only sense that it is on the line.
+     *
+     * `build` is the version **name**, four wide, because it is short (`149`, `1.4`) and sorts
+     * beside itself in a shell. `state` is three wide and is `open` or `cls` — the app in front of
+     * the person, or behind something else. `-` is used where neither is known, which is every row
+     * written before the app has worked out which build it is.
+     *
+     * The id is padded to four so that a file read with its eyes has its columns straight, and the
+     * kind is padded to seven for the same reason. [name] is never padded: it is the one column
+     * whose width cannot be known, and padding it would push the body out of alignment for the long
+     * names and not the short ones.
      */
-    fun row(at: Long, id: Int, kind: String, name: String, detail: String): String =
-        row(stamp(at), id, kind, name, detail)
+    fun row(
+        at: Long,
+        id: Int,
+        kind: String,
+        name: String,
+        detail: String,
+        build: String = "-",
+        state: String = "-",
+    ): String = row(stamp(at), id, kind, name, detail, build, state)
 
     /**
      * The same row from a stamp that is already text.
@@ -47,9 +66,21 @@ object LogFormat {
      * agent's record is truncated at a burst boundary, and a row that came back with a fresh
      * timestamp would say the whole conversation happened at the moment it was trimmed.
      */
-    fun row(stamp: String, id: Int, kind: String, name: String, detail: String): String =
+    fun row(
+        stamp: String,
+        id: Int,
+        kind: String,
+        name: String,
+        detail: String,
+        build: String = "-",
+        state: String = "-",
+    ): String =
         buildString {
             append(stamp)
+            append(' ')
+            append(build.padEnd(4))
+            append(' ')
+            append(state.padEnd(4))
             append(' ')
             append(id.toString().padStart(4))
             append(' ')

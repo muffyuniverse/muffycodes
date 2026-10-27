@@ -41,6 +41,27 @@ import java.io.File
 import kotlinx.coroutines.flow.filterNotNull
 
 class MainActivity : ComponentActivity() {
+    /**
+     * **The trace says whether the app is in front, on every line.**
+     *
+     * A log of what happened while a phone was in a pocket reads differently from a log of what
+     * happened while somebody was looking at it — a background kill, a session that kept polling,
+     * a tap that "did nothing" because the screen was not the one on top. `cls` rather than
+     * `closed`, because the column is four wide and `cls` cannot be mistaken for the app being
+     * shut down.
+     */
+    override fun onStart() {
+        super.onStart()
+        Trace.state = "open"
+        Trace.note("app-shown", "")
+    }
+
+    override fun onStop() {
+        Trace.state = "cls"
+        Trace.note("app-hidden", "")
+        super.onStop()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

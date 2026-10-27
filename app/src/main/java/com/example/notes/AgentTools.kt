@@ -136,7 +136,7 @@ class AgentTools(
          */
         val KEYS: Map<String, Set<String>> = mapOf(
             "tree" to setOf("path", "depth", "name", "grep", "from", "to"),
-            "read" to setOf("path", "from", "to", "grep", "lines", "revision"),
+            "read" to setOf("path", "from", "to", "grep", "revision"),
             "edit" to setOf("path", "grep", "replace", "from", "to", "at", "text"),
             "forget" to setOf("ids"),
             "create" to setOf("path", "text"),
@@ -195,20 +195,19 @@ class AgentTools(
                 "Read a text file, or one of its versions. Always read before you change one. " +
                 "`from` and `to` are line numbers, both included; `from` starts at 1 and `to` " +
                 "left out runs to the end. " +
-                    "**`grep` is the selector.** By default it answers with the text the pattern " +
-                    "matched — every match, exactly as matched, no line number — so the answer can " +
-                    "be pasted straight into `edit`'s `replace`. With `lines:true` it answers " +
-                    "`number: line` instead: the whole line, with the file's own line number, for " +
-                    "when the next call names a place rather than a paste. Either way it is applied " +
-                    "inside `from`/`to` rather than to the whole file. A pattern is a regular " +
-                    "expression, case-insensitive, matched inside one line. A file is shown " +
-                    "exactly as it is stored, columns and all. " +
+                    "**`grep` is the selector, and its answer follows from the pattern.** A " +
+                    "pattern that matches a **whole line** (`^milk$`, `.*TODO.*`) answers with " +
+                    "`number: line` — where it is, for a next call that names a place. A pattern " +
+                    "that matches **part of a line** (`\\d+`, `TODO`) answers with the text it " +
+                    "matched, every match, no number — for a next call that pastes it into " +
+                    "`edit`'s `replace`. It is applied inside `from`/`to` rather than to the whole " +
+                    "file. A pattern is a regular expression, case-insensitive, matched inside one " +
+                    "line. A file is shown exactly as it is stored, columns and all. " +
                     "Your own `agent/context.log` is the rows in your context as " +
                     "`id size name body`, and `agent/session.log` is everything that happened, " +
                     "with `kind` and `ctx`.",
                 "{\"path\":\"the file, relative to the project\",\"from\":1,\"to\":200," +
-                    "\"grep\":\"a pattern to select\",\"lines\":false," +
-                    "\"revision\":\"an id from history\"}",
+                    "\"grep\":\"a pattern to select\",\"revision\":\"an id from history\"}",
             ),
             spec(
                 "edit",
@@ -530,22 +529,6 @@ class AgentTools(
         return Result.success(number)
     }
 
-    /**
-     * A yes or no from a key, and **never a silent default**.
-     *
-     * `optBoolean` answers `false` for anything it does not understand, so `{"lines":"yes"}` would
-     * have meant "no" — a key that quietly does nothing is the failure this whole table exists to
-     * prevent. Absent is `false`; anything present must be a boolean or one of the two words a
-     * person writes in JSON by habit.
-     */
-    private fun truth(value: Any?): Boolean? = when {
-        value == null || value == JSONObject.NULL -> false
-        value is Boolean -> value
-        value is String && value.trim().equals("true", ignoreCase = true) -> true
-        value is String && value.trim().equals("false", ignoreCase = true) -> false
-        else -> null
-    }
-
     /** [value] as a whole number, or null when it is not one — a number, or a string holding one. */
     private fun whole(value: Any?): Int? {
         val number = when (value) {
@@ -560,6 +543,16 @@ class AgentTools(
 
     /** A value from the arguments, short enough to quote back inside a sentence. */
     private fun quoted(value: Any?): String = "\"" + value.toString().take(30) + "\""
+
+    /**
+     * [text] without the `12: ` a `read` puts in front of a whole-line answer.
+     *
+     * **Only ever applied to a replacement for whole lines**, so a body that legitimately starts
+     * with digits — a numbered list pasted in as a replacement — keeps them: the caller asks this
+     * only when the line it is replacing was answered as `number: line`.
+     */
+    private fun stripNumber(text: String): String =
+        text.replaceFirst(Regex("""^\s*\d+: ?"""), "")
 
     /**
      * A pattern from the model, or null when it gave none — **and the one meaning every command
@@ -783,34 +776,33 @@ class AgentTools(
         // than the first hit, because `\d+` in a line of numbers is several selections and a selector
         // that silently answers one of them is the "grep only gives lines" complaint again.
         //
-        // **Where** a match is, when the model asks for it. `lines` is the second shape of the
-        // same answer: `false` (the default) is the matched text alone, which is what `edit`'s
-        // `replace` takes; `true` is `number: line`, the whole line with the file's own number,
-        // which is what a model wants when its next call names a place rather than a paste.
+        // **The shape follows from the pattern, and nobody has to choose it.**
         //
-        // **Two shapes, one selector.** The alternative was two commands — which is what `find`
-        // was — and a model that has to choose between `grep` and `find` before it knows what it
-        // wants gets the choice wrong, as the live log said three times over. A key says which
-        // answer it wants; the pattern means the same thing either way.
+        // Two answers are wanted from a selector, and which one is wanted is already written in the
+        // pattern. A pattern that **matches a whole line** (`^milk$`, `.*TODO.*`, `^\d+\s`) is a
+        // question about lines, so the answer is the line with its number — the model is about to
+        // name a place. A pattern that matches **part of a line** (`\d+`, `TODO`, `milk`) is a
+        // question about text, so the answer is the text it matched — the model is about to paste
+        // it. Asking for a key would be asking the model to classify its own pattern, which is the
+        // choice `find` got wrong three times in the live log.
+        //
+        // **A whole-line match is decided per line, and the answer says which shape it used.** A
+        // file where one line is entirely `milk` and another is `milk and bread` gets one line
+        // answer and one text answer — each line answered the way that line's match asked. That is
+        // not two answers to one question: it is the same question, and each line answered it.
         if (grep != null) {
-            val withLines = truth(args.opt("lines"))
-                ?: return Result.failure(
-                    IllegalArgumentException(
-                        "`lines` is true or false, and ${quoted(args.opt("lines"))} is neither",
-                    ),
-                )
-            if (withLines) {
-                val found = chosen.withIndex().mapNotNull { (offset, line) ->
-                    val at = hit(line, grep, deadline, "read") ?: return@mapNotNull null
-                    "${from + offset}: ${excerpt(line, at, HIT)}"
+            val found = ArrayList<String>()
+            var any = false
+            for ((offset, line) in chosen.withIndex()) {
+                val at = hit(line, grep, deadline, "read") ?: continue
+                any = true
+                if (at.first == 0 && at.last == line.length - 1) {
+                    found.add("${from + offset}: ${excerpt(line, at, HIT)}")
+                } else {
+                    found.addAll(hits(line, grep, deadline, "read"))
                 }
-                if (found.isEmpty()) {
-                    return Result.success("nothing in ${rel(file)} matches that")
-                }
-                return Result.success(found.joinToString("\n"))
             }
-            val found = chosen.flatMap { line -> hits(line, grep, deadline, "read") }
-            if (found.isEmpty()) {
+            if (!any) {
                 return Result.success("nothing in ${rel(file)} matches that")
             }
             return Result.success(found.joinToString("\n"))
@@ -926,14 +918,21 @@ class AgentTools(
                 } else {
                     lines.size
                 }
-                val escaped = Regex.escapeReplacement(put)
+                // **A pasted `2: milk` is a line, not text to write.** `read` answers a
+                // whole-line pattern with `number: line`, so the obvious next move — paste that
+                // into `replace` — would have written the number into the file. It is stripped
+                // **only when this edit is replacing whole lines**, because that is exactly when
+                // `read` put a number on the front: a part-of-line pattern never produces one, so a
+                // body that happens to begin with digits is left exactly as it was written.
                 var changed = false
                 val rewritten = lines.mapIndexed { index, line ->
                     // 1-based, and only inside the range the model named.
                     if (index + 1 < first || index + 1 > last) return@mapIndexed line
-                    if (!find.containsMatchIn(line)) return@mapIndexed line
+                    val at = hit(line, find, deadline, "edit") ?: return@mapIndexed line
                     changed = true
-                    find.replace(line, escaped)
+                    val wholeLine = at.first == 0 && at.last == line.length - 1
+                    val body = if (wholeLine) stripNumber(put) else put
+                    find.replace(line, Regex.escapeReplacement(body))
                 }
                 if (!changed) return refusal("Nothing in ${rel(file)} matches that")
                 rewritten.joinToString("\n")

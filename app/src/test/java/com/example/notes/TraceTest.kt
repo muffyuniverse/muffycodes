@@ -59,6 +59,28 @@ class TraceTest {
     // ---- the columns --------------------------------------------------------
 
     @Test
+    fun `every line carries the build and whether the app was open`() {
+        // **Two facts a reader asks first, and neither was a column.** Nine builds were interleaved
+        // in one file and a report from one is not a report about another; and whether the app was
+        // in front changes what a missing answer means. Both were prose, or absent.
+        Trace.build = "149"
+        Trace.state = "open"
+        Trace.note("app-shown", "")
+        val open = firstLine()
+
+        Trace.state = "cls"
+        Trace.note("app-hidden", "")
+        val closed = settle().last()
+
+        val openFields = open.trim().split(Regex(" +"))
+        val closedFields = closed.trim().split(Regex(" +"))
+        assertEquals("the build is the second field", "149", openFields[1])
+        assertEquals("and the state the third", "open", openFields[2])
+        assertEquals("the build again", "149", closedFields[1])
+        assertEquals("and the app was behind something", "cls", closedFields[2])
+    }
+
+    @Test
     fun `a body with a newline in it is still one row, and reads back as it was`() {
         // The file is grepped, watched line by line, and read by eye on a phone. A body that
         // carries a newline breaks all three, and it is the one part of a row the app does not
