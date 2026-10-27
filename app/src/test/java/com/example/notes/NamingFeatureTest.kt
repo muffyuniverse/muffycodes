@@ -33,7 +33,8 @@ class NamingFeatureTest : FeatureTest() {
      * `.single()` over the whole list would be asking a question whose answer changed when the
      * system project arrived.
      */
-    private fun made(): String = scene.names().single { it != Workspace.SYSTEM_PROJECT }
+    private fun made(): String =
+        scene.names().single { !Workspace.isSystemLocked(it) && it != Workspace.SYSTEM_PROJECT }
 
     @Test
     fun `a name typed with capitals and spaces is written the one way`() {

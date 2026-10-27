@@ -54,7 +54,9 @@ class AccountsFeatureTest : FeatureTest() {
     fun `with nobody signed in there is nothing to show and nothing to make`() {
         assertNull("no account", scene.viewModel.account)
         assertNull("no workspace", scene.viewModel.workspace)
-        assertTrue("nothing is listed", scene.names().isEmpty())
+        // Nothing of the person's. The app's own folder is shown now, and only after an account
+        // exists - which is what this assertion is actually about: a signed-out app lists nothing.
+        assertTrue("nothing of the person's is listed", scene.names().all { Workspace.isSystemLocked(it) || it == Workspace.SYSTEM_PROJECT })
         assertFalse("and nothing can be made", scene.viewModel.signedIn)
     }
 
@@ -92,10 +94,11 @@ class AccountsFeatureTest : FeatureTest() {
         scene.signedIn()
 
         assertTrue("the account's folder is there", scene.workspace!!.accountDir.isDirectory)
-        // **One row, and it is the settings project.** A brand-new account has no projects of its
-        // own; it has the folder where the whole account's settings live, because that is where the
-        // system prompt is written and a prompt with nowhere to live is one nobody can edit.
-        assertEquals("and no project of their own yet", listOf("system"), scene.names())
+        // **Two rows, and neither is the person's project.** A brand-new account has the settings
+        // project, because that is where the system prompt is written and a prompt with nowhere to
+        // live is one nobody can edit — and `.muffy/`, the app's own flags, which report 28 asked to
+        // stop hiding. Folders sort by lowercase name, so the dot comes first.
+        assertEquals("and no project of their own yet", listOf(".muffy", "system"), scene.names())
     }
 
     @Test

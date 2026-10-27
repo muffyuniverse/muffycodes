@@ -31,7 +31,9 @@ class VisibilityFeatureTest : FeatureTest() {
         // **The system project is at the root too**, because it is a project like any other — it
         // holds the settings that belong to the whole account, and a row is how a person reaches
         // them. Folders sort before files, then by name, so it lands after `Shopping`.
-        assertEquals(listOf("loose", "Shopping", "system", "notes.txt"), scene.names())
+        // **`.muffy` is a folder at the root now**, because report 28 asked for the app's own things
+        // to be visible and locked rather than hidden. Folders sort first by lowercase name.
+        assertEquals(listOf(".muffy", "loose", "Shopping", "system", "notes.txt"), scene.names())
     }
 
     @Test
@@ -129,7 +131,7 @@ class VisibilityFeatureTest : FeatureTest() {
         scene.file("apple.txt")
 
         // Called for in lowercase, because that is how the app writes a name it makes.
-        assertEquals(listOf("system", "zebra", "apple.txt", "milk.txt"), scene.names())
+        assertEquals(listOf(".muffy", "system", "zebra", "apple.txt", "milk.txt"), scene.names())
     }
 
     @Test

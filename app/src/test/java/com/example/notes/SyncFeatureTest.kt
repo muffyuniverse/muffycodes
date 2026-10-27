@@ -166,7 +166,7 @@ class SyncFeatureTest : FeatureTest() {
     fun `nothing can be synced when nobody is signed in`() {
         val alone = Scenario(scene.app, signIn = false)
 
-        assertEquals("no projects to sync", emptyList<String>(), alone.viewModel.projectNames)
+        assertEquals("no projects of the person's to sync", listOf("system"), alone.viewModel.projectNames)
         alone.viewModel.sync("Shopping")
         assertEquals("nothing happened", null, alone.viewModel.account)
     }
