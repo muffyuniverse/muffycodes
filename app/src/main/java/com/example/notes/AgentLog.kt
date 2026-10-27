@@ -609,8 +609,8 @@ class AgentLog private constructor(
      * the whole poll is cheap only because it is a cache hit. The turn boundary and the reconnect
      * line are here for the same reason: they are how the *app* counts, not what the model said.
      */
-    fun bookkeeping(kind: String, name: String, detail: String): Int =
-        record(kind, name, detail, ctx = APP)
+    fun bookkeeping(kind: String, name: String, detail: String, answers: Int = 0): Int =
+        record(kind, name, detail, ctx = APP, answers = answers)
 
     private fun record(
         kind: String,
@@ -834,10 +834,13 @@ class AgentLog private constructor(
             val inContext = dangling(contextRows()).map { it.id }.toSet()
             for (call in pending) {
                 val said = "$FAILURE the app was closed before this answered"
+                // **The seal names the call it answers**, which is the case the column was made
+                // for: a result whose call is in the evidence but no longer in the context still
+                // has to say what it is sealing, or a reader cannot tell it from an orphan.
                 if (call.id in inContext) {
-                    got(call.name, said)
+                    got(call.name, said, answers = call.id)
                 } else {
-                    bookkeeping(GOT, call.name, said)
+                    bookkeeping(GOT, call.name, said, answers = call.id)
                 }
             }
             return pending.size
@@ -853,24 +856,12 @@ class AgentLog private constructor(
      * answering right now, which is both wrong and confusing to read.
      */
     fun dangling(rows: List<Row>): List<Row> {
-        val out = mutableListOf<Row>()
-        var pending: Row? = null
-        for (row in rows) {
-            when (row.kind) {
-                CALL -> {
-                    if (row.name in TERMINATING) {
-                        pending = null
-                    } else {
-                        pending?.let { out.add(it) }
-                        pending = row
-                    }
-                }
-
-                GOT -> pending = null
-            }
-        }
-        pending?.let { out.add(it) }
-        return out
+        // **By id, like every other reader.** This used to hold one `pending` call and assume the
+        // next result answered it — so a reply with two calls, sealed while the app was closed,
+        // would have reported one of them as answered and the other as dangling. The result says
+        // which call it answers, so the question is a set difference.
+        val answered = rows.filter { it.kind == GOT }.map { it.answers }.toSet()
+        return rows.filter { it.kind == CALL && it.name !in TERMINATING && it.id !in answered }
     }
 
 
