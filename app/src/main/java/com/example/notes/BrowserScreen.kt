@@ -691,8 +691,10 @@ private fun EntryList(viewModel: AppViewModel, actions: BrowserActions) {
                 // the person did not set and cannot lift. Conflating them would either hide the
                 // row again (what the report asked to stop) or offer a toggle that does nothing.
                 system = ws?.isStructural(entry.file) == true,
+                // `isAppFlag` is a question about this account's files, so it needs the workspace;
+                // `isSystemLocked` is a question about a name, so it is asked of the class.
                 systemLocked = ws?.isAppFlag(entry.file) == true ||
-                    ws?.isSystemLocked(entry.name) == true,
+                    Workspace.isSystemLocked(entry.name),
                 actions = actions,
                 onOpen = {
                     if (entry.isFolder) viewModel.openChild(entry.name) else actions.onOpen(entry)

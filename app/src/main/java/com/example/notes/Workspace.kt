@@ -186,9 +186,6 @@ class Workspace(val accountDir: File) {
      */
     fun isHidden(name: String): Boolean = name == KEEPER || name == GIT_DIR
 
-    /** True for a name that is shown but **locked by the app itself** — readable, not writable. */
-    fun isSystemLocked(name: String): Boolean =
-        name == STATE_DIR || name == AgentLog.DIR
 
     /**
      * True for the agent's record: `<project>/agent/session.log` — every event — and
@@ -888,6 +885,19 @@ class Workspace(val accountDir: File) {
 
         /** True for [name] when it is the system project's — **whatever its case.** */
         fun isSystem(name: String): Boolean = name.equals(SYSTEM_PROJECT, ignoreCase = true)
+
+        /**
+         * True for a name that is **shown and locked by the app itself** — readable, not writable.
+         *
+         * **A name test, so it lives with the other name tests.** It is here rather than on the
+         * instance because it needs no account, no folder and no state: the question is what a name
+         * means, which is the same question `isSystem` answers, and a caller that has only a name
+         * should not have to hold a `Workspace` to ask it.
+         *
+         * Report 28: these rows are visible now, and locked. `.muffy/` is the app's flags for the
+         * whole account; `agent/` is one project's record.
+         */
+        fun isSystemLocked(name: String): Boolean = name == STATE_DIR || name == AgentLog.DIR
 
         /** A project's ignore file, and the two lines the app keeps in it. */
         const val IGNORE = ".gitignore"
