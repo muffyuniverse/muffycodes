@@ -12,12 +12,12 @@ tree.
 
 ## Part 1 · The 38 reports
 
-The numbering is the log's own: the order the reports appear in `trace.log (1).txt`. **32 are
-marked `closed` in the log and 6 are open**, and the count in this document is taken from that
+The numbering is the log's own: the order the reports appear in `trace.log (1).txt`. **33 are
+marked `closed` in the log and 5 are open**, and the count in this document is taken from that
 file rather than remembered — an earlier draft of this plan said 20 and 18, which was wrong, and
 the three it had lost (#9, #20, #21) were the three that were not about code I had touched.
 
-### Closed — 32
+### Closed — 33
 
 | # | Build | Report | Closed by |
 |---|---|---|---|
@@ -56,17 +56,18 @@ the three it had lost (#9, #20, #21) were the three that were not about code I h
 | 28 | 149 | make hidden files visible but read-only, with a system lock in a distinct colour | `cd87b3c`, `156a2ea` — `.muffy/` is a row, locked in tertiary, no menu |
 | 30 | 149 | remove "n to send"; make it "see n changes" as a button | `494b7f0` — one button, no separate caption |
 
+| 23 | 149 | how is "wait for the model" different from "stop command after"? | `96eef42` — two named groups, one unit, every row saying what it bounds; the ack/idle split is `PLAN-streaming.md` |
+
 **Two closed themselves.** #16 and #18 were answered by the folder merge *deleting* the level they
 were about. A report can become moot, and "closed" is not always "fixed".
 
-### Open — 6
+### Open — 5
 
 | # | Report | What it needs |
 |---|---|---|
 | 17 | where is the chat icon within the project? | look at what a project row shows |
 | 20 | block the agent settings together, rule them off, drop "agent" from every label but the block title | step 7 |
 | 21 | the "signed in as" block still has gaps between rows | step 7 |
-| 23 | how is "wait for the model" different from "stop command after"? | **in progress** — the two groups and the seconds unit are in; the ack/idle split waits on `PLAN-streaming.md` |
 | 29 | "see changes" should be an enterable list; editor needs a diff mode with a two-commit picker; view/edit/diff as separate modes | step 6 |
 | 36 | chat as many bubbles; remove `ask`/`conclude`; message ends with a plain message; drop the token column; footer with time, date, id; time column back in the session log | step 5 |
 
