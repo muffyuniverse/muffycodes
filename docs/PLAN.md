@@ -66,7 +66,7 @@ were about. A report can become moot, and "closed" is not always "fixed".
 | 17 | where is the chat icon within the project? | look at what a project row shows |
 | 20 | block the agent settings together, rule them off, drop "agent" from every label but the block title | step 7 |
 | 21 | the "signed in as" block still has gaps between rows | step 7 |
-| 23 | how is "wait for the model" different from "stop command after"? | **a question** — needs an answer in the UI |
+| 23 | how is "wait for the model" different from "stop command after"? | **in progress** — the two groups and the seconds unit are in; the ack/idle split waits on `PLAN-streaming.md` |
 | 29 | "see changes" should be an enterable list; editor needs a diff mode with a two-commit picker; view/edit/diff as separate modes | step 6 |
 | 36 | chat as many bubbles; remove `ask`/`conclude`; message ends with a plain message; drop the token column; footer with time, date, id; time column back in the session log | step 5 |
 
@@ -192,6 +192,24 @@ one gets re-litigated.
 5. **Chat** — bubbles, footer, token column out, session-log time column in.
 6. **Diff mode** — the picker, `versionsOf`, right unset, Done greyed.
 7. **#18** (the chat icon) and **#28** (the wait/stop question), once looked at.
+
+### Not a bug report: the streaming work
+
+`docs/PLAN-streaming.md` records the change that the timeout question opened up. It is not one of the
+38 — it came out of R23 while answering it.
+
+**What it is:** the app sends `stream: false`, so the provider says nothing until the answer is
+complete. That makes a dropped request and a diligent model the same silence, and one number has to
+serve both. Streaming splits it into an **ack** timeout (silence before the first chunk — retry is
+free) and an **idle** timeout (silence between chunks — the stream died).
+
+**What it buys the footer:** the mechanism was already proven watching a kimi audit — every 30
+seconds, `30s answer=0c thinking=12060c`, 38 lines over 19 minutes. The message bubble's footer can
+show elapsed time, thinking produced, answer produced and tool calls assembled, live, while the
+model works. Measured detail: those were **characters**, not tokens; token totals arrive only in the
+final `usage` block, so a per-chunk token count would be an estimate dressed as a measurement.
+
+**Not a progress bar.** Elapsed and produced, never a percentage — there is no denominator.
 
 ### Known and not yet fixed
 

@@ -2545,7 +2545,7 @@ class AppViewModel @JvmOverloads constructor(
             // **The person's number, not the app's.** Four minutes by default; a slow network is a
             // fact only they know, and a timeout that is too short turns a long turn into a ladder of
             // retries that never let it finish.
-            timeoutMs = settings.timeoutMinutes * 60_000,
+            timeoutMs = settings.timeoutSeconds * 1000,
         )
     })(model)
 

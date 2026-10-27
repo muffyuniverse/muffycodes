@@ -30,7 +30,7 @@ object AgentWiring {
                 model = active.model,
                 provider = active.provider,
                 effort = active.effort,
-                timeoutMs = settings.timeoutMinutes * 60_000,
+                timeoutMs = settings.timeoutSeconds * 1000,
             )
         },
         notify: (AgentSession) -> Unit = {},

@@ -295,14 +295,145 @@ fun SettingsScreen(
             )
             RowDivider()
 
-            // ---- how often it is checked on, and for how long a command is waited for ----
+            // ---- the two clocks: work on this phone, and the wait for the model ----
             //
-            // **Three waits, and they are different questions.** The keepalive is about money: a
-            // waiting conversation is re-sent so the provider's cache stays warm, and the person pays
-            // for that in requests and battery, so the switch, the interval and the ceiling are all
-            // theirs. A *command* limit is about the turn: past it the command is aborted, its result
-            // says so, and the turn carries on — the model is told the truth rather than made to wait
-            // for ever.
+            // **Two groups, because they measure two different things and one label each was not
+            // enough.** Reported from the live log: "how wait for the model is different from stop
+            // command after? is it how long it takes to produce first response?" - which is what
+            // three timeouts in a row, in two units, with "wait" and "stop" used for both, will
+            // always produce. The answer is not a sentence in a description: it is that these numbers
+            // bound different machines, and the screen has to say which is which before it says how
+            // long.
+            //
+            // **Everything is seconds now.** The model wait was in minutes and the command limits in
+            // seconds, eight lines apart, with nothing saying they were different scales - so "4" and
+            // "180" looked like the same kind of number.
+            Text("While the app works on this phone", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "These bound work the app does itself: reading files, walking folders, talking to " +
+                    "git. The model is not involved - it is waiting for the app. All in seconds; " +
+                    "blank means no limit.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            LengthField(
+                label = "A command may hold the conversation for (seconds, blank = no limit)",
+                value = settings.foregroundSeconds,
+                placeholder = "no limit",
+                onValueChange = { settings.keepForeground(it) },
+            )
+            Text(
+                text = if (settings.foregroundSeconds <= 0) {
+                    "Now: a command runs until it finishes, and the turn waits for it. A number " +
+                        "here is a choice about how long a turn may sit still."
+                } else {
+                    // **This sentence used to say "nothing half-written is kept", and it stopped
+                    // being true the moment a slow command was handed to the background.** The
+                    // report that changed it: "when command takes more than the timeout, agent gets a
+                    // result that tells that this command takes longer than the timeout allows and
+                    // will be returned on one of the next turns". A setting screen that describes the
+                    // old behaviour is worse than one that describes none.
+                    "Now: past ${settings.foregroundSeconds} s the command stops holding the turn and " +
+                        "carries on in the background. The agent is told the path its result will be " +
+                        "written to, and the result arrives with the next batch."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            LengthField(
+                label = "Stop a background command after (seconds, blank = never)",
+                value = settings.backgroundSeconds,
+                placeholder = "never",
+                onValueChange = { settings.keepBackground(it) },
+            )
+            Text(
+                text = if (settings.backgroundSeconds <= 0) {
+                    "Now: a background command runs until it finishes. Its result is a file, so " +
+                        "nothing is waiting on it."
+                } else {
+                    // **This one really does stop**, and the difference from the row above is the
+                    // whole reason both exist: a command that already left the conversation has
+                    // nowhere further to be handed to, so past this it dies and says why.
+                    "Now: past ${settings.backgroundSeconds} s a background command is stopped for " +
+                        "good - it has already left the conversation, so there is nowhere to hand it " +
+                        "to. The file it was writing says it stopped."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            RowDivider()
+
+            // ---- the other clock: the wait for the model ----
+            Text("While it talks to the model", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "This bounds one request to OpenRouter: from the bytes going out to the answer " +
+                    "coming back. Nothing on this phone is running while it waits - the app is " +
+                    "sitting still, and the model is the one working. In seconds; blank means the " +
+                    "default.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            LengthField(
+                label = "Wait for an answer for (seconds)",
+                value = settings.timeoutSeconds,
+                placeholder = "${SettingsStore.DEFAULT_TIMEOUT_SECONDS}",
+                onValueChange = { settings.keepTimeout(it) },
+            )
+            Text(
+                text = "Now: past ${settings.timeoutSeconds} s the request is dropped and tried " +
+                    "again on another provider. An answer longer than this is never cut: a result " +
+                    "too big for the conversation is written whole to a file, and its path is the " +
+                    "answer.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            // **What this number cannot yet tell apart, said plainly.** The provider sends nothing
+            // until the completion is finished, so a request that never arrived and a model that is
+            // thinking hard are the same silence to this app - and they need opposite responses: a
+            // dropped request should be retried at once, a diligent model should be waited for,
+            // because retrying throws away work already paid for. One number cannot express two
+            // things, so the screen says so instead of implying the number is enough.
+            Text(
+                "A dropped request and a model thinking hard look the same from here: the provider " +
+                    "says nothing until the answer is complete. So this one number covers both.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.outline,
+            )
+            LengthField(
+                label = "One result may carry (tokens)",
+                value = settings.maxResult,
+                placeholder = "6000",
+                onValueChange = { settings.keepMaxResult(it) },
+            )
+            // **The clamp says which number is in force.** A result bigger than the model's input
+            // window cannot be sent at all, so a bigger ask is not a bigger allowance — and a row
+            // that showed only the ask would be the same "96k" mistake in a second unit.
+            val resultLimit = ContextBudget.resultLimit(
+                settings.maxResult,
+                viewModel.modelInfo?.contextLength,
+            )
+            if (resultLimit.clamped) {
+                Text(
+                    "This model's input window is ${resultLimit.ceiling} tokens, so that is " +
+                        "what is used.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            RowDivider()
+
+            // ---- how much of the record is kept ----
+            // **The other half of Context, and it is a different act.** Clearing up takes a row out
+            // of the conversation and leaves it in the record; this is where the record itself stops,
+            // and what it drops is dropped for good. Two numbers were reported as one confusion —
+            // "where is max session log size? because context trim just switches row out of context,
+            // and session log limit removes them altogether" — so they are named apart here.
+            // ---- keepalive, which is about money rather than a bound ----
+            //
+            // **Its own section, because it is not a timeout.** The two groups above bound how long
+            // something may take; this one decides whether the app spends requests at all. A waiting
+            // conversation is re-sent so the provider's cache stays warm, and the person pays for
+            // that in requests and battery, so the switch, the interval and the ceiling are theirs.
             //
             // **"Keepalive", because that is what it does.** The agent used to say `wait` and the app
             // came back to ask again; the name described the model's act and hid the person's bill.
@@ -362,85 +493,8 @@ fun SettingsScreen(
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
-            LengthField(
-                label = "Stop a command after (seconds, blank = never)",
-                value = settings.foregroundSeconds,
-                placeholder = "never",
-                onValueChange = { settings.keepForeground(it) },
-            )
-            Text(
-                text = if (settings.foregroundSeconds <= 0) {
-                    "Now: a command runs until it finishes. This is the app's own behaviour; a " +
-                        "number here is a choice."
-                } else {
-                    "Now: past ${settings.foregroundSeconds} s a command is stopped and its result " +
-                        "says so. Nothing half-written is kept."
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            LengthField(
-                label = "Stop a background command after (seconds, blank = never)",
-                value = settings.backgroundSeconds,
-                placeholder = "never",
-                onValueChange = { settings.keepBackground(it) },
-            )
-            Text(
-                text = if (settings.backgroundSeconds <= 0) {
-                    "Now: a background command runs until it finishes. Its result is a file, so " +
-                        "nothing is waiting on it."
-                } else {
-                    "Now: past ${settings.backgroundSeconds} s a background command is stopped, and " +
-                        "the file it was writing says so."
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             RowDivider()
 
-            // ---- how long the app waits for the model itself ----
-            Text(
-                "An answer from the model that takes longer than this is a blip: the app " +
-                    "reconnects. A result longer than the length below is never cut: it is written " +
-                    "whole to a file in the agent's folder, and its path is the answer.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            LengthField(
-                label = "Wait for the model (minutes)",
-                value = settings.timeoutMinutes,
-                placeholder = "4",
-                onValueChange = { settings.keepTimeout(it) },
-            )
-            LengthField(
-                label = "One result may carry (tokens)",
-                value = settings.maxResult,
-                placeholder = "6000",
-                onValueChange = { settings.keepMaxResult(it) },
-            )
-            // **The clamp says which number is in force.** A result bigger than the model's input
-            // window cannot be sent at all, so a bigger ask is not a bigger allowance — and a row
-            // that showed only the ask would be the same "96k" mistake in a second unit.
-            val resultLimit = ContextBudget.resultLimit(
-                settings.maxResult,
-                viewModel.modelInfo?.contextLength,
-            )
-            if (resultLimit.clamped) {
-                Text(
-                    "This model's input window is ${resultLimit.ceiling} tokens, so that is " +
-                        "what is used.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            RowDivider()
-
-            // ---- how much of the record is kept ----
-            // **The other half of Context, and it is a different act.** Clearing up takes a row out
-            // of the conversation and leaves it in the record; this is where the record itself stops,
-            // and what it drops is dropped for good. Two numbers were reported as one confusion —
-            // "where is max session log size? because context trim just switches row out of context,
-            // and session log limit removes them altogether" — so they are named apart here.
             Text("The record", style = MaterialTheme.typography.titleMedium)
             Text(
                 "agent/session.log is the evidence: every event, in order. Empty keeps all of it. " +

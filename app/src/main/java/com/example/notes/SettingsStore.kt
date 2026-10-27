@@ -285,27 +285,36 @@ class SettingsStore(context: Context, name: String = "settings") {
     val backgroundMs: Long get() = backgroundSeconds * 1000L
 
     /**
-     * How long the app waits for the model's answer, in minutes.
+     * How long the app waits for the model's answer, **in seconds**.
      *
      * **This is what turns "the provider is not answering" into a blip.** The door's read timeout
      * ends the attempt, the ladder retries it at one, two, four seconds, and the session reconnects
      * instead of hanging. Too short retries a long turn for ever; too long holds the session's one
-     * worker for half an hour on a provider that is simply down. The original brief asked for four
-     * minutes and a field, because a phone on a slow network is a fact only the person holding it
-     * knows.
+     * worker for half an hour on a provider that is simply down.
+     *
+     * **Seconds, like every other limit on this screen.** It was minutes, and it sat eight lines from
+     * two limits in seconds with nothing saying the scales differed — so "4" and "180" read as the
+     * same kind of number. Reported as: "how wait for the model is different from stop command
+     * after?". One unit is part of that answer.
+     *
+     * **What it actually bounds is one HTTP exchange, whole.** With `stream: false` the provider
+     * sends nothing until the completion is finished, so this covers connect, queue, generation and
+     * transfer as one block — which means **the app cannot currently tell a dropped request from a
+     * model that is thinking hard.** Both are silence. That is why this is one number and not two;
+     * see `docs/PLAN-streaming.md` for the change that splits them.
      */
-    var timeoutMinutes: Int by mutableStateOf(
-        prefs.getInt(KEY_TIMEOUT, DEFAULT_TIMEOUT_MINUTES)
+    var timeoutSeconds: Int by mutableStateOf(
+        prefs.getInt(KEY_TIMEOUT, DEFAULT_TIMEOUT_SECONDS)
     )
         private set
 
     /** Sets the answer timeout, clamped to a wait a person would recognise. */
-    fun keepTimeout(minutes: Int) {
-        val clean = minutes.coerceIn(MIN_TIMEOUT_MINUTES, MAX_TIMEOUT_MINUTES)
-        Trace.tap("answer timeout", "$clean min")
-        timeoutMinutes = clean
+    fun keepTimeout(seconds: Int) {
+        val clean = seconds.coerceIn(MIN_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS)
+        Trace.tap("answer timeout", "$clean s")
+        timeoutSeconds = clean
         prefs.edit().putInt(KEY_TIMEOUT, clean).apply()
-        Trace.said("the app waits $clean minutes for an answer")
+        Trace.said("the app waits $clean seconds for an answer")
     }
 
     /**
@@ -404,7 +413,19 @@ class SettingsStore(context: Context, name: String = "settings") {
     const val KEY_HARD = "agent_hard_tokens"
 
     /** How long one answer may take, in minutes, and how much one result may carry. */
-    const val KEY_TIMEOUT = "agent_timeout_minutes"
+    /**
+     * **The key is renamed with the unit, and that is the whole migration.**
+     *
+     * The value used to be minutes under `agent_timeout_minutes`. Reading that number as seconds
+     * would turn a stored 4 into a four-second wait - a phone that retried a long turn for ever,
+     * which is the failure the setting exists to prevent. A new key means the old number is never
+     * read as the new unit: this build finds no value under its own key and writes the default.
+     *
+     * That is not compatibility machinery. Nothing here reads the old key, nothing migrates, and
+     * no code path knows a previous release existed. It is one key that was renamed because the
+     * thing it stores changed meaning.
+     */
+    const val KEY_TIMEOUT = "agent_timeout_seconds"
 
     /** Whether a waiting conversation is kept warm, how often, and for how long. */
     const val KEY_KEEPALIVE = "agent_keepalive"
@@ -428,7 +449,7 @@ class SettingsStore(context: Context, name: String = "settings") {
     const val MAX_TOKENS = 1_048_576
 
     /** Four minutes: the brief's own number, and long enough for a turn that does real work. */
-    const val DEFAULT_TIMEOUT_MINUTES = 4
+    const val DEFAULT_TIMEOUT_SECONDS = 240
 
     /** The keepalive interval: a floor below which pinging is a loop of its own, and the 250 s cap. */
     const val MIN_POLL_SECONDS = 15
@@ -462,8 +483,14 @@ class SettingsStore(context: Context, name: String = "settings") {
     const val MAX_COMMAND_SECONDS = 900
 
     /** Under a minute a real request cannot finish; half an hour holds a worker too long. */
-    const val MIN_TIMEOUT_MINUTES = 1
-    const val MAX_TIMEOUT_MINUTES = 30
+    /**
+     * The bounds on the answer wait, in seconds.
+     *
+     * **The same numbers the minutes version had** — 1 minute to 30 — expressed in the unit the rest
+     * of the screen uses. A person who wants four minutes types 240.
+     */
+    const val MIN_TIMEOUT_SECONDS = 60
+    const val MAX_TIMEOUT_SECONDS = 1_800
 
     /**
      * Six thousand tokens is about twenty thousand characters — a long source file, which is what a

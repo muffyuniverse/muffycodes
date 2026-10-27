@@ -664,13 +664,16 @@ class AgentRunnerTest {
         // Both were constants before the audit: two minutes for an answer and twenty thousand
         // characters for a result. The brief asked for them as fields, and the clamps are the part
         // that matters — a timeout of zero retries for ever, and a result of zero is a hang.
-        assertEquals("four minutes by default", 4, settings.timeoutMinutes)
+        // **In seconds, like every other limit on the screen.** It was minutes and sat beside two
+        // limits in seconds, which is what "how wait for the model is different from stop command
+        // after?" was really asking about - so the default is 240, not 4.
+        assertEquals("four minutes by default", 240, settings.timeoutSeconds)
         assertEquals("six thousand tokens by default", 6_000, settings.maxResult)
 
         settings.keepTimeout(0)
-        assertEquals("under a minute cannot finish", 1, settings.timeoutMinutes)
-        settings.keepTimeout(600)
-        assertEquals("half a day holds the worker", 30, settings.timeoutMinutes)
+        assertEquals("under a minute cannot finish", 60, settings.timeoutSeconds)
+        settings.keepTimeout(60_000)
+        assertEquals("half an hour is where it stops holding the worker", 1_800, settings.timeoutSeconds)
 
         settings.keepMaxResult(0)
         assertEquals("a result of nothing is a hang", 1_000, settings.maxResult)
