@@ -1,0 +1,11 @@
+: OPENROUTER PROCESSING
+data: {"id": "gen-1", "object": "chat.completion.chunk", "model": "x", "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}}]}
+data: {"id": "gen-1", "object": "chat.completion.chunk", "model": "x", "choices": [{"index": 0, "delta": {"reasoning": "The person wants to know "}}]}
+data: {"id": "gen-1", "object": "chat.completion.chunk", "model": "x", "choices": [{"index": 0, "delta": {"reasoning": "what is in the project, so tree."}}]}
+data: {"id": "gen-1", "object": "chat.completion.chunk", "model": "x", "choices": [{"index": 0, "delta": {"reasoning_details": [{"type": "reasoning.text", "text": "A tree call."}]}}]}
+data: {"id": "gen-1", "object": "chat.completion.chunk", "model": "x", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "id": "call_a", "type": "function", "function": {"name": "tree", "arguments": ""}}]}}]}
+data: {"id": "gen-1", "object": "chat.completion.chunk", "model": "x", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "function": {"arguments": "{\"pa"}}]}}]}
+data: {"id": "gen-1", "object": "chat.completion.chunk", "model": "x", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "function": {"arguments": "th\":\"\"}"}}]}}]}
+data: {"id": "gen-1", "object": "chat.completion.chunk", "model": "x", "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]}
+data: {"id": "gen-1", "object": "chat.completion.chunk", "model": "x", "choices": [{"index": 0, "delta": {}}], "usage": {"prompt_tokens": 120, "completion_tokens": 40, "total_tokens": 160}}
+data: [DONE]

@@ -1,0 +1,7 @@
+data: {"id": "gen-1", "object": "chat.completion.chunk", "model": "x", "choices": [{"index": 0, "delta": {"role": "assistant"}}]}
+data: {"id": "gen-1", "object": "chat.completion.chunk", "model": "x", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "id": "call_a", "function": {"name": "tree", "arguments": "{\"path\":\"\"}"}}]}}]}
+data: {"id": "gen-1", "object": "chat.completion.chunk", "model": "x", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "id": "call_b", "function": {"name": "read", "arguments": ""}}]}}]}
+data: {"id": "gen-1", "object": "chat.completion.chunk", "model": "x", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "id": "call_b", "function": {"arguments": "{\"path\":"}}]}}]}
+data: {"id": "gen-1", "object": "chat.completion.chunk", "model": "x", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": 0, "id": "call_b", "function": {"arguments": "\"milk.txt\"}"}}]}}]}
+data: {"id": "gen-1", "object": "chat.completion.chunk", "model": "x", "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]}
+data: [DONE]

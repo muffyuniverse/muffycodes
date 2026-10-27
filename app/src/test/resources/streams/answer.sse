@@ -1,0 +1,8 @@
+: ping
+data: {"id": "gen-1", "object": "chat.completion.chunk", "model": "x", "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}}]}
+data: {"id": "gen-1", "object": "chat.completion.chunk", "model": "x", "choices": [{"index": 0, "delta": {"content": "There is "}}]}
+data: {"id": "gen-1", "object": "chat.completion.chunk", "model": "x", "choices": [{"index": 0, "delta": {"content": "one fil"}}]}
+data: {"id": "gen-1", "object": "chat.completion.chunk", "model": "x", "choices": [{"index": 0, "delta": {"content": "e."}}]}
+data: {"id": "gen-1", "object": "chat.completion.chunk", "model": "x", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+data: {"id": "gen-1", "object": "chat.completion.chunk", "model": "x", "choices": [{"index": 0, "delta": {}}], "usage": {"prompt_tokens": 9, "completion_tokens": 5, "total_tokens": 14}}
+data: [DONE]
