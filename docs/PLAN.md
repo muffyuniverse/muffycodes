@@ -12,54 +12,61 @@ tree.
 
 ## Part 1 · The 38 reports
 
-### Closed — 20, each with the line that closes it
+The numbering is the log's own: the order the reports appear in `trace.log (1).txt`. **22 are
+marked `closed` in the log and 16 are open**, and the count in this document is taken from that
+file rather than remembered — an earlier draft of this plan said 20 and 18, which was wrong, and
+the three it had lost (#9, #20, #21) were the three that were not about code I had touched.
+
+### Closed — 22
 
 | # | Build | Report | Closed by |
 |---|---|---|---|
-| 1, 2, 7 | 103–104 | sync grey and inactive; new files and folders too; always shows 1 | `6f734cb` — the count was an id collision. `GitService.kt:83` counts **paths, not commits**, so a batch that moved three files is 3 |
-| 8 | 104 | the sync button itself shows a number, remove it | `BrowserScreen.kt:511` — the comment names the report; the button says "Sync" |
-| 3, 4 | 103–104 | + menu overlaps rows; align right, width just past the widest word | `BrowserScreen.kt:215` — `Surface` with elevation, `IntrinsicSize.Max`; the report is quoted |
-| 5 | 104 | adding/deleting a project shows only after leaving the menu | `AppViewModel.kt:1966` — the report is quoted |
-| 6 | 103 | too much space between account and buttons | `SettingsScreen.kt:160` — `spacedBy(2.dp)`, report quoted |
-| 9 | 129 | move agent block up, key first field | `SettingsScreen.kt:208,238` — both quote the report |
-| 10 | 129 | add/remove model buttons into the model window | `ModelSection.kt:85` quotes the report |
-| 11 | 129 | why a 96k trim limit — follow the model | `ContextBudget.kt:49,65` — 96k is only `UNKNOWN_CEILING`, used when no window was passed |
-| 12 | 129 | where is max session log size | `SettingsScreen.kt:438` — "The record" section, `MAX_SESSION_MB = 512` |
-| 13 | 129 | what is agent pace description | `SettingsScreen.kt:309` quotes the report |
-| 14 | 129 | merge account and projects folders | `Workspace.kt:45` — **one folder per project, at the root.** There is no `projects/` wrapper |
-| 15 | 129 | battery/notification descriptions, minimally | `SettingsScreen.kt:302` |
-| 17 | 129 | rename `GitHub/` to `<project>_repository` | `ProjectGit.kt:36` — `repoDir = projectDir`. **The level it would rename is gone** |
-| 20 | 129 | merge project and repo folders | same line — the merge happened |
-| 22 | 149 | lock changes only show after re-entering | `BrowserScreen.kt:670` — the redraw |
-| 25, 26, 27, 29 | 149 | `find` should be `grep`; grep+from/to compose; are they separate engines; grep gives only lines | `2b98531`, `bf60d60` — one selector, and the answer shape follows the pattern |
-| 35, 36 | 149 | what does the context "read" button do; "900k of 1000k" | `7e4ed5a` — button gone, one line |
+| 1 | 103 | changed a file, saved, but sync is still grey and inactive | `6f734cb` — the count was an id collision, not a stale redraw |
+| 2 | 104 | same broken sync on new files and folders; guess deletions and moves too | `GitService.kt:83` counts **paths, not commits** |
+| 3 | 104 | between the user account and the buttons below it there is too much space | `SettingsScreen.kt:160` — `spacedBy(2.dp)`, report quoted |
+| 4 | 104 | the + menu's options overlap the file rows | `BrowserScreen.kt:215` — `Surface` with elevation |
+| 5 | 104 | adding or deleting a project shows only after leaving the menu | `AppViewModel.kt:1966` — report quoted |
+| 6 | 104 | the + menu is ugly; align right, just past the widest word | `BrowserScreen.kt:215` — `IntrinsicSize.Max` |
+| 7 | 103 | sync always shows 1 to send even when there are many changes | `6f734cb` — same id collision as #1 |
+| 8 | 104 | why does the sync button itself show a number? remove it | `BrowserScreen.kt:511` — the button says "Sync" |
+| 10 | 129 | why a 96k trim limit? it should follow the active model's context | `ContextBudget.kt:49,65` — 96k is only `UNKNOWN_CEILING` |
+| 11 | 129 | where is the max session log size? | `SettingsScreen.kt:438` — `MAX_SESSION_MB = 512` |
+| 12 | 129 | what is the agent pace description? | `SettingsScreen.kt:309` quotes the report |
+| 14 | 129 | move add/remove model into the model window; keep only reset in settings | `ModelSection.kt:85` quotes the report |
+| 15 | 129 | move the agent block up under "signed in as"; key first | `SettingsScreen.kt:208,238` — both quote the report |
+| 16 | 129 | merge the account and projects folders so the account shows projects | `Workspace.kt:45` — **one folder per project, at the root** |
+| 18 | 129 | rename `GitHub/` to `<project>_repository` | `ProjectGit.kt:36` — **the level it named is gone** |
+| 19 | 129 | battery/notification descriptions, minimally | `SettingsScreen.kt:302` |
+| 22 | 129 | merge the project and repo folders; add a row button for gitignore | `ProjectGit.kt:36` — the merge happened; the row button is #26 |
+| 27 | 149 | the lock button's change shows only after re-entering the screen | `BrowserScreen.kt:670` — the redraw |
+| 31 | 149 | the agent says grep is called `find` | `2b98531` — one selector, named grep |
+| 32 | 149 | grep passed into edit carries its line numbers | `bf60d60` — `stripNumber` |
+| 33 | 149 | are grep and find separate engines? | `2b98531` — there is one selector |
+| 34 | 149 | why does grep only give lines? why is find crippled? | `bf60d60` — the answer shape follows the pattern |
 
-**Two of these closed themselves.** #17 and #20 were answered by the folder merge *deleting* the
-level they were about. Worth remembering: a report can become moot, and "closed" is not always
-"fixed".
+**Two closed themselves.** #16 and #18 were answered by the folder merge *deleting* the level they
+were about. A report can become moot, and "closed" is not always "fixed".
 
-**#37 was not a defect, and I said it was.** I claimed the prompt lied about timeouts. It does
-not: `Timeouts.kt:112` says a direct call past the limit *is* stopped, which is what the prompt
-says. "showing first n of m" appears nowhere in the current prompt — it was removed. I reverted
-the prompt edit I had written, uncommitted.
+### Open — 16
 
-### Open — 18
-
-| # | Build | Report | State |
-|---|---|---|---|
-| 16 | 129 | hidden files visible, read-only; system lock a distinct non-interactive colour | **next up** (step 3) |
-| 18 | 129 | chat icon inside the project | needs a look at what the row shows |
-| 21 | 149 | gitignore as a per-row button, not a 3-dot item | **next up** (step 4) |
-| 23 | 149 | "see changes" as an enterable list; editor diff mode; view/edit/diff buttons | step 7 |
-| 24 | 149 | remove "n to send"; make it "see n changes" as a button | step 4 |
-| 28 | 149 | is "wait for the model" different from "stop after"? | **a question, not a bug** — needs an answer in the UI |
-| 30, 34 | 149 | where is the system project with global settings; the prompt is outdated | **done** — step 1, `203c605` |
-| 31 | 149 | remove `ask`/`conclude`; the message box ends with a plain message | step 5 |
-| 32 | 149 | chat is many bubbles, not one box | step 6 |
-| 33 | 149 | token column out; footer with time, date, id; time column back in session log | step 6 |
-| 37 | 149 | is "showing first n of m" stale? | **closed** — it is gone, and the prompt is accurate |
-
----
+| # | Report | What it needs |
+|---|---|---|
+| 9 | the openrouter key is not passing through | **verify** — the wiring exists (`AppViewModel.kt:2514`); was this fixed after build 129? |
+| 13 | a result that overruns the timeout blips — instead tell the agent it will arrive on a later turn | **behaviour change** — today it is killed and told "nothing was kept" (`Timeouts.kt:112`) |
+| 17 | where is the chat icon within the project? | look at what a project row shows |
+| 20 | block the agent settings together, rule them off, drop "agent" from every label but the block title | step 7 |
+| 21 | the "signed in as" block still has gaps between rows | step 7 |
+| 23 | how is "wait for the model" different from "stop command after"? | **a question** — needs an answer in the UI |
+| 24 | what does the context "read" button do, and what are the numbers beside it? | **gone** — the button and the numbers no longer exist |
+| 25 | "context 900k of 1000k" — does that mean the context is full? | **gone** with #24 |
+| 26 | gitignore as a per-row button, not a 3-dot item | step 4 |
+| 28 | make hidden files visible but read-only, with a system lock in a distinct colour, non-interactive | step 3 |
+| 29 | "see changes" should be an enterable list; editor needs a diff mode with a two-commit picker; view/edit/diff as separate modes | step 6 |
+| 30 | remove "n to send"; make it "see n changes" as a button | step 4 |
+| 35 | where is the system local project with the global settings? | **done** — step 1 |
+| 36 | chat as many bubbles; remove `ask`/`conclude`; message ends with a plain message; drop the token column; footer with time, date, id; time column back in the session log | step 5 |
+| 37 | the system prompt is outdated; it should be an editable file in the system project | **done** — step 1 |
+| 38 | is "showing first n of m" a stale part of the system prompt? | **gone** — the phrase is not in the prompt, and over-limit results go to a file with the path returned |
 
 ## Part 2 · The decisions, and the reasons
 
