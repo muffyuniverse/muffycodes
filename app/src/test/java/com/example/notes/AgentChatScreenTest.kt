@@ -113,14 +113,17 @@ class AgentChatScreenTest {
 
     @Test
     fun `the record is what the box read, and it holds the app's turn boundaries`() {
+        // **Two calls, because the assertion below is about calls plural.** It asked for two or
+        // more while the script made one, so it could only ever have passed by accident.
         val door = ScriptedDoor(
             Reply("", listOf(call("tree", """{"path":""}"""))),
+            Reply("", listOf(call("tree", """{"path":"."}"""))),
             Reply("There is one file."),
         )
 
         chat(door)
         say("what is in the project")
-        awaitTurns(2)
+        awaitTurns(3)
 
         val log = AgentLog.open(File(scene.viewModel.workspace!!.accountDir, "groceries"))
         val kinds = log.rows().map { it.kind }

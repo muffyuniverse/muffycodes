@@ -2367,6 +2367,17 @@ class AppViewModel @JvmOverloads constructor(
         agentSessions.firstOrNull { it.project == project }
 
     /**
+     * The session as it stands **on disk**, which is not always what the screen has.
+     *
+     * `agentSessions` is a snapshot taken when a tick was *started*, and the poll that tick began
+     * writes its outcome afterwards — from a worker. Anything that needs the result of a poll it
+     * just watched finish has to read the store, or it reads the moment before the answer arrived.
+     * [sessionOf] stays for the screen, which wants exactly the snapshot it drew.
+     */
+    fun readSession(project: String): AgentSession? = workspace
+        ?.let { AgentSessions(it.accountDir).read().firstOrNull { s -> s.project == project } }
+
+    /**
      * Switches the agent on for [project], with nothing said yet.
      *
      * The first ping is one interval away, because there is no conversation to keep warm until the

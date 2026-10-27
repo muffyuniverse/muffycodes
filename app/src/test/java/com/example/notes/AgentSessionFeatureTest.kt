@@ -127,9 +127,14 @@ class AgentSessionFeatureTest : FeatureTest() {
      * seconds a pass, which is the schedule's business and not this test's.
      */
     private fun giveUp(project: String) {
+        // **The failure is written by a worker, so the view model's list is one write behind it.**
+        // `tick` returns when the poll has finished, but the list it refreshed was read before that
+        // poll's failure was saved — so `retryFrom` is still 0 here, and a jump computed from it
+        // would land on the wrong second. Reading the store again is what makes the second tick
+        // measure from when the ladder really began.
         tick(project)
-        val session = scene.viewModel.sessionOf(project) ?: return
-        val past = (if (session.retryFrom > 0) session.retryFrom else session.lastPollAt) +
+        val began = scene.viewModel.readSession(project)?.retryFrom ?: 0
+        val past = (if (began > 0) began else System.currentTimeMillis()) +
             scene.settings.reconnectMs + 1_000
         scene.viewModel.tickAgents(past)
         scene.await("it to give up") {
