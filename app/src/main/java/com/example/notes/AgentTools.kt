@@ -196,7 +196,7 @@ class AgentTools(
                 "`from` and `to` are line numbers, both included; `from` starts at 1 and `to` " +
                 "left out runs to the end. " +
                     "**`grep` is the selector, and its answer follows from the pattern.** A " +
-                    "pattern that matches a **whole line** (`^milk$`, `.*TODO.*`) answers with " +
+                    "pattern that matches a **whole line** (`^milk\$`, `.*TODO.*`) answers with " +
                     "`number: line` — where it is, for a next call that names a place. A pattern " +
                     "that matches **part of a line** (`\\d+`, `TODO`) answers with the text it " +
                     "matched, every match, no number — for a next call that pastes it into " +
