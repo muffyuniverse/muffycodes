@@ -69,7 +69,7 @@ were about. A report can become moot, and "closed" is not always "fixed".
 | 20 | block the agent settings together, rule them off, drop "agent" from every label but the block title | step 7 |
 | 21 | the "signed in as" block still has gaps between rows | step 7 |
 | 29 | "see changes" should be an enterable list; editor needs a diff mode with a two-commit picker; view/edit/diff as separate modes | step 6 |
-| 36 | chat as many bubbles; remove `ask`/`conclude`; message ends with a plain message; drop the token column; footer with time, date, id; time column back in the session log | step 5 |
+| 36 | chat as many bubbles; remove `ask`/`conclude`; message ends with a plain message; drop the token column; footer with time, date, id; time column back in the session log | **specified in `PLAN-chat.md`** — bubbles, per-bubble footer (id · time · thinking · output), line height cap, fullscreen pages |
 
 ## Part 2 · The decisions, and the reasons
 
@@ -185,14 +185,47 @@ one gets re-litigated.
 
 ### Next, in order
 
-1. **The ignore button's two sentences** — short when the path was never pushed, long when it was.
-2. **No hidden files** — `.muffy/` visible and system-locked; `.gitkeep` the exception.
-3. **Per-row lock and syncignore buttons**, both toggles, both with a way back; syncignore's off
-   re-adds the file. This is #21 and #16 together.
-4. **Remove `ask`/`conclude`** and the state, notification and paused indicator with them.
-5. **Chat** — bubbles, footer, token column out, session-log time column in.
-6. **Diff mode** — the picker, `versionsOf`, right unset, Done greyed.
-7. **#18** (the chat icon) and **#28** (the wait/stop question), once looked at.
+The operator's order of 2026-10-27: **the small ones, then the chat rebuild.** Steps 1-3 are done;
+what is left starts at 4.
+
+1. ~~The ignore button's two sentences~~ — done (`494b7f0`).
+2. ~~No hidden files~~ — done (`cd87b3c`).
+3. ~~The two clocks and one unit~~ — done (`96eef42`, `ec918fd`).
+4. **The small three**: **#17** (the chat icon lives in the project row's overflow menu — decide
+   whether that is where it belongs), **#20** (block the agent settings, horizontal rules, "agent"
+   only in the block title), **#21** (halve the gaps in "signed in as").
+5. **The chat rebuild** — `PLAN-chat.md`. Bubbles, footer (id and time; thinking and output when
+   streaming lands), the line cap, the fullscreen pages, `ask`/`conclude` gone, the token column
+   gone, `session.log`'s time column back.
+6. **Streaming** — `PLAN-streaming.md`. This is where the footer's thinking and output numbers come
+   from; it is also the ack/idle split that the timeout question opened.
+7. **Diff mode** — the picker, `versionsOf`, right unset, Done greyed.
+
+**Why streaming is after the chat and not before:** the chat rebuild is not blocked on it. The
+footer ships with id and time, which are recorded facts; thinking and output are not, and inventing
+them would be worse than leaving the space empty until the stream carries them.
+
+### Not a bug report: the chat rebuild
+
+`docs/PLAN-chat.md` is the specification for report 36, after the operator's answers of 2026-10-27.
+The shape it settles: **a vertical list of bubbles**, one per request and what came of it — a tool
+call and its result are one bubble, and the last bubble is the agent's words as markdown.
+
+Four decisions worth naming here, because each could have gone the other way:
+
+- **The clock goes in `session.log`, not `context.log`.** The chat box reads the evidence; the
+  context file is written for the model and never read back. My first instinct was the wrong file,
+  and it would have produced a footer with no time beside a context with a useless column.
+- **The footer is id · time · thinking · output**, time only (not the date — the date is the
+  conversation's, and a column of one repeated date is noise).
+- **thinking/output wait for streaming.** `usage` is never parsed today, so there is no number to
+  show; the footer ships with id and time and gains the rest in `PLAN-streaming.md` step 3.
+- **`ask`/`conclude` go entirely, and their rows are refused.** No migration: there is no previous
+  release to be compatible with.
+
+**Also recorded:** a `GOT` row does not name the call it answers — the pairing is positional, held
+by a deque in two places. A bubble is a call and its result, so that convention now has a visible
+consequence and is written down where it can be checked.
 
 ### Not a bug report: the streaming work
 
