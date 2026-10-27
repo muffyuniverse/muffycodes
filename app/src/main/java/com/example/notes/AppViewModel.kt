@@ -2597,7 +2597,7 @@ class AppViewModel @JvmOverloads constructor(
             // the door is built, so a turn run for the background draws nothing and costs nothing;
             // and it is handed the stream itself rather than a number, so the count it shows is
             // always the one that just arrived.
-            door.listener = { stream -> chatLive = stream.shape() }
+            door.listener = { stream, elapsed -> chatLive = stream.shape(elapsed) }
         }
     })(model)
 

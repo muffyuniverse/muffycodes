@@ -130,6 +130,76 @@ class StreamTest {
         assertEquals("the usable part is kept", "still here", stream.reply().text)
     }
 
+    // ---- the two clocks ------------------------------------------------------
+
+    private fun door(ackSeconds: Int = 90, gapSeconds: Int = 120) = OpenRouterDoor(
+        key = { "sk-or-v1-the-persons-key" },
+        model = "deepseek/deepseek-v4.1-flash-1017",
+        provider = "decart/fp4",
+        effort = "high",
+        ackMs = ackSeconds * 1000,
+        gapMs = gapSeconds * 1000,
+    )
+
+    @Test
+    fun `a stall before the first chunk is the ack clock, and it costs nothing to retry`() {
+        // **The two silences, and why they cannot share a number.** Nothing has arrived, so the
+        // provider never took the request: no tokens were generated and repeating it is free. That
+        // is what lets this clock be generous - it is not paying for anything while it waits.
+        val silent = Streamed()
+        val stall = door(ackSeconds = 90, gapSeconds = 120).stall(silent)
+
+        assertTrue("it is the ack clock that ran out", stall is Unacknowledged)
+        assertEquals("and it says how long it waited", 90_000L, (stall as Unacknowledged).waitedMs)
+        assertEquals("and that nothing had arrived", 0, stall.stream.said.length)
+    }
+
+    @Test
+    fun `a stall after the first chunk is the idle clock, because an answer was being written`() {
+        // The opposite decision, from the same event. An answer had begun, so the work is real and
+        // in progress; the connection died rather than the model thinking. Killing this is right,
+        // and retrying it is not free - which is why the two clocks are two settings.
+        val begun = Streamed()
+        begun.line(""": OPENROUTER PROCESSING""")
+        begun.line("""data: {"choices":[{"index":0,"delta":{"content":"There is "}}]}""")
+
+        val stall = door(ackSeconds = 90, gapSeconds = 120).stall(begun)
+
+        assertTrue("it is the idle clock that ran out", stall is Idle)
+        assertEquals("and it says how long the gap was", 120_000L, (stall as Idle).waitedMs)
+        assertEquals("and what had already arrived", "There is ", stall.stream.said.toString())
+    }
+
+    @Test
+    fun `a comment line counts as the acknowledgement, because it is proof the request arrived`() {
+        // **The case that makes the ack clock usable.** An upstream that is queueing sends a comment
+        // and nothing else, and treating that as silence would kill a request that is working
+        // perfectly - at the busiest moment, when the queue is longest.
+        val queueing = Streamed()
+        queueing.line(": OPENROUTER PROCESSING")
+
+        assertTrue("a comment is an ack, so this is the idle clock", door().stall(queueing) is Idle)
+    }
+
+    @Test
+    fun `the footer says elapsed and produced, and never a fraction`() {
+        val stream = recorded("answer.sse")
+
+        val line = stream.shape(elapsedMs = 4_000)
+
+        assertEquals("the two numbers a person needs: 4s · 18 characters · 14 tokens", "4s · 18 characters · 14 tokens", line)
+        assertFalse("and no percentage, because there is no denominator", line.contains("%"))
+    }
+
+    @Test
+    fun `the footer counts calls, because a call is what it did rather than what it said`() {
+        val line = recorded("tool-call.sse").shape(elapsedMs = 61_000)
+
+        assertTrue("a minute in, with one call made: $line", line.startsWith("61s"))
+        assertTrue("the call is counted: $line", line.contains("1 call"))
+        assertTrue("and the thinking, which is why it is not dead: $line", line.contains("thinking"))
+    }
+
     @Test
     fun `a refusal in the middle of a stream is still a refusal`() {
         val stream = Streamed()

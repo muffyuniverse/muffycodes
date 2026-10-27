@@ -187,12 +187,24 @@ class Streamed {
      */
     fun reply(): Reply = Reply(said.toString(), calls.toList())
 
-    /** Everything a person is told about the exchange, kept for the log and the screen. */
-    fun shape(): String = buildString {
-        append("said=${said.length}c")
-        if (thinking.isNotEmpty()) append(" · thinking=${thinking.length}c")
-        if (calls.isNotEmpty()) append(" · calls=$callCount")
-        if (finish.isNotEmpty()) append(" · $finish")
+    /**
+     * Everything a person is told about the exchange, **in the words the footer shows.**
+     *
+     * Elapsed first, because that is the number that answers "is this working?" when nothing has
+     * arrived yet — and produced second, because that is the number that answers it once something
+     * has. Neither is a fraction: there is no denominator, and saying so is the whole design of this
+     * line.
+     *
+     * **The counts are characters, not tokens**, for the reason [said] gives. When the stream is
+     * over and the provider has said its totals, those are shown instead — at that point they are a
+     * measurement rather than an estimate, which is exactly the distinction the per-chunk version
+     * could not make.
+     */
+    fun shape(elapsedMs: Long): String = buildString {
+        append("${elapsedMs / 1000}s")
+        if (said.isNotEmpty()) append(" · ${said.length} characters")
+        if (thinking.isNotEmpty()) append(" · thinking ${thinking.length}")
+        if (calls.isNotEmpty()) append(" · $callCount ${if (callCount == 1) "call" else "calls"}")
         usage?.let { append(" · ${it.optInt("total_tokens")} tokens") }
     }
 }

@@ -35,6 +35,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
@@ -118,11 +119,22 @@ fun AgentChatScreen(
                 } },
                 actions = {
                     if (viewModel.chatWorking) {
+                        // **Elapsed and produced, and never a percentage.** There is no denominator:
+                        // nobody knows how long an answer will be until it has finished, so a bar
+                        // would imply a proportion the app cannot know. What it can say is how long
+                        // this has been going on and how much has arrived, and both are measured.
+                        //
+                        // **It is a description, not a progress bar**, and it is written in the
+                        // same place the word "working" used to be - one line, in the corner, where
+                        // a person glancing at the phone finds it and a person reading the answer
+                        // is not distracted by it.
                         Text(
-                            "working",
+                            viewModel.chatLive.ifBlank { "working" },
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(end = 8.dp),
+                            modifier = Modifier
+                                .padding(end = 8.dp)
+                                .testTag("chat-live"),
                         )
                     }
                     // **Reset clears the working context and keeps the evidence.** No dialog:

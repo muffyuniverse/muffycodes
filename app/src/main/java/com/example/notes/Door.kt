@@ -189,7 +189,7 @@ class OpenRouterDoor(
      * that wants the running character count reads it rather than being handed a number that would
      * then be a second copy of the same fact.
      */
-    var listener: ((Streamed) -> Unit)? = null
+    var listener: ((Streamed, Long) -> Unit)? = null
 
     /**
      * The turn, **read as it arrives.**
@@ -312,6 +312,7 @@ class OpenRouterDoor(
      */
     private fun streamed(request: Request): Reply {
         val token = token()
+        val began = System.currentTimeMillis()
         val body = body(request, maxTokens = null).put("stream", true)
 
         var connection: HttpURLConnection? = null
@@ -339,19 +340,13 @@ class OpenRouterDoor(
                     val line = try {
                         reader.readLine()
                     } catch (t: java.net.SocketTimeoutException) {
-                        // **A stall has two names and they are not the same problem.** Before the
-                        // first chunk the provider never acknowledged the request, so nothing was
-                        // produced and the whole attempt is cheap to repeat. After it, an answer
-                        // was being written and has stopped — which is a different sentence to a
-                        // person, and a different decision about whether to try again.
-                        throw if (stream.acknowledged) {
-                            Idle(gapMs.toLong(), stream)
-                        } else {
-                            Unacknowledged(ackMs.toLong(), stream)
-                        }
+                        throw stall(stream)
                     } ?: break
                     stream.line(line)
-                    listener?.invoke(stream)
+                    // **Elapsed is measured here, where the clock is**, rather than in the footer:
+                    // a screen that computed it would need its own timer, and two clocks is how the
+                    // number and the thing it describes drift apart.
+                    listener?.invoke(stream, System.currentTimeMillis() - began)
                 }
             }
         } finally {
@@ -359,6 +354,24 @@ class OpenRouterDoor(
         }
         return stream.reply()
     }
+
+    /**
+     * **Which clock ran out**, decided in one place and answerable without a socket.
+     *
+     * A stall has two names and they are not the same problem. Before the first chunk the provider
+     * never acknowledged the request: nothing was produced, so repeating the attempt costs the same
+     * as the first one. After it, an answer was being written and has stopped — a different sentence
+     * for the person, and a different decision about whether to try again.
+     *
+     * This is a function of one boolean because that boolean is the entire distinction. Tested
+     * directly, it cannot drift; tested through a socket, it could only be checked by waiting.
+     */
+    internal fun stall(stream: Streamed): java.io.IOException =
+        if (stream.acknowledged) {
+            Idle(gapMs.toLong(), stream)
+        } else {
+            Unacknowledged(ackMs.toLong(), stream)
+        }
 
     /**
      * The headers a request carries, given its token.
