@@ -102,12 +102,17 @@ class WorkspaceTest {
         File(dir, "visible.txt").writeText("hi")
         File(dir, ".gitignore").writeText("x")
         File(dir, ".muffy").mkdirs()
+        File(dir, ".git").mkdirs()
+        File(dir, Workspace.KEEPER).writeText("")
+        File(dir, "dotfile.txt").writeText("a person's own")
         val names = workspace.list(dir).map { it.name }
-        // **The root is the projects list**, so nothing is there that the app made: a project's
-        // folder is a person's, and `projects/` — the folder this app used to put them in — is
-        // gone. `.gitignore`, `.muffy` and everything else starting with a dot is the app's and
-        // is never listed.
-        assertEquals(listOf("visible.txt"), names)
+        // **The rule is no longer "a dot means hidden".** Report 28 asked for the app's own things to
+        // be visible and read-only instead of invisible, so `.muffy` is listed - and so is a
+        // person's own dot-file, which was never the app's to hide.
+        //
+        // Two names are still not listed, and neither is information: `.git` is git's own store, and
+        // `.gitkeep` exists only so git can record an empty folder.
+        assertEquals(listOf(".muffy", "dotfile.txt", "visible.txt"), names)
     }
 
     @Test

@@ -501,6 +501,12 @@ class AppViewModel @JvmOverloads constructor(
         val ws = workspace ?: return false
         if (!dir.isDirectory) return false
         if (ws.isHidden(dir.name)) return false
+        // **A folder the app keeps is not a place a person's document goes**, even now that it is
+        // visible. Report 28 made `.muffy/` a row so it could be *read*; a move target is a different
+        // question, and answering it with "is it hidden" stopped being right the moment `.muffy`
+        // stopped being hidden. The command refuses it too — `coreProblem` names it — so this is the
+        // picker agreeing with the command rather than being the only guard.
+        if (Workspace.isSystemLocked(dir.name)) return false
         // The record's folder is the one the app owns inside a project; everything else — the
         // repository itself included, now that a project *is* the repository — is the person's.
         return !ws.isStructural(dir)

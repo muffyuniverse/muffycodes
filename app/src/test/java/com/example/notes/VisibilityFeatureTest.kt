@@ -135,13 +135,23 @@ class VisibilityFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `a hidden file cannot be renamed, moved or deleted, even by name`() {
-        val dir = scene.viewModel.currentDir!!
-        val secret = File(dir, ".gitignore").apply { writeText("x") }
+    fun `a file the app keeps cannot be renamed, moved or deleted, even by name`() {
+        // **The refusal moved with the rule.** This used to be about a dot-name, because a dot-name
+        // was the app's. Report 28 made the app's things visible instead of hidden, so the thing
+        // that must be refused is no longer "starts with a dot" but "is one of the app's own files" -
+        // and a person's own `.notes` is theirs to rename now.
+        val ws = scene.workspace!!
+        val state = File(ws.accountDir, Workspace.STATE_DIR).apply { mkdirs() }
+        val flag = File(state, "locked.json").apply { writeText("[]") }
 
-        assertTrue("renaming is refused", scene.viewModel.rename(secret, "shown.txt").not())
-        assertTrue("deleting is refused", scene.viewModel.delete(secret).not())
-        assertTrue("the file is untouched", secret.isFile)
+        assertTrue("renaming is refused", scene.viewModel.rename(flag, "shown.txt").not())
+        assertTrue("deleting is refused", scene.viewModel.delete(flag).not())
+        assertTrue("the file is untouched", flag.isFile)
+
+        // And a person's own dot-file is not the app's: it can be renamed.
+        val dir = scene.viewModel.currentDir!!
+        val theirs = File(dir, ".notes").apply { writeText("mine") }
+        assertTrue("their own dot-file can be renamed", scene.viewModel.rename(theirs, "notes.txt"))
     }
 
     @Test
@@ -252,6 +262,10 @@ class VisibilityFeatureTest : FeatureTest() {
             .filterNot { ws.isHidden(it.name) || ws.isStructural(it) }
             .map { it.name }
 
+        // **Still not a destination, and now for a stated reason.** Report 28 made `.muffy` a row, so
+        // it is visible - but "shown" and "somewhere to put a person's file" are different questions.
+        // The app's own folder is not a place a document goes, which is why the move command refuses
+        // it as well as the picker not offering it.
         assertFalse(".muffy is not a destination", offered.contains(".muffy"))
         assertFalse("nor is the record's folder", offered.contains(AgentLog.DIR))
     }

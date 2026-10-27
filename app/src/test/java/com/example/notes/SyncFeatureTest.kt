@@ -166,7 +166,10 @@ class SyncFeatureTest : FeatureTest() {
     fun `nothing can be synced when nobody is signed in`() {
         val alone = Scenario(scene.app, signIn = false)
 
-        assertEquals("no projects of the person's to sync", listOf("system"), alone.viewModel.projectNames)
+        // **Empty, and the emptiness is the point.** With no account there is no account folder, so
+        // `ensure()` never ran and even the settings project does not exist. The assertion is about
+        // "nobody signed in means nothing to sync", not about what a *signed-in* account holds.
+        assertEquals("nothing at all to sync", emptyList<String>(), alone.viewModel.projectNames)
         alone.viewModel.sync("Shopping")
         assertEquals("nothing happened", null, alone.viewModel.account)
     }
