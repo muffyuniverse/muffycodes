@@ -3,8 +3,6 @@ package com.example.notes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertIsEnabled
-import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -95,18 +93,16 @@ class AgentChatScreenTest {
         say("what is in the project")
         awaitTurns(2)
 
-        // The box opens at the end of the conversation, so the agent's last words are what it shows.
+        // **Everything at once, oldest first.** The box used to draw one turn and make a person
+        // press ‹ to see the call that produced the answer they were reading; a conversation is a
+        // list and a list scrolls.
         compose.onNodeWithText("what is in the project", substring = true).assertExists()
-        compose.onNodeWithText("2 of 2").assertExists()
         // **The caption is `agent`, not `concluded`.** The `CONCLUDE` row is gone; the ending is the
         // model's own note, which is drawn under the same caption as any other thing it said.
         compose.onNodeWithText("agent").assertExists()
         compose.onNodeWithText("There is one file.", substring = true).assertExists()
-
-        // And the turn before it is one press away, with the call and its result on one line.
-        compose.onNodeWithText("‹").performClick()
-        compose.waitForIdle()
-        compose.onNodeWithText("1 of 2").assertExists()
+        // And the call is on the same screen as the answer it produced, with its result on the
+        // same line - which is the thing the navigator was making a person work for.
         compose.onNodeWithText("tree").assertExists()
         compose.onNodeWithText("0 ·", substring = true).assertExists()
     }
@@ -151,7 +147,7 @@ class AgentChatScreenTest {
     }
 
     @Test
-    fun `the newest turn is where the box starts, and one press shows the one before`() {
+    fun `the conversation is bubbles, and every one of them is on the screen`() {
         val door = ScriptedDoor(
             Reply("", listOf(call("tree", """{"path":""}"""))),
             Reply("There is one file."),
@@ -161,22 +157,20 @@ class AgentChatScreenTest {
         say("what is in the project")
         awaitTurns(2)
 
-        // The navigator's ends are the ends: the last turn has nothing after it, so `›` and
-        // `»` are both spent, and the box opened on the newest turn rather than the first.
-        compose.onNodeWithText("2 of 2").assertExists()
-        compose.onNodeWithText("‹").assertIsEnabled()
-        compose.onNodeWithText("›").assertIsNotEnabled()
-        compose.onNodeWithText("»").assertIsNotEnabled()
-        compose.onNodeWithText("agent").assertExists()
-
-        compose.onNodeWithText("‹").performClick()
-        compose.waitForIdle()
-
-        compose.onNodeWithText("1 of 2").assertExists()
-        compose.onNodeWithText("‹").assertIsNotEnabled()
-        compose.onNodeWithText("»").assertIsEnabled()
-        // The first turn is the call; the agent's words belong to the second.
-        compose.onNodeWithText("tree").assertExists()
+        // **Three bubbles, and the count is the point.** The operator's message, the call with its
+        // result, and the agent's words - one per act. The turn boundaries are not bubbles: a
+        // `TURN` row says where a request ended, which is bookkeeping about the record rather than
+        // something that happened in the conversation.
+        assertEquals(
+            "the operator's message, the call, and the answer",
+            listOf("you", "tree", "agent"),
+            scene.viewModel.chatBox?.bubbles?.map { it.caption },
+        )
+        // The call and its result are **one** bubble, not two: they are one act.
+        assertEquals("three bubbles for three acts", 3, scene.viewModel.chatBox?.bubbles?.size)
+        // And the first one is the person's own words, so the list reads as an answer to them.
+        assertEquals("the operator's message comes first", "what is in the project",
+            scene.viewModel.chatBox?.bubbles?.first()?.body)
     }
 
     @Test
@@ -235,6 +229,53 @@ class AgentChatScreenTest {
         compose.onNodeWithText("1 check", substring = true).assertExists()
     }
     @Test
+    fun `every bubble has a footer naming the row it came from`() {
+        // **The id is how a person finds the row in `session.log`**, which is what the box is a
+        // view of. The time comes with it because a transcript without one is a list of things
+        // that might have happened in any order.
+        val door = ScriptedDoor(
+            Reply("", listOf(call("tree", """{"path":""}"""))),
+            Reply("There is one file."),
+        )
+
+        chat(door)
+        say("what is in the project")
+        awaitTurns(2)
+
+        val bubbles = scene.viewModel.chatBox!!.bubbles
+        assertTrue("every bubble has an id: ${bubbles.map { it.id }}", bubbles.all { it.id > 0 })
+        assertTrue("and a time: ${bubbles.map { it.stamp }}", bubbles.all { it.stamp.isNotBlank() })
+        // **The footer is on the screen, not only in the model.** The first bubble's id is drawn.
+        compose.onNodeWithText("#${bubbles.first().id}", substring = true).assertExists()
+        // And it is the id of the row the person can find, not a position in the list.
+        assertEquals("the first bubble is the operator's own row", AgentLog.TOLD, AgentLog.open(
+            File(scene.viewModel.workspace!!.accountDir, "groceries"),
+        ).rows().first { it.id == bubbles.first().id }.kind)
+    }
+
+    @Test
+    fun `a message past the cap says so rather than looking shorter than it is`() {
+        // **A bubble that simply stopped would be indistinguishable from one that had finished.**
+        // The cap hides nothing - it asks for one tap - and the sentence is what makes that true.
+        val door = ScriptedDoor(
+            Reply("", listOf(call("tree", """{"path":""}"""))),
+            Reply((1..30).joinToString("\n") { "line $it" }),
+        )
+        scene.settings.keepBubbleLines(5)
+
+        chat(door)
+        say("what is in the project")
+        awaitTurns(2)
+
+        // The screen says how much of it it is not showing...
+        compose.onNodeWithText("more lines", substring = true).assertExists()
+        // ...and the words are all still there, because the cap is a drawing rule rather than a
+        // truncation: the record holds what the agent said and the page view shows all of it.
+        val agent = scene.viewModel.chatBox!!.bubbles.last()
+        assertTrue("the agent's words are the whole thirty lines", agent.body.lines().size == 30)
+    }
+
+    @Test
     fun `a long conversation leaves the line to speak in on the screen`() {
         // **The box stops at three quarters of the window and scrolls.** The alternative — a
         // conversation that grows the column — pushes the composer off the bottom, and the one control
@@ -248,8 +289,13 @@ class AgentChatScreenTest {
         // One request carries the forty calls, the next is the agent's words: two turns.
         awaitTurns(2)
         compose.onNodeWithText("Send").assertIsDisplayed()
-        // And the navigator still says which turn of the conversation is on the screen.
-        compose.onNodeWithText("2 of 2").assertIsDisplayed()
+        // And every call is drawn, because the list is the conversation rather than one turn of
+        // it - forty calls is forty bubbles, and the answer after them is still reachable.
+        assertEquals(
+            "the operator's message, forty calls, and the answer",
+            42,
+            scene.viewModel.chatBox?.bubbles?.size,
+        )
     }
 
 }

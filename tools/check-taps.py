@@ -71,6 +71,13 @@ VOCABULARY = {
     "replace", "confirm replace",
     # the agent's conversation: one project's, and the turns inside it
     "chat", "close chat", "send", "previous turn", "next turn", "latest turn", "turn",
+    # **A bubble is what the conversation is made of now**, so opening one is its own act - and the
+    # navigator's three names above stay because a tap log is a record of what happened, not of
+    # what the screen offers today.
+    "bubble", "bubble height",
+    # opening one fullscreen and coming back - a page view of the same bubble, so the name says
+    # "page" rather than "bubble" a second time
+    "bubble page", "close page",
     # the agent itself, how often it reminds, and the numbers it runs with
     "start agent", "stop agent", "stop all agents", "reset agent", "remind me",
     "answer timeout", "result length",

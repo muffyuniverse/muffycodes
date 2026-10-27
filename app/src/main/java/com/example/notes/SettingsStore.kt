@@ -459,6 +459,28 @@ class SettingsStore(context: Context, name: String = "settings") {
      * without asking; a person who never set a number had no way to know, so the default is now
      * "keep it".
      */
+    /**
+     * **How tall one bubble may be, in lines.**
+     *
+     * Lines and not a fraction of the screen, because that is the unit a person reads in: "eight
+     * lines" is a statement about the text, and "40% of the window" is a statement about the phone
+     * they happen to be holding. A bubble over the cap is cut at it, and its last line says the
+     * message continues — so the cap hides nothing, it just asks for one tap before showing it.
+     *
+     * Zero means no cap, which is the honest default for a screen that already scrolls.
+     */
+    var bubbleLines: Int by mutableStateOf(prefs.getInt(KEY_BUBBLE_LINES, DEFAULT_BUBBLE_LINES))
+        private set
+
+    /** Sets the bubble height cap, clamped. */
+    fun keepBubbleLines(lines: Int) {
+        val clean = lines.coerceIn(0, MAX_BUBBLE_LINES)
+        Trace.tap("bubble height", if (clean == 0) "no cap" else "$clean lines")
+        bubbleLines = clean
+        prefs.edit().putInt(KEY_BUBBLE_LINES, clean).apply()
+        Trace.said(if (clean == 0) "a message is as tall as it is" else "a message shows $clean lines")
+    }
+
     var sessionMb: Int by mutableStateOf(prefs.getInt(KEY_SESSION_MB, DEFAULT_SESSION_MB))
         private set
 
@@ -523,6 +545,10 @@ class SettingsStore(context: Context, name: String = "settings") {
      * only an older build wrote is a key with no reader — and the defaults below are what a person
      * who has never set either should get.
      */
+    const val KEY_BUBBLE_LINES = "chat_bubble_lines"
+    const val DEFAULT_BUBBLE_LINES = 0
+    const val MAX_BUBBLE_LINES = 200
+
     const val KEY_ACK = "agent_ack_seconds"
     const val KEY_GAP = "agent_gap_seconds"
 

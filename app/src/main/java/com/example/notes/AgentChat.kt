@@ -76,6 +76,54 @@ object AgentChat {
         val turns: List<Turn>,
         /** How the idle polls after them read, or null when the agent is not waiting. */
         val idle: String?,
+        /**
+         * The conversation as **bubbles**: one per act, in the order they happened.
+         *
+         * The unit is a request and what came of it — not a line, and not a tool call. The
+         * operator's message is the first, a call-and-its-result is one in the middle, and the
+         * agent's own words are the last. That is the shape a person reads a conversation in, and
+         * it is why this exists beside [turns]: a turn is how the *record* is divided (one request
+         * to the model), and a bubble is how a *conversation* is divided. They are not the same
+         * division and neither can be derived from the other.
+         */
+        val bubbles: List<Bubble> = emptyList(),
+    )
+
+    /**
+     * One thing that happened, with its own footer.
+     *
+     * **A call and its result are one bubble**, because they are one act: the tool was run and this
+     * is what came back. Two bubbles would make a person read the same event twice, and would put
+     * the result further from the call than the arguments are.
+     */
+    data class Bubble(
+        /** What this bubble is, in one word — `told`, the tool's name, or `agent`. */
+        val caption: String,
+        /** The words, or the one line a result reduces to. */
+        val body: String,
+        /** The whole of it, for the page view: arguments and the full result. */
+        val detail: String = "",
+        /**
+         * **The row's own number**, which is how a person finds it in `session.log`.
+         *
+         * The box is a view of the record, so the handle it shows has to be the record's — not a
+         * position in a list, which moves when anything before it is forgotten.
+         */
+        val id: Int = 0,
+        /**
+         * **The time, and not the date.** The date is the conversation's; a list where every row
+         * repeats the same date is a column of noise. Empty for a row the app has not written yet.
+         */
+        val stamp: String = "",
+        val failed: Boolean = false,
+        /** Out of the context: drawn struck through, so the conversation shows what it forgot. */
+        val forgotten: Boolean = false,
+        /** True for the agent's own words, which are drawn as markdown rather than as a line. */
+        val prose: Boolean = false,
+        /** The tokens the model spent thinking, when the row knows — 0 when it does not. */
+        val thinking: Long = 0,
+        /** The tokens it wrote, when the row knows — 0 when it does not. */
+        val output: Long = 0,
     )
 
     // ---- the conversation ---------------------------------------------------
@@ -127,6 +175,124 @@ object AgentChat {
         return out.filter { it.isNotEmpty() }.map { Turn(it.toList()) }
     }
 
+    /**
+     * The conversation as bubbles, **one per act.**
+     *
+     * The three shapes, and why each is one bubble:
+     *
+     *  - **The operator's message**, first, always. It is what the rest of the list is an answer to.
+     *  - **A call and its result**, joined by `answers` rather than by position — so a reply that
+     *    called two tools is two bubbles and the order the results arrived in does not matter.
+     *  - **The agent's own words**, last, as prose. This is the ending, and there is no `CONCLUDE`
+     *    row any more: the words are the agent's note, which is what the model reads back, so
+     *    saying them twice was the duplication this app avoids everywhere else.
+     *
+     * **A keepalive check is not a bubble.** Forty of them would be forty identical bubbles, and
+     * what a person wants from them is one line saying the agent is still there — which is what
+     * [Box.idle] is.
+     */
+    fun bubbles(conversation: List<AgentLog.Row>): List<Bubble> {
+        val out = mutableListOf<Bubble>()
+        val pending = mutableMapOf<Int, AgentLog.Row>()
+        for (row in conversation) {
+            if (row.broken) {
+                out.add(
+                    Bubble(
+                        caption = "unreadable",
+                        body = oneLine(row.detail, 120),
+                        detail = row.detail,
+                        id = row.id,
+                        stamp = row.stamp,
+                        failed = true,
+                        forgotten = row.ctx == AgentLog.OUT,
+                    ),
+                )
+                continue
+            }
+            val forgot = row.ctx == AgentLog.OUT
+            when (row.kind) {
+                // **The request boundaries are not bubbles.** A `TURN` row marks where one request
+                // to the model ended; it is bookkeeping about the record's shape, not something
+                // that happened in the conversation.
+                AgentLog.TURN -> Unit
+                AgentLog.TOLD -> out.add(
+                    Bubble(
+                        caption = "you",
+                        body = row.body,
+                        detail = row.body,
+                        id = row.id,
+                        stamp = row.stamp,
+                        forgotten = forgot,
+                    ),
+                )
+                AgentLog.CALL -> pending[row.id] = row
+                AgentLog.GOT -> {
+                    val call = pending.remove(row.answers)
+                    if (call == null) {
+                        // A result whose call is not in this conversation: a seal written when the
+                        // app was reopened, answering a call from the conversation before. Drawn
+                        // where it stands, so an interrupted turn is visible rather than silently
+                        // missing its answer.
+                        out.add(
+                            Bubble(
+                                caption = row.name,
+                                body = summary(row.body),
+                                detail = row.body,
+                                id = row.id,
+                                stamp = row.stamp,
+                                failed = failed(row.body),
+                                forgotten = forgot,
+                            ),
+                        )
+                    } else {
+                        // **One bubble, and it carries the call's id** — the call is what the person
+                        // is looking for in the record, and the result is the same act.
+                        out.add(
+                            Bubble(
+                                caption = call.name,
+                                body = summary(row.body),
+                                detail = "asked with ${call.body}\n\nanswered with ${row.body}",
+                                id = call.id,
+                                stamp = call.stamp,
+                                failed = failed(row.body),
+                                forgotten = forgot || call.ctx == AgentLog.OUT,
+                            ),
+                        )
+                    }
+                }
+                AgentLog.NOTE -> when (row.name) {
+                    // The ping's own note belongs to the collapsed idle line, not to a bubble.
+                    PING -> Unit
+                    "agent" -> out.add(
+                        Bubble(
+                            caption = "agent",
+                            body = row.body,
+                            detail = row.body,
+                            id = row.id,
+                            stamp = row.stamp,
+                            forgotten = forgot,
+                            prose = true,
+                        ),
+                    )
+                    // Anything else the app or the agent noted: "stopped" and its reason, most of
+                    // all. It is the only thing a failed turn has to say, so it is drawn.
+                    else -> out.add(
+                        Bubble(
+                            caption = row.name,
+                            body = oneLine(row.body, 200),
+                            detail = row.body,
+                            id = row.id,
+                            stamp = row.stamp,
+                            forgotten = forgot,
+                        ),
+                    )
+                }
+                else -> Unit
+            }
+        }
+        return out
+    }
+
     /** The whole conversation as the box draws it, or null when there is none yet. */
     fun box(rows: List<AgentLog.Row>): Box? {
         val conversation = conversation(rows) ?: return null
@@ -148,6 +314,7 @@ object AgentChat {
                 val checks = if (idle.size == 1) "1 check" else "${idle.size} checks"
                 if (since == null) checks else "idle since #$since · $checks"
             },
+            bubbles = bubbles(conversation),
         )
     }
 

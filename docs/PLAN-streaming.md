@@ -149,21 +149,33 @@ produced**, never a percentage and never an estimate of time remaining.
 
 ---
 
-## Part 5 · Order of work
+## Part 5 · Order of work — **done**
 
-1. **The SSE parser**, pure, with a recorded fixture and the fragmented-tool-call case.
-2. **`exchange` streams**, behind the parser; `parseReply` rebuilt from assembled deltas.
-3. **The listener**, wired to nothing yet; a test asserts counts per chunk.
-4. **The three timeouts** — connect, ack, idle — with the ack/idle distinction tested by a fake
-   stream that stalls at each point.
-5. **The footer**, showing elapsed / thinking / answer / calls live, and the `usage` facts at the end.
-6. **The settings**, replacing one number with two and deleting the stale sentence.
-7. **`exclude: false`**, so reasoning is visible rather than merely counted — decided last, because
-   it changes what the footer can show.
+1. ✅ **The SSE parser**, pure, with a recorded fixture and the fragmented-tool-call case.
+   `Stream.kt` + `StreamTest`, three recordings under `app/src/test/resources/streams/`.
+2. ✅ **`exchange` streams**, behind the parser; `parseReply` rebuilt from assembled deltas.
+   `OpenRouterDoor.streamed()` reads the socket; `Streamed.reply()` assembles the answer.
+3. ✅ **The listener**, `OpenRouterDoor.listener`, fed the stream and the elapsed time per chunk.
+4. ✅ **The three timeouts** — connect, ack, idle. The ack/idle distinction is `stall()`, a function
+   of one boolean, so both branches are tested directly rather than by waiting on a socket.
+5. ✅ **The footer**, `chatLive`: elapsed, characters, thinking, calls, and the `usage` facts at the
+   end. Shown where the word "working" used to be.
+6. ✅ **The settings**, two fields where one was, and the stale sentence deleted. The test that
+   asserted that sentence was *displayed* now asserts it is **gone**.
+7. ✅ **`exclude: false`**, so reasoning is visible rather than merely counted.
 
-**Acceptance:** a request that stalls before its first chunk trips *ack* and retries cheaply; a
-request that streams for 19 minutes without tripping anything succeeds; a stream that dies mid-answer
-trips *idle*; and the footer shows all of it as it happens.
+**Acceptance — how each is met.** A stall before the first chunk trips *ack*: `stall()` on a stream
+with nothing in it returns `Unacknowledged`, and a comment line counts as an ack because an upstream
+that is queueing sends one. A long stream trips nothing: only the *gap* is bounded, so steady output
+never accumulates against a clock. A stall mid-answer trips *idle*: `stall()` on a stream that has
+content returns `Idle` with what had already arrived. The footer shows all of it live, in characters,
+because a per-chunk `usage` block is not guaranteed and a token count there would be an estimate
+dressed as a measurement.
+
+**One thing deliberately not done.** There is no total cap. A turn can now run for as long as the
+model keeps producing, because that is what a diligent model looks like — bounding the total is a
+different setting with a different meaning, and folding it into the idle clock would put the old
+problem back.
 
 ---
 

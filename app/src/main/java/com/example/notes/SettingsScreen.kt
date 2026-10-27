@@ -553,6 +553,15 @@ fun SettingsScreen(
                 placeholder = "everything",
                 onValueChange = { settings.keepSession(it) },
             )
+            // **In lines, because that is what a person reads in.** A cap expressed as a fraction of
+            // the window would be a statement about the phone; a cap in lines is a statement about
+            // the message. Zero means no cap, which is the honest default on a screen that scrolls.
+            LengthField(
+                label = "A message may be this many lines (blank = no limit)",
+                value = settings.bubbleLines,
+                placeholder = "no limit",
+                onValueChange = { settings.keepBubbleLines(it) },
+            )
             // **The block ends here.** Reminders, the trace and the theme are the app's, not the
             // agent's: a reminder fires whether or not a model is configured, and the trace is the
             // app's own record. The heavier rule is the only thing on the screen that says so.

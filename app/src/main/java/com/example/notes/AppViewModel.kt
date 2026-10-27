@@ -2107,10 +2107,6 @@ class AppViewModel @JvmOverloads constructor(
     var chatGeneration: Int by mutableStateOf(0)
         private set
 
-    /** Which turn of the conversation the box is showing, from zero. */
-    var chatTurn: Int by mutableStateOf(0)
-        private set
-
     /** True while a burst is running. */
     var chatWorking: Boolean by mutableStateOf(false)
         private set
@@ -2143,7 +2139,6 @@ class AppViewModel @JvmOverloads constructor(
         Trace.tap("chat", project)
         chatProject = project
         chatBox = null
-        chatTurn = 0
         readChat(follow = true)
     }
 
@@ -2151,7 +2146,6 @@ class AppViewModel @JvmOverloads constructor(
         Trace.tap("close chat", chatProject.orEmpty())
         chatProject = null
         chatBox = null
-        chatTurn = 0
         chatWorking = false
         chatLive = ""
     }
@@ -2175,21 +2169,6 @@ class AppViewModel @JvmOverloads constructor(
             }
             main.post { applyChat(rows, follow) }
         }
-    }
-
-    fun chatTurnBy(delta: Int) {
-        val last = (chatBox?.turns?.lastIndex ?: 0)
-        val next = (chatTurn + delta).coerceIn(0, last)
-        if (next == chatTurn) return
-        Trace.tap(if (delta < 0) "previous turn" else "next turn", "${next + 1} of ${last + 1}")
-        chatTurn = next
-    }
-
-    fun chatLatestTurn() {
-        val last = (chatBox?.turns?.lastIndex ?: 0)
-        if (last == chatTurn) return
-        Trace.tap("latest turn", "${last + 1} of ${last + 1}")
-        chatTurn = last
     }
 
     /**
@@ -2601,12 +2580,16 @@ class AppViewModel @JvmOverloads constructor(
         }
     })(model)
 
-    /** Hands a freshly read conversation to the screen, keeping the turn in range. */
+    /**
+     * Hands a freshly read conversation to the screen.
+     *
+     * **There is no "which turn" any more.** The box drew one turn at a time and kept a position so
+     * a re-read would not pull a person away from the turn they were reading; a list of bubbles
+     * scrolls, so the position is the scroll's, and the screen keeps the one thing that *is* a
+     * position — which bubble is open — keyed by the row's id rather than by a count.
+     */
     private fun applyChat(rows: List<AgentLog.Row>, follow: Boolean) {
-        val box = AgentChat.box(rows)
-        val last = (box?.turns?.lastIndex ?: 0).coerceAtLeast(0)
-        chatBox = box
-        chatTurn = if (follow) last else chatTurn.coerceIn(0, last)
+        chatBox = AgentChat.box(rows)
         chatGeneration++
     }
 

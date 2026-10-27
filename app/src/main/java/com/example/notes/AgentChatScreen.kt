@@ -79,15 +79,28 @@ fun AgentChatScreen(
     // it is also the key that follows a new turn's arrival.
     val generation = viewModel.chatGeneration
     val box = viewModel.chatBox
-    val turns = box?.turns.orEmpty()
-    val index = viewModel.chatTurn.coerceIn(0, (turns.size - 1).coerceAtLeast(0))
-    val turn = turns.getOrNull(index)
     var draft by remember(project) { mutableStateOf("") }
-    var expanded by remember(index, generation) { mutableStateOf(false) }
+    /**
+     * **Which bubble is open, by the row's id** — 0 for none.
+     *
+     * Not a position in the list: a position moves when anything before it is forgotten, and the
+     * whole point of the footer's id is that the record's handle is stable. Keyed to the generation
+     * as well, so a re-read of the record closes whatever was open rather than leaving a bubble
+     * expanded that may no longer be there.
+     */
+    var opened by remember(generation) { mutableStateOf(0) }
+    /**
+     * The bubble being read fullscreen, or null.
+     *
+     * **A page view rather than a bigger bubble.** A long result read in the list is a tall box
+     * inside a taller list, which is two scrolls fighting; fullscreen shows the same text one screen
+     * at a time, so there is one scroll and it is the one a person expects.
+     */
+    var page by remember(generation) { mutableStateOf<AgentChat.Bubble?>(null) }
     val scroll = rememberScrollState()
 
-    // A new turn is the thing being waited for, so the box follows it to the bottom.
-    LaunchedEffect(index, generation) {
+    // A new bubble is the thing being waited for, so the box follows it to the bottom.
+    LaunchedEffect(box?.bubbles?.size, generation) {
         scroll.animateScrollTo(scroll.maxValue)
     }
 
@@ -172,16 +185,11 @@ fun AgentChatScreen(
                 // that must never be behind it.
                 .imePadding(),
         ) {
-            if (turns.isNotEmpty()) {
-                Navigator(
-                    index = index,
-                    last = turns.lastIndex,
-                    onPrevious = { viewModel.chatTurnBy(-1) },
-                    onNext = { viewModel.chatTurnBy(1) },
-                    onLatest = { viewModel.chatLatestTurn() },
-                )
-                HorizontalDivider()
-            }
+            // **No navigator.** It was there because the box drew one turn at a time, and a turn
+            // could be a dozen lines; a conversation is a list of bubbles and a list scrolls. The
+            // navigator was the thing that made a person press ‹ to see the call that produced the
+            // answer they were reading, which is the opposite of what a transcript should ask of
+            // them.
 
             // **At most three quarters of the window, and scrolls beyond that.** The
             // conversation is not the whole screen: the line a person speaks in stays visible
@@ -203,40 +211,31 @@ fun AgentChatScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     } else {
-                        Line("operator", box.told)
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
-                        if (turn != null) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        expanded = !expanded
-                                        Trace.tap(
-                                            "turn",
-                                            if (expanded) "opened ${index + 1}" else "closed ${index + 1}",
-                                        )
-                                    },
-                                verticalArrangement = Arrangement.spacedBy(6.dp),
-                            ) {
-                                for (line in turn.lines) {
-                                    Line(
-                                        caption = line.caption,
-                                        body = line.body,
-                                        failed = line.failed,
-                                        size = line.tokens,
-                                        forgotten = line.forgotten,
-                                    )
-                                    if (expanded && line.detail.isNotBlank()) {
-                                        Text(
-                                            line.detail,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            fontFamily = FontFamily.Monospace,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.padding(start = 88.dp),
-                                        )
-                                    }
-                                }
-                            }
+                        // **Every bubble, oldest first, and the list lasts as long as the
+                        // session.** That is the whole shape: what the person asked, what the agent
+                        // did about it, and what it finally said.
+                        for (bubble in box.bubbles) {
+                            Bubble(
+                                bubble = bubble,
+                                expanded = opened == bubble.id,
+                                cap = viewModel.settings.bubbleLines,
+                                onOpen = {
+                                    // **Fullscreen is a page view, not a bigger bubble.** The same
+                                    // text, one screen at a time, so a long result is read by
+                                    // turning pages rather than by scrolling a tall box inside a
+                                    // taller list.
+                                    page = bubble
+                                    Trace.tap("bubble page", "#${bubble.id}")
+                                },
+                                onTap = {
+                                    // **One open at a time, keyed by the row's id.** A set of open
+                                    // bubbles would let a person expand six and lose the thread; and
+                                    // an id is what the record uses, so the state survives a redraw
+                                    // that reorders nothing but re-reads everything.
+                                    opened = if (opened == bubble.id) 0 else bubble.id
+                                    Trace.tap("bubble", "#${bubble.id}")
+                                },
+                            )
                         }
                         if (box.idle != null) {
                             Text(
@@ -277,86 +276,154 @@ fun AgentChatScreen(
             }
         }
     }
-}
 
-/** `‹ 3 of 6 ›` and `»`: the turns of this conversation, and nothing older. */
-@Composable
-private fun Navigator(
-    index: Int,
-    last: Int,
-    onPrevious: () -> Unit,
-    onNext: () -> Unit,
-    onLatest: () -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        TextButton(onClick = onPrevious, enabled = index > 0) { Text("‹") }
-        Text(
-            "${index + 1} of ${last + 1}",
-            style = MaterialTheme.typography.labelLarge,
-        )
-        TextButton(onClick = onNext, enabled = index < last) { Text("›") }
-        Spacer(Modifier.weight(1f))
-        // At the last turn it is disabled, like the other two at their ends: `»` means "the
-        // newest turn of this conversation" and there is nowhere further to go — an earlier
-        // conversation is read in the record, not walked to here.
-        TextButton(onClick = onLatest, enabled = index < last) { Text("»") }
+    // **The page view, over everything.** Not a new screen: the same bubble, one screen at a time,
+    // with a way back. It is drawn last so it covers the list and the composer both - a person
+    // reading a long result is not about to type.
+    page?.let { open ->
+        Surface(modifier = Modifier.fillMaxSize()) {
+            Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        open.caption,
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = {
+                        page = null
+                        Trace.tap("close page", "#${open.id}")
+                    }) { Text("Close") }
+                }
+                Text(
+                    footer(open),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    if (open.prose) {
+                        MarkdownBody(text = open.detail)
+                    } else {
+                        Text(
+                            open.detail.ifBlank { open.body },
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
 /**
- * One line: the caption and the row's size in a narrow column, the body beside it.
+ * One bubble: what happened, and **a footer saying which row it was and when.**
  *
- * **The size is in tokens, and it is there for the clear-up.** A person looking at a context that
- * is over its limit needs to know which rows are the expensive ones, and a number beside each
- * caption answers that without opening anything. Tokens rather than bytes because the limit beside
- * it is in tokens, and it is the record's own stored number rather than a second measurement — so
- * the caption and the agent's clear-up line cannot disagree.
+ * **The token column is gone.** It was there for the clear-up, and the clear-up is a sentence in the
+ * context rather than a number beside every line — so the space it took now carries the two facts a
+ * person actually needs to find the row in `session.log`: its id, and the time.
+ *
+ * The footer is **id · time · thinking · output**, in that order: the handle first because that is
+ * what a person copies, then when, then what the model spent. Thinking and output are shown only
+ * when the row knows them, which it does for a streamed turn and does not for anything older — a
+ * zero there would be a claim, and the absence of a number is the honest answer.
+ *
+ * **The time is a time, not a date.** The date belongs to the conversation; a list where every
+ * bubble repeats it is a column of noise.
  */
 @Composable
-private fun Line(
-    caption: String,
-    body: String,
-    failed: Boolean = false,
-    size: Long = 0,
-    forgotten: Boolean = false,
+private fun Bubble(
+    bubble: AgentChat.Bubble,
+    expanded: Boolean,
+    cap: Int,
+    onOpen: () -> Unit,
+    onTap: () -> Unit,
 ) {
-    Row(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.width(80.dp)) {
+    // **Cut at the cap and say so.** The last line is the app telling the truth about the message
+    // rather than the message looking shorter than it is - a bubble that simply stopped would be
+    // indistinguishable from one that had finished.
+    val lines = bubble.body.lines()
+    val cut = cap > 0 && !expanded && lines.size > cap
+    val shown = if (cut) lines.take(cap).joinToString("\n") else bubble.body
+    val continuing = if (cut) "\n… ${lines.size - cap} more lines — tap to read" else ""
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onTap)
+            .padding(vertical = 2.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Row(modifier = Modifier.fillMaxWidth()) {
             Text(
-                caption,
+                bubble.caption,
                 style = MaterialTheme.typography.labelMedium,
-                color = if (failed) {
+                color = if (bubble.failed) {
                     MaterialTheme.colorScheme.error
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },
+                modifier = Modifier.width(80.dp),
             )
-            if (size > 0) {
+            // **The agent's own words are markdown; everything else is a line.** A result is one
+            // sentence about what a tool did, and rendering it as prose would invite a person to
+            // read structure into it that is not there.
+            if (bubble.prose) {
+                MarkdownBody(
+                    text = shown + continuing,
+                    modifier = Modifier.weight(1f),
+                )
+            } else {
                 Text(
-                    // **Tokens, the one unit the limits are in.** A byte count beside a token limit
-                    // is a number a person has to convert before it means anything, and the row it
-                    // sits under is the app's statement of what the row costs its context.
-                    "${ContextBudget.short(size)} tok",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    shown + continuing,
+                    style = MaterialTheme.typography.bodyMedium,
+                    // **Struck through, not hidden.** A row the agent forgot is still read here:
+                    // that is what makes the forgetting auditable rather than something the app
+                    // asks you to trust.
+                    textDecoration = if (bubble.forgotten) TextDecoration.LineThrough else null,
+                    color = when {
+                        bubble.failed -> MaterialTheme.colorScheme.error
+                        bubble.forgotten -> MaterialTheme.colorScheme.onSurfaceVariant
+                        else -> MaterialTheme.colorScheme.onSurface
+                    },
+                    modifier = Modifier.weight(1f),
                 )
             }
         }
         Text(
-            body,
-            style = MaterialTheme.typography.bodyMedium,
-            // **Struck through, not hidden.** A row the agent forgot is still read here: that is
-            // what makes the forgetting auditable rather than something the app asks you to trust.
-            textDecoration = if (forgotten) TextDecoration.LineThrough else null,
-            color = when {
-                failed -> MaterialTheme.colorScheme.error
-                forgotten -> MaterialTheme.colorScheme.onSurfaceVariant
-                else -> MaterialTheme.colorScheme.onSurface
-            },
-            modifier = Modifier.weight(1f),
+            footer(bubble),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.outline,
+            modifier = Modifier.padding(start = 80.dp),
         )
+        if (expanded && bubble.detail.isNotBlank()) {
+            Text(
+                bubble.detail,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 80.dp),
+            )
+        }
     }
+}
+
+/**
+ * What a bubble's footer says: **id · time · thinking · output.**
+ *
+ * A part that is not known is left out rather than filled with a zero — a zero is a measurement and
+ * "not recorded" is not the same fact. The id is always known (it is the row's own number) and the
+ * time is known for every row that was written, so in practice the absent parts are the two token
+ * counts, which only a streamed turn can report.
+ */
+private fun footer(bubble: AgentChat.Bubble): String {
+    val parts = mutableListOf<String>()
+    if (bubble.id > 0) parts.add("#${bubble.id}")
+    if (bubble.stamp.isNotBlank()) parts.add(bubble.stamp)
+    if (bubble.thinking > 0) parts.add("thinking ${ContextBudget.short(bubble.thinking)}")
+    if (bubble.output > 0) parts.add("output ${ContextBudget.short(bubble.output)}")
+    return parts.joinToString(" · ")
 }
