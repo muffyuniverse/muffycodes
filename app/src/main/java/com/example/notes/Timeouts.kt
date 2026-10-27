@@ -18,15 +18,26 @@ import java.util.concurrent.atomic.AtomicBoolean
  * have either finished or not started when the time passes, so "nothing was kept" is true for them
  * without their asking anything.
  */
-class Deadline(private val ms: Long) {
+class Deadline(
+    private val ms: Long,
+    /**
+     * The clock, so a test can say when "now" is.
+     *
+     * **Not a sleep.** A test that proves expiry by waiting is a test whose result depends on how
+     * busy the machine is — and the wait it adds is real time in a suite that has a budget. With the
+     * clock injected, "the deadline has passed" is a statement about the code instead of about the
+     * runner, and the two tests that used to sleep now do not.
+     */
+    private val now: () -> Long = { System.currentTimeMillis() },
+) {
 
-    private val started = System.currentTimeMillis()
+    private val started = now()
 
     /** True when [ms] has passed. A deadline of zero or less means "no deadline", never "expired". */
-    val expired: Boolean get() = ms > 0L && System.currentTimeMillis() - started >= ms
+    val expired: Boolean get() = ms > 0L && now() - started >= ms
 
     /** How long it has been, for a sentence about it. */
-    val elapsedMs: Long get() = System.currentTimeMillis() - started
+    val elapsedMs: Long get() = now() - started
 
     /**
      * Throws [StoppedException] when the time is up. **The one place a command asks.**

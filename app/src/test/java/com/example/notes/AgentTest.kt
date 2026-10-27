@@ -47,6 +47,7 @@ class AgentTest {
         // no test acquires a deadline it did not ask for.
         foregroundMs: Long = 0L,
         bg: Background = Background.none(),
+        clock: () -> Long = { System.currentTimeMillis() },
     ) = Agent(
         accountDir = account,
         project = "shopping",
@@ -60,6 +61,7 @@ class AgentTest {
         limits = limits ?: ContextBudget.Limits.of(0, 0, ContextBudget.UNKNOWN_CEILING),
         foregroundMs = foregroundMs,
         bg = bg,
+        clock = clock,
     )
 
     private fun call(name: String, args: String, id: String = "c1") = Call(id, name, args)
@@ -538,24 +540,26 @@ class AgentTest {
         // will be returned on one of the next turns with other call results".
         //
         // What the app used to say was "stopped after 60 s; nothing was kept" - the app treating a
-        // limit on how long it *waits* as a limit on the work. The deadline here is zero seconds,
-        // so the very first check expires and the handover is what the turn is told about.
+        // limit on how long it *waits* as a limit on the work. Here the limit has already run out
+        // when the command starts, so the first check inside the walk expires and the handover is
+        // what the turn is told about.
         val bg = Background.inline()
         val door = ScriptedDoor(
             Reply("", listOf(Call("c1", "tree", """{"path":""}"""))),
             Reply("", listOf(Call("c2", "conclude", """{"text":"done"}"""))),
         )
-        // **A folder with enough in it that the walk cannot finish inside the deadline.** One
-        // millisecond is a real deadline, but a walk of one file can beat it on a fast machine, and
-        // a test that passes because the machine was slow is not a test of the handover.
-        repeat(400) { File(ws.projectDir("shopping"), "bulk/file-$it.txt").apply { parentFile?.mkdirs() }.writeText("x") }
-        val slow = agent(door, foregroundMs = 1L, bg = bg)
+        // **The clock is the test's, so the wait is over before the command starts.** The deadline
+        // is one second; the clock is wound forward by two before `burst` is called, so the very
+        // first `check` inside the walk expires - on any machine, at any speed, with no sleep.
+        var clock = 1_000_000L
+        val slow = agent(door, foregroundMs = 1_000L, bg = bg, clock = { clock })
+        clock += 2_000
 
         slow.burst("go")
 
         val got = gotRows().first { it.name == "tree" }.body
         assertTrue("it says the command is still running: $got", "still running" in got)
-        assertTrue("and how long was allowed: $got", "1 s" in got)
+        assertTrue("and names the limit it passed: $got", "after 1 s" in got)
         assertTrue("and where the result will be: $got", "background_results/tree-c1.txt" in got)
         assertTrue(
             "and that it arrives with other results, not alone: $got",
@@ -576,8 +580,12 @@ class AgentTest {
             Reply("", listOf(Call("c1", "delete", """{"path":"Shopping"}"""))),
             Reply("", listOf(Call("c2", "conclude", """{"text":"done"}"""))),
         )
-        repeat(400) { File(ws.projectDir("shopping"), "Shopping/inner-$it.txt").apply { parentFile?.mkdirs() }.writeText("x") }
-        val slow = agent(door, foregroundMs = 1L)
+        File(ws.projectDir("shopping"), "Shopping/inner.txt").apply { parentFile?.mkdirs() }.writeText("x")
+        // The same wound-forward clock: the walk asks the deadline between entries, so it stops
+        // before the first one - and this is the act that must NOT be handed over.
+        var clock = 1_000_000L
+        val slow = agent(door, foregroundMs = 1_000L, clock = { clock })
+        clock += 2_000
 
         slow.burst("go")
 

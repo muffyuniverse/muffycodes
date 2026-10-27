@@ -26,9 +26,12 @@ class TimeoutsTest {
 
     @Test
     fun `a deadline that has passed says so`() {
-        val past = Deadline(20L)
-        Thread.sleep(40)
-        assertTrue("20 ms plus a 40 ms wait is past it", past.expired)
+        // **The clock is the test's, so there is no wait.** A sleep here would make the result depend
+        // on how busy the machine is, and it would add real time to a suite with a budget.
+        var clock = 1_000L
+        val past = Deadline(20L) { clock }
+        clock += 40
+        assertTrue("20 ms plus 40 ms is past it", past.expired)
     }
 
     @Test

@@ -79,6 +79,14 @@ class Agent(
      */
     private val bg: Background = Background.none(),
     private val foregroundMs: Long = 0L,
+    /**
+     * The clock a foreground deadline is measured against.
+     *
+     * **Injected so a test can say the wait is over** without sleeping for it. The deadline itself
+     * asks a clock for the time; this is which clock, and the only place the foreground's deadline
+     * is made.
+     */
+    private val clock: () -> Long = { System.currentTimeMillis() },
     /** The operator's limit for a `background` command; zero is "no limit". */
     private val backgroundMs: () -> Long = { 0L },
     /**
@@ -650,7 +658,7 @@ class Agent(
         val body = if (foregroundMs <= 0L) {
             runTool(call)
         } else {
-            tools.run(call, Deadline(foregroundMs), canHandOver = true)
+            tools.run(call, Deadline(foregroundMs, clock), canHandOver = true)
         }
         // **The one place the result limit applies**, because this is the one place a result enters
         // the conversation. A backgrounded command's body goes straight to its file, and so does the
