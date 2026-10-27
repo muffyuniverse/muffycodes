@@ -300,7 +300,7 @@ class AgentRunnerTest {
         // **The registry's clock is the test's**, so a completion's time and a tick's are the same
         // axis: the watermark is a comparison of two numbers that have to mean the same thing.
         val bg = Background(launch = { it() }, now = { 1_001 })
-        val door = ScriptedDoor(Reply("", listOf(Call("c1", "conclude", """{"text":"three files"}"""))))
+        val door = ScriptedDoor(Reply("three files"))
         val runner = AgentRunner(
             ws = ws,
             git = git,
@@ -342,8 +342,8 @@ class AgentRunnerTest {
         var at = 5_000L
         val bg = Background(launch = { it() }, now = { at })
         val door = ScriptedDoor(
-            Reply("", listOf(Call("c1", "conclude", """{"text":"one"}"""))),
-            Reply("", listOf(Call("c2", "conclude", """{"text":"two"}"""))),
+            Reply("one"),
+            Reply("two"),
         )
         val runner = AgentRunner(
             ws = ws, git = git, settings = settings,
@@ -381,7 +381,7 @@ class AgentRunnerTest {
             // **The wake's own reply.** The session is put into `asked` by the test, because that is
             // the state being tested; the wake then answers for itself, which is what a real turn
             // does when the result it was waiting for arrives.
-            Reply("", listOf(Call("c1", "conclude", """{"text":"that was the branch I meant"}"""))),
+            Reply("that was the branch I meant"),
         )
         val runner = AgentRunner(
             ws = ws, git = git, settings = settings,
@@ -419,7 +419,7 @@ class AgentRunnerTest {
         on("shopping", now = 1_000)
         var at = 5_000L
         val bg = Background(launch = { it() }, now = { at })
-        val door = ScriptedDoor(Reply("", listOf(Call("c1", "conclude", """{"text":"read it"}"""))))
+        val door = ScriptedDoor(Reply("read it"))
         val runner = AgentRunner(
             ws = ws, git = git, settings = settings,
             model = { ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high") },
@@ -453,7 +453,7 @@ class AgentRunnerTest {
         // again afterwards because the watermark is the tick's time, past both completions.
         on("shopping", now = 1_000)
         val bg = Background(launch = { it() }, now = { 5_000 })
-        val door = ScriptedDoor(Reply("", listOf(Call("c1", "conclude", """{"text":"both read"}"""))))
+        val door = ScriptedDoor(Reply("both read"))
         val runner = AgentRunner(
             ws = ws, git = git, settings = settings,
             model = { ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high") },
@@ -483,7 +483,7 @@ class AgentRunnerTest {
         // two sets of results, and the last one to land wins. The completion is not lost: it waits.
         on("shopping", now = 1_000)
         val bg = Background(launch = { it() }, now = { 5_000 })
-        val door = ScriptedDoor(Reply("", listOf(Call("c1", "conclude", """{"text":"now I can"}"""))))
+        val door = ScriptedDoor(Reply("now I can"))
         val runner = AgentRunner(
             ws = ws, git = git, settings = settings,
             model = { ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high") },
@@ -508,7 +508,7 @@ class AgentRunnerTest {
         // there, and its waiting result has nowhere to be read from.
         on("shopping", now = 1_000)
         val bg = Background(launch = { it() }, now = { 5_000 })
-        val door = ScriptedDoor(Reply("", listOf(Call("c1", "conclude", """{"text":"no"}"""))))
+        val door = ScriptedDoor(Reply("no"))
         val runner = AgentRunner(
             ws = ws, git = git, settings = settings,
             model = { ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high") },
@@ -530,7 +530,7 @@ class AgentRunnerTest {
         // one worth paying for. Afterwards the clock has moved, so the ping is not fired on its heels.
         on("shopping", now = 1_000)
         val bg = Background(launch = { it() }, now = { 1_000 + 2 * AgentSession.POLL_MS })
-        val door = ScriptedDoor(Reply("", listOf(Call("c1", "conclude", """{"text":"done"}"""))))
+        val door = ScriptedDoor(Reply("done"))
         val runner = AgentRunner(
             ws = ws, git = git, settings = settings,
             model = { ActiveModel("deepseek/deepseek-v4.1-flash-1017", "deepseek", "high") },

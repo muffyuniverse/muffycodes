@@ -50,7 +50,8 @@ class AgentChatTest {
      */
     private fun got(tool: String, body: String, answers: Int = lastCall) =
         row(AgentLog.GOT, tool, body, answers = answers)
-    private fun ask(question: String) = row(AgentLog.ASK, "question", question)
+    /** The agent's own words — the ending, now that `ask`/`conclude` are gone. */
+    private fun said(text: String) = row(AgentLog.NOTE, "agent", text)
 
     // ---- what a conversation is ---------------------------------------------
 
@@ -62,12 +63,12 @@ class AgentChatTest {
                 turn(),
                 call("tree"),
                 got("tree", "0\nmilk.txt"),
-                row(AgentLog.CONCLUDE, "conclusion", "done"),
+                said("done"),
                 told("second"),
                 turn(),
                 call("tree"),
                 got("tree", "0\ndairy.txt"),
-                row(AgentLog.CONCLUDE, "conclusion", "done again"),
+                said("done again"),
             )
         )
 
@@ -93,7 +94,7 @@ class AgentChatTest {
                 got("tree", "0\n"),
                 call("read"),
                 got("read", "0\nhello"),
-                row(AgentLog.CONCLUDE, "conclusion", "one file"),
+                said("one file"),
             )
         )
 
@@ -114,7 +115,7 @@ class AgentChatTest {
                 told("look"),
                 call("tree"),
                 got("tree", "0\n"),
-                row(AgentLog.CONCLUDE, "conclusion", "one file"),
+                said("one file"),
             )
         )
 
@@ -167,15 +168,13 @@ class AgentChatTest {
 
     @Test
     fun `the ending is the agent's words, never a call`() {
-        val lines = AgentChat.lines(
-            listOf(
-                call("ask", """{"question":"Fix the README too?"}"""),
-                ask("Fix the README too?"),
-            )
-        )
+        // **The ending is a note, because there is no ending tool any more.** It used to be an
+        // `ASK`/`CONCLUDE` row written beside the agent's own note — the same paragraph twice. The
+        // note is the one that survives: it is what the model reads back and what the box draws.
+        val lines = AgentChat.lines(listOf(said("Fix the README too?")))
 
         assertEquals("one line", 1, lines.size)
-        assertEquals("drawn as the question", "asked", lines[0].caption)
+        assertEquals("drawn as the agent", "agent", lines[0].caption)
         assertEquals("with its words", "Fix the README too?", lines[0].body)
     }
 
@@ -228,7 +227,7 @@ class AgentChatTest {
             turn(),
             call("tree"),
             got("tree", "0\n"),
-            row(AgentLog.CONCLUDE, "conclusion", "Nothing to change."),
+            said("Nothing to change."),
         ) + poll + poll
 
         val box = AgentChat.box(rows)
@@ -242,16 +241,18 @@ class AgentChatTest {
     }
 
     @Test
-    fun `a new question ends the tail, and its checks are its own`() {
-        // The other half of the rule: a burst that holds an ending is a new answer to the person, not
-        // a check on the old one.
+    fun `a new operator message is the one on screen, and the old checks belong to the old one`() {
+        // **The boundary is the person speaking**, which is now the only boundary there is: a turn
+        // ends with the agent's words and no row marks it, so a burst runs from one operator message
+        // to the next. The old conversation's checks are the old conversation's — the new one has no
+        // idle line until the agent finishes and the keepalive starts on it.
         val rows = listOf(
             told("look"),
-            row(AgentLog.CONCLUDE, "conclusion", "Nothing to change."),
+            said("Nothing to change."),
         ) + ping() + listOf(
             told("what about now"),
             turn(),
-            ask("Shall I?"),
+            said("Shall I?"),
         )
 
         val box = AgentChat.box(rows)

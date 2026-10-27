@@ -135,28 +135,7 @@ class AgentLog private constructor(
 
         const val CALL = "CALL"
         const val GOT = "GOT"
-        const val ASK = "ASK"
-        const val CONCLUDE = "CONCLUDE"
         const val NOTE = "NOTE"
-
-        /**
-         * The tools that end a turn.
-         *
-         * Named here rather than imported from [AgentTools], because the record has to be
-         * readable — and sealable — without a workspace, a repository or a model behind it.
-         */
-        val TERMINATING = setOf("ask", "conclude")
-
-        /**
-         * The terminating tools that never get a result, because their words are their own row.
-         *
-         * `ask` and `conclude` end the turn and are never run, so nothing answers them — and a
-         * conversation carrying a tool call with no tool message is one every endpoint refuses.
-         * Their text is written as `ASK`/`CONCLUDE`, and that is what the model reads back.
-         * `wait` is not among them: its call is answered once, so the idle agent's context stays
-         * a legal conversation.
-         */
-        val SPEAKING = setOf("ask", "conclude")
 
         /** A result's first line: the call worked. */
         const val SUCCESS = "0"
@@ -350,16 +329,20 @@ class AgentLog private constructor(
         /**
          * Splits rows into bursts, oldest first.
          *
-         * A burst is one conversation: an operator's message starts it, and a terminating row
-         * ends it. Trimming happens between bursts and never inside one — half a conversation is
+         * A burst is one conversation: **an operator's message starts it, and the next one starts
+         * the next.** Trimming happens between bursts and never inside one — half a conversation is
          * a log that reads like a bug.
+         *
+         * It used to end at a terminating row (`ask`/`conclude`), which had a consequence worth
+         * naming: the keepalive's rows that followed a conclusion started a burst with no operator
+         * message in it, and `AgentChat.conversation` needed a loop to re-attach them. That loop is
+         * gone, because there is no such row any more.
          */
         fun bursts(rows: List<Row>): List<List<Row>> {
             val out = mutableListOf<MutableList<Row>>()
             for (row in rows) {
                 if (row.startsBurst || out.isEmpty()) out.add(mutableListOf())
                 out.last().add(row)
-                if (row.endsBurst) out.add(mutableListOf())
             }
             return out.filter { it.isNotEmpty() }.map { it.toList() }
         }
@@ -438,7 +421,12 @@ class AgentLog private constructor(
     ) {
         /** An operator's message begins a conversation, and a terminating tool ends it. */
         val startsBurst: Boolean get() = kind == TOLD
-        val endsBurst: Boolean get() = kind == ASK || kind == CONCLUDE
+        // **`endsBurst` used to live here, and it is gone rather than returning false.** It was true
+        // for an `ASK`/`CONCLUDE` row, and those are gone: a turn now ends with the agent's own words
+        // and no call, which is a note — and a note cannot end a burst without every other note
+        // ending one too. A burst therefore ends where the next operator message begins, which is
+        // the boundary a person actually sees. A property that always answers "no" is not a rule; it
+        // is a place for a future reader to assume one.
 
         /**
          * The row as it stands in the file — **verbatim**.
@@ -594,8 +582,6 @@ class AgentLog private constructor(
         record(GOT, tool, body, answers = answers)
 
     /** The terminating question, and the terminating statement. */
-    fun ask(question: String): Int = record(ASK, "question", question)
-    fun conclude(text: String): Int = record(CONCLUDE, "conclusion", text)
 
     /** A row the agent or the app wants on the record without it being a tool. */
     fun note(name: String, detail: String): Int = record(NOTE, name, detail)
@@ -861,7 +847,7 @@ class AgentLog private constructor(
         // would have reported one of them as answered and the other as dangling. The result says
         // which call it answers, so the question is a set difference.
         val answered = rows.filter { it.kind == GOT }.map { it.answers }.toSet()
-        return rows.filter { it.kind == CALL && it.name !in TERMINATING && it.id !in answered }
+        return rows.filter { it.kind == CALL && it.id !in answered }
     }
 
 

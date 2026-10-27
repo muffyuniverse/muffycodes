@@ -83,25 +83,25 @@ object AgentChat {
     /**
      * The newest conversation in [rows], or null when nobody has said anything yet.
      *
-     * "Newest" is the last burst the record holds, and a burst is the app's own split: an
-     * operator's message opens one and a terminating turn closes it. That split is also what the
-     * trim works on, so a conversation the box can show is never half a conversation.
+     * "Newest" is the last burst the record holds, and a burst is the app's own split: **an
+     * operator's message opens one, and the next operator's message opens the next.** That split is
+     * also what the trim works on, so a conversation the box can show is never half a conversation.
+     *
+     * **The tail loop is gone with `ask`/`conclude`.** A burst used to end at a terminating row, so
+     * the keepalive's rows that followed started a burst of their own with no operator message in
+     * it — and reading only the last burst *with* a TOLD would have dropped them, which is why the
+     * loop below existed. With no terminating row, a burst runs from one operator message to the
+     * next, and the checks after the agent finished are part of the same conversation by
+     * construction.
      */
     fun conversation(rows: List<AgentLog.Row>): List<AgentLog.Row>? {
         val bursts = AgentLog.bursts(rows)
         val start = bursts.indexOfLast { burst -> burst.any { it.kind == AgentLog.TOLD } }
         if (start < 0) return null
-        // **The checks after the ending are still its conversation.** `ask` and `conclude` end a
-        // burst — that is what makes them an ending — so the keepalive's rows that follow start a
-        // new burst with no operator message in it. Reading only the last burst *with* a TOLD would
-        // drop them, and the idle line the person watches would disappear the moment the agent
-        // finished. The tail is taken only while it holds no new ending of its own.
-        val out = bursts[start].toMutableList()
-        for (next in bursts.drop(start + 1)) {
-            if (next.any { it.kind == AgentLog.TOLD || it.endsBurst }) break
-            out += next
-        }
-        return out
+        // Everything from that operator message to the end of the record: the conversation, the
+        // checks that followed it, and the checks still to come. A later operator message starts a
+        // burst of its own and is simply not included.
+        return bursts.drop(start).flatten()
     }
 
     /**
@@ -209,14 +209,6 @@ object AgentChat {
                     }
                 }
 
-                AgentLog.ASK -> out.add(
-                    Line("asked", row.body, tokens = size, detail = row.body, forgotten = forgot),
-                )
-                AgentLog.CONCLUDE -> out.add(
-                    Line(
-                        "concluded", row.body, tokens = size, detail = row.body, forgotten = forgot,
-                    ),
-                )
                 AgentLog.NOTE -> when (row.name) {
                     // The ping's own note belongs to the collapsed idle line, not to a turn.
                     PING -> Unit
@@ -259,7 +251,6 @@ object AgentChat {
         for (call in pending.values.sortedBy { it.id }) {
             // A terminating call is drawn from its own ASK/CONCLUDE row, and `wait` from the
             // idle line, so a call still waiting here is one the turn never got to answer.
-            if (call.name in AgentLog.TERMINATING) continue
             out.add(
                 Line(
                     call.name,

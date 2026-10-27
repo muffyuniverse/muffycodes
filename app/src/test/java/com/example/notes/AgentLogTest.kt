@@ -333,18 +333,22 @@ class AgentLogTest {
     }
 
     @Test
-    fun `a conversation is a burst, from the operator to the terminating row`() {
+    fun `a conversation is a burst, from one operator message to the next`() {
+        // **The boundary is the operator's message, and it is the only one.** A burst used to end
+        // at a terminating row (`ask`/`conclude`); those tools are gone, so the ending is the
+        // agent's own words and there is no row to end a burst on. What is left is the boundary a
+        // person actually sees: they spoke, and then they spoke again.
         log.told("first task")
         (log.call("tree", "{}")).also { lastCall = it }
         log.got("tree", "0\nnothing", answers = lastCall)
-        log.ask("shall I?")
+        log.note("agent", "there is nothing to do")
         log.told("second task")
-        log.conclude("done")
+        log.note("agent", "done")
 
         val bursts = AgentLog.bursts(log.rows())
 
         assertEquals("two conversations", 2, bursts.size)
-        assertEquals("the first ends with the question", 4, bursts[0].size)
+        assertEquals("the first runs to the second message", 4, bursts[0].size)
         assertEquals("the second is the answer", 2, bursts[1].size)
     }
 
@@ -356,7 +360,7 @@ class AgentLogTest {
             log.told("task $n")
             (log.call("tree", "{}")).also { lastCall = it }
             log.got("tree", "0\nnothing", answers = lastCall)
-            log.conclude("finished $n")
+            log.note("agent", "finished $n")
         }
         val before = log.rows().size
 
@@ -367,12 +371,14 @@ class AgentLogTest {
         // **The marker is the newest row, so it is the last of the oldest-first list.** Everything
         // the file's own order says has to agree with everything `rows()` hands out.
         assertTrue("and it says what: ${rows.last().detail}", rows.last().detail.contains("rows"))
-        assertEquals("the newest conversation is whole", 4, rows.count { it.kind != AgentLog.NOTE })
         assertTrue("less than before", rows.size < before)
-        // Every row kept is a whole burst: a TOLD followed by three, three times.
+        // Every row kept is a whole burst: a TOLD, a call, a result, and the agent's words.
         val kept = rows.filterNot { it.name == "trimmed" }
         assertTrue("it starts with an operator's message", kept.first().kind == AgentLog.TOLD)
-        assertTrue("and ends with a conclusion", kept.last().kind == AgentLog.CONCLUDE)
+        assertTrue(
+            "and ends with the agent's own words",
+            kept.last().kind == AgentLog.NOTE && kept.last().name == "agent",
+        )
     }
 
     @Test
@@ -382,7 +388,7 @@ class AgentLogTest {
         // could never fire. A limit that means nothing is a limit that does nothing.
         repeat(6) { n ->
             log.told("task $n " + "x".repeat(200))
-            log.conclude("done")
+            log.note("agent", "done")
         }
 
         val dropped = log.trimSession(limit = 1_500)
@@ -399,7 +405,7 @@ class AgentLogTest {
         // Something has to be on the record. A trim that emptied the file would be a housekeeping
         // step that destroyed the thing it was housekeeping.
         log.told("everything " + "x".repeat(5_000))
-        log.conclude("done")
+        log.note("agent", "done")
         val before = sessionLines()
 
         val dropped = log.trimSession(limit = 100)

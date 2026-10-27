@@ -104,10 +104,14 @@ class Agent(
 
     /** How a turn ended. */
     sealed class End {
-        /** The agent needs the person. */
-        data class Asked(val question: String) : End()
-
-        /** The work is done. */
+        /**
+         * The work is done — **the model said something and called nothing.**
+         *
+         * There used to be an `Asked` beside this, for a `conclude`/`ask` tool the model called to
+         * end a turn. Both tools are gone: an agent that needs a person says so in its words, which
+         * is a conclusion like any other, and the session goes idle — which is what the keepalive
+         * polls, and what a person replies into.
+         */
         data class Concluded(val said: String) : End()
 
         /**
@@ -139,7 +143,6 @@ class Agent(
         /** The one word the trace uses for this ending. */
         val word: String
             get() = when (this) {
-                is Asked -> "asked"
                 is Concluded -> "concluded"
                 is Interrupted -> "interrupted"
                 is Stopped -> "stopped"
@@ -153,7 +156,6 @@ class Agent(
          */
         val detail: String
             get() = when (this) {
-                is Asked -> question
                 is Concluded -> said
                 is Interrupted -> why
                 is Stopped -> why
@@ -190,7 +192,6 @@ class Agent(
             }
 
         fun after(session: AgentSession, now: Long): AgentSession = when (this) {
-            is Asked -> session.asked(now)
             is Concluded -> session.concluded(now)
             // **The person speaking does not change the session.** The agent is still on and the
             // words that interrupted it are the next turn; a stop is the only thing here that
@@ -211,7 +212,6 @@ class Agent(
          * and each one defined once — here, on the type that knows the difference.
          */
         fun plainly(): String = when (this) {
-            is Asked -> "The agent asked something"
             is Concluded -> "The agent finished"
             is Interrupted -> "The agent was cut short by what you said"
             is Stopped -> why
@@ -419,93 +419,35 @@ class Agent(
 
             if (reply.text.isNotBlank()) log.note("agent", reply.text)
 
-            val ending = reply.calls.firstOrNull { it.tool in AgentTools.TERMINATING }
+            // **Words and no calls is the ending**, and it is the only one. There used to be a
+            // second: `ask` and `conclude` were tools the model called to end a turn, with a rule
+            // that they be called alone, a refusal for calling them in company, and a branch here
+            // for each shape. All of it is gone — a turn now ends the way a conversation does, with
+            // the agent saying something and calling nothing.
+            if (reply.calls.isEmpty()) return finish(wordsWithoutCalls(reply))
 
-            when {
-                // Words and no calls: the model has nothing to do. Recorded and ended, rather than
-                // asked again — a second request would be answered with more words.
-                reply.calls.isEmpty() -> return finish(wordsWithoutCalls(reply))
-
-                // **A terminating tool is called alone.** The refusal is written as each call's
-                // own result, so the model sees what it did and what it should have done — and
-                // the terminating call is not obeyed, because a reply that ignored the rule is a
-                // reply that was improvising.
-                ending != null && reply.calls.size > 1 -> {
-                    refusedInCompany(reply.calls)
-                    idle++
-                    progress()
-                }
-
-                ending != null -> {
-                    // **A terminating call with a key it does not take never happens.** It is
-                    // answered as a refusal and the turn carries on, exactly as a `read` with a
-                    // misspelled key is: the model can then call it again with the words it meant.
-                    // It used to be obeyed, with the missing text quietly replaced by the reply's
-                    // own prose — an ending nobody asked for, described by a sentence nobody wrote.
-                    val unknown = AgentTools.unknownIn(ending.tool, argsOf(ending))
-                    if (unknown.isNotEmpty()) {
-                        val id = log.call(ending.tool, ending.args)
-                        log.got(ending.tool, AgentTools.refuseKeys(ending.tool, unknown), answers = id)
-                        Trace.note("agent", "$project call ${ending.tool} #$id")
-                        idle++
-                        progress()
-                    } else {
-                        return finish(leave(ending, reply))
-                    }
-                }
-
-                else -> {
-                    // **Measured, not asked.** Whether the clear-up happened is the context
-                    // getting shorter on disk, not the model saying that it did.
-                    val rowsBefore = if (watching) log.contextRows().size else 0
-                    val moved = work(reply.calls)
-                    if (watching && log.contextRows().size < rowsBefore) clearedUp = true
-                    if (moved) idle = 0 else idle++
-                    progress()
-                }
-            }
+            // **Measured, not asked.** Whether the clear-up happened is the context getting shorter
+            // on disk, not the model saying that it did.
+            val rowsBefore = if (watching) log.contextRows().size else 0
+            val moved = work(reply.calls)
+            if (watching && log.contextRows().size < rowsBefore) clearedUp = true
+            if (moved) idle = 0 else idle++
+            progress()
         }
         return finish(overBudget())
     }
 
-    // ---- the four ways a turn ends -------------------------------------------
+    // ---- the ways a turn ends ------------------------------------------------
     //
     // One function each, and each one is the whole rule: the record rows it writes, and the
     // sentence the session keeps. [finish] is the only place a trace line is written, so an
     // ending cannot be added without being on the trace.
-
-    /** The agent needs the person. */
-    private fun asked(call: Call, args: org.json.JSONObject, reply: Reply): End {
-        log.call(call.tool, call.args)
-        val question = args.optString("question", reply.text).trim()
-            .ifEmpty { "(a question with no words)" }
-        log.ask(question)
-        return End.Asked(question)
-    }
-
-    /** The work is done. */
-    private fun concluded(call: Call, args: org.json.JSONObject, reply: Reply): End {
-        log.call(call.tool, call.args)
-        val said = args.optString("text", reply.text).trim()
-        log.conclude(said)
-        return End.Concluded(said)
-    }
-
-    /**
-     * A terminating call, obeyed — **one of two, because the app does the waiting now.**
-     *
-     * `wait` used to be the third, and it was the app's own job written as the model's: a request
-     * every four minutes whose reply was the word "wait". The app sends that request itself, with a
-     * one-token answer and no model turn to pay for, so an agent that cannot act has nothing to say
-     * — it concludes, or it asks.
-     */
-    private fun leave(call: Call, reply: Reply): End {
-        val args = argsOf(call)
-        return when (call.tool) {
-            "ask" -> asked(call, args, reply)
-            else -> concluded(call, args, reply)
-        }
-    }
+    //
+    // **Two of the four are gone with `ask` and `conclude`.** `asked` wrote a question row and
+    // stopped the session needing a person; `concluded` wrote a statement and stopped it finished.
+    // A conclusion is now the model's own words with no call, which [wordsWithoutCalls] handles —
+    // and it does not need a row of its own, because the words are already on the record as the
+    // agent's own note. The old pair said the same paragraph twice.
 
     /**
      * A call's arguments, tolerated rather than thrown.
@@ -542,9 +484,8 @@ class Agent(
         }
     }
 
-    /** The model answered with prose and no call: nothing to do, and nothing to ask again. */
     /**
-     * The model answered with words and no call: **that is a conclusion.**
+     * The model answered with words and no call: **that is the end of the turn.**
      *
      * It used to stop the session with `LOOP`, on the reasoning that a model which ignored the tool
      * protocol would only produce more prose. The operator's ruling is the better one: the words are
@@ -552,14 +493,14 @@ class Agent(
      * the file they asked about is locked" has been answered — stopping the agent over the shape of
      * the reply punishes the person for the model's grammar.
      *
-     * **The conclusion row is bookkeeping on purpose.** The words are already in the context as the
-     * agent's own text (`log.note("agent", …)` above), and a second `CONCLUDE` row in the context
-     * would put the same paragraph in the conversation twice. The box and the evidence get the
-     * ending they need; the model does not get its own sentence echoed back.
+     * **One row, not two.** A `CONCLUDE` row used to be written here beside the agent's own note —
+     * the same paragraph twice, once for the box and once for the model. The note is the one that
+     * matters: it is what the model reads back, and it is what the box draws. What is left is the
+     * app's own line saying *why* the turn ended, which is a fact about the loop rather than a copy
+     * of what the model said.
      */
     private fun wordsWithoutCalls(reply: Reply): End {
         val said = reply.text.trim().ifEmpty { "(the model said nothing)" }
-        log.bookkeeping(AgentLog.CONCLUDE, "conclusion", said)
         log.bookkeeping(AgentLog.NOTE, "ended", "no tool call, so the words are the conclusion")
         return End.Concluded(said)
     }
@@ -614,21 +555,6 @@ class Agent(
         // A call that wrote nothing and left the project as it was is a call that did nothing —
         // the count the idle guard is about. Files, not the reply's own claim about itself.
         return changed || changedFiles() != before
-    }
-
-    /** A terminating call in company: refused as each call's own result, and nothing done. */
-    private fun refusedInCompany(calls: List<Call>) {
-        for (call in calls) {
-            val id = log.call(call.tool, call.args)
-            val body = if (call.tool in AgentTools.TERMINATING) {
-                AgentLog.FAILURE +
-                    " ${call.tool} is a terminating tool; call it alone. Nothing was done."
-            } else {
-                answer(call)
-            }
-            log.got(call.tool, body, answers = id)
-            Trace.note("agent", "$project call ${call.tool} #$id")
-        }
     }
 
     /** Runs one call and returns its body with its `0` or `1` already on the front. */
@@ -929,9 +855,7 @@ class Agent(
                 // message calls a tool with no answer is refused by every endpoint. Their
                 // words are the ASK/CONCLUDE row, which is added below as the agent's own
                 // message; that is the seam an answer needs.
-                AgentLog.CALL -> if (row.name !in AgentLog.SPEAKING) {
-                    calls.add(Call(callId(row.id), row.name, row.body))
-                }
+                AgentLog.CALL -> calls.add(Call(callId(row.id), row.name, row.body))
                 AgentLog.GOT -> {
                     flush()
                     // **The result says which call it answers.** It used to be inferred: a queue of
@@ -948,11 +872,6 @@ class Agent(
                     val call = callId(row.answers)
                     if (row.answers <= 0 || !awaiting.remove(call)) continue
                     out.add(Msg.tool(call, row.body))
-                }
-
-                AgentLog.ASK, AgentLog.CONCLUDE -> {
-                    flush()
-                    out.add(Msg.assistant(row.body))
                 }
 
                 // **`woke` is a message of its own, and the only note that is.** A wake has to say

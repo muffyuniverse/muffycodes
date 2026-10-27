@@ -89,7 +89,7 @@ class AgentTest {
         // The claim is about the request's *contents*, which is why the scripted door keeps
         // what it was asked: a loop that built a request from nothing would still look right
         // from the outside until the model was charged for it.
-        val door = ScriptedDoor(Reply("", listOf(call("conclude", """{"text":"done"}"""))))
+        val door = ScriptedDoor(Reply("done"))
 
         agent(door).burst("rename milk.txt to dairy.txt")
 
@@ -118,7 +118,7 @@ class AgentTest {
         val file = File(projectDir, AgentPrompt.PROJECT_FILE)
         file.writeText("Always answer in one sentence.")
 
-        val door = ScriptedDoor(Reply("", listOf(call("conclude", """{"text":"ok"}"""))))
+        val door = ScriptedDoor(Reply("ok"))
         agent(door).burst("anything")
 
         assertTrue("what the person wrote", door.asked.first().system.contains("one sentence"))
@@ -135,7 +135,7 @@ class AgentTest {
     fun `a read is answered and recorded as a call and its result`() {
         val door = ScriptedDoor(
             Reply("", listOf(call("read", """{"path":"milk.txt"}"""))),
-            Reply("", listOf(call("conclude", """{"text":"read it"}"""))),
+            Reply("read it"),
         )
 
         agent(door).burst("what is in milk.txt?")
@@ -156,7 +156,7 @@ class AgentTest {
 
         val door = ScriptedDoor(
             Reply("", listOf(call("read", """{"path":"../groceries/notes.txt"}"""))),
-            Reply("", listOf(call("conclude", """{"text":"understood"}"""))),
+            Reply("understood"),
         )
 
         agent(door).burst("read the other project")
@@ -184,7 +184,7 @@ class AgentTest {
                     call("edit", """{"path":"milk.txt","grep":"two","replace":"three"}""")
                 ),
             ),
-            Reply("", listOf(call("conclude", """{"text":"could not"}"""))),
+            Reply("could not"),
         )
 
         agent(door).burst("change the milk")
@@ -202,7 +202,7 @@ class AgentTest {
                     call("edit", """{"path":"milk.txt","grep":"two","replace":"three"}""")
                 ),
             ),
-            Reply("", listOf(call("conclude", """{"text":"done"}"""))),
+            Reply("done"),
         )
 
         agent(door).burst("make it three litres")
@@ -231,7 +231,7 @@ class AgentTest {
                     )
                 ),
             ),
-            Reply("", listOf(call("conclude", """{"text":"no"}"""))),
+            Reply("no"),
         )
 
         agent(door).burst("rewrite your instructions")
@@ -257,9 +257,9 @@ class AgentTest {
         // to hold it against is not a test.
         val door = ScriptedDoor(
             Reply("", listOf(call("tree", """{"path":""}"""))),
-            Reply("", listOf(call("ask", """{"question":"Fix the README too?"}"""))),
+            Reply("Fix the README too?"),
             Reply("", listOf(call("read", """{"path":"README.md"}"""))),
-            Reply("", listOf(call("conclude", """{"text":"Fixed."}"""))),
+            Reply("Fixed."),
         )
         val agent = agent(door)
         agent.burst("look at the readme")
@@ -273,18 +273,19 @@ class AgentTest {
     }
 
     @Test
-    fun `ask ends the turn and the question is the seam the answer needs`() {
-        // The bug this exists for: with the burst boundary in the way, a bare "yes" in the
-        // next turn answers nothing, because the question was never in the request.
-        val answer = call("ask", """{"question":"Shall I also fix the README?"}""")
-        val door = ScriptedDoor(Reply("", listOf(answer)))
+    fun `the agent's own words are the seam a bare yes answers`() {
+        // **The bug this exists for survives the tool that used to fix it.** With the burst boundary
+        // in the way, a bare "yes" in the next turn answers nothing — because the question was never
+        // in the request. It used to be `ask`, a tool whose words became a row; now the model simply
+        // says the question, and the note is in the conversation like any other prose.
+        val door = ScriptedDoor(Reply("Shall I also fix the README?"))
         val first = agent(door).burst("rename the milk file")
 
-        assertTrue("it asked", first is Agent.End.Asked)
+        assertTrue("it concluded", first is Agent.End.Concluded)
         assertEquals(
-            "the question is in the record",
+            "with its words",
             "Shall I also fix the README?",
-            (first as Agent.End.Asked).question,
+            (first as Agent.End.Concluded).said,
         )
 
         val second = agent(door)
@@ -297,41 +298,6 @@ class AgentTest {
         val yesAt = messages.indexOfFirst { it.role == "user" && it.text == "yes" }
         assertTrue("the question is in the request", questionAt >= 0)
         assertTrue("before the answer, which is what makes it an answer", questionAt < yesAt)
-    }
-
-    @Test
-    fun `a terminating tool called with others is refused rather than obeyed`() {
-        // The endpoints never emit two calls, so a reply that does is a sign the model is
-        // improvising — and obeying it would end the turn on a call whose sibling was dropped.
-        val door = ScriptedDoor(
-            Reply(
-                "",
-                listOf(
-                    call("conclude", """{"text":"done"}""", id="c1"),
-                    call("read", """{"path":"milk.txt"}""", id="c2"),
-                ),
-            ),
-            Reply("", listOf(call("conclude", """{"text":"now really done"}"""))),
-        )
-
-        val end = agent(door).burst("do two things at once")
-
-        assertTrue("the turn went on", end is Agent.End.Concluded)
-        // **One sentence, for the call that broke the rule.** The other call in the reply was
-        // run and answered, because the model's mistake is not a reason to throw its work away.
-        assertEquals("both calls were answered", 2, gotRows().size)
-        assertEquals(
-            "and only the terminating one was refused",
-            1,
-            gotRows().count { it.body.contains("terminating tool") },
-        )
-        assertTrue(
-            "the other one really ran",
-            gotRows().any { it.body.contains("two litres") },
-        )
-        assertEquals("and it was told alone the second time", 1, callRows().count {
-            it.name == "conclude" && it.detail.contains("really done")
-        })
     }
 
     @Test
@@ -348,9 +314,13 @@ class AgentTest {
         assertTrue("the words are the agent's own text in the context", log.contextRows().any {
             it.kind == AgentLog.NOTE && it.name == "agent" && it.body.contains("nothing to do")
         })
-        assertTrue("the box is told how it ended", rows().any {
-            it.kind == AgentLog.CONCLUDE && it.body.contains("nothing to do")
-        })
+        // **One row carries the ending, and it is the agent's own.** The `CONCLUDE` row that used
+        // to sit beside it said the same paragraph a second time, for the box alone.
+        assertEquals(
+            "the ending is the agent's own words, once",
+            1,
+            rows().count { it.kind == AgentLog.NOTE && it.name == "agent" },
+        )
         assertFalse("and nothing was stopped", rows().any { it.name == "stopped" })
     }
 
@@ -394,7 +364,7 @@ class AgentTest {
         // **The whole economy of the feature.** A ping is the conversation the person will add to,
         // sent again so the provider's cache is warm — so it must not add a row to the context, or
         // the next ping would be a different request and every one of them a cold prompt.
-        val door = ScriptedDoor(Reply("", listOf(call("conclude", """{"text":"nothing to do"}"""))))
+        val door = ScriptedDoor(Reply("nothing to do"))
         val agent = agent(door)
         agent.burst("look at it")
 
@@ -435,9 +405,9 @@ class AgentTest {
         // sentence naming the file, is the whole difference between "do something" and "answer me
         // again the same way".
         val door = ScriptedDoor(
-            Reply("", listOf(call("conclude", """{"text":"started it"}"""))),
+            Reply("started it"),
             Reply("", listOf(call("read", """{"path":"agent/background_results/tree-c9.txt"}"""))),
-            Reply("", listOf(call("conclude", """{"text":"three files, all fine"}"""))),
+            Reply("three files, all fine"),
         )
         val agent = agent(door)
         agent.burst("look at everything")
@@ -554,7 +524,7 @@ class AgentTest {
         val bg = Background.inline()
         val door = ScriptedDoor(
             Reply("", listOf(Call("c1", "tree", """{"path":""}"""))),
-            Reply("", listOf(Call("c2", "conclude", """{"text":"done"}"""))),
+            Reply("done"),
         )
         // **The clock is the test's, and it jumps after the deadline is made.** `Deadline` reads the
         // clock once when it is constructed - that is "when the wait started" - so the jump has to
@@ -592,7 +562,7 @@ class AgentTest {
         // says part of it is already gone.
         val door = ScriptedDoor(
             Reply("", listOf(Call("c1", "delete", """{"path":"Shopping"}"""))),
-            Reply("", listOf(Call("c2", "conclude", """{"text":"done"}"""))),
+            Reply("done"),
         )
         File(ws.projectDir("shopping"), "Shopping/inner.txt").apply { parentFile?.mkdirs() }.writeText("x")
         // The same clock: it is read once to start the deadline, then late on every check - so the
@@ -779,7 +749,6 @@ class AgentTest {
         // A path that does not exist is used for every call, because `delete` and `create` would act
         // on the project folder if they were handed nothing.
         for (spec in AgentTools.specs()) {
-            if (spec.name in AgentTools.TERMINATING) continue
             val answer = tool(spec.name, """{"path":"no-such-thing"}""")
             assertFalse(
                 "${spec.name} is answered rather than unknown: $answer",
@@ -1503,19 +1472,22 @@ class AgentTest {
     }
 
     @Test
-    fun `a conclude with a key it does not take does not end the turn`() {
-        // **An ending nobody asked for is worse than a refusal.** `conclude {"txt":"done"}` used to
-        // fall back to the reply's own prose and end the turn, so the model was told nothing and the
-        // person was told whatever the model happened to say in passing.
+    fun `words end the turn, and there is no key for a tool that does not exist`() {
+        // **The bug this came from is gone with the tool.** `conclude {"txt":"done"}` used to fall
+        // back to the reply's own prose and end the turn — an ending nobody asked for, described by
+        // a sentence nobody wrote. There is no `conclude` now: the model's words *are* the ending,
+        // and there is no argument that can be misspelled on the way to it.
         val door = ScriptedDoor(
             Reply("", listOf(call("conclude", """{"txt":"done"}"""))),
-            Reply("", listOf(call("conclude", """{"text":"all done"}"""))),
+            Reply("all done"),
         )
 
         val end = agent(door).burst("do the thing")
 
+        // The unknown tool is answered as a refusal, so the turn carries on and the second reply —
+        // plain words — is what ends it.
         assertEquals(
-            "the second conclude is the one that ended it",
+            "the words are what ended it",
             "all done",
             (end as Agent.End.Concluded).said,
         )
@@ -1676,16 +1648,6 @@ class AgentTest {
         assertTrue("both worked: $one / $two", one.startsWith(AgentLog.SUCCESS) && two.startsWith(AgentLog.SUCCESS))
         assertEquals("the first answer", "0\nthe milk", File(ws.projectDir("shopping"), "agent/background_results/read-c1.txt").readText())
         assertEquals("the second answer", "0\nthe bread", File(ws.projectDir("shopping"), "agent/background_results/read-c2.txt").readText())
-    }
-
-    @Test
-    fun `the two that end a turn cannot be put in the background`() {
-        // There is no result to file: the turn ends on them.
-        listOf("ask", "conclude").forEach { tool ->
-            val body = tool("background", """{"tool":"$tool","args":{}}""")
-            assertTrue("$tool is refused: $body", body.startsWith(AgentLog.FAILURE))
-            assertTrue("and says why: $body", body.contains("ends the turn"))
-        }
     }
 
     @Test
@@ -1941,14 +1903,21 @@ class AgentTest {
     fun `the record holds the operator, the calls, their answers and the ending`() {
         val door = ScriptedDoor(
             Reply("", listOf(call("tree", """{"path":""}"""))),
-            Reply("", listOf(call("conclude", """{"text":"there is one file"}"""))),
+            Reply("there is one file"),
         )
 
         agent(door).burst("what is in the project?")
 
         val kinds = rows().map { it.kind }
         assertEquals("the operator's words come first", AgentLog.TOLD, kinds.first())
-        assertEquals("and the turn ends with a conclusion", AgentLog.CONCLUDE, kinds.last())
+        // **The last row is the agent's words**, which is what a conclusion is now: a note, not a
+        // kind of its own.
+        assertEquals("and the turn ends with the agent's words", AgentLog.NOTE, kinds.last())
+        assertEquals(
+            "which is the note it is drawn from",
+            "agent",
+            rows().last().name,
+        )
         assertTrue("with a call and its result in between", kinds.contains(AgentLog.CALL))
         assertTrue(kinds.contains(AgentLog.GOT))
     }
@@ -1960,7 +1929,7 @@ class AgentTest {
         val door = ScriptedDoor(
             Reply("", listOf(call("tree", """{"path":""}"""))),
             Reply("", listOf(call("read", """{"path":"milk.txt"}"""))),
-            Reply("", listOf(call("conclude", """{"text":"done"}"""))),
+            Reply("done"),
         )
 
         agent(door).burst("look around")
@@ -1975,7 +1944,7 @@ class AgentTest {
     fun `an argument the tool cannot parse is refused, not swallowed`() {
         val door = ScriptedDoor(
             Reply("", listOf(call("read", "this is not json"))),
-            Reply("", listOf(call("conclude", """{"text":"ok"}"""))),
+            Reply("ok"),
         )
 
         agent(door).burst("read something")
@@ -1988,7 +1957,7 @@ class AgentTest {
     fun `a reason is written into the record and stays out of the person's files`() {
         val door = ScriptedDoor(
             Reply("", listOf(call("reason", """{"text":"milk.txt is the only file"}"""))),
-            Reply("", listOf(call("conclude", """{"text":"noted"}"""))),
+            Reply("noted"),
         )
 
         agent(door).burst("think about it")
@@ -2020,7 +1989,7 @@ class AgentTest {
 
         val door = ScriptedDoor(
             Reply("", listOf(call("read", """{"path":"big.txt"}"""))),
-            Reply("", listOf(call("conclude", """{"text":"read what I could"}"""))),
+            Reply("read what I could"),
         )
 
         Agent(
@@ -2081,7 +2050,7 @@ class AgentTest {
                     if (asked.size == 1) {
                         Reply("", listOf(Call("c1", "tree", """{"path":""}""")))
                     } else {
-                        Reply("", listOf(Call("c2", "conclude", """{"text":"done"}""")))
+                        Reply("done")
                     },
                 )
             }
@@ -2097,7 +2066,7 @@ class AgentTest {
         )
 
         brief.writeText("Answer in three sentences.")
-        val next = ScriptedDoor(Reply("", listOf(Call("c3", "conclude", """{"text":"ok"}"""))))
+        val next = ScriptedDoor(Reply("ok"))
         agent(next).burst("again")
         assertTrue("the next turn has the edit", next.asked.first().system.contains("three sentences"))
     }
@@ -2109,12 +2078,12 @@ class AgentTest {
         // the correction. Anything else would make the file a decoration.
         val file = File(File(account, Workspace.SYSTEM_PROJECT), AgentPrompt.SYSTEM_FILE)
         file.writeText("You are working inside a phone app. Answer in Latin.")
-        val first = ScriptedDoor(Reply("", listOf(Call("c1", "conclude", """{"text":"ok"}"""))))
+        val first = ScriptedDoor(Reply("ok"))
         agent(first).burst("go")
         assertTrue("the edit is what was sent", first.asked.first().system.contains("in Latin"))
 
         file.writeText("You are working inside a phone app. Answer in Greek.")
-        val second = ScriptedDoor(Reply("", listOf(Call("c2", "conclude", """{"text":"ok"}"""))))
+        val second = ScriptedDoor(Reply("ok"))
         agent(second).burst("go again")
 
         assertTrue("and the next edit is too", second.asked.first().system.contains("in Greek"))
@@ -2132,7 +2101,7 @@ class AgentTest {
         val dir = File(ws.accountDir, "shopping")
         val prompt = AgentPrompt.read(account, dir).message
         val limits = ContextBudget.Limits.of(triggerAsked = 1, hardAsked = 0, ceiling = 100_000)
-        val door = ScriptedDoor(Reply("", listOf(call("conclude", """{"text":"done"}"""))))
+        val door = ScriptedDoor(Reply("done"))
 
         Agent(account, "shopping", ws, git, log, door, model(), limits = limits).burst("go")
 
@@ -2280,7 +2249,7 @@ class AgentTest {
         val door = ScriptedDoor(
             Reply("", listOf(call("c1", "tree", """{"path":""}"""))),
             Reply("", listOf(call("c2", "read", """{"path":"milk.txt"}"""))),
-            Reply("", listOf(Call("c3", "conclude", """{"text":"done"}"""))),
+            Reply("done"),
         )
 
         Agent(account, "shopping", ws, git, log, door, model(), limits = limits).burst("go")
@@ -2301,7 +2270,7 @@ class AgentTest {
         // related to his current task". A floor, not a ceiling: exactly at the target is the least
         // that counts, and cutting further is what is wanted when rows do not serve the task.
         val limits = ContextBudget.Limits.of(triggerAsked = 1, hardAsked = 0, ceiling = 100_000)
-        val door = ScriptedDoor(Reply("", listOf(call("conclude", """{"text":"done"}"""))))
+        val door = ScriptedDoor(Reply("done"))
 
         Agent(account, "shopping", ws, git, log, door, model(), limits = limits).burst("go")
 
@@ -2325,7 +2294,7 @@ class AgentTest {
         (log.call("read", """{"path":"milk.txt"}""")).also { lastCall = it }
         log.got("read", "0\n" + "x".repeat(4_000), answers = lastCall)
         val limits = ContextBudget.Limits.of(triggerAsked = 100, hardAsked = 0, ceiling = 100_000)
-        val door = ScriptedDoor(Reply("", listOf(call("conclude", """{"text":"done"}"""))))
+        val door = ScriptedDoor(Reply("done"))
 
         agent(door, limits).burst("clear up please")
 
@@ -2382,8 +2351,8 @@ class AgentTest {
         val first = log.rows().first { it.kind == AgentLog.TOLD }
         val door = ScriptedDoor(
             Reply("", listOf(call("forget", """{"ids":[${first.id}]}"""))),
-            Reply("", listOf(Call("c2", "conclude", """{"text":"cleared up"}"""))),
-            Reply("", listOf(Call("c3", "conclude", """{"text":"done"}"""))),
+            Reply("cleared up"),
+            Reply("done"),
         )
         val agent = agent(door, limits)
 
@@ -2416,7 +2385,7 @@ class AgentTest {
             hardAsked = 0,
             ceiling = 1_000_000,
         )
-        val afterDoor = ScriptedDoor(Reply("", listOf(Call("c9", "conclude", """{"text":"ok"}"""))))
+        val afterDoor = ScriptedDoor(Reply("ok"))
         agent(afterDoor, lenient).burst("again")
 
         assertFalse(
@@ -2428,7 +2397,7 @@ class AgentTest {
     @Test
     fun `under the trigger nothing is said about the context at all`() {
         val limits = ContextBudget.Limits.of(triggerAsked = 900_000, hardAsked = 0, ceiling = 917_504)
-        val door = ScriptedDoor(Reply("", listOf(call("conclude", """{"text":"done"}"""))))
+        val door = ScriptedDoor(Reply("done"))
 
         Agent(account, "shopping", ws, git, log, door, model(), limits = limits).burst("go")
 
@@ -2450,7 +2419,7 @@ class AgentTest {
         // hard limit sits above it, because the app's trim is the last resort and never the first
         // thing that happens. The content is a few hundred tokens, so both are crossed.
         val limits = ContextBudget.Limits.of(triggerAsked = 100, hardAsked = 140, ceiling = 100_000)
-        val door = ScriptedDoor(Reply("", listOf(call("conclude", """{"text":"done"}"""))))
+        val door = ScriptedDoor(Reply("done"))
         val before = Trace.report().lines.toSet()
 
         Agent(account, "shopping", ws, git, log, door, model(), limits = limits).burst("the seventh")
@@ -2479,7 +2448,7 @@ class AgentTest {
     @Test
     fun `the trace says which model and endpoint answered the turn`() {
         val before = Trace.report().lines.toSet()
-        val door = ScriptedDoor(Reply("", listOf(call("conclude", """{"text":"done"}"""))))
+        val door = ScriptedDoor(Reply("done"))
 
         agent(door).burst("go")
 
@@ -2517,7 +2486,7 @@ class AgentTest {
         // A row taken out of the context by somebody else — a reset, a trim, or a person with a
         // shell. If the loop kept a transcript in memory this is the request that never notices.
         log.told("first")
-        val door = ScriptedDoor(Reply("", listOf(Call("c1", "conclude", """{"text":"done"}"""))))
+        val door = ScriptedDoor(Reply("done"))
         val agent = agent(door)
 
         log.reset()
@@ -2531,8 +2500,8 @@ class AgentTest {
     fun `a reset leaves the next request with the new task and nothing before it`() {
         val door = ScriptedDoor(
             Reply("", listOf(call("tree", """{"path":""}"""))),
-            Reply("", listOf(call("conclude", """{"text":"done"}"""))),
-            Reply("", listOf(Call("c3", "conclude", """{"text":"done again"}"""))),
+            Reply("done"),
+            Reply("done again"),
         )
         val agent = agent(door)
         agent.burst("look at the folder")
@@ -2587,8 +2556,7 @@ class AgentTest {
         // shifts when an older line is evicted — which is exactly how this test first failed,
         // reading another test's lines and none of its own.
         val endings = listOf(
-            Triple("asked", listOf(Reply("", listOf(call("ask", """{"question":"Which?"}""")))), "asked:"),
-            Triple("concluded", listOf(Reply("", listOf(call("conclude", """{"text":"done"}""")))), "concluded:"),
+            Triple("concluded", listOf(Reply("done")), "concluded:"),
             Triple("words", listOf(Reply("just some words", emptyList())), "concluded:"),
         )
         for ((name, replies, word) in endings) {
@@ -2638,7 +2606,7 @@ class AgentTest {
     fun `the record's numbers are the tool's arguments, not the app's guesses`() {
         val door = ScriptedDoor(
             Reply("", listOf(call("read", """{"path":"milk.txt"}"""))),
-            Reply("", listOf(call("conclude", """{"text":"done"}"""))),
+            Reply("done"),
         )
 
         agent(door).burst("look")

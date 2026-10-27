@@ -88,7 +88,7 @@ class AgentChatScreenTest {
     fun `the box draws what was asked, what the agent called, and what it answered`() {
         val door = ScriptedDoor(
             Reply("", listOf(call("tree", """{"path":""}"""))),
-            Reply("", listOf(call("conclude", """{"text":"There is one file."}"""))),
+            Reply("There is one file."),
         )
 
         chat(door)
@@ -113,7 +113,7 @@ class AgentChatScreenTest {
     fun `the record is what the box read, and it holds the app's turn boundaries`() {
         val door = ScriptedDoor(
             Reply("", listOf(call("tree", """{"path":""}"""))),
-            Reply("", listOf(call("conclude", """{"text":"There is one file."}"""))),
+            Reply("There is one file."),
         )
 
         chat(door)
@@ -125,7 +125,13 @@ class AgentChatScreenTest {
         assertTrue("the operator's words are on the record", kinds.contains(AgentLog.TOLD))
         assertTrue("so are the calls", kinds.count { it == AgentLog.CALL } >= 2)
         assertTrue("and their answers", kinds.contains(AgentLog.GOT))
-        assertTrue("and the ending", kinds.contains(AgentLog.CONCLUDE))
+        // **The ending is the agent's own words, not a row of its own kind.** There is no
+        // `CONCLUDE` any more: what marks a turn as finished is the model having said something and
+        // called nothing, and the row that carries it is the same `agent` note as any other prose.
+        assertTrue(
+            "and the ending is the agent's words",
+            log.rows().any { it.kind == AgentLog.NOTE && it.name == "agent" },
+        )
         // The box counted two turns, so the record has to say where one request ended.
         assertEquals(
             "one boundary per request",
@@ -143,7 +149,7 @@ class AgentChatScreenTest {
     fun `the newest turn is where the box starts, and one press shows the one before`() {
         val door = ScriptedDoor(
             Reply("", listOf(call("tree", """{"path":""}"""))),
-            Reply("", listOf(call("conclude", """{"text":"There is one file."}"""))),
+            Reply("There is one file."),
         )
 
         chat(door)
@@ -171,12 +177,12 @@ class AgentChatScreenTest {
     @Test
     fun `an answer to the agent's question carries the question into the next request`() {
         // The seam, through the box: the person answers in the composer, and without the
-        // question in the next request their "yes" answers nothing. It is carried as the
-        // agent's own words — a terminating call is never run, so it has no result, and a
-        // call with no result is a request every endpoint refuses.
+        // question in the next request their "yes" answers nothing. **It is carried as the
+        // agent's own words** — which is all it ever needed to be. It used to be an `ask` call
+        // whose text became a row; now the model simply says the question and calls nothing.
         val door = ScriptedDoor(
-            Reply("", listOf(call("ask", """{"question":"Fix the README too?"}"""))),
-            Reply("", listOf(call("conclude", """{"text":"Fixed."}"""))),
+            Reply("Fix the README too?"),
+            Reply("Fixed."),
         )
 
         chat(door)
@@ -206,7 +212,7 @@ class AgentChatScreenTest {
         // **A real ping, through the app's own clock.** The conversation ends with a conclusion, and
         // the four-minute tick keeps it warm: the rows a ping writes reach the screen as the line
         // they are meant to be — [AgentChatTest] pins the collapsing, this pins the wiring.
-        val door = ScriptedDoor(Reply("", listOf(call("conclude", """{"text":"Nothing to do."}"""))))
+        val door = ScriptedDoor(Reply("Nothing to do."))
 
         chat(door)
         scene.viewModel.startAgent("groceries")
@@ -229,12 +235,12 @@ class AgentChatScreenTest {
         // conversation that grows the column — pushes the composer off the bottom, and the one control
         // a person needs is the one that disappears first. Forty calls is what an afternoon of work
         // looks like, and the Send button is still there.
-        val calls = (1..40).map { call("tree", """{"path":"$it"}""") } + call("conclude", """{"text":"Done."}""")
-        chat(ScriptedDoor(Reply("", calls)))
+        val calls = (1..40).map { call("tree", """{"path":"$it"}""") }
+        chat(ScriptedDoor(Reply("", calls), Reply("Done.")))
 
         say("Look at everything.")
 
-        // One request carries the forty calls, the next carries the conclusion: two turns.
+        // One request carries the forty calls, the next is the agent's words: two turns.
         awaitTurns(2)
         compose.onNodeWithText("Send").assertIsDisplayed()
         // And the navigator still says which turn of the conversation is on the screen.

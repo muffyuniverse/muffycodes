@@ -417,7 +417,7 @@ class AgentSessionFeatureTest : FeatureTest() {
         listening()
         scene.project("groceries")
         val door = ScriptedDoor(
-            Reply("", listOf(Call("c1", "conclude", """{"text":"done"}"""))),
+            Reply("done"),
         )
         openChat("groceries", door)
         scene.viewModel.startAgent("groceries")
@@ -437,8 +437,8 @@ class AgentSessionFeatureTest : FeatureTest() {
     fun `an edit to the project's instructions reaches the next turn`() {
         listening()
         val door = ScriptedDoor(
-            Reply("", listOf(Call("c1", "conclude", """{"text":"done"}"""))),
-            Reply("", listOf(Call("c2", "conclude", """{"text":"done"}"""))),
+            Reply("done"),
+            Reply("done"),
         )
         openChat("groceries", door)
         scene.viewModel.startAgent("groceries")
@@ -466,8 +466,8 @@ class AgentSessionFeatureTest : FeatureTest() {
         listening()
         val door = ScriptedDoor(
             Reply("", listOf(Call("c1", "tree", """{"path":""}"""))),
-            Reply("", listOf(Call("c2", "conclude", """{"text":"there is one file"}"""))),
-            Reply("", listOf(Call("c3", "conclude", """{"text":"done again"}"""))),
+            Reply("there is one file"),
+            Reply("done again"),
         )
         openChat("groceries", door)
         scene.viewModel.startAgent("groceries")
@@ -526,7 +526,7 @@ class AgentSessionFeatureTest : FeatureTest() {
         listening()
         val door = ScriptedDoor(
             Reply("I think the milk is fine.", emptyList()),
-            Reply("", listOf(Call("c2", "conclude", """{"text":"done"}"""))),
+            Reply("done"),
         )
         openChat("groceries", door)
         scene.viewModel.startAgent("groceries")
@@ -540,8 +540,11 @@ class AgentSessionFeatureTest : FeatureTest() {
         val session = scene.viewModel.sessionOf("groceries")!!
         assertEquals("nothing is wrong", null, session.reason)
         assertFalse("and it is not asking to be resolved", session.needsYou)
+        // **One row, not two.** The conclusion used to be written twice — once as the agent's own
+        // note (which is what the model reads back) and once as a `CONCLUDE` row for the box. The
+        // second is gone; the note is what the box draws, and there is exactly one of it.
         assertEquals("the box draws the words as the conclusion", "I think the milk is fine.",
-            record("groceries").rows().single { it.kind == AgentLog.CONCLUDE }.body)
+            record("groceries").rows().single { it.kind == AgentLog.NOTE && it.name == "agent" }.body)
         assertFalse(
             "and nothing was written down as a stop",
             record("groceries").rows().any { it.name == "stopped" },
@@ -556,7 +559,7 @@ class AgentSessionFeatureTest : FeatureTest() {
     @Test
     fun `a concluded turn is idle and finished, not waiting`() {
         listening()
-        val door = ScriptedDoor(Reply("", listOf(Call("c1", "conclude", """{"text":"done"}"""))))
+        val door = ScriptedDoor(Reply("done"))
         openChat("groceries", door)
         scene.viewModel.startAgent("groceries")
         scene.viewModel.sendChat("do the thing")
@@ -579,7 +582,7 @@ class AgentSessionFeatureTest : FeatureTest() {
         scene.settings.keepTrigger(1)
         assertEquals("the number typed is what is stored", 1, scene.settings.triggerTokens)
         assertEquals("and the hard limit is still off", 0, scene.settings.hardTokens)
-        val door = ScriptedDoor(Reply("", listOf(Call("c1", "conclude", """{"text":"done"}"""))))
+        val door = ScriptedDoor(Reply("done"))
         openChat("groceries", door)
         scene.viewModel.startAgent("groceries")
 

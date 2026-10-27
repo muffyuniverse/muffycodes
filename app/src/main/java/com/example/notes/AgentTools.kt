@@ -51,16 +51,6 @@ class AgentTools(
         /** The default result limit in tokens, for a caller that has no setting of its own. */
         const val MAX_RESULT = SettingsStore.DEFAULT_MAX_RESULT
 
-        /**
-         * The tools that end a turn. They are called alone; anything beside them is refused.
-         *
-         * **The record's set, not a second copy of it.** `AgentLog` owns this vocabulary because
-         * it has to read and seal a record with no workspace, repository or model behind it — and
-         * two sets with the same three names is a set that drifts the day one of them gains a
-         * fourth.
-         */
-        val TERMINATING = AgentLog.TERMINATING
-
         /** The tools that change a file. */
         val WRITING = setOf("edit", "create", "delete", "move", "restore")
 
@@ -146,8 +136,6 @@ class AgentTools(
             "restore" to setOf("path", "revision"),
             "background" to setOf("tool", "args"),
             "reason" to setOf("text"),
-            "ask" to setOf("question"),
-            "conclude" to setOf("text"),
         )
 
         /** The keys [args] carries that [tool] does not take, in the order the model wrote them. */
@@ -267,16 +255,6 @@ class AgentTools(
                     "your record, not in their files.",
                 """{"text":"your reasoning"}""",
             ),
-            spec(
-                "ask",
-                "End the turn with one question for the person. Called alone.",
-                """{"question":"what you need to know"}""",
-            ),
-            spec(
-                "conclude",
-                "End the turn: the work is done. Say what you did. Called alone.",
-                """{"text":"what you did"}""",
-            ),
         )
 
         private fun spec(name: String, description: String, parameters: String) = ToolSpec(
@@ -291,8 +269,10 @@ class AgentTools(
     /**
      * Runs one call and returns its body, `0` or `1` first.
      *
-     * `ask` and `conclude` are not run here: the loop ends the turn on them, because the turn is
-     * what they end. Everything else is answered here, including the refusal.
+     * **Every tool advertised here is run here.** `ask` and `conclude` used to be the exception: the
+     * loop ended the turn on them instead of running them, so a spec existed for something this
+     * function would never answer. They are gone, and the rule is now the simple one — if the model
+     * can see it, it can call it, and the call is answered.
      *
      * **One `when`, and every command gets the deadline.** There used to be a short list of "slow"
      * commands with a deadline and a second dispatch beside this one for them; a `read` of a huge
@@ -391,7 +371,7 @@ class AgentTools(
      * changed something part of the way (see [Stopped.partway]).
      */
     fun handOver(call: Call, deadline: Deadline): String? {
-        if (call.tool in TERMINATING || call.tool == "background") return null
+        if (call.tool == "background") return null
         if (call.tool !in KEYS) return null
         val args = try {
             JSONObject(call.args.ifBlank { "{}" })
@@ -427,9 +407,6 @@ class AgentTools(
     private fun background(call: Call, args: JSONObject): String {
         val tool = args.optString("tool").trim()
         if (tool.isEmpty()) return refusal("Say which command to run in the background")
-        if (tool in TERMINATING) {
-            return refusal("$tool ends the turn, so there is no result to put in a file")
-        }
         if (tool == "background") {
             return refusal("A background command cannot be put in the background")
         }
