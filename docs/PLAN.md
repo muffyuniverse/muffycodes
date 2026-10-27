@@ -12,12 +12,12 @@ tree.
 
 ## Part 1 · The 38 reports
 
-The numbering is the log's own: the order the reports appear in `trace.log (1).txt`. **22 are
-marked `closed` in the log and 16 are open**, and the count in this document is taken from that
+The numbering is the log's own: the order the reports appear in `trace.log (1).txt`. **29 are
+marked `closed` in the log and 9 are open**, and the count in this document is taken from that
 file rather than remembered — an earlier draft of this plan said 20 and 18, which was wrong, and
 the three it had lost (#9, #20, #21) were the three that were not about code I had touched.
 
-### Closed — 22
+### Closed — 29
 
 | # | Build | Report | Closed by |
 |---|---|---|---|
@@ -44,29 +44,30 @@ the three it had lost (#9, #20, #21) were the three that were not about code I h
 | 33 | 149 | are grep and find separate engines? | `2b98531` — there is one selector |
 | 34 | 149 | why does grep only give lines? why is find crippled? | `bf60d60` — the answer shape follows the pattern |
 
+| 9 | 129 | the openrouter key is not passing through | `74b4c0d` — `headers()` is now a question a test asks, and a key with a line break is refused rather than sent |
+| 13 | 149 | a result that overruns the timeout blips; instead tell the agent it will arrive on a later turn | `3f0cc25` — the foreground hands the work to `background`, and the turn is told the path |
+| 24 | 149 | what does the context "read" button do, and what are the numbers beside it? | the button and the numbers no longer exist |
+| 25 | 149 | "context 900k of 1000k" — is the context full? | gone with #24 |
+| 35 | 149 | where is the system local project with the global settings? | step 1 — `203c605` |
+| 37 | 149 | the system prompt is outdated; it should be an editable file in the system project | step 1 — `203c605`, `0285bc0`; one path, no fallback |
+| 38 | 149 | is "showing first n of m" a stale part of the system prompt? | the phrase is not in the prompt, and over-limit results go to a file whose path is returned |
+
 **Two closed themselves.** #16 and #18 were answered by the folder merge *deleting* the level they
 were about. A report can become moot, and "closed" is not always "fixed".
 
-### Open — 16
+### Open — 9
 
 | # | Report | What it needs |
 |---|---|---|
-| 9 | the openrouter key is not passing through | **verify** — the wiring exists (`AppViewModel.kt:2514`); was this fixed after build 129? |
-| 13 | a result that overruns the timeout blips — instead tell the agent it will arrive on a later turn | **behaviour change** — today it is killed and told "nothing was kept" (`Timeouts.kt:112`) |
 | 17 | where is the chat icon within the project? | look at what a project row shows |
 | 20 | block the agent settings together, rule them off, drop "agent" from every label but the block title | step 7 |
 | 21 | the "signed in as" block still has gaps between rows | step 7 |
 | 23 | how is "wait for the model" different from "stop command after"? | **a question** — needs an answer in the UI |
-| 24 | what does the context "read" button do, and what are the numbers beside it? | **gone** — the button and the numbers no longer exist |
-| 25 | "context 900k of 1000k" — does that mean the context is full? | **gone** with #24 |
 | 26 | gitignore as a per-row button, not a 3-dot item | step 4 |
 | 28 | make hidden files visible but read-only, with a system lock in a distinct colour, non-interactive | step 3 |
 | 29 | "see changes" should be an enterable list; editor needs a diff mode with a two-commit picker; view/edit/diff as separate modes | step 6 |
 | 30 | remove "n to send"; make it "see n changes" as a button | step 4 |
-| 35 | where is the system local project with the global settings? | **done** — step 1 |
 | 36 | chat as many bubbles; remove `ask`/`conclude`; message ends with a plain message; drop the token column; footer with time, date, id; time column back in the session log | step 5 |
-| 37 | the system prompt is outdated; it should be an editable file in the system project | **done** — step 1 |
-| 38 | is "showing first n of m" a stale part of the system prompt? | **gone** — the phrase is not in the prompt, and over-limit results go to a file with the path returned |
 
 ## Part 2 · The decisions, and the reasons
 
