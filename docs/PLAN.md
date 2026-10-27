@@ -12,12 +12,12 @@ tree.
 
 ## Part 1 · The 38 reports
 
-The numbering is the log's own: the order the reports appear in `trace.log (1).txt`. **29 are
-marked `closed` in the log and 9 are open**, and the count in this document is taken from that
+The numbering is the log's own: the order the reports appear in `trace.log (1).txt`. **32 are
+marked `closed` in the log and 6 are open**, and the count in this document is taken from that
 file rather than remembered — an earlier draft of this plan said 20 and 18, which was wrong, and
 the three it had lost (#9, #20, #21) were the three that were not about code I had touched.
 
-### Closed — 29
+### Closed — 32
 
 | # | Build | Report | Closed by |
 |---|---|---|---|
@@ -52,10 +52,14 @@ the three it had lost (#9, #20, #21) were the three that were not about code I h
 | 37 | 149 | the system prompt is outdated; it should be an editable file in the system project | step 1 — `203c605`, `0285bc0`; one path, no fallback |
 | 38 | 149 | is "showing first n of m" a stale part of the system prompt? | the phrase is not in the prompt, and over-limit results go to a file whose path is returned |
 
+| 26 | 149 | gitignore as a per-row button, not a 3-dot item | `494b7f0` — its own button beside Lock |
+| 28 | 149 | make hidden files visible but read-only, with a system lock in a distinct colour | `cd87b3c`, `156a2ea` — `.muffy/` is a row, locked in tertiary, no menu |
+| 30 | 149 | remove "n to send"; make it "see n changes" as a button | `494b7f0` — one button, no separate caption |
+
 **Two closed themselves.** #16 and #18 were answered by the folder merge *deleting* the level they
 were about. A report can become moot, and "closed" is not always "fixed".
 
-### Open — 9
+### Open — 6
 
 | # | Report | What it needs |
 |---|---|---|
@@ -63,10 +67,7 @@ were about. A report can become moot, and "closed" is not always "fixed".
 | 20 | block the agent settings together, rule them off, drop "agent" from every label but the block title | step 7 |
 | 21 | the "signed in as" block still has gaps between rows | step 7 |
 | 23 | how is "wait for the model" different from "stop command after"? | **a question** — needs an answer in the UI |
-| 26 | gitignore as a per-row button, not a 3-dot item | step 4 |
-| 28 | make hidden files visible but read-only, with a system lock in a distinct colour, non-interactive | step 3 |
 | 29 | "see changes" should be an enterable list; editor needs a diff mode with a two-commit picker; view/edit/diff as separate modes | step 6 |
-| 30 | remove "n to send"; make it "see n changes" as a button | step 4 |
 | 36 | chat as many bubbles; remove `ask`/`conclude`; message ends with a plain message; drop the token column; footer with time, date, id; time column back in the session log | step 5 |
 
 ## Part 2 · The decisions, and the reasons
