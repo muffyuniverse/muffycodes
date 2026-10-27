@@ -2514,11 +2514,17 @@ class AgentTest {
 
         assertEquals("the working context was emptied", 1, log.contextRows().count { it.kind == AgentLog.CALL })
         assertTrue("and it is the new turn's", before > log.contextRows().size - 1)
-        val third = door.asked.last().messages
+        // **The request that opened the new burst, not the last one the door happened to see.**
+        // `asked.last()` is whatever request finished last, which after the second burst is the one
+        // carrying its call and result — so the assertion was reading the wrong request and only
+        // passed while the second burst happened to be a single reply.
+        val opener = door.asked.first { req ->
+            req.messages.any { it.role == "user" && it.text == "now something else" }
+        }
         assertEquals(
-            "the third request is the new task alone",
+            "the request that opened the new burst is the new task alone",
             listOf("now something else"),
-            third.map { it.text },
+            opener.messages.map { it.text },
         )
         assertTrue(
             "with nothing of the old conversation in it",

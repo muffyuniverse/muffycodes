@@ -412,6 +412,35 @@ jobs:
       #
       # `if: always()` is deliberate: on a red run this is the step that says which
       # classes did run, and that is the first question anybody asks.
+      # **The failure's own sentence, on the run's page.** Gradle writes the assertion message
+      # into the XML and prints only "AssertionError at File.kt:NNN" to the log, so the one line
+      # that says *what* was wrong lived in an artifact — and an artifact is not where anybody
+      # looks first. Reported by the person reading CI: several rounds were spent inferring from
+      # line numbers what the message said outright.
+      #
+      # It prints the message, not the stack: the line number is already in the log, and the
+      # message is the part that cannot be recovered from it.
+      - name: Say what actually failed, in words
+        if: failure() && steps.shard.outputs.nothing == 'no'
+        run: |
+          python3 - <<'PY'
+          import glob, xml.etree.ElementTree as ET
+          shown = 0
+          for f in sorted(glob.glob("app/build/test-results/**/TEST-*.xml", recursive=True)):
+              try:
+                  root = ET.parse(f).getroot()
+              except Exception:
+                  continue
+              for case in root.iter("testcase"):
+                  for fail in case.iter("failure"):
+                      msg = (fail.get("message") or "").strip().splitlines()
+                      print(f"::error title={case.get('classname')}::{case.get('name')}")
+                      if msg:
+                          print(f"  {msg[0][:600]}")
+                      shown += 1
+          print(f"{shown} failing test(s)") if shown else print("no test-result XML found")
+          PY
+
       - name: Check that the tests that ran are the tests that were asked for
         if: always() && steps.shard.outputs.nothing == 'no'
         env:
