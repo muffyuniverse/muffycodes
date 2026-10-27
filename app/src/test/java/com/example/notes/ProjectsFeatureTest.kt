@@ -133,7 +133,9 @@ class ProjectsFeatureTest : FeatureTest() {
             "the app says why",
             scene.viewModel.message!!.contains("already a project"),
         )
-        assertEquals("and made nothing", listOf("system", "shopping", "Shopping"), scene.viewModel.projectNames)
+        // **`shopping` was refused, so it is not here.** The list is the one project that was made
+        // and the settings project, in the order `projectNames` sorts by: lowercase name.
+        assertEquals("and made nothing", listOf("Shopping", "system"), scene.viewModel.projectNames)
     }
 
     @Test
@@ -294,7 +296,7 @@ class ProjectsFeatureTest : FeatureTest() {
                 !File(dir, ".gitignore").exists(),
         )
         assertTrue("and no remote at all", scene.viewModel.isLocalProject("scratch"))
-        assertEquals("its name is the one typed", listOf("system", "scratch"), scene.viewModel.projectNames)
+        assertEquals("its name is the one typed", listOf("scratch", "system"), scene.viewModel.projectNames)
     }
 
     @Test
