@@ -268,10 +268,9 @@ class OpenRouterDoor(
 
         var connection: HttpURLConnection? = null
         val text = try {
-            connection = (URL("https://openrouter.ai/api/v1/chat/completions")
-                .openConnection() as HttpURLConnection).apply {
+            connection = (URL(ENDPOINT).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
-                connectTimeout = 20_000
+                connectTimeout = CONNECT_MS
                 readTimeout = timeoutMs
                 doOutput = true
                 headers(token).forEach { (name, value) -> setRequestProperty(name, value) }
@@ -346,9 +345,9 @@ class OpenRouterDoor(
                         // was being written and has stopped — which is a different sentence to a
                         // person, and a different decision about whether to try again.
                         throw if (stream.acknowledged) {
-                            Idle(gapMs, stream)
+                            Idle(gapMs.toLong(), stream)
                         } else {
-                            Unacknowledged(ackMs, stream)
+                            Unacknowledged(ackMs.toLong(), stream)
                         }
                     } ?: break
                     stream.line(line)
@@ -462,6 +461,15 @@ class OpenRouterDoor(
          * ping is the prompt it re-reads and not the token it generates.
          */
         const val PING_TOKENS = 1
+
+        /** The one endpoint this app talks to. A constant because two functions now open it. */
+        const val ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
+
+        /**
+         * A socket that will not open is a network that is not there, and no amount of waiting
+         * changes that. Unchanged from before streaming: it was never the number that was wrong.
+         */
+        const val CONNECT_MS = 20_000
 
         /**
          * One reply out of the endpoint's own shape.

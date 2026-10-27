@@ -3,9 +3,11 @@ package com.example.notes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -245,18 +247,23 @@ class SettingsScreenTest {
 
         compose.onNodeWithText("While the app works on this phone").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("While it talks to the model").performScrollTo().assertIsDisplayed()
-        // And the model wait is in seconds, like its neighbours rather than minutes apart from them.
-        compose.onNodeWithText("Wait for an answer for (seconds)", substring = true)
+        // And the model waits are in seconds, like their neighbours rather than minutes apart from
+        // them. **Two of them now**: streaming split one silence into "nothing came back at all"
+        // and "it went quiet halfway through", which want opposite answers and so cannot share a
+        // number.
+        compose.onNodeWithText("Wait for an answer to begin (seconds)", substring = true)
             .performScrollTo()
             .assertIsDisplayed()
-        // **The limit of the number is said, not hidden.** With `stream: false` a dropped request and
-        // a thinking model really are the same silence, so the screen says so rather than implying
-        // the number is enough. When streaming lands this sentence is deleted - and deleting it is
-        // part of that work, recorded in docs/PLAN-streaming.md, not something this test should
-        // silently require.
-        compose.onNodeWithText("look the same from here", substring = true)
+        compose.onNodeWithText("Wait between pieces of an answer (seconds)", substring = true)
             .performScrollTo()
             .assertIsDisplayed()
+        // **And the sentence that apologised for the old limit is gone.** It said a dropped request
+        // and a model thinking hard look the same from here, which was true of a non-streamed
+        // request. It is not true now, and leaving it would be the screen explaining a limitation
+        // the app no longer has. This assertion is the one that would have caught the split landing
+        // without the sentence being deleted - the work is only half done while both are on screen.
+        compose.onAllNodesWithText("look the same from here", substring = true)
+            .assertCountEquals(0)
     }
 
     @Test

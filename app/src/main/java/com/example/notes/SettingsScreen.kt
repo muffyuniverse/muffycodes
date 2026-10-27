@@ -386,18 +386,29 @@ fun SettingsScreen(
             // ---- the other clock: the wait for the model ----
             Text("While it talks to the model", style = MaterialTheme.typography.titleMedium)
             Text(
-                "This bounds one request to OpenRouter: from the bytes going out to the answer " +
-                    "coming back. Nothing on this phone is running while it waits - the app is " +
-                    "sitting still, and the model is the one working. In seconds; blank means the " +
-                    "default.",
+                "The answer arrives as it is written, so there are two silences rather than one. " +
+                    "Nothing on this phone is running while it waits - the app is sitting still, " +
+                    "and the model is the one working. In seconds; blank means the default.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            // **Two fields, because they bound two different silences.** The first is before
+            // anything at all has come back: an upstream that is queueing sends nothing, so this
+            // one is generous - and because no answer has been produced yet, retrying is free. The
+            // second is a gap *inside* an answer, where a model thinking hard is quiet and a dead
+            // connection is quieter; a single number would have to be long enough for the first and
+            // short enough for the second, which is no number at all.
             LengthField(
-                label = "Wait for an answer for (seconds)",
-                value = settings.timeoutSeconds,
-                placeholder = "${SettingsStore.DEFAULT_TIMEOUT_SECONDS}",
-                onValueChange = { settings.keepTimeout(it) },
+                label = "Wait for an answer to begin (seconds)",
+                value = settings.ackSeconds,
+                placeholder = "${SettingsStore.DEFAULT_ACK_SECONDS}",
+                onValueChange = { settings.keepAck(it) },
+            )
+            LengthField(
+                label = "Wait between pieces of an answer (seconds)",
+                value = settings.gapSeconds,
+                placeholder = "${SettingsStore.DEFAULT_GAP_SECONDS}",
+                onValueChange = { settings.keepGap(it) },
             )
             // **The other half of the same question**, and it is a different number: the one above
             // bounds a single request, and this bounds how long a *failure* is retried before the
@@ -425,18 +436,12 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary,
             )
-            // **What this number cannot yet tell apart, said plainly.** The provider sends nothing
-            // until the completion is finished, so a request that never arrived and a model that is
-            // thinking hard are the same silence to this app - and they need opposite responses: a
-            // dropped request should be retried at once, a diligent model should be waited for,
-            // because retrying throws away work already paid for. One number cannot express two
-            // things, so the screen says so instead of implying the number is enough.
-            Text(
-                "A dropped request and a model thinking hard look the same from here: the provider " +
-                    "says nothing until the answer is complete. So this one number covers both.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.outline,
-            )
+            // **The sentence that used to be here is gone, and its going is the point.** It said a
+            // dropped request and a model thinking hard look the same from here, because the
+            // provider said nothing until the answer was complete. That was true of a non-streamed
+            // request and it is not true now: the answer arrives as it is written, so the two are
+            // different silences with a clock each, and leaving the paragraph behind would be the
+            // screen apologising for a limitation the app no longer has.
             LengthField(
                 label = "One result may carry (tokens)",
                 value = settings.maxResult,
