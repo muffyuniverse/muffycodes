@@ -64,6 +64,7 @@ content on disk:     v2         <- local, editable, never pushed again
 **This is a real defect and I will fix it as its own commit**, ahead of everything else — it is
 the difference between the button working and the button lying, and it is unrelated to the
 redesign.
+@ ok, so file/folder is either tracked both locally and remotely or ignored by all. ok.
 
 ---
 
@@ -88,6 +89,7 @@ Three things follow that I want to name:
 3. **`agent/` is already gitignored** — it is in `APP_IGNORES` (`Workspace.kt:803`), written into
    `.git/info/exclude`, not the person's `.gitignore`. That distinction is worth keeping: the
    app's own lines should not appear as a change in the person's repository.
+   @ right
 
 ---
 
@@ -107,6 +109,7 @@ One thing the button needs that the menu item does not: **a way back.** Today "A
 is one-way — the file is written and committed, and nothing in the app removes the line. A toggle
 that cannot be un-toggled is a trap, so the same button removes the line (and, if the person asks,
 brings the file back into the repository).
+@ right. but I am still confused, there is only gitignore, there is no push/syncignore in git, right? so untracked means untracked both locally and remotely?
 
 ---
 
@@ -119,6 +122,7 @@ until both are set**. That is honest and it needs no rule about "the first versi
 
 I will make the emptiness say why — "this file has never been synced" beside the field — because a
 greyed button with no sentence is the thing this app keeps fixing.
+@ how do you distinguish sync hashes? by commit message?
 
 ---
 
@@ -141,6 +145,7 @@ record:
    words, not the time, not the id. So the line still reads as one line in the same format.
 
 And I keep doing it in `docs/PLAN-bug-reports-v149.md`, which is where the 38 are already marked.
+@ why do you have transcript if thera is an original log?
 
 ---
 
