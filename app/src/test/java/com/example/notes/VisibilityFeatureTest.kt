@@ -27,7 +27,10 @@ class VisibilityFeatureTest : FeatureTest() {
         File(scene.workspace!!.accountDir, "loose").mkdirs()
         scene.viewModel.refresh()
 
-        assertEquals(listOf("loose", "Shopping", "notes.txt"), scene.names())
+        // **The system project is at the root too**, because it is a project like any other — it
+        // holds the settings that belong to the whole account, and a row is how a person reaches
+        // them. Folders sort before files, then by name, so it lands after `Shopping`.
+        assertEquals(listOf("loose", "Shopping", "system", "notes.txt"), scene.names())
     }
 
     @Test
@@ -97,7 +100,7 @@ class VisibilityFeatureTest : FeatureTest() {
         scene.file("apple.txt")
 
         // Called for in lowercase, because that is how the app writes a name it makes.
-        assertEquals(listOf("zebra", "apple.txt", "milk.txt"), scene.names())
+        assertEquals(listOf("system", "zebra", "apple.txt", "milk.txt"), scene.names())
     }
 
     @Test
