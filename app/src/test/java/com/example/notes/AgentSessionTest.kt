@@ -178,7 +178,7 @@ class AgentSessionTest {
         val asked = session().needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 0)
 
         assertFalse("no reminder ever", asked.reminderDue(10 * 24 * 60 * minute, intervalMs = 0))
-        assertEquals("but it is still worth one sentence", "shopping: the agent asked something", asked.notice())
+        assertEquals("but it is still worth one sentence", "shopping: stopped, the pinned provider refused", asked.notice())
     }
 
     @Test
@@ -257,10 +257,10 @@ class AgentSessionTest {
         // **Counted in reminders, not in notifications.** The sentence that comes with the
         // question is not a reminder; the first repeat is the first one.
         val first = session().needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 0).reminded()
-        assertEquals("1st reminder · shopping: the agent asked something", first.notice())
+        assertEquals("1st reminder · shopping: stopped, the pinned provider refused", first.notice())
         val second = first.reminded()
         assertEquals(
-            "2nd reminder · shopping: the agent asked something",
+            "2nd reminder · shopping: stopped, the pinned provider refused",
             second.notice(),
         )
     }

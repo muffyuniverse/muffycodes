@@ -389,15 +389,20 @@ class AgentRunnerTest {
             door = { door }, notify = { notices += it }, bg = bg,
         ).also { runners += it }
 
-        // Asked, and then a command lands.
+        // **A session that needs help is not woken.** It stopped because its problem is the person's
+        // to fix — a refused key, an empty balance — and waking it would spend a request to fail in
+        // the same way. It used to be `asked`, which *was* woken: a result landing could be the
+        // answer it was waiting for. With no questions, the only session that needs somebody is one
+        // that cannot run at all.
         AgentSessions(ws.accountDir).put(
-            AgentSessions(ws.accountDir).read().single().needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 1_000),
+            AgentSessions(ws.accountDir).read().single()
+                .needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 1_000),
         )
         bg.start(ws.projectDir("shopping"), Call("c1", "tree", "{}")) { "0 one" }
         runner.tick(5_001)
         settle(runner)
 
-        assertEquals("a question is woken", 1, door.asked.size)
+        assertEquals("a session that needs help is not woken", 0, door.asked.size)
         assertEquals("and the wake's ending replaced it", AgentSession.Sub.FINISHED, runner.sessions().single().sub)
 
         // Stopped, and then a command lands: nothing is spent.
@@ -654,26 +659,27 @@ class AgentRunnerTest {
     }
 
     @Test
-    fun `a session that asked is warmed too, and a stopped one is not`() {
-        // **The two states that were left to go cold.** A question is the thing most likely to be
-        // answered next, and a concluded agent is one the person will add to — both had no ping at
-        // all, because a poll was something only `wait` asked for.
+    fun `a finished session is warmed, and one that needs help is not`() {
+        // **The line moved with the state that went away.** A finished agent is one the person will
+        // add to, so it is kept warm. A session that *needs help* is the opposite: it cannot run
+        // until somebody fixes the key or the balance, so pinging it buys warmth for a conversation
+        // that cannot continue.
         on("shopping", now = 1_000)
         val sessions = AgentSessions(ws.accountDir)
-        sessions.put(sessions.read().single().needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 1_000))
+        sessions.put(sessions.read().single().concluded(at = 1_000))
         val door = PingDoor()
         val runner = runner(door)
 
         runner.tick(1_000 + AgentSession.POLL_MS)
         settle(runner)
-        assertEquals("a question is kept warm", 1, door.pings.size)
-        assertEquals("and it still needs help", AgentSession.State.STOPPED, runner.sessions().single().state)
+        assertEquals("a finished conversation is kept warm", 1, door.pings.size)
 
-        // The person stops it: nothing more is spent on a conversation they switched off.
-        runner.stop("shopping")
-        runner.tick(1_000 + 10 * AgentSession.POLL_MS)
+        // Now it stops for a reason that is the person's to fix: nothing more is spent on it.
+        val stopped = AgentSessions(ws.accountDir)
+        stopped.put(stopped.read().single().needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 2_000))
+        runner.tick(2_000 + 10 * AgentSession.POLL_MS)
         settle(runner)
-        assertEquals("and a stopped session is left alone", 1, door.pings.size)
+        assertEquals("and one that needs help is left alone", 1, door.pings.size)
     }
 
     @Test
