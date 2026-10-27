@@ -143,7 +143,13 @@ class AgentSessionFeatureTest : FeatureTest() {
             began = scene.viewModel.readSession(project)?.retryFrom ?: 0L
         }
         check(began > 0) { "no failure was ever recorded, so there is no window to spend" }
-        scene.viewModel.tickAgents(began + scene.settings.reconnectMs + 1_000)
+        // **Past both deadlines, not just the window.** A tick that is not due does nothing at all,
+        // and the poll interval is four minutes while the floor window is thirty seconds — so a jump
+        // to "the window spent" is still three minutes before the session is due, and the test would
+        // sit waiting for a tick the app had correctly declined to take. The session's own
+        // `nextPollAt` is the other deadline, and it is asked rather than assumed.
+        val due = scene.viewModel.readSession(project)?.nextPollAt ?: 0L
+        scene.viewModel.tickAgents(maxOf(due, began + scene.settings.reconnectMs + 1_000))
         scene.await("it to give up") {
             scene.viewModel.sessionOf(project)?.state == AgentSession.State.STOPPED
         }
