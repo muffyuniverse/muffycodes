@@ -1169,13 +1169,32 @@ class AppViewModel @JvmOverloads constructor(
         // the ignore is completed by taking the path out of the index — the file stays on the
         // phone, editable, and stops being sent. Without this the button wrote a line, committed
         // it, and said "Ignoring x" while x went on being pushed.
-        val stillTracked = git?.open(project)?.use { repo ->
-            !GitService.untrack(repo, inside)
-        } ?: false
-        message = if (stillTracked) {
-            "Ignoring $inside, but it is still in the repository"
-        } else {
-            "Ignoring $inside"
+        // **Asked before the untrack, because untracking is what makes it untrue.** The question is
+        // "does GitHub have a copy of this path", and once the path is out of the index a fresh
+        // answer would be about a different state. It is also the question the person actually has:
+        // a file is ignored *because* it holds something that should not travel.
+        var pushed = false
+        var stillTracked = false
+        git?.open(project)?.use { repo ->
+            pushed = GitService.wasPushed(repo, inside)
+            stillTracked = !GitService.untrack(repo, inside)
+        }
+        // **Two sentences, because there are two situations and only one of them is dangerous.**
+        //
+        // Ignoring stops a path being *sent from now on*. It does not take back what was sent: the
+        // commit that carried it is still in the remote's history and `git cat-file` still prints it
+        // after the file is gone from a fresh clone. Measured, not assumed. So a person who ignores a
+        // file because it holds a key has not removed the key, and the sentence has to say so.
+        //
+        // **Every time, and for every path** - not only for names that look like secrets. The app
+        // cannot judge what is a secret, and a list of patterns would be right about the names
+        // somebody thought of and silently wrong about every other file.
+        message = when {
+            stillTracked -> "Ignoring $inside, but it is still in the repository"
+            pushed ->
+                "Ignoring $inside. Its earlier versions stay on GitHub — ignoring stops it being " +
+                    "sent from now on; it does not take back what was sent."
+            else -> "Ignoring $inside"
         }
         refresh()
         commitProject(project, "Ignored $inside")

@@ -488,23 +488,26 @@ fun SlimRow(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            Text(
-                // "to send", not "changed": a saved file is committed at once and is only
-                // waiting for the push, so calling it "changed" described git's state
-                // rather than the person's.
-                text = if (changes > 0) "$changes to send" else "up to date",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.width(8.dp))
-            // **To the left of Sync, and only when there is something to see.** "1 to send" is the
-            // question this button answers; with nothing to send there is no answer and no button.
+            // **The count is on the button, not beside it.** There used to be a caption reading
+            // "1 to send" and a button reading "See changes" — two things saying one thing, and the
+            // caption was the half a person could not press. Report 30 asked for them to be one:
+            // "see <n> changes" *is* a button. With nothing to send there is no count and no button,
+            // because there is no answer to give.
             if (onSeeChanges != null && changes > 0) {
                 TextButton(
                     onClick = onSeeChanges,
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                ) { Text("See changes") }
+                ) { Text(if (changes == 1) "See 1 change" else "See $changes changes") }
+            } else if (changes == 0) {
+                // **"up to date" stays**, because it is the answer to a question a person asks by
+                // looking at the header — and it is not a button, because there is nothing behind it.
+                Text(
+                    text = "up to date",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
+            Spacer(Modifier.width(8.dp))
             if (busy) {
                 CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
             } else if (changes > 0) {
@@ -765,6 +768,22 @@ private fun EntryRow(
                     else MaterialTheme.colorScheme.outline,
                 )
             }
+            // **Ignoring has its own button, beside the lock, because it is that kind of act.**
+            // Report 26: it lived in the three-dot menu, which is where the app puts things a person
+            // does not often need. Ignoring a file is the opposite - it is what somebody reaches for
+            // when they realise a key is in the repository, and a thing you reach for in a hurry
+            // should not be behind a menu. It sits with Lock for the same reason: both are "keep
+            // this one here".
+            IconButton(onClick = { actions.onIgnore(entry) }) {
+                Icon(
+                    // **The eye-with-a-slash is not in the imported set**, and one glyph is not
+                    // worth a dependency — the same decision the open padlock got. `Clear` reads as
+                    // "take this out", which is what ignoring does: out of what GitHub is told.
+                    Icons.Filled.Clear,
+                    contentDescription = "Stop sending ${entry.name} to GitHub",
+                    tint = MaterialTheme.colorScheme.outline,
+                )
+            }
         }
         if (!choosing && !system) Box {
             IconButton(onClick = { menu = true }) {
@@ -811,15 +830,6 @@ private fun EntryRow(
                     onClick = {
                         menu = false
                         actions.onCopy(entry)
-                    },
-                )
-                // **A folder too.** Ignoring a folder ignores everything below it, which is what a
-                // person means when they say "not this one" about a build directory.
-                DropdownMenuItem(
-                    text = { Text("Add to .gitignore") },
-                    onClick = {
-                        menu = false
-                        actions.onIgnore(entry)
                     },
                 )
                 if (!locked) {

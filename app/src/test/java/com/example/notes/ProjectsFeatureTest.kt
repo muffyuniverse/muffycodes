@@ -423,6 +423,78 @@ class ProjectsFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `ignoring a file GitHub already has says its earlier versions stay there`() {
+        // **Report 9's other half, and the sentence the operator asked for.** Ignoring stops a path
+        // being *sent from now on*; it does not take back what was sent. Measured: after untracking
+        // and pushing, a fresh clone has no file in its tree, but `git log --all` still finds the
+        // commit and `git cat-file` still prints the contents. A person ignoring a file because it
+        // holds a key has not removed the key, and the app has to say so.
+        scene.project("groceries")
+        val ws = scene.workspace!!
+        val dir = ws.projectDir("groceries")
+        val file = File(dir, "secret.txt")
+        val git = ProjectGit(ws, { null }, { GitAuthor("Muffy", "muffy@example.com") })
+        // A real remote, because "was it pushed" is a question about a real ref. A bare repository
+        // on disk is enough: a push writes `refs/remotes/origin/<branch>` exactly as GitHub would.
+        val bare = File(File(System.getProperty("java.io.tmpdir"), "remote-${System.nanoTime()}"), "groceries.git")
+        bare.mkdirs()
+        org.eclipse.jgit.api.Git.init(bare.absolutePath).use { it.close() }
+        git.open("groceries")!!.use { GitService.setRemoteUrl(it, bare.absolutePath) }
+
+        ws.write(file, "the key that must not travel")
+        git.commitOutcome("groceries", "a save")
+        val pushed = git.open("groceries")!!.use { repo -> GitService.push(repo, null) }
+        assertTrue(
+            "the push really reached the remote, or the rest of this proves nothing: ${pushed.message}",
+            pushed.success,
+        )
+        assertTrue(
+            "and the remote-tracking ref is there",
+            git.open("groceries")!!.use { repo ->
+                repo.findRef("refs/remotes/origin/${repo.branch}") != null
+            },
+        )
+
+        scene.viewModel.ignoreInGit(file)
+
+        val said = scene.viewModel.message.orEmpty()
+        assertTrue("it says the file is ignored: $said", said.contains("Ignoring secret.txt"))
+        assertTrue(
+            "and that earlier versions stay on GitHub: $said",
+            said.contains("earlier versions stay on GitHub"),
+        )
+        assertTrue(
+            "and what ignoring does not do: $said",
+            said.contains("does not take back what was sent"),
+        )
+    }
+
+    @Test
+    fun `ignoring a file that was never pushed says only that it is ignored`() {
+        // **The other sentence, and the reason there are two.** A file saved and never synced is in
+        // the local history and not on GitHub, so warning that "earlier versions stay on GitHub"
+        // would be false - on the one screen where a person is trying to be careful. The warning is
+        // worth something only if its absence means something.
+        scene.project("groceries")
+        val ws = scene.workspace!!
+        val dir = ws.projectDir("groceries")
+        val file = File(dir, "notes.txt")
+        val git = ProjectGit(ws, { null }, { GitAuthor("Muffy", "muffy@example.com") })
+        ws.write(file, "never sent anywhere")
+        git.commitOutcome("groceries", "a save")
+        // No remote at all: this project stays on the phone.
+
+        scene.viewModel.ignoreInGit(file)
+
+        val said = scene.viewModel.message.orEmpty()
+        assertTrue("it says the file is ignored: $said", said.contains("Ignoring notes.txt"))
+        assertFalse(
+            "and says nothing about GitHub, because it was never there: $said",
+            said.contains("GitHub"),
+        )
+    }
+
+    @Test
     fun `a local project keeps its versions like any other`() {
         scene.viewModel.createLocalProject("scratch")
         scene.await("the local project", 30_000) {

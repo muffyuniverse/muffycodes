@@ -292,6 +292,34 @@ object GitService {
     }
 
     /**
+     * Whether [path] was ever **pushed** — that is, whether GitHub has a copy of it.
+     *
+     * **Asked of the remote-tracking ref, not of `HEAD`.** `refs/remotes/origin/<branch>` is git's
+     * own record of what the remote holds, so a path in that history is a path that left this phone.
+     * The local history is not the same question: a file saved and never synced is in `HEAD` and not
+     * on GitHub, and telling a person "its earlier versions stay on GitHub" about a file that never
+     * got there would be a false warning on the one screen where they are trying to be careful.
+     *
+     * **The walk is bounded by the branch tip, not by every ref.** A stash or a dangling commit is
+     * not something GitHub was told about.
+     */
+    fun wasPushed(repo: Repository, path: String): Boolean = try {
+        val remoteRef = repo.findRef("refs/remotes/origin/${repo.branch}") ?: return false
+        RevWalk(repo).use { walker ->
+            walker.markStart(walker.parseCommit(remoteRef.objectId))
+            // **Does this path exist in any commit the remote holds?** That is the question, and
+            // `TreeWalk.forPath` answers it for one commit without a diff: a non-null walk means the
+            // path was there. No filter, no patch, no list of every file in every commit.
+            walker.any { commit -> TreeWalk.forPath(repo, path, commit.tree) != null }
+        }
+    } catch (t: Throwable) {
+        // **A question that cannot be answered is answered "no".** The warning is the cautious
+        // sentence; refusing to ignore a file because the repository could not be read would be a
+        // worse failure than a warning that does not appear.
+        false
+    }
+
+    /**
      * What became of an attempt to write a change into a repository.
      *
      * Three outcomes, not two. Returning `String?` — an id, or null — made "there was

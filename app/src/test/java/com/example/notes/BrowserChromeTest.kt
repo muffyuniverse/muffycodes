@@ -192,10 +192,11 @@ class BrowserChromeTest {
         }
         browser()
 
-        // The row says how many; the button says what pressing it does. It carried the
-        // count for a while and read as a second, competing number — reported from the live
-        // log as "why sync button itself started to show a number? remove it".
-        awaitText("1 to send")
+        // **One thing, and it is a button.** There used to be a caption reading "1 to send" and a
+        // button reading "See changes" beside it — the same fact twice, and the half a person would
+        // want to press was the one without the number. Report 30 asked for them to be one:
+        // "see <n> changes" *is* the button, and there is no separate caption any more.
+        awaitText("See 1 change")
         compose.onNodeWithText("Sync").assertIsEnabled()
         compose.onNodeWithText("Sync").performClick()
     }
