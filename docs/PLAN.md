@@ -65,12 +65,21 @@ the three it had lost (#9, #20, #21) were the three that were not about code I h
 **Two closed themselves.** #16 and #18 were answered by the folder merge *deleting* the level they
 were about. A report can become moot, and "closed" is not always "fixed".
 
-### Open — 2
+### Open — 1
 
 | # | Report | What it needs |
 |---|---|---|
-| 29 | "see changes" should be an enterable list; editor needs a diff mode with a two-commit picker; view/edit/diff as separate modes | step 6 |
-| 36 | chat as many bubbles; remove `ask`/`conclude`; message ends with a plain message; drop the token column; footer with time, date, id; time column back in the session log | **specified in `PLAN-chat.md`** — bubbles, per-bubble footer (id · time · thinking · output), line height cap, fullscreen pages |
+| 29 | "see changes" should be an enterable list; editor needs a diff mode with a two-commit picker; view/edit/diff as separate modes | the last one — `f833d54`-style work in the editor and the changes list |
+
+**36 is closed** (`f8068bc`, `1e322a3`), and it was the biggest one. The conversation is a list of
+bubbles now: the operator's message, a call with its result, and the agent's own words as markdown.
+The navigator that made a person press ‹ to see the call behind an answer is gone, along with
+`chatTurn` and the two methods that moved it — a list scrolls, so the position is the scroll's. The
+token column is gone and its space carries the row's id and time, plus thinking and output when the
+row knows them (a zero is left out rather than shown: a zero is a measurement, and "not recorded" is
+a different fact). A message over the line cap says how many lines it is not showing, and a bubble
+opens fullscreen as a page view rather than as a tall box inside a taller list. `PLAN-chat.md` has
+the whole specification, with every step marked done.
 
 ## Part 2 · The decisions, and the reasons
 

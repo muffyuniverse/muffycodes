@@ -263,6 +263,12 @@ object AgentChat {
                 AgentLog.NOTE -> when (row.name) {
                     // The ping's own note belongs to the collapsed idle line, not to a bubble.
                     PING -> Unit
+                    // **`ended` is a fact about the loop, not about the conversation.** It says why
+                    // the turn stopped — "no tool call, so the words are the conclusion" — which is
+                    // bookkeeping about the app's own decision. The words themselves are the `agent`
+                    // note right beside it, and drawing both would put the same ending on screen
+                    // twice with one of them phrased as machinery.
+                    "ended" -> Unit
                     "agent" -> out.add(
                         Bubble(
                             caption = "agent",

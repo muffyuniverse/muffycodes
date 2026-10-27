@@ -271,8 +271,17 @@ class AgentChatScreenTest {
         compose.onNodeWithText("more lines", substring = true).assertExists()
         // ...and the words are all still there, because the cap is a drawing rule rather than a
         // truncation: the record holds what the agent said and the page view shows all of it.
+        // **The last bubble is the agent's, and the thirty lines are all in it.** Said as a count
+        // of what is in the bubble rather than as a comparison against a number the test wrote,
+        // because the reply is thirty lines only if nothing else joined it - and the message here
+        // is the useful part of a failure.
         val agent = scene.viewModel.chatBox!!.bubbles.last()
-        assertTrue("the agent's words are the whole thirty lines", agent.body.lines().size == 30)
+        assertEquals("the last bubble is the agent's words", "agent", agent.caption)
+        assertEquals(
+            "all thirty lines are in it: ${agent.body.take(120)}",
+            30,
+            agent.body.lines().size,
+        )
     }
 
     @Test
