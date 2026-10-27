@@ -32,7 +32,7 @@ class AgentSessionsTest {
     @Test
     fun `a session is written where the app looks for it, and read back whole`() {
         val session = AgentSession(project = "shopping")
-            .asked(at = 1_700_000_000_000)
+            .needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 1_700_000_000_000)
             .reminded()
             .reminded()
 
@@ -40,7 +40,7 @@ class AgentSessionsTest {
         val read = store.read().single()
 
         assertTrue("the file is in .muffy, beside the locks", file.isFile)
-        assertEquals("asked", read.state, AgentSession.State.ASKED)
+        assertEquals("stopped, needing help", read.state, AgentSession.State.STOPPED)
         assertEquals("and its clock came with it", 1_700_000_000_000, read.askedAt)
         assertEquals("and how many reminders were spent", 2, read.reminders)
         assertEquals("so the next one is the second", "2nd reminder · shopping: the agent asked something", read.notice())
@@ -51,11 +51,11 @@ class AgentSessionsTest {
         // The failure this exists for: the app is killed while the agent is waiting for an
         // answer, and on the next open the session has to still be `asked` with its clock — or
         // the person is reminded from minute zero of a question asked yesterday.
-        store.put(AgentSession("shopping").asked(at = 1_000).reminded())
+        store.put(AgentSession("shopping").needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 1_000).reminded())
 
         val reopened = AgentSessions(account).read().single()
 
-        assertEquals(AgentSession.State.ASKED, reopened.state)
+        assertEquals(AgentSession.State.STOPPED, reopened.state)
         assertEquals("the reminder count survived too", 1, reopened.reminders)
         assertTrue("and the ladder continues where it was", reopened.reminderDue(1_000 + 2 * AgentSession.REMIND_MS))
     }
@@ -113,10 +113,10 @@ class AgentSessionsTest {
         store.put(AgentSession("shopping"))
         store.put(AgentSession("notes"))
 
-        store.put(AgentSession("notes").asked(at = 5))
+        store.put(AgentSession("notes").needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 5))
 
         assertEquals("both are still there", 2, store.read().size)
-        assertEquals("and the second one changed", AgentSession.State.ASKED, store.read().first { it.project == "notes" }.state)
+        assertEquals("and the second one changed", AgentSession.State.STOPPED, store.read().first { it.project == "notes" }.state)
     }
 
     @Test

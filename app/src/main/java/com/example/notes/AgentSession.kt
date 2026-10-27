@@ -439,6 +439,22 @@ data class AgentSession(
     )
 
     /**
+     * **Stopped, needing a person, with the reminder clock starting now.**
+     *
+     * The one construction that produces a session the app will notify about. It used to be `asked`
+     * — an agent that had put a question to the person — and the state it produced (`ASKED`) is
+     * gone with the tool. What remains is the situation the operator described: the ladder has tried
+     * and given up, so somebody has to look.
+     *
+     * `askedAt` is set here because it is what the reminder ladder counts from, and for a session
+     * that stopped it means "when it started needing somebody" — which is the same clock, under a
+     * name that no longer matches its only caller. It is kept rather than renamed because it is a
+     * persisted field: a rename would be a file format change for no gain.
+     */
+    fun needingHelp(why: StopReason, at: Long, words: String = ""): AgentSession =
+        stopped(why, words).copy(askedAt = at)
+
+    /**
      * The session stopped.
      *
      * A turn that ends in `Stopped` is not always the session stopping: a refusal the agent can

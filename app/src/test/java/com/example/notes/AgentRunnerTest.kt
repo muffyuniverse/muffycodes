@@ -391,7 +391,7 @@ class AgentRunnerTest {
 
         // Asked, and then a command lands.
         AgentSessions(ws.accountDir).put(
-            AgentSessions(ws.accountDir).read().single().asked(1_000),
+            AgentSessions(ws.accountDir).read().single().needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 1_000),
         )
         bg.start(ws.projectDir("shopping"), Call("c1", "tree", "{}")) { "0 one" }
         runner.tick(5_001)
@@ -660,14 +660,14 @@ class AgentRunnerTest {
         // all, because a poll was something only `wait` asked for.
         on("shopping", now = 1_000)
         val sessions = AgentSessions(ws.accountDir)
-        sessions.put(sessions.read().single().asked(1_000))
+        sessions.put(sessions.read().single().needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 1_000))
         val door = PingDoor()
         val runner = runner(door)
 
         runner.tick(1_000 + AgentSession.POLL_MS)
         settle(runner)
         assertEquals("a question is kept warm", 1, door.pings.size)
-        assertEquals("and it is still a question", AgentSession.State.ASKED, runner.sessions().single().state)
+        assertEquals("and it still needs help", AgentSession.State.STOPPED, runner.sessions().single().state)
 
         // The person stops it: nothing more is spent on a conversation they switched off.
         runner.stop("shopping")
@@ -680,7 +680,7 @@ class AgentRunnerTest {
     fun `the reminder is the settings' interval, repeated, and it stops when answered`() {
         on("shopping", now = 1_000)
         AgentSessions(ws.accountDir).put(
-            AgentSessions(ws.accountDir).read().single().asked(2_000),
+            AgentSessions(ws.accountDir).read().single().needingHelp(AgentSession.StopReason.PIN_REFUSED, at = 2_000),
         )
         settings.keepRemind(5)
         val runner = runner()

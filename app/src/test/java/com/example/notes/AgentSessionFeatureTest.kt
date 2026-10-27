@@ -42,9 +42,29 @@ class AgentSessionFeatureTest : FeatureTest() {
     }
 
     /** Refuses the first [times] pings as the provider would, then warms. */
-    private class FlakyDoor(private val times: Int, private val code: Int = 503) : Door {
+    /**
+     * A door that refuses, for [times] attempts.
+     *
+     * **[failTurn] makes `turn` refuse too**, which is what a person's own message needs: a session
+     * that gives up on a *ping* takes several ticks to get there, and a test about what happens
+     * afterwards should not have to drive those ticks first.
+     */
+    private class FlakyDoor(
+        private val times: Int,
+        private val code: Int = 503,
+        private val failTurn: Boolean = false,
+    ) : Door {
         var attempts = 0
-        override fun turn(request: Request) = Result.success(Reply("nothing to change", emptyList()))
+        override fun turn(request: Request): Result<Reply> {
+            if (!failTurn) return Result.success(Reply("nothing to change", emptyList()))
+            attempts++
+            return if (attempts <= times) {
+                Result.failure(Refused(code, "OpenRouter answered $code"))
+            } else {
+                Result.success(Reply("nothing to change", emptyList()))
+            }
+        }
+
         override fun ping(request: Request): Result<Unit> {
             attempts++
             return if (attempts <= times) {
@@ -231,25 +251,38 @@ class AgentSessionFeatureTest : FeatureTest() {
         assertEquals("and nothing was asked", 1, door.asked.size)
     }
 
-    // ---- asked --------------------------------------------------------------
+    // ---- needing help -------------------------------------------------------
 
     @Test
-    fun `a question needs a person at once, and the reminder waits for the interval`() {
+    fun `a wall needs a person at once, and the reminder waits for the interval`() {
+        // **The one situation worth a notification**, in the operator's own words: something went
+        // wrong and the ladder ran out. It used to be a question the agent had asked; the tool is
+        // gone, so the same machinery is driven by the case that remains.
         listening()
         scene.project("groceries")
-        val door = ScriptedDoor(
-            Reply("", listOf(Call("c1", "ask", """{"question":"Which branch?"}"""))),
-        )
-        openChat("groceries", door)
+        // **The turn succeeds; the pings that follow it do not.** That is the shape of the real
+        // failure this state is for: the work went fine, then the provider started refusing, the
+        // ladder tried, and it gave up. A *turn* failure is retryable by design — the ladder owns it
+        // — so a session only stops when the keepalive's own attempts are spent.
+        openChat("groceries", ScriptedDoor(Reply("done")))
+        scene.settings.keepReconnect(SettingsStore.MIN_RECONNECT_SECONDS)
+        scene.viewModel.chatDoor = { FlakyDoor(times = Int.MAX_VALUE, code = 401) }
         scene.viewModel.startAgent("groceries")
         scene.viewModel.sendChat("do it")
-        scene.await("the question") {
-            scene.viewModel.sessionOf("groceries")?.state == AgentSession.State.ASKED
+        scene.await("the turn to finish") {
+            scene.viewModel.sessionOf("groceries")?.sub == AgentSession.Sub.FINISHED
+        }
+        // Now the ladder: each tick is one attempt, and the window is the floor.
+        var guard = 0
+        while (scene.viewModel.sessionOf("groceries")?.state != AgentSession.State.STOPPED &&
+            guard++ < 40
+        ) {
+            tick("groceries")
         }
 
         assertEquals(
             "one sentence, immediately",
-            listOf("groceries: the agent asked something"),
+            listOf("groceries: the agent stopped"),
             notices,
         )
         assertEquals(
@@ -265,7 +298,7 @@ class AgentSessionFeatureTest : FeatureTest() {
         scene.viewModel.tickAgents(askedAt + AgentSession.REMIND_MS)
         assertEquals(
             "then the second sentence says which one it is",
-            "1st reminder · groceries: the agent asked something",
+            "1st reminder · groceries: the agent stopped",
             notices.last(),
         )
         assertTrue(
@@ -274,7 +307,7 @@ class AgentSessionFeatureTest : FeatureTest() {
         )
         assertEquals(
             "and it is still waiting for the person",
-            AgentSession.State.ASKED,
+            AgentSession.State.STOPPED,
             scene.viewModel.sessionOf("groceries")?.state,
         )
     }
@@ -285,15 +318,20 @@ class AgentSessionFeatureTest : FeatureTest() {
         // A reminder that ignored the setting would pass every test written with the default.
         listening()
         scene.project("groceries")
-        val door = ScriptedDoor(
-            Reply("", listOf(Call("c1", "ask", """{"question":"Which branch?"}"""))),
-        )
-        openChat("groceries", door)
         scene.settings.keepRemind(5)
+        openChat("groceries", ScriptedDoor(Reply("done")))
+        scene.settings.keepReconnect(SettingsStore.MIN_RECONNECT_SECONDS)
+        scene.viewModel.chatDoor = { FlakyDoor(times = Int.MAX_VALUE, code = 401) }
         scene.viewModel.startAgent("groceries")
         scene.viewModel.sendChat("do it")
-        scene.await("the question") {
-            scene.viewModel.sessionOf("groceries")?.state == AgentSession.State.ASKED
+        scene.await("the turn to finish") {
+            scene.viewModel.sessionOf("groceries")?.sub == AgentSession.Sub.FINISHED
+        }
+        var guard = 0
+        while (scene.viewModel.sessionOf("groceries")?.state != AgentSession.State.STOPPED &&
+            guard++ < 40
+        ) {
+            tick("groceries")
         }
         val askedAt = scene.viewModel.sessionOf("groceries")!!.askedAt
 
@@ -314,23 +352,32 @@ class AgentSessionFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `an agent in ask is not polled, however long the person takes`() {
+    fun `a session that needs help is not polled, however long the person takes`() {
+        // **A stopped session is not warmed.** Its problem is the person's to fix — a refused key,
+        // an empty balance — and a ping every few minutes would spend money on a session that
+        // cannot work while charging somebody to be reminded of it.
         listening()
         scene.project("groceries")
-        val door = ScriptedDoor(
-            Reply("", listOf(Call("c1", "ask", """{"question":"Which branch?"}"""))),
-        )
-        openChat("groceries", door)
+        openChat("groceries", ScriptedDoor(Reply("done")))
+        scene.settings.keepReconnect(SettingsStore.MIN_RECONNECT_SECONDS)
+        val broken = FlakyDoor(times = Int.MAX_VALUE, code = 401)
+        scene.viewModel.chatDoor = { broken }
         scene.viewModel.startAgent("groceries")
         scene.viewModel.sendChat("do it")
-        scene.await("the question") {
-            scene.viewModel.sessionOf("groceries")?.state == AgentSession.State.ASKED
+        scene.await("the turn to finish") {
+            scene.viewModel.sessionOf("groceries")?.sub == AgentSession.Sub.FINISHED
         }
-        val asked = door.asked.size
+        var guard = 0
+        while (scene.viewModel.sessionOf("groceries")?.state != AgentSession.State.STOPPED &&
+            guard++ < 40
+        ) {
+            tick("groceries")
+        }
+        val asked = broken.attempts
 
         repeat(10) { tick("groceries") }
 
-        assertEquals("no new request while a person is being waited for", asked, door.asked.size)
+        assertEquals("no new request while a person is needed", asked, broken.attempts)
     }
 
     // ---- stopped ------------------------------------------------------------
@@ -370,7 +417,7 @@ class AgentSessionFeatureTest : FeatureTest() {
         scene.settings.keepReconnect(SettingsStore.MIN_RECONNECT_SECONDS)
         // **One door, not a new one per poll.** A lambda that built a door on every call would
         // reset its own attempt count, and a failure count that resets is not a failure count.
-        val broken = FlakyDoor(times = Int.MAX_VALUE, code = 401)
+        val broken = FlakyDoor(times = Int.MAX_VALUE, code = 401, failTurn = true)
         scene.viewModel.chatDoor = { broken }
         scene.viewModel.startAgent("groceries")
 
