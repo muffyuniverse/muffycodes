@@ -787,7 +787,16 @@ class AgentSessionFeatureTest : FeatureTest() {
         val project = File(scene.viewModel.workspace!!.accountDir, "groceries")
         val due = scene.viewModel.sessionOf("groceries")!!.nextPollAt
 
-        project.deleteRecursively()
+        // **Moved away rather than deleted, because the test is about the path being gone.**
+        // `deleteRecursively()` is a tree walk, and on a checkout with a `.git` in it the walk can
+        // leave something behind — which fails the precondition below and says nothing about the
+        // behaviour under test. A rename makes the path disappear in one step, which is exactly the
+        // fact the tick is being asked about.
+        val away = File(project.parentFile, "groceries-gone")
+        assertTrue(
+            "the folder could be moved away: ${project.list()?.joinToString()}",
+            project.renameTo(away),
+        )
         assertFalse("the folder is really gone before the tick", project.isDirectory)
         scene.viewModel.tickAgents(due)
         // **The tick answers on the main thread.** It posts the new session list there, so the
