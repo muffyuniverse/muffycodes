@@ -45,19 +45,24 @@ would have been renamed.
 | 28 | 149 | is "wait for the model" different from "stop after"? | **A question, not a bug.** Needs an answer in the UI, not code |
 | 37 | 149 | "showing first n of m" — stale prompt? | **Yes, stale.** `AgentPrompt.kt:81` says a command past the limit is "stopped, and says so". The code writes the result to a file and returns the path. The prompt contradicts the tool |
 
-**#37 is the one real defect in this group.** The prompt tells the model a lie about its own
-tools, and it is one sentence.
+**#37 is not a defect, and I was wrong to call it one.** "showing first n of m" appears nowhere in
+the current prompt — it was removed already. What remains is correct for the path it describes: a
+direct call that passes the limit *is* stopped (`Timeouts.kt:112` says "stopped after 60 s; nothing
+was kept"), while a `background` call answers with a path. The prompt and the code agree.
+
+**So Group A is one question and no defect.** #28 needs an answer in the UI, not a fix.
 
 ### Group B · Small UI — six reports, six screens
 
 | # | Build | Report | Where |
 |---|---|---|---|
-| 3 | 103 | + menu options need backgrounds, they overlap file rows | `BrowserScreen.kt:222` has a `Surface` with elevation — **needs checking against the report, not assumed** |
-| 4 | 104 | + menu: align right, width just past the widest word | same menu |
-| 5 | 104 | adding/deleting a project shows only after leaving the menu | `AppViewModel.refreshChanges` / project list recomposition |
 | 16 | 129 | hidden files visible but read-only, system lock a distinct non-interactive colour | `BrowserScreen.kt:819` region — lock rendering |
 | 21 | 149 | gitignore as a per-row button, not a 3-dot item | `BrowserScreen.kt:819` — confirmed still in the menu |
-| 22 | 149 | lock button changes only show after re-entering the screen | `7f540ca` claims this; **needs verification, may be closed** |
+
+**Verified closed since the first pass:** #3 and #4 (the + menu's `Surface` and `IntrinsicSize.Max`,
+with the report quoted at `BrowserScreen.kt:215`), #5 (the project list refreshes after an add or
+a delete — the report is quoted at `AppViewModel.kt:1966`), #22 (the lock redraws on the tap,
+`BrowserScreen.kt:670`). Group B is **two** real items, not six.
 @ from 103 and 104 builds are probably closed already
 
 ### Group C · Medium — one feature each
