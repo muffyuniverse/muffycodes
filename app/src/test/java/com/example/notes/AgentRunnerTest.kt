@@ -7,6 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 /**
  * The clock on its own, with no screen behind it.
@@ -34,6 +35,27 @@ class AgentRunnerTest {
      * should: the tick's whole job is the cache, and a turn from here is a second door into a
      * conversation the person is not talking in.
      */
+    /**
+     * A door whose ping can be held open, so "did two go out at once" is observed rather than timed.
+     *
+     * **Not a sleep.** A test that proved serialism by waiting would pass on a fast machine and fail
+     * on a slow one, and would be measuring the runner's speed rather than its shape. This holds the
+     * first ping inside the door until the test lets it go, which makes the second ping's absence a
+     * fact instead of a guess.
+     */
+    private class HeldDoor : Door {
+        val pings = mutableListOf<Request>()
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        override fun turn(request: Request): Result<Reply> = Result.success(Reply("nothing to do"))
+        override fun ping(request: Request): Result<Unit> {
+            pings.add(request)
+            entered.countDown()
+            release.await()
+            return Result.success(Unit)
+        }
+    }
+
     private class PingDoor(private val answer: () -> Result<Unit> = { Result.success(Unit) }) : Door {
         val pings = mutableListOf<Request>()
         var turns = 0
@@ -145,6 +167,32 @@ class AgentRunnerTest {
         settle(service)
 
         assertEquals("one ping between them", 1, floor.pings.size)
+    }
+
+    @Test
+    fun `two projects due at once go out one at a time, and the second waits its turn`() {
+        // **The operator's ruling, and the reason it is a test rather than a comment:** "keep it
+        // serial - it will be easier to manage, predictable and simple". A single-threaded executor
+        // is one word to change, so the decision needs something that fails when it is changed.
+        //
+        // What is being pinned is not speed. It is that the app never has two of its own requests
+        // in flight at the same time: a ping buys warmth cheaply, and three at once is three times
+        // the bill for the same warmth.
+        on("shopping", now = 1_000)
+        on("work", now = 1_000)
+        val door = HeldDoor()
+        val runner = runner(door)
+        val due = runner.sessions().first().nextPollAt
+
+        runner.tick(due)
+        // The first ping is inside the door and cannot return. If the runner were parallel the
+        // second would be inside it too, which is exactly what the assertion below would see.
+        assertTrue("the first ping went out", door.entered.await(20, TimeUnit.SECONDS))
+        assertEquals("and nothing else did", 1, door.pings.size)
+
+        door.release.countDown()
+        settle(runner)
+        assertEquals("both went out in the end", 2, door.pings.size)
     }
 
     // ---- what the phone took, and what it did not ---------------------------

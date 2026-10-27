@@ -46,33 +46,86 @@ class AgentRunner(
 
     private val sessions = AgentSessions(ws.accountDir)
 
+    /**
+     * **One request at a time, on purpose.**
+     *
+     * The per-project guard above already allows several projects to be due at once, so this thread
+     * is the thing that decides how many of them actually go out together: one. The operator's ruling
+     * (2026-10-27) is that serial is easier to manage, predictable and simple — and the alternatives
+     * each cost something this app does not want to pay:
+     *
+     * - **Three projects due is three requests in flight**, and a ping's whole point is buying warmth
+     *   cheaply. Three at once is three times the bill for the same warmth, and a phone on a battery
+     *   doing three simultaneous completions is a phone that gets hot.
+     * - **Concurrency needs a queue policy that can be explained**: what happens when four are due,
+     *   which one goes first, whether a person's turn may jump ahead of a ping. Serial answers all of
+     *   that by not asking it.
+     *
+     * The cost is honest and it is paid by whoever is at the back: a ping on a slow model makes the
+     * next project wait. That is the trade — a delay a person can predict, instead of a bill and a
+     * temperature nobody can.
+     *
+     * **What is *not* serialised:** a `background` call, which gets a thread of its own
+     * ([Background.real]), and a turn from the screen, which does not run here at all. This queue is
+     * the app's own keepalive and wake work, which nothing is waiting on.
+     */
     private val worker = Executors.newSingleThreadExecutor()
 
-    /** Projects with a check in flight, so one slow check is not started twice in this process. */
+    /**
+     * **The unit of concurrency is the agent, and today an agent is its project.**
+     *
+     * These are agent ids, not project names — they only look the same because one project has one
+     * agent. A subagent will be `"<project>/<name>"`, and everything below keeps working unchanged:
+     * two agents of one project are two ids, so neither blocks the other, and two agents writing the
+     * same file is a *scope* rule rather than a threading one (see `docs/PLAN.md`).
+     *
+     * **Keyed this way on purpose, before there was a second kind of agent.** The alternative was to
+     * write "project" everywhere and rename later, which is the change that goes wrong: a guard whose
+     * name says project will be *reasoned about* as a project, and a subagent added under it would be
+     * serialised by a set that was never meant to hold two.
+     */
     private val inFlight = mutableSetOf<String>()
 
-    /** Projects a screen turn is running, which the tick must not disturb. Guarded by [inFlight]. */
+    /** Agents a screen turn is running, which the tick must not disturb. Guarded by [inFlight]. */
     private val held = mutableSetOf<String>()
 
     /**
-     * The projects with a check or a turn in flight — **the tick's own guard, and the screen's.**
+     * The agents with a check or a turn in flight — **the tick's own guard, and the screen's.**
      *
      * A turn from the screen and a wake from the tick would otherwise be two requests on one
      * conversation at the same time, writing two endings and two sets of results. The screen takes
-     * the same claim a ping does, so the tick sees the project as busy and leaves it alone.
+     * the same claim a ping does, so the tick sees the agent as busy and leaves it alone.
      */
     fun polling(): Set<String> = synchronized(inFlight) { (inFlight + held).toSet() }
 
+    /** Whether [project]'s agent is busy — **the comparison, in one place.**
+     *
+     * `polling()` holds agent ids, and a caller holding a project name must not compare the two
+     * directly: they are equal today and will not be the day a project has a subagent, and the
+     * mistake would be silent (the screen would think an agent was idle while it worked).
+     */
+    fun isBusy(project: String): Boolean = agentId(project) in polling()
+
     /**
-     * Says "a turn is being taken for [project]" until the returned function is called.
+     * Says "a turn is being taken for [agent]" until the returned function is called.
      *
      * Separate from [inFlight] rather than the same set: a turn and a ping may overlap for a moment
      * (a ping in flight while the person types), and one finishing must not release the other's claim.
      */
-    fun hold(project: String): () -> Unit {
-        synchronized(inFlight) { held += project }
-        return { synchronized(inFlight) { held -= project } }
+    fun hold(agent: String): () -> Unit {
+        synchronized(inFlight) { held += agent }
+        return { synchronized(inFlight) { held -= agent } }
     }
+
+    /**
+     * The id of the agent that owns a project's conversation.
+     *
+     * **A function, not a string concatenation at each call site**, because it is the one place that
+     * will change when a project has more than one agent. Everything that claims, releases or checks
+     * work asks this — so `inFlight` holds ids rather than project names without any caller knowing
+     * that a subagent is possible at all.
+     */
+    fun agentId(project: String): String = project
 
     /** How often a waiting conversation is kept warm, from Settings — the person's number. */
     private val pollMs: Long get() = settings.pollMs
@@ -147,9 +200,12 @@ class AgentRunner(
             // **The setting decides, not the session's copy of it.** The person may have changed
             // the interval, the switch or the ceiling since this session was written, and a tick is
             // when that matters.
-            if (finished.isNotEmpty() && current.project !in polling()) {
+            if (finished.isNotEmpty() && agentId(current.project) !in polling()) {
                 wake(current, now, finished)
-            } else if (current.warmDue(now, keepAlive, pollMs, warmMs) && current.project !in polling()) {
+            } else if (
+                current.warmDue(now, keepAlive, pollMs, warmMs) &&
+                agentId(current.project) !in polling()
+            ) {
                 warm(current, now)
             }
         }
@@ -210,7 +266,7 @@ class AgentRunner(
             changed(sessions.read())
             return
         }
-        synchronized(inFlight) { inFlight += project }
+        synchronized(inFlight) { inFlight += agentId(project) }
         // **The claim, written before the work goes out, and it names which kind of work it was.** A
         // wake also moves the watermark, so the same finished file cannot wake the agent twice.
         put(if (waking == null) session.polled(now) else session.woken(now), speak = false)
@@ -304,7 +360,11 @@ class AgentRunner(
                 )
             }
             changed(sessions.read())
-            synchronized(inFlight) { inFlight -= project }
+            // **The same id the claim was made with.** `project` and `agentId(project)` are the same
+            // string today, so this line looks like a no-op either way - and the day they differ, a
+            // release that named the project would leave the claim standing and wedge the agent for
+            // ever. The pair is what makes the guard correct, not either line alone.
+            synchronized(inFlight) { inFlight -= agentId(project) }
         }
     }
 

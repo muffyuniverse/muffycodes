@@ -158,7 +158,12 @@ fun SettingsScreen(
             // giving them the outer rhythm — on top of a button's own padding — left a gap
             // wide enough to look like two screens. Reported from the live log: "between
             // user account and buttons below it is too much space".
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            // **The rows are one thing, so the space between them is one pixel, not two.** Reported
+            // twice from the live log - "between user account and buttons below it is too much
+            // space", then "and signed in as block still has gaps between rows that should be
+            // halved at least" - and the second report is the useful one: the gap that was left
+            // was between the three *lines*, not between the block and what followed.
+            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                 Text("Signed in as", style = MaterialTheme.typography.labelMedium)
                 Text(
                     text = account?.login ?: "Nobody yet",
@@ -221,16 +226,31 @@ fun SettingsScreen(
             //
             // The word is in the title and in no row: inside this block it is the only thing on the
             // screen, so repeating it in six labels says nothing six times.
+            // **The block is drawn as a block: a rule above it, a rule below it.** The word AGENT
+            // was already in the title and in no row, but nothing said where the block *ended* -
+            // Keepalive, the record, reminders and the theme all followed at the same rhythm, so
+            // "everything the agent needs" was a claim about the order rather than something the
+            // screen showed. Reported from the live log: "block all agent related stuff together
+            // and use if possible horisontal lines to delineate all what relates to agent
+            // management".
+            //
+            // Two weights, and the difference is the meaning: the sections inside the block keep
+            // the light divider, and the block itself is bounded by the heavier one. A screen where
+            // every rule is the same weight has no blocks, only paragraphs.
+            HorizontalDivider(
+                modifier = Modifier.padding(top = 4.dp),
+                color = MaterialTheme.colorScheme.outline,
+            )
             Text(
                 "AGENT",
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.primary,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
             )
             Text(
-                "One model, one key, and what it is allowed to use. Everything here is about the " +
-                    "agent on this phone.",
+                "One model, one key, and what it is allowed to use. Everything between this rule and " +
+                    "the one below it is about the agent on this phone.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -510,7 +530,13 @@ fun SettingsScreen(
                 placeholder = "everything",
                 onValueChange = { settings.keepSession(it) },
             )
-            RowDivider()
+            // **The block ends here.** Reminders, the trace and the theme are the app's, not the
+            // agent's: a reminder fires whether or not a model is configured, and the trace is the
+            // app's own record. The heavier rule is the only thing on the screen that says so.
+            HorizontalDivider(
+                modifier = Modifier.padding(top = 4.dp),
+                color = MaterialTheme.colorScheme.outline,
+            )
 
             // ---- how often a thing that needs a person says so ----
             // The poll is the agent working; this is the app asking somebody to look at it. It

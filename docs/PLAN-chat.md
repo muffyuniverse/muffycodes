@@ -43,8 +43,9 @@ One footer per bubble, on the bubble, saying **id · time · thinking · output*
 ## Where the time comes from — and why it is `session.log`
 
 `session.log` is the evidence: *every event, in the order it happened*. A chronology with no times
-is the one thing it could not answer, so **it gains a time column**. `context.log` does not: the
-model has no use for when a row was written, and that file is the model's view of its own memory.
+is the one thing it could not answer, so **it gains a time column** — in the same edit that adds
+`answers` (see above). `context.log` does not: the model has no use for when a row was written, and
+that file is the model's view of its own memory.
 
 This keeps the model's conversation byte-identical — `Agent.messages()` builds from a row's `body`,
 and a time is not part of it.
@@ -54,17 +55,47 @@ is the file the chat was assumed to read. It is not. The chat box reads `session
 `context.log` is written for the model and never read back. Putting the clock in the wrong file
 would have meant a footer with no time and a context with a useless column.
 
-## What a result row does and does not say
+## The `answers` column — the pairing becomes a record
 
 **A `GOT` row does not name the call it answers.** It carries the tool name and the body. The pairing
 is positional: `AgentChat.lines()` and `Agent.messages()` each keep a deque of unanswered calls and
-pop the oldest when a result arrives. It works because calls and results are written adjacently, one
-at a time — but nothing in the file *states* the pairing.
+pop the oldest when a result arrives. It works because the writer interleaves — `CALL GOT CALL GOT` —
+so the deque is never more than one deep.
 
-This is recorded here because the footer makes it matter: a bubble is a call **and** its result, and
-that grouping is currently a convention held by two deque implementations. The plan does not change
-it (the order is a rule the writer keeps), but a bubble that shows its call's id next to its
-result's id makes the convention visible enough to be checked.
+**The agent can call several tools in one reply, and there is no cap.** `Agent.work()` loops over
+`reply.calls` and writes a `CALL`/`GOT` pair per call. A reply with three calls writes six rows. Two
+tests already pin the *shape* ("two calls in one reply are one turn") but **nothing pins the
+interleaving** — and the deque silently mispairs if it ever changes. A parallel implementation that
+wrote all the calls and then all the results would pair call 1 with result 3, and the box would show
+the wrong result under the wrong command with no indication anything was wrong.
+
+**So `session.log` gains an `answers` column.** A result names the call it answers:
+
+```text
+  41   812 CALL    in  -     edit        {"path":"milk.md","content":"..."}
+  42   310 GOT     in  41    edit        0 · wrote 4 lines
+```
+
+Three consequences, and each removes a guess:
+
+1. **The deques go.** `AgentChat.lines()` and `Agent.messages()` look the call up by id instead of
+   assuming the next result belongs to the oldest open call.
+2. **A dangling call is a fact, not an inference.** Today `AgentChat.kt:186` renders "a result whose
+   call is not in this conversation" by *not finding a pending call* — a conclusion drawn from the
+   absence of a deque entry. With the column, a result says which call it answers and the answer is
+   either there or not.
+3. **A mismatch becomes detectable.** A result naming a call that does not exist is a broken record,
+   and it can be refused rather than drawn as something plausible.
+
+**Where the column goes, and why not the body.** The columns are `id size kind ctx answers name
+detail`. `answers` sits beside `ctx` because it is the same kind of thing: the app's own bookkeeping
+about a row, not the model's content. **It must not go in the body** — the model is sent a row's
+body, and which row answers which is a fact about the record, not something the model needs in order
+to work. `-` means "this row answers nothing", which is every row that is not a `GOT`.
+
+**One format change, not two.** The time column (below) and `answers` are one edit to the same row
+format: one `LogFormat`, one row regex, one round of test fallout. Splitting them would mean editing
+the regex twice for no benefit, and a file format is a thing to change once.
 
 ## The height cap
 
@@ -84,12 +115,13 @@ result is read by turning pages rather than by scrolling a tall box inside a tal
 
 ## Order of work
 
-1. **`session.log` gains a time column.** `LogFormat`, the row regex, `Row`, and the writer. Old
-   rows without a time read as unknown rather than wrong.
+1. **One format change to `session.log`: a time column and an `answers` column.** `LogFormat`, the
+   row regex, `Row`, the writer, and the two deques that guess the pairing. Old rows read as
+   unknown-rather-than-wrong for the time and `-` for `answers`.
 2. **`ask`/`conclude` removed** — tools, sets, kinds, message building, rendering. Rows of those
    kinds are refused.
-3. **`AgentChat` rebuilt as bubbles**: a call and its result are one bubble; the last bubble is the
-   agent's words.
+3. **`AgentChat` rebuilt as bubbles**: a call and its result are one bubble, joined by `answers`
+   rather than by position; the last bubble is the agent's words.
 4. **The footer**: id and time.
 5. **The height cap** in settings, in lines, with the truncation sentence.
 6. **The fullscreen page view** from a bubble's header.

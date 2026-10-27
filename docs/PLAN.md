@@ -223,9 +223,17 @@ Four decisions worth naming here, because each could have gone the other way:
 - **`ask`/`conclude` go entirely, and their rows are refused.** No migration: there is no previous
   release to be compatible with.
 
-**Also recorded:** a `GOT` row does not name the call it answers — the pairing is positional, held
-by a deque in two places. A bubble is a call and its result, so that convention now has a visible
-consequence and is written down where it can be checked.
+**And the pairing becomes a record.** A `GOT` row did not name the call it answers — the pairing was
+positional, held by a deque in `AgentChat` and another in `Agent.messages()`. That works only because
+the writer interleaves `CALL GOT CALL GOT`; the agent may call several tools in one reply (no cap),
+and nothing pinned the interleaving. A parallel writer that batched the calls would pair call 1 with
+result 3 and the box would show the wrong result under the wrong command, silently.
+
+So `session.log` gains an **`answers` column** beside `ctx` — the app's bookkeeping, not the model's
+content, which is why it is a column and not part of the body the model is sent. The deques go, a
+dangling call becomes a fact rather than an inference, and a result naming a call that does not
+exist is refused instead of drawn as something plausible. **It is one format change with the time
+column, not two:** same regex, same `LogFormat`, same test fallout.
 
 ### Not a bug report: the streaming work
 
@@ -244,6 +252,66 @@ model works. Measured detail: those were **characters**, not tokens; token total
 final `usage` block, so a per-chunk token count would be an estimate dressed as a measurement.
 
 **Not a progress bar.** Elapsed and produced, never a percentage — there is no denominator.
+
+### Not a bug report: serial now, and what subagents would need
+
+**The operator's rule (2026-10-27):** *an agent's own commands are serial with each other; different
+agents work independently.* Agent 1's `read` waits for agent 1's `edit`; it never waits for agent 2.
+
+**What the code does today.** There are three single-threaded executors — `AgentRunner.worker`
+(pings and wakes), `AppViewModel.worker` (screen turns and file work), `Trace.writer` — and one
+place with real concurrency, `Background`, which starts a thread per call. So:
+
+| Work | Serial with | Parallel with |
+|---|---|---|
+| A turn from the screen | other screen turns (`chatWorking`), its own project's pings (`hold`) | — |
+| A ping/wake | other pings and wakes (one thread) | a screen turn on another project |
+| A `background` command | nothing | everything |
+
+The app is therefore *mostly* serial, and **the rule is already half in force by accident**: a
+screen turn on project A really does overlap a ping on project B, on two different threads.
+
+**Why serial is kept for now, in the operator's words:** *easier to manage, predictable and simple.*
+And the honest reason it costs nothing yet: **only one agent can be active at a time.** There is one
+`chatProject`, so two screen turns cannot happen, and a project's own pings are already excluded by
+`hold`. A pool would buy parallelism for a situation the UI cannot produce.
+
+**Why it is not a corner, and why the plumbing was adjusted anyway.** The lock is already per
+**file**, not per app:
+
+```kotlin
+private fun gateFor(session: File): Gate = gates.computeIfAbsent(session.absolutePath) { Gate() }
+```
+
+Two agents writing two records take two gates and never contend. So the concurrency-safety work that
+normally makes parallelism hard **is already done** — the only thing that serialises agents today is
+one `newSingleThreadExecutor()` line.
+
+Three small changes were made now, while they are free, so the day a subagent exists nothing has to
+be re-reasoned:
+
+1. **`inFlight` and `held` hold *agent ids*, not project names.** They are the same string today
+   (`agentId(project) = project`), and the comment says so.
+2. **`AgentRunner.agentId(project)`** is the one place that will change — `"<project>/<name>"`.
+   Claims, releases and the tick's guard all go through it, so no caller knows a subagent is
+   possible.
+3. **`AgentRunner.isBusy(project)` / `AppViewModel.agentBusy(project)`** — the comparison lives with
+   the ids rather than at each call site. `project in polling()` would have been silently wrong the
+   day the two differ, and the screen would have thought a working agent was idle.
+
+**What subagents would still need, and none of it is threading:**
+
+- **A scope rule.** `AgentTools` gets the whole project today. A subagent that may write anywhere is
+  not a subagent. Which paths it may touch is a design decision.
+- **A file-conflict rule.** Two agents on one project can `edit` one path. The record gate protects
+  the log, not the filesystem — so this needs either disjoint subtrees or a per-path lock. **This is
+  the only genuinely hard part**, and it costs the same whether parallelism lands now or later.
+- **A way to see two agents.** One `chatProject` is the real blocker for *using* two agents, and it
+  is a UI change.
+- **One line:** `newSingleThreadExecutor()` → a pool, when two agents can actually work at once.
+
+**The rule for later, written down so it is not rediscovered:** *serial within an agent, parallel
+across agents.* The unit of concurrency is the agent id, and it is already the key.
 
 ### Known and not yet fixed
 

@@ -89,7 +89,10 @@ class AgentSessionFeatureTest : FeatureTest() {
         val session = scene.viewModel.sessionOf(project) ?: return
         scene.viewModel.tickAgents(session.nextPollAt)
         scene.await("the poll to finish", 20_000) {
-            project !in scene.viewModel.agentPollingInFlight()
+            // **Asked, not compared.** The runner's set holds agent ids, which equal project names
+            // today; a test that compared them directly would keep passing after they stopped being
+            // the same thing, which is the one way this test could lie about the guard.
+            !scene.viewModel.agentBusy(project)
         }
     }
 

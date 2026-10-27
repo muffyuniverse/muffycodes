@@ -2343,6 +2343,15 @@ class AppViewModel @JvmOverloads constructor(
     internal fun agentPollingInFlight(): Set<String> = runner?.polling() ?: emptySet()
 
     /**
+     * Whether this project's agent is busy, asked the runner rather than compared here.
+     *
+     * **Not `project in agentPollingInFlight()`.** The runner's set holds agent ids; a project name
+     * equals one today and will not when a project can have more than one agent. The comparison
+     * lives with the ids, so the day they differ the screen is right without being changed.
+     */
+    internal fun agentBusy(project: String): Boolean = runner?.isBusy(project) ?: false
+
+    /**
      * The last answer to "does a clock need to exist?", or null before this process asked.
      *
      * **Asked on change rather than on every tick**, because the answer is the same on almost every
@@ -2404,7 +2413,7 @@ class AppViewModel @JvmOverloads constructor(
      */
     fun resetAgent(project: String) {
         val ws = workspace ?: return
-        if (chatWorking || project in agentPollingInFlight()) return
+        if (chatWorking || agentBusy(project)) return
         Trace.tap("reset agent", project)
         onWorker {
             val log = AgentLog.open(ws.projectDir(project))
@@ -2426,7 +2435,7 @@ class AppViewModel @JvmOverloads constructor(
         // case, right order"). The loop is told at its next boundary; the calls the reply carried
         // are answered `1 interrupted` so the record stays a conversation, and the session is
         // already stopped so the ending cannot switch it back on.
-        if (chatWorking || project in agentPollingInFlight()) {
+        if (chatWorking || agentBusy(project)) {
             interrupt = Agent.BY_OPERATOR
             pendingChat = null
         }
