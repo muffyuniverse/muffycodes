@@ -12,12 +12,12 @@ tree.
 
 ## Part 1 · The 38 reports
 
-The numbering is the log's own: the order the reports appear in `trace.log (1).txt`. **33 are
-marked `closed` in the log and 5 are open**, and the count in this document is taken from that
+The numbering is the log's own: the order the reports appear in `trace.log (1).txt`. **36 are
+marked `closed` in the log and 2 are open**, and the count in this document is taken from that
 file rather than remembered — an earlier draft of this plan said 20 and 18, which was wrong, and
 the three it had lost (#9, #20, #21) were the three that were not about code I had touched.
 
-### Closed — 33
+### Closed — 36
 
 | # | Build | Report | Closed by |
 |---|---|---|---|
@@ -58,16 +58,17 @@ the three it had lost (#9, #20, #21) were the three that were not about code I h
 
 | 23 | 149 | how is "wait for the model" different from "stop command after"? | `96eef42` — two named groups, one unit, every row saying what it bounds; the ack/idle split is `PLAN-streaming.md` |
 
+| 17 | 149 | where is the chat icon within the project? | `5434a89` — the project's own toolbar carries it |
+| 20 | 149 | block the agent settings together, rule them off | `f833d54` — heavy rules at both ends, "agent" only in the title |
+| 21 | 149 | the "signed in as" block still has gaps between rows | `f833d54` — the rows are one column, one pixel apart |
+
 **Two closed themselves.** #16 and #18 were answered by the folder merge *deleting* the level they
 were about. A report can become moot, and "closed" is not always "fixed".
 
-### Open — 5
+### Open — 2
 
 | # | Report | What it needs |
 |---|---|---|
-| 17 | where is the chat icon within the project? | look at what a project row shows |
-| 20 | block the agent settings together, rule them off, drop "agent" from every label but the block title | step 7 |
-| 21 | the "signed in as" block still has gaps between rows | step 7 |
 | 29 | "see changes" should be an enterable list; editor needs a diff mode with a two-commit picker; view/edit/diff as separate modes | step 6 |
 | 36 | chat as many bubbles; remove `ask`/`conclude`; message ends with a plain message; drop the token column; footer with time, date, id; time column back in the session log | **specified in `PLAN-chat.md`** — bubbles, per-bubble footer (id · time · thinking · output), line height cap, fullscreen pages |
 
@@ -191,9 +192,8 @@ what is left starts at 4.
 1. ~~The ignore button's two sentences~~ — done (`494b7f0`).
 2. ~~No hidden files~~ — done (`cd87b3c`).
 3. ~~The two clocks and one unit~~ — done (`96eef42`, `ec918fd`).
-4. **The small three**: **#17** (the chat icon lives in the project row's overflow menu — decide
-   whether that is where it belongs), **#20** (block the agent settings, horizontal rules, "agent"
-   only in the block title), **#21** (halve the gaps in "signed in as").
+4. ~~The small three~~ — done. **#17** was already fixed (`5434a89`); **#20** and **#21** landed in
+   `f833d54` with tests in `a735bcb`.
 5. **The chat rebuild** — `PLAN-chat.md`. Bubbles, footer (id and time; thinking and output when
    streaming lands), the line cap, the fullscreen pages, `ask`/`conclude` gone, the token column
    gone, `session.log`'s time column back.
