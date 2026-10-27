@@ -94,6 +94,11 @@ class BrowserChromeTest {
     private fun there(text: String): Boolean =
         compose.onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty()
 
+    /** The same question about an icon, which carries a description and no text. */
+    private fun described(text: String): Boolean =
+        compose.onAllNodesWithContentDescription(text, substring = true)
+            .fetchSemanticsNodes().isNotEmpty()
+
     /**
      * The add button is an **icon**, so it carries a content description and no text.
      *
@@ -274,13 +279,18 @@ class BrowserChromeTest {
         scene.project("groceries")
         scene.open("groceries")
         val file = scene.worktreeFile("milk.txt", "two litres")
+        // **The list is built from `entries`, which is a snapshot.** A file written behind the
+        // screen's back is not in it until something refreshes — that is the app working as
+        // designed, and without this the row the test taps does not exist.
+        scene.viewModel.refresh()
         browser()
         compose.waitUntil(20_000) { there("milk.txt") }
 
-        // Before: unlocked, so the content description offers the lock.
+        // Before: unlocked, so the content description offers the lock. Asked as a description
+        // rather than as text, because the control is an icon.
         assertTrue(
             "the row starts unlocked",
-            there("Lock milk.txt, so it can only be viewed"),
+            described("Lock milk.txt, so it can only be viewed"),
         )
 
         // The tap, made on the screen rather than through the view model, because the bug was
@@ -293,7 +303,7 @@ class BrowserChromeTest {
         assertTrue("and it is locked", scene.viewModel.isLocked(file))
         assertTrue(
             "the row says so without leaving the screen",
-            there("milk.txt is locked; tap to unlock"),
+            described("milk.txt is locked; tap to unlock"),
         )
     }
 
