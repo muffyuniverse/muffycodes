@@ -2528,7 +2528,7 @@ class AgentTest {
         )
         assertTrue(
             "with nothing of the old conversation in it",
-            third.none { it.text.contains("milk") },
+            opener.messages.none { it.text.contains("milk") },
         )
         assertTrue(
             "while the evidence still has all of it",

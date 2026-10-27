@@ -438,7 +438,14 @@ jobs:
                       if msg:
                           print(f"  {msg[0][:600]}")
                       shown += 1
-          print(f"{shown} failing test(s)") if shown else print("no test-result XML found")
+          if shown:
+              print(f"{shown} failing test(s)")
+          else:
+              # **A build that never compiled has no test results, and saying "nothing failed"
+              # would be the wrong sentence.** The compiler's own lines are in the step above;
+              # this points at them rather than pretending the suite ran and was happy.
+              print("::error title=The suite did not run::No test-result XML was written, so the "
+                    "build did not get as far as running tests. The compiler's errors are above.")
           PY
 
       - name: Check that the tests that ran are the tests that were asked for
