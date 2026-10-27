@@ -90,46 +90,44 @@ fun ModelSection(viewModel: AppViewModel) {
         TextButton(onClick = { viewModel.resetModelConfig() }) { Text("Reset") }
     }
 
-    // **What context the pin actually allows, named here because this is where the model is
-    // chosen.** The number under the Context fields is the floor when nothing has been read yet,
-    // and a floor that looks like a limit is how "96k" got reported as a cap on a million-token
-    // model. This row says which of the two it is, and pressing it re-reads the catalogue.
+    // **What this provider exposes, in one line, under the choice it belongs to.** Reported from
+    // the live log, twice: "context 900k of 1000k — what does that mean? I somehow have the context
+    // full?" and then "is it what provider can take out of what model can?". The second question is
+    // the right reading of the old line, and it should not have needed asking.
+    //
+    // Three numbers, named: the window the model holds, the room the provider keeps for its reply,
+    // and what is left for the conversation. They are read from the endpoint in use rather than
+    // from the model, because the reply reserve is a fact about the endpoint — `cloudflare` keeps
+    // 943,718 of the same 1,048,576 window that `deepinfra` keeps 131,072 of.
+    //
+    // There is no button. The catalogue is read on arrival and whenever the model or provider
+    // changes, which are the only moments the numbers can change; a second way to ask was a second
+    // thing to explain. A read that fails says so in the same place, because a line of numbers with
+    // no word about being stale is the floor pretending to be a measurement.
     val info = viewModel.modelInfo
-    val ceiling = ContextBudget.ceiling(
-        pin = viewModel.modelConfig.active.provider,
-        contextLength = info?.contextLength,
-        maxOutput = info?.maxOutput,
+    val endpoint = viewModel.modelEndpoints.firstOrNull { it.tag == config.active.provider }
+    val window = endpoint?.contextLength ?: info?.contextLength
+    val reply = endpoint?.maxOutput ?: info?.maxOutput
+    // **The clamp is asked the same question the agent asks it.** The measured pins in the table win
+    // first (`max_prompt_tokens` is null for every endpoint of this model, so a table entry is the
+    // only number that was ever checked); everything else comes from the endpoint in use. Passing
+    // the model's numbers here instead would have reported `deepinfra`'s reserve on `cloudflare`,
+    // which is the disagreement this line exists to prevent.
+    val input = ContextBudget.ceiling(config.active.provider, window, reply)
+    Text(
+        text = when {
+            window == null || reply == null -> "Context: not read yet"
+            else -> "Context: ${tokens(window)} · reply ${tokens(reply)} · input ${tokens(input)}"
+        },
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    viewModel.catalogueProblem?.let {
         Text(
-            // **How much room there is, said as room.** "900k of 1000k" was read as "900 used of
-            // 1000" — a context that looked 90% full when nothing was in it. The first number is
-            // what the app will actually send and the second is what the model advertises, so the
-            // line says *available* and names the window it is out of.
-            text = "Context: ${ContextBudget.short(ceiling)} available" +
-                (info?.contextLength?.let { " of ${ContextBudget.short(it.toLong())}" } ?: ""),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.weight(1f),
+            text = it,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.error,
         )
-        if (viewModel.catalogueReading) {
-            // **The read happens by itself; this only says it is happening.** The button is for
-            // asking again — the numbers are a fact about the endpoint that can change while the
-            // screen is open, and before this there was no way to ask without leaving it.
-            Text(
-                text = "reading…",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        TextButton(
-            onClick = {
-                // Only this press is an act: the sheet's own read is the app doing its job, and a
-                // tap recorded for it would be a gesture nobody made.
-                Trace.tap("read catalogue", viewModel.modelConfig.active.model)
-                viewModel.readCatalogue(viewModel.modelConfig.active.model, force = true)
-            },
-        ) { Text("Read") }
     }
 
     if (picking != null) {
@@ -327,8 +325,21 @@ private fun ModelPicker(
                         }
                         PROVIDER -> {
                             Trace.tap("provider", pick)
+                            // **The new provider's own numbers travel with the choice.** They did
+                            // not before: the window and the reply reserve stayed the old pin's, so
+                            // choosing `cloudflare` left the agent clamped to `deepinfra`'s
+                            // 917,504 while that endpoint keeps 943,718 of the window for replies.
+                            // The model's window is the same either way; the reserve is not.
+                            val chosen = numbers.firstOrNull { it.tag == pick }
                             viewModel.chooseModel(
-                                active.model, pick, active.effort, info?.efforts.orEmpty(),
+                                active.model,
+                                pick,
+                                active.effort,
+                                info?.efforts.orEmpty(),
+                                contextLength = chosen?.contextLength
+                                    ?: info?.contextLength.takeIf { active.provider == pick },
+                                maxOutput = chosen?.maxOutput
+                                    ?: info?.maxOutput.takeIf { active.provider == pick },
                             )
                         }
                         else -> {
@@ -412,11 +423,14 @@ fun number(value: Double?): String =
     if (value == null) "—" else String.format(Locale.US, "%.0f", value)
 
 /** A token count, shortened, because 1,048,576 is a number a person has to count digits of. */
-fun tokens(value: Int): String = when {
+fun tokens(value: Long): String = when {
     value >= 1_000_000 -> String.format(Locale.US, "%.1fM", value / 1_000_000.0)
     value >= 1_000 -> "${value / 1_000}k"
     else -> value.toString()
 }
+
+/** The same, for a number that arrived as an `Int` — an endpoint's own limits. */
+fun tokens(value: Int): String = tokens(value.toLong())
 
 /** The release date of a model, as a person reads a date. */
 fun released(at: Long?): String = if (at == null) "—" else

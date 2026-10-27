@@ -117,6 +117,50 @@ class ModelSectionTest {
     }
 
     @Test
+    fun `changing provider carries that provider's reply reserve, not the old one`() {
+        // **The 96k bug with the sign flipped.** The window and the reply reserve are facts about a
+        // *pin*, not about the model: `deepinfra/fp8` keeps 131,072 of a 1,048,576 window and
+        // `cloudflare` keeps 943,718 of the same window. Carrying the old reserve across a provider
+        // change left the agent clamped to an endpoint it was no longer using — the app would have
+        // trimmed at 917,504 on an endpoint that only accepts 104,858.
+        scene.viewModel.catalogue = scripted(
+            listOf(
+                endpoint("deepinfra/fp8", reply = 131_072),
+                endpoint("cloudflare", reply = 943_718),
+            ),
+        )
+        scene.viewModel.readCatalogue(ModelConfigFile.DEFAULT_MODEL)
+        scene.await("the endpoints", 5_000) { scene.viewModel.modelEndpoints.size == 2 }
+
+        scene.viewModel.chooseModel(
+            ModelConfigFile.DEFAULT_MODEL, "deepinfra/fp8", "high", listOf("max", "high", "low"),
+            contextLength = 1_048_576, maxOutput = 131_072,
+        )
+        scene.viewModel.chooseModel(
+            ModelConfigFile.DEFAULT_MODEL, "cloudflare", "high", listOf("max", "high", "low"),
+            contextLength = 1_048_576, maxOutput = 943_718,
+        )
+
+        assertEquals("the new reserve", 943_718, scene.viewModel.modelConfig.active.maxOutput)
+        assertEquals(
+            "and the clamp follows it",
+            104_858L,
+            ContextBudget.ceiling(
+                scene.viewModel.modelConfig.active.provider,
+                scene.viewModel.modelConfig.active.contextLength,
+                scene.viewModel.modelConfig.active.maxOutput,
+            ),
+        )
+    }
+
+    /** One endpoint, with only the two numbers this file's tests care about. */
+    private fun endpoint(tag: String, reply: Int) = EndpointInfo(
+        tag = tag, providerName = tag, contextLength = 1_048_576, maxPrompt = null,
+        maxOutput = reply, priceIn = 0.1, priceOut = 0.2, priceCache = null,
+        tokensPerSecond = null, uptime = null, tools = true,
+    )
+
+    @Test
     fun `a provider that cannot call tools is not one the agent can use`() {
         // The add form greys these out, because a provider without tool support cannot run an
         // agent at all. The fact is on the endpoint, so this is where it is asserted.
@@ -223,23 +267,43 @@ class ModelSectionTest {
     }
 
     @Test
-    fun `the context line says how much room there is, not how much is used`() {
-        // **Reported from the live log:** "text against read button says context 900k of 1000k —
-        // what does that mean? I somehow have the context full or what?" It read as a tank 90%
-        // full, when the first number is what the app will send and the second is what the model
-        // advertises. The word *available* is the whole fix, and this test is what keeps it.
+    fun `the context line names the window, the reply and what is left for input`() {
+        // **Reported from the live log, twice.** "context 900k of 1000k — what does that mean? I
+        // somehow have the context full or what?" and then, after a rewording, "is it what provider
+        // can take out of what model can?". The second question was the right reading, and a line
+        // that needs it asked twice is a line that does not say what its numbers are.
+        //
+        // Three numbers now, each named: the model's window, the room this endpoint keeps for its
+        // reply, and the input that is left. The middle one is the whole difference between the
+        // other two, so it is on the line rather than left to be subtracted in a person's head.
         scene.viewModel.catalogue = scripted()
         compose.setContent { Section() }
 
         scene.await("the catalogue", 5_000) { scene.viewModel.modelInfo != null }
 
-        // 1048576 window with 393216 of reply promised leaves 655360, which is also the measured
-        // deepseek pin — the label must agree with the number the agent is actually clamped by.
-        compose.onNodeWithText("available", substring = true).assertIsDisplayed()
+        // 1,048,576 window, 393,216 kept by the model — the deepseek pin is 655,360.
+        compose.onNodeWithText("Context: 1.0M", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("reply 393k", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("input 655k", substring = true).assertIsDisplayed()
     }
 
     @Test
-    fun `the numbers are read on arrival, without pressing anything`() {
+    fun `there is no button to press to find out, because the screen reads it itself`() {
+        // The button was the only way to ask, so the screen showed the floor until somebody
+        // pressed it — the same floor that once had a million-token model trimmed at 96k. One
+        // line that is always current beats a line and a control that explains it.
+        scene.viewModel.catalogue = scripted()
+        compose.setContent { Section() }
+
+        scene.await("the read the screen does for itself", 5_000) {
+            scene.viewModel.modelInfo != null
+        }
+
+        compose.onNodeWithText("Read").assertDoesNotExist()
+    }
+
+    @Test
+    fun `the numbers are read on arrival, for the model actually in use`() {
         // The button used to be the only way to find out, which meant a screen that showed the
         // floor — the same floor that once had a million-token model trimmed at 96k. Arriving at
         // the screen is now enough.

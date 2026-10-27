@@ -632,10 +632,15 @@ class AppViewModel @JvmOverloads constructor(
         val before = modelConfig.active.effort
         // **The window travels with the choice.** Two readers build an agent — this screen's turn and
         // the service's poll — and neither can reach a catalogue, so the numbers the picker saw are
-        // written beside the model they belong to. A pick made without them (a catalogue that was not
-        // read, a provider change from a stale sheet) keeps whatever was stored rather than erasing
-        // it: null here means "not told", not "no window".
-        val same = model == modelConfig.active.model
+        // written beside the model they belong to.
+        //
+        // **A number is only carried over when the endpoint is the same one.** Both values are facts
+        // about a *pin*: `deepinfra/fp8/flex` keeps 131,072 of the window for replies and
+        // `cloudflare` keeps 943,718, so carrying the old reserve across a provider change would
+        // leave the agent clamped to an endpoint it is no longer using — the 96k bug with the sign
+        // flipped. Null here means "not told", and an unknown endpoint falls through
+        // `ContextBudget.ceiling` to the model's own window, which is the honest answer.
+        val same = model == modelConfig.active.model && provider == modelConfig.active.provider
         val active = ActiveModel(
             model = model,
             provider = provider,
