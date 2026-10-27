@@ -1472,11 +1472,11 @@ class AgentTest {
     }
 
     @Test
-    fun `words end the turn, and there is no key for a tool that does not exist`() {
+    fun `a tool that no longer exists is refused like any unknown name, and the turn carries on`() {
         // **The bug this came from is gone with the tool.** `conclude {"txt":"done"}` used to fall
         // back to the reply's own prose and end the turn — an ending nobody asked for, described by
-        // a sentence nobody wrote. There is no `conclude` now: the model's words *are* the ending,
-        // and there is no argument that can be misspelled on the way to it.
+        // a sentence nobody wrote. There is no `conclude` at all now, so a model that still calls it
+        // is calling an unknown tool, which is a refusal like any other and the turn carries on.
         val door = ScriptedDoor(
             Reply("", listOf(call("conclude", """{"txt":"done"}"""))),
             Reply("all done"),
@@ -1484,15 +1484,13 @@ class AgentTest {
 
         val end = agent(door).burst("do the thing")
 
-        // The unknown tool is answered as a refusal, so the turn carries on and the second reply —
-        // plain words — is what ends it.
         assertEquals(
             "the words are what ended it",
             "all done",
             (end as Agent.End.Concluded).said,
         )
         val got = gotRows().first()
-        assertTrue("the first was refused: ${got.body}", got.body.contains("`txt`"))
+        assertTrue("and the unknown tool was refused: ${got.body}", got.body.contains("no tool called"))
     }
 
     @Test
@@ -1910,14 +1908,13 @@ class AgentTest {
 
         val kinds = rows().map { it.kind }
         assertEquals("the operator's words come first", AgentLog.TOLD, kinds.first())
-        // **The last row is the agent's words**, which is what a conclusion is now: a note, not a
-        // kind of its own.
-        assertEquals("and the turn ends with the agent's words", AgentLog.NOTE, kinds.last())
-        assertEquals(
-            "which is the note it is drawn from",
-            "agent",
-            rows().last().name,
-        )
+        // **The turn ends with the agent's words**, which is what a conclusion is now: a note, not
+        // a kind of its own. The app's own `ended` note follows it on the record — it is `app`, so
+        // it is not part of the conversation — which is why this asks for the last row the model is
+        // sent rather than the last row in the file.
+        val conversation = log.contextRows()
+        assertEquals("and the turn ends with the agent's words", AgentLog.NOTE, conversation.last().kind)
+        assertEquals("which is the note it is drawn from", "agent", conversation.last().name)
         assertTrue("with a call and its result in between", kinds.contains(AgentLog.CALL))
         assertTrue(kinds.contains(AgentLog.GOT))
     }
@@ -2498,10 +2495,13 @@ class AgentTest {
 
     @Test
     fun `a reset leaves the next request with the new task and nothing before it`() {
+        // **Two bursts, and the second one is not the same conversation.** Each burst ends with the
+        // model saying something and calling nothing, so this needs two of those — one for each.
         val door = ScriptedDoor(
             Reply("", listOf(call("tree", """{"path":""}"""))),
             Reply("done"),
             Reply("done again"),
+            Reply("and once more"),
         )
         val agent = agent(door)
         agent.burst("look at the folder")
