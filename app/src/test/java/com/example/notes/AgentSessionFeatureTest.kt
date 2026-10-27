@@ -285,7 +285,7 @@ class AgentSessionFeatureTest : FeatureTest() {
 
         assertEquals(
             "one sentence, immediately",
-            listOf("groceries: stopped, the pinned provider refused"),
+            listOf("groceries: stopped, OpenRouter answered 401"),
             notices,
         )
         assertEquals(
@@ -301,7 +301,7 @@ class AgentSessionFeatureTest : FeatureTest() {
         scene.viewModel.tickAgents(askedAt + AgentSession.REMIND_MS)
         assertEquals(
             "then the second sentence says which one it is",
-            "1st reminder · groceries: stopped, the pinned provider refused",
+            "1st reminder · groceries: stopped, OpenRouter answered 401",
             notices.last(),
         )
         assertTrue(
@@ -347,7 +347,7 @@ class AgentSessionFeatureTest : FeatureTest() {
         assertEquals("and five is", 2, notices.size)
         assertEquals(
             "the first reminder is the first",
-            "1st reminder · groceries: stopped, the pinned provider refused",
+            "1st reminder · groceries: stopped, OpenRouter answered 401",
             notices.last(),
         )
         assertTrue(
