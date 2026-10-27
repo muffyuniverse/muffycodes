@@ -237,9 +237,7 @@ class OpenRouterDoor(
                 connectTimeout = 20_000
                 readTimeout = timeoutMs
                 doOutput = true
-                setRequestProperty("Authorization", "Bearer $token")
-                setRequestProperty("Content-Type", "application/json")
-                setRequestProperty("Accept", "application/json")
+                headers(token).forEach { (name, value) -> setRequestProperty(name, value) }
             }
             connection.outputStream.use { it.write(body.toString().toByteArray()) }
             val code = connection.responseCode
@@ -253,6 +251,31 @@ class OpenRouterDoor(
             connection?.disconnect()
         }
         return text
+    }
+
+    /**
+     * The headers a request carries, given its token.
+     *
+     * **A function, not three lines inside `exchange`, because the token is the one thing here a
+     * report has ever been filed about.** "The openrouter key isn't passing through" is a claim
+     * about a header, and while that header was built inside a method that opens a socket, the only
+     * way to check the claim was to read the source and believe it. `internal` so a test can ask
+     * what would be sent without sending it.
+     */
+    internal fun headers(token: String): List<Pair<String, String>> {
+        // **A header value is one line, and a token is whatever was pasted.** A key copied out of a
+        // file with Windows endings, or off a page that wrapped it, carries a line break - and a
+        // line break in a header value either throws inside `setRequestProperty` or, on a laxer
+        // stack, ends the header and starts another. Refused here, before a socket is opened, so
+        // the sentence a person reads does not depend on which stack they run.
+        require('\n' !in token && '\r' !in token) {
+            "The OpenRouter key has a line break in it, so it cannot be sent. Copy it again."
+        }
+        return listOf(
+            "Authorization" to "Bearer $token",
+            "Content-Type" to "application/json",
+            "Accept" to "application/json",
+        )
     }
 
     /** The provider's own sentence, which is always more useful than the number. */

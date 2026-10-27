@@ -3,6 +3,7 @@ package com.example.notes
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -517,6 +518,51 @@ class AgentTest {
         assertTrue("with the context's own columns", now.contains("id size name body"))
         assertTrue("and the order they are written in", now.contains("oldest line first"))
         assertFalse("and no projection key that read no longer takes", now.contains("`raw`"))
+    }
+
+    // ---- the key that is sent ------------------------------------------------
+
+    @Test
+    fun `the key a person stored is the key in the header`() {
+        // **Report 9, and the reason it could stay open for four builds.** "The openrouter key isn't
+        // passing through" is a claim about a header, and the header was built inside a method that
+        // opens a socket - so the only way to answer the report was to read the source and believe
+        // it. Reading is not evidence. This asks the door what it would send, which is now a
+        // question it can answer without sending anything.
+        val door = OpenRouterDoor(
+            key = { "sk-or-v1-the-persons-key" },
+            model = "deepseek/deepseek-v4.1-flash-1017",
+            provider = "decart/fp4",
+            effort = "high",
+        )
+
+        val headers = door.headers("sk-or-v1-the-persons-key").toMap()
+
+        assertEquals("the token is a bearer token", "Bearer sk-or-v1-the-persons-key", headers["Authorization"])
+        assertEquals("and the body is said to be JSON", "application/json", headers["Content-Type"])
+        assertEquals("and the answer is asked for as JSON", "application/json", headers["Accept"])
+        assertEquals("three headers, so nothing is added unnoticed", 3, headers.size)
+    }
+
+    @Test
+    fun `a key with a newline in it cannot break the header`() {
+        // **A header value is one line.** A token with a line break in it - from a paste, or from a
+        // file with Windows endings - would either throw inside `setRequestProperty` or, on a
+        // laxer stack, end the header and start another. The refusal happens before the socket is
+        // opened, because the sentence a person reads should not depend on which stack they run.
+        val door = OpenRouterDoor(
+            key = { "sk-or-v1-abc\r\nX-Injected: yes" },
+            model = "deepseek/deepseek-v4.1-flash-1017",
+            provider = "decart/fp4",
+            effort = "high",
+        )
+
+        val refusal = assertThrows(IllegalArgumentException::class.java) {
+            door.headers("sk-or-v1-abc\r\nX-Injected: yes")
+        }
+
+        assertTrue("it says what is wrong", "line break" in refusal.message.orEmpty())
+        assertTrue("and what to do", "Copy it again" in refusal.message.orEmpty())
     }
 
     // ---- what the door says when it has no key --------------------------------
