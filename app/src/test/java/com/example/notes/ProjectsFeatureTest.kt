@@ -437,8 +437,17 @@ class ProjectsFeatureTest : FeatureTest() {
         // A real remote, because "was it pushed" is a question about a real ref. A bare repository
         // on disk is enough: a push writes `refs/remotes/origin/<branch>` exactly as GitHub would.
         val bare = File(File(System.getProperty("java.io.tmpdir"), "remote-${System.nanoTime()}"), "groceries.git")
-        bare.mkdirs()
-        org.eclipse.jgit.api.Git.init(bare.absolutePath).use { it.close() }
+        // **A bare repository, made the way the rest of this suite makes one.** `Git.init()` returns
+        // an `InitCommand`, not a `Git`, so the command is configured, run, and the result closed.
+        // `setInitialBranch("main")` matters here: the assertion below looks up the tracking ref by
+        // the branch's own name, and a remote whose default is `master` would answer a different
+        // question than the one the test is asking.
+        org.eclipse.jgit.api.Git.init()
+            .setDirectory(bare)
+            .setBare(true)
+            .setInitialBranch("main")
+            .call()
+            .close()
         git.open("groceries")!!.use { GitService.setRemoteUrl(it, bare.absolutePath) }
 
         ws.write(file, "the key that must not travel")

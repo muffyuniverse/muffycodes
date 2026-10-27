@@ -685,7 +685,14 @@ private fun EntryList(viewModel: AppViewModel, actions: BrowserActions) {
                 // own folders: they can be opened, and nothing else. Renaming,
                 // moving or deleting one is how the account's tree stops being the
                 // tree the app thinks it is.
+                // **Two different things, drawn differently.** `system` is "the app owns this
+                // row", which already means no menu and no long-press. `systemLocked` is the new
+                // report-28 state: the row is *shown*, can be opened and read, and carries a lock
+                // the person did not set and cannot lift. Conflating them would either hide the
+                // row again (what the report asked to stop) or offer a toggle that does nothing.
                 system = ws?.isStructural(entry.file) == true,
+                systemLocked = ws?.isAppFlag(entry.file) == true ||
+                    ws?.isSystemLocked(entry.name) == true,
                 actions = actions,
                 onOpen = {
                     if (entry.isFolder) viewModel.openChild(entry.name) else actions.onOpen(entry)
@@ -705,6 +712,16 @@ private fun EntryRow(
     selected: Boolean,
     choosing: Boolean,
     system: Boolean,
+    /**
+     * True when the app keeps this row locked — **readable, and never writable by hand.**
+     *
+     * Report 28 asked for the app's own things to stop being invisible and become read-only
+     * instead. So this is not `system`: a `system` row has no menu at all, while this one is a row a
+     * person can open, read, and see a lock on that they did not set. The lock is drawn in a colour
+     * of its own and does nothing when tapped, because a toggle that refuses to toggle is worse than
+     * a mark that never claimed to be one.
+     */
+    systemLocked: Boolean = false,
     actions: BrowserActions,
     onOpen: () -> Unit,
 ) {
@@ -750,7 +767,18 @@ private fun EntryRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        if (!choosing && !system && entry.kind == EntryKind.TEXT) {
+        if (systemLocked) {
+            // **A mark, not a toggle.** The lock a person sets is a button; this one is a statement
+            // about a file the app keeps, so it is drawn in a colour the person's lock never uses
+            // and it is not clickable. A toggle that refuses to toggle teaches people that buttons
+            // in this list sometimes do nothing.
+            Icon(
+                Icons.Filled.Lock,
+                contentDescription = "${entry.name} is kept by the app and cannot be edited",
+                tint = MaterialTheme.colorScheme.tertiary,
+                modifier = Modifier.padding(horizontal = 12.dp).size(20.dp),
+            )
+        } else if (!choosing && !system && entry.kind == EntryKind.TEXT) {
             // The lock sits to the left of the menu, and only where it can mean
             // something: a file this app would otherwise let you write.
             IconButton(onClick = { actions.onToggleLock(entry) }) {
@@ -785,7 +813,11 @@ private fun EntryRow(
                 )
             }
         }
-        if (!choosing && !system) Box {
+        // **No menu on a file the app keeps.** Every item in it would be refused by `coreProblem`
+        // — rename, move, delete and ignore all answer "that is one of the app's own files" — and a
+        // menu whose every item refuses is worse than no menu: it teaches that the app's refusals are
+        // arbitrary. Report 28's word for it was "noninteractive", and this is where that lands.
+        if (!choosing && !system && !systemLocked) Box {
             IconButton(onClick = { menu = true }) {
                 Icon(Icons.Filled.MoreVert, contentDescription = "More")
             }

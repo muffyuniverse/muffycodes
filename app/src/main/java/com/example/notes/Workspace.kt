@@ -170,8 +170,25 @@ class Workspace(val accountDir: File) {
         else -> EntryKind.UNKNOWN
     }
 
-    /** True for a name the app made: never shown, never touched. */
-    fun isHidden(name: String): Boolean = name.startsWith(".")
+    /**
+     * True for a name that is **never shown**, because showing it would be noise.
+     *
+     * **One name, not every dot-name.** Report 28 asked for the app's own folders to stop being
+     * invisible: "can you make all hidden files visible but readonly? with system lock". A person
+     * debugging their own phone should be able to see that `.muffy/` exists and read what is in it —
+     * an app that hides its own bookkeeping from the person whose phone it is has made itself
+     * unaccountable.
+     *
+     * What stays hidden is `.gitkeep`, and only because it is not information: it exists so git can
+     * record an empty folder, and showing it would put a stray file in every folder a person makes.
+     * `.git/` is not a file a person browses; it is git's own store, and every tool treats it as
+     * opaque.
+     */
+    fun isHidden(name: String): Boolean = name == KEEPER || name == GIT_DIR
+
+    /** True for a name that is shown but **locked by the app itself** — readable, not writable. */
+    fun isSystemLocked(name: String): Boolean =
+        name == STATE_DIR || name == AgentLog.DIR
 
     /**
      * True for the agent's record: `<project>/agent/session.log` — every event — and
@@ -208,6 +225,18 @@ class Workspace(val accountDir: File) {
      */
     fun isStructural(file: File): Boolean =
         file.isDirectory && file.name == AgentLog.DIR &&
+            file.parentFile?.parentFile?.canonicalFile == accountDir.canonicalFile
+
+    /**
+     * True when [file] is one of the app's own flags, which are shown and never written by hand.
+     *
+     * **Report 28's other half.** `.muffy/` holds `agents.json`, `locked.json` and `pins.json` — the
+     * app's record of which sessions are running and what is locked or pinned on this phone. A person
+     * may read them; a hand-edited lock list naming a file that no longer exists is a lock with no
+     * object, and a hand-edited session list is a claim about a session nobody started.
+     */
+    fun isAppFlag(file: File): Boolean =
+        file.parentFile?.name == STATE_DIR &&
             file.parentFile?.parentFile?.canonicalFile == accountDir.canonicalFile
 
     /**
@@ -315,6 +344,12 @@ class Workspace(val accountDir: File) {
     fun write(file: File, text: String): Boolean {
         if (isLocked(file)) return false
         if (isRecord(file)) return false
+        // **The app's own flags are shown and not writable**, which is report 28's "visible but
+        // readonly". Readable, because a person debugging their own phone should be able to see what
+        // the app recorded; not writable, because every one of these files is a flag the app reads
+        // back, and a hand-edited lock list naming a file that no longer exists is a lock with no
+        // object.
+        if (isAppFlag(file)) return false
         put(file, text)
         return true
     }
@@ -624,6 +659,7 @@ class Workspace(val accountDir: File) {
         isHidden(file.name) -> "That belongs to the app"
         isAppOwned(file) -> "That belongs to the app"
         isStructural(file) -> "That folder belongs to the app"
+        isAppFlag(file) -> "That is one of the app's own files, and it is not the person's to change"
         // The record is not the person's to move, rename or delete — the same rule that stops them
         // saving over it. Deleting the project still takes it, which is the lever they keep.
         isRecord(file) -> "That is the agent's record"
@@ -824,6 +860,14 @@ class Workspace(val accountDir: File) {
             return "$stem $n$tail"
         }
 
+        /**
+         * The app's own flags, per account: `agents.json`, `locked.json`, `pins.json`.
+         *
+         * **Shown, and locked by the app.** Report 28: a person should be able to read what the app
+         * recorded about their own phone. They cannot edit it, because every one of these files is a
+         * flag the app reads back — a hand-edited lock list that names a file which no longer exists
+         * is a lock with no object.
+         */
         const val STATE_DIR = ".muffy"
 
         /**
@@ -865,6 +909,9 @@ class Workspace(val accountDir: File) {
 
         const val PINS_FILE = "pins.json"
         const val LOCKED_FILE = "locked.json"
+
+        /** git's own store. Not shown, because it is not a file a person browses. */
+        const val GIT_DIR = ".git"
 
         /** The extensions treated as pictures rather than text (§9). */
         val IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp")

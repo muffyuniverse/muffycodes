@@ -2,6 +2,7 @@ package com.example.notes
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -34,19 +35,44 @@ class VisibilityFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `a name that begins with a dot is the app's, and is never drawn`() {
+    fun `the app's own folder is shown, and only git's store and the folder marker are not`() {
+        // **Report 28, and it changed this test's answer.** "Can you make all hidden files visible
+        // but readonly? with system lock" — an app that hides its own bookkeeping from the person
+        // whose phone it is has made itself unaccountable, so `.muffy/` is a row now.
+        //
+        // What stays hidden is two things, and neither is information: `.git` is git's own store
+        // (every tool treats it as opaque), and `.gitkeep` exists only so git can record an empty
+        // folder. A person's own dot-file is *their* file, so it is shown too — this was never a
+        // rule about dots, it was a rule about the app's things, and the app's things are now
+        // visible and locked instead of invisible.
         val dir = scene.viewModel.currentDir!!
 
-        File(dir, ".gitignore").writeText("a")
+        File(dir, ".git").mkdirs()
+        File(dir, ".gitkeep").writeText("")
         File(dir, ".muffy").mkdirs()
         File(dir, ".anything").writeText("b")
         File(dir, "shown.txt").writeText("c")
         scene.viewModel.refresh()
 
-        // **The system project is the one folder that is always there**, so "only what the test
-        // made" is `system` plus the file. What the test is about is the three dot-names above:
-        // none of them appears, which is what the assertion below would catch.
-        assertEquals(listOf("system", "shown.txt"), scene.names())
+        // Folders first, then files, each by lowercase name - so `.muffy` comes before `system`.
+        assertEquals(listOf(".muffy", "system", ".anything", "shown.txt"), scene.names())
+    }
+
+    @Test
+    fun `a file the app keeps is shown, opens, and refuses to be written`() {
+        // **Visible but readonly**, which is the whole of report 28. Reading is the point: a person
+        // debugging their own phone should see what the app recorded. Writing is refused because
+        // every one of these files is a flag the app reads back.
+        val ws = scene.workspace!!
+        val state = File(ws.accountDir, Workspace.STATE_DIR).apply { mkdirs() }
+        val flag = File(state, "locked.json")
+        flag.writeText("[]")
+
+        assertTrue("the folder is shown", ws.list(ws.accountDir).any { it.name == Workspace.STATE_DIR })
+        assertTrue("the file is the app's own", ws.isAppFlag(flag))
+        assertFalse("so it cannot be written", ws.write(flag, "[\"secret.txt\"]"))
+        assertEquals("and the app's own content is untouched", "[]", flag.readText())
+        assertNotNull("while it can still be read", ws.read(flag))
     }
 
     @Test
