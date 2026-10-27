@@ -130,6 +130,36 @@ class StreamTest {
         assertEquals("the usable part is kept", "still here", stream.reply().text)
     }
 
+    @Test
+    fun `a turn asks for a stream, and a ping does not`() {
+        // **One body, two answers.** The ping is the same request with one token of answer, and it
+        // reads none of it - so streaming it would add a protocol and a clock for nothing. The turn
+        // is where an answer has to be watched, which is the whole reason the two differ.
+        val door = door()
+        val request = Request(
+            model = "deepseek/deepseek-v4.1-flash-1017",
+            provider = "decart/fp4",
+            effort = "high",
+            system = "you are an agent",
+            messages = listOf(Msg.user("a task")),
+            tools = AgentTools.specs(),
+        )
+
+        val turn = door.body(request)
+        val ping = door.body(request, maxTokens = OpenRouterDoor.PING_TOKENS)
+
+        assertFalse("the turn's body is streamed", turn.getBoolean("stream"))
+        assertFalse("and so is the ping's, until the turn flips it", ping.getBoolean("stream"))
+        // **What the turn changes is one field**, so everything the provider caches is identical:
+        // the tools, the pin and the reasoning block are the same bytes in both.
+        assertEquals(
+            "the cache sees the same prefix either way",
+            turn.getJSONObject("provider").toString(),
+            ping.getJSONObject("provider").toString(),
+        )
+        assertEquals("and the same tools", turn.getJSONArray("tools").length(), ping.getJSONArray("tools").length())
+    }
+
     // ---- the two clocks ------------------------------------------------------
 
     private fun door(ackSeconds: Int = 90, gapSeconds: Int = 120) = OpenRouterDoor(

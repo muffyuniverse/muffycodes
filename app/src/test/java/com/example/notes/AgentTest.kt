@@ -692,10 +692,16 @@ class AgentTest {
 
         assertEquals("the tag, never the base slug", "decart/fp4", body.getJSONObject("provider").getJSONArray("only").getString(0))
         assertFalse("and nothing beside it", body.getJSONObject("provider").getBoolean("allow_fallbacks"))
-        assertTrue("reasoning is not requested back", body.getJSONObject("reasoning").getBoolean("exclude"))
+        // **Reasoning is requested back, and streaming is why.** It used to be excluded because the
+        // tokens were billed and thrown away; with a streamed answer they arrive first, while the
+        // model is thinking, which is the one signal that tells a diligent model from a dead
+        // connection. The idle timeout is the thing that needs it.
+        assertFalse("reasoning is asked for, not excluded", body.getJSONObject("reasoning").getBoolean("exclude"))
         assertEquals("the model's own way of saying effort", "high", body.getString("reasoning_effort"))
         assertEquals("tool calling is the model's choice", "auto", body.getString("tool_choice"))
-        assertFalse("and the answer is not streamed", body.getBoolean("stream"))
+        // **This body is the ping's**, which is not streamed: a ping reads no answer, so there is
+        // nothing to watch for and no ack to time. The turn's body is the same one with this flipped.
+        assertFalse("and a ping's answer is not streamed", body.getBoolean("stream"))
     }
 
     @Test

@@ -143,8 +143,16 @@ class ScriptedDoor(vararg script: Reply) : Door {
  * `supports_tool_choice: {auto: true, function: false}`, so the forced form would be refused by
  * at least one of them — and this app must behave the same whichever one is active.
  *
- * Reasoning is excluded. It costs tokens that are thrown away, and the agent's reasoning
- * belongs in its record, where a person can read it, rather than in a hidden field.
+ * **Reasoning is no longer excluded, and streaming is why.** It used to be: the tokens were
+ * generated, billed, and then thrown away unseen, which is the worst of both. With a streamed
+ * answer they are not thrown away — they arrive *first*, while the model is thinking and before it
+ * has written anything, which makes "diligent" observable. A connection that has died is silent; a
+ * model working hard is not. That is exactly the distinction the idle timeout has to make, so
+ * excluding reasoning would leave the app blind to the one signal that answers it.
+ *
+ * It also reaches the footer, so a person watching a long turn sees progress rather than a still
+ * screen — and it is not in the conversation: [Streamed.thinking] is kept apart from
+ * [Streamed.said], so nothing the model thought is ever sent back to it as something it said.
  */
 class OpenRouterDoor(
     private val key: () -> String?,
@@ -251,7 +259,10 @@ class OpenRouterDoor(
             .put("tool_choice", "auto")
             .put("provider", JSONObject().put("only", JSONArray().put(request.provider))
                 .put("allow_fallbacks", false))
-            .put("reasoning", JSONObject().put("exclude", true))
+            // **`exclude: false` since streaming landed.** The reason is above the class: reasoning
+            // that is streamed is a liveness signal, not wasted tokens. It is still not part of the
+            // answer, and never enters the conversation.
+            .put("reasoning", JSONObject().put("exclude", false))
             .put("stream", false)
         if (request.effort.isNotBlank()) body.put("reasoning_effort", request.effort)
         // **Everything above is unchanged by a ping, and must be.** A provider's cache matches the
