@@ -388,32 +388,35 @@ class ProjectsFeatureTest : FeatureTest() {
         // The act is completed by taking the path out of the index. The file stays on the phone,
         // editable, and stops being sent.
         scene.project("groceries")
-        val dir = scene.workspace!!.projectDir("groceries")
+        val ws = scene.workspace!!
+        val dir = ws.projectDir("groceries")
         val file = File(dir, "secret.txt")
-        scene.workspace!!.write(file, "the first version")
-        scene.repo("groceries").commitOutcome("groceries", "a save")
+        // A `ProjectGit` of the test's own, because the point is what the *repository* holds — the
+        // question the view model cannot answer about itself.
+        val git = ProjectGit(ws, { null }, { GitAuthor("Muffy", "muffy@example.com") })
+        ws.write(file, "the first version")
+        git.commitOutcome("groceries", "a save")
 
         // It really is in the repository, or the rest of this proves nothing.
-        assertEquals(
-            "the file is in the history before it is ignored",
-            "the first version",
-            scene.repo("groceries").versions("groceries", "secret.txt").firstOrNull()?.second,
+        assertTrue(
+            "the file is in the repository before it is ignored",
+            scene.repo("groceries").tracked().contains("secret.txt"),
         )
 
         scene.viewModel.ignoreInGit(file)
         scene.await("the ignore to be committed", 30_000) {
-            scene.repo("groceries").versions("groceries", "secret.txt").isEmpty()
+            !scene.repo("groceries").tracked().contains("secret.txt")
         }
 
         // And now the edit that used to sneak in.
-        scene.workspace!!.write(file, "the second version")
-        scene.repo("groceries").commitOutcome("groceries", "another save")
+        ws.write(file, "the second version")
+        git.commitOutcome("groceries", "another save")
 
         assertTrue("the file is still on the phone", file.isFile)
         assertEquals("with the edit in it", "the second version", file.readText())
-        assertTrue(
+        assertFalse(
             "and the edit never reached the repository",
-            scene.repo("groceries").versions("groceries", "secret.txt").isEmpty(),
+            scene.repo("groceries").tracked().contains("secret.txt"),
         )
     }
 
