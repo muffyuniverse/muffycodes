@@ -333,4 +333,51 @@ class AgentSessionTest {
                 .warmDue(AgentSession.MAX_IDLE_MS, keepAlive = true),
         )
     }
+
+    // ---- the reconnect window ------------------------------------------------
+
+    /**
+     * The operator's window, as arithmetic, with no clock and no door.
+     *
+     * **This is the one place the window can be checked directly.** The feature tests drive the
+     * real runner, where a tick has to be *due* as well as *late* — two deadlines — and a session
+     * that recovers between failures clears the ladder. Those tests can show that a session
+     * eventually stops; only this one can show where the boundary is.
+     */
+    @Test
+    fun `the ladder stops when the window is spent, and not one millisecond before`() {
+        val window = 30_000L
+        val first = session().failed(at = 1_000, forMs = window)
+        assertEquals("the first failure starts the window", 1_000, first.retryFrom)
+        assertEquals("and does not spend it", AgentSession.Sub.RECONNECTING, first.sub)
+
+        val justShort = first.failed(at = 1_000 + window - 1, forMs = window)
+        assertEquals("one millisecond short is still trying", AgentSession.Sub.RECONNECTING, justShort.sub)
+        assertEquals("and the window still began when it did", 1_000, justShort.retryFrom)
+
+        val spent = first.failed(at = 1_000 + window, forMs = window)
+        assertEquals("the moment it is spent, the session stops", AgentSession.State.STOPPED, spent.state)
+        assertEquals("with the reason a person can act on", AgentSession.StopReason.PIN_REFUSED, spent.reason)
+        assertTrue(
+            "and words to act on, which are the provider's own when it said any",
+            spent.lastWords.isNotBlank(),
+        )
+    }
+
+    @Test
+    fun `a failure that recovers clears the ladder, so the next one starts a new window`() {
+        // **Without this the window is a lifetime total**, and an agent that failed for a second
+        // every hour would stop after thirty hours of otherwise perfect service.
+        val window = 30_000L
+        val failing = session().failed(at = 1_000, forMs = window).failed(at = 2_000, forMs = window)
+        assertEquals("the ladder is under way", 1_000, failing.retryFrom)
+
+        val recovered = failing.warmed(at = 3_000)
+        assertEquals("a successful ping ends the ladder", 0, recovered.retryFrom)
+        assertEquals("and forgets how many tries it took", 0, recovered.retries)
+
+        val nextOutage = recovered.failed(at = 100_000, forMs = window)
+        assertEquals("so the next window starts at the next failure", 100_000, nextOutage.retryFrom)
+        assertEquals("and it is not spent by the last one", AgentSession.Sub.RECONNECTING, nextOutage.sub)
+    }
 }
