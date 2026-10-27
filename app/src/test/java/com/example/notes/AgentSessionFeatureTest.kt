@@ -489,7 +489,16 @@ class AgentSessionFeatureTest : FeatureTest() {
         }
 
         val session = scene.viewModel.sessionOf("groceries")
-        assertEquals("it gave up: $last", AgentSession.State.STOPPED, session?.state)
+        // **The numbers, in the message.** This assertion was failing with "idle · waiting" and
+        // nothing else, and every link in the chain had been checked by reading it. A failure that
+        // says what the ladder actually saw - how many tries, when it started, what the window is -
+        // is the difference between another round of reading and an answer.
+        assertEquals(
+            "it gave up: $last · ticks=$ticks retries=${session?.retries} " +
+                "retryFrom=${session?.retryFrom} window=${scene.settings.reconnectMs}",
+            AgentSession.State.STOPPED,
+            session?.state,
+        )
         assertEquals("and knows why", AgentSession.StopReason.PIN_REFUSED, session?.reason)
         assertTrue("and said so once", notices.any { it.contains("groceries") })
         assertTrue("with the reason in the label: $last", last.contains("OpenRouter answered 401"))
