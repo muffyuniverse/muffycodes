@@ -2664,7 +2664,14 @@ class AppViewModel @JvmOverloads constructor(
             // system project holds the files, and it is read at write time so a response landing
             // after a sign-out cannot be filed under the wrong account.
             onStats = { stats ->
-                workspace?.let { live -> RequestLog.write(live.accountDir, System.currentTimeMillis(), stats) }
+                workspace?.let { live ->
+                    RequestLog.write(
+                        live.accountDir,
+                        System.currentTimeMillis(),
+                        stats,
+                        keepDays = settings.requestDays,
+                    )
+                }
             },
         ).also { door ->
             // **The footer's feed, and only while somebody is looking.** The listener is set where

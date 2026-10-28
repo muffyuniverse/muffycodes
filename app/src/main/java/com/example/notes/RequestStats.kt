@@ -111,36 +111,46 @@ object RequestStats {
      */
     fun parse(day: LocalDate, line: String): Row? {
         val cells = line.split('\t')
-        // time, kind, ms, provider, model, prompt, cached, completion, reasoning, cost, finish
-        if (cells.size < 10) return null
-        val kind = when (cells[1]) {
+        // utc, time, day, kind, ms, provider, model, prompt, cached, completion, reasoning,
+        // cost, finish
+        if (cells.size < 12) return null
+        val kind = when (cells[3]) {
             "turn" -> RequestLog.Stats.Kind.TURN
             "ping" -> RequestLog.Stats.Kind.PING
             else -> return null
         }
+        // **The instant, and nothing else, places the row.** A line without a readable one is not
+        // guessed at from its clock time: a guessed timezone is worse than a missing row, because
+        // it looks like a measurement.
+        val atMs = cells[0].toLongOrNull() ?: return null
         fun long(i: Int) = cells.getOrNull(i)?.takeIf { it.isNotBlank() }?.toLongOrNull()
         fun double(i: Int) = cells.getOrNull(i)?.takeIf { it.isNotBlank() }?.toDoubleOrNull()
-        val cost = double(9)
+        val cost = double(11)
         return Row(
+            atMs = atMs,
             day = day,
-            at = cells[0],
             kind = kind,
-            prompt = long(5),
-            cached = long(6),
-            completion = long(7),
-            reasoning = long(8),
+            prompt = long(7),
+            cached = long(8),
+            completion = long(9),
+            reasoning = long(10),
             cost = cost,
         )
     }
 
-    /** The clock column's format, as [RequestLog.line] writes it. */
-    private val TIME_FORMAT = java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
-
     /** One parsed line. [at] is the clock time, which is all the bucketing needs. */
     data class Row(
-        /** The day of the file this line came from, so a row can be placed on the time axis. */
+        /**
+         * **When this response happened, as an instant.**
+         *
+         * Not a clock time and not a day: an instant is the only form of a time that survives a
+         * change of timezone, and every bucket in the table is arithmetic on it. A log read on a
+         * phone that has since flown somewhere else still places its rows correctly because of
+         * this column.
+         */
+        val atMs: Long,
+        /** The local day of the file it came from, kept so a line can be reported against its file. */
         val day: LocalDate,
-        val at: String,
         val kind: RequestLog.Stats.Kind,
         val prompt: Long?,
         val cached: Long?,
@@ -189,20 +199,12 @@ object RequestStats {
         }.toMutableMap()
 
         for (row in rows) {
-            // **The row's own day and its own clock time.** The clock alone would put every line
-            // into today, which turns a thirty-day table into one column; the day alone would put
-            // every line into the same hour. Both come from the row, so the axis is the log's
-            // rather than the moment somebody opened the screen.
-            val time = try {
-                // **The log's own format, named rather than assumed.** `LocalTime.parse` would
-                // take "09:14:22.301" today and could stop taking it if the format ever gained a
-                // component; naming it here is what makes the reading end match the writing one.
-                row.day.atTime(
-                    java.time.LocalTime.parse(row.at, TIME_FORMAT),
-                ).atZone(zone)
-            } catch (t: Throwable) {
-                continue
-            }
+            // **The instant, converted into the zone being displayed.** This is the whole of the
+            // timezone story: the log records instants, the table converts them, and the axis is
+            // therefore correct whatever the phone's clock is set to. Bucketing the stored clock
+            // time instead would mean a row written in Berlin was counted in the Berlin hour even
+            // while the phone was showing Tokyo's.
+            val time = Instant.ofEpochMilli(row.atMs).atZone(zone)
             val key = keyOf(time)
             val cell = sums[key] ?: continue
             val add = Stats(
@@ -234,31 +236,39 @@ object RequestStats {
      * watched it would be re-reading it while the agent wrote to it.
      */
     fun read(accountDir: File): List<Row> {
-        val dir = File(File(accountDir, Workspace.SYSTEM_PROJECT), RequestLog.DIR)
-        if (!dir.isDirectory) return emptyList()
-        val files = dir.listFiles { f -> f.isFile && f.name.endsWith(".log") }
-            ?.sortedBy { it.name }
-            ?: return emptyList()
-        return files.flatMap { file ->
-            // **The file name is the day**, which is what makes a row placeable at all: the log's
-            // own time column is a clock time with no date in it.
-            val day = try {
-                LocalDate.parse(file.nameWithoutExtension)
-            } catch (t: Throwable) {
-                return@flatMap emptyList<Row>()
+        val file = RequestLog.fileFor(accountDir)
+        if (!file.isFile) return emptyList()
+        return try {
+            // **One file, one shape, one read.** A row carries its own instant, so there is no day
+            // in a file name to be read against and no neighbour to fetch: the table for any zone
+            // is this same single pass.
+            file.readLines().drop(1).mapNotNull { raw ->
+                val day = raw.split('\t').getOrNull(2)?.let {
+                    try {
+                        LocalDate.parse(it)
+                    } catch (t: Throwable) {
+                        null
+                    }
+                } ?: LocalDate.now()
+                parse(day, raw)
             }
-            try {
-                file.readLines().drop(1).mapNotNull { parse(day, it) }
-            } catch (t: Throwable) {
-                emptyList()
-            }
+        } catch (t: Throwable) {
+            // A file that cannot be read contributes nothing rather than failing the table.
+            emptyList()
         }
     }
 
-    /** Days the log covers, so the screen can say what it is a table of. */
-    fun days(accountDir: File): Int {
-        val dir = File(File(accountDir, Workspace.SYSTEM_PROJECT), RequestLog.DIR)
-        return dir.listFiles { f -> f.isFile && f.name.endsWith(".log") }?.size ?: 0
+    /**
+     * How many days the log covers, so the screen can say what the table is of.
+     *
+     * **Counted from the rows rather than from the files**, now that a day is no longer a file: the
+     * span a person cares about is the oldest response held, which is a fact about the rows.
+     */
+    fun days(rows: List<Row>, now: Long, zone: ZoneId = ZoneId.systemDefault()): Int {
+        val oldest = rows.minOfOrNull { it.atMs } ?: return 0
+        val from = Instant.ofEpochMilli(oldest).atZone(zone).toLocalDate()
+        val to = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
+        return java.time.temporal.ChronoUnit.DAYS.between(from, to).toInt() + 1
     }
 
     /** The span the axis names, in words, for the screen's own caption. */

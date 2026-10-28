@@ -44,6 +44,37 @@ class SettingsStore(context: Context, name: String = "settings") {
         private set
 
     /**
+     * How many days of request log are kept — **the operator's number, and off by default.**
+     *
+     * The log is written on every response, including the keepalives sent every four minutes while
+     * the agent waits, so it grows whether or not anybody is using the app: roughly a megabyte a
+     * month of an idle account, and a great deal more of a busy one. Empty keeps all of it, which is
+     * the right default for a log whose whole purpose is being able to ask "what did that cost" a
+     * year later.
+     *
+     * **Retention is a number of days rather than a size in bytes**, because a person thinks in
+     * "keep a month" and not in megabytes, and because the file's own timestamps make a day an
+     * exact boundary while a byte count is not.
+     */
+    var requestDays: Int by mutableStateOf(prefs.getInt(KEY_REQUEST_DAYS, 0))
+        private set
+
+    /** Keeps this many days of request log, clamped. Zero or less keeps everything. */
+    fun keepRequests(days: Int) {
+        val clean = if (days < 0) 0 else days
+        Trace.tap("request log limit", if (clean == 0) "all" else clean.toString())
+        Trace.said(
+            if (clean == 0) {
+                "every response is kept"
+            } else {
+                "responses older than $clean days are dropped as new ones are written"
+            },
+        )
+        requestDays = clean
+        prefs.edit().putInt(KEY_REQUEST_DAYS, clean).apply()
+    }
+
+    /**
      * Whether the trace is copied into Downloads while the app is open.
      *
      * **A development aid, and only a development aid.** A release build answers no
@@ -515,6 +546,9 @@ class SettingsStore(context: Context, name: String = "settings") {
         const val KEY_DARK = "use_dark"
         const val KEY_LIVE = "live_trace"
         const val KEY_HISTORY = "history_length"
+
+        /** Days of request log kept. 0 (the default) keeps every response ever written. */
+        const val KEY_REQUEST_DAYS = "request_days"
 
         /** The reminder interval, in minutes. */
         const val KEY_REMIND = "agent_remind_minutes"

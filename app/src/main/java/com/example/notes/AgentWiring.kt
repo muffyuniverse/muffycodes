@@ -45,6 +45,7 @@ object AgentWiring {
                             AccountStore(rootDir).dirOf(login),
                             System.currentTimeMillis(),
                             stats,
+                            keepDays = settings.requestDays,
                         )
                     }
                 },

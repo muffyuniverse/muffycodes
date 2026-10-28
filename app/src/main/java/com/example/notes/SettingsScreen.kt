@@ -685,6 +685,29 @@ fun SettingsScreen(
                 value = settings.historyLength,
                 onValueChange = { settings.keepHistory(it) },
             )
+
+            // ---- how much of the request log is kept ----
+            //
+            // **Its own field, not part of the history limit.** They are different files with
+            // different shapes: the history is versions of the person's work, and the log is what
+            // the model cost. One number for both would make a person choose between keeping their
+            // files and keeping their bill.
+            Text(
+                "Request log",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(top = 12.dp),
+            )
+            Text(
+                "Every response the agent receives, with what it cost. Empty keeps all of them.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            LengthField(
+                label = "Days kept",
+                value = settings.requestDays,
+                placeholder = "all of them",
+                onValueChange = { settings.keepRequests(it) },
+            )
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
             // ---- every one on this phone, and one switch ----

@@ -77,4 +77,15 @@ object StatsFormat {
 
     /** A request count. */
     fun count(value: Int): String = value.toString()
+
+    /**
+     * A day, for a tap's own record and for the caption.
+     *
+     * In the device's zone: the picker, the file and the table all speak local days, and the one
+     * number that does not is the UTC instant in the log.
+     */
+    fun day(ms: Long, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String =
+        java.time.Instant.ofEpochMilli(ms)
+            .atZone(zone)
+            .format(java.time.format.DateTimeFormatter.ofPattern("dd MMM yyyy"))
 }

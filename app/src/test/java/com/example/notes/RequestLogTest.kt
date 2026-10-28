@@ -59,20 +59,22 @@ class RequestLogTest {
 
         // The count is the contract: a column added without the header being changed would shift
         // every value one place to the right of its name.
-        assertEquals("one cell per column", 11, cells.size)
-        assertEquals("00:00:00.000", cells[0])
-        assertEquals("ping", cells[1])
-        assertEquals("1840", cells[2])
-        assertEquals("deepinfra/fp8/flex", cells[3])
-        assertEquals("deepseek/deepseek-v4.1-flash", cells[4])
-        assertEquals("3691", cells[5])
-        assertEquals("the part the provider did not have to read", "3584", cells[6])
-        assertEquals("1", cells[7])
-        assertEquals("the column the keepalive is watched with", "1", cells[8])
+        assertEquals("one cell per column", 13, cells.size)
+        assertEquals("the instant, and the only column with no zone in it", "0", cells[0])
+        assertEquals("00:00:00.000", cells[1])
+        assertEquals("the local day, for a person reading it", "1970-01-01", cells[2])
+        assertEquals("ping", cells[3])
+        assertEquals("1840", cells[4])
+        assertEquals("deepinfra/fp8/flex", cells[5])
+        assertEquals("deepseek/deepseek-v4.1-flash", cells[6])
+        assertEquals("3691", cells[7])
+        assertEquals("the part the provider did not have to read", "3584", cells[8])
+        assertEquals("1", cells[9])
+        assertEquals("the column the keepalive is watched with", "1", cells[10])
         // **Plain decimal, not Java's shortest form.** `Double.toString` would write 2.41E-5, which
         // the statistics table then has to parse back - so the shape is part of the contract.
-        assertEquals("0.0000241000", cells[9])
-        assertEquals("length", cells[10])
+        assertEquals("0.0000241000", cells[11])
+        assertEquals("length", cells[12])
     }
 
     @Test
@@ -83,11 +85,11 @@ class RequestLogTest {
         val bare = usage("""{ "prompt_tokens": 100 }""")
         val cells = RequestLog.line(0, stats(bare)).split("\t")
 
-        assertEquals("100", cells[5])
-        assertEquals("cached was not reported", "", cells[6])
-        assertEquals("completion was not reported", "", cells[7])
-        assertEquals("reasoning was not reported", "", cells[8])
-        assertEquals("cost was not reported", "", cells[9])
+        assertEquals("100", cells[7])
+        assertEquals("cached was not reported", "", cells[8])
+        assertEquals("completion was not reported", "", cells[9])
+        assertEquals("reasoning was not reported", "", cells[10])
+        assertEquals("cost was not reported", "", cells[11])
     }
 
     @Test
@@ -95,7 +97,7 @@ class RequestLogTest {
         // A ping whose answer was refused, or a provider that simply omits `usage`: the response
         // happened and its cost is unknown. The line has to survive that without a crash.
         val cells = RequestLog.line(0, stats(null)).split("\t")
-        assertEquals(11, cells.size)
+        assertEquals(13, cells.size)
         assertEquals("ping", cells[1])
         assertEquals("", cells[5])
         assertNull("and nothing was invented", RequestLog.Stats(
@@ -109,29 +111,43 @@ class RequestLogTest {
     }
 
     @Test
-    fun `one file per day, and the header is written once`() {
+    fun `one file, one header, however many responses`() {
         val account = tmp.newFolder("account")
-        // Two responses on one day, one on the next. The day is taken from the timestamp, so the
-        // file a response lands in is a fact about the response rather than about when the test ran.
-        val day1 = LocalDate.of(2026, 10, 28)
-        val at = { h: Int, m: Int ->
-            day1.atTime(h, m).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-        }
+        // **No day boundary in the file**, which is the whole reason the shape changed: a file
+        // named after a local day spans a run of UTC hours that starts and ends somewhere else.
+        RequestLog.write(account, 1_000L, stats(full))
+        RequestLog.write(account, 2_000L, stats(full))
 
-        RequestLog.write(account, at(9, 0), stats(full))
-        RequestLog.write(account, at(9, 5), stats(full))
-        RequestLog.write(account, at(9, 10) + 86_400_000L, stats(full))
-
-        val first = RequestLog.fileFor(account, day1)
-        assertTrue("the day's file exists", first.isFile)
-        val lines = first.readLines()
+        val file = RequestLog.fileFor(account)
+        assertTrue("one file", file.isFile)
+        val lines = file.readLines()
         assertEquals("a header and two responses", 3, lines.size)
-        assertTrue("the header names the columns", lines[0].startsWith("time\tkind\tms"))
-        assertEquals("and only once", 1, lines.count { it.startsWith("time\t") })
+        assertTrue("the header names the columns", lines[0].startsWith("utc\ttime\tday"))
+        assertEquals("written once", 1, lines.count { it.startsWith("utc\t") })
+    }
 
-        val next = RequestLog.fileFor(account, day1.plusDays(1))
-        assertTrue("the next day is its own file", next.isFile)
-        assertEquals("with its own header", 2, next.readLines().size)
+    @Test
+    fun `retention drops old rows by their instant, and keeps the newest`() {
+        val account = tmp.newFolder("account")
+        val day = 86_400_000L
+        val now = 100 * day
+        // One row from long ago, one from inside the window, and the newest.
+        RequestLog.write(account, now - 40 * day, stats(full), keepDays = 30)
+        RequestLog.write(account, now - 1 * day, stats(full), keepDays = 30)
+        RequestLog.write(account, now, stats(full), keepDays = 30)
+
+        val body = RequestLog.fileFor(account).readLines().drop(1)
+        assertEquals("the old one is gone", 2, body.size)
+        assertTrue("and the recent ones are kept", body.all { it.substringBefore('\t').toLong() >= now - 30 * day })
+    }
+
+    @Test
+    fun `a retention of zero keeps everything, which is the default`() {
+        val account = tmp.newFolder("account")
+        val day = 86_400_000L
+        RequestLog.write(account, 1L, stats(full))
+        RequestLog.write(account, 100 * day, stats(full))
+        assertEquals("both rows survive", 2, RequestLog.fileFor(account).readLines().drop(1).size)
     }
 
     @Test
@@ -143,7 +159,7 @@ class RequestLogTest {
         val account = tmp.newFolder("account")
         RequestLog.write(account, 0, stats(full))
 
-        val file = RequestLog.fileFor(account, LocalDate.of(1970, 1, 1))
+        val file = RequestLog.fileFor(account)
         assertTrue("inside the system project", file.absolutePath.contains("/system/"))
         assertTrue("in the folder the constant names", file.absolutePath.contains("/requests/"))
         assertTrue(
@@ -156,7 +172,7 @@ class RequestLogTest {
     fun `a turn and a ping are told apart, because they cost different things`() {
         val turn = RequestLog.line(0, stats(full, RequestLog.Stats.Kind.TURN)).split("\t")
         val ping = RequestLog.line(0, stats(full, RequestLog.Stats.Kind.PING)).split("\t")
-        assertEquals("turn", turn[1])
-        assertEquals("ping", ping[1])
+        assertEquals("turn", turn[3])
+        assertEquals("ping", ping[3])
     }
 }

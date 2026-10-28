@@ -12,6 +12,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -21,6 +23,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -64,14 +68,23 @@ fun StatsScreen(
 ) {
     var axis by remember { mutableStateOf(RequestStats.Axis.DAY) }
 
+    // **Where the table ends.** The axis says how wide a bucket is; this says which bucket is the
+    // last one. It starts at now and moves when a person picks a time - which is the difference
+    // between "what did today cost" and "what did that Tuesday cost", and only one of those can be
+    // answered by a clock.
+    var anchor by remember { mutableStateOf(now) }
+    var picking by remember { mutableStateOf(false) }
+    val picker = rememberDatePickerState(initialSelectedDateMillis = anchor)
+    val pickedMs = picker.selectedDateMillis
+
     // **Read when the screen opens, not while it is open.** The log is appended to on every
     // response, including the keepalives sent while nobody is looking, so a table that watched the
     // files would be re-reading them while the agent wrote to them — and would move under the
     // reader's eyes. What the report asked for was a table counted on opening, which is also the
     // only version whose numbers are stable enough to compare.
     val rows = remember(accountDir) { RequestStats.read(accountDir) }
-    val days = remember(accountDir) { RequestStats.days(accountDir) }
-    val buckets = remember(rows, axis) { RequestStats.buckets(rows, axis, now) }
+    val days = remember(rows, anchor) { RequestStats.days(rows, anchor) }
+    val buckets = remember(rows, axis, anchor) { RequestStats.buckets(rows, axis, anchor) }
 
     Scaffold(
         topBar = {
@@ -108,15 +121,63 @@ fun StatsScreen(
             }
 
             item {
-                Text(
-                    // The span, in the app's own words, so the table never has to be counted
-                    // backwards to know what it covers.
-                    RequestStats.span(axis, now) +
-                        " · " + (if (days == 0) "no log yet" else "$days day(s) kept"),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 8.dp),
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        // The span, in the app's own words, so the table never has to be counted
+                        // backwards to know what it covers.
+                        RequestStats.span(axis, anchor) +
+                            " · " + (if (days == 0) "no log yet" else "$days day(s) kept"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    // **A picker rather than only "now"**, because most cost questions are about a
+                    // time that has already gone: what a Tuesday cost, and whether last month was
+                    // more expensive than this one.
+                    TextButton(onClick = { Trace.tap("stats date", "open"); picking = true }) {
+                        Text("When")
+                    }
+                }
+            }
+
+            if (picking) {
+                item {
+                    // **Material's own picker, in a dialog.** A hand-rolled calendar would be a
+                    // second date implementation to keep correct, and the platform's already knows
+                    // about leap years, month lengths and the first day of the week.
+                    DatePickerDialog(
+                        onDismissRequest = { picking = false },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    pickedMs?.let { utcMidnight ->
+                                        // **The picker returns UTC midnight of the chosen day.** Used
+                                        // as-is, a phone west of UTC would anchor on the previous
+                                        // local day and the table would describe a day ago. The date
+                                        // is converted: take the UTC date it names and put it at the
+                                        // *end* of that day in the device's zone, so the chosen day
+                                        // is the last bucket shown rather than the first one cut off.
+                                        val day = java.time.Instant.ofEpochMilli(utcMidnight)
+                                            .atZone(java.time.ZoneOffset.UTC)
+                                            .toLocalDate()
+                                        val chosen = day.atTime(23, 59, 59)
+                                            .atZone(java.time.ZoneId.systemDefault())
+                                            .toInstant()
+                                            .toEpochMilli()
+                                        Trace.tap("stats date", StatsFormat.day(chosen))
+                                        anchor = chosen
+                                    }
+                                    picking = false
+                                },
+                            ) { Text("Show") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { picking = false }) { Text("Cancel") }
+                        },
+                    ) {
+                        DatePicker(state = picker)
+                    }
+                }
             }
 
             if (rows.isEmpty()) {

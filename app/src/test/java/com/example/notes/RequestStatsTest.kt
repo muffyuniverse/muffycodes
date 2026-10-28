@@ -41,7 +41,9 @@ class RequestStatsTest {
         completion: String = "1",
         reasoning: String = "1",
         cost: String = "0.0000241",
-    ) = "$at\t$kind\t1840\tdeepinfra/fp8/flex\tdeepseek\t$prompt\t$cached\t" +
+        utc: Long = LocalDate.parse("2026-10-28").atTime(9, 14)
+            .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+    ) = "$utc\t$at\t$day\t$kind\t1840\tdeepinfra/fp8/flex\tdeepseek\t$prompt\t$cached\t" +
         "$completion\t$reasoning\t$cost\tlength"
 
     @Test
@@ -129,6 +131,41 @@ class RequestStatsTest {
     }
 
     @Test
+    fun `the same rows bucket differently in two zones, because the instant is the truth`() {
+        // **This is the test the single file exists for.** A log written in one place and read in
+        // another must place every row by its instant, not by the clock time it was written with -
+        // "09:14" in Berlin is "00:14" in Los Angeles, and a table that bucketed the stored clock
+        // time would count a Berlin morning as a Los Angeles evening.
+        val instant = LocalDate.parse("2026-10-28").atTime(9, 14)
+            .atZone(java.time.ZoneId.of("Europe/Berlin"))
+            .toInstant()
+            .toEpochMilli()
+        val rows = listOf(
+            RequestStats.Row(
+                atMs = instant,
+                day = LocalDate.parse("2026-10-28"),
+                at = "09:14:22.301",
+                kind = RequestLog.Stats.Kind.TURN,
+                prompt = 1_000, cached = 0, completion = 10, reasoning = 0, cost = 0.001,
+            ),
+        )
+        val now = instant + 60_000L
+
+        val berlin = RequestStats.buckets(
+            rows, RequestStats.Axis.HOUR, now, java.time.ZoneId.of("Europe/Berlin"),
+        )
+        val la = RequestStats.buckets(
+            rows, RequestStats.Axis.HOUR, now, java.time.ZoneId.of("America/Los_Angeles"),
+        )
+
+        assertEquals("Berlin saw it in the nine o'clock hour", 1, berlin.first { it.label == "09:00" }.total.requests)
+        assertEquals("Los Angeles saw it in the midnight hour", 1, la.first { it.label == "00:00" }.total.requests)
+        // And the total is the same fact in both: one request, counted once.
+        assertEquals("one request either way", 1, berlin.sumOf { it.total.requests })
+        assertEquals("one request either way", 1, la.sumOf { it.total.requests })
+    }
+
+    @Test
     fun `a line that does not parse is skipped, not guessed at`() {
         // The log is appended to while it is being read, so the last line may be half written. A
         // table that refused to draw because of one bad line would be a table that never drew.
@@ -161,6 +198,6 @@ class RequestStatsTest {
         assertEquals("and the numbers survived the round trip", 1000L, rows.single().prompt)
         assertEquals("including the cache", 500L, rows.single().cached)
         assertEquals("and the thinking", 2L, rows.single().reasoning)
-        assertEquals("one day kept", 1, RequestStats.days(account))
+        assertEquals("one day kept", 1, RequestStats.days(rows, now))
     }
 }
