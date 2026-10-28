@@ -143,6 +143,7 @@ class RequestLogTest {
         val day = 86_400_000L
         // Long enough ago that its hours are outside the window.
         val old = 100 * day
+        // April 1970, and `now` is 51 days later: June. Different months, deliberately.
         val now = old + 60 * day
         // **A day's worth of hours**, so the month is closed and both levels get built.
         for (h in 0..23) RequestLog.write(account, old + h * 3_600_000L + 60_000L, stats(full))
@@ -154,10 +155,15 @@ class RequestLogTest {
         // **But the levels above them remain**, which is the whole point: the year and month
         // columns still answer for that period.
         assertTrue("the month above them is kept", rows.any { it.span == "month" })
+        // **The month that held the pruned hours**, not the sum of every month row: the live hour
+        // at `now` is in a later month of its own, and adding them together would assert a number
+        // nothing computes. Fifty-one days apart is chosen so the two are provably different
+        // months - otherwise this would pass while testing the wrong one.
+        val oldMonth = RequestStats.monthFloor(old)
         assertEquals(
             "and it still counts what its hours counted",
             24L,
-            rows.filter { it.span == "month" }.sumOf { it.requests },
+            rows.filter { it.span == "month" && it.atMs == oldMonth }.sumOf { it.requests },
         )
     }
 
