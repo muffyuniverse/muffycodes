@@ -290,9 +290,12 @@ class EditorScreenTest {
 
         val report = Trace.report()
         assertTrue("the press was recorded", report.taps > before)
+        // **The name is slugged on the way into the line**, so the vocabulary's `editor edit`
+        // is written `editor-edit`. That is the trace's own rule for every name, not a special
+        // case here: a name with a space in it would make the row's columns ambiguous.
         assertTrue(
             "and it says which mode: newest ${report.lines.take(3)}",
-            report.lines.take(3).any { it.contains("EDIT") && it.contains("editor edit") },
+            report.lines.take(3).any { it.contains("TAP") && it.contains("editor-edit") },
         )
     }
 

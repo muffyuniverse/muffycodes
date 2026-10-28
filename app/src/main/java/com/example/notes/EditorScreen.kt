@@ -256,17 +256,24 @@ fun EditorScreen(
         },
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            // The second row. It scrolls sideways so that it can carry what it
-            // needs to without squeezing the text into a column four buttons wide —
-            // and because a phone in a large font has no room for all of it.
+            // **Save does not scroll.** It is the one act this row exists for, and a primary button
+            // a person has to scroll sideways to find is a button that looks missing - which is
+            // exactly what happened when the third mode arrived: the row was a single scrolling
+            // line, and three modes plus History pushed Save past the right edge. The modes and
+            // History take whatever is left and scroll within it; Save is pinned.
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                    .padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .horizontalScroll(rememberScrollState()),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                 TextButton(onClick = {
                     // The name is committed first: a version list is a list of this
                     // file's versions, and the file may just have been given another
@@ -309,6 +316,8 @@ fun EditorScreen(
                         }
                     }
                 }
+
+            }
 
                 Button(
                     onClick = {
