@@ -197,8 +197,14 @@ object AgentChat {
      * [Box.idle] is.
      */
     /** What one reply was charged for, as the [AgentLog.USAGE] row stores it. */
-    @JvmInline
-    value class Spend(val output: Long, val thinking: Long)
+    /**
+     * What one reply was charged for, as the [AgentLog.USAGE] row stores it.
+     *
+     * **A `data class`, not a `value class`.** Two numbers is two fields, and a value class in Kotlin
+     * has exactly one - so the inline form here would not compile, and wrapping the pair in a holder
+     * to qualify would cost an allocation to save none.
+     */
+    data class Spend(val output: Long, val thinking: Long)
 
     /**
      * Reads `out=123 think=45`, **and tolerates either half being missing.**
