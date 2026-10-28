@@ -239,7 +239,7 @@ class EditorScreenTest {
         // state in which View was the one selected.
         val file = scene.file("milk.txt", "two litres")
 
-        editorWriting(file)
+        editorFor(file)
 
         // The text is readable, and the body is not a field. **The name still is** - renaming a
         // file is not editing it - so the assertion is about the body and not about the screen.
@@ -322,9 +322,8 @@ class EditorScreenTest {
                 )
             }
         }
-        // Into view mode, which is where a note is read rather than typed.
-        compose.onNodeWithText("Edit").performClick()
-
+        // **It opens in View**, which is where a note is read rather than typed - so the picture
+        // is drawn without a press. This used to press Edit to get here, which is now the way out.
         compose.waitUntil(5_000) {
             compose.onAllNodesWithContentDescription("a cat").fetchSemanticsNodes().isNotEmpty()
         }
@@ -351,8 +350,7 @@ class EditorScreenTest {
                 )
             }
         }
-        compose.onNodeWithText("Edit").performClick()
-
+        // It opens in View, so the sentence is there without a press.
         compose.waitUntil(5_000) {
             compose.onAllNodesWithText("could not be read here", substring = true)
                 .fetchSemanticsNodes().isNotEmpty()
