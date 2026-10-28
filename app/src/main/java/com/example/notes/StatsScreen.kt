@@ -256,19 +256,17 @@ private fun KindBlock(
     // a month of empty columns with today's numbers off-screen - which is exactly what the first
     // picture of this screen showed.
     val scroll = rememberScrollState()
-    // **Anchored to a cell boundary, and it JUMPS there.**
+    // **Anchored flush to the right, and it JUMPS there.**
     //
-    // `maxValue` leaves whatever remainder the viewport has, so the leftmost column is drawn cut in
-    // half - the first picture of this screen showed a heading as ":t". Rounding down to a whole
-    // cell means the table always shows whole columns.
+    // Flush right is what puts the newest column - the one a cost screen is usually asking about -
+    // entirely on screen. Two attempts to tidy the left edge got this wrong: rounding the target
+    // down to a whole cell scrolled back by the viewport's remainder, which clips the RIGHT edge
+    // instead, so today's column became the cut one. A table that scrolls sideways always shows a
+    // partial column at one end; the end to sacrifice is the oldest.
     //
-    // It is `scrollTo` and not `animateScrollTo` because an animated anchor is not an anchor: the
-    // second picture caught it mid-flight, three columns short of today, which reads as a table of
-    // nothing. A table opens where it is anchored.
-    val cellPx = with(androidx.compose.ui.platform.LocalDensity.current) { (CELL_DP.dp).toPx() }
-    LaunchedEffect(scroll.maxValue) {
-        scroll.scrollTo(scroll.maxValue - (scroll.maxValue % cellPx.toInt()))
-    }
+    // `scrollTo` and not `animateScrollTo` because an animated anchor is not an anchor: the picture
+    // caught it mid-flight, three columns short of today, which reads as a table of nothing.
+    LaunchedEffect(scroll.maxValue) { scroll.scrollTo(scroll.maxValue) }
 
     Text(
         title + "  ·  " + StatsFormat.count(total.requests) + " requests",
