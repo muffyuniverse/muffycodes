@@ -2609,7 +2609,7 @@ class AppViewModel @JvmOverloads constructor(
         if (now - lastCompact < 10 * 60 * 1000L) return
         lastCompact = now
         val dir = workspace?.accountDir ?: return
-        onWorker { RequestLog.compact(dir, System.currentTimeMillis()) }
+        onWorker { RequestLog.compact(dir, System.currentTimeMillis(), settings.requestDays) }
     }
 
     /**
@@ -2716,7 +2716,6 @@ class AppViewModel @JvmOverloads constructor(
                         live.accountDir,
                         System.currentTimeMillis(),
                         stats,
-                        keepDays = settings.requestDays,
                     )
                 }
             },

@@ -130,22 +130,34 @@ class RequestLogTest {
     }
 
     @Test
-    fun `retention drops old rows by their instant, and keeps the newest`() {
-        val account = tmp.newFolder("account")
+    fun `retention bounds the hour rows and keeps every coarser level`() {
+        // **What the knob is for, said precisely.** It bounds the detail the table can show, not the
+        // file's size - because the pyramid means an old year costs one row while its hours cost
+        // eight thousand. Dropping the hours loses almost all the bytes and almost none of the
+        // information: an old month still answers from its month row, it just cannot be broken down
+        // into days any more.
+        //
+        // Dropping the month row instead would lose the whole column to save one line, which is why
+        // the rule is "hours only".
+        val account = tmp.newFolder("retention")
         val day = 86_400_000L
-        val now = 100 * day
-        // One row from long ago, one from inside the window, and the newest.
-        RequestLog.write(account, now - 40 * day, stats(full), keepDays = 30)
-        RequestLog.write(account, now - 1 * day, stats(full), keepDays = 30)
-        RequestLog.write(account, now, stats(full), keepDays = 30)
+        // Long enough ago that its hours are outside the window.
+        val old = 100 * day
+        val now = old + 60 * day
+        // **A day's worth of hours**, so the month is closed and both levels get built.
+        for (h in 0..23) RequestLog.write(account, old + h * 3_600_000L + 60_000L, stats(full))
+        RequestLog.write(account, now - 60_000L, stats(full))
+        RequestLog.compact(account, now, keepDays = 30)
 
-        val body = RequestLog.fileFor(account).readLines().drop(1)
-        assertEquals("the old one is gone", 2, body.size)
-        assertTrue(
-            "and the recent ones are kept",
-            body.all {
-                java.time.Instant.parse(it.substringBefore('\t')).toEpochMilli() >= now - 30 * day
-            },
+        val rows = RequestStats.read(account)
+        assertEquals("the old hours are gone", 0, rows.count { it.span == "hour" && it.atMs < now - 30 * day })
+        // **But the levels above them remain**, which is the whole point: the year and month
+        // columns still answer for that period.
+        assertTrue("the month above them is kept", rows.any { it.span == "month" })
+        assertEquals(
+            "and it still counts what its hours counted",
+            24L,
+            rows.filter { it.span == "month" }.sumOf { it.requests },
         )
     }
 

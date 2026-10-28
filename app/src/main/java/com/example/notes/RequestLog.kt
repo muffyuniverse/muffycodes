@@ -289,7 +289,6 @@ object RequestLog {
         accountDir: File,
         now: Long,
         stats: Stats,
-        keepDays: Int = 0,
     ) {
         try {
             val dir = File(File(accountDir, Workspace.SYSTEM_PROJECT), DIR)
@@ -302,7 +301,10 @@ object RequestLog {
                     appendLine(line(now, stats))
                 },
             )
-            prune(file, now, keepDays)
+            // **No retention here, deliberately.** This runs once per response, and a retention
+            // pass reads the whole file - at ten thousand requests a day that is the entire log
+            // re-read ten thousand times. Raw rows are now bounded by [compact], which drops them
+            // the moment they are rolled, so there is nothing for a per-write prune to do.
         } catch (t: Throwable) {
             // Deliberately silent. See above.
         }
@@ -312,53 +314,70 @@ object RequestLog {
     private class Entry(val row: RequestStats.Row?, val text: String)
 
     /**
-     * Rolls every closed hour into one aggregate row and drops the raw rows it covers.
+     * Rolls every closed hour into one aggregate row, drops the raw rows it covers, rebuilds the
+     * coarser levels, and applies the retention rule — **in one pass, with one rewrite**.
      *
-     * **The one destructive operation on this file**, so the order matters: the new contents are
-     * written beside and renamed over, exactly as [prune] does, because the door appends from
-     * another thread and a rewrite in place would drop whatever was written between the read and
-     * the write. A raw row is only let go after the aggregate that replaces it is on disk.
+     * **The one destructive operation on this file**, so the order is the whole design:
      *
-     * **Only closed hours.** The hour in progress is left whole: rolling it would store a number
-     * that the next request contradicts, and the file would then hold two rows disagreeing about
-     * the same hour, with nothing to say which is right.
+     * 1. **Roll** every closed hour from its raw rows. The hour in progress is left alone: an
+     *    aggregate for it would be contradicted by the next request.
+     * 2. **Rebuild** `day`, `month` and `year` from the hour rows.
+     * 3. **Then** apply [keepDays] to the hour rows.
+     *
+     * **Step 3 must come after step 2, and that is not a detail.** Rebuilding a day from hours that
+     * retention has already dropped would delete the day: the hours are gone, so the rebuilt day
+     * covers only what is left of it, and the rest of the history disappears one level at a time.
+     * Deriving first and pruning second means an old year keeps its year, month and day rows after
+     * its hours have gone - the columns still answer, they just cannot be broken down further.
      *
      * **A line this code cannot parse is written back untouched** - not parsed into a Row and
-     * rendered again, which would silently drop whatever it held. It cannot be rolled, and
-     * discarding what cannot be read is how a log loses its own evidence.
-     *
-     * Afterwards the coarser levels are rebuilt from the hour rows by [rollUp], so `day` is the sum
-     * of its hours rather than a second opinion about them.
+     * rendered again, which would silently drop whatever it held.
      *
      * Returns the number of raw rows removed, so a test can tell "did nothing" from "worked".
      */
-    fun compact(accountDir: File, now: Long): Int {
+    fun compact(accountDir: File, now: Long, keepDays: Int = 0): Int {
         val file = fileFor(accountDir)
         if (!file.isFile) return 0
         return try {
             val (header, entries) = readEntries(file) ?: return 0
-            val raw = entries.filter { it.row?.span == SPAN_RAW }
-            val closed = RequestStats.closable(raw.mapNotNull { it.row }, "hour", now)
-            if (closed.isEmpty()) return 0
+            val parsed = entries.filter { it.row != null }
 
-            // **Identified by the line's own text**, not by its instant: two rows can share an
-            // instant to the millisecond, and a comparison on time would drop both when one was
-            // meant. The text is the identity the file itself uses.
-            val rolled = closed.values.flatten()
-            val rolledText = rolled.map { r -> entries.first { it.row === r }.text }.toSet()
-            val removed = rolled.size
+            // ---- 1. roll the closed hours ----
+            val rawEntries = parsed.filter { it.row!!.span == SPAN_RAW }
+            val closed = RequestStats.closable(rawEntries.map { it.row!! }, "hour", now)
 
-            val fresh = closed.mapNotNull { (from, group) ->
+            // **Identified by the line's own text**, not by its instant: two responses can share a
+            // millisecond, and a comparison on time would drop both when one was meant. The text is
+            // the identity the file itself uses.
+            val rolledText = closed.values.flatten()
+                .map { rolled -> rawEntries.first { it.row === rolled }.text }
+                .toSet()
+            val removed = rolledText.size
+
+            val freshHours: List<String> = closed.mapNotNull { (from, group) ->
                 RequestStats.rollup(group, "hour", from)?.let(::aggregateLine)
             }
+            // Existing hour rows, plus the ones just built. Raw rows in the open hour survive.
+            val hours: List<Entry> = parsed.filter {
+                it.row!!.span == "hour" || (it.row.span == SPAN_RAW && it.text !in rolledText)
+            }
+
+            // ---- 2. rebuild the coarser levels from the hours ----
+            val rebuilt = rebuild(hours.mapNotNull { it.row } + freshHours.mapNotNull { RequestStats.parse(it) })
+
+            // ---- 3. then bound the hours by age ----
+            val all = hours + rebuilt.map { Entry(RequestStats.parse(it), it) }
+            val kept = prune(all, now, keepDays)
+
             writeWhole(
                 file,
                 header,
-                entries.filter { it.text !in rolledText }.map { it.text } + fresh,
+                // **Unreadable lines first**, because they are kept verbatim and belong to no level.
+                entries.filter { it.row == null }.map { it.text } +
+                    // Then every level the compaction now owns: the surviving hours (already
+                    // pruned) and the coarser rows derived from them.
+                    kept.map { it.text },
             )
-            // Coarser levels are rebuilt, never patched: a day assembled by adding to a number
-            // already in the file would keep any earlier mistake for ever.
-            rollUp(file, now)
             removed
         } catch (t: Throwable) {
             // A compaction that failed leaves the log whole, which is the right failure.
@@ -367,36 +386,36 @@ object RequestLog {
     }
 
     /**
-     * Rebuilds `day`, `month` and `year` rows from the `hour` rows.
+     * The `day`, `month` and `year` rows that the given `hour` rows imply.
      *
      * **Derived, not incrementally maintained.** Each level is recomputed from the level below it,
-     * so the file cannot drift: `day` is the sum of its hours by construction. That is what makes a
-     * change of semantics - and the windows in `docs/PLAN-request-history.md` §1 were revised twice -
-     * a recombination rather than a migration.
+     * so `day` is the sum of its hours by construction rather than a second opinion. That is what
+     * makes a change of semantics - and the windows in `docs/PLAN-request-history.md` §1 were
+     * revised twice - a recombination rather than a migration.
+     *
+     * **Only units that can be proved from the hours in hand are rebuilt.** After retention has
+     * dropped a year of hours, recomputing that year's days from what is left would produce days
+     * covering a fraction of themselves - history deleted a level at a time. A unit is rebuilt only
+     * when every hour it has was available to the rebuild, which for retention means: the unit is
+     * entirely at or after the oldest hour still present.
      */
-    private fun rollUp(file: File, now: Long) {
-        val (header, entries) = try {
-            readEntries(file) ?: return
-        } catch (t: Throwable) {
-            return
-        }
-        // **Everything that is not a coarser aggregate is kept as it is**: raw rows the compactor
-        // has not reached, hour rows, and any line that could not be read. The day/month/year rows
-        // are the only ones replaced, because they are the only ones derived from something else.
-        val keep = entries.filter { it.row?.span !in setOf("day", "month", "year") }
-        val hours = entries.mapNotNull { it.row }.filter { it.span == "hour" }
-
-        val rebuilt = mutableListOf<String>()
+    private fun rebuild(hours: List<RequestStats.Row>): List<String> {
+        if (hours.isEmpty()) return emptyList()
+        val oldest = hours.minOf { it.atMs }
+        val fresh = mutableListOf<String>()
         var level = hours
         for (span in listOf("day", "month", "year")) {
-            val closed = RequestStats.closable(level, span, now)
-            val fresh = closed.mapNotNull { (from, group) ->
+            val closed = RequestStats.closable(level, span, Long.MAX_VALUE)
+                // Only units whose finer rows are all present: a unit that starts before the oldest
+                // hour we have may have lost some.
+                .filterKeys { start -> start >= oldest }
+            val lines = closed.mapNotNull { (from, group) ->
                 RequestStats.rollup(group, span, from)?.let(::aggregateLine)
             }
-            rebuilt += fresh
-            level = fresh.mapNotNull { RequestStats.parse(it) }
+            fresh += lines
+            level = lines.mapNotNull { RequestStats.parse(it) }
         }
-        writeWhole(file, header, keep.map { it.text } + rebuilt)
+        return fresh
     }
 
     /**
@@ -435,45 +454,36 @@ object RequestLog {
     }
 
     /**
-     * Drops rows older than [keepDays], and keeps the newest whatever it says.
+     * Drops `hour` rows older than [keepDays], and **keeps every coarser row whatever its age**.
      *
-     * **A row is dropped by its instant**, which is the same rule the table buckets by, so a row is
-     * never counted in one place and retained by another. A line whose instant will not parse is
-     * kept: it is a line somebody wrote, and discarding what cannot be read is how a log loses its
-     * own evidence.
+     * **What the knob bounds is the history the table can show in detail**, not the file's size.
+     * The pyramid means an old year costs **one row**, while its ten thousand hours cost eight
+     * thousand — so dropping the hours loses almost all the bytes and almost none of the
+     * information: the month and year columns still answer, they just cannot be broken down
+     * further. Dropping the year rows instead would lose the total column to save one line.
      *
-     * **[keepDays] of zero keeps everything**, which is the default: the whole purpose of this file
-     * is being able to ask what something cost a year later.
+     * **[keepDays] of zero keeps everything**, which is the default. With the pyramid that is
+     * ~1.4 MB a year against ~420 MB of raw at ten thousand requests a day, so "everything" is a
+     * reasonable default for the first time.
+     *
+     * **Called from [compact], never from a write.** A retention pass reads the whole file, and
+     * doing that once per response is what this used to do: at ten thousand requests a day the
+     * entire log was re-read ten thousand times. Compaction already reads the file and already
+     * rewrites it, so the retention rides along for free.
+     *
+     * A line whose instant will not parse, or whose span this code does not recognise, is **kept**:
+     * it is a line somebody wrote, and discarding what cannot be read is how a log loses its own
+     * evidence.
      */
-    private fun prune(file: File, now: Long, keepDays: Int) {
-        if (keepDays <= 0 || !file.isFile) return
+    private fun prune(entries: List<Entry>, now: Long, keepDays: Int): List<Entry> {
+        if (keepDays <= 0) return entries
         val cutoff = now - keepDays.toLong() * 86_400_000L
-        val lines = try {
-            file.readLines()
-        } catch (t: Throwable) {
-            return
-        }
-        if (lines.isEmpty()) return
-        val body = lines.drop(1).filter { raw ->
-            // The row is kept when its time cannot be read: a line somebody wrote must not be
-            // discarded because this code could not parse it.
-            val at = try {
-                Instant.parse(raw.substringBefore('\t')).toEpochMilli()
-            } catch (t: Throwable) {
-                return@filter true
-            }
-            at >= cutoff
-        }
-        // Nothing to do, and no rewrite: a prune that rewrites an unchanged file is a prune that
-        // can lose an append for no reason.
-        if (body.size == lines.size - 1) return
-        try {
-            // **Written beside and renamed over**, because the door appends from another thread. A
-            // rewrite in place could drop the response written between the read and the write -
-            // which is exactly the response somebody would be looking for.
-            writeWhole(file, lines.first(), body)
-        } catch (t: Throwable) {
-            // A prune that failed leaves the log whole, which is the right failure.
+        return entries.filter { entry ->
+            // **Only hour rows are bounded.** Everything above them is cheap and everything below
+            // them is already gone, so the hours are the only level where age costs anything.
+            val row = entry.row ?: return@filter true
+            if (row.span != "hour") return@filter true
+            row.atMs >= cutoff
         }
     }
 
