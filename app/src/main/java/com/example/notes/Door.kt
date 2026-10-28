@@ -217,8 +217,12 @@ class OpenRouterDoor(
      * returns is the same shape a non-streamed one would have been — the difference is that it was
      * assembled instead of parsed, and that the listener saw it happen.
      */
-    override fun turn(request: Request): Result<Reply> = try {
-        val began = System.currentTimeMillis()
+    override fun turn(request: Request): Result<Reply> =
+        // **Outside the try**, because the failure path writes a row too and needs the start time.
+        // Declared inside, it was out of scope exactly where a stall is recorded.
+        turnFrom(request, System.currentTimeMillis())
+
+    private fun turnFrom(request: Request, began: Long): Result<Reply> = try {
         val stream = Streamed()
         val reply = streamed(request, stream)
         onStats?.invoke(

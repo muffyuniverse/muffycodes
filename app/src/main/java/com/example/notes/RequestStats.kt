@@ -202,9 +202,11 @@ object RequestStats {
             keyOf(when_) to labelOf(when_)
         }
 
-        val sums = columns.associate { (key, _) ->
-            key to (Stats() to Stats() to Stats())
-        }.toMutableMap()
+        // A named accumulator rather than a Triple: three values of the SAME type in a Triple is a
+        // shape whose order nobody can check by eye, and the compiler binds it to the wrong nesting
+        // the moment the types repeat.
+        data class Sum(val turns: Stats = Stats(), val pings: Stats = Stats(), val stalls: Stats = Stats())
+        val sums = columns.associate { (key, _) -> key to Sum() }.toMutableMap()
 
         for (row in rows) {
             // **The instant, converted into the zone being displayed.** This is the whole of the
@@ -225,15 +227,15 @@ object RequestStats {
                 costReported = if (row.cost != null) 1 else 0,
             )
             sums[key] = when (row.kind) {
-                RequestLog.Stats.Kind.TURN -> Triple(cell.first + add, cell.second, cell.third)
-                RequestLog.Stats.Kind.PING -> Triple(cell.first, cell.second + add, cell.third)
-                RequestLog.Stats.Kind.STALL -> Triple(cell.first, cell.second, cell.third + add)
+                RequestLog.Stats.Kind.TURN -> cell.copy(turns = cell.turns + add)
+                RequestLog.Stats.Kind.PING -> cell.copy(pings = cell.pings + add)
+                RequestLog.Stats.Kind.STALL -> cell.copy(stalls = cell.stalls + add)
             }
         }
 
         return columns.map { (key, label) ->
-            val (turns, pings, stalls) = sums[key] ?: Triple(Stats(), Stats(), Stats())
-            Bucket(label = label, turns = turns, pings = pings, stalls = stalls)
+            val sum = sums[key] ?: Sum()
+            Bucket(label = label, turns = sum.turns, pings = sum.pings, stalls = sum.stalls)
         }
     }
 
