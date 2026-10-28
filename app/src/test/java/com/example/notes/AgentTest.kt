@@ -2810,14 +2810,22 @@ class AgentTest {
                 calls = listOf(call("tree", "{}", "c1")),
                 usage = JSONObject("""{"completion_tokens":900}"""),
             ),
-            Reply("done."),
+            // **And a second reply that does speak, with its own numbers.** Without them this test
+            // would pass for the wrong reason: nothing would be written by either reply, and "no
+            // row" would be indistinguishable from "the call-only reply was correctly skipped".
+            Reply(
+                text = "done.",
+                usage = JSONObject("""{"completion_tokens":700}"""),
+            ),
         )
         agent(door).burst("what is in the folder?")
 
         val usage = rows().filter { it.kind == AgentLog.USAGE }
         assertEquals("one accounting, for the reply that spoke", 1, usage.size)
         val agent = AgentChat.box(rows())!!.bubbles.filter { it.caption == "agent" }
-        assertEquals("the words carry it", 900L, agent.single().output)
+        // **700, not 900.** The call-only reply was charged 900 and had nowhere to put it, so the
+        // figure on the words is the speaking reply's own - which is the whole claim.
+        assertEquals("the words carry their own reply's numbers", 700L, agent.single().output)
     }
 
 }
