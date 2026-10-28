@@ -2748,4 +2748,76 @@ class AgentTest {
         assertEquals("and exactly what it was given", """{"path":"milk.txt"}""", call.body)
         assertTrue("as JSON, so a reader can parse it", JSONObject(call.body).has("path"))
     }
+
+    // ---- the footer's numbers, end to end ----------------------------------------------------
+    //
+    // The one test that proves anything *writes* the numbers. Every other test in this area hands
+    // them in; this one goes reply -> loop -> file -> bubble, which is the path a real turn takes.
+
+    @Test
+    fun `a reply is charged to the row its words were written to`() {
+        // **The numbers arrive with the end of the stream and the row was written before it**, so
+        // the accounting is a second row naming the first. Fails if the usage is dropped between the
+        // door and the record - which is the state this replaced: `Bubble.output` declared, drawn,
+        // and set by nobody.
+        val door = ScriptedDoor(
+            Reply(
+                text = "the file says four.",
+                usage = JSONObject(
+                    """{"completion_tokens":2400,"completion_tokens_details":{"reasoning_tokens":9100}}""",
+                ),
+            ),
+        )
+        agent(door).burst("how many litres?")
+
+        val said = rows().single { it.kind == AgentLog.NOTE && it.name == "agent" }
+        val usage = rows().single { it.kind == AgentLog.USAGE }
+        assertEquals("the words are the row it accounts for", said.id, usage.answers)
+
+        // **And the footer would draw them after a reopen**, which is the point of persisting them:
+        // the bubble is rebuilt from the file with the reply long gone from memory.
+        val bubble = AgentChat.box(rows())!!.bubbles.single { it.caption == "agent" }
+        assertEquals("output", 2400L, bubble.output)
+        assertEquals("thinking", 9100L, bubble.thinking)
+    }
+
+    @Test
+    fun `a door that reports no usage writes no accounting row`() {
+        // **A row of zeroes would claim the request was free.** A scripted door, a provider that sent
+        // no `usage` block, and every log written before this existed all look like this.
+        agent(ScriptedDoor(Reply("nothing to do."))).burst("look")
+
+        assertTrue(
+            "no accounting rather than a zero",
+            rows().none { it.kind == AgentLog.USAGE },
+        )
+        val bubble = AgentChat.box(rows())!!.bubbles.single { it.caption == "agent" }
+        assertEquals("and the footer draws no count", 0L, bubble.output)
+        assertEquals("for either", 0L, bubble.thinking)
+    }
+
+    @Test
+    fun `a call-only reply writes no accounting, because it said nothing`() {
+        // The numbers ride on the words. A reply that only calls tools has no words, so nothing is
+        // charged to a bubble — the alternative would be inventing a row for a call, and then the
+        // same figure would appear on two bubbles of one turn.
+        val door = ScriptedDoor(
+            // **A reply with no words**, so there is nothing for the numbers to ride on. The tool
+            // is a real one: a name the suite does not know would be a refusal, and a refused call
+            // is a different test.
+            Reply(
+                text = "",
+                calls = listOf(call("tree", "{}", "c1")),
+                usage = JSONObject("""{"completion_tokens":900}"""),
+            ),
+            Reply("done."),
+        )
+        agent(door).burst("what is in the folder?")
+
+        val usage = rows().filter { it.kind == AgentLog.USAGE }
+        assertEquals("one accounting, for the reply that spoke", 1, usage.size)
+        val agent = AgentChat.box(rows())!!.bubbles.filter { it.caption == "agent" }
+        assertEquals("the words carry it", 900L, agent.single().output)
+    }
+
 }

@@ -67,8 +67,33 @@ data class Msg(
 /** One tool the model asked for: the name, the arguments as it wrote them, and its own id. */
 data class Call(val id: String, val tool: String, val args: String)
 
-/** One reply. A reply may carry words, calls, or both — the contract allows both. */
-data class Reply(val text: String, val calls: List<Call> = emptyList())
+/**
+ * One reply. A reply may carry words, calls, or both — the contract allows both.
+ *
+ * **[usage] is the provider's own accounting for this reply**, carried here rather than only into
+ * `requests.log`, because the bubble footer asks a question the request log cannot answer: *what did
+ * this message cost*. `requests.log` is keyed by instant and knows nothing about row ids; the footer
+ * is keyed by the row's id. The reply is the only thing that knows both what it said and what it
+ * cost, so the number has to travel with it.
+ *
+ * **Null means the provider said nothing**, which is not the same as zero: a `Reply` built by a
+ * scripted door has no accounting, and a footer that printed `output 0` for it would claim a
+ * measurement nobody made. The two accessors return null in that case for the same reason.
+ */
+data class Reply(
+    val text: String,
+    val calls: List<Call> = emptyList(),
+    val usage: JSONObject? = null,
+) {
+    /** Tokens the model wrote, when the provider said. */
+    val outputTokens: Int?
+        get() = usage?.let { if (it.has("completion_tokens")) it.optInt("completion_tokens") else null }
+
+    /** Tokens it spent thinking, when the provider said. */
+    val thinkingTokens: Int?
+        get() = usage?.optJSONObject("completion_tokens_details")
+            ?.let { if (it.has("reasoning_tokens")) it.optInt("reasoning_tokens") else null }
+}
 
 /**
  * One request, as this app builds it.

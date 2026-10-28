@@ -261,6 +261,45 @@ class AgentChatScreenTest {
     }
 
     @Test
+    fun `the footer draws what the reply cost`() {
+        // **The screen is the claim.** `AgentChatTest` proves the box carries the numbers and
+        // `AgentLogTest` proves they survive a reopen; this one proves the last inch, that they
+        // reach the glass - a footer that rendered nothing would satisfy both of the others.
+        val door = ScriptedDoor(
+            Reply(
+                text = "There is one file.",
+                usage = org.json.JSONObject(
+                    """{"completion_tokens":2400,"completion_tokens_details":{"reasoning_tokens":9100}}""",
+                ),
+            ),
+        )
+
+        chat(door)
+        say("what is in the project")
+        awaitTurns(1)
+
+        // **Both counts, as the footer words them.** 9100 rounds to 9k through the same helper the
+        // footer uses, so this asserts the rendering rather than re-deriving the format here.
+        compose.onNodeWithText("thinking 9k", substring = true).assertExists()
+        compose.onNodeWithText("output 2k", substring = true).assertExists()
+    }
+
+    @Test
+    fun `a reply with no accounting draws no token counts, and does not draw zeroes`() {
+        // **A zero is a measurement.** A scripted door reports nothing, so the footer must say
+        // nothing - "output 0" would claim the request was free rather than unrecorded.
+        chat(ScriptedDoor(Reply("There is one file.")))
+        say("what is in the project")
+        awaitTurns(1)
+
+        // **`· output` is footer-only**, so this cannot pass because some other label happened to
+        // say the word. A bare "output" would also match a caption, and a test that passed for the
+        // wrong reason is worse than no test.
+        compose.onNodeWithText("· output", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("· thinking", substring = true).assertDoesNotExist()
+    }
+
+    @Test
     fun `a message past the cap says so rather than looking shorter than it is`() {
         // **A bubble that simply stopped would be indistinguishable from one that had finished.**
         // The cap hides nothing - it asks for one tap - and the sentence is what makes that true.

@@ -909,4 +909,72 @@ class AgentLogTest {
             log.rows().first { it.id == poll }.ctx,
         )
     }
+
+    // ---- the footer's numbers, as the file holds them ---------------------------------------
+    //
+    // **Persistence is the claim**, so every assertion here reads the file rather than the object:
+    // a recorder whose in-memory row carried the numbers and whose file did not would satisfy any
+    // question asked of the recorder, and would lose the footer on the next reopen.
+
+    @Test
+    fun `a request's accounting is written, and reads back against its own row`() {
+        // Fails if the numbers live only on the reply: the footer would be right until the screen
+        // was reopened and blank afterwards.
+        val said = log.note("agent", "I read the three files and changed nothing.")
+        log.usage(said, output = 2400, thinking = 9100)
+
+        // **Read from the file**, so this cannot pass on a value the writer kept in memory.
+        val rows = AgentLog.open(project).rows()
+        val usage = rows.single { it.kind == AgentLog.USAGE }
+        assertEquals("it names the row it accounts for", said, usage.answers)
+        assertEquals("and the numbers survive the round trip", AgentChat.Spend(2400, 9100), AgentChat.spend(usage.detail))
+    }
+
+    @Test
+    fun `an accounting row is the app's, so the model is never sent it`() {
+        // **It would change the request between polls.** A row whose numbers differ every turn breaks
+        // the provider's cache on the longest common prefix — the whole reason the three prompt
+        // layers are one message.
+        val said = log.note("agent", "done")
+        log.usage(said, output = 2400, thinking = 9100)
+
+        assertTrue(
+            "not in the context",
+            log.contextRows().none { it.kind == AgentLog.USAGE },
+        )
+        assertTrue(
+            "but on the record, because the footer reads the record",
+            AgentLog.open(project).rows().any { it.kind == AgentLog.USAGE },
+        )
+    }
+
+    @Test
+    fun `an unreported figure is absent rather than zero`() {
+        // **`out=0` would be a measurement.** A provider that reported completion tokens and said
+        // nothing about reasoning produced half an accounting, and the file must say exactly that.
+        val said = log.note("agent", "done")
+        log.usage(said, output = 2400, thinking = null)
+
+        val detail = AgentLog.open(project).rows().single { it.kind == AgentLog.USAGE }.detail
+        assertEquals("only the reported half is written", "out=2400", detail)
+        assertFalse("no thinking key at all", detail.contains("think"))
+    }
+
+    @Test
+    fun `an accounting row survives a forget and a trim`() {
+        // **The rewrite paths re-render every row from its own text.** A row whose numbers were held
+        // beside the file instead of in it would be the one thing lost by a forget, which is exactly
+        // when a person is looking back through a conversation.
+        val said = log.note("agent", "keep me")
+        log.usage(said, output = 111, thinking = 222)
+        val forgettable = log.note("note", "forget me")
+
+        log.forget(setOf(forgettable))
+
+        val usage = AgentLog.open(project).rows().single { it.kind == AgentLog.USAGE }
+        assertEquals("still there after a rewrite", AgentChat.Spend(111, 222), AgentChat.spend(usage.detail))
+        assertEquals("still naming its row", said, usage.answers)
+    }
+
+
 }

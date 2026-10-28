@@ -237,11 +237,11 @@ Each step is independently shippable and testable.
    table asks one interval of that structure, not five.
 5. **Checkboxes right of the date picker** — **NOT DOING.** There is one column, so there is nothing
    to check.
-6. **The picker's four granularities.** The operator asked for a picker over **hour, day, month and
-   year** (L28599). Today there is one Material `DatePicker` (a *day*) plus an hour stepper, so
-   picking *year only* or *month only* is impossible. **Still open, and now questionable** — see §7
-   item 10: that requirement came from the per-axis design, and with two pickers a month is
-   expressible as its first and last hour.
+6. ~~**The picker's four granularities.**~~ **NOT NEEDED, decided by the operator 2026-10-28.**
+   The requirement came from the per-axis design, where the picker's granularity *was* the question.
+   With two pickers the question is an interval, and "October" is expressible as its first and last
+   hour, so a month-only or year-only mode would be convenience rather than a requirement — and
+   convenience that adds a second way to say the same thing.
 7. ~~**`session.log` `output`/`thinking` columns** and the `Bubble` wiring~~ **Done.** The footer is
    fed by `stream.shape(elapsed)`.
 
@@ -299,12 +299,13 @@ Each step is independently shippable and testable.
 
 ### Not built
 
-10. **The picker's four granularities** (§5 item 6) — **and now questionable.** There is one Material
-    `DatePicker` (a *day*) plus an hour stepper, so a month-only or year-only pick is impossible.
-    But that requirement came from the per-axis design, where the picker's granularity *was* the
-    question. With two pickers the question is an interval, and "October" is expressible as
-    1 Oct 00:00 → 1 Nov 00:00. **Decide before building:** a month/year mode may be convenience
-    rather than a requirement.
+**Nothing.** Every item in this plan is either built or explicitly not needed. The one open piece of
+work in the request-history area is the bubble footer's persistence, which is tracked separately
+because it is a `session.log` concern rather than a stats one.
+
+10. ~~**The picker's four granularities** (§5 item 6)~~ — **NOT NEEDED** (operator, 2026-10-28). See
+    §5 item 6: with two pickers a month is expressible as its first and last hour, so a month-only
+    mode would be a second way to say the same thing.
 
 ### Three traps found while building, worth keeping
 

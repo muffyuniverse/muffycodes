@@ -133,6 +133,23 @@ class AgentLog private constructor(
          */
         const val TURN = "TURN"
 
+        /**
+         * **What one request was charged for**, as app bookkeeping.
+         *
+         * A row of its own rather than two more columns on every row, and the reason is that the
+         * numbers are per **reply** while the file's rows are per **act**. One reply produces an
+         * operator-visible message and any number of calls; spreading its token counts across those
+         * rows would print the same figure three times and invite adding them up.
+         *
+         * So this row names the row it accounts for in the `answers` column, which already means
+         * "the id of the row this row is about" — [usage] is the only caller that fills it with
+         * something that is not a call.
+         *
+         * **Session only, like [TURN].** It is the app's own accounting, the model has no use for
+         * it, and sending it would change the request between polls for no gain.
+         */
+        const val USAGE = "USAGE"
+
         const val CALL = "CALL"
         const val GOT = "GOT"
         const val NOTE = "NOTE"
@@ -585,6 +602,33 @@ class AgentLog private constructor(
 
     /** A row the agent or the app wants on the record without it being a tool. */
     fun note(name: String, detail: String): Int = record(NOTE, name, detail)
+
+    /**
+     * Records what a request was charged for, **against the row it was charged for.**
+     *
+     * Written after the reply, because the numbers arrive with the end of the stream and the row
+     * they describe was written before it. [of] is that row's id.
+     *
+     * **Both figures are required and neither may be guessed.** A provider that sent no `usage`
+     * block has nothing to record, and the caller passes nothing rather than writing zeroes: a zero
+     * is a measurement and "not reported" is a different fact, which is the same rule the stats
+     * screen follows with its dashes.
+     *
+     * The detail is two `key=value` tokens so a reader needs no column widths: `out=123 think=45`.
+     */
+    fun usage(of: Int, output: Int?, thinking: Int?): Int = record(
+        USAGE,
+        "usage",
+        // **Absent keys are absent, not zero.** `out=123` alone means the provider reported output
+        // and said nothing about reasoning; `out=0` would mean it thought nothing, which is a claim
+        // nobody made. The reader parses only the keys it finds.
+        listOfNotNull(
+            output?.let { "out=$it" },
+            thinking?.let { "think=$it" },
+        ).joinToString(" "),
+        ctx = APP,
+        answers = of,
+    )
 
     /**
      * A row the app writes for itself, and that the model is never sent.

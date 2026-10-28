@@ -454,7 +454,20 @@ class Agent(
             // un-sent, but its commands must not run once the person has spoken or stopped.
             cut()?.let { return finish(cutShort(it, reply.calls)) }
 
-            if (reply.text.isNotBlank()) log.note("agent", reply.text)
+            if (reply.text.isNotBlank()) {
+                val said = log.note("agent", reply.text)
+                // **The accounting goes on the words, because the words are what it is for.**
+                // `output` is the tokens the model wrote and `thinking` the ones it spent getting
+                // there, so they belong to the message a person reads - not to the tool calls, whose
+                // own bubble would then show the same figure twice and invite adding it up.
+                //
+                // **Nothing is written when the provider said nothing.** A scripted door has no
+                // usage, and a row of zeroes would claim the request was free rather than that it
+                // was never reported.
+                if (reply.outputTokens != null || reply.thinkingTokens != null) {
+                    log.usage(said, reply.outputTokens, reply.thinkingTokens)
+                }
+            }
 
             // **Words and no calls is the ending**, and it is the only one. There used to be a
             // second: `ask` and `conclude` were tools the model called to end a turn, with a rule

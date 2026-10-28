@@ -283,4 +283,167 @@ class AgentChatTest {
             box?.idle,
         )
     }
+
+    // ---- the footer's numbers -------------------------------------------------
+    //
+    // **What the footer is for.** Report 36 asked for "time, date and id"; `output` and `thinking`
+    // were declared on `Bubble`, drawn by `footer()`, and for a long time set by nobody — a bubble
+    // reported no tokens because no constructor ever gave it any. These tests are the falsifiers for
+    // the persistence, and each one states the wrong behaviour it would catch.
+
+    private fun usage(of: Int, output: Int?, thinking: Int?) =
+        row(AgentLog.USAGE, "usage", listOfNotNull(
+            output?.let { "out=$it" },
+            thinking?.let { "think=$it" },
+        ).joinToString(" "), ctx = AgentLog.APP, answers = of)
+
+    @Test
+    fun `the agent's words carry what the reply cost`() {
+        // Fails if the numbers never leave the reply: the bubble would report 0 and the footer would
+        // draw neither count, which is exactly the state this replaced.
+        val words = said("I read the three files and changed nothing.")
+        val rows = listOf(told("look at the files"), turn(), words, usage(words.id, 2400, 9100))
+        val box = AgentChat.box(rows)!!
+
+        val agent = box.bubbles.last()
+        assertEquals("captioned as the agent", "agent", agent.caption)
+        assertEquals("the tokens it wrote", 2400L, agent.output)
+        assertEquals("and the ones it thought", 9100L, agent.thinking)
+    }
+
+    @Test
+    fun `a bubble is not charged for a reply that came after it`() {
+        // **The falsifier for reading in place.** The usage row is written *after* the reply, so a
+        // reader that applied rows as it met them would have drawn this bubble already. Here a second
+        // turn's accounting must land on the second turn's words and not on the first.
+        val first = said("nothing to change")
+        val second = said("now I have changed it")
+        val rows = listOf(
+            told("first"), turn(), first, usage(first.id, 100, 200),
+            told("second"), turn(), second, usage(second.id, 300, 400),
+        )
+        val box = AgentChat.box(rows)!!
+
+        val agents = box.bubbles.filter { it.caption == "agent" }
+        assertEquals("both replies are shown", 2, agents.size)
+        assertEquals("the first keeps its own numbers", 100L, agents[0].output)
+        assertEquals("and its own thinking", 200L, agents[0].thinking)
+        assertEquals("the second has its own", 300L, agents[1].output)
+        assertEquals("not the first's", 400L, agents[1].thinking)
+    }
+
+    @Test
+    fun `a tool call is not charged twice for the reply that asked for it`() {
+        // **The reason the numbers go on the words rather than on every row of the turn.** One reply
+        // produces a message and any number of calls. Spread across them, a person reading two
+        // bubbles in one turn would see the same figure twice and reasonably add them.
+        val ask = call("read_file", "{\"path\":\"a.kt\"}")
+        val words = said("the file is fine")
+        val rows = listOf(
+            told("check a.kt"), turn(), ask, got("read_file", "0 ok"), words,
+            usage(words.id, 500, 1200),
+        )
+        val box = AgentChat.box(rows)!!
+
+        val tool = box.bubbles.first { it.caption == "read_file" }
+        assertEquals("the call reports no tokens of its own", 0L, tool.output)
+        assertEquals("and none of the thinking", 0L, tool.thinking)
+        val agent = box.bubbles.last()
+        assertEquals("the message carries the request's numbers", 500L, agent.output)
+        assertEquals("once", 1200L, agent.thinking)
+    }
+
+    @Test
+    fun `a reply with no accounting reports nothing rather than zero`() {
+        // **Absent is not zero.** A scripted door, a provider that sent no `usage` block, and a log
+        // written before this existed all look like this. The footer omits the count, and a zero
+        // here would instead claim the request was free.
+        val words = said("done")
+        val rows = listOf(told("go"), turn(), words)
+        val box = AgentChat.box(rows)!!
+
+        val agent = box.bubbles.last()
+        assertEquals("no output count", 0L, agent.output)
+        assertEquals("no thinking count", 0L, agent.thinking)
+    }
+
+    @Test
+    fun `half an accounting is still an accounting`() {
+        // A provider may report the completion count and say nothing about reasoning. The missing
+        // half must not become a zero that the footer then prints - `out=2400` alone is a real row.
+        val words = said("done")
+        val box = AgentChat.box(
+            listOf(told("go"), turn(), words, usage(words.id, 2400, null)),
+        )!!
+
+        val agent = box.bubbles.last()
+        assertEquals("the half that was reported", 2400L, agent.output)
+        assertEquals("and the half that was not stays unknown", 0L, agent.thinking)
+    }
+
+    @Test
+    fun `an accounting row names its own row, not the newest one`() {
+        // **The falsifier for joining by position.** A usage row belongs to the row its `answers`
+        // column names. If the reader took "the last agent bubble" instead, a log whose rows were
+        // rewritten - a forget reorders nothing but rewrites everything - would silently re-point it.
+        val first = said("earlier")
+        val second = said("later")
+        // Deliberately out of order: the second reply's accounting comes first in the file.
+        val rows = listOf(
+            told("go"), turn(), first, second,
+            usage(second.id, 300, 400),
+            usage(first.id, 100, 200),
+        )
+        val box = AgentChat.box(rows)!!
+
+        val agents = box.bubbles.filter { it.caption == "agent" }
+        assertEquals("the earlier reply", 100L, agents[0].output)
+        assertEquals("the later reply", 300L, agents[1].output)
+    }
+
+    @Test
+    fun `an unreadable accounting row costs nothing and loses no other bubble`() {
+        // It is the app's own bookkeeping, so this should not happen - but a row is the evidence, and
+        // a reader that threw on one bad line would lose the whole conversation to it. `spend` is
+        // total: anything it does not recognise reads as nothing.
+        assertEquals("empty", AgentChat.Spend(0, 0), AgentChat.spend(""))
+        assertEquals("not key=value", AgentChat.Spend(0, 0), AgentChat.spend("garbage"))
+        assertEquals("a key with no value", AgentChat.Spend(0, 0), AgentChat.spend("out="))
+        assertEquals("a value that is not a number", AgentChat.Spend(0, 0), AgentChat.spend("out=lots"))
+        // **A negative is not a token count**, so it is rejected rather than carried into a footer
+        // that would hide it (`> 0`) while a sum elsewhere counted it.
+        assertEquals("a negative is refused, the other half kept", AgentChat.Spend(0, 200), AgentChat.spend("out=-5 think=200"))
+        assertEquals("both", AgentChat.Spend(2400, 9100), AgentChat.spend("out=2400 think=9100"))
+        assertEquals("reversed order is the same fact", AgentChat.Spend(2400, 9100), AgentChat.spend("think=9100 out=2400"))
+        // **An unknown key is ignored rather than fatal**, so a later version can add one and an
+        // older build still reads the row.
+        assertEquals("an unknown key", AgentChat.Spend(7, 0), AgentChat.spend("out=7 cost=0.003"))
+    }
+
+    @Test
+    fun `a usage row is bookkeeping and is not drawn as a bubble`() {
+        // Forty of these would be forty bubbles saying nothing a person asked for. The numbers reach
+        // the screen through the bubble's footer, which is where the report put them.
+        val words = said("done")
+        val rows = listOf(told("go"), turn(), words, usage(words.id, 2400, 9100))
+        val box = AgentChat.box(rows)!!
+
+        assertEquals("one bubble for the words, and no bubble for the row", 2, box.bubbles.size)
+        assertTrue(
+            "nothing is captioned usage",
+            box.bubbles.none { it.caption == "usage" },
+        )
+    }
+
+    @Test
+    fun `an accounting row never enters the context`() {
+        // **It would change the request between polls.** The context has to be byte-identical across
+        // a keepalive, and a row whose numbers differ every turn would break the provider's cache on
+        // the longest common prefix - the thing the three-layer system message exists to protect.
+        val words = said("done")
+        val rows = listOf(told("go"), turn(), words, usage(words.id, 2400, 9100))
+        val box = AgentChat.box(rows)!!
+        assertEquals("the accounting is not a turn", 1, box.turns.size)
+    }
+
 }

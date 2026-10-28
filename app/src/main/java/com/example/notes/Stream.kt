@@ -185,7 +185,17 @@ class Streamed {
      * **Assembled, not parsed from one body** — which is the whole difference from a non-streamed
      * reply. The calls are the same shape, because the join above already produced them.
      */
-    fun reply(): Reply = Reply(said.toString(), calls.toList())
+    /**
+     * The assembled answer, **with the provider's accounting attached.**
+     *
+     * The usage is handed over here because this is the last place that has both: the stream knows
+     * what arrived and what it was charged for, and after this the numbers would have to be carried
+     * separately through the loop to reach the row that the footer reads.
+     *
+     * A reply that streamed nothing at all has `usage == null` and the footer draws no token
+     * counts — which is the honest answer, and the one a scripted door gives.
+     */
+    fun reply(): Reply = Reply(said.toString(), calls.toList(), usage)
 
     /**
      * Everything a person is told about the exchange, **in the words the footer shows.**
