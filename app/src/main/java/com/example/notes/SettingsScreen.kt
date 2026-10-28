@@ -206,7 +206,12 @@ fun SettingsScreen(
                 TextButton(onClick = onTestAccount) { Text("Use the test account") }
             }
 
-            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+            // **One gap, not three.** This divider carried 12dp of its own on top of the column's
+            // 6dp between rows and the button's own vertical padding, which together read as a hole
+            // between the account and the agent section rather than as a separator - visible in the
+            // settings scenario's own picture. A divider's job is to be a line; the space around it
+            // belongs to the column that holds it.
+            HorizontalDivider(modifier = Modifier.padding(top = 4.dp))
 
             // ---- everything the agent needs, in one place, on this screen once ----
             //

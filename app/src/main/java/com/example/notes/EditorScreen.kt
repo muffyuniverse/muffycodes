@@ -274,14 +274,6 @@ fun EditorScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                TextButton(onClick = {
-                    // The name is committed first: a version list is a list of this
-                    // file's versions, and the file may just have been given another
-                    // name.
-                    commitName()
-                    onOpenHistory()
-                }) { Text("History") }
-
                 // **Three modes, named, and one of them is selected.** A single chip that said
                 // "Edit" or "View" was a switch: it told a person what pressing it would do, not
                 // where they were, and there was nowhere to put a third thing. Report 29 asked for
@@ -293,6 +285,10 @@ fun EditorScreen(
                 // the row scrolls, so nothing was unreachable, but a primary button you have to
                 // scroll sideways to find is a button that looks missing. A segmented control also
                 // says "exactly one of these" in its shape, which three independent chips cannot.
+                // **The modes come first, before History.** They are what the screen *is*; History
+                // is an act performed on it. Ordering them the other way put Diff off the right
+                // edge of the scrolling part, so a person had to scroll the row to discover a mode
+                // - which the scenario picture showed and the test then caught.
                 if (kind == EntryKind.TEXT) {
                     SingleChoiceSegmentedButtonRow {
                         ModeSegment("View", Mode.VIEW, selected = mode) {
@@ -316,6 +312,14 @@ fun EditorScreen(
                         }
                     }
                 }
+
+                TextButton(onClick = {
+                    // The name is committed first: a version list is a list of this
+                    // file's versions, and the file may just have been given another
+                    // name.
+                    commitName()
+                    onOpenHistory()
+                }) { Text("History") }
 
             }
 
