@@ -142,12 +142,14 @@ class RequestStatsTest {
     }
 
     @Test
-    fun `the same rows bucket differently in two zones, because the instant is the truth`() {
+    fun `the same row lands in a different hour in two zones, from one instant`() {
         // **This is the test the single file exists for.** A log written in one place and read in
-        // another must place every row by its instant, not by the clock time it was written with -
-        // "09:14" in Berlin is "00:14" in Los Angeles, and a table that bucketed the stored clock
-        // time would count a Berlin morning as a Los Angeles evening.
-        val instant = LocalDate.parse("2026-10-28").atTime(9, 14)
+        // another must place every row by its instant, not by the clock time it was written with.
+        //
+        // 13:14 Berlin is 04:14 the same day in Los Angeles - nine hours apart, both on the 28th,
+        // so the DAY agrees and only the HOUR differs. That isolates the conversion: a test whose
+        // zones disagree about the date could pass on a timezone bug one day out.
+        val instant = LocalDate.parse("2026-10-28").atTime(13, 14)
             .atZone(java.time.ZoneId.of("Europe/Berlin"))
             .toInstant()
             .toEpochMilli()
@@ -159,24 +161,22 @@ class RequestStatsTest {
                 prompt = 1_000, cached = 0, completion = 10, reasoning = 0, cost = 0.001,
             ),
         )
-        val now = instant + 60_000L
+        val berlinZone = java.time.ZoneId.of("Europe/Berlin")
+        val laZone = java.time.ZoneId.of("America/Los_Angeles")
 
-        val berlin = RequestStats.buckets(
-            rows, RequestStats.Axis.DAY, now, java.time.ZoneId.of("Europe/Berlin"),
-        )
-        val la = RequestStats.buckets(
-            rows, RequestStats.Axis.DAY, now, java.time.ZoneId.of("America/Los_Angeles"),
-        )
+        // Hours: the two zones must disagree, and disagree by nine.
+        val berlinHour = RequestStats.buckets(rows, RequestStats.Axis.HOUR, instant, berlinZone)
+            .first { it.total.requests == 1 }.label
+        val laHour = RequestStats.buckets(rows, RequestStats.Axis.HOUR, instant, laZone)
+            .first { it.total.requests == 1 }.label
+        assertEquals("Berlin's own hour", "13:00", berlinHour)
+        assertEquals("and Los Angeles', nine hours back", "04:00", laHour)
 
-        // **A day, not an hour: one column per date is unambiguous**, while an hour label sits at
-        // the edge of a 24-hour window and would test the window rather than the timezone.
-        assertEquals("Berlin counted it on its own 28th", 1, berlin.first { it.label == "28 Oct" }.total.requests)
-        // The same instant is still the 27th in Los Angeles - nine hours earlier - and that is the
-        // whole point: one request, one instant, and the local day depends on where you stand.
-        assertEquals("Los Angeles counted it on its 27th", 1, la.first { it.label == "27 Oct" }.total.requests)
-        // And it is one request in both, counted once rather than duplicated by the conversion.
-        assertEquals("one request either way", 1, berlin.sumOf { it.total.requests })
-        assertEquals("one request either way", 1, la.sumOf { it.total.requests })
+        // Days: both on the 28th, so the difference above is the hour and not the date.
+        val berlinDay = RequestStats.buckets(rows, RequestStats.Axis.DAY, instant, berlinZone)
+        val laDay = RequestStats.buckets(rows, RequestStats.Axis.DAY, instant, laZone)
+        assertEquals("one request, counted once", 1, berlinDay.sumOf { it.total.requests })
+        assertEquals("one request, counted once", 1, laDay.sumOf { it.total.requests })
     }
 
     @Test
@@ -187,7 +187,14 @@ class RequestStatsTest {
         // `usage` and every cost column blank. A zero would say "free", and the honest answer is
         // "we do not know".
         val day = LocalDate.parse("2026-10-28")
-        val stallRow = "1759" + "000000\t09:14:22.301\t2026-10-28\tstall\t41000\tdeepinfra\tdeepseek\t" +
+        // **The instant is derived, not typed.** A hand-written epoch is a number no reader can
+        // check and that misses the test's own window by however much somebody mistyped it - this
+        // one was thirteen months out, so the row was correct and the column was empty.
+        val atMs = day.atTime(9, 14, 22)
+            .atZone(ZoneId.systemDefault())
+            .toInstant()
+            .toEpochMilli()
+        val stallRow = "$atMs\t09:14:22.301\t2026-10-28\tstall\t41000\tdeepinfra\tdeepseek\t" +
             "\t\t\t\t\t\t120\t880"
         val parsed = RequestStats.parse(day, stallRow)!!
 
@@ -201,8 +208,7 @@ class RequestStatsTest {
 
         val buckets = RequestStats.buckets(
             listOf(parsed), RequestStats.Axis.DAY,
-            LocalDate.parse("2026-10-28").atTime(9, 30).atZone(ZoneId.systemDefault())
-                .toInstant().toEpochMilli(),
+            day.atTime(9, 30).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
         )
         val today = buckets.last()
         assertEquals("counted as a request", 1, today.stalls.requests)
