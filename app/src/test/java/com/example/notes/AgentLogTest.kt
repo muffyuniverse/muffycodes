@@ -204,7 +204,10 @@ class AgentLogTest {
         // The date went into the *same token*, with a `T` between them, rather than into a new
         // column - because the parser reads the stamp as one `\S+`, so a second column would have
         // moved every column after it and a log written by an older build would stop parsing.
-        val id = log.bookkeeping(AgentLog.NOTE, "a note", "the words")
+        // **The name is one word, because the row's columns are separated by spaces.** `a note`
+        // would make the id look like part of the stamp and the detail like part of the name - the
+        // row would not parse, and the test would be asking about a row the app cannot write.
+        val id = log.bookkeeping(AgentLog.NOTE, "a_note", "the words")
 
         val row = log.rows().first { it.id == id }
         // **The two halves are what the footer draws**, and they are read out of the one token the
