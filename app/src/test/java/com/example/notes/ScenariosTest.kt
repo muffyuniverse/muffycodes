@@ -6,6 +6,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import org.robolectric.RuntimeEnvironment
 import androidx.test.espresso.IdlingPolicies
 import java.util.concurrent.TimeUnit
@@ -535,9 +537,24 @@ class ScenariosTest {
         // **The conversation is made by the app, not by hand.** `sendChat` writes the operator's row
         // and asks the door; the door answers with a call, and then with words. A scenario that
         // built the rows itself would be photographing a record the app cannot produce.
+        // **With the provider's accounting, so the footer's numbers are in the picture.** A door
+        // that reported no usage would photograph the one thing the footer can no longer draw - and
+        // the counts are persisted precisely so they survive a reopen, so a scenario without them
+        // would be showing a screen that cannot exist on a phone that has done a real turn.
         val door = ScriptedDoor(
-            Reply("", listOf(Call("call-1", "tree", """{"path":""}"""))),
-            Reply("There is one file, and it is the note you wrote."),
+            Reply(
+                text = "",
+                calls = listOf(Call("call-1", "tree", """{"path":""}""")),
+                usage = org.json.JSONObject(
+                    """{"completion_tokens":412,"completion_tokens_details":{"reasoning_tokens":1880}}""",
+                ),
+            ),
+            Reply(
+                text = "There is one file, and it is the note you wrote.",
+                usage = org.json.JSONObject(
+                    """{"completion_tokens":2400,"completion_tokens_details":{"reasoning_tokens":9100}}""",
+                ),
+            ),
         )
         viewModel.chatDoor = { door }
         viewModel.openChat("groceries")
@@ -650,6 +667,43 @@ class ScenariosTest {
                     "and To sit above the table, and every number below is that interval summed. " +
                     "One figure per metric, which is what a person asks for - not five nested " +
                     "views of one instant that each need a rule for where they start.",
+            )
+        }
+    }
+
+    @Test
+    fun `the window that picks when the table is about`() {
+        // **The one popup the cost table has, and the only place a minute could be chosen.** The
+        // table counts whole hours, so the dialog offers the hour alone - and that is a decision
+        // only a picture can confirm, because "the minute stepper is gone" is true of a dialog that
+        // might have lost the hour too.
+        //
+        // Material's calendar is above the steppers: the day is the platform's own picker because a
+        // hand-written calendar is a month of work that would still not match the phone's, and only
+        // the hour is ours.
+        scene.signedIn()
+        val account = scene.workspace?.accountDir ?: error("signed in, so there is one")
+        val now = java.time.LocalDate.parse("2026-10-28")
+            .atTime(14, 30).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+
+        scenario(
+            compose, "25-the-window-that-picks-an-interval",
+            "The window that picks when the table is about.",
+            "the day and the hour, and nothing finer than an hour.",
+            screen = { stats(account, now) },
+        ) {
+            before()
+            then("`From` is pressed, which opens the calendar and the hour.") {
+                // The From button shows the interval's own start, which is midnight - so the text
+                // is unique in a table whose To reads 15:00.
+                compose.onNodeWithText("00:00", substring = true).performClick()
+            }
+            after()
+            result(
+                "A day from the phone's own calendar and an hour beside it, and no minute at all: " +
+                    "the table counts whole hours, so a minute would let a person pick a period the " +
+                    "figures could not describe. `Show` is named for the act rather than for the " +
+                    "window.",
             )
         }
     }
