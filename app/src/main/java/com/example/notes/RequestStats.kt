@@ -145,18 +145,29 @@ object RequestStats {
      * pile, and it is the only thing standing between the table and a number that is merely
      * plausible.
      *
-     * - **Raw is always counted.** Nothing covers raw: it is the floor of the pyramid, and the only
-     *   level that always exists.
+     * - **Raw is silenced too, when an hour covers it.** Raw is the floor only in the sense that
+     *   nothing exists below it - not in the sense that it always counts. A rolling window's
+     *   boundary can cut through an hour whose raw rows and hour row both survive a half-finished
+     *   compaction, and counting both is precisely the double count this exists to prevent.
      * - **A coarser row need not be complete for the box.** Aggregates only ever exist for closed
      *   units - the compactor refuses an open one - so "it exists" already means "it is whole". A
      *   day row is therefore counted even when the column cuts through it, which is right: the
      *   alternative is to descend to hours that were deleted once the day was written.
      */
     private fun counts(r: Row, covered: Map<String, List<Long>>): Boolean {
-        if (r.span == RequestLog.SPAN_RAW) return true
-        val start = unitFloor(r.span, r.atMs) ?: return true
+        // **A raw row's unit is the hour it falls in.** It is the finest level, so the coarser
+        // levels above it are exactly the four aggregates - and if one of those covers its hour,
+        // the raw row has already been spoken for.
+        val start = unitFloor(r.span, r.atMs) ?: hourFloor(r.atMs)
         val end = unitEnd(r.span, start)
+        // **Which levels speak for this one's unit.** An hour row describes the same hour as the
+        // raw rows beneath it - it was built from them and the compactor then deletes them - so an
+        // hour row silences raw rows in its hour. That is not "two levels of different sizes": it
+        // is one level having replaced another, and the file can briefly hold both if a compaction
+        // died between writing the aggregate and rewriting the file. Counting both would add the
+        // hour to itself.
         val coarser = when (r.span) {
+            RequestLog.SPAN_RAW -> listOf("hour", "day", "month", "year")
             "hour" -> listOf("day", "month", "year")
             "day" -> listOf("month", "year")
             "month" -> listOf("year")
