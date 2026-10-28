@@ -184,7 +184,12 @@ class Workspace(val accountDir: File) {
      * `.git/` is not a file a person browses; it is git's own store, and every tool treats it as
      * opaque.
      */
-    fun isHidden(name: String): Boolean = name == KEEPER || name == GIT_DIR
+    fun isHidden(name: String): Boolean = name == KEEPER || name == GIT_DIR ||
+        // **A file being written is not a file.** It exists for the length of one rename, so a
+        // folder listing that caught it would show a row that vanishes - and the deletion window,
+        // which asks the history what used to be here, would offer it back. Named by [Beside], which
+        // is the only thing that creates one.
+        name.startsWith(Beside.TEMP_PREFIX)
 
 
     /**

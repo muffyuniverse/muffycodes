@@ -253,8 +253,43 @@ object GitService {
      * everything ends up staged.
      */
     private fun stageEverything(git: Git) {
+        excludeTemporaries(git.repository)
         git.add().addFilepattern(".").call()
         git.add().addFilepattern(".").setUpdate(true).call()
+    }
+
+    /**
+     * Tells this repository to ignore the app's own half-written files — **and never a person's.**
+     *
+     * A file is written beside itself and renamed over, so between the write and the rename there is
+     * a real file in the project. `git add .` cannot tell it from content, and a commit that ran in
+     * that window would record a file the rename then deleted: a phantom "deleted file" in the
+     * person's history, for ever, offering to restore something they never had.
+     *
+     * **`.git/info/exclude`, not `.gitignore`.** An ignore line in `.gitignore` is content: it would
+     * be committed, pushed to GitHub, and appear in the person's change list as a file they did not
+     * write. `info/exclude` is git's own place for a local ignore, it lives inside `.git` where the
+     * app already owns the bytes, and it is not part of any tree.
+     *
+     * Written on the way into every commit rather than once at init, because a project made before
+     * this existed has no line and would keep the hazard. The read is of a file measured in bytes,
+     * next to a stage-everything that walks the tree.
+     */
+    private fun excludeTemporaries(repo: Repository) {
+        try {
+            val info = File(repo.directory, "info").apply { mkdirs() }
+            val exclude = File(info, "exclude")
+            val line = "${Beside.TEMP_PREFIX}*"
+            val was = if (exclude.isFile) exclude.readText() else ""
+            if (was.lineSequence().any { it.trim() == line }) return
+            val now = if (was.isEmpty() || was.endsWith("\n")) was + line + "\n" else was + "\n" + line + "\n"
+            exclude.writeText(now)
+        } catch (t: Throwable) {
+            // **A repository that cannot be told still works.** The rename deletes the temporary a
+            // moment later, so the failure mode is a phantom file in one listing rather than a lost
+            // one - and a commit that failed because a hint could not be written would be worse than
+            // the hint.
+        }
     }
 
     /**

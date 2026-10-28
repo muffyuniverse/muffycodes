@@ -684,4 +684,128 @@ class ProjectGitTest {
         assertEquals("nothing to send", 0, git.changes("Shopping").total)
         assertTrue(git.log("Shopping", "${AgentLog.DIR}/session.log").isEmpty())
     }
+
+    // ---- the file being written is never content --------------------------------------------
+    //
+    // **Found while chasing a flake, and the flake was the evidence.** `HistoryFeatureTest` failed
+    // once with "nothing is offered expected:[] but was:[kept.txt.new]" - a file nobody created,
+    // offered back from the history. The mechanism: a save writes `<name>.new` beside the file and
+    // renames over it, and a commit that ran between the two recorded the temporary, which the
+    // rename then deleted. The phantom then sits in every later deletion window, offering to
+    // restore a file that never existed.
+
+    @Test
+    fun `a half-written file is not committed`() {
+        workspace.createProjectFolders("Shopping").getOrThrow()
+        val git = gitFor()
+        git.init("Shopping").getOrThrow()
+        val worktree = workspace.repoOf("Shopping")
+
+        File(worktree, "milk.txt").writeText("two litres")
+        // **The exact state a save is in for one instant**: the target beside a temporary, both real
+        // files, the rename not yet done.
+        File(worktree, Beside.TEMP_PREFIX + "milk.txt").writeText("three litres")
+
+        git.commit("Shopping", "Edited milk.txt")
+
+        val held = git.paths("Shopping", null, git.log("Shopping", null, 1).single().id)
+        assertTrue("the file is committed: $held", "milk.txt" in held)
+        assertFalse(
+            "and the half-written one is not: $held",
+            held.any { it.startsWith(Beside.TEMP_PREFIX) },
+        )
+    }
+
+    @Test
+    fun `the exclusion is local, so it is not a file the person wrote`() {
+        // **`.git/info/exclude`, not `.gitignore`.** An ignore line in `.gitignore` is content: it
+        // would be committed, pushed to GitHub, and appear in the change list as a file nobody wrote.
+        workspace.createProjectFolders("Shopping").getOrThrow()
+        val git = gitFor()
+        git.init("Shopping").getOrThrow()
+        val worktree = workspace.repoOf("Shopping")
+
+        File(worktree, "milk.txt").writeText("two litres")
+        git.commit("Shopping", "Edited milk.txt")
+
+        val held = git.paths("Shopping", null, git.log("Shopping", null, 1).single().id)
+        assertFalse("no .gitignore was invented for the person", ".gitignore" in held)
+        assertTrue(
+            "the hint lives inside .git",
+            File(worktree, ".git/info/exclude").isFile,
+        )
+    }
+
+    @Test
+    fun `the hint is written once, however many commits there are`() {
+        // It is written on the way into every commit, because a project made before this existed has
+        // no line. That makes duplication the obvious failure: an exclude file that grew a line per
+        // commit would be a slow leak in a file the person may one day read.
+        workspace.createProjectFolders("Shopping").getOrThrow()
+        val git = gitFor()
+        git.init("Shopping").getOrThrow()
+        val worktree = workspace.repoOf("Shopping")
+
+        repeat(3) { n ->
+            File(worktree, "milk.txt").writeText("$n litres")
+            git.commit("Shopping", "Edited milk.txt")
+        }
+
+        val text = File(worktree, ".git/info/exclude").readText()
+        assertEquals(
+            "one line, not three",
+            1,
+            text.lineSequence().count { it.trim() == "${Beside.TEMP_PREFIX}*" },
+        )
+    }
+
+    @Test
+    fun `a project made before the hint was written still gets it`() {
+        // The line is added at commit time rather than at init precisely for this: every project on
+        // a phone already has a repository with no exclude file, and a fix that only helped new
+        // projects would leave the hazard on all of them.
+        workspace.createProjectFolders("Shopping").getOrThrow()
+        val git = gitFor()
+        git.init("Shopping").getOrThrow()
+        val worktree = workspace.repoOf("Shopping")
+        File(worktree, ".git/info/exclude").delete()
+
+        File(worktree, "milk.txt").writeText("two litres")
+        git.commit("Shopping", "Edited milk.txt")
+
+        assertTrue(
+            "the line is there now",
+            File(worktree, ".git/info/exclude").readText().contains("${Beside.TEMP_PREFIX}*"),
+        )
+    }
+
+    @Test
+    fun `a file being written leaves nothing behind and is whole`() {
+        // **The rename is the whole point of the temporary.** A write that left the temporary in
+        // place would put a second copy of the file in the folder, and one that wrote through it
+        // would leave the target half-written after a kill.
+        val file = File(root, "note.txt")
+        Beside.write(file, "first")
+        Beside.write(file, "second")
+
+        assertEquals("the target is whole", "second", file.readText())
+        assertEquals(
+            "and no temporary is left",
+            emptyList<String>(),
+            file.parentFile!!.list()!!.filter { it.startsWith(Beside.TEMP_PREFIX) },
+        )
+    }
+
+    @Test
+    fun `a half-written file is not a row in any listing`() {
+        // Even before git is asked, the app must not draw it: a folder refresh landing inside the
+        // write window would show a row that disappears, and the deletion window asks the same
+        // question through the same method.
+        assertTrue("hidden", workspace.isHidden(Beside.TEMP_PREFIX + "milk.txt"))
+        assertFalse("and the file itself is not", workspace.isHidden("milk.txt"))
+        // **A person's own `.new` is theirs.** The old name was `<name>.new`, and hiding that suffix
+        // would now hide a file somebody really has.
+        assertFalse("a person's `.new` stays visible", workspace.isHidden("notes.new"))
+    }
+
 }
