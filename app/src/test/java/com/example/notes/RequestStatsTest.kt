@@ -92,20 +92,132 @@ class RequestStatsTest {
     }
 
     @Test
-    fun `one pick is three columns, and they are the hour, the day and the month`() {
-        // **This is the table.** Pick 12:00 on 25 October 2026 and there are exactly three
-        // columns: the hour that instant is in, the day it is in, and the month it is in.
+    fun `one pick is three columns, and each runs from its own start to the pick`() {
+        // **This is the table.** Pick 12:45 on 25 October 2026 and there are exactly three
+        // columns, all ending at 12:45 and each starting at the boundary of its own span:
+        //
+        //     hour   12:00 - 12:45
+        //     day    00:00 - 12:45
+        //     month  the 1st - 12:45
+        //
+        // Cumulative windows, not whole spans. A whole day column at 12:45 would count an
+        // afternoon that has not happened.
         //
         // The shape is asserted as a list rather than as a count, because three labels say which
         // three spans are shown and a count of three does not.
-        val at = LocalDate.parse("2026-10-25").atTime(12, 0)
+        val at = LocalDate.parse("2026-10-25").atTime(12, 45)
             .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val buckets = RequestStats.buckets(listOf(), at)
         assertEquals(
-            "narrowest first: the hour, the day, the month",
-            listOf("12:00", "25 Oct", "Oct 2026"),
+            "what each column is",
+            listOf("12:00–12:45", "25 Oct", "Oct 2026"),
             buckets.map { it.label },
         )
+        assertEquals(
+            "and where it starts - the hour names both ends, the others only their start",
+            listOf("", "from 00:00", "from the 1st"),
+            buckets.map { it.sub },
+        )
+    }
+
+    @Test
+    fun `all three columns stop at the pick, and start at their own boundary`() {
+        // The bounds themselves, not just the labels - a label can agree with a bug.
+        val local = LocalDate.parse("2026-10-25").atTime(12, 45)
+        val zone = ZoneId.systemDefault()
+        val at = local.atZone(zone).toInstant().toEpochMilli()
+        val (hour, day, month) = RequestStats.SPANS.map { RequestStats.container(it, at, zone) }
+
+        fun ms(l: java.time.LocalDateTime) = l.atZone(zone).toInstant().toEpochMilli()
+
+        assertEquals("the hour starts at 12:00", ms(local.withMinute(0).withSecond(0).withNano(0)), hour.fromMs)
+        assertEquals("the day starts at midnight", ms(local.toLocalDate().atStartOfDay()), day.fromMs)
+        assertEquals("the month starts on the 1st", ms(local.withDayOfMonth(1).toLocalDate().atStartOfDay()), month.fromMs)
+
+        // **And all three end on the same instant**, which is what makes them comparable: the hour
+        // is what happened inside the day, and the day inside the month, up to the question.
+        assertEquals("the hour stops at the pick", at, hour.toMs)
+        assertEquals("so does the day", at, day.toMs)
+        assertEquals("so does the month", at, month.toMs)
+    }
+
+    @Test
+    fun `the month column is the 1st to the pick's own day, at clock time`() {
+        // **Said in one sentence: "the 1st to n", where n is the day of the month picked.** All
+        // three spans are clock time - not elapsed milliseconds, not a rolling window - so the
+        // month of a pick at 12:45 on the 25th runs from 1 October 00:00 to 25 October 12:45.
+        //
+        // Pinned at three different days because the interesting cases are different: an early
+        // day, a day in the middle, and the last day of the month (where "to n" is the whole month
+        // up to the pick, which is the case most likely to be got wrong by adding one).
+        val zone = ZoneId.systemDefault()
+        for (n in listOf(1, 25, 31)) {
+            val local = LocalDate.parse("2026-10-%02d".format(n)).atTime(12, 45)
+            val at = local.atZone(zone).toInstant().toEpochMilli()
+            val month = RequestStats.container(RequestStats.Span.MONTH, at, zone)
+
+            assertEquals(
+                "day $n: the column starts on the 1st",
+                local.withDayOfMonth(1).toLocalDate().atStartOfDay(zone).toInstant().toEpochMilli(),
+                month.fromMs,
+            )
+            assertEquals("day $n: and stops at the pick, not at month end", at, month.toMs)
+        }
+    }
+
+    @Test
+    fun `the day column is clock midnight to the pick, not the last twelve hours`() {
+        // A day column that reached back twelve hours from 12:45 would begin at 00:45 and quietly
+        // include the previous evening's requests in "the 25th". It begins at midnight.
+        val zone = ZoneId.systemDefault()
+        val local = LocalDate.parse("2026-10-25").atTime(12, 45)
+        val at = local.atZone(zone).toInstant().toEpochMilli()
+        val day = RequestStats.container(RequestStats.Span.DAY, at, zone)
+
+        assertEquals(
+            "midnight",
+            local.toLocalDate().atStartOfDay(zone).toInstant().toEpochMilli(),
+            day.fromMs,
+        )
+        assertEquals("and the pick", at, day.toMs)
+    }
+
+    @Test
+    fun `a request after the pick is not in any column`() {
+        // **The whole reason to cut at the pick.** At 12:45 the rest of the hour, the rest of the
+        // day and the rest of the month had not happened, so counting them would report spending
+        // that has not occurred.
+        val rows = listOf(
+            RequestStats.parse(row(day = "2026-10-25", at = "09:00:00.000"))!!,
+            RequestStats.parse(row(day = "2026-10-25", at = "12:30:00.000"))!!,
+            RequestStats.parse(row(day = "2026-10-25", at = "12:50:00.000"))!!,
+            RequestStats.parse(row(day = "2026-10-25", at = "18:00:00.000"))!!,
+        )
+        val at = LocalDate.parse("2026-10-25").atTime(12, 45)
+            .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val buckets = RequestStats.buckets(rows, at)
+
+        assertEquals("only the 12:30 request is in the 12:00-12:45 hour", 1, buckets[0].total.requests)
+        assertEquals("the day has 09:00 and 12:30", 2, buckets[1].total.requests)
+        assertEquals("the month has the same two", 2, buckets[2].total.requests)
+    }
+
+    @Test
+    fun `picking midnight leaves the hour and the day empty, honestly`() {
+        // **A consequence of one rule, and it should be pinned** so a later "fix" does not special-
+        // case it. At 00:00 nothing has been spent today and nothing in this hour; the month still
+        // holds its earlier days. The table says zero rather than reaching into the future.
+        val rows = listOf(
+            RequestStats.parse(row(day = "2026-10-24", at = "22:00:00.000"))!!,
+            RequestStats.parse(row(day = "2026-10-25", at = "06:00:00.000"))!!,
+        )
+        val at = LocalDate.parse("2026-10-25").atTime(0, 0)
+            .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val buckets = RequestStats.buckets(rows, at)
+
+        assertEquals("nothing this hour yet", 0, buckets[0].total.requests)
+        assertEquals("nothing today yet", 0, buckets[1].total.requests)
+        assertEquals("but yesterday's request is in the month", 1, buckets[2].total.requests)
     }
 
     @Test

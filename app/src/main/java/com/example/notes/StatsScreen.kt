@@ -128,8 +128,10 @@ fun StatsScreen(
                         // the whole log held, which for a container in the past was a negative
                         // number.
                         // **The instant, then whether the log reaches back to it.** Three
-                        // numbers, because three is how many ways the same moment is counted.
-                        StatsFormat.instant(anchor) + when {
+                        // numbers, because three is how many ways the same moment is counted -
+                        // and the sentence that makes the three columns readable: they all stop
+                        // here, so the later part of the hour, day and month is not in them.
+                        "up to " + StatsFormat.instant(anchor) + when {
                             rows.isEmpty() -> " · no log yet"
                             covered -> ""
                             oldest == null -> " · no log yet"
@@ -257,6 +259,7 @@ fun StatsScreen(
                         MetricRow(
                             name = "",
                             cells = buckets.map { it.label },
+                            subs = buckets.map { it.sub },
                             header = true,
                         )
                         MetricRow("requests", buckets.map { StatsFormat.count(it.total.requests) })
@@ -358,6 +361,8 @@ private val GUTTER_DP = 100
 private fun MetricRow(
     name: String,
     cells: List<String>,
+    /** Drawn under each cell, one line each. Only the heading row uses it. */
+    subs: List<String> = emptyList(),
     header: Boolean = false,
     muted: Boolean = false,
 ) {
@@ -378,23 +383,37 @@ private fun MetricRow(
             modifier = Modifier.width(GUTTER_DP.dp),
         )
         Row(modifier = Modifier.weight(1f)) {
-            for (cell in cells) {
-                Text(
-                    cell,
-                    style = if (header) {
-                        MaterialTheme.typography.labelSmall
-                    } else {
-                        MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
-                    },
-                    color = if (header) {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    },
-                    textAlign = TextAlign.End,
-                    maxLines = 1,
-                    modifier = Modifier.weight(1f),
-                )
+            for ((i, cell) in cells.withIndex()) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        cell,
+                        style = if (header) {
+                            MaterialTheme.typography.labelSmall
+                        } else {
+                            MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
+                        },
+                        color = if (header) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                        textAlign = TextAlign.End,
+                        maxLines = 1,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    // **The second line of a heading**, saying where its window starts. Only the
+                    // heading has one; an empty string keeps the row heights equal.
+                    if (header && i < subs.size && subs[i].isNotEmpty()) {
+                        Text(
+                            subs[i],
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.End,
+                            maxLines = 1,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
             }
         }
     }

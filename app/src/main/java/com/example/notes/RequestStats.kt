@@ -39,13 +39,13 @@ object RequestStats {
      *   table shows all three at once and needs no control to switch between them.
      */
     enum class Span(val label: String) {
-        /** The hour the instant falls in: 12:00 to 12:59. */
+        /** The clock hour, cut at the pick: picking 12:45 shows 12:00 to 12:45. */
         HOUR("hour"),
 
-        /** The calendar day it falls on, in the device's zone. */
+        /** The calendar day, cut at the pick: picking 12:45 shows 00:00 to 12:45. */
         DAY("day"),
 
-        /** The calendar month it falls on: the 1st to the last day of that month. */
+        /** The calendar month, cut at the pick: picking 12:45 shows the 1st to 12:45. */
         MONTH("month"),
     }
 
@@ -55,45 +55,104 @@ object RequestStats {
     /**
      * One span's bounds and name, for a given instant.
      *
-     * `fromMs` is inclusive and `toMs` is the last millisecond of the span, so "is this row in this
-     * column" is one comparison and the final millisecond needs no special case.
+     * **Every column starts at the boundary of its own span and stops at the picked moment.**
+     * Picking 12:45 on the 25th gives `12:00-12:45`, `00:00-12:45` and `1 Oct-12:45`: three
+     * cumulative windows that all end at the same instant and nest inside one another.
+     *
+     * Two readings were rejected, and both were built first:
+     *
+     * - **Stopping at the end of the span** (`12:00-12:59`, the whole day, the whole month) counts
+     *   time that has not happened. At 12:45 the afternoon of the 25th is in the future, so a day
+     *   column claiming a full day would be inventing it.
+     * - **Cutting on a boundary exception** (a pick at exactly 12:00 meaning the whole hour) made
+     *   the three columns disagree with each other: the day would be whole while the hour was cut.
+     *   One rule for all three is simpler and needs no explanation.
+     *
+     * A consequence worth knowing: with the pick at 00:00 the hour and the day are both empty,
+     * because neither has any elapsed time yet. That is honest - at midnight nothing has been
+     * spent today - and the month still has its earlier days.
+     *
+     * `fromMs` is inclusive and `toMs` is the last millisecond, so "is this row in this column" is
+     * one comparison. A row after the pick is deliberately outside: it is not part of a period that
+     * had not happened yet.
      */
     data class Container(
         val fromMs: Long,
         val toMs: Long,
-        /** The column's heading: "12:00", "25 Oct", "Oct 2026". */
+        /**
+         * What the column *is*: `12:00`, `25 Oct`, `Oct 2026`.
+         *
+         * The hour, the day and the month of the pick — never a whole one of any of those, because
+         * every column is cut at the picked moment.
+         */
         val label: String,
+        /**
+         * Where the column *starts*, since [label] cannot say it: `to 12:45`, `from 00:00`,
+         * `from the 1st`.
+         *
+         * All three end at the pick, which the caption above the table states once. So the month
+         * column of a pick at 12:45 on the 25th is `Oct 2026` / `from the 1st`, meaning the 1st to
+         * the 25th at 12:45 — and a heading of `Oct 2026` on its own would claim the whole month.
+         */
+        val sub: String,
     )
 
     /** The span of [span] that holds [anchor]. */
     fun container(span: Span, anchor: Long, zone: ZoneId = ZoneId.systemDefault()): Container {
         val at = Instant.ofEpochMilli(anchor).atZone(zone)
-        // `atStartOfDay(zone)` rather than `atTime(0,0)`: on the day a zone springs forward,
-        // midnight does not exist and asking for it by name lands somewhere else or throws.
-        fun start(local: java.time.LocalDate) = local.atStartOfDay(zone).toInstant().toEpochMilli()
+        fun fmt(local: java.time.ZonedDateTime, pattern: String) =
+            local.format(java.time.format.DateTimeFormatter.ofPattern(pattern))
+
+        /**
+         * The last millisecond counted: the pick itself, for all three spans.
+         *
+         * One rule, no exceptions. A request that happened after the picked moment is not counted,
+         * because at the picked moment it had not happened.
+         */
+        fun cut(): Long = anchor
+
         return when (span) {
-            Span.HOUR -> Container(
+            Span.HOUR -> {
                 // Truncated to the hour by dropping the parts below it, not by subtracting a
                 // remainder: a zone's hour is not always 3600000 ms, and a DST hour must still
-                // produce one column.
-                fromMs = at.withMinute(0).withSecond(0).withNano(0).toInstant().toEpochMilli(),
-                toMs = at.withMinute(0).withSecond(0).withNano(0).plusHours(1).toInstant().toEpochMilli() - 1,
-                label = at.format(java.time.format.DateTimeFormatter.ofPattern("HH:00")),
-            )
+                // produce exactly one column.
+                val hourStart = at.withMinute(0).withSecond(0).withNano(0)
+                val end = cut()
+                Container(
+                    fromMs = hourStart.toInstant().toEpochMilli(),
+                    toMs = end,
+                    // **A range, not `12:00`.** A range is how an hour is said, and this one stops
+                    // at the pick - so it names both ends and needs no second line.
+                    label = fmt(hourStart, "HH:mm") + "–" +
+                        fmt(Instant.ofEpochMilli(end).atZone(zone), "HH:mm"),
+                    sub = "",
+                )
+            }
             Span.DAY -> {
                 val day = at.toLocalDate()
+                // `atStartOfDay(zone)` rather than `atTime(0,0)`: on the day a zone springs forward
+                // midnight does not exist, and asking for it by name lands somewhere else.
+                val from = day.atStartOfDay(zone).toInstant().toEpochMilli()
                 Container(
-                    fromMs = start(day),
-                    toMs = start(day.plusDays(1)) - 1,
+                    fromMs = from,
+                    toMs = cut(),
                     label = day.format(java.time.format.DateTimeFormatter.ofPattern("d MMM")),
+                    // Midnight, because a day column is that day up to the pick — not the last
+                    // twelve hours, which would reach back into the day before.
+                    sub = "from 00:00",
                 )
             }
             Span.MONTH -> {
-                val firstOfMonth = at.toLocalDate().withDayOfMonth(1)
+                val first = at.toLocalDate().withDayOfMonth(1)
+                val from = first.atStartOfDay(zone).toInstant().toEpochMilli()
                 Container(
-                    fromMs = start(firstOfMonth),
-                    toMs = start(firstOfMonth.plusMonths(1)) - 1,
-                    label = firstOfMonth.format(java.time.format.DateTimeFormatter.ofPattern("MMM yyyy")),
+                    fromMs = from,
+                    toMs = cut(),
+                    label = first.format(java.time.format.DateTimeFormatter.ofPattern("MMM yyyy")),
+                    // **The 1st, and it stops at the pick's day** — so at midday on the 25th this
+                    // column covers the 1st to the 25th, not all thirty-one days. Saying "from the
+                    // 1st" plus the caption's instant is the shortest heading that is still exact.
+                    sub = "from the 1st",
                 )
             }
         }
@@ -109,6 +168,8 @@ object RequestStats {
      */
     data class Bucket(
         val label: String,
+        /** Where the column starts: `to 12:45`, `from 00:00`, `from the 1st`. */
+        val sub: String = "",
         /** Everything accounted for in this span: turns and keepalives together. */
         val total: Stats = Stats(),
         /** Answers that began and then died. Billed and unreported, so they are counted apart. */
