@@ -464,6 +464,70 @@ object RequestStats {
         .toInstant().toEpochMilli()
 
     /**
+     * The stored aggregates, grouped by level, for one [totals] draw.
+     *
+     * Keyed by level so [coversUnit] can answer in a scan of one level. A month does not "equal" the
+     * days inside it, so membership has to be **containment**: the day 5 August is covered by the
+     * month starting 1 August, and a set of exact unit starts could never say so.
+     */
+    private fun units(all: List<Row>): Map<String, List<Long>> =
+        all.filter { it.span != RequestLog.SPAN_RAW }
+            .groupBy { it.span }
+            .mapValues { (_, rows) -> rows.map { it.atMs }.sorted() }
+
+    /** Whether any stored [span] aggregate covers the unit `[from, to)`. */
+    private fun coversUnit(aggregates: Map<String, List<Long>>, span: String, from: Long, to: Long): Boolean =
+        aggregates[span].orEmpty().any { start -> start <= from && to <= unitEnd(span, start) }
+
+    /** The start of the unit of [span] that holds [ms], or null for a span this code does not know. */
+    private fun unitFloor(span: String, ms: Long): Long? = when (span) {
+        "hour" -> hourFloor(ms)
+        "day" -> dayFloor(ms)
+        "month" -> monthFloor(ms)
+        "year" -> yearFloor(ms)
+        else -> null
+    }
+
+    /**
+     * Whether [r] is the level that speaks for its unit.
+     *
+     * **The disjointness rule, in one place.** The coarsest stored aggregate wins; every level
+     * beneath a covered unit stays silent. That is what makes the figure a partition rather than a
+     * pile, and it is the only thing standing between the table and a number that is merely
+     * plausible.
+     *
+     * **Raw is silenced too, when an hour covers it.** Raw is the floor only in the sense that
+     * nothing exists below it - not in the sense that it always counts. An hour row and the raw rows
+     * it was built from are two descriptions of one hour, and a file can briefly hold both if a
+     * compaction died between writing the aggregate and rewriting the file. Counting both would add
+     * the hour to itself.
+     *
+     * **A coarser row need not be complete for the interval.** Aggregates only ever exist for
+     * closed units - the compactor refuses an open one - so "it exists" already means "it is
+     * whole".
+     */
+    private fun counts(r: Row, covered: Map<String, List<Long>>): Boolean {
+        // **A raw row's unit is the hour it falls in**, and the level has to be named for that
+        // rather than carried through as `raw`: `unitEnd("raw", ...)` matches none of its cases and
+        // falls through to a YEAR, so a raw row's "unit" became the whole year and no hour could
+        // ever cover it. A silent wrong answer, not a crash.
+        val level = if (r.span == RequestLog.SPAN_RAW) "hour" else r.span
+        val start = unitFloor(level, r.atMs) ?: hourFloor(r.atMs)
+        val end = unitEnd(level, start)
+        // **Raw is the only level whose description may sit one step above it**, and an hour row
+        // must not list "hour": `coversUnit` would find the hour row itself and silence it, so a
+        // set of hour rows would read zero.
+        val coarser = when {
+            r.span == RequestLog.SPAN_RAW -> listOf("hour", "day", "month", "year")
+            level == "hour" -> listOf("day", "month", "year")
+            level == "day" -> listOf("month", "year")
+            level == "month" -> listOf("year")
+            else -> emptyList()
+        }
+        return coarser.none { coversUnit(covered, it, start, end) }
+    }
+
+    /**
      * Where a unit of [span] that starts at [start] ends — the first millisecond of the next one.
      *
      * **Computed, never assumed.** A month and a year are not fixed widths, and assuming 30 days
