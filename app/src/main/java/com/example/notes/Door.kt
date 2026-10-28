@@ -184,6 +184,16 @@ class OpenRouterDoor(
      */
     private val keyState: () -> KeyState =
         { if (key() != null) KeyState.READABLE else KeyState.NONE },
+    /**
+     * Where each response's statistics go, or null when nobody is keeping them.
+     *
+     * **A parameter, and nullable, because the log is evidence and never a dependency.** A door
+     * built by a test has no account folder to write into and must still work; a door built by the
+     * wiring has one, and every answer it receives — including the ones a ping throws away — is
+     * written down. Called from the thread that already has the numbers, so nothing is copied and
+     * no second pass over the reply is needed.
+     */
+    private val onStats: ((RequestLog.Stats) -> Unit)? = null,
 ) : Door {
 
     /**
@@ -208,7 +218,20 @@ class OpenRouterDoor(
      * assembled instead of parsed, and that the listener saw it happen.
      */
     override fun turn(request: Request): Result<Reply> = try {
-        Result.success(streamed(request))
+        val began = System.currentTimeMillis()
+        val stream = Streamed()
+        val reply = streamed(request, stream)
+        onStats?.invoke(
+            RequestLog.Stats(
+                kind = RequestLog.Stats.Kind.TURN,
+                ms = System.currentTimeMillis() - began,
+                provider = provider,
+                model = model,
+                usage = stream.usage,
+                finish = stream.finish.ifBlank { null },
+            ),
+        )
+        Result.success(reply)
     } catch (e: Exception) {
         Result.failure(
             IllegalStateException(Secrets.explain(e, "The model could not be asked"))
@@ -222,7 +245,24 @@ class OpenRouterDoor(
      * depends on the code, and the caller is the one that knows a ping may not stop a session.
      */
     override fun ping(request: Request): Result<Unit> = try {
-        exchange(request, maxTokens = PING_TOKENS)
+        val began = System.currentTimeMillis()
+        // **The body is read now, though nothing is done with the answer.** It used to be dropped
+        // on the floor, which is why a keepalive that quietly grew from twenty tokens to five
+        // hundred was indistinguishable from one that was fine: the numbers arrived on every
+        // response and were thrown away with the text. The text is still discarded — a ping's
+        // answer must never enter the conversation — but its `usage` is the only evidence there is
+        // that the ping is cheap, so it is kept.
+        val said = exchange(request, maxTokens = PING_TOKENS)
+        onStats?.invoke(
+            RequestLog.Stats(
+                kind = RequestLog.Stats.Kind.PING,
+                ms = System.currentTimeMillis() - began,
+                provider = provider,
+                model = model,
+                usage = usageOf(said),
+                finish = finishOf(said),
+            ),
+        )
         Result.success(Unit)
     } catch (e: Exception) {
         Result.failure(e)
@@ -321,13 +361,12 @@ class OpenRouterDoor(
      * connection's read timeout starts when the socket is opened, so ack and idle are the same
      * mechanism with different numbers, and the first read is the one that uses the ack's.
      */
-    private fun streamed(request: Request): Reply {
+    private fun streamed(request: Request, stream: Streamed = Streamed()): Reply {
         val token = token()
         val began = System.currentTimeMillis()
         val body = body(request, maxTokens = null).put("stream", true)
 
         var connection: HttpURLConnection? = null
-        val stream = Streamed()
         try {
             connection = (URL(ENDPOINT).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
@@ -407,6 +446,30 @@ class OpenRouterDoor(
             "Content-Type" to "application/json",
             "Accept" to "application/json",
         )
+    }
+
+    /**
+     * The `usage` block of a **non-streamed** reply, or null when the body has none.
+     *
+     * A ping does not go through [Streamed] — there are no deltas to assemble, and nothing about the
+     * answer is wanted — so the two numbers the log needs are read straight off the document. Null
+     * rather than an empty object, because "the provider did not say" and "the provider said zero"
+     * are different facts and only one of them is a cache hit.
+     */
+    internal fun usageOf(body: String): JSONObject? = try {
+        JSONObject(body).optJSONObject("usage")
+    } catch (t: Throwable) {
+        null
+    }
+
+    /** The `finish_reason` of a non-streamed reply, or null when it did not say. */
+    internal fun finishOf(body: String): String? = try {
+        JSONObject(body).optJSONArray("choices")
+            ?.optJSONObject(0)
+            ?.optString("finish_reason")
+            ?.takeIf { it.isNotEmpty() && it != "null" }
+    } catch (t: Throwable) {
+        null
     }
 
     /** The provider's own sentence, which is always more useful than the number. */

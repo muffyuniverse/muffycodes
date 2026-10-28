@@ -2658,6 +2658,14 @@ class AppViewModel @JvmOverloads constructor(
             timeoutMs = settings.timeoutSeconds * 1000,
             ackMs = settings.ackMs,
             gapMs = settings.gapMs,
+            // **Every response is written down, whether or not anybody is watching.** The log is
+            // not the footer: the footer stops when the screen does, and the requests that matter
+            // most are the ones made while the phone is in a pocket. `ws` is the account whose
+            // system project holds the files, and it is read at write time so a response landing
+            // after a sign-out cannot be filed under the wrong account.
+            onStats = { stats ->
+                workspace?.let { live -> RequestLog.write(live.accountDir, System.currentTimeMillis(), stats) }
+            },
         ).also { door ->
             // **The footer's feed, and only while somebody is looking.** The listener is set where
             // the door is built, so a turn run for the background draws nothing and costs nothing;

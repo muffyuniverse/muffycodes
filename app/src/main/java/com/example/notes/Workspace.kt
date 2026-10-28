@@ -901,7 +901,21 @@ class Workspace(val accountDir: File) {
 
         /** A project's ignore file, and the two lines the app keeps in it. */
         const val IGNORE = ".gitignore"
-        val APP_IGNORES = listOf("agent/", ".muffy/")
+        /**
+         * What the app writes into a project that is **not the person's work.**
+         *
+         * `agent/` is the conversation's own record, `.muffy/` is the flags, and `requests/` is the
+         * per-response log of what the model cost. All three live inside a project because that is
+         * where the app keeps things, and none of them belongs in a commit: a repository whose
+         * history is mostly the app's bookkeeping is a history nobody can read, and a project that
+         * said "1 changed" after every response would make the person commit it or delete it.
+         *
+         * **The log is the newest of the three and the reason the list is documented.** It is
+         * written on every response, including the keepalives sent while nobody is looking, so it
+         * grows whether or not anybody is using the app. Left unignored it would be the single
+         * noisiest thing in the working tree.
+         */
+        val APP_IGNORES = listOf("agent/", ".muffy/", "requests/")
 
         /**
          * The hidden marker that gives an empty folder a version.

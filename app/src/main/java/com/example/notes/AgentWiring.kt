@@ -31,6 +31,23 @@ object AgentWiring {
                 provider = active.provider,
                 effort = active.effort,
                 timeoutMs = settings.timeoutSeconds * 1000,
+                // **The service's door writes the log too.** The runner built here is the one that
+                // runs with the app in the background, so a door without this would log only the
+                // turns somebody was watching - which is the minority of the requests and none of
+                // the keepalives.
+                onStats = { stats ->
+                    // Asked here rather than captured: this lambda is a *default parameter*, so it
+                    // is evaluated before the function body that makes `accounts`. Reading the
+                    // login at write time also means a response landing after a sign-out is not
+                    // filed under the account that has just gone.
+                    credentials.activeLogin?.let { login ->
+                        RequestLog.write(
+                            AccountStore(rootDir).dirOf(login),
+                            System.currentTimeMillis(),
+                            stats,
+                        )
+                    }
+                },
             )
         },
         notify: (AgentSession) -> Unit = {},

@@ -2,6 +2,7 @@ package com.example.notes
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -360,6 +361,38 @@ class AgentTest {
     }
 
     @Test
+    fun `a ping carries its instruction on the wire and never in the record`() {
+        // **The instruction is the difference between a heartbeat and an invitation to talk.**
+        // Measured on the pinned endpoint: the same conversation with no instruction and one token
+        // allowed produced 136 tokens of answer, because a conversation with no question in it
+        // invites the model to continue. With the instruction it produced 20. So the sentence is
+        // worth sending - but it must never become a row, or the next real turn would be answering
+        // a question the person never asked.
+        val door = ScriptedDoor(Reply("nothing to do"))
+        val agent = agent(door)
+        agent.burst("look at it")
+
+        val before = log.contextRows().size
+        agent.warm()
+
+        val sent = door.pings.single()
+        assertEquals(
+            "the conversation, then the instruction",
+            "Answer with a message that contains only one dot and nothing else.",
+            sent.messages.last().text,
+        )
+        assertEquals("as the person's own turn, so it is legal to answer", "user", sent.messages.last().role)
+
+        // **And nothing was written down.** This is the half that a test of the sent request alone
+        // would miss: the instruction is on the wire and absent from the evidence.
+        assertEquals("the record did not grow", before, log.contextRows().size)
+        assertTrue(
+            "and the instruction is in no row",
+            rows().none { it.body.contains("only one dot") },
+        )
+    }
+
+    @Test
     fun `a keepalive ping sends the conversation and writes nothing into it`() {
         // **The whole economy of the feature.** A ping is the conversation the person will add to,
         // sent again so the provider's cache is warm — so it must not add a row to the context, or
@@ -665,6 +698,58 @@ class AgentTest {
     }
 
     // ---- what goes on the wire ------------------------------------------------
+
+    @Test
+    fun `a ping's statistics are read from its body instead of thrown away`() {
+        // **The defect this pins is an absence.** `ping` used to discard the whole response, so the
+        // only evidence that a keepalive was cheap went with it: a ping that had grown from twenty
+        // tokens to five hundred looked exactly like one that was fine. The text is still
+        // discarded - a ping's answer must never enter the conversation - but `usage` is not.
+        val door = OpenRouterDoor(
+            key = { "unused-by-this-test" },
+            model = "deepseek/deepseek-v4.1-flash-1017",
+            provider = "deepinfra/fp8/flex",
+            effort = "max",
+        )
+
+        // The shape a non-streamed reply has, including the two details the log watches: how much
+        // of the prompt the provider did not have to read, and how much of the answer was thinking.
+        val said = """
+            {
+              "id": "gen-1",
+              "choices": [{"index": 0, "finish_reason": "length",
+                           "message": {"role": "assistant", "content": null}}],
+              "usage": {
+                "prompt_tokens": 3691, "completion_tokens": 1, "total_tokens": 3692,
+                "cost": 0.0000241,
+                "prompt_tokens_details": {"cached_tokens": 3584},
+                "completion_tokens_details": {"reasoning_tokens": 1}
+              }
+            }
+        """.trimIndent()
+
+        val usage = door.usageOf(said)
+        assertEquals("the prompt", 3691, usage?.optInt("prompt_tokens"))
+        assertEquals("what was cached", 3584, usage?.optJSONObject("prompt_tokens_details")?.optInt("cached_tokens"))
+        assertEquals("how much was thinking", 1, usage?.optJSONObject("completion_tokens_details")?.optInt("reasoning_tokens"))
+        assertEquals("and why it ended", "length", door.finishOf(said))
+    }
+
+    @Test
+    fun `a body with no usage block reports nothing rather than zero`() {
+        // A refusal, or a provider that simply omits `usage`. Null and 0 are different facts here:
+        // a cached response reports every counter as 0, so an invented zero would read as a cache
+        // hit - the one conclusion a person might act on.
+        val door = OpenRouterDoor(
+            key = { "unused-by-this-test" },
+            model = "deepseek/deepseek-v4.1-flash-1017",
+            provider = "deepinfra/fp8/flex",
+            effort = "max",
+        )
+        assertNull("no usage", door.usageOf("""{"id":"gen-1","choices":[]}"""))
+        assertNull("and no finish reason either", door.finishOf("""{"id":"gen-1","choices":[]}"""))
+        assertNull("nor from nonsense", door.usageOf("not json at all"))
+    }
 
     @Test
     fun `the request names one provider tag, forbids fallbacks, and asks for no reasoning`() {

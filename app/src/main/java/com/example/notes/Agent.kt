@@ -322,7 +322,12 @@ class Agent(
     fun warm(): Warm {
         val layers = AgentPrompt.read(accountDir, tools.projectDir)
         val request = try {
-            build(layers, readOpening(layers, log, AgentTools.specs()), clearedUp = false)
+            // **The instruction is appended, never written down.** It is a message on the wire and
+            // not a row in the record: a `TOLD` row here would enter the conversation the ping
+            // exists to keep warm, and the next real turn would be answering a question the person
+            // never asked. `build` reads the record; this is the one thing added after it.
+            val built = build(layers, readOpening(layers, AgentTools.specs()), clearedUp = false)
+            built.copy(messages = built.messages + PING_INSTRUCTION)
         } catch (t: Throwable) {
             // **A request that could not be built is not a ping that got through.** This said
             // `stopping = false`, and the runner's false branch calls `warmed()` — which clears the
@@ -336,6 +341,10 @@ class Agent(
             onSuccess = {
                 log.bookkeeping(AgentLog.TURN, "turn", "ping")
                 log.bookkeeping(AgentLog.NOTE, "ping", "kept warm")
+                // **The shape, and not the cost.** What a ping cost is a fact about one response
+                // and it goes in the request log, where every response has a line; the trace is
+                // the running account of what the app *did*, and a number repeated there would be
+                // a second copy of the same fact that could drift from the first.
                 Trace.note("agent-warm", "$project · ${request.shape}")
                 Warm.Sent
             },
@@ -679,6 +688,25 @@ class Agent(
     } catch (e: Throwable) {
         -1
     }
+
+    /**
+     * What a ping tells the model to do, **so that the ping is a bounded piece of work.**
+     *
+     * Measured, on the pinned endpoint: the same conversation sent with no instruction and one
+     * token allowed produced a hundred and thirty-six tokens of answer, because a conversation
+     * with no question in it invites the model to continue it. With this instruction the same
+     * request produced twenty. The instruction is the difference between "say something" and "do
+     * nothing", and a heartbeat should be the second.
+     *
+     * **It also removes the last ambiguity a provider could reason about.** The keepalive asks the
+     * model to spend nothing, and an instruction that can be read one way leaves nothing to
+     * interpret. That matters more than the tokens: OpenRouter's own documentation warns that
+     * `max_tokens` bounds reasoning *on most providers*, and a provider that ignores it while
+     * reasoning about an unclear request is exactly the failure this sentence prevents.
+     */
+    private val PING_INSTRUCTION = Msg.user(
+        "Answer with a message that contains only one dot and nothing else.",
+    )
 
     /**
      * The request, rebuilt from the record every time.
