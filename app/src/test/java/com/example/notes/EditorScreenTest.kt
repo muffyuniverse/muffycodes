@@ -8,6 +8,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -86,6 +87,19 @@ class EditorScreenTest {
         }
     }
 
+    /**
+     * The editor, with Edit pressed.
+     *
+     * **Every file opens in View now**, which is what report 29 asked for, so a test that types
+     * has to say so. The alternative — leaving these tests as they were — would be testing a
+     * screen that no longer exists, and they would pass or fail for reasons nobody could read.
+     */
+    private fun editorWriting(file: File) {
+        editorFor(file)
+        compose.onNodeWithText("Edit").performClick()
+        compose.waitForIdle()
+    }
+
     @Test
     fun `Save keeps what was typed, and back leaves it as it was`() {
         // The pair the top row promises. Save is a button because saving is
@@ -93,7 +107,7 @@ class EditorScreenTest {
         // does not reach the file.
         val file = scene.file("milk.txt", "two litres")
 
-        editorFor(file)
+        editorWriting(file)
         compose.onNodeWithText("two litres").performTextReplacement("three litres")
         // **The tap is recorded before the work starts**, so its absence can be measured — a
         // check for "nothing is waiting" run too early would pass on a save that never happened.
@@ -134,7 +148,7 @@ class EditorScreenTest {
         // fixing the file's name silently emptied the screen.
         val file = scene.file("milk.txt", "two litres")
 
-        editorFor(file)
+        editorWriting(file)
         compose.onNodeWithText("two litres").performTextReplacement("three litres")
         compose.onNodeWithText("milk.txt").performTextReplacement("shopping list")
         compose.onNodeWithText("shopping list").performImeAction()
@@ -158,7 +172,7 @@ class EditorScreenTest {
         // it was before the first, failed, and put the old name back.
         val file = scene.file("milk.txt", "two litres")
 
-        editorFor(file)
+        editorWriting(file)
         compose.onNodeWithText("milk.txt").performTextReplacement("shopping list")
         compose.onNodeWithText("shopping list").performImeAction()
 
@@ -225,11 +239,12 @@ class EditorScreenTest {
         // state in which View was the one selected.
         val file = scene.file("milk.txt", "two litres")
 
-        editorFor(file)
+        editorWriting(file)
 
-        // The text is readable, and it is not a field: there is nothing to type into.
+        // The text is readable, and the body is not a field. **The name still is** - renaming a
+        // file is not editing it - so the assertion is about the body and not about the screen.
         compose.onNodeWithText("two litres").assertIsDisplayed()
-        compose.onAllNodes(hasSetTextAction()).assertCountEquals(0)
+        compose.onNode(hasSetTextAction() and hasText("two litres")).assertDoesNotExist()
         // One press, and it is.
         compose.onNodeWithText("Edit").performClick()
         compose.onNodeWithText("two litres").performTextReplacement("three litres")
@@ -257,7 +272,7 @@ class EditorScreenTest {
         compose.onNodeWithText("View").performClick()
         compose.waitForIdle()
         compose.onNodeWithText("two litres").assertIsDisplayed()
-        compose.onAllNodes(hasSetTextAction()).assertCountEquals(0)
+        compose.onNode(hasSetTextAction() and hasText("two litres")).assertDoesNotExist()
     }
 
     @Test
@@ -278,9 +293,9 @@ class EditorScreenTest {
                 )
             }
         }
-        // Into view mode.
-        compose.onNodeWithText("Edit").performClick()
-
+        // **No press is needed: it opens in View**, which is the mode that renders. This used to
+        // read "into view mode" and press a switch - the switch is gone and the mode it reached
+        // is the one the file starts in.
         compose.onNodeWithText("Shopping").assertIsDisplayed()
         compose.onNodeWithText("# Shopping", substring = true).assertDoesNotExist()
         compose.onNodeWithText("- milk", substring = true).assertDoesNotExist()
@@ -361,7 +376,7 @@ class EditorScreenTest {
         // field. Typing a new one and finishing renames the file.
         val file = scene.file("milk.txt", "two litres")
 
-        editorFor(file)
+        editorWriting(file)
         compose.onNodeWithText("milk.txt").performTextReplacement("Shopping List")
         compose.onNodeWithText("Shopping List").performImeAction()
 
@@ -374,12 +389,23 @@ class EditorScreenTest {
     }
 
     @Test
-    fun `a text file is shown in a field that can be typed into`() {
+    fun `a text file is shown as text, and Edit turns it into a field`() {
+        // **It used to be a field from the moment it opened**, and that is what report 29
+        // overruled: a person opening a note usually wants to read it, and a cursor in the text
+        // before anybody has said they want to change anything is an invitation to change it.
         val file = scene.file("milk.txt", "two litres")
 
         editorFor(file)
 
         compose.onNodeWithText("two litres").assertIsDisplayed()
+        // The body is not a field; the name still is, because renaming a file is not editing it.
+        compose.onNode(hasSetTextAction() and hasText("two litres")).assertDoesNotExist()
+
+        compose.onNodeWithText("Edit").performClick()
+        compose.onNodeWithText("two litres").performTextReplacement("three litres")
+        compose.onNodeWithText("Save").performClick()
+        compose.waitUntil(10_000) { file.readText() == "three litres" }
+        assertEquals("and now it can be written", "three litres", file.readText())
     }
 
     @Test
