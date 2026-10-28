@@ -612,11 +612,18 @@ class AgentLog private constructor(
             // cost of the body is what this row costs — not the formatted line, whose padding the
             // model never sees.
             val cost = ContextBudget.tokens(detail)
-            append(file, LogFormat.recordRow(now, id, cost, kind, ctx, answers, name, detail))
+            // **The row's own shape is this writer's promise, and a name is where it can break.**
+            // The columns are separated by spaces and the name is one of them, so a name with a
+            // space in it does not make a wide column - it makes the row unparseable, and a row
+            // that cannot be read is a row that was never written as far as the app is concerned.
+            // Most names are the app's own one-word words, but `GOT`'s is a tool name from the
+            // model, which can be anything at all.
+            val oneWord = name.trim().replace(Regex("\\s+"), "_").ifEmpty { "-" }
+            append(file, LogFormat.recordRow(now, id, cost, kind, ctx, answers, oneWord, detail))
             // **The context file grows with the evidence, one row at a time.** A row the app wrote
             // for itself (`app`) never enters it, which is what keeps a repeated `wait` out of the
             // request and the request byte-identical between polls.
-            if (ctx == IN) append(context, LogFormat.contextRow(id, cost, name, detail))
+            if (ctx == IN) append(context, LogFormat.contextRow(id, cost, oneWord, detail))
             gate.seen = size()
             return id
         }

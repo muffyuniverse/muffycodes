@@ -204,9 +204,6 @@ class AgentLogTest {
         // The date went into the *same token*, with a `T` between them, rather than into a new
         // column - because the parser reads the stamp as one `\S+`, so a second column would have
         // moved every column after it and a log written by an older build would stop parsing.
-        // **The name is one word, because the row's columns are separated by spaces.** `a note`
-        // would make the id look like part of the stamp and the detail like part of the name - the
-        // row would not parse, and the test would be asking about a row the app cannot write.
         val id = log.bookkeeping(AgentLog.NOTE, "a_note", "the words")
 
         val row = log.rows().first { it.id == id }
@@ -246,6 +243,30 @@ class AgentLogTest {
         val reread = all.first { it.id == 9 }
         assertEquals("the old row's time is read", "10:00:00.000", LogFormat.time(reread.stamp))
         assertEquals("and it has no day to claim", "", LogFormat.day(reread.stamp))
+    }
+
+    @Test
+    fun `a name with a space in it is written as one word, not as an unreadable row`() {
+        // **The columns are separated by spaces and the name is one of them.** A name holding a
+        // space does not make a wide column - it makes the row unparseable: the parser reads the
+        // stamp, id, size, kind, ctx, answers, then the first half of the name, and the rest of the
+        // name becomes the detail. A row that cannot be read is a row that was never written as far
+        // as the app is concerned, and `rows()` silently leaves it out.
+        //
+        // Most names are the app's own one-word words. `GOT`'s is a tool name **from the model**,
+        // which can be anything, so the writer guarantees its own shape rather than trusting every
+        // caller to have read the format.
+        val id = log.bookkeeping(AgentLog.NOTE, "read file", "the words")
+
+        val rows = log.rows()
+        val row = rows.firstOrNull { it.id == id }
+        assertTrue(
+            "the row is readable at all: ${rows.map { it.id to it.broken }}",
+            row != null,
+        )
+        assertEquals("with the space made a word", "read_file", row!!.name)
+        assertEquals("and the detail where it belongs", "the words", row.detail)
+        assertFalse("so it is not broken", row.broken)
     }
 
     @Test
