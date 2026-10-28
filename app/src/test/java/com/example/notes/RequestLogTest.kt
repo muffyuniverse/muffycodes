@@ -57,13 +57,14 @@ class RequestLogTest {
         val line = RequestLog.line(0, stats(full))
         val cells = line.split("\t")
 
+        // **Sixteen: the instant, the response, twelve numbers, and the three that describe what
+        // the line covers.** There is one time column and it is an instant - the local clock time
+        // and local day the first version also wrote are gone, because a time written into a file
+        // is a fact that stops agreeing with the instant the moment somebody flies somewhere.
+        //
         // The count is the contract: a column added without the header being changed would shift
         // every value one place to the right of its name.
-        // **Thirteen: eleven accounting columns and the two counts a stall row carries.** There is
-        // one time column now and it is an instant - the local clock time and local day the first
-        // version also wrote are gone, because a time written into a file is a fact that stops
-        // agreeing with the instant the moment somebody flies somewhere.
-        assertEquals("one cell per column", 13, cells.size)
+        assertEquals("one cell per column", 16, cells.size)
         assertEquals("the instant, in the one form that says so", "1970-01-01T00:00:00Z", cells[0])
         assertEquals("ping", cells[1])
         assertEquals("1840", cells[2])
@@ -99,7 +100,7 @@ class RequestLogTest {
         // A ping whose answer was refused, or a provider that simply omits `usage`: the response
         // happened and its cost is unknown. The line has to survive that without a crash.
         val cells = RequestLog.line(0, stats(null)).split("\t")
-        assertEquals(13, cells.size)
+        assertEquals(16, cells.size)
         assertEquals("ping", cells[1])
         assertEquals("", cells[5])
         assertNull("and nothing was invented", RequestLog.Stats(

@@ -43,6 +43,10 @@ class RequestStatsTest {
         completion: String = "1",
         reasoning: String = "1",
         cost: String = "0.0000241",
+        /** Appended columns. A line written before they existed simply omits them. */
+        span: String = "",
+        requests: String = "",
+        costReported: String = "",
     ) = run {
         // **The instant is derived from the day and the clock time**, in the given zone, which is
         // exactly what the writer does. A helper that hard-coded one instant would make every
@@ -52,8 +56,16 @@ class RequestStatsTest {
             .atZone(ZoneId.systemDefault())
             .toInstant()
             .toString()
-        "$utc\t$kind\t1840\tdeepinfra/fp8/flex\tdeepseek\t$prompt\t$cached\t" +
-            "$completion\t$reasoning\t$cost\tlength"
+        buildString {
+            append("$utc\t$kind\t1840\tdeepinfra/fp8/flex\tdeepseek\t$prompt\t$cached\t")
+            append("$completion\t$reasoning\t$cost\tlength")
+            // **The trailing columns are written only when asked for**, so the default helper still
+            // produces exactly the line a phone already holds: thirteen cells and no span. That is
+            // what makes every existing test a back-compatibility test.
+            if (span.isNotEmpty() || requests.isNotEmpty() || costReported.isNotEmpty()) {
+                append("\t$span\t$requests\t$costReported")
+            }
+        }
     }
 
     @Test
@@ -238,6 +250,58 @@ class RequestStatsTest {
         assertEquals("only the 12:30 request is in the 12:00-12:45 hour", 1, buckets[0].total.requests)
         assertEquals("the day has 09:00 and 12:30", 2, buckets[1].total.requests)
         assertEquals("the month has the same two", 2, buckets[2].total.requests)
+    }
+
+    @Test
+    fun `a line written before the span columns is read as one raw request`() {
+        // **Back-compatibility, and it is not a formality.** Every line already on a phone lacks
+        // the three columns that came later. Reading a missing span as anything but `raw` would
+        // silently promote real history into an aggregate - and a "month" made of one real request
+        // would look exactly like a month that cost one request.
+        //
+        // The helper writes thirteen cells by default, so this is the same line the old writer
+        // produced.
+        val old = RequestStats.parse(row(cost = "0.0000241"))!!
+        assertEquals("one response", RequestLog.SPAN_RAW, old.span)
+        assertEquals("and it counts as one", 1L, old.requests)
+        assertEquals("it did report a cost", 1L, old.costReported)
+
+        // A line with no cost at all: the count is 0, which is what the dash on screen reads.
+        val free = RequestStats.parse(row(cost = ""))!!
+        assertEquals("nothing reported", 0L, free.costReported)
+    }
+
+    @Test
+    fun `an aggregate row is counted by its own request count, not as one`() {
+        // **The arithmetic that a rollup gets wrong silently.** A day row covering 9,412 requests
+        // must contribute 9,412 to the column, not 1 - otherwise a month reads "3 requests" beside
+        // a cost that summed a hundred thousand, and the per-request average derived from the two
+        // is absurd rather than merely inaccurate.
+        val row = RequestStats.parse(row(span = "day", requests = "9412", costReported = "9000", cost = "0.5"))!!
+        assertEquals(9412L, row.requests)
+        assertEquals(9000L, row.costReported)
+        // Its tokens are already sums, so they need no multiplying - sums of sums are sums.
+        assertEquals(3691L, row.prompt)
+    }
+
+    @Test
+    fun `an aggregate row is not counted beside the raw rows it covers`() {
+        // **The double-counting hazard, pinned before the compactor exists.** An aggregate covers
+        // the same requests as the raw lines beneath it. Counting both would double the column with
+        // no sign of failure: the number is still a number, and still plausible.
+        //
+        // Until the disjoint decomposition lands, raw is the only level that exists, so an
+        // aggregate is skipped entirely. The assertion proves the filter is real rather than
+        // accidental: the raw row counts, the aggregate beside it does not.
+        val raw = RequestStats.parse(row(day = "2026-10-25", at = "12:30:00.000"))!!
+        val aggregate = RequestStats.parse(
+            row(day = "2026-10-25", at = "12:00:00.000", span = "hour", requests = "40", costReported = "40"),
+        )!!
+        val at = LocalDate.parse("2026-10-25").atTime(12, 45)
+            .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val hour = RequestStats.buckets(listOf(raw, aggregate), at)[0]
+
+        assertEquals("one request, not forty-one", 1, hour.total.requests)
     }
 
     @Test

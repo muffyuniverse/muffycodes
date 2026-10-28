@@ -321,9 +321,28 @@ object RequestStats {
         fun long(i: Int) = cells.getOrNull(i)?.takeIf { it.isNotBlank() }?.toLongOrNull()
         fun double(i: Int) = cells.getOrNull(i)?.takeIf { it.isNotBlank() }?.toDoubleOrNull()
         val cost = double(9)
+
+        /**
+         * **A line that predates the span columns is a raw response, because that is what it is.**
+         *
+         * The three columns were appended, so every line already on a phone lacks them. Defaulting
+         * to `raw`/1/`cost != null` is not a guess about what those lines mean: one line was always
+         * one response, and whether it reported a cost is readable from its `cost` cell. Treating a
+         * missing span as anything else would silently turn real history into an aggregate.
+         */
+        val span = cells.getOrNull(13)?.takeIf { it.isNotBlank() } ?: RequestLog.SPAN_RAW
+        val requests = long(14) ?: 1
+        val costReported = long(15) ?: if (cost != null) 1 else 0
+
         return Row(
             atMs = atMs,
             kind = kind,
+            // **An aggregate row has no kind of its own**: it sums turns and keepalives, and each
+            // contributing line had its own. The kind is carried through as the row's own kind for
+            // a raw line and is meaningless for an aggregate, which `buckets` reads by span.
+            span = span,
+            requests = requests,
+            costReported = costReported,
             prompt = long(5),
             cached = long(6),
             completion = long(7),
@@ -346,6 +365,23 @@ object RequestStats {
          */
         val atMs: Long,
         val kind: RequestLog.Stats.Kind,
+        /**
+         * What the line covers: [RequestLog.SPAN_RAW] for one response, or `hour`/`day`/`month`/
+         * `year` for a rolled-up row.
+         *
+         * Defaults to raw, which is what every line written before the column existed was.
+         */
+        val span: String = RequestLog.SPAN_RAW,
+        /** How many requests this row covers. 1 for a raw line. */
+        val requests: Long = 1,
+        /**
+         * How many of them reported a cost.
+         *
+         * **The denominator for an average, never an amount of money.** A sum of costs divided by a
+         * count of requests averages over rows that never reported one, and the answer looks like
+         * money while being wrong.
+         */
+        val costReported: Long = 0,
         val prompt: Long?,
         val cached: Long?,
         val completion: Long?,
@@ -374,15 +410,38 @@ object RequestStats {
             for (row in rows) {
                 // Cheap rejection first: a row outside the span cannot be in its column, and a
                 // month's column should not build a Stats for years of irrelevant rows.
+                // **Raw only, for now, and this is the line that must not be forgotten.**
+                //
+                // An aggregate row covers the same requests as the raw rows beneath it, so counting
+                // both would double the column - the hazard `docs/PLAN-request-history.md` §2 names,
+                // where the arithmetic produces a plausible wrong number instead of failing. Until
+                // the compactor and the disjoint decomposition land (plan step 4), raw is the only
+                // level that exists, so this filter is correct *and* it makes double counting
+                // impossible in the meantime.
+                //
+                // Step 4 replaces it with: coarsest complete aggregates that partition the span,
+                // plus one descending chain - never two levels of different sizes at once.
+                if (row.span != RequestLog.SPAN_RAW) continue
                 if (row.atMs < box.fromMs || row.atMs > box.toMs) continue
+                // **`row.requests`, not 1.** A raw line covers one response and an aggregate covers
+                // thousands, and this is the only place that difference exists: counting every row
+                // as one would make a month column read "3 requests" while its cost summed a
+                // hundred thousand, and the per-request average derived from it would be absurd
+                // rather than merely wrong.
+                //
+                // The tokens and the money need no such treatment - they are already sums, and
+                // sums of sums are sums.
                 val add = Stats(
-                    requests = 1,
+                    requests = row.requests.toInt(),
                     promptTokens = row.prompt ?: 0,
                     cachedTokens = row.cached ?: 0,
                     completionTokens = row.completion ?: 0,
                     reasoningTokens = row.reasoning ?: 0,
                     cost = row.cost ?: 0.0,
-                    costReported = if (row.cost != null) 1 else 0,
+                    // **The reported count, not a fresh reading of `cost`.** An aggregate's `cost`
+                    // is a sum of reported costs and cannot say how many rows contributed; its own
+                    // column is the only thing that can.
+                    costReported = row.costReported.toInt(),
                     saidChars = row.said ?: 0,
                     thinkingChars = row.thinking ?: 0,
                 )

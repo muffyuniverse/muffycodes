@@ -36,6 +36,9 @@ object RequestLog {
     /** The one file. */
     const val FILE = "requests.log"
 
+    /** The `span` of a line that covers one response. Everything else is an aggregate. */
+    const val SPAN_RAW = "raw"
+
     /**
      * The columns, in order, and the reason the header is a constant rather than a literal.
      *
@@ -72,6 +75,26 @@ object RequestLog {
         // is the difference between "the model was thinking" and "the model was writing".
         "said",
         "thinking",
+        // **What this line covers**, for the rolled-up rows that come later.
+        //
+        // `raw` is one response. `hour`/`day`/`month`/`year` are aggregates that cover many, and
+        // they are what keep a month's column from re-reading a month of lines.
+        //
+        // **At the end of the line, not in front, and that is a compatibility decision.** The plan
+        // said "in front of the existing columns", which reads better - the shape of the row is the
+        // first thing to know. But the first cell is the instant, and every parser here starts by
+        // reading it: putting `span` in front would make `Instant.parse("raw")` throw on every line
+        // already on the phone, and the whole history would vanish. Appending means an old line
+        // simply lacks the columns and is read as `raw`/1, which is what it is.
+        "span",
+        // **How many requests the row covers, and how many of them reported a cost.**
+        //
+        // Not derivable from the numbers: `cost` is a sum, so "cost per request" needs a count of
+        // requests, and a sum alone cannot say how many responses contributed to it. Without these
+        // two a rollup's average is silently wrong in the plausible direction - it divides a large
+        // sum by one, and the answer still looks like money.
+        "requests",
+        "cost reported",
     )
 
     /**
@@ -179,6 +202,15 @@ object RequestLog {
             stats.finish.orEmpty(),
             stats.received?.said?.toString().orEmpty(),
             stats.received?.thinking?.toString().orEmpty(),
+            // A line written as it happens is one raw response, and it reported a cost or it did
+            // not. The rolled-up rows are written by the compactor, which supplies its own values.
+            SPAN_RAW,
+            "1",
+            // **Through `stats.cost`, not through `usage` again.** The two must not be able to
+            // disagree: if this re-checked the JSON while `line()`'s cost column used the accessor,
+            // a future change to one would leave the log saying a cost was reported and showing
+            // none, or the reverse.
+            if (stats.cost != null) "1" else "0",
         ).joinToString("\t")
     }
 
