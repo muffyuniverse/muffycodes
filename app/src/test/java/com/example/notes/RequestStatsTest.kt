@@ -1,6 +1,7 @@
 package com.example.notes
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -146,9 +147,11 @@ class RequestStatsTest {
         // **This is the test the single file exists for.** A log written in one place and read in
         // another must place every row by its instant, not by the clock time it was written with.
         //
-        // 13:14 Berlin is 04:14 the same day in Los Angeles - nine hours apart, both on the 28th,
-        // so the DAY agrees and only the HOUR differs. That isolates the conversion: a test whose
-        // zones disagree about the date could pass on a timezone bug one day out.
+        // **The expected hour is computed, not written down.** The first version of this test said
+        // 13:14 Berlin was 04:14 Los Angeles - a guess about daylight saving - and CI said 05:14.
+        // An hour deduced by hand is an assertion about tzdata, not about this code; asking the
+        // zone what that instant means for it is the same arithmetic the app does, so a mismatch
+        // would be a real disagreement rather than a stale offset in a test.
         val instant = LocalDate.parse("2026-10-28").atTime(13, 14)
             .atZone(java.time.ZoneId.of("Europe/Berlin"))
             .toInstant()
@@ -164,15 +167,22 @@ class RequestStatsTest {
         val berlinZone = java.time.ZoneId.of("Europe/Berlin")
         val laZone = java.time.ZoneId.of("America/Los_Angeles")
 
-        // Hours: the two zones must disagree, and disagree by nine.
+        fun expectedHourIn(zone: java.time.ZoneId): String =
+            java.time.format.DateTimeFormatter.ofPattern("HH:00")
+                .format(java.time.Instant.ofEpochMilli(instant).atZone(zone))
+
         val berlinHour = RequestStats.buckets(rows, RequestStats.Axis.HOUR, instant, berlinZone)
             .first { it.total.requests == 1 }.label
         val laHour = RequestStats.buckets(rows, RequestStats.Axis.HOUR, instant, laZone)
             .first { it.total.requests == 1 }.label
-        assertEquals("Berlin's own hour", "13:00", berlinHour)
-        assertEquals("and Los Angeles', nine hours back", "04:00", laHour)
 
-        // Days: both on the 28th, so the difference above is the hour and not the date.
+        assertEquals("Berlin's own hour", expectedHourIn(berlinZone), berlinHour)
+        assertEquals("and the hour that instant is in Los Angeles", expectedHourIn(laZone), laHour)
+        // **And they must differ**, or the test proves nothing: a table that ignored the zone
+        // entirely would put both rows in one hour and pass the two assertions above.
+        assertNotEquals("the two zones disagree, which is the point", berlinHour, laHour)
+
+        // Both count the request once - the conversion moves it, it does not duplicate it.
         val berlinDay = RequestStats.buckets(rows, RequestStats.Axis.DAY, instant, berlinZone)
         val laDay = RequestStats.buckets(rows, RequestStats.Axis.DAY, instant, laZone)
         assertEquals("one request, counted once", 1, berlinDay.sumOf { it.total.requests })
