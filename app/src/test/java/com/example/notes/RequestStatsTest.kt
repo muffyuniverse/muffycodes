@@ -128,8 +128,11 @@ class RequestStatsTest {
         // day the screen opened, which put every line from every file into today and turned a
         // thirty-day table into one column.
         val rows = listOf(
-            RequestStats.parse(LocalDate.parse("2026-10-26"), row(at = "14:00:00.000"))!!,
-            RequestStats.parse(LocalDate.parse("2026-10-28"), row(at = "09:14:22.301"))!!,
+            // **The day goes to the builder, not to the parser.** `parse`'s day argument only
+            // labels the row; the instant that places it comes from the line's own first column,
+            // which is computed from the day given here.
+            RequestStats.parse(LocalDate.parse("2026-10-26"), row(day = "2026-10-26", at = "14:00:00.000"))!!,
+            RequestStats.parse(LocalDate.parse("2026-10-28"), row(day = "2026-10-28", at = "09:14:22.301"))!!,
         )
         val at = LocalDate.parse("2026-10-28").atTime(9, 30).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val buckets = RequestStats.buckets(rows, RequestStats.Axis.DAY, at)
@@ -159,15 +162,19 @@ class RequestStatsTest {
         val now = instant + 60_000L
 
         val berlin = RequestStats.buckets(
-            rows, RequestStats.Axis.HOUR, now, java.time.ZoneId.of("Europe/Berlin"),
+            rows, RequestStats.Axis.DAY, now, java.time.ZoneId.of("Europe/Berlin"),
         )
         val la = RequestStats.buckets(
-            rows, RequestStats.Axis.HOUR, now, java.time.ZoneId.of("America/Los_Angeles"),
+            rows, RequestStats.Axis.DAY, now, java.time.ZoneId.of("America/Los_Angeles"),
         )
 
-        assertEquals("Berlin saw it in the nine o'clock hour", 1, berlin.first { it.label == "09:00" }.total.requests)
-        assertEquals("Los Angeles saw it in the midnight hour", 1, la.first { it.label == "00:00" }.total.requests)
-        // And the total is the same fact in both: one request, counted once.
+        // **A day, not an hour: one column per date is unambiguous**, while an hour label sits at
+        // the edge of a 24-hour window and would test the window rather than the timezone.
+        assertEquals("Berlin counted it on its own 28th", 1, berlin.first { it.label == "28 Oct" }.total.requests)
+        // The same instant is still the 27th in Los Angeles - nine hours earlier - and that is the
+        // whole point: one request, one instant, and the local day depends on where you stand.
+        assertEquals("Los Angeles counted it on its 27th", 1, la.first { it.label == "27 Oct" }.total.requests)
+        // And it is one request in both, counted once rather than duplicated by the conversion.
         assertEquals("one request either way", 1, berlin.sumOf { it.total.requests })
         assertEquals("one request either way", 1, la.sumOf { it.total.requests })
     }
