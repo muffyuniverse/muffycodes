@@ -357,17 +357,22 @@ object RequestLog {
             val freshHours: List<String> = closed.mapNotNull { (from, group) ->
                 RequestStats.rollup(group, "hour", from)?.let(::aggregateLine)
             }
-            // Existing hour rows, plus the ones just built. Raw rows in the open hour survive.
+            // Existing hour rows plus the ones just built. Raw rows survive only where no hour
+            // closed over them - the hour still in progress.
             val hours: List<Entry> = parsed.filter {
                 it.row!!.span == "hour" || (it.row.span == SPAN_RAW && it.text !in rolledText)
             }
+            val allHours: List<Entry> = hours + freshHours.map { Entry(RequestStats.parse(it), it) }
 
             // ---- 2. rebuild the coarser levels from the hours ----
-            val rebuilt = rebuild(hours.mapNotNull { it.row } + freshHours.mapNotNull { RequestStats.parse(it) })
+            // **From `allHours`, not from `hours`.** The rows just rolled have no day above them
+            // yet, so rebuilding from the pre-compaction list would derive nothing at all for the
+            // day that was just closed - the aggregate would be written and then have no parent.
+            val rebuilt = rebuild(allHours.mapNotNull { it.row })
 
             // ---- 3. then bound the hours by age ----
-            val all = hours + rebuilt.map { Entry(RequestStats.parse(it), it) }
-            val kept = prune(all, now, keepDays)
+            val everyLevel = allHours + rebuilt.map { Entry(RequestStats.parse(it), it) }
+            val kept = prune(everyLevel, now, keepDays)
 
             writeWhole(
                 file,
@@ -390,26 +395,27 @@ object RequestLog {
      *
      * **Derived, not incrementally maintained.** Each level is recomputed from the level below it,
      * so `day` is the sum of its hours by construction rather than a second opinion. That is what
-     * makes a change of semantics - and the windows in `docs/PLAN-request-history.md` §1 were
-     * revised twice - a recombination rather than a migration.
+     * makes a change of semantics - and the windows in `docs/PLAN-request-history.md` were revised
+     * twice - a recombination rather than a migration.
      *
-     * **Only units that can be proved from the hours in hand are rebuilt.** After retention has
-     * dropped a year of hours, recomputing that year's days from what is left would produce days
-     * covering a fraction of themselves - history deleted a level at a time. A unit is rebuilt only
-     * when every hour it has was available to the rebuild, which for retention means: the unit is
-     * entirely at or after the oldest hour still present.
+     * **A unit is rebuilt from whatever hours it still has, and that is the whole point.** A month
+     * beginning on the 1st routinely holds hours from the 3rd: its start being earlier than the
+     * oldest surviving row means the log began late, not that rows were lost. Trying to prove
+     * completeness would skip every such unit - which is every unit - and the levels above the
+     * hours would simply never exist.
+     *
+     * **The ordering is what protects the history**: this runs *before* [prune], so a unit is
+     * always derived from the fullest set of hours available. Pruning then drops hours and leaves
+     * the coarser rows standing, so an old year keeps its year, month and day rows after its hours
+     * have gone. Deriving *after* pruning is the mistake that would erase history a level at a
+     * time, and it is why step 2 of [compact] comes before step 3.
      */
     private fun rebuild(hours: List<RequestStats.Row>): List<String> {
         if (hours.isEmpty()) return emptyList()
-        val oldest = hours.minOf { it.atMs }
         val fresh = mutableListOf<String>()
         var level = hours
         for (span in listOf("day", "month", "year")) {
-            val closed = RequestStats.closable(level, span, Long.MAX_VALUE)
-                // Only units whose finer rows are all present: a unit that starts before the oldest
-                // hour we have may have lost some.
-                .filterKeys { start -> start >= oldest }
-            val lines = closed.mapNotNull { (from, group) ->
+            val lines = RequestStats.closable(level, span, Long.MAX_VALUE).mapNotNull { (from, group) ->
                 RequestStats.rollup(group, span, from)?.let(::aggregateLine)
             }
             fresh += lines
