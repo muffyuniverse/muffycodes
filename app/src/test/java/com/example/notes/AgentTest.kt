@@ -58,6 +58,11 @@ class AgentTest {
         foregroundMs: Long = 0L,
         bg: Background = Background.none(),
         clock: () -> Long = { System.currentTimeMillis() },
+        // **A fixed tail by default, so no test is ever at the mercy of a random draw.** A test
+        // about a ping's shape that drew a real one would have a 1-in-238328 chance of asserting
+        // something about different bytes than it expected; a test *about* the tail passes a
+        // sequence instead.
+        mark: () -> String = { "a7F" },
     ) = Agent(
         accountDir = account,
         project = "shopping",
@@ -72,6 +77,7 @@ class AgentTest {
         foregroundMs = foregroundMs,
         bg = bg,
         clock = clock,
+        pingMark = mark,
     )
 
     private fun call(name: String, args: String, id: String = "c1") = Call(id, name, args)
@@ -2855,13 +2861,14 @@ class AgentTest {
     @Test
     fun `no two pings are the same request`() {
         val door = ScriptedDoor(Reply("nothing to do"))
-        // A clock that moves, because the marker is drawn from it.
-        var now = 1_000L
-        val agent = agent(door, clock = { now })
+        // **A sequence, not the real generator.** Two real draws would prove it 238,327 times out of
+        // 238,328; the rule is "the tail comes from the generator every time", and a sequence tests
+        // the rule. The generator's own alphabet and length are pinned separately.
+        val marks = ArrayDeque(listOf("a7F", "Q2z"))
+        val agent = agent(door, mark = { marks.removeFirst() })
         agent.burst("look at it")
 
         agent.warm()
-        now += 240_000
         agent.warm()
 
         val sent = door.pings.map { it.messages.last().text }
@@ -2874,31 +2881,66 @@ class AgentTest {
     }
 
     @Test
-    fun `the mark says it is not part of the answer`() {
-        // **A marker the model could echo would put the ping's cost back up**, and would do it in
-        // the one message nobody reads: the answer is discarded, so a ping that started writing
-        // forty tokens instead of one would only ever show up on the bill.
+    fun `the tail is three symbols, and only three`() {
+        // **Short is the point.** The tail is the only part of a ping the provider's cache never
+        // covers, so its cost is its length - three symbols is about two tokens, where the millis
+        // it replaced was six. The alphabet is what pays for the shortness: three base62 symbols
+        // and three digits cost the same and differ by 238x in how often they repeat.
+        repeat(200) {
+            val mark = Agent.mark()
+            assertEquals("three symbols: $mark", 3, mark.length)
+            assertTrue(
+                "all of them from the alphabet: $mark",
+                mark.all { c -> "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ".contains(c) },
+            )
+        }
+    }
+
+    @Test
+    fun `the instruction survives, with the tail after it`() {
+        // **The words are load-bearing and must not have been traded away for the tail.** Without
+        // them the same conversation and one token allowed produced 136 tokens of answer; with them,
+        // 20. A tail that replaced the instruction instead of following it would restore the cost
+        // the instruction was measured to remove.
         val door = ScriptedDoor(Reply("nothing to do"))
-        val agent = agent(door, clock = { 1_700_000_000_000L })
+        val agent = agent(door, mark = { "a7F" })
         agent.burst("look at it")
         agent.warm()
 
         val text = door.pings.single().messages.last().text
-        assertTrue("the one-dot instruction survives: $text", text.contains("only one dot"))
-        assertTrue("the marker is present: $text", text.contains("1700000000000"))
-        assertTrue(
-            "and is explicitly excluded from the answer: $text",
-            text.contains("not part of your answer"),
+        assertTrue("the one-dot instruction: $text", text.startsWith("Answer with a message that contains only one dot"))
+        assertTrue("and the tail is at the very end: $text", text.endsWith("a7F"))
+    }
+
+    @Test
+    fun `every ping gets the tail it was given`() {
+        // **Injected, because a test that drew two real tails would be asserting a probability.**
+        // With 238,328 combinations it would pass a quarter of a million times and fail once - a
+        // flake dressed as a proof. A sequence makes the rule the thing under test: whatever the
+        // generator says, that is what goes on the wire, and each ping takes the next one.
+        val door = ScriptedDoor(Reply("nothing to do"))
+        val marks = ArrayDeque(listOf("abc", "xyz", "019"))
+        val agent = agent(door, mark = { marks.removeFirst() })
+        agent.burst("look at it")
+
+        agent.warm()
+        agent.warm()
+        agent.warm()
+
+        assertEquals(
+            "in order, one each",
+            listOf("abc", "xyz", "019"),
+            door.pings.map { it.messages.last().text.substringAfterLast(' ') },
         )
     }
 
     @Test
-    fun `the mark never reaches the record`() {
+    fun `the tail never reaches the record`() {
         // The exemption the rest of the ping already gets, kept for the same reason: a row holding
         // the marker would enter the conversation, and the next real turn would be answering a
         // message about bookkeeping that the person never sent.
         val door = ScriptedDoor(Reply("nothing to do"))
-        val agent = agent(door, clock = { 1_700_000_000_000L })
+        val agent = agent(door, mark = { "a7F" })
         agent.burst("look at it")
         val before = log.contextRows().size
 
@@ -2907,7 +2949,7 @@ class AgentTest {
         assertEquals("the context did not grow", before, log.contextRows().size)
         assertTrue(
             "and no row mentions the marker",
-            rows().none { it.body.contains("1700000000000") || it.body.contains("bookkeeping") },
+            rows().none { it.body.contains("a7F") || it.body.contains("only one dot") },
         )
     }
 
@@ -2919,12 +2961,11 @@ class AgentTest {
         // something earlier - the opening line, a row, the instructions - would defeat the very
         // cache the keepalive exists to refresh.
         val door = ScriptedDoor(Reply("nothing to do"))
-        var now = 1_000L
-        val agent = agent(door, clock = { now })
+        val marks = ArrayDeque(listOf("a7F", "Q2z"))
+        val agent = agent(door, mark = { marks.removeFirst() })
         agent.burst("look at it")
 
         agent.warm()
-        now += 240_000
         agent.warm()
 
         val first = door.pings[0].messages

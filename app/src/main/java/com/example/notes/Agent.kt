@@ -96,6 +96,15 @@ class Agent(
      * is made.
      */
     private val clock: () -> Long = { System.currentTimeMillis() },
+    /**
+     * Three symbols for the keepalive's tail — **injected so its uniqueness is testable.**
+     *
+     * A test that drew from the real generator and compared two draws would be asserting a
+     * probability: with 238,328 combinations it would pass a quarter of a million times and fail
+     * once, which is a flake dressed as a proof. A test supplies a sequence instead and asserts the
+     * *rule* — every ping gets the tail it was given, and the tail reaches nothing but the wire.
+     */
+    private val pingMark: () -> String = { Agent.mark() },
     /** The operator's limit for a `background` command; zero is "no limit". */
     private val backgroundMs: () -> Long = { 0L },
     /**
@@ -717,40 +726,42 @@ class Agent(
      * `max_tokens` bounds reasoning *on most providers*, and a provider that ignores it while
      * reasoning about an unclear request is exactly the failure this sentence prevents.
      */
+    /**
+     * The alphabet the keepalive's tail is drawn from: **three symbols, base62.**
+     *
+     * Base62 rather than digits, and the reason is a measurement rather than taste. The tail is the
+     * only part of a ping that is not in the provider's cache, so its cost is its length and not its
+     * alphabet: three digits and three base62 symbols are both about two tokens. What differs is the
+     * chance of drawing the same tail twice in a row, which is the one repeat that matters —
+     * 1.4% of 15-ping sessions for digits against 0.01% for base62, and 26% against 0.13% over 300
+     * pings. Paying nothing to make a rare failure rarer by 238× is not a trade, it is a free move.
+     */
+    private const val MARK_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+    /** Three symbols, freshly drawn. */
+    internal fun mark(): String =
+        (1..3).map { MARK_ALPHABET.random() }.joinToString("")
+
     private fun pingInstruction(): Msg = Msg.user(
-        "Answer with a message that contains only one dot and nothing else.\n" +
-            // **A new marker on every ping, and it is the operator's ruling rather than a
-            // decoration.** L28198: *"we need to attach a new dot to every subsequent keepalive
-            // message so that message never stays exactly the same."*
-            //
-            // Without it the ping is byte-identical to the one before, and an identical request is
-            // exactly what a gateway's own response cache answers without ever reaching the
-            // upstream - so the upstream's prompt cache expires while the app believes it is warm,
-            // and the keepalive fails at its only job while looking like it is working.
-            //
-            // **Why this cannot break the cache it exists to protect.** A provider matches the
-            // longest common *prefix*, and this marker sits after the whole conversation - so the
-            // cached part is untouched and only the tail differs. An exact-match cache is defeated;
-            // a prefix cache still hits.
-            //
-            // **The number is explicitly excluded from the answer**, because the ping's measured
-            // cost is what bounds it: the same request with no instruction produced 136 tokens,
-            // with the one-dot instruction 20. A marker the model could echo would put the count
-            // back up, and would do it in the one message nobody is reading.
-            //
-            // Millis, so it cannot repeat - a counter would restart at 1 after a restart and
-            // re-send a request that had already been answered once. The clock is the injected one,
-            // so a test can hold it still and watch the marker change.
-            "The number ${clock()} is bookkeeping and is not part of your answer.",
+        // **The instruction, then three random symbols.** The words are what bound the answer: the
+        // same conversation with no instruction and one token allowed produced 136 tokens, because
+        // a conversation with no question in it invites the model to continue. With the one-dot
+        // instruction it produced 20. The tail is what stops the request ever being the one before
+        // it - see [mark], and the operator's ruling at L28198: *"attach a new dot to every
+        // subsequent keepalive message so that message never stays exactly the same."*
+        //
+        // **Why a changing tail cannot break the cache the ping exists to protect.** A provider
+        // matches the longest common *prefix*, and this sits after the whole conversation - so the
+        // cached part is untouched and only the last two tokens are new. It defeats an exact-match
+        // cache, which is the thing that was answering instead of the upstream, and leaves a
+        // prefix cache hitting.
+        //
+        // **Appended rather than prepended, deliberately.** A prefix cache reads forwards, so
+        // anything new belongs at the end; a symbol at the front would invalidate every cached
+        // token behind it and turn every ping into a full-price re-prefill.
+        "Answer with a message that contains only one dot and nothing else. " + pingMark(),
     )
 
-    /**
-     * The request, rebuilt from the record every time.
-     *
-     * Reading it back rather than keeping it in memory is what makes the agent's own compaction real:
-     * a row it forgot is `out` in the record, and the next request genuinely does not contain it. A
-     * cached transcript would keep sending what it threw away.
-     */
     private fun build(layers: AgentPrompt.Layers, opening: Opening, clearedUp: Boolean): Request {
         val tools = AgentTools.specs()
         var rows = log.contextRows()
