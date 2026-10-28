@@ -94,20 +94,28 @@ class ScenarioShots(
      */
     fun after() {
         switchToAfter()
+        compose.waitForIdle()
+        // **Then the looper alone, and never a second compose idle.**
+        //
+        // Asking compose to go idle again is what an open window cannot survive: a dialog animates
+        // for as long as it is shown, so a loop of idle waits trips Espresso's own never-idle guard
+        // and the scenario fails with `AppNotIdleException` — five of them did, one window each.
+        // Pumping the main looper is enough, because the answer being waited for is a post, not a
+        // frame.
+        //
+        // The loop ends on the screen's own signature rather than a pass count: two passes prove
+        // only that the loop ran twice, while a settled tree is the thing that says the work
+        // finished.
         val deadline = System.currentTimeMillis() + 5_000
         var previous: String? = null
         var stable = 0
         while (System.currentTimeMillis() < deadline) {
             shadowOf(Looper.getMainLooper()).idle()
-            compose.waitForIdle()
-            // **The screen's own signature**, not a pass counter: two passes prove only that the
-            // loop ran twice. What says the work finished is that the drawn tree stopped changing,
-            // and a post that lands mid-loop changes it.
             val signature = compose.onAllNodes(isRoot()).fetchSemanticsNodes()
                 .joinToString("|") { it.id.toString() + it.config.toString() }
             stable = if (signature == previous) stable + 1 else 0
             previous = signature
-            if (stable >= 2) break
+            if (stable >= 3) break
             Thread.sleep(16)
         }
         capture("after.png")
