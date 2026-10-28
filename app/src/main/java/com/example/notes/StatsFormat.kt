@@ -104,6 +104,16 @@ object StatsFormat {
         java.time.Instant.ofEpochMilli(ms).atZone(zone)
             .format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm"))
 
+    /**
+     * An interval's length, in hours: `31 hours`, `1 hour`.
+     *
+     * **The column's unit**, so the figure has a scale instead of being a number with no extent.
+     * Hours because that is the granularity the log keeps and the interval is measured at - a
+     * count of days would be wrong for a two-hour window and a count of seconds unreadable for a
+     * month.
+     */
+    fun hours(count: Long): String = "$count ${if (count == 1L) "hour" else "hours"}"
+
     /** A request count. */
     fun count(value: Int): String = value.toString()
 

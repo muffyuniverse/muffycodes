@@ -58,7 +58,7 @@ VOCABULARY = {
     # the account
     "add account", "confirm add account", "remove account", "use test account",
     # the log itself, and the table counted from the request logs
-    "share log", "stats", "stats date", "stats span", "stats time",
+    "share log", "stats", "stats from", "stats interval", "stats time", "stats to",
     # how much of it is kept
     "request log limit",
     # dialogs' buttons — the acts above, confirmed

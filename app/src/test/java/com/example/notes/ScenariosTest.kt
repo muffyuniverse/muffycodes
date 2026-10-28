@@ -639,17 +639,17 @@ class ScenariosTest {
         scenario(
             compose, "24-what-it-cost",
             "What it cost.",
-            "the request log summed over the hour, the day and the month of one instant.",
+            "the request log summed over an interval chosen with two pickers.",
             screen = { stats(account, now) },
         ) {
             before()
             then("Nothing is pressed: the table is a reading of the log, counted when it opened.") {}
             after()
             result(
-                "One instant picked, and three columns: the hour it is in, the day, and the " +
-                    "month. They overlap on purpose - the hour is part of the day, the day part of " +
-                    "the month - so the same spend appears at three widths and can be read as " +
-                    "'this hour, inside this day, inside this month'.",
+                "Two picks and one column. The interval is stated rather than inferred: From " +
+                    "and To sit above the table, and every number below is that interval summed. " +
+                    "One figure per metric, which is what a person asks for - not five nested " +
+                    "views of one instant that each need a rule for where they start.",
             )
         }
     }

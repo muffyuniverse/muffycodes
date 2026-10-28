@@ -22,277 +22,38 @@ import java.time.ZoneId
 object RequestStats {
 
     /**
-     * **The three spans, side by side, containing one chosen instant.**
+     * **An interval, half-open: `fromMs` inclusive, `toMs` inclusive.**
      *
-     * Not three views and not three axes. One pick — 12:00 on 25 October 2026 — and the table has
-     * exactly three columns: the hour that instant is in, the day it is in, and the month it is in.
-     * `12:00 | 25 Oct | Oct 2026`, with the metrics as rows.
+     * This replaces the five nested `Span`s. The operator's revision: *"we need 2 pickers for
+     * starting and ending, and just 1 result column for the selected interval with per hour
+     * granularity."* Two pickers remove the whole question of where a column starts and stops -
+     * the person states the interval, which is the thing they actually know.
      *
-     * This was read three different wrong ways before it was built, so the reason is worth stating:
-     *
-     * - **Not "the last 24 hours".** That was the first build, and it drew a month of columns
-     *   ending at the pick, which is a different question and cannot show October by itself.
-     * - **Not "24 hours, or 31 days, or 12 months, chosen by an axis."** That was the second, and
-     *   it made the person pick a granularity before they could see anything — when the whole point
-     *   is that one instant has an hour, a day and a month at the same time.
-     * - **Three columns, always, whatever is chosen.** The spans are what one instant *is*, so the
-     *   table shows all three at once and needs no control to switch between them.
+     * **Granularity is the hour**, which is also what the log keeps (§2 of the plan): a `hour` row
+     * covers one clock hour, so an interval reads whole hours from the aggregates and one partial
+     * hour from raw. Nothing coarser is needed to answer it, and nothing finer exists.
      */
-    enum class Span(val label: String) {
-        /** The clock hour, cut at the pick: picking 12:45 shows 12:00 to 12:45. */
-        HOUR("hour"),
-
-        /** The calendar day, cut at the pick: picking 12:45 shows 00:00 to 12:45. */
-        DAY("day"),
-
-        /** The calendar month, cut at the pick: picking 12:45 shows the 1st to 12:45. */
-        MONTH("month"),
-
-        /**
-         * The calendar year, cut at the pick: picking 23:00 on 31 December shows the whole of it.
-         *
-         * **This is how a year is asked about** — there is no year-only picker and no need for one.
-         * Choosing the last instant of 2025 gives 2025 as the year column, December as the month
-         * column, the 31st as the day column, and so on: one pick, every column, always.
-         */
-        YEAR("year"),
-
-        /**
-         * **Everything up to the picked moment** — not all of time.
-         *
-         * The same rule as the other four spans, taken to its widest: it ends at the pick. A total
-         * that ran to "now" would answer a different question from the column beside it, and the
-         * five are only comparable because they share one end.
-         *
-         * Its start is the beginning of the log, and the container does not consult the log to find
-         * it: it begins at the epoch, before any row can exist. That makes the bounds a property of
-         * the pick alone, so the same instant describes the same span on every read.
-         */
-        TOTAL("total"),
-    }
-
-    /** The spans the table always has, in the order a person reads them: narrowest first. */
-    val SPANS: List<Span> = Span.entries
-
-    /**
-     * One span's bounds and name, for a given instant.
-     *
-     * **Every column starts at the boundary of its own span and stops at the picked moment.**
-     * Picking 12:45 on the 25th gives `12:00-12:45`, `00:00-12:45` and `1 Oct-12:45`: three
-     * cumulative windows that all end at the same instant and nest inside one another.
-     *
-     * Two readings were rejected, and both were built first:
-     *
-     * - **Stopping at the end of the span** (`12:00-12:59`, the whole day, the whole month) counts
-     *   time that has not happened. At 12:45 the afternoon of the 25th is in the future, so a day
-     *   column claiming a full day would be inventing it.
-     * - **Cutting on a boundary exception** (a pick at exactly 12:00 meaning the whole hour) made
-     *   the three columns disagree with each other: the day would be whole while the hour was cut.
-     *   One rule for all three is simpler and needs no explanation.
-     *
-     * A consequence worth knowing: with the pick at 00:00 the hour and the day are both empty,
-     * because neither has any elapsed time yet. That is honest - at midnight nothing has been
-     * spent today - and the month still has its earlier days.
-     *
-     * `fromMs` is inclusive and `toMs` is the last millisecond, so "is this row in this column" is
-     * one comparison. A row after the pick is deliberately outside: it is not part of a period that
-     * had not happened yet.
-     */
-    data class Container(
-        val fromMs: Long,
-        val toMs: Long,
-        /**
-         * What the column *is*: `12:00`, `25 Oct`, `Oct 2026`.
-         *
-         * The hour, the day and the month of the pick — never a whole one of any of those, because
-         * every column is cut at the picked moment.
-         */
-        val label: String,
-        /**
-         * Where the column *starts*, since [label] cannot say it: `to 12:45`, `from 00:00`,
-         * `from the 1st`.
-         *
-         * All three end at the pick, which the caption above the table states once. So the month
-         * column of a pick at 12:45 on the 25th is `Oct 2026` / `from the 1st`, meaning the 1st to
-         * the 25th at 12:45 — and a heading of `Oct 2026` on its own would claim the whole month.
-         */
-        val sub: String,
-    )
-
-    /**
-     * The stored aggregates, grouped by level, for one [buckets] draw.
-     *
-     * Keyed by level and sorted by start so [covers] can answer in a scan of one level. A month
-     * does not "equal" the days inside it, so membership has to be **containment**: the day 5 Aug
-     * is covered by the month starting 1 Aug, and a set of exact unit starts could never say so.
-     */
-    private fun row(all: List<Row>): Map<String, List<Long>> =
-        all.filter { it.span != RequestLog.SPAN_RAW }
-            .groupBy { it.span }
-            .mapValues { (_, rows) -> rows.map { it.atMs }.sorted() }
-
-    /** Whether any stored [span] aggregate covers the unit `[from, to)`. */
-    private fun covers(aggregates: Map<String, List<Long>>, span: String, from: Long, to: Long): Boolean =
-        aggregates[span].orEmpty().any { start ->
-            start <= from && to <= unitEnd(span, start)
-        }
-
-    /**
-     * Whether [r] is the level that speaks for its unit.
-     *
-     * **The disjointness rule, in one place.** The coarsest stored aggregate wins; every level
-     * beneath a covered unit stays silent. That is what makes a column a partition rather than a
-     * pile, and it is the only thing standing between the table and a number that is merely
-     * plausible.
-     *
-     * - **Raw is silenced too, when an hour covers it.** Raw is the floor only in the sense that
-     *   nothing exists below it - not in the sense that it always counts. A rolling window's
-     *   boundary can cut through an hour whose raw rows and hour row both survive a half-finished
-     *   compaction, and counting both is precisely the double count this exists to prevent.
-     * - **A coarser row need not be complete for the box.** Aggregates only ever exist for closed
-     *   units - the compactor refuses an open one - so "it exists" already means "it is whole". A
-     *   day row is therefore counted even when the column cuts through it, which is right: the
-     *   alternative is to descend to hours that were deleted once the day was written.
-     */
-    private fun counts(r: Row, covered: Map<String, List<Long>>): Boolean {
-        // **A raw row's unit is the hour it falls in**, and the level has to be named for that
-        // rather than carried through as `raw`: `unitEnd("raw", …)` matches none of its cases and
-        // falls through to a YEAR, so a raw row's "unit" became the whole year and no hour could
-        // ever cover it. That is a silent wrong answer, not a crash - the column simply counted one
-        // extra request for every hour that had already been rolled.
-        val level = if (r.span == RequestLog.SPAN_RAW) "hour" else r.span
-        val start = unitFloor(level, r.atMs) ?: hourFloor(r.atMs)
-        val end = unitEnd(level, start)
-        // **Which levels speak for this one's unit.** An hour row describes the same hour as the
-        // raw rows beneath it - it was built from them and the compactor then deletes them - so an
-        // hour row silences raw rows in its hour. That is not "two levels of different sizes": it
-        // is one level having replaced another, and the file can briefly hold both if a compaction
-        // died between writing the aggregate and rewriting the file. Counting both would add the
-        // hour to itself.
-        // **Raw is the only level whose description may sit one step above it**, and an hour row
-        // must not list "hour": `covers` would find the hour row itself and silence it, so a column
-        // of hour rows would read zero. They are two descriptions of one hour, and which one speaks
-        // depends on whether this row is the description or the thing described.
-        val coarser = when {
-            r.span == RequestLog.SPAN_RAW -> listOf("hour", "day", "month", "year")
-            level == "hour" -> listOf("day", "month", "year")
-            level == "day" -> listOf("month", "year")
-            level == "month" -> listOf("year")
-            else -> emptyList()
-        }
-        return coarser.none { covers(covered, it, start, end) }
-    }
-
-    /** The start of the unit of [span] that holds [ms], or null for a span this code does not know. */
-    private fun unitFloor(span: String, ms: Long): Long? = when (span) {
-        "hour" -> hourFloor(ms)
-        "day" -> dayFloor(ms)
-        "month" -> monthFloor(ms)
-        "year" -> yearFloor(ms)
-        else -> null
-    }
-
-    /** The span of [span] that holds [anchor]. */
-    fun container(span: Span, anchor: Long, zone: ZoneId = ZoneId.systemDefault()): Container {
-        val at = Instant.ofEpochMilli(anchor).atZone(zone)
-        fun fmt(local: java.time.ZonedDateTime, pattern: String) =
-            local.format(java.time.format.DateTimeFormatter.ofPattern(pattern))
-
-        /**
-         * The last millisecond counted: the pick itself, for all three spans.
-         *
-         * One rule, no exceptions. A request that happened after the picked moment is not counted,
-         * because at the picked moment it had not happened.
-         */
-        fun cut(): Long = anchor
-
-        return when (span) {
-            Span.HOUR -> {
-                // Truncated to the hour by dropping the parts below it, not by subtracting a
-                // remainder: a zone's hour is not always 3600000 ms, and a DST hour must still
-                // produce exactly one column.
-                val hourStart = at.withMinute(0).withSecond(0).withNano(0)
-                val end = cut()
-                Container(
-                    fromMs = hourStart.toInstant().toEpochMilli(),
-                    toMs = end,
-                    // **A range, not `12:00`.** A range is how an hour is said, and this one stops
-                    // at the pick - so it names both ends and needs no second line.
-                    label = fmt(hourStart, "HH:mm") + "–" +
-                        fmt(Instant.ofEpochMilli(end).atZone(zone), "HH:mm"),
-                    sub = "",
-                )
-            }
-            Span.DAY -> {
-                val day = at.toLocalDate()
-                // `atStartOfDay(zone)` rather than `atTime(0,0)`: on the day a zone springs forward
-                // midnight does not exist, and asking for it by name lands somewhere else.
-                val from = day.atStartOfDay(zone).toInstant().toEpochMilli()
-                Container(
-                    fromMs = from,
-                    toMs = cut(),
-                    label = day.format(java.time.format.DateTimeFormatter.ofPattern("d MMM")),
-                    // Midnight, because a day column is that day up to the pick — not the last
-                    // twelve hours, which would reach back into the day before.
-                    sub = "from 00:00",
-                )
-            }
-            Span.MONTH -> {
-                val first = at.toLocalDate().withDayOfMonth(1)
-                val from = first.atStartOfDay(zone).toInstant().toEpochMilli()
-                Container(
-                    fromMs = from,
-                    toMs = cut(),
-                    label = first.format(java.time.format.DateTimeFormatter.ofPattern("MMM yyyy")),
-                    // **The 1st, and it stops at the pick's day** — so at midday on the 25th this
-                    // column covers the 1st to the 25th, not all thirty-one days. Saying "from the
-                    // 1st" plus the caption's instant is the shortest heading that is still exact.
-                    sub = "from the 1st",
-                )
-            }
-            Span.YEAR -> {
-                val jan1 = at.toLocalDate().withDayOfMonth(1).withMonth(1)
-                Container(
-                    fromMs = jan1.atStartOfDay(zone).toInstant().toEpochMilli(),
-                    toMs = cut(),
-                    label = jan1.format(java.time.format.DateTimeFormatter.ofPattern("yyyy")),
-                    sub = "from 1 Jan",
-                )
-            }
-            Span.TOTAL -> Container(
-                // **The epoch, not the oldest row.** The container must not consult the log: the
-                // same instant would then describe a different span as the log grows, and the
-                // column would change its meaning between two reads. Starting before any possible
-                // row makes the bounds a property of the pick alone, and `buckets` counts exactly
-                // the rows that exist - up to `cut()`, like every other column.
-                fromMs = 0L,
-                toMs = cut(),
-                label = "total",
-                sub = "from the first row",
-            )
-        }
+    data class Interval(val fromMs: Long, val toMs: Long) {
+        val hours: Long get() = if (toMs < fromMs) 0 else (toMs - fromMs) / 3_600_000L + 1
     }
 
     /**
-     * One column of the table: a span of time, and what was spent in it.
+     * The interval between two picks, in either order, and never wider than the data.
      *
-     * The two kinds are kept apart because they cost different things and answer different
-     * questions. The keepalive fires every four minutes while idle — roughly 360 responses a day —
-     * so a table that summed them with the turns would be about the keepalive while looking like it
-     * was about the agent. [Stats] is what one kind did.
+     * **Left to right regardless of which picker was moved**, because a person sets "start 9am,
+     * end 5pm" in the order they think of it, and a table that went blank when the two were
+     * swapped would look broken rather than empty.
      */
-    data class Bucket(
-        val label: String,
-        /**
-         * Where the column starts: `from 00:00`, `from the 1st`, `from 1 Jan`, `from the first row`.
-         *
-         * **No default value, deliberately.** This was `= ""` and the constructor forgot it, so
-         * every column rendered with a blank second line - a bug that compiles, renders, and is
-         * caught only by a test asserting the text. A required parameter makes the omission a
-         * compile error instead.
-         */
-        val sub: String,
-        /** Everything accounted for in this span: turns and keepalives together. */
+    fun interval(a: Long, b: Long): Interval = Interval(minOf(a, b), maxOf(a, b))
+
+    /**
+     * **The one column.** Everything the log holds for one interval, as one set of numbers.
+     *
+     * There is no label to carry and no second column to line up with: the interval is stated by
+     * the two pickers, and these are its numbers.
+     */
+    data class Totals(
+        /** Everything accounted for in the interval: turns and keepalives together. */
         val total: Stats = Stats(),
         /** Answers that began and then died. Billed and unreported, so they are counted apart. */
         val stalls: Stats = Stats(),
@@ -492,58 +253,70 @@ object RequestStats {
      * day that cost Y, in a month that cost Z" is the question the table answers, and three
      * disjoint windows could never answer it.
      */
-    fun buckets(rows: List<Row>, anchor: Long, zone: ZoneId = ZoneId.systemDefault()): List<Bucket> {
+    fun totals(rows: List<Row>, span: Interval): Totals {
         // **The covered units, built once.** `counts` asks "does a coarser aggregate cover this
         // row's unit", and answering that by scanning every row would be quadratic - at ten
-        // thousand raw rows, a hundred million comparisons for each of five columns. A set of
-        // (level, unit start) pairs makes it one lookup, and it is the same information.
-        val covered = row(rows)
-        return SPANS.map { span ->
-            val box = container(span, anchor, zone)
-            var sum = Stats()
-            var stalls = Stats()
-            for (row in rows) {
-                // **Which rows this column counts, and never two levels of the same thing.**
-                //
-                // The hazard the plan names: an aggregate covers the same requests as the raw rows
-                // beneath it, so counting both doubles the column into a plausible wrong number.
-                // The rule is a **disjoint decomposition**: for each part of the span, take the
-                // coarsest COMPLETE aggregate that covers it, and descend into the level below only
-                // for the part no aggregate covers.
-                //
-                // Implemented as the simplest correct form of that: a row counts if its own span's
-                // unit lies wholly inside the column *and* no row from a coarser level covers that
-                // same unit. An hour inside a day is dropped, because the day row already speaks for
-                // it; an hour in a day that has no aggregate is counted, because nothing else does.
-                if (row.atMs < box.fromMs || row.atMs > box.toMs) continue
-                if (!counts(row, covered)) continue
-                val add = Stats(
-                    requests = row.requests.toInt(),
-                    promptTokens = row.prompt ?: 0,
-                    cachedTokens = row.cached ?: 0,
-                    completionTokens = row.completion ?: 0,
-                    reasoningTokens = row.reasoning ?: 0,
-                    cost = row.cost ?: 0.0,
-                    // **The reported count, not a fresh reading of `cost`.** An aggregate's `cost`
-                    // is a sum of reported costs and cannot say how many rows contributed; its own
-                    // column is the only thing that can.
-                    costReported = row.costReported.toInt(),
-                    saidChars = row.said ?: 0,
-                    thinkingChars = row.thinking ?: 0,
-                )
-                when (row.kind) {
-                    // Turns and keepalives are summed together because the columns are time, not
-                    // kind: the question "what did this hour cost" has one answer, and splitting it
-                    // into two blocks per column would double every heading. The kind split is
-                    // already on the screen as its own two blocks over the same three columns.
-                    RequestLog.Stats.Kind.TURN, RequestLog.Stats.Kind.PING -> sum += add
-                    // A stall is billed but reports no totals, so it is counted apart rather than
-                    // folded in - adding it to `sum` would silently claim a cost of zero for it.
-                    RequestLog.Stats.Kind.STALL -> stalls += add
-                }
+        // thousand raw rows, a hundred million comparisons. A map of level to sorted starts makes
+        // it one lookup, and it is the same information.
+        val covered = units(rows)
+        var sum = Stats()
+        var stalls = Stats()
+        for (row in rows) {
+            // **Which rows this interval counts, and never two levels of the same thing.**
+            //
+            // The hazard the plan names: an aggregate covers the same requests as the raw rows
+            // beneath it, so counting both doubles the figure into a plausible wrong number. The
+            // rule is a **disjoint decomposition**: the coarsest stored level that covers a unit
+            // speaks for it, and every level beneath a covered unit is silent.
+            //
+            // **Raw is exact, aggregates are atomic.** A raw row counts when its own instant is
+            // inside the interval. An aggregate counts when the interval touches its unit **at
+            // all**, because a stored hour cannot be divided: it describes a clock hour that had
+            // already closed when it was written.
+            //
+            // So 10:15-10:45 counts the whole stored 10:00 hour. That rounds the figure up to the
+            // hour, which is worse than exact - and far better than showing nothing for a period
+            // the log demonstrably has. An interval that has not been compacted is precise to the
+            // millisecond, because raw rows are.
+            val level = if (row.span == RequestLog.SPAN_RAW) null else row.span
+            if (level == null) {
+                if (row.atMs < span.fromMs || row.atMs > span.toMs) continue
+            } else {
+                val start = unitFloor(level, row.atMs) ?: continue
+                // Touching: the unit's last millisecond is not before the interval starts, and its
+                // first is not after the interval ends.
+                if (unitEnd(level, start) - 1 < span.fromMs || start > span.toMs) continue
             }
-            Bucket(label = box.label, sub = box.sub, total = sum, stalls = stalls)
+            // The unit a row describes must be entirely inside the interval to be counted whole,
+            // unless it is raw - see above. A coarser row that merely overlaps is still counted,
+            // because its unit is atomic.
+            if (!counts(row, covered)) continue
+            val add = Stats(
+                requests = row.requests.toInt(),
+                promptTokens = row.prompt ?: 0,
+                cachedTokens = row.cached ?: 0,
+                completionTokens = row.completion ?: 0,
+                reasoningTokens = row.reasoning ?: 0,
+                cost = row.cost ?: 0.0,
+                // **The reported count, not a fresh reading of `cost`.** An aggregate's `cost` is
+                // a sum of reported costs and cannot say how many rows contributed; its own column
+                // is the only thing that can.
+                costReported = row.costReported.toInt(),
+                saidChars = row.said ?: 0,
+                thinkingChars = row.thinking ?: 0,
+            )
+            when (row.kind) {
+                // Turns and keepalives are summed together because the column is time, not kind:
+                // "what did this interval cost" has one answer. The kind split is still visible
+                // where it matters - the keepalive is most of the spend and almost none of the
+                // output, and that shows in the tokens.
+                RequestLog.Stats.Kind.TURN, RequestLog.Stats.Kind.PING -> sum += add
+                // A stall is billed but reports no totals, so it is counted apart rather than
+                // folded in - adding it to `sum` would silently claim a cost of zero for it.
+                RequestLog.Stats.Kind.STALL -> stalls += add
+            }
         }
+        return Totals(total = sum, stalls = stalls)
     }
 
     /**
@@ -579,16 +352,14 @@ object RequestStats {
     }
 
     /**
-     * True when the log has any row inside [box].
+     * True when the log has anything inside [span].
      *
-     * **This replaces a function that answered a different question and answered it wrongly.** It
-     * used to return "how many days from the oldest row to now", which ignored the anchor entirely
-     * and so returned a *negative* number for a container in the past — a caption reading "-7 days
-     * kept" under a table of empty columns. Under container semantics the question a reader asks is
-     * not "how long is the log" but "does the log reach back this far", and that is one comparison.
+     * The question a reader asks of an empty table is not "how long is the log" but **"does the log
+     * reach this far"** - so a period with no rows reads "nothing happened then" rather than looking
+     * like a broken table. The two are different facts and only one of them is a problem.
      */
-    fun covers(rows: List<Row>, box: Container): Boolean =
-        rows.any { it.atMs in box.fromMs..box.toMs }
+    fun covers(rows: List<Row>, span: Interval): Boolean =
+        rows.any { it.atMs in span.fromMs..span.toMs }
 
     /**
      * The oldest instant the log holds, or null when it holds nothing.

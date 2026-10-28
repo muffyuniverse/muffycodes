@@ -8,54 +8,59 @@ defect gets built twice.
 
 ## 1. What the stats table is
 
-### THE ONE RULE
+> **REVISED 2026-10-28, by the operator, superseding everything below this box:** the table is
+> **two pickers (start and end) and ONE column** — the results for the selected interval, at
+> **per-hour granularity**. **No checkboxes, and no five columns.**
+>
+> The operator's words: *"I think I was dumb with insisting on one picker — we need 2 pickers for
+> starting and ending, and just 1 result column for the selected interval with per hour granularity.
+> and no checkboxes."*
 
-> **ONE PICK. ALL COLUMNS. Always.** Checkboxes choose *which* are rendered, never *which one* is
-> being asked about. There is one selection, and every enabled column is computed from it on every
-> recompute.
+### The table, as revised
 
-To look at **2025**, pick **23:00 on 31 December 2025**. That is not a workaround, it is the design:
-the year column is then all of 2025, the month column all of December, the day column the 31st, the
-hour column 23:00–23:59, and the total column everything up to that moment. **One pick, every
-column.**
+| | |
+|---|---|
+| **start** | a date and a time, picked by the first picker |
+| **end** | a date and a time, picked by the second picker |
+| **column** | **one**. Every number in §1a, summed over `[start, end]` |
+| **granularity** | **per hour** — the interval is measured in hours, not in days/months/years |
 
-There is no year-only picker and no month-only picker, and adding one would be a defect rather than a
-convenience: a year-only pick has to answer *"the 31st of which month?"* for the day column. Only an
-instant fixes all five at once.
+So the questions "how many requests", "what did it cost", "what was the cache share" have one
+answer each, over one interval. Choosing 00:00 on 1 October to 23:00 on 31 October is a month of
+requests; choosing 09:00 to 17:00 on one day is a workday.
 
-**Why this rule is easy to lose, so it is written here in capitals:** every other design in this
-screen's history — a segmented axis control, a "granularity" per axis, a picker per axis — turned the
-columns into alternatives, and *each was built*. Three separate times the code answered "one column at
-a time" while the intent was "all columns from one pick". A rule that has been rebuilt wrongly three
-times needs to be the first paragraph, not a detail.
+**What this deletes:** the five nested spans (hour/day/month/year/total), the anchor, the checkbox
+row, and the `Span`/`Container` machinery that existed only to express "one instant seen five
+ways". A column labelled with its interval replaces all of it.
 
-Pick **one instant**. It belongs to **five nested spans at once**, and each is a column:
+**What survives from the sections below**, because it is about the log rather than the table: the
+pyramid (§2), `span`/`requests`/`cost reported` (§3), and who owns which number (§4). The hours are
+still what the log keeps, which is exactly what a per-hour interval reads.
 
-| column | from | to (pick = 12:45 on 25 Oct 2026) |
-|---|---|---|
-| hour  | `12:00`             | `12:45` |
-| day   | `00:00` on the 25th | `12:45` |
-| month | `1 Oct 00:00`       | `25 Oct 12:45` |
-| year  | `1 Jan 00:00`       | `25 Oct 12:45` |
-| total | the beginning of the log | `25 Oct 12:45` |
+### The rejected history, kept so it is not rebuilt
 
-Five cumulative windows, all ending at the same instant, each nested inside the next.
-**Everything is clock time** — not elapsed milliseconds, not a rolling window.
+Four shapes were proposed and built before this one, and every one of them was an attempt to ask
+several questions of one instant:
 
-**Three were built first and five were agreed**: the year and total columns only became computable
-when the pyramid (§2) existed, because they need complete-month and complete-year rows to sum. The
-first two builds drew three because there was nothing coarser to read.
+| rejected | why |
+|---|---|
+| rolling window ("the last 24 hours") | a window that moves; cannot show October by itself |
+| one axis at a time | the person chooses a granularity before seeing anything |
+| a picker per axis | switching axis changed *when* was being asked about |
+| **five columns from one pick** | one instant does not describe an interval. Reading 2025 means picking 23:00 on 31 December and trusting four nested cut-offs to describe a year — when the honest way to say "2025" is to pick its first and last hour |
+| checkboxes for which columns to draw | there is no longer more than one column |
+| three fixed columns (hour/day/month) | the first build; had the same fault at a smaller scale |
 
-**Which columns are drawn is chosen by checkboxes to the right of the date picker**, one per span,
-all five on by default. Hiding a column must not change any other column's number, and must not
-change *which* instant is being asked about: the checkbox is a drawing rule over a fixed computation,
-never a different computation. With every box ticked the table is the five-column table above; with
-one ticked it is a one-column table of the same five numbers.
+**The lesson worth keeping:** every rejected design made the *instant* carry the meaning, and each
+needed a rule to decide where a column started and stopped. Two pickers remove the question — the
+person states the interval, which is the thing they actually know.
 
-### 1a. The rows
+---
 
-The operator's list (L28419), in this order. These are the **usage axis**; the spans above are the
-**time axis**.
+## 1a. The rows — unchanged by the revision
+
+The operator's list (L28419). These are the metrics, and they are now the **rows of a single
+column**:
 
 | row | what it is |
 |---|---|
@@ -68,39 +73,15 @@ The operator's list (L28419), in this order. These are the **usage axis**; the s
 | `per M out` | cost per million completion tokens |
 | `per request` | cost per request |
 
-- **Per million, not per billion.** Agreed at L29550 after a revert: *"I later reverted to per
-  million for every token ratio."* An earlier recording of "per billion built as per million" was
-  wrong and is not a defect.
+- **Per million, not per billion**, agreed at L29550 after a revert (*"I later reverted to per
+  million for every token ratio"*). An earlier note calling "per billion built as per million" a
+  defect was wrong.
 - **Cache is a share of input, not a row beside it** — `cached_tokens` is a subset of
   `prompt_tokens`, so a third absolute would count the same tokens twice.
-- **Precision** (L28419, L28438): percentages to **three** decimals where it makes sense, cost and
-  the two rates to **five**. The current `StatsFormat.share` renders **one** decimal (`%.1f%%`) and
-  is therefore not yet to spec; cost/`perMillion`/`perRequest` are already `%.5f`.
-- **`—` is not zero** (agreed earlier): a span with no requests has no average, which is a different
-  fact from an average of zero.
-
-Consequences, each pinned by a test:
-
-- Month = `1 .. n`, where n is the picked day. A pick on the 31st is the whole month.
-- Year = `1 Jan .. the pick`; total = `the beginning of the log .. the pick`. **Total is everything
-  up to the picked moment, never all of time** — a column that ran to "now" would answer a different
-  question from the four beside it, and they are comparable only because they share one end.
-- A request after the pick is in no column: at 12:45 the afternoon had not happened.
-- At 00:00 the hour and day columns are **empty** (no elapsed time yet); the month, year and total
-  still hold their earlier spans. Deliberate; do not special-case it.
-- The columns **overlap** — an hour is part of its day, which is part of its month. That is the
-  information, not double counting, and it is why the five can be read side by side at all.
-
-Rejected and built first, recorded so they are not rebuilt:
-
-| rejected | why |
-|---|---|
-| "the last 24 hours / 30 days / 12 months" | a window *ending* at the pick; a month of columns that cannot show October alone |
-| one axis at a time (24 hours **or** 31 days **or** 12 months) | makes the person choose a granularity before seeing anything |
-| a picker per axis | switching axis changed *when* you were looking at |
-| three fixed columns | true only while hour/day/month were all the pyramid could compute; year and total need complete-month and complete-year rows (§2) |
-| closing the span (`12:00–12:59`) | counts time that has not happened |
-| a boundary exception (pick at 12:00 → whole hour) | the columns then disagree with each other |
+- **Precision**: percentages to **three** decimals where it makes sense (L28419, L28438), cost and
+  the two rates to **five**. `StatsFormat.share` renders one decimal today.
+- **`—` is not zero**: a span with no requests has no average, which is a different fact from an
+  average of zero.
 
 ---
 

@@ -67,36 +67,31 @@ fun StatsScreen(
     readRows: (((List<RequestStats.Row>) -> Unit) -> Unit)? = null,
 ) {
     /**
-     * **The one instant the whole screen is about**, and the only thing the picker sets.
+     * **The interval, as two picks.** The operator's revision: *"we need 2 pickers for starting and
+     * ending, and just 1 result column for the selected interval with per hour granularity. and no
+     * checkboxes."*
      *
-     * Every column is computed from this: pick 12:00 on 25 October 2026 and the five columns are
-     * that hour, that day, that month, that year and everything before it — all ending at the pick.
-     * "Everything" means up to the pick, never all of time: the five columns are comparable only
-     * because they share one end.
-     * They are the **five spans the one instant belongs to**, not five views of it: nothing switches,
-     * and no control exists that could.
+     * **Two pickers, because the question is an interval.** Every earlier design here tried to make
+     * one instant carry the meaning - five nested spans, checkboxes to choose among them, an axis
+     * control - and each needed a rule for where a column started and stopped. Two pickers remove
+     * the question: the person states the interval, which is the thing they actually know.
      *
-     * (The paragraph here used to describe an "hour axis" showing a day's twenty-four hours and a
-     * "month axis" showing a year's twelve months. That was the rolling-window reading, which is a
-     * different question and was rejected twice; the control it described has been deleted, and this
-     * comment outlived it. See `docs/PLAN-request-history.md` §1.)
-     *
-     * It starts at [now], which gives the default the operator asked for: the current hour, the
-     * current day, the current month and the current year, all at once.
+     * The default is the current day, midnight to now, because that is the interval a person
+     * opening a cost screen most often wants and it is bounded.
      */
-    var anchor by remember { mutableStateOf(now) }
-    var picking by remember { mutableStateOf(false) }
-    // The dialog's own state, reset from `anchor` every time it is opened — a picker that kept its
-    // last selection would open a month away from the table it describes.
-    val picker = rememberDatePickerState(initialSelectedDateMillis = anchor)
-    val pickedMs = picker.selectedDateMillis
-    // The time of day, as three numbers the client side owns: Material's DatePicker picks a DATE,
-    // and the hour axis needs the hour. Kept separately from the date so choosing a date never
-    // silently resets 12:00 to midnight.
-    val anchorHour = java.time.Instant.ofEpochMilli(anchor)
+    var from by remember { mutableStateOf(dayStart(now)) }
+    var to by remember { mutableStateOf(now) }
+    /** Which picker is open: null when neither is, `true` for the start, `false` for the end. */
+    var editingStart by remember { mutableStateOf<Boolean?>(null) }
+
+    // The dialog's own state, reset from the pick it is editing every time it opens - a picker that
+    // kept its last selection would open a day away from the interval it describes.
+    val pickingValue = if (editingStart == true) from else to
+    val picker = rememberDatePickerState(initialSelectedDateMillis = pickingValue)
+    val editingHour = java.time.Instant.ofEpochMilli(pickingValue)
         .atZone(java.time.ZoneId.systemDefault()).toLocalTime()
-    var pickedHour by remember { mutableStateOf(anchorHour.hour) }
-    var pickedMinute by remember { mutableStateOf(anchorHour.minute) }
+    var pickedHour by remember { mutableStateOf(editingHour.hour) }
+    var pickedMinute by remember { mutableStateOf(editingHour.minute) }
 
     // **Read when the screen opens, not while it is open.** The log is appended to on every
     // response, including the keepalives sent while nobody is looking, so a table that watched the
@@ -118,29 +113,14 @@ fun StatsScreen(
             }
         }
     }
-    /**
-     * **Which columns are drawn.** A drawing rule, never a computation rule: every span is computed
-     * from the one [anchor] whatever is ticked, and hiding a column must not move another column's
-     * number. All five are on to begin with, which is the table the screen is for.
-     */
-    val shown = remember { mutableStateOf(RequestStats.SPANS.toSet()) }
-
-    // Computed for every span, ticked or not - see above. Filtering here rather than inside
-    // `buckets` is what makes the checkbox unable to change a number.
-    val all = remember(rows, anchor) { RequestStats.buckets(rows, anchor) }
-    val buckets = remember(all, shown.value) {
-        val spans = RequestStats.SPANS.filter { it in shown.value }
-        // **Never an empty table.** With every box cleared there is nothing to draw, so the last
-        // column is kept rather than showing a table of no columns and no explanation.
-        (if (spans.isEmpty()) listOf(RequestStats.Span.HOUR) else spans).map { span ->
-            all[RequestStats.SPANS.indexOf(span)]
-        }
-    }
-    // **Whether the log reaches back this far**, which is not the same as "nothing happened" in
-    // it. The month column is the widest span, so it is the one that answers whether any of the
-    // three can: if the log covers the month, it covers the day and hour inside it too.
-    val box = remember(anchor) { RequestStats.container(RequestStats.Span.MONTH, anchor) }
-    val covered = remember(rows, box) { RequestStats.covers(rows, box) }
+    // **One figure, over the interval the two pickers name.** No list, no spans, no filtering: the
+    // checkbox row is gone because there is one column, and the whole "which level speaks for this
+    // unit" question is answered once per draw rather than once per column.
+    val span = remember(from, to) { RequestStats.interval(from, to) }
+    val totals = remember(rows, span) { RequestStats.totals(rows, span) }
+    // **Whether the log reaches this far**, which is not the same as "nothing happened". The two
+    // read identically in an empty table and mean different things.
+    val covered = remember(rows, span) { RequestStats.covers(rows, span) }
     val oldest = remember(rows) { RequestStats.oldest(rows) }
 
     Scaffold(
@@ -160,75 +140,77 @@ fun StatsScreen(
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             item {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                // **Two pickers, one line each.** Start above end, because that is the order the
+                // interval is read in - and because a vertical pair fits "From 1 Oct 09:00" beside
+                // "To 31 Oct 17:00" without the labels fighting for width on a phone.
+                Column(modifier = Modifier.padding(top = 4.dp)) {
+                    IntervalRow(
+                        label = "From",
+                        at = from,
+                        onOpen = {
+                            Trace.tap("stats from", "open")
+                            picker.selectedDateMillis = from
+                            val t = java.time.Instant.ofEpochMilli(from)
+                                .atZone(java.time.ZoneId.systemDefault()).toLocalTime()
+                            pickedHour = t.hour
+                            pickedMinute = t.minute
+                            editingStart = true
+                        },
+                    )
+                    IntervalRow(
+                        label = "To",
+                        at = to,
+                        onOpen = {
+                            Trace.tap("stats to", "open")
+                            picker.selectedDateMillis = to
+                            val t = java.time.Instant.ofEpochMilli(to)
+                                .atZone(java.time.ZoneId.systemDefault()).toLocalTime()
+                            pickedHour = t.hour
+                            pickedMinute = t.minute
+                            editingStart = false
+                        },
+                    )
                     Text(
-                        // **The container's name, then whether the log reaches it.** Two facts,
-                        // because they answer two different questions: "what am I looking at" and
-                        // "is an empty column here because nothing happened, or because nothing was
-                        // recorded yet". The old caption answered neither - it said how many days
-                        // the whole log held, which for a container in the past was a negative
-                        // number.
-                        // **The instant, then whether the log reaches back to it.** Three
-                        // numbers, because three is how many ways the same moment is counted -
-                        // and the sentence that makes the three columns readable: they all stop
-                        // here, so the later part of the hour, day and month is not in them.
-                        "up to " + StatsFormat.instant(anchor) + when {
+                        // **What the interval is, and whether the log reaches it.** Two facts,
+                        // because they answer different questions: "what am I looking at" and "is
+                        // an empty table because nothing happened, or because nothing was recorded
+                        // yet". The second is the one that saves a person from thinking the screen
+                        // is broken.
+                        StatsFormat.hours(span.hours) + " · " + when {
                             // **Not "no log yet" while the read is still running.** Those are two
                             // different facts and only one of them is about the log.
-                            !loaded -> " · reading"
-                            rows.isEmpty() -> " · no log yet"
-                            covered -> ""
-                            oldest == null -> " · no log yet"
-                            else -> " · the log starts " + StatsFormat.day(oldest)
+                            !loaded -> "reading"
+                            rows.isEmpty() -> "no log yet"
+                            covered -> "from the log"
+                            oldest == null -> "no log yet"
+                            else -> "the log starts " + StatsFormat.instant(oldest)
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.padding(top = 2.dp, bottom = 6.dp),
                     )
-                    // **A picker rather than only "now"**, because most cost questions are about a
-                    // time that has already gone: what a Tuesday cost, and whether last month was
-                    // more expensive than this one.
-                    //
-                    // One button, one meaning: it sets the instant, and the axis decides how to
-                    // read it. Labelling it per axis ("Which month") was wrong - it implied the
-                    // picker asked a different question depending on which axis was showing, when
-                    // the whole point is that one selection answers all three.
-                    TextButton(onClick = {
-                        Trace.tap("stats date", "open")
-                        // The dialog opens on what the table is showing, not on wherever it was
-                        // last left - it is a view of the anchor, not a place of its own.
-                        picker.selectedDateMillis = anchor
-                        pickedHour = anchorHour.hour
-                        pickedMinute = anchorHour.minute
-                        picking = true
-                    }) {
-                        Text("When")
-                    }
                 }
             }
 
-            if (picking) {
+            if (editingStart != null) {
                 item {
                     // **Material's own calendar, plus the time of day.** The operator asked for a
-                    // picker over "hour, day, month, year" and for a standard Android picker; the
-                    // platform's picks a DATE, so the hour and minute are added underneath rather
-                    // than reimplementing a calendar to get them. That combination is the smallest
-                    // honest way to select an instant.
+                    // standard Android picker; the platform's picks a DATE, so the hour and minute
+                    // are added underneath rather than reimplementing a calendar to get them.
                     DatePickerDialog(
-                        onDismissRequest = { picking = false },
+                        onDismissRequest = { editingStart = null },
                         confirmButton = {
                             TextButton(
                                 onClick = {
-                                    pickedMs?.let { utcMidnight ->
+                                    picker.selectedDateMillis?.let { utcMidnight ->
                                         // **The picker returns UTC midnight of the chosen day.** Used
                                         // as-is, a phone west of UTC would land on the previous local
                                         // day, so the UTC date it names is read first and then
                                         // rebuilt in the device's zone at the chosen time of day.
                                         //
-                                        // `atZone(...).toInstant()` on a local date-time that does not
-                                        // exist - the hour a zone springs forward - resolves forward
-                                        // to the next real instant instead of throwing, which is why
-                                        // this is safe for any hour the person can choose.
+                                        // `atZone(...).toInstant()` on a local date-time that does
+                                        // not exist - the hour a zone springs forward - resolves
+                                        // forward to the next real instant instead of throwing.
                                         val day = java.time.Instant.ofEpochMilli(utcMidnight)
                                             .atZone(java.time.ZoneOffset.UTC)
                                             .toLocalDate()
@@ -236,22 +218,24 @@ fun StatsScreen(
                                             .atZone(java.time.ZoneId.systemDefault())
                                             .toInstant()
                                             .toEpochMilli()
-                                        Trace.tap("stats date", StatsFormat.day(chosen))
-                                        anchor = chosen
+                                        Trace.tap("stats interval", StatsFormat.instant(chosen))
+                                        // **`interval()` puts them in order**, so dragging the
+                                        // start past the end does not make the table vanish - it
+                                        // swaps them, which is what the person meant.
+                                        if (editingStart == true) from = chosen else to = chosen
                                     }
-                                    picking = false
+                                    editingStart = null
                                 },
                             ) { Text("Show") }
                         },
                         dismissButton = {
-                            TextButton(onClick = { picking = false }) { Text("Cancel") }
+                            TextButton(onClick = { editingStart = null }) { Text("Cancel") }
                         },
                     ) {
                         Column {
                             DatePicker(state = picker)
                             // The time of day. Two compact steppers rather than a clock face: a
-                            // clock is a large control for a screen whose subject is a table, and
-                            // the hour is the only part the hour axis reads.
+                            // clock is a large control for a screen whose subject is a table.
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -293,78 +277,70 @@ fun StatsScreen(
                     )
                 }
             } else {
-                // **One table, one column per ticked span** — five by default. The rows are the
-                // metrics the operator named, in the order they were named: the counts, the tokens
-                // with their shares, then the cost and the two derived rates.
+                // **One column.** The operator's revision: "just 1 result column for the selected
+                // interval with per hour granularity. and no checkboxes." The rows are the metrics
+                // named in L28419, in the order they were named - the counts, the tokens with their
+                // shares, then the cost and the two derived rates.
                 item {
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        // The headings: one per span, narrowest first, so the columns read
-                        // 12:00-12:45 | 25 Oct | Oct 2026 | 2026 | total — one instant seen five
-                        // ways. `sub` is the second line saying where each window starts.
                         MetricRow(
                             name = "",
-                            cells = buckets.map { it.label },
-                            subs = buckets.map { it.sub },
+                            // The single column's heading: what the interval is, in hours, so the
+                            // figure has a scale rather than being a number with no extent.
+                            cells = listOf(StatsFormat.hours(span.hours)),
                             header = true,
                         )
-                        MetricRow("requests", buckets.map { StatsFormat.count(it.total.requests) })
-                        MetricRow(
-                            "input",
-                            buckets.map { StatsFormat.tokens(it.total.promptTokens) },
-                        )
+                        MetricRow("requests", listOf(StatsFormat.count(totals.total.requests)))
+                        MetricRow("input", listOf(StatsFormat.tokens(totals.total.promptTokens)))
                         MetricRow(
                             "  · cached",
-                            buckets.map {
+                            listOf(
                                 StatsFormat.absoluteAndShare(
-                                    StatsFormat.tokens(it.total.cachedTokens),
-                                    it.total.cachedShare,
-                                )
-                            },
+                                    StatsFormat.tokens(totals.total.cachedTokens),
+                                    totals.total.cachedShare,
+                                ),
+                            ),
                             muted = true,
                         )
-                        MetricRow(
-                            "output",
-                            buckets.map { StatsFormat.tokens(it.total.completionTokens) },
-                        )
+                        MetricRow("output", listOf(StatsFormat.tokens(totals.total.completionTokens)))
                         MetricRow(
                             "  · thinking",
-                            buckets.map {
+                            listOf(
                                 StatsFormat.absoluteAndShare(
-                                    StatsFormat.tokens(it.total.reasoningTokens),
-                                    it.total.thinkingShare,
-                                )
-                            },
+                                    StatsFormat.tokens(totals.total.reasoningTokens),
+                                    totals.total.thinkingShare,
+                                ),
+                            ),
                             muted = true,
                         )
                         MetricRow(
                             "cost $",
-                            buckets.map {
-                                StatsFormat.cost(it.total.cost.takeIf { _ -> it.total.costReported > 0 })
-                            },
+                            listOf(
+                                StatsFormat.cost(
+                                    totals.total.cost.takeIf { _ -> totals.total.costReported > 0 },
+                                ),
+                            ),
                         )
-                        MetricRow("per request", buckets.map { StatsFormat.perRequest(it.total.perRequest) })
-                        MetricRow("per M in", buckets.map { StatsFormat.perMillion(it.total.perMillionInput) })
-                        MetricRow("per M out", buckets.map { StatsFormat.perMillion(it.total.perMillionOutput) })
+                        MetricRow("per request", listOf(StatsFormat.perRequest(totals.total.perRequest)))
+                        MetricRow("per M in", listOf(StatsFormat.perMillion(totals.total.perMillionInput)))
+                        MetricRow("per M out", listOf(StatsFormat.perMillion(totals.total.perMillionOutput)))
                         HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
                     }
                 }
                 // **Answers that stopped, only when there were any.** They are billed but report no
                 // totals, so they cannot be folded into the rows above without claiming a cost of
-                // zero for them; they get their own block, over the same three columns.
-                if (buckets.any { it.stalls.requests > 0 }) {
+                // zero for them; they get their own short block.
+                if (totals.stalls.requests > 0) {
                     item {
                         Column(modifier = Modifier.fillMaxWidth()) {
                             Text(
                                 "Answers that stopped  ·  " +
-                                    StatsFormat.count(buckets.fold(0) { n, b -> n + b.stalls.requests }) +
-                                    " requests",
+                                    StatsFormat.count(totals.stalls.requests) + " requests",
                                 style = MaterialTheme.typography.titleSmall,
                                 modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
                             )
-                            MetricRow("", buckets.map { it.label }, header = true)
-                            MetricRow("requests", buckets.map { StatsFormat.count(it.stalls.requests) })
-                            MetricRow("written", buckets.map { StatsFormat.tokens(it.stalls.saidChars) })
-                            MetricRow("thought", buckets.map { StatsFormat.tokens(it.stalls.thinkingChars) })
+                            MetricRow("written", listOf(StatsFormat.tokens(totals.stalls.saidChars)))
+                            MetricRow("thought", listOf(StatsFormat.tokens(totals.stalls.thinkingChars)))
                             HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
                         }
                     }
@@ -373,17 +349,52 @@ fun StatsScreen(
                     Text(
                         // The one thing a reader has to know to read the shares correctly, said
                         // once rather than in every row.
-                        "The columns overlap: the hour is part of the day, and the day part of the " +
-                            "month. Cached is part of input, not a column beside it. A dash is a " +
-                            "number that does not exist — a span with no requests has no average, " +
-                            "and that is not the same as zero. A stopped answer was billed but " +
-                            "never reported its totals, so its cost cannot be shown.",
+                        "Cached is part of input, not a column beside it. A dash is a number that " +
+                            "does not exist — an interval with no requests has no average, and that " +
+                            "is not the same as zero. A stopped answer was billed but never " +
+                            "reported its totals, so its cost cannot be shown. An interval that " +
+                            "reaches into a compacted hour counts that hour whole.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 12.dp),
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * Midnight at the start of the day that holds [at], in the device's zone.
+ *
+ * **`atStartOfDay(zone)` rather than `atTime(0, 0)`**: on the day a zone springs forward, midnight
+ * does not exist, and asking for it by name lands somewhere else or throws.
+ */
+private fun dayStart(at: Long): Long = java.time.Instant.ofEpochMilli(at)
+    .atZone(java.time.ZoneId.systemDefault())
+    .toLocalDate()
+    .atStartOfDay(java.time.ZoneId.systemDefault())
+    .toInstant()
+    .toEpochMilli()
+
+/**
+ * One end of the interval: `From  28 Oct 2026, 00:00`.
+ *
+ * **A button, not a field.** The date is picked from the platform's calendar and the time from two
+ * steppers, so there is nothing to type and nothing to validate - a person who mistypes a date does
+ * not exist here.
+ */
+@Composable
+private fun IntervalRow(label: String, at: Long, onOpen: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(48.dp),
+        )
+        TextButton(onClick = onOpen) {
+            Text(StatsFormat.instant(at))
         }
     }
 }
@@ -423,36 +434,27 @@ private fun TimeStepper(
     }
 }
 
-/** How wide the metric names are, leaving the rest for the three time columns. */
-private val GUTTER_DP = 100
-
 /**
- * One metric, as a name and one cell per bucket.
+ * One metric, as a name and its number.
  *
- * **The name gutter is a fixed width and the three cells share the rest.** There is no sideways
- * scroll any more: the columns are one hour, one day and one month, so there are exactly three and
- * they fit a phone. The transposed shape survives from when the columns were a rolling window of
- * thirty, which had to scroll.
- *
- * The gutter is 100dp because the longest label is `per request` at eleven characters in bodySmall;
- * the three cells then share 411 - 24 - 100 = 287dp, about 95dp each, which holds `24.0k (91.7%)`.
+ * **One cell, not a row of them.** There is a single column now, so the transposed table and its
+ * shared horizontal scroll are gone with the fifth column: this is a label on the left and a figure
+ * on the right, which is what a table of one column always was.
  */
 @Composable
 private fun MetricRow(
     name: String,
     cells: List<String>,
-    /** Drawn under each cell, one line each. Only the heading row uses it. */
-    subs: List<String> = emptyList(),
     header: Boolean = false,
     muted: Boolean = false,
 ) {
-    Row(modifier = Modifier.fillMaxWidth()) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
         Text(
             name,
             style = if (header) {
                 MaterialTheme.typography.labelSmall
             } else {
-                MaterialTheme.typography.bodySmall
+                MaterialTheme.typography.bodyMedium
             },
             color = if (muted) {
                 MaterialTheme.colorScheme.onSurfaceVariant
@@ -460,41 +462,58 @@ private fun MetricRow(
                 MaterialTheme.colorScheme.onSurface
             },
             maxLines = 1,
-            modifier = Modifier.width(GUTTER_DP.dp),
+            modifier = Modifier.weight(1f),
         )
-        Row(modifier = Modifier.weight(1f)) {
-            for ((i, cell) in cells.withIndex()) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        cell,
-                        style = if (header) {
-                            MaterialTheme.typography.labelSmall
-                        } else {
-                            MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
-                        },
-                        color = if (header) {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        },
-                        textAlign = TextAlign.End,
-                        maxLines = 1,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    // **The second line of a heading**, saying where its window starts. Only the
-                    // heading has one; an empty string keeps the row heights equal.
-                    if (header && i < subs.size && subs[i].isNotEmpty()) {
-                        Text(
-                            subs[i],
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.End,
-                            maxLines = 1,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                }
-            }
+        Text(
+            cells.firstOrNull().orEmpty(),
+            style = if (header) {
+                MaterialTheme.typography.labelSmall
+            } else {
+                MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace)
+            },
+            color = if (header) {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            } else {
+                MaterialTheme.colorScheme.onSurface
+            },
+            textAlign = TextAlign.End,
+            maxLines = 1,
+        )
+    }
+}
+
+/**
+ * One number a person sets, with a step either side: `− 12 +`.
+ *
+ * **Wrapping, not clamping.** At 59 the next minute is 0 and at 23 the next hour is 0, because that
+ * is how a clock works and because a control that refuses the last press teaches nothing about which
+ * press would have worked. It is also what lets 23:59 reach 00:00 without a special case.
+ *
+ * **Zero-padded and monospaced**, so the control does not change width as the number does; a button
+ * that shifts sideways under the finger is one a person misses.
+ */
+@Composable
+private fun TimeStepper(
+    label: String,
+    value: Int,
+    range: IntRange,
+    onChange: (Int) -> Unit,
+) {
+    fun step(by: Int): Int = ((value + by - range.first).mod(range.last + 1 - range.first)) + range.first
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        TextButton(onClick = { Trace.tap("stats time", "$label-"); onChange(step(-1)) }) {
+            Text("−")
+        }
+        Text(
+            // **`Locale.UK`, not the device's.** A zero-padded two-digit number is diagnostic, and a
+            // locale that substitutes other digits would make the two steppers disagree with each
+            // other and with the column heading.
+            String.format(java.util.Locale.UK, "%02d", value),
+            style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace),
+        )
+        TextButton(onClick = { Trace.tap("stats time", "$label+"); onChange(step(1)) }) {
+            Text("+")
         }
     }
 }
+
