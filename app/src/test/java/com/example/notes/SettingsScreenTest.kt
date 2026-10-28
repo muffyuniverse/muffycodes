@@ -304,6 +304,24 @@ class SettingsScreenTest {
     }
 
     @Test
+    fun `a dev build names itself in the trace, so a report cannot be mistaken for a release`() {
+        // **The build column is how a report is placed in time.** A dev build carries the live
+        // trace, can make a test account, and is where a bug is actually found - so a log reading
+        // `149` for both the shipped app and the dev copy would make "which build produced this"
+        // unanswerable at the moment somebody is trying to answer it.
+        //
+        // The suite runs against a debug build, which is the case asserted here. The release half is
+        // the same expression with `DEBUG` false, so what is checked is that the suffix is present
+        // and that it does not disturb the column's shape.
+        val name = scene.viewModel.buildName
+
+        assertTrue("a dev build is marked: $name", name.endsWith("-dev"))
+        // **One token, because it is a column.** A space would make the build read as part of the
+        // state, which is the next column along.
+        assertEquals("and it is still one word", 1, name.split(" ").size)
+    }
+
+    @Test
     fun `every agent can be switched off from settings`() {
         // The brief assumed this existed. The button is there when there is nothing on, and it is
         // greyed out — a switch that does nothing is worse than no switch.

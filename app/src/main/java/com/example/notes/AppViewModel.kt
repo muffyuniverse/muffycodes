@@ -823,14 +823,22 @@ class AppViewModel @JvmOverloads constructor(
      * what makes "it crashes on mine" reproducible by somebody who is not holding it.
      * Nothing here identifies the person or the account.
      */
-    /** The version name alone — `149`, `1.4` — for the trace's build column. */
+    /**
+     * The version name alone — `149`, `1.4` — for the trace's build column.
+     *
+     * **A dev build says so.** It carries the live trace, it can make a test account, and it is the
+     * build a bug is found on; a log whose build column read `149` for both the shipped app and the
+     * dev copy would make "which build produced this report" unanswerable at exactly the moment
+     * somebody is trying to answer it. `149-dev` is one token, so the column's shape is unchanged.
+     */
     val buildName: String
         get() = try {
-            getApplication<android.app.Application>().packageManager
+            val name = getApplication<android.app.Application>().packageManager
                 .getPackageInfo(getApplication<android.app.Application>().packageName, 0)
                 .versionName.orEmpty()
+            if (BuildConfig.DEBUG) "$name-dev" else name
         } catch (t: Throwable) {
-            "-"
+            if (BuildConfig.DEBUG) "-dev" else "-"
         }
 
     val versionLine: String
