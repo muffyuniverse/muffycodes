@@ -112,6 +112,13 @@ object RequestLog {
         // An absent number is written as nothing, not as 0: see Stats. A dash would be read as a
         // measurement of minus one by half the tools that will ever touch this file.
         fun num(v: Any?): String = v?.toString().orEmpty()
+        // **Cost is written plainly, not in the shortest form Java can find.** `Double.toString`
+        // renders a small number as "2.41E-5", which is correct, unreadable in a column, and
+        // unparseable by anything that expects a decimal - the statistics table reads this file
+        // back, so the two have to agree on the shape as well as the value. Ten decimals is enough
+        // for a single response on any model this app can be pointed at.
+        fun money(v: Double?): String =
+            if (v == null) "" else java.util.Locale.UK.let { String.format(it, "%.10f", v) }
         return listOf(
             time,
             stats.kind.label,
@@ -122,7 +129,7 @@ object RequestLog {
             num(stats.cachedTokens),
             num(stats.completionTokens),
             num(stats.reasoningTokens),
-            num(stats.cost),
+            money(stats.cost),
             stats.finish.orEmpty(),
         ).joinToString("\t")
     }

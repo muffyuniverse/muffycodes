@@ -69,7 +69,9 @@ class RequestLogTest {
         assertEquals("the part the provider did not have to read", "3584", cells[6])
         assertEquals("1", cells[7])
         assertEquals("the column the keepalive is watched with", "1", cells[8])
-        assertEquals("0.0000241", cells[9])
+        // **Plain decimal, not Java's shortest form.** `Double.toString` would write 2.41E-5, which
+        // the statistics table then has to parse back - so the shape is part of the contract.
+        assertEquals("0.0000241000", cells[9])
         assertEquals("length", cells[10])
     }
 
