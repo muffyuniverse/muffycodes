@@ -7,6 +7,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
 import org.robolectric.RuntimeEnvironment
+import androidx.test.espresso.IdlingPolicies
+import java.util.concurrent.TimeUnit
+import org.junit.BeforeClass
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -45,6 +48,29 @@ import java.io.File
 @Config(sdk = [34], qualifiers = "w411dp-h891dp")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ScenariosTest {
+
+    companion object {
+        /**
+         * **A wait that can never succeed is bounded tightly, because it is a mistake, not a wait.**
+         *
+         * Espresso's default master policy waits sixty seconds for idle before raising
+         * `AppNotIdleException`. That default assumes the app is eventually idle; a Robolectric
+         * composition with an animating dialog is never idle, so the exception is the *expected*
+         * outcome there and the sixty seconds are pure cost. One bad `after()` failed five window
+         * scenarios twice and took six minutes to say so, twice - twelve minutes of CI spent
+         * proving that a dialog does not stand still.
+         *
+         * Fifteen seconds, not five: a git read on a loaded runner is not the sub-second thing it
+         * is on a laptop, and a bound that a working scenario can exceed would turn a slow picture
+         * red for no reason. Fifteen still cuts the cost of a mistake to a quarter.
+         */
+        @JvmStatic
+        @BeforeClass
+        fun boundTheIdleWait() {
+            IdlingPolicies.setMasterPolicyTimeout(15, TimeUnit.SECONDS)
+            IdlingPolicies.setIdlingResourceTimeout(15, TimeUnit.SECONDS)
+        }
+    }
 
     @get:Rule
     val compose = createComposeRule()
