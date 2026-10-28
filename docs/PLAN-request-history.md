@@ -16,7 +16,8 @@ defect gets built twice.
 
 To look at **2025**, pick **23:00 on 31 December 2025**. That is not a workaround, it is the design:
 the year column is then all of 2025, the month column all of December, the day column the 31st, the
-hour column 23:00–23:59, and the total column everything ever. **One pick, every column.**
+hour column 23:00–23:59, and the total column everything up to that moment. **One pick, every
+column.**
 
 There is no year-only picker and no month-only picker, and adding one would be a defect rather than a
 convenience: a year-only pick has to answer *"the 31st of which month?"* for the day column. Only an
@@ -36,7 +37,7 @@ Pick **one instant**. It belongs to **five nested spans at once**, and each is a
 | day   | `00:00` on the 25th | `12:45` |
 | month | `1 Oct 00:00`       | `25 Oct 12:45` |
 | year  | `1 Jan 00:00`       | `25 Oct 12:45` |
-| total | the oldest row      | `25 Oct 12:45` |
+| total | the beginning of the log | `25 Oct 12:45` |
 
 Five cumulative windows, all ending at the same instant, each nested inside the next.
 **Everything is clock time** — not elapsed milliseconds, not a rolling window.
@@ -81,8 +82,9 @@ The operator's list (L28419), in this order. These are the **usage axis**; the s
 Consequences, each pinned by a test:
 
 - Month = `1 .. n`, where n is the picked day. A pick on the 31st is the whole month.
-- Year = `1 Jan .. the pick`; total = `the oldest row .. the pick`. Both read their complete coarser
-  rows and descend only for the open chain.
+- Year = `1 Jan .. the pick`; total = `the beginning of the log .. the pick`. **Total is everything
+  up to the picked moment, never all of time** — a column that ran to "now" would answer a different
+  question from the four beside it, and they are comparable only because they share one end.
 - A request after the pick is in no column: at 12:45 the afternoon had not happened.
 - At 00:00 the hour and day columns are **empty** (no elapsed time yet); the month, year and total
   still hold their earlier spans. Deliberate; do not special-case it.

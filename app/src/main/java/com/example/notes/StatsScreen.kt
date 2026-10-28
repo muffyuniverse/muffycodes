@@ -67,7 +67,9 @@ fun StatsScreen(
      * **The one instant the whole screen is about**, and the only thing the picker sets.
      *
      * Every column is computed from this: pick 12:00 on 25 October 2026 and the five columns are
-     * that hour, that day, that month, that year and the whole history — all ending at the pick.
+     * that hour, that day, that month, that year and everything before it — all ending at the pick.
+     * "Everything" means up to the pick, never all of time: the five columns are comparable only
+     * because they share one end.
      * They are the **five spans the one instant belongs to**, not five views of it: nothing switches,
      * and no control exists that could.
      *

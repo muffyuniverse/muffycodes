@@ -58,11 +58,15 @@ object RequestStats {
         YEAR("year"),
 
         /**
-         * The whole history: every row in the log up to the pick.
+         * **Everything up to the picked moment** — not all of time.
          *
-         * Its start is not a boundary of the pick at all but the first row, so its container begins
-         * at the epoch — no row can precede it, which makes the bounds honest without the container
-         * needing to know what the log holds.
+         * The same rule as the other four spans, taken to its widest: it ends at the pick. A total
+         * that ran to "now" would answer a different question from the column beside it, and the
+         * five are only comparable because they share one end.
+         *
+         * Its start is the beginning of the log, and the container does not consult the log to find
+         * it: it begins at the epoch, before any row can exist. That makes the bounds a property of
+         * the pick alone, so the same instant describes the same span on every read.
          */
         TOTAL("total"),
     }
@@ -187,7 +191,7 @@ object RequestStats {
                 // same instant would then describe a different span as the log grows, and the
                 // column would change its meaning between two reads. Starting before any possible
                 // row makes the bounds a property of the pick alone, and `buckets` counts exactly
-                // the rows that exist.
+                // the rows that exist - up to `cut()`, like every other column.
                 fromMs = 0L,
                 toMs = cut(),
                 label = "total",

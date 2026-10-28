@@ -150,7 +150,8 @@ class RequestStatsTest {
     fun `picking the last hour of 2025 renders all of 2025 in the year column`() {
         // **The operator's own example**, and the reason there is no year picker: to look at 2025,
         // pick 23:00 on 31 December 2025. One pick, every column - 23:00-23:59 of that hour, the
-        // whole of the 31st, the whole of December, the whole of 2025, and everything ever.
+        // whole of the 31st, the whole of December, the whole of 2025, and everything up to 23:00
+        // on that day - the total ends at the pick too, it is not all of time.
         //
         // A year-only picker would have to answer "the 31st of which month?" for the day column.
         // Picking an *instant* answers it for all five at once, which is why the picker stays one
@@ -237,6 +238,32 @@ class RequestStatsTest {
         assertEquals("only the 12:30 request is in the 12:00-12:45 hour", 1, buckets[0].total.requests)
         assertEquals("the day has 09:00 and 12:30", 2, buckets[1].total.requests)
         assertEquals("the month has the same two", 2, buckets[2].total.requests)
+    }
+
+    @Test
+    fun `the total column is everything up to the pick, not everything in the log`() {
+        // **The one span wide enough to look like it has no end.** It has one: the same pick as the
+        // other four. A total that ran to "now" would answer a different question from the column
+        // beside it, and the five are comparable only because they share an end.
+        //
+        // Pinned with a row after the pick because that is the only way a wrong implementation
+        // shows: a total filtered by "before now" would include it and still look plausible.
+        val rows = listOf(
+            RequestStats.parse(row(day = "2025-12-30", at = "10:00:00.000"))!!,
+            RequestStats.parse(row(day = "2025-12-31", at = "22:00:00.000"))!!,
+            RequestStats.parse(row(day = "2025-12-31", at = "23:30:00.000"))!!, // after the pick
+            RequestStats.parse(row(day = "2026-06-01", at = "10:00:00.000"))!!, // long after
+        )
+        val at = LocalDate.parse("2025-12-31").atTime(23, 0)
+            .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val buckets = RequestStats.buckets(rows, at)
+
+        assertEquals("the two rows before the pick", 2, buckets[4].total.requests)
+        assertEquals("and the year column agrees", 2, buckets[3].total.requests)
+        // **And it is not merely "fewer than everything"**: every column counts the same two rows
+        // except the hour, which counts none of them.
+        assertEquals("the hour at 23:00 has nothing yet", 0, buckets[0].total.requests)
+        assertEquals("the month has the 30th and 22:00 on the 31st", 2, buckets[2].total.requests)
     }
 
     @Test
