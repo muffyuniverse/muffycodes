@@ -214,6 +214,13 @@ fun scenario(
     screen: @Composable () -> Unit,
     /** The screen the second half is taken on, when it is not the same one. */
     afterScreen: (@Composable () -> Unit)? = null,
+    /**
+     * True once the second screen has what it needs to draw itself.
+     *
+     * Only for a second screen that reads the repository: its answer arrives from the worker, and a
+     * composition idle wait returns before that post lands. See [ScenarioShots.ready].
+     */
+    ready: () -> Boolean = { true },
     body: ScenarioShots.() -> Unit,
 ): String {
     // One `setContent` for the whole scenario, because a Compose test rule allows
@@ -227,6 +234,7 @@ fun scenario(
     val shots = ScenarioShots(
         compose, folder, title, about,
         switchToAfter = { showingAfter.value = true },
+        ready = ready,
     )
     shots.body()
     return shots.write()
