@@ -343,6 +343,41 @@ fun StatsScreen(
     }
 }
 
+/**
+ * One number a person sets, with a step either side: `− 12 +`.
+ *
+ * **Wrapping, not clamping.** At 59 the next minute is 0 and at 23 the next hour is 0, because that
+ * is how a clock works and because a control that refuses the last press teaches nothing about which
+ * press would have worked. It is also what lets 23:59 reach 00:00 without a special case.
+ *
+ * **Zero-padded and monospaced**, so the control does not change width as the number does; a button
+ * that shifts sideways under the finger is one a person misses.
+ */
+@Composable
+private fun TimeStepper(
+    label: String,
+    value: Int,
+    range: IntRange,
+    onChange: (Int) -> Unit,
+) {
+    fun step(by: Int): Int = ((value + by - range.first).mod(range.last + 1 - range.first)) + range.first
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        TextButton(onClick = { Trace.tap("stats time", "$label-"); onChange(step(-1)) }) {
+            Text("−")
+        }
+        Text(
+            // **`Locale.UK`, not the device's.** A zero-padded two-digit number is diagnostic, and a
+            // locale that substitutes other digits would make the two steppers disagree with each
+            // other and with the column heading.
+            String.format(java.util.Locale.UK, "%02d", value),
+            style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace),
+        )
+        TextButton(onClick = { Trace.tap("stats time", "$label+"); onChange(step(1)) }) {
+            Text("+")
+        }
+    }
+}
+
 /** How wide the metric names are, leaving the rest for the three time columns. */
 private val GUTTER_DP = 100
 
