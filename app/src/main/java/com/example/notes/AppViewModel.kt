@@ -1644,6 +1644,10 @@ class AppViewModel @JvmOverloads constructor(
      * and a screen that re-walked it on each recomposition would be doing that work for a frame.
      */
     fun openDiff(path: String) {
+        // **Traced here rather than in the screen**, because this is where the mode becomes a
+        // question about the repository: entering Diff and finding nothing to compare look the same
+        // on the screen, and only the log can say which happened.
+        Trace.tap("diff", path)
         val ws = workspace ?: return
         val project = currentProject ?: return
         val g = git ?: return
@@ -1687,6 +1691,8 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     fun openChangedFile(path: String) {
+        // The list's own act: which file a person entered from "see n changes".
+        Trace.tap("open changed file", path)
         val ws = workspace ?: return
         val project = currentProject ?: return
         openEditor(File(ws.projectDir(project), path))

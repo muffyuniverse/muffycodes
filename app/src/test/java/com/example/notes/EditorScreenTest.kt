@@ -276,6 +276,72 @@ class EditorScreenTest {
     }
 
     @Test
+    fun `a mode change is traced, so the log can say which mode a person was in`() {
+        // **Falsification: if the mode were not recorded, this test would pass with no line.** The
+        // claim is not that a tap happened — a tap is the app's own bookkeeping — but that the trace
+        // names *which* mode, because "I opened the diff and it showed nothing" and "I never got
+        // into Diff" are the same picture and different histories.
+        val file = scene.file("milk.txt", "two litres")
+        editorFor(file)
+
+        val before = Trace.report().taps
+        compose.onNodeWithText("Edit").performClick()
+        compose.waitForIdle()
+
+        val report = Trace.report()
+        assertTrue("the press was recorded", report.taps > before)
+        assertTrue(
+            "and it says which mode: newest ${report.lines.take(3)}",
+            report.lines.take(3).any { it.contains("EDIT") && it.contains("editor edit") },
+        )
+    }
+
+    @Test
+    fun `a mode change away from Edit keeps what was typed, and does not save it`() {
+        // **Falsification of the opposite claim**: that switching mode is a commit. It is not — the
+        // mode says what the screen is doing, not what has been decided — so a person who types and
+        // then looks at the diff has not saved, and going back finds their words.
+        val file = scene.file("milk.txt", "two litres")
+        editorWriting(file)
+        compose.onNodeWithText("two litres").performTextReplacement("three litres")
+
+        compose.onNodeWithText("View").performClick()
+        compose.waitForIdle()
+
+        // The file on disk is untouched...
+        assertEquals("nothing was written", "two litres", file.readText())
+        // ...and the words are still in the editor, ready to save.
+        compose.onNodeWithText("Edit").performClick()
+        compose.onNodeWithText("three litres").assertIsDisplayed()
+        compose.onNodeWithText("Save").performClick()
+        compose.waitUntil(10_000) { file.readText() == "three litres" }
+        assertEquals("and saving them works", "three litres", file.readText())
+    }
+
+    @Test
+    fun `a locked file cannot reach Edit, and Diff still opens`() {
+        // **Falsification of the obvious guard**: that a read-only file blocks the whole row. The
+        // lock is about writing, and reading a file's history is not writing it, so Diff has to stay
+        // open - a rule that greyed the row out would take away something the lock never forbade.
+        val file = scene.file("milk.txt", "two litres")
+        scene.viewModel.toggleLocked(file)
+        editorFor(file)
+
+        compose.onNodeWithText("Edit").assertIsNotEnabled()
+        compose.onNodeWithText("Diff").assertIsEnabled()
+        compose.onNodeWithText("Diff").performClick()
+        compose.waitForIdle()
+        // **Diff was actually reached**, which is a fact about the screen rather than about the
+        // chip: a mode that was entered shows the mode's own content, and this file has one commit,
+        // so the honest answer is that there is nothing to compare it against.
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("nothing to compare", substring = true)
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText("nothing to compare", substring = true).assertIsDisplayed()
+    }
+
+    @Test
     fun `markdown is shown as the thing it describes in view mode`() {
         // A `.md` file read as bytes still has its `#` and its `**`, which looks
         // like a draft rather than a finished page. The reader is only for view

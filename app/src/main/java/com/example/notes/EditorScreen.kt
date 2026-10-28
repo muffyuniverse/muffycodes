@@ -24,7 +24,10 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.SingleChoiceSegmentedButtonRowScope
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -124,6 +127,28 @@ fun EditorScreen(
     // Kept as a name because the rest of this function asks "is the text being written" in a dozen
     // places, and a boolean read off the mode is clearer at each of them than the comparison is.
     val writing = mode == Mode.EDIT
+
+    /**
+     * **One place a mode is entered, so one place records it.**
+     *
+     * A mode is an act, not a redraw: "I opened the diff and it showed nothing" and "I never got
+     * into Diff" look the same on a screen with no log. The name is the mode's own lowercase word,
+     * so the trace reads `EDITOR VIEW milk.txt` rather than a sentence about a button.
+     */
+    val choose: (Mode) -> Unit = { next ->
+        // **Literal names, not a name built from the enum.** The vocabulary check refuses a
+        // computed tap name, and it is right to: a name it cannot read is a name nobody can grep
+        // for, and the list of what a person can press is the point of having a vocabulary.
+        Trace.tap(
+            when (next) {
+                Mode.VIEW -> "editor view"
+                Mode.EDIT -> "editor edit"
+                Mode.DIFF -> "editor diff"
+            },
+            file.name,
+        )
+        mode = next
+    }
     var focused by remember { mutableStateOf(false) }
     val focus = LocalFocusManager.current
 
@@ -254,25 +279,34 @@ fun EditorScreen(
                 // "Edit" or "View" was a switch: it told a person what pressing it would do, not
                 // where they were, and there was nowhere to put a third thing. Report 29 asked for
                 // separate buttons and got them.
+                //
+                // **One segmented control rather than three chips**, which is the same three named
+                // modes in a third less width. Three separate chips took so much of this row that
+                // Save - the one act the row exists for - was pushed off the right edge on a phone:
+                // the row scrolls, so nothing was unreachable, but a primary button you have to
+                // scroll sideways to find is a button that looks missing. A segmented control also
+                // says "exactly one of these" in its shape, which three independent chips cannot.
                 if (kind == EntryKind.TEXT) {
-                    ModeChip("View", mode == Mode.VIEW) {
-                        // **Leaving Edit does not throw anything away.** What was typed is still in
-                        // the field and Save is still there; the mode says what the screen is doing,
-                        // not what has been decided.
-                        focus.clearFocus()
-                        commitName()
-                        mode = Mode.VIEW
-                    }
-                    ModeChip("Edit", mode == Mode.EDIT, enabled = !readOnly) {
-                        mode = Mode.EDIT
-                    }
-                    // **Diff is offered on any file with a history**, which is every file in a
-                    // project: the picker's default is HEAD against the last synced commit, and a
-                    // file with nothing between them says so rather than hiding the mode.
-                    ModeChip("Diff", mode == Mode.DIFF) {
-                        focus.clearFocus()
-                        commitName()
-                        mode = Mode.DIFF
+                    SingleChoiceSegmentedButtonRow {
+                        ModeSegment("View", Mode.VIEW, selected = mode) {
+                            // **Leaving Edit does not throw anything away.** What was typed is still
+                            // in the field and Save is still there; the mode says what the screen is
+                            // doing, not what has been decided.
+                            focus.clearFocus()
+                            commitName()
+                            choose(it)
+                        }
+                        ModeSegment("Edit", Mode.EDIT, selected = mode, enabled = !readOnly) {
+                            choose(it)
+                        }
+                        // **Diff is offered on any file with a history**, which is every file in a
+                        // project: the picker's default is HEAD against the last synced commit, and
+                        // a file with nothing between them says so rather than hiding the mode.
+                        ModeSegment("Diff", Mode.DIFF, selected = mode) {
+                            focus.clearFocus()
+                            commitName()
+                            choose(it)
+                        }
                     }
                 }
 
@@ -545,15 +579,27 @@ private fun CannotEdit(file: java.io.File, padding: androidx.compose.foundation.
  */
 private enum class Mode { VIEW, EDIT, DIFF }
 
-/** One of the three, selected when it is the mode in force. */
+/**
+ * One of the three, selected when it is the mode in force.
+ *
+ * **`index` is what the segmented control needs and what the caller should not have to count**, so
+ * it is derived from the mode itself: the enum's order is the row's order, which is the order a
+ * person reads them in — View, then Edit, then Diff, from reading towards changing.
+ */
 @Composable
-private fun ModeChip(label: String, selected: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
-    FilterChip(
-        selected = selected,
+private fun SingleChoiceSegmentedButtonRowScope.ModeSegment(
+    label: String,
+    mode: Mode,
+    selected: Mode,
+    enabled: Boolean = true,
+    onClick: (Mode) -> Unit,
+) {
+    SegmentedButton(
+        selected = selected == mode,
         enabled = enabled,
-        onClick = onClick,
-        label = { Text(label) },
-    )
+        onClick = { onClick(mode) },
+        shape = SegmentedButtonDefaults.itemShape(index = mode.ordinal, count = Mode.entries.size),
+    ) { Text(label) }
 }
 
 /**

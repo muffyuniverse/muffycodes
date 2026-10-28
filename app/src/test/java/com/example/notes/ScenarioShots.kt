@@ -3,7 +3,8 @@ package com.example.notes
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
-import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.isRoot
+import androidx.compose.ui.test.onAllNodes
 import com.github.takahirom.roborazzi.captureRoboImage
 import java.io.File
 
@@ -88,9 +89,22 @@ class ScenarioShots(
         this.result = result.trim()
     }
 
+    /**
+     * The picture, taken of **whatever is on top.**
+     *
+     * `onRoot()` answers with the *first* root, and a dialog is a second window with its own root
+     * drawn over the first. A scenario that opens a window and captures would then have photographed
+     * the screen behind it - the picture would look right in the sense that it is the app, and wrong
+     * in the only sense that matters: the thing the scenario is about would not be in it.
+     *
+     * So the roots are asked for and the last one is taken. Composition order puts the newest window
+     * last, which is the one a person is looking at.
+     */
     private fun capture(fileName: String) {
         if (!recording) return
-        compose.onRoot().captureRoboImage("build/outputs/scenarios/$folder/$fileName")
+        val roots = compose.onAllNodes(isRoot()).fetchSemanticsNodes()
+        val top = roots.size - 1
+        compose.onAllNodes(isRoot())[top].captureRoboImage("build/outputs/scenarios/$folder/$fileName")
     }
 
     /** Writes the page. Called once, when the scenario has said everything. */

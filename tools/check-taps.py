@@ -43,6 +43,10 @@ VOCABULARY = {
     "open file", "open folder", "close editor", "close history", "close changes", "settings",
     # editing
     "save", "history", "restore version",
+    # the editor's three modes, and the diff's own two acts
+    "editor view", "editor edit", "editor diff", "diff", "diff commit",
+    # entering a file from the list of what is waiting to be sent
+    "open changed file",
     # a row's own switches
     "lock", "unlock", "pin", "unpin", "select", "unselect",
     # what a row's menu offers, and what the selection bar offers
@@ -78,8 +82,6 @@ VOCABULARY = {
     # opening one fullscreen and coming back - a page view of the same bubble, so the name says
     # "page" rather than "bubble" a second time
     "bubble page", "close page",
-    # the editor's three modes, and the two ends of a diff
-    "diff commit",
     # the agent itself, how often it reminds, and the numbers it runs with
     "start agent", "stop agent", "stop all agents", "reset agent", "remind me",
     "answer timeout", "result length",

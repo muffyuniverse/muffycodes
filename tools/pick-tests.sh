@@ -157,11 +157,28 @@ if [ "$SELF_TEST" = "1" ]; then
         complain "a half-valid selection was accepted"
     fi
 
+    # 3. **The split is even by time, not only by count.** This is the claim the packing exists
+    #    for, and it is the one a count-based check cannot make: the old hash-and-round-robin put
+    #    23 classes on each shard and a quarter more work on one of them. The check asks the
+    #    shard script for its own balance figure and refuses anything past the budget.
+    for n in 2 3; do
+        line="$(bash "$HERE/test-shard.sh" --of "$n" --verify 2>/dev/null | grep 'balance:')"
+        [ -n "$line" ] || complain "no balance figure for $n shards"
+        ratio="$(printf '%s' "$line" | sed -n 's/.*(\([0-9.]*\)x).*/\1/p')"
+        [ -n "$ratio" ] || complain "could not read the balance for $n shards: $line"
+        # Integer arithmetic, because this runs in a shell with no bc. The budget is 1.15x,
+        # which is the same number the shard script warns past.
+        if [ -n "$ratio" ]; then
+            over="$(awk -v r="$ratio" 'BEGIN { print (r > 1.15) ? "yes" : "no" }')"
+            [ "$over" = "no" ] || complain "$n shards are unbalanced: $line"
+        fi
+    done
+
     if [ "$fails" -gt 0 ]; then
         echo "$fails check(s) failed in the test selector" >&2
         exit 1
     fi
-    echo "  the selector agrees with itself: $total classes, one shard each"
+    echo "  the selector agrees with itself: $total classes, one shard each, balanced by time"
     exit 0
 fi
 

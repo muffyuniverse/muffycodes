@@ -3,6 +3,7 @@ package com.example.notes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
 import org.robolectric.RuntimeEnvironment
 import org.junit.Rule
@@ -90,6 +91,31 @@ class ScenariosTest {
             onRemoveAccount = {},
             onTestAccount = {},
         )
+    }
+
+    /** The chat, which needs a project and a conversation in it before it has anything to show. */
+    @Composable
+    private fun chatScreen() = Screen { AgentChatScreen(viewModel = viewModel, onBack = {}) }
+
+    /** What the app did: the trace's own screen, with a report that has something in it. */
+    @Composable
+    private fun observability(report: Trace.Report) = Screen {
+        ObservabilityScreen(report = report, onBack = {}, onShare = {}, onClear = {})
+    }
+
+    /**
+     * A dialog, painted on its own.
+     *
+     * **A window is a screen too**, and a report that only ever shows the screens behind them cannot
+     * show what a person is actually looking at when the app asks a question. Each dialog is drawn
+     * over an empty surface, which is what it looks like over any of them - the window carries its
+     * own scrim.
+     */
+    @Composable
+    private fun window(content: @Composable () -> Unit) = Screen {
+        // A box with nothing in it, so the capture has a background to draw the window over.
+        androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {}
+        content()
     }
 
     private fun record(folder: String, title: String, about: String, body: ScenarioShots.() -> Unit) {
@@ -441,3 +467,295 @@ class ScenariosTest {
         onSelect = {},
     )
 }
+
+    // ---- the two screens no scenario had reached ------------------------------
+
+    @Test
+    fun `the chat, which is a conversation rather than one turn`() {
+        // **Report 36, photographed.** The box used to draw one turn behind a navigator; what a
+        // person sees now is the whole conversation as a list, and a picture of it is the only way
+        // to say whether the shape reads as one.
+        scene.signedIn()
+        scene.project("groceries")
+        scene.open("groceries")
+        // **The conversation is made by the app, not by hand.** `sendChat` writes the operator's row
+        // and asks the door; the door answers with a call, and then with words. A scenario that
+        // built the rows itself would be photographing a record the app cannot produce.
+        val door = ScriptedDoor(
+            Reply("", listOf(Call("call-1", "tree", """{"path":""}"""))),
+            Reply("There is one file, and it is the note you wrote."),
+        )
+        viewModel.chatDoor = { door }
+        viewModel.openChat("groceries")
+        scene.await("the conversation to be read") { viewModel.chatGeneration > 0 }
+        viewModel.sendChat("what is in the project")
+        scene.await("the answer") { viewModel.chatBox?.bubbles?.any { it.caption == "agent" } == true }
+
+        scenario(
+            compose, "13-the-chat",
+            "The chat, with a question and its answer.",
+            "one question, one call, and the words that came back.",
+            screen = { chatScreen() },
+        ) {
+            before()
+            then("Nothing here: the conversation is already on the screen, oldest first.") {}
+            after()
+            result(
+                "Every act is its own bubble - the question, the call with its result, and the " +
+                    "answer - and each carries the id and time of the row it came from, so the " +
+                    "picture can be checked against session.log.",
+            )
+        }
+    }
+
+    @Test
+    fun `what the app did, as the trace's own screen shows it`() {
+        scene.signedIn()
+        val id = Trace.tap("settings", "")
+        Trace.answered(id, "opened")
+        val report = Trace.report()
+
+        scenario(
+            compose, "14-what-the-app-did",
+            "What the app did.",
+            "the log of taps and answers, with one tap that was answered.",
+            screen = { observability(report) },
+        ) {
+            before()
+            then("Nothing is pressed: this screen is a reading of the log, not an act.") {}
+            after()
+            result(
+                "The screen says how many taps were answered and shows the lines themselves, " +
+                    "so a person can see the app's own account of what it did.",
+            )
+        }
+    }
+
+    // ---- the windows ---------------------------------------------------------
+
+    @Test
+    fun `the window that asks for a name`() {
+        // **A prompt is the smallest window and the most common one**: a new file, a new folder, a
+        // rename and a move all end here, so a picture of it is a picture of four features.
+        scenario(
+            compose, "15-a-window-asking-for-a-name",
+            "A window asking for a name.",
+            "the shape every new file, new folder, rename and move ends in.",
+            screen = {
+                window {
+                    PromptDialog(
+                        title = "New file",
+                        label = "Name",
+                        initial = "",
+                        confirm = "Create",
+                        onDismiss = {},
+                        onConfirm = {},
+                    )
+                }
+            },
+        ) {
+            before()
+            then("Nothing is typed: this is the window as it opens, before a name exists.") {}
+            after()
+            result(
+                "One field, one button, and a way out - and the button is named for the act " +
+                    "rather than for the window, so a person knows what pressing it does.",
+            )
+        }
+    }
+
+    @Test
+    fun `the window that asks before something is lost`() {
+        scenario(
+            compose, "16-a-window-asking-before-a-loss",
+            "A window asking before something is lost.",
+            "deleting, which is the one act the app stops to ask about.",
+            screen = {
+                window {
+                    ConfirmDialog(
+                        title = "Delete milk.txt?",
+                        text = "It goes to the folder's deleted files and can be restored from there.",
+                        confirm = "Delete",
+                        destructive = true,
+                        onDismiss = {},
+                        onConfirm = {},
+                    )
+                }
+            },
+        ) {
+            before()
+            then("Nothing is confirmed: the picture is the question, not the answer to it.") {}
+            after()
+            result(
+                "The button is in the error colour, the sentence says where the file goes, and " +
+                    "there is a way out - which is what makes a destructive act safe to offer.",
+            )
+        }
+    }
+
+    @Test
+    fun `the window that offers to remove an account`() {
+        scenario(
+            compose, "17-a-window-removing-an-account",
+            "A window offering to remove an account.",
+            "the one place the app can delete work that is not on this phone.",
+            screen = {
+                window {
+                    RemoveAccountDialog(
+                        login = "muffyuniverse",
+                        onDismiss = {},
+                        onRemove = {},
+                    )
+                }
+            },
+        ) {
+            before()
+            then("Nothing is removed.") {}
+            after()
+            result(
+                "The window names the account, says what stays and what goes, and offers the " +
+                    "copies as a separate decision rather than a default.",
+            )
+        }
+    }
+
+    @Test
+    fun `the window that offers to delete a project`() {
+        scenario(
+            compose, "18-a-window-deleting-a-project",
+            "A window offering to delete a project.",
+            "a project's own folder, and the choice of where it is deleted from.",
+            screen = {
+                window {
+                    DeleteProjectDialog(project = "groceries", onDismiss = {}, onDelete = {})
+                }
+            },
+        ) {
+            before()
+            then("Nothing is deleted.") {}
+            after()
+            result(
+                "Both outcomes are named - here, or everywhere - because a person deleting a " +
+                    "project is deciding about two copies and the window has to say so.",
+            )
+        }
+    }
+
+    @Test
+    fun `the window that adds a project, with nothing to add`() {
+        scenario(
+            compose, "19-a-window-adding-a-project",
+            "A window adding a project, before anything is signed in.",
+            "the empty state of the list of repositories on GitHub.",
+            screen = {
+                window {
+                    AddProjectDialog(
+                        repositories = emptyList(),
+                        alreadyHere = emptySet(),
+                        loading = false,
+                        error = null,
+                        onDismiss = {},
+                        onNewProject = {},
+                        onPick = {},
+                    )
+                }
+            },
+        ) {
+            before()
+            then("Nothing is picked: there is nothing to pick.") {}
+            after()
+            result(
+                "An empty list says it is empty rather than looking like a list that failed to " +
+                    "load, and making a project on this phone is offered beside it.",
+            )
+        }
+    }
+
+    @Test
+    fun `the window that makes a new project`() {
+        scenario(
+            compose, "20-a-window-making-a-project",
+            "A window making a new project.",
+            "a name, a licence, and nothing else to decide.",
+            screen = {
+                window {
+                    NewProjectDialog(licences = emptyList(), local = true, onDismiss = {}, onCreate = { _, _ -> })
+                }
+            },
+        ) {
+            before()
+            then("Nothing is created.") {}
+            after()
+            result(
+                "The name and the licence are the whole question, and the licence's own sentence " +
+                    "is under it rather than hidden behind a link.",
+            )
+        }
+    }
+
+    @Test
+    fun `the window that asks for a key`() {
+        scenario(
+            compose, "21-a-window-asking-for-a-key",
+            "A window asking for a key.",
+            "the one field the model cannot work without.",
+            screen = {
+                window {
+                    ModelKeyDialog(onDismiss = {}, error = null, onSave = {})
+                }
+            },
+        ) {
+            before()
+            then("Nothing is typed: a key is not something a picture should contain.") {}
+            after()
+            result(
+                "One field, and no key in the picture - which is the point of a window that " +
+                    "takes one.",
+            )
+        }
+    }
+
+    @Test
+    fun `the window that syncs, with changes to send`() {
+        scenario(
+            compose, "22-a-window-syncing",
+            "A window syncing, with two changes waiting.",
+            "the message the sync will be committed under.",
+            screen = {
+                window {
+                    SyncDialog(project = "groceries", changes = 2, onDismiss = {}, onSync = {})
+                }
+            },
+        ) {
+            before()
+            then("Nothing is synced.") {}
+            after()
+            result(
+                "The window says how many changes are going and lets the message be changed, " +
+                    "because the message is what the history will say about them for ever.",
+            )
+        }
+    }
+
+    @Test
+    fun `the window that reports a problem`() {
+        val broken = Trace.Broken(id = 7, at = 1_000L, what = "sync", detail = "groceries", waitedMs = 30_000L)
+        scenario(
+            compose, "23-a-window-reporting-a-problem",
+            "A window reporting a problem.",
+            "a tap that never answered, which is what a person sends when something is stuck.",
+            screen = {
+                window {
+                    ReportDialog(waiting = listOf(broken), failures = emptyList(), onDismiss = {}, onSend = {})
+                }
+            },
+        ) {
+            before()
+            then("Nothing is sent: a report is a decision, not a side effect.") {}
+            after()
+            result(
+                "The window says what is stuck, in the words of the act that got stuck, so a " +
+                    "report can be understood without opening the log.",
+            )
+        }
+    }
