@@ -109,7 +109,7 @@ object RequestStats {
      * Read leniently: a line that does not parse is skipped rather than aborting the table, because
      * the log is appended to while it is being read and the last line may be half-written.
      */
-    internal fun parse(day: LocalDate, line: String): Row? {
+    fun parse(day: LocalDate, line: String): Row? {
         val cells = line.split('\t')
         // time, kind, ms, provider, model, prompt, cached, completion, reasoning, cost, finish
         if (cells.size < 10) return null
@@ -134,7 +134,7 @@ object RequestStats {
     }
 
     /** One parsed line. [at] is the clock time, which is all the bucketing needs. */
-    internal data class Row(
+    data class Row(
         /** The day of the file this line came from, so a row can be placed on the time axis. */
         val day: LocalDate,
         val at: String,

@@ -178,9 +178,12 @@ private fun KindBlock(
         modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
     )
     Column(modifier = Modifier.fillMaxWidth()) {
+        // **The time labels, once, at the top of the block.** Without them the columns are
+        // numbers with no position in time - and they are the row that has to scroll with the
+        // values below, which is why it is drawn by the same function rather than beside it.
         MetricRow(
             name = "",
-            cells = buckets.map { "" },
+            cells = buckets.map { it.label },
             header = true,
         )
         MetricRow("requests", buckets.map { StatsFormat.count(of(it).requests) })

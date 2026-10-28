@@ -25,8 +25,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.QueryStats
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -193,7 +193,12 @@ fun BrowserScreen(
                         // than the one it asks, which is worse than not offering it.
                         IconButton(onClick = { adding = false; onOpenStats() }) {
                             Icon(
-                                Icons.Filled.QueryStats,
+                                // **A core icon, not `QueryStats`.** That one lives in the
+                                // extended set, which this app does not depend on: importing it
+                                // compiled locally and failed on CI, which is the worst kind of
+                                // difference. `Info` is in the core set and says the same thing -
+                                // this shows you facts rather than changing anything.
+                                Icons.Filled.Info,
                                 contentDescription = "What it cost",
                             )
                         }

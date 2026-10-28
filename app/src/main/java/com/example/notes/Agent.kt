@@ -326,7 +326,7 @@ class Agent(
             // not a row in the record: a `TOLD` row here would enter the conversation the ping
             // exists to keep warm, and the next real turn would be answering a question the person
             // never asked. `build` reads the record; this is the one thing added after it.
-            val built = build(layers, readOpening(layers, AgentTools.specs()), clearedUp = false)
+            val built = build(layers, readOpening(layers, log, AgentTools.specs()), clearedUp = false)
             built.copy(messages = built.messages + PING_INSTRUCTION)
         } catch (t: Throwable) {
             // **A request that could not be built is not a ping that got through.** This said

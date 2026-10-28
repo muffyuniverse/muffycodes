@@ -397,7 +397,6 @@ private fun AppRoot(viewModel: AppViewModel) {
             onRemoveAccount = { tap("remove account"); pending = Pending.RemoveAccount },
             onTestAccount = { tap("use test account"); viewModel.signInAsTestAccount() },
             onOpenTrace = { showTrace = true },
-            onOpenStats = { showStats = true },
             onReport = openReport,
         )
 
