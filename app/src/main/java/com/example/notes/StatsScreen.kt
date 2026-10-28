@@ -1,6 +1,8 @@
 package com.example.notes
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,7 +13,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -240,8 +241,21 @@ fun StatsScreen(
                             TextButton(onClick = { editingStart = null }) { Text("Cancel") }
                         },
                     ) {
-                        Column {
-                            DatePicker(state = picker)
+                        // **The calendar is shrunk, and the body scrolls.**
+                        //
+                        // Found by looking at the picture, not by a test: on a 320x470 screen the
+                        // default `DatePicker` filled the dialog and the hour stepper sat *below the
+                        // bottom of the screen* - so the one control this session added could not be
+                        // reached at all, and every assertion about it still passed because the node
+                        // exists whether or not a person can see it.
+                        //
+                        // The title and the headline are the two lines Material lets a caller drop
+                        // ("Select date", "October 28, 2026"), and they are the two that repeat what
+                        // the month navigator directly beneath them already says. Dropping them is
+                        // ~120dp, which is the hour row. The scroll is the backstop: a font scale or
+                        // a shorter phone must not be able to hide a control again.
+                        Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                            DatePicker(state = picker, title = null, headline = null)
                             // **The hour, and nothing finer.** One stepper rather than a clock face:
                             // a clock is a large control for a screen whose subject is a table, and
                             // it would offer minutes the table cannot count.
