@@ -860,7 +860,7 @@ fun ReportBody(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(max = 420.dp)
+            .heightIn(max = 300.dp)
             .verticalScroll(rememberScrollState()),
     ) {
         Text(
@@ -967,7 +967,12 @@ fun ModelKeyDialog(
                 OutlinedTextField(
                     value = key,
                     onValueChange = { key = it },
-                    label = { Text("Key, starting sk-or-v1-") },
+                    // **A placeholder, not a label.** A label is drawn in the notch cut into the
+                    // outline, so a label wider than the field runs out past the border - which is
+                    // what "Key, starting sk-or-v1-" did in the key scenario's picture, a word
+                    // sitting on the line. A placeholder is drawn inside the field and is clipped
+                    // to it, so the same sentence cannot escape the box.
+                    placeholder = { Text("starts with sk-or-v1-") },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                 )

@@ -8,6 +8,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -169,6 +170,37 @@ class ReportTest {
         compose.onNodeWithText("Save (milk.txt)", substring = true).assertIsDisplayed()
         // And the id is on screen, which is how the person can point at the line directly.
         assertTrue("the tap is the one that is waiting", waiting.single().id == id)
+    }
+
+    @Test
+    fun `the window can be scrolled to its last sentence, however much it holds`() {
+        // **The defect this pins was only ever visible in a picture.** The body was a plain Column
+        // in a fixed-height dialog, so a body taller than the window was simply cut: the report
+        // scenario rendered "Your sentence goes into the same log the app has been writing since it
+        // opened, so the lines" and stopped mid-word. Every existing assertion here passed, because
+        // a clipped node is still a node that exists and is laid out - assertIsDisplayed says
+        // nothing about whether a person can read it.
+        //
+        // What makes it catchable is that the body now scrolls: with more stuck taps than fit, the
+        // last paragraph is reachable by a scroll rather than lost. The assertion is that the
+        // scroll exists at all, which is the thing whose absence clipped the sentence.
+        val waiting = (1..12).map {
+            Trace.tap("Row $it", "file$it.txt")
+        }.let { Trace.report(System.currentTimeMillis() + 5_000).waiting }
+
+        compose.setContent {
+            Frame {
+                ReportBody(waiting = waiting, failures = emptyList(), note = "", onNote = {})
+            }
+        }
+
+        // The sentence is there in the tree...
+        val last = compose.onNodeWithText("Your sentence goes into the same log", substring = true)
+        last.assertExists()
+        // ...and the body it sits in is a scroll container, which is what lets a person reach it.
+        compose.onNodeWithText("Your sentence goes into the same log", substring = true)
+            .performScrollTo()
+        last.assertIsDisplayed()
     }
 
     @Test
