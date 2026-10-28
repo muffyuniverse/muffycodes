@@ -133,6 +133,9 @@ object RequestStats {
         )
     }
 
+    /** The clock column's format, as [RequestLog.line] writes it. */
+    private val TIME_FORMAT = java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
+
     /** One parsed line. [at] is the clock time, which is all the bucketing needs. */
     data class Row(
         /** The day of the file this line came from, so a row can be placed on the time axis. */
@@ -188,7 +191,12 @@ object RequestStats {
             // every line into the same hour. Both come from the row, so the axis is the log's
             // rather than the moment somebody opened the screen.
             val time = try {
-                row.day.atTime(java.time.LocalTime.parse(row.at.take(12))).atZone(zone)
+                // **The log's own format, named rather than assumed.** `LocalTime.parse` would
+                // take "09:14:22.301" today and could stop taking it if the format ever gained a
+                // component; naming it here is what makes the reading end match the writing one.
+                row.day.atTime(
+                    java.time.LocalTime.parse(row.at, TIME_FORMAT),
+                ).atZone(zone)
             } catch (t: Throwable) {
                 continue
             }

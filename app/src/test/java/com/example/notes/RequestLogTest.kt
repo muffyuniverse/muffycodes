@@ -118,7 +118,7 @@ class RequestLogTest {
 
         RequestLog.write(account, at(9, 0), stats(full))
         RequestLog.write(account, at(9, 5), stats(full))
-        RequestLog.write(account, at(9, 10).plusMillis(86_400_000), stats(full))
+        RequestLog.write(account, at(9, 10) + 86_400_000L, stats(full))
 
         val first = RequestLog.fileFor(account, day1)
         assertTrue("the day's file exists", first.isFile)
