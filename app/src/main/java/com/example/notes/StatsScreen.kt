@@ -127,7 +127,12 @@ fun StatsScreen(
                         // The span, in the app's own words, so the table never has to be counted
                         // backwards to know what it covers.
                         RequestStats.span(axis, anchor) +
-                            " · " + (if (days == 0) "no log yet" else "$days day(s) kept"),
+                            // A count with "(s)" after it is a placeholder that was never replaced.
+                            " · " + when (days) {
+                                0 -> "no log yet"
+                                1 -> "1 day kept"
+                                else -> "$days days kept"
+                            },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f),
@@ -251,7 +256,15 @@ private fun KindBlock(
     // a month of empty columns with today's numbers off-screen - which is exactly what the first
     // picture of this screen showed.
     val scroll = rememberScrollState()
-    LaunchedEffect(buckets.size) { scroll.animateScrollTo(scroll.maxValue) }
+    // **Anchored to a cell boundary, not to the raw end.** `maxValue` leaves whatever remainder the
+    // viewport has, so the leftmost column is drawn cut in half - the first picture of this screen
+    // showed its heading as ":t". Rounding the target down to a whole cell means the table always
+    // shows whole columns, and the newest one is still on the right.
+    val cellPx = with(androidx.compose.ui.platform.LocalDensity.current) { (CELL_DP.dp).toPx() }
+    LaunchedEffect(buckets.size, scroll.maxValue) {
+        val whole = scroll.maxValue - (scroll.maxValue % cellPx.toInt())
+        scroll.animateScrollTo(whole)
+    }
 
     Text(
         title + "  ·  " + StatsFormat.count(total.requests) + " requests",
@@ -303,6 +316,9 @@ private fun KindBlock(
     }
 }
 
+/** How wide one column is. A named constant because the scroll anchors to a multiple of it. */
+private val CELL_DP = 64
+
 /**
  * One metric, as a name and one cell per bucket.
  *
@@ -350,7 +366,7 @@ private fun MetricRow(
                     },
                     textAlign = TextAlign.End,
                     maxLines = 1,
-                    modifier = Modifier.width(64.dp),
+                    modifier = Modifier.width(CELL_DP.dp),
                 )
             }
         }
