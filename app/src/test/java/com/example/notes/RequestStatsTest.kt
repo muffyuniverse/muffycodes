@@ -276,9 +276,13 @@ class RequestStatsTest {
         assertEquals("tokens add", 3000L, rolled.prompt)
         assertEquals("including the cached part, which is part of the prompt", 2700L, rolled.cached)
         assertEquals("money adds", 0.003, rolled.cost, 1e-12)
-        // **The average is over the two that reported**, not the three that ran. Dividing 0.003 by
-        // 3 gives a number that looks like money and is wrong; the count is what prevents it.
-        assertNotEquals("not the average over every request", 0.001, rolled.cost / rolled.requests, 1e-12)
+        // **The average is over the two that reported**, not the three that ran. With 0.003 spent
+        // and two reports the honest figure is 0.0015; dividing by all three requests would give
+        // 0.001 - a number that looks like money, is 33% low, and is what `Stats.perRequest` uses
+        // `costReported` to avoid. The two numbers happen to be distinct here, which is why this
+        // test can tell them apart at all.
+        assertEquals("the average is over the two that reported", 0.0015, rolled.cost / rolled.costReported, 1e-12)
+        assertNotEquals("not the average over every request", rolled.cost / rolled.costReported, rolled.cost / rolled.requests, 1e-12)
     }
 
     @Test
@@ -365,7 +369,10 @@ class RequestStatsTest {
             kind = RequestLog.Stats.Kind.TURN, ms = 1840, provider = "p", model = "m",
             usage = null, finish = "stop",
         )).split("\t").size
-        val mine = row().split("\t").size
+        // **Compared with the trailing columns asked for**, because that is the writer's shape.
+        // Without them the helper deliberately produces the older 13-cell line, which is what the
+        // back-compatibility test above needs; asking for them makes the two comparable.
+        val mine = row(span = "hour", requests = "1", costReported = "1").split("\t").size
         assertEquals("the helper describes the same file the writer writes", written, mine)
     }
 

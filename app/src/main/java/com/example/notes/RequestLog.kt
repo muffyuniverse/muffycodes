@@ -236,6 +236,43 @@ object RequestLog {
     }
 
     /**
+     * One aggregate row, as a line: the same sixteen cells as [line], mostly empty.
+     *
+     * **Blank where a sum has no meaning.** An aggregate covers many responses with different
+     * providers, models, durations and finish reasons, and there is no true single value for any of
+     * them. Writing zeros would say "zero milliseconds" and "no provider"; writing blanks says what
+     * is true, which is that this line is not about any one response.
+     *
+     * The `kind` is [KIND_ALL] rather than one of the real kinds, because an hour holds turns and
+     * keepalives together and naming one of them would be false.
+     */
+    internal fun aggregateLine(rolled: RequestStats.Rolled): String {
+        fun num(v: Any?): String = v?.toString().orEmpty()
+        fun money(v: Double?): String =
+            if (v == null) "" else String.format(java.util.Locale.UK, "%.10f", v)
+        return listOf(
+            // **The start of the span**, which is the one instant an aggregate is about: every row
+            // it covers falls at or after it and before the next unit begins.
+            Instant.ofEpochMilli(rolled.fromMs).toString(),
+            KIND_ALL,
+            "",
+            "",
+            "",
+            num(rolled.prompt.takeIf { it != 0L }),
+            num(rolled.cached.takeIf { it != 0L }),
+            num(rolled.completion.takeIf { it != 0L }),
+            num(rolled.reasoning.takeIf { it != 0L }),
+            money(rolled.cost.takeIf { rolled.costReported > 0 }),
+            "",
+            num(rolled.said.takeIf { it != 0L }),
+            num(rolled.thinking.takeIf { it != 0L }),
+            rolled.span,
+            rolled.requests.toString(),
+            rolled.costReported.toString(),
+        ).joinToString("\t")
+    }
+
+    /**
      * Writes one response's statistics, then applies the retention rule.
      *
      * **Called from the door, on the thread that already has the numbers.** A log written from a
@@ -269,6 +306,132 @@ object RequestLog {
         } catch (t: Throwable) {
             // Deliberately silent. See above.
         }
+    }
+
+    /** One line of the file: what it says, and the characters it already has. */
+    private class Entry(val row: RequestStats.Row?, val text: String)
+
+    /**
+     * Rolls every closed hour into one aggregate row and drops the raw rows it covers.
+     *
+     * **The one destructive operation on this file**, so the order matters: the new contents are
+     * written beside and renamed over, exactly as [prune] does, because the door appends from
+     * another thread and a rewrite in place would drop whatever was written between the read and
+     * the write. A raw row is only let go after the aggregate that replaces it is on disk.
+     *
+     * **Only closed hours.** The hour in progress is left whole: rolling it would store a number
+     * that the next request contradicts, and the file would then hold two rows disagreeing about
+     * the same hour, with nothing to say which is right.
+     *
+     * **A line this code cannot parse is written back untouched** - not parsed into a Row and
+     * rendered again, which would silently drop whatever it held. It cannot be rolled, and
+     * discarding what cannot be read is how a log loses its own evidence.
+     *
+     * Afterwards the coarser levels are rebuilt from the hour rows by [rollUp], so `day` is the sum
+     * of its hours rather than a second opinion about them.
+     *
+     * Returns the number of raw rows removed, so a test can tell "did nothing" from "worked".
+     */
+    fun compact(accountDir: File, now: Long): Int {
+        val file = fileFor(accountDir)
+        if (!file.isFile) return 0
+        return try {
+            val (header, entries) = readEntries(file) ?: return 0
+            val raw = entries.filter { it.row?.span == SPAN_RAW }
+            val closed = RequestStats.closable(raw.mapNotNull { it.row }, "hour", now)
+            if (closed.isEmpty()) return 0
+
+            // **Identified by the line's own text**, not by its instant: two rows can share an
+            // instant to the millisecond, and a comparison on time would drop both when one was
+            // meant. The text is the identity the file itself uses.
+            val rolled = closed.values.flatten()
+            val rolledText = rolled.map { r -> entries.first { it.row === r }.text }.toSet()
+            val removed = rolled.size
+
+            val fresh = closed.mapNotNull { (from, group) ->
+                RequestStats.rollup(group, "hour", from)?.let(::aggregateLine)
+            }
+            writeWhole(
+                file,
+                header,
+                entries.filter { it.text !in rolledText }.map { it.text } + fresh,
+            )
+            // Coarser levels are rebuilt, never patched: a day assembled by adding to a number
+            // already in the file would keep any earlier mistake for ever.
+            rollUp(file, now)
+            removed
+        } catch (t: Throwable) {
+            // A compaction that failed leaves the log whole, which is the right failure.
+            0
+        }
+    }
+
+    /**
+     * Rebuilds `day`, `month` and `year` rows from the `hour` rows.
+     *
+     * **Derived, not incrementally maintained.** Each level is recomputed from the level below it,
+     * so the file cannot drift: `day` is the sum of its hours by construction. That is what makes a
+     * change of semantics - and the windows in `docs/PLAN-request-history.md` §1 were revised twice -
+     * a recombination rather than a migration.
+     */
+    private fun rollUp(file: File, now: Long) {
+        val (header, entries) = try {
+            readEntries(file) ?: return
+        } catch (t: Throwable) {
+            return
+        }
+        // **Everything that is not a coarser aggregate is kept as it is**: raw rows the compactor
+        // has not reached, hour rows, and any line that could not be read. The day/month/year rows
+        // are the only ones replaced, because they are the only ones derived from something else.
+        val keep = entries.filter { it.row?.span !in setOf("day", "month", "year") }
+        val hours = entries.mapNotNull { it.row }.filter { it.span == "hour" }
+
+        val rebuilt = mutableListOf<String>()
+        var level = hours
+        for (span in listOf("day", "month", "year")) {
+            val closed = RequestStats.closable(level, span, now)
+            val fresh = closed.mapNotNull { (from, group) ->
+                RequestStats.rollup(group, span, from)?.let(::aggregateLine)
+            }
+            rebuilt += fresh
+            level = fresh.mapNotNull { RequestStats.parse(it) }
+        }
+        writeWhole(file, header, keep.map { it.text } + rebuilt)
+    }
+
+    /**
+     * Every line of the file, with its header, or null when there is nothing to read.
+     *
+     * **Streamed.** The compactor is the second thing to read this file and it must not be the one
+     * allocation that undoes the streaming read: a year at ten thousand requests a day is millions
+     * of lines. `useLines` holds one at a time.
+     */
+    private fun readEntries(file: File): Pair<String, List<Entry>>? {
+        val entries = ArrayList<Entry>()
+        var header: String? = null
+        file.useLines { lines ->
+            for ((i, text) in lines.withIndex()) {
+                if (i == 0) {
+                    header = text
+                } else if (text.isNotBlank()) {
+                    entries += Entry(RequestStats.parse(text), text)
+                }
+            }
+        }
+        return header?.let { it to entries }
+    }
+
+    /**
+     * The whole file, beside it and renamed over.
+     *
+     * **The only way this file is ever rewritten.** A write in place that stopped halfway would
+     * leave a record whose last row is half a row, and this file is evidence: a reader must see
+     * either the old one whole or the new one whole.
+     */
+    private fun writeWhole(file: File, header: String, body: List<String>) {
+        val temp = File(file.parentFile, FILE + ".tmp")
+        temp.writeText((listOf(header) + body).joinToString("\n", postfix = "\n"))
+        if (!temp.renameTo(file)) temp.delete()
     }
 
     /**
@@ -308,9 +471,7 @@ object RequestLog {
             // **Written beside and renamed over**, because the door appends from another thread. A
             // rewrite in place could drop the response written between the read and the write -
             // which is exactly the response somebody would be looking for.
-            val temp = File(file.parentFile, FILE + ".tmp")
-            temp.writeText((listOf(lines.first()) + body).joinToString("\n", postfix = "\n"))
-            if (!temp.renameTo(file)) temp.delete()
+            writeWhole(file, lines.first(), body)
         } catch (t: Throwable) {
             // A prune that failed leaves the log whole, which is the right failure.
         }

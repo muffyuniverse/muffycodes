@@ -150,6 +150,83 @@ class RequestLogTest {
     }
 
     @Test
+    fun `compaction rolls a closed hour into one row and drops the raw rows`() {
+        val account = tmp.newFolder("compact")
+        val hour = 3_600_000L
+        val now = 100 * 86_400_000L + 12 * hour
+        // Three responses in one closed hour, one in the hour in progress.
+        for (i in 1..3) RequestLog.write(account, now - 2 * hour + i * 60_000L, stats(full))
+        RequestLog.write(account, now - 60_000L, stats(full))
+
+        val removed = RequestLog.compact(account, now)
+        assertEquals("three raw rows let go", 3, removed)
+
+        val rows = RequestStats.read(account)
+        val hours = rows.filter { it.span == "hour" }
+        assertEquals("one hour aggregate", 1, hours.size)
+        assertEquals("covering three requests", 3L, hours.single().requests)
+        assertEquals("with every token summed", 3L * 1000L, hours.single().prompt)
+        // **And the open hour is still raw.** Rolling it would store a number the next request
+        // contradicts.
+        assertEquals("the current hour is untouched", 1, rows.count { it.span == RequestLog.SPAN_RAW })
+    }
+
+    @Test
+    fun `compaction keeps a line it cannot read, and every other line as it was`() {
+        // **The destructive step, on the file that is the evidence.** A line this code cannot parse
+        // is not parsed into a Row and rendered back - it is written back byte for byte, because
+        // rendering it back would silently drop whatever it held. Pinned by writing a line nothing
+        // can parse and checking it survives a compaction unchanged.
+        val account = tmp.newFolder("keep")
+        val now = 100 * 86_400_000L
+        RequestLog.write(account, now - 3 * 3_600_000L, stats(full))
+        val odd = "this is not a row at all\tand it must survive"
+        RequestLog.fileFor(account).appendText(odd + "\n")
+
+        RequestLog.compact(account, now)
+
+        val lines = RequestLog.fileFor(account).readLines()
+        assertTrue("the unreadable line is still there, verbatim", odd in lines)
+        assertTrue("and the header is still first", lines.first().startsWith("utc\tkind\tms"))
+        // Nothing to compact for the day/month/year levels yet beyond the hour, and no row may be
+        // duplicated by the rewrite.
+        assertEquals("no row was written twice", lines.size, lines.distinct().size)
+    }
+
+    @Test
+    fun `a day is rebuilt from its hours, so a wrong aggregate is repairable`() {
+        // **Why the hour rows are kept.** The windows were revised twice while this was being
+        // built; if aggregates replaced hours, every old row would be frozen under an abandoned
+        // rule. Here the day is derived, so recompacting recomputes it - and this asserts the one
+        // property that makes that true: the day equals the sum of its own hours.
+        val account = tmp.newFolder("derive")
+        val day = 86_400_000L
+        val now = 100 * day
+        for (h in 0..23) RequestLog.write(account, now - day + h * 3_600_000L + 60_000L, stats(full))
+        RequestLog.compact(account, now)
+        RequestLog.compact(account, now)
+
+        val rows = RequestStats.read(account)
+        val hourRows = rows.filter { it.span == "hour" }
+        val dayRows = rows.filter { it.span == "day" }
+        assertEquals("a day of hours", 24, hourRows.size)
+        assertEquals("and one day", 1, dayRows.size)
+        assertEquals(
+            "the day is the sum of its hours, not a second opinion",
+            hourRows.sumOf { it.requests },
+            dayRows.single().requests,
+        )
+        assertEquals(
+            "and its money agrees too",
+            hourRows.sumOf { it.cost ?: 0.0 },
+            dayRows.single().cost ?: 0.0,
+            1e-9,
+        )
+        // Compacting twice must not double anything: the second pass has no closed hours left.
+        assertEquals("the second compaction is a no-op", 0, RequestLog.compact(account, now))
+    }
+
+    @Test
     fun `a retention of zero keeps everything, which is the default`() {
         val account = tmp.newFolder("account")
         val day = 86_400_000L
