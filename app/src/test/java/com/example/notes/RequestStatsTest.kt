@@ -144,7 +144,6 @@ class RequestStatsTest {
             RequestStats.Row(
                 atMs = instant,
                 day = LocalDate.parse("2026-10-28"),
-                at = "09:14:22.301",
                 kind = RequestLog.Stats.Kind.TURN,
                 prompt = 1_000, cached = 0, completion = 10, reasoning = 0, cost = 0.001,
             ),
