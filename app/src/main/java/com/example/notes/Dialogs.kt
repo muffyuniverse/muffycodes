@@ -913,9 +913,13 @@ fun ReportBody(
                 )
             }
         }
+        // **Shorter, because the window is.** The sentence used to run to three lines and was the
+        // thing that got cut: the body's own cap could be reduced until it scrolled, but a body
+        // whose last paragraph is always the one past the fold has not been fixed, only made
+        // scrollable. What the paragraph has to carry is that the sentence joins the log - the
+        // rest was explaining a screen the reader is already looking at.
         Text(
-            "Your sentence goes into the same log the app has been writing since it " +
-                "opened, so the lines above it are what happened.",
+            "This joins the same log, after everything above it.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 12.dp),

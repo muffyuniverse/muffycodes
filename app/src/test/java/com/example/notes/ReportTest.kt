@@ -195,11 +195,10 @@ class ReportTest {
         }
 
         // The sentence is there in the tree...
-        val last = compose.onNodeWithText("Your sentence goes into the same log", substring = true)
+        val last = compose.onNodeWithText("This joins the same log", substring = true)
         last.assertExists()
         // ...and the body it sits in is a scroll container, which is what lets a person reach it.
-        compose.onNodeWithText("Your sentence goes into the same log", substring = true)
-            .performScrollTo()
+        last.performScrollTo()
         last.assertIsDisplayed()
     }
 
