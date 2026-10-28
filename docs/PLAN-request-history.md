@@ -8,6 +8,26 @@ defect gets built twice.
 
 ## 1. What the stats table is
 
+### THE ONE RULE
+
+> **ONE PICK. ALL COLUMNS. Always.** Checkboxes choose *which* are rendered, never *which one* is
+> being asked about. There is one selection, and every enabled column is computed from it on every
+> recompute.
+
+To look at **2025**, pick **23:00 on 31 December 2025**. That is not a workaround, it is the design:
+the year column is then all of 2025, the month column all of December, the day column the 31st, the
+hour column 23:00–23:59, and the total column everything ever. **One pick, every column.**
+
+There is no year-only picker and no month-only picker, and adding one would be a defect rather than a
+convenience: a year-only pick has to answer *"the 31st of which month?"* for the day column. Only an
+instant fixes all five at once.
+
+**Why this rule is easy to lose, so it is written here in capitals:** every other design in this
+screen's history — a segmented axis control, a "granularity" per axis, a picker per axis — turned the
+columns into alternatives, and *each was built*. Three separate times the code answered "one column at
+a time" while the intent was "all columns from one pick". A rule that has been rebuilt wrongly three
+times needs to be the first paragraph, not a detail.
+
 Pick **one instant**. It belongs to **five nested spans at once**, and each is a column:
 
 | column | from | to (pick = 12:45 on 25 Oct 2026) |
@@ -26,8 +46,10 @@ when the pyramid (§2) existed, because they need complete-month and complete-ye
 first two builds drew three because there was nothing coarser to read.
 
 **Which columns are drawn is chosen by checkboxes to the right of the date picker**, one per span,
-all five on by default. Hiding a column must not change any other column's number: the checkbox is a
-drawing rule over a fixed computation, never a different computation.
+all five on by default. Hiding a column must not change any other column's number, and must not
+change *which* instant is being asked about: the checkbox is a drawing rule over a fixed computation,
+never a different computation. With every box ticked the table is the five-column table above; with
+one ticked it is a one-column table of the same five numbers.
 
 ### 1a. The rows
 

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -98,7 +99,24 @@ fun StatsScreen(
     // reader's eyes. What the report asked for was a table counted on opening, which is also the
     // only version whose numbers are stable enough to compare.
     val rows = remember(accountDir) { RequestStats.read(accountDir) }
-    val buckets = remember(rows, anchor) { RequestStats.buckets(rows, anchor) }
+    /**
+     * **Which columns are drawn.** A drawing rule, never a computation rule: every span is computed
+     * from the one [anchor] whatever is ticked, and hiding a column must not move another column's
+     * number. All five are on to begin with, which is the table the screen is for.
+     */
+    val shown = remember { mutableStateOf(RequestStats.SPANS.toSet()) }
+
+    // Computed for every span, ticked or not - see above. Filtering here rather than inside
+    // `buckets` is what makes the checkbox unable to change a number.
+    val all = remember(rows, anchor) { RequestStats.buckets(rows, anchor) }
+    val buckets = remember(all, shown.value) {
+        val spans = RequestStats.SPANS.filter { it in shown.value }
+        // **Never an empty table.** With every box cleared there is nothing to draw, so the last
+        // column is kept rather than showing a table of no columns and no explanation.
+        (if (spans.isEmpty()) listOf(RequestStats.Span.HOUR) else spans).map { span ->
+            all[RequestStats.SPANS.indexOf(span)]
+        }
+    }
     // **Whether the log reaches back this far**, which is not the same as "nothing happened" in
     // it. The month column is the widest span, so it is the one that answers whether any of the
     // three can: if the log covers the month, it covers the day and hour inside it too.
@@ -253,13 +271,14 @@ fun StatsScreen(
                     )
                 }
             } else {
-                // **One table, three columns.** The rows are the metrics the operator named, in
-                // the order they were named: counts and the two kinds' tokens with their shares,
-                // then the cost and the two derived rates.
+                // **One table, one column per ticked span** — five by default. The rows are the
+                // metrics the operator named, in the order they were named: the counts, the tokens
+                // with their shares, then the cost and the two derived rates.
                 item {
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        // The headings: one per span, and the narrowest first, so the columns read
-                        // 12:00 | 25 Oct | Oct 2026 - the same instant seen three ways.
+                        // The headings: one per span, narrowest first, so the columns read
+                        // 12:00-12:45 | 25 Oct | Oct 2026 | 2026 | total — one instant seen five
+                        // ways. `sub` is the second line saying where each window starts.
                         MetricRow(
                             name = "",
                             cells = buckets.map { it.label },

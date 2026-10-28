@@ -110,7 +110,7 @@ class RequestStatsTest {
         val buckets = RequestStats.buckets(listOf(), at)
         assertEquals(
             "what each column is - five nested spans of one instant",
-            listOf("12:00–12:45", "25 Oct", "Oct 2026", "2026", "all"),
+            listOf("12:00–12:45", "25 Oct", "Oct 2026", "2026", "total"),
             buckets.map { it.label },
         )
         assertEquals(
@@ -144,6 +144,38 @@ class RequestStatsTest {
         assertEquals("the hour stops at the pick", at, hour.toMs)
         assertEquals("so does the day", at, day.toMs)
         assertEquals("so does the month", at, month.toMs)
+    }
+
+    @Test
+    fun `picking the last hour of 2025 renders all of 2025 in the year column`() {
+        // **The operator's own example**, and the reason there is no year picker: to look at 2025,
+        // pick 23:00 on 31 December 2025. One pick, every column - 23:00-23:59 of that hour, the
+        // whole of the 31st, the whole of December, the whole of 2025, and everything ever.
+        //
+        // A year-only picker would have to answer "the 31st of which month?" for the day column.
+        // Picking an *instant* answers it for all five at once, which is why the picker stays one
+        // control and the columns are chosen by checkboxes.
+        val zone = ZoneId.systemDefault()
+        val local = LocalDate.parse("2025-12-31").atTime(23, 0)
+        val at = local.atZone(zone).toInstant().toEpochMilli()
+        val buckets = RequestStats.buckets(listOf(), at, zone)
+
+        assertEquals(
+            "five columns of one instant",
+            listOf("23:00–23:00", "31 Dec", "Dec 2025", "2025", "total"),
+            buckets.map { it.label },
+        )
+
+        // Boundaries, which the labels alone cannot prove.
+        fun ms(l: java.time.LocalDateTime) = l.atZone(zone).toInstant().toEpochMilli()
+        val spans = RequestStats.SPANS.map { RequestStats.container(it, at, zone) }
+        assertEquals("the year begins on 1 January 2025", ms(LocalDate.parse("2025-01-01").atStartOfDay()), spans[3].fromMs)
+        assertEquals("and ends at the pick, so it is the whole year", at, spans[3].toMs)
+        assertEquals("the month is all of December", ms(LocalDate.parse("2025-12-01").atStartOfDay()), spans[2].fromMs)
+        assertEquals("the day is all of the 31st", ms(LocalDate.parse("2025-12-31").atStartOfDay()), spans[1].fromMs)
+        assertEquals("the total reaches back past any row", 0L, spans[4].fromMs)
+        assertEquals("and every column stops at the same instant",
+            listOf(at, at, at, at, at), spans.map { it.toMs })
     }
 
     @Test

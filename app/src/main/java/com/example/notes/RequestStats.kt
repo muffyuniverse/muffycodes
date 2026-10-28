@@ -47,6 +47,24 @@ object RequestStats {
 
         /** The calendar month, cut at the pick: picking 12:45 shows the 1st to 12:45. */
         MONTH("month"),
+
+        /**
+         * The calendar year, cut at the pick: picking 23:00 on 31 December shows the whole of it.
+         *
+         * **This is how a year is asked about** — there is no year-only picker and no need for one.
+         * Choosing the last instant of 2025 gives 2025 as the year column, December as the month
+         * column, the 31st as the day column, and so on: one pick, every column, always.
+         */
+        YEAR("year"),
+
+        /**
+         * The whole history: every row in the log up to the pick.
+         *
+         * Its start is not a boundary of the pick at all but the first row, so its container begins
+         * at the epoch — no row can precede it, which makes the bounds honest without the container
+         * needing to know what the log holds.
+         */
+        TOTAL("total"),
     }
 
     /** The spans the table always has, in the order a person reads them: narrowest first. */
@@ -155,6 +173,26 @@ object RequestStats {
                     sub = "from the 1st",
                 )
             }
+            Span.YEAR -> {
+                val jan1 = at.toLocalDate().withDayOfMonth(1).withMonth(1)
+                Container(
+                    fromMs = jan1.atStartOfDay(zone).toInstant().toEpochMilli(),
+                    toMs = cut(),
+                    label = jan1.format(java.time.format.DateTimeFormatter.ofPattern("yyyy")),
+                    sub = "from 1 Jan",
+                )
+            }
+            Span.TOTAL -> Container(
+                // **The epoch, not the oldest row.** The container must not consult the log: the
+                // same instant would then describe a different span as the log grows, and the
+                // column would change its meaning between two reads. Starting before any possible
+                // row makes the bounds a property of the pick alone, and `buckets` counts exactly
+                // the rows that exist.
+                fromMs = 0L,
+                toMs = cut(),
+                label = "total",
+                sub = "from the first row",
+            )
         }
     }
 
