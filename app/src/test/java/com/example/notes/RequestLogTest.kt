@@ -59,25 +59,24 @@ class RequestLogTest {
 
         // The count is the contract: a column added without the header being changed would shift
         // every value one place to the right of its name.
-        // **Fifteen: the eleven the first version had, plus the instant, the local day, and the
-        // two counts a stall row carries.** Bumping this is the moment to ask whether the new
-        // columns are in the header too - they are written by the same list.
-        assertEquals("one cell per column", 15, cells.size)
-        assertEquals("the instant, and the only column with no zone in it", "0", cells[0])
-        assertEquals("00:00:00.000", cells[1])
-        assertEquals("the local day, for a person reading it", "1970-01-01", cells[2])
-        assertEquals("ping", cells[3])
-        assertEquals("1840", cells[4])
-        assertEquals("deepinfra/fp8/flex", cells[5])
-        assertEquals("deepseek/deepseek-v4.1-flash", cells[6])
-        assertEquals("3691", cells[7])
-        assertEquals("the part the provider did not have to read", "3584", cells[8])
-        assertEquals("1", cells[9])
-        assertEquals("the column the keepalive is watched with", "1", cells[10])
+        // **Thirteen: eleven accounting columns and the two counts a stall row carries.** There is
+        // one time column now and it is an instant - the local clock time and local day the first
+        // version also wrote are gone, because a time written into a file is a fact that stops
+        // agreeing with the instant the moment somebody flies somewhere.
+        assertEquals("one cell per column", 13, cells.size)
+        assertEquals("the instant, in the one form that says so", "1970-01-01T00:00:00Z", cells[0])
+        assertEquals("ping", cells[1])
+        assertEquals("1840", cells[2])
+        assertEquals("deepinfra/fp8/flex", cells[3])
+        assertEquals("deepseek/deepseek-v4.1-flash", cells[4])
+        assertEquals("3691", cells[5])
+        assertEquals("the part the provider did not have to read", "3584", cells[6])
+        assertEquals("1", cells[7])
+        assertEquals("the column the keepalive is watched with", "1", cells[8])
         // **Plain decimal, not Java's shortest form.** `Double.toString` would write 2.41E-5, which
         // the statistics table then has to parse back - so the shape is part of the contract.
-        assertEquals("0.0000241000", cells[11])
-        assertEquals("length", cells[12])
+        assertEquals("0.0000241000", cells[9])
+        assertEquals("length", cells[10])
     }
 
     @Test
@@ -88,11 +87,11 @@ class RequestLogTest {
         val bare = usage("""{ "prompt_tokens": 100 }""")
         val cells = RequestLog.line(0, stats(bare)).split("\t")
 
-        assertEquals("100", cells[7])
-        assertEquals("cached was not reported", "", cells[8])
-        assertEquals("completion was not reported", "", cells[9])
-        assertEquals("reasoning was not reported", "", cells[10])
-        assertEquals("cost was not reported", "", cells[11])
+        assertEquals("100", cells[5])
+        assertEquals("cached was not reported", "", cells[6])
+        assertEquals("completion was not reported", "", cells[7])
+        assertEquals("reasoning was not reported", "", cells[8])
+        assertEquals("cost was not reported", "", cells[9])
     }
 
     @Test
@@ -100,9 +99,9 @@ class RequestLogTest {
         // A ping whose answer was refused, or a provider that simply omits `usage`: the response
         // happened and its cost is unknown. The line has to survive that without a crash.
         val cells = RequestLog.line(0, stats(null)).split("\t")
-        assertEquals(15, cells.size)
-        assertEquals("ping", cells[3])
-        assertEquals("", cells[7])
+        assertEquals(13, cells.size)
+        assertEquals("ping", cells[1])
+        assertEquals("", cells[5])
         assertNull("and nothing was invented", RequestLog.Stats(
             kind = RequestLog.Stats.Kind.PING,
             ms = 0,
@@ -125,7 +124,7 @@ class RequestLogTest {
         assertTrue("one file", file.isFile)
         val lines = file.readLines()
         assertEquals("a header and two responses", 3, lines.size)
-        assertTrue("the header names the columns", lines[0].startsWith("utc\ttime\tday"))
+        assertTrue("the header names the columns", lines[0].startsWith("utc\tkind\tms"))
         assertEquals("written once", 1, lines.count { it.startsWith("utc\t") })
     }
 
@@ -141,7 +140,12 @@ class RequestLogTest {
 
         val body = RequestLog.fileFor(account).readLines().drop(1)
         assertEquals("the old one is gone", 2, body.size)
-        assertTrue("and the recent ones are kept", body.all { it.substringBefore('\t').toLong() >= now - 30 * day })
+        assertTrue(
+            "and the recent ones are kept",
+            body.all {
+                java.time.Instant.parse(it.substringBefore('\t')).toEpochMilli() >= now - 30 * day
+            },
+        )
     }
 
     @Test
@@ -175,7 +179,7 @@ class RequestLogTest {
     fun `a turn and a ping are told apart, because they cost different things`() {
         val turn = RequestLog.line(0, stats(full, RequestLog.Stats.Kind.TURN)).split("\t")
         val ping = RequestLog.line(0, stats(full, RequestLog.Stats.Kind.PING)).split("\t")
-        assertEquals("turn", turn[3])
-        assertEquals("ping", ping[3])
+        assertEquals("turn", turn[1])
+        assertEquals("ping", ping[1])
     }
 }

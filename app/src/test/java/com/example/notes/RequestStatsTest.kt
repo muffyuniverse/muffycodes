@@ -43,15 +43,15 @@ class RequestStatsTest {
         reasoning: String = "1",
         cost: String = "0.0000241",
     ) = run {
-        // **The instant is derived from the day and the clock time**, in the device's zone, which
-        // is exactly what the writer does. A helper that hard-coded one instant would make every
+        // **The instant is derived from the day and the clock time**, in the given zone, which is
+        // exactly what the writer does. A helper that hard-coded one instant would make every
         // placement test pass while testing nothing.
         val utc = LocalDate.parse(day)
             .atTime(java.time.LocalTime.parse(at))
             .atZone(ZoneId.systemDefault())
             .toInstant()
-            .toEpochMilli()
-        "$utc\t$at\t$day\t$kind\t1840\tdeepinfra/fp8/flex\tdeepseek\t$prompt\t$cached\t" +
+            .toString()
+        "$utc\t$kind\t1840\tdeepinfra/fp8/flex\tdeepseek\t$prompt\t$cached\t" +
             "$completion\t$reasoning\t$cost\tlength"
     }
 
@@ -93,9 +93,9 @@ class RequestStatsTest {
     @Test
     fun `the two kinds are summed apart, and their sum is the total`() {
         val rows = listOf(
-            RequestStats.parse(LocalDate.parse("2026-10-28"), row(kind = "turn", prompt = "1000", cost = "0.001"))!!,
-            RequestStats.parse(LocalDate.parse("2026-10-28"), row(kind = "ping", prompt = "3691", cost = "0.0000241"))!!,
-            RequestStats.parse(LocalDate.parse("2026-10-28"), row(kind = "ping", prompt = "3691", cost = "0.0000241"))!!,
+            RequestStats.parse(row(kind = "turn", prompt = "1000", cost = "0.001"))!!,
+            RequestStats.parse(row(kind = "ping", prompt = "3691", cost = "0.0000241"))!!,
+            RequestStats.parse(row(kind = "ping", prompt = "3691", cost = "0.0000241"))!!,
         )
         val at = LocalDate.parse("2026-10-28").atTime(9, 30).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val buckets = RequestStats.buckets(rows, RequestStats.Axis.DAY, at)
@@ -132,8 +132,8 @@ class RequestStatsTest {
             // **The day goes to the builder, not to the parser.** `parse`'s day argument only
             // labels the row; the instant that places it comes from the line's own first column,
             // which is computed from the day given here.
-            RequestStats.parse(LocalDate.parse("2026-10-26"), row(day = "2026-10-26", at = "14:00:00.000"))!!,
-            RequestStats.parse(LocalDate.parse("2026-10-28"), row(day = "2026-10-28", at = "09:14:22.301"))!!,
+            RequestStats.parse(row(day = "2026-10-26", at = "14:00:00.000"))!!,
+            RequestStats.parse(row(day = "2026-10-28", at = "09:14:22.301"))!!,
         )
         val at = LocalDate.parse("2026-10-28").atTime(9, 30).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val buckets = RequestStats.buckets(rows, RequestStats.Axis.DAY, at)
@@ -159,7 +159,6 @@ class RequestStatsTest {
         val rows = listOf(
             RequestStats.Row(
                 atMs = instant,
-                day = LocalDate.parse("2026-10-28"),
                 kind = RequestLog.Stats.Kind.TURN,
                 prompt = 1_000, cached = 0, completion = 10, reasoning = 0, cost = 0.001,
             ),
@@ -200,13 +199,15 @@ class RequestStatsTest {
         // **The instant is derived, not typed.** A hand-written epoch is a number no reader can
         // check and that misses the test's own window by however much somebody mistyped it - this
         // one was thirteen months out, so the row was correct and the column was empty.
-        val atMs = day.atTime(9, 14, 22)
+        val at = day.atTime(9, 14, 22)
             .atZone(ZoneId.systemDefault())
             .toInstant()
-            .toEpochMilli()
-        val stallRow = "$atMs\t09:14:22.301\t2026-10-28\tstall\t41000\tdeepinfra\tdeepseek\t" +
+            .toString()
+        // utc, kind, ms, provider, model, prompt, cached, completion, reasoning, cost, finish,
+        // said, thinking - a stall leaves the five accounting columns empty and fills the last two.
+        val stallRow = "$at\tstall\t41000\tdeepinfra\tdeepseek\t" +
             "\t\t\t\t\t\t120\t880"
-        val parsed = RequestStats.parse(day, stallRow)!!
+        val parsed = RequestStats.parse(stallRow)!!
 
         assertEquals("it is a stall", RequestLog.Stats.Kind.STALL, parsed.kind)
         assertNull("with no prompt count", parsed.prompt)
@@ -232,9 +233,9 @@ class RequestStatsTest {
         // The log is appended to while it is being read, so the last line may be half written. A
         // table that refused to draw because of one bad line would be a table that never drew.
         val day = LocalDate.parse("2026-10-28")
-        assertNull("a short line", RequestStats.parse(day, "09:14:22.301\tturn"))
-        assertNull("an unknown kind", RequestStats.parse(day, row(kind = "shrug")))
-        assertNotNull("and a good one", RequestStats.parse(day, row()))
+        assertNull("a short line", RequestStats.parse("2026-10-28T09:14:22.301Z\tturn"))
+        assertNull("an unknown kind", RequestStats.parse(row(kind = "shrug")))
+        assertNotNull("and a good one", RequestStats.parse(row()))
     }
 
     @Test

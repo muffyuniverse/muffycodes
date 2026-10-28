@@ -3,7 +3,6 @@ package com.example.notes
 import org.json.JSONObject
 import java.io.File
 import java.time.Instant
-import java.time.ZoneId
 
 /**
  * Every answer the model gave, one line each, in the system project.
@@ -44,15 +43,20 @@ object RequestLog {
      * engineered later. These names are what a person reads at the top of the file.
      */
     private val COLUMNS = listOf(
-        // **The instant, and the only column with no timezone in it.** Everything the table does —
-        // bucketing by hour, day, month — is arithmetic on this number, and arithmetic on an
-        // instant gives the same answer wherever the phone is standing. A clock time does not:
-        // "09:14" is two different instants in two zones, so a log read after a flight would have
-        // rows that could not be placed.
+        // **One time column, and it is an instant.**
+        //
+        // The first version also wrote the local clock time and the local day, "for a person
+        // reading the file by eye". They are gone, and the reason is not that they were unused -
+        // they were never read — but that **they could be wrong**. Local time is a function of the
+        // instant and the zone the phone is in *now*; written down, it becomes a second fact that
+        // stops agreeing with the first the moment somebody flies somewhere. A file holding two
+        // contradictory times is worse than a file holding one that needs converting, because a
+        // reader has to know which to trust.
+        //
+        // Everything local - the hour a bucket is labelled with, the day it falls on, the caption -
+        // is computed when the table is drawn. `2026-10-28T11:14:22.301Z` is readable at a glance
+        // and has no zone to be misread in.
         "utc",
-        // The next two are for a person reading the file by eye. Nothing computes from them.
-        "time",
-        "day",
         "kind",
         "ms",
         "provider",
@@ -65,8 +69,7 @@ object RequestLog {
         "finish",
         // **What had arrived, for a stall.** Blank on every other row, where `usage` is the better
         // answer. On a stall these are the only numbers there are, and the difference between them
-        // is the difference between "the model was thinking" and "the model was writing" - which
-        // is what a person wants to know about a request they were charged for and never saw.
+        // is the difference between "the model was thinking" and "the model was writing".
         "said",
         "thinking",
     )
@@ -150,12 +153,7 @@ object RequestLog {
      * part and the columns are the thing that has to stay stable once a person has started reading
      * them.
      */
-    internal fun line(now: Long, stats: Stats, zone: ZoneId = ZoneId.systemDefault()): String {
-        val at = Instant.ofEpochMilli(now).atZone(zone)
-        val time = String.format(
-            "%02d:%02d:%02d.%03d",
-            at.hour, at.minute, at.second, at.nano / 1_000_000,
-        )
+    internal fun line(now: Long, stats: Stats): String {
         // An absent number is written as nothing, not as 0: see Stats. A dash would be read as a
         // measurement of minus one by half the tools that will ever touch this file.
         fun num(v: Any?): String = v?.toString().orEmpty()
@@ -166,9 +164,9 @@ object RequestLog {
         fun money(v: Double?): String =
             if (v == null) "" else String.format(java.util.Locale.UK, "%.10f", v)
         return listOf(
-            now.toString(),
-            time,
-            at.toLocalDate().toString(),
+            // **The instant, in the one form that says so.** ISO-8601 with a trailing Z is
+            // readable at a glance and cannot be mistaken for a local time.
+            Instant.ofEpochMilli(now).toString(),
             stats.kind.label,
             stats.ms.toString(),
             stats.provider,
@@ -202,7 +200,6 @@ object RequestLog {
         now: Long,
         stats: Stats,
         keepDays: Int = 0,
-        zone: ZoneId = ZoneId.systemDefault(),
     ) {
         try {
             val dir = File(File(accountDir, Workspace.SYSTEM_PROJECT), DIR)
@@ -212,7 +209,7 @@ object RequestLog {
             file.appendText(
                 buildString {
                     if (fresh) appendLine(COLUMNS.joinToString("\t"))
-                    appendLine(line(now, stats, zone))
+                    appendLine(line(now, stats))
                 },
             )
             prune(file, now, keepDays)
@@ -242,8 +239,14 @@ object RequestLog {
         }
         if (lines.isEmpty()) return
         val body = lines.drop(1).filter { raw ->
-            val at = raw.substringBefore('\t').toLongOrNull()
-            at == null || at >= cutoff
+            // The row is kept when its time cannot be read: a line somebody wrote must not be
+            // discarded because this code could not parse it.
+            val at = try {
+                Instant.parse(raw.substringBefore('\t')).toEpochMilli()
+            } catch (t: Throwable) {
+                return@filter true
+            }
+            at >= cutoff
         }
         // Nothing to do, and no rewrite: a prune that rewrites an unchanged file is a prune that
         // can lose an append for no reason.

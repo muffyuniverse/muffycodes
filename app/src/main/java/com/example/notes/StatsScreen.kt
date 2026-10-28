@@ -271,6 +271,13 @@ private fun KindBlock(
             muted = true,
         )
         MetricRow("cost $", buckets.map { StatsFormat.cost(of(it).cost.takeIf { _ -> of(it).costReported > 0 }) })
+        // **Drawn only when the block has characters to show**, which is only ever the stall
+        // block. It is the one number a stall has: how much had arrived before the connection died,
+        // which is the closest thing to the amount that was billed.
+        if (total.saidChars > 0 || total.thinkingChars > 0) {
+            MetricRow("  · written", buckets.map { StatsFormat.tokens(of(it).saidChars) }, muted = true)
+            MetricRow("  · thought", buckets.map { StatsFormat.tokens(of(it).thinkingChars) }, muted = true)
+        }
         MetricRow("per request $", buckets.map { StatsFormat.perRequest(of(it).perRequest) })
         MetricRow("per M in $", buckets.map { StatsFormat.perMillion(of(it).perMillionInput) })
         MetricRow("per M out $", buckets.map { StatsFormat.perMillion(of(it).perMillionOutput) })

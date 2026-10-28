@@ -66,6 +66,15 @@ object RequestStats {
         val cost: Double = 0.0,
         /** How many responses actually reported a cost, so an average is over the right count. */
         val costReported: Int = 0,
+        /**
+         * What a stalled answer had produced, in characters.
+         *
+         * **Only stalls have these**, which is why there is no share and no average: they are the
+         * closest thing to a billed amount for a request whose accounting never arrived. Zero for
+         * every other kind, where `completion` is the better answer.
+         */
+        val saidChars: Long = 0,
+        val thinkingChars: Long = 0,
     ) {
         operator fun plus(other: Stats) = Stats(
             requests = requests + other.requests,
@@ -75,6 +84,8 @@ object RequestStats {
             reasoningTokens = reasoningTokens + other.reasoningTokens,
             cost = cost + other.cost,
             costReported = costReported + other.costReported,
+            saidChars = saidChars + other.saidChars,
+            thinkingChars = thinkingChars + other.thinkingChars,
         )
 
         /**
@@ -111,12 +122,12 @@ object RequestStats {
      * Read leniently: a line that does not parse is skipped rather than aborting the table, because
      * the log is appended to while it is being read and the last line may be half-written.
      */
-    fun parse(day: LocalDate, line: String): Row? {
+    fun parse(line: String): Row? {
         val cells = line.split('\t')
         // utc, time, day, kind, ms, provider, model, prompt, cached, completion, reasoning,
         // cost, finish
-        if (cells.size < 12) return null
-        val kind = when (cells[3]) {
+        if (cells.size < 10) return null
+        val kind = when (cells[1]) {
             "turn" -> RequestLog.Stats.Kind.TURN
             "ping" -> RequestLog.Stats.Kind.PING
             "stall" -> RequestLog.Stats.Kind.STALL
@@ -125,21 +136,27 @@ object RequestStats {
         // **The instant, and nothing else, places the row.** A line without a readable one is not
         // guessed at from its clock time: a guessed timezone is worse than a missing row, because
         // it looks like a measurement.
-        val atMs = cells[0].toLongOrNull() ?: return null
+        // **An ISO instant, read as an instant.** It used to be raw millis, and before that a
+        // clock time that needed a day beside it to mean anything - which is what made the log
+        // hold a local time at all.
+        val atMs = try {
+            Instant.parse(cells[0]).toEpochMilli()
+        } catch (t: Throwable) {
+            return null
+        }
         fun long(i: Int) = cells.getOrNull(i)?.takeIf { it.isNotBlank() }?.toLongOrNull()
         fun double(i: Int) = cells.getOrNull(i)?.takeIf { it.isNotBlank() }?.toDoubleOrNull()
-        val cost = double(11)
+        val cost = double(9)
         return Row(
             atMs = atMs,
-            day = day,
             kind = kind,
-            prompt = long(7),
-            cached = long(8),
-            completion = long(9),
-            reasoning = long(10),
+            prompt = long(5),
+            cached = long(6),
+            completion = long(7),
+            reasoning = long(8),
             cost = cost,
-            said = long(13),
-            thinking = long(14),
+            said = long(11),
+            thinking = long(12),
         )
     }
 
@@ -154,8 +171,6 @@ object RequestStats {
          * this column.
          */
         val atMs: Long,
-        /** The local day of the file it came from, kept so a line can be reported against its file. */
-        val day: LocalDate,
         val kind: RequestLog.Stats.Kind,
         val prompt: Long?,
         val cached: Long?,
@@ -225,6 +240,8 @@ object RequestStats {
                 reasoningTokens = row.reasoning ?: 0,
                 cost = row.cost ?: 0.0,
                 costReported = if (row.cost != null) 1 else 0,
+                saidChars = row.said ?: 0,
+                thinkingChars = row.thinking ?: 0,
             )
             sums[key] = when (row.kind) {
                 RequestLog.Stats.Kind.TURN -> cell.copy(turns = cell.turns + add)
@@ -253,16 +270,7 @@ object RequestStats {
             // **One file, one shape, one read.** A row carries its own instant, so there is no day
             // in a file name to be read against and no neighbour to fetch: the table for any zone
             // is this same single pass.
-            file.readLines().drop(1).mapNotNull { raw ->
-                val day = raw.split('\t').getOrNull(2)?.let {
-                    try {
-                        LocalDate.parse(it)
-                    } catch (t: Throwable) {
-                        null
-                    }
-                } ?: LocalDate.now()
-                parse(day, raw)
-            }
+            file.readLines().drop(1).mapNotNull { parse(it) }
         } catch (t: Throwable) {
             // A file that cannot be read contributes nothing rather than failing the table.
             emptyList()
