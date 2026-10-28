@@ -210,8 +210,15 @@ object RequestStats {
      */
     data class Bucket(
         val label: String,
-        /** Where the column starts: `to 12:45`, `from 00:00`, `from the 1st`. */
-        val sub: String = "",
+        /**
+         * Where the column starts: `from 00:00`, `from the 1st`, `from 1 Jan`, `from the first row`.
+         *
+         * **No default value, deliberately.** This was `= ""` and the constructor forgot it, so
+         * every column rendered with a blank second line - a bug that compiles, renders, and is
+         * caught only by a test asserting the text. A required parameter makes the omission a
+         * compile error instead.
+         */
+        val sub: String,
         /** Everything accounted for in this span: turns and keepalives together. */
         val total: Stats = Stats(),
         /** Answers that began and then died. Billed and unreported, so they are counted apart. */
@@ -390,7 +397,7 @@ object RequestStats {
                     RequestLog.Stats.Kind.STALL -> stalls += add
                 }
             }
-            Bucket(label = box.label, total = sum, stalls = stalls)
+            Bucket(label = box.label, sub = box.sub, total = sum, stalls = stalls)
         }
     }
 

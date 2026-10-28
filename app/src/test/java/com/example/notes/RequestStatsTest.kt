@@ -103,8 +103,8 @@ class RequestStatsTest {
         // Cumulative windows, not whole spans. A whole day column at 12:45 would count an
         // afternoon that has not happened.
         //
-        // The shape is asserted as a list rather than as a count, because three labels say which
-        // three spans are shown and a count of three does not.
+        // The shape is asserted as a list rather than as a count, because five labels say which
+        // five spans are shown and a count of five does not.
         val at = LocalDate.parse("2026-10-25").atTime(12, 45)
             .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val buckets = RequestStats.buckets(listOf(), at)
