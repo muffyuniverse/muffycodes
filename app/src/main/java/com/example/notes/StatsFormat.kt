@@ -75,6 +75,25 @@ object StatsFormat {
     fun perRequest(value: Double?): String =
         if (value == null) NONE else String.format(Locale.UK, "%.5f", value)
 
+    /**
+     * An absolute number **and the share it is of, in one cell**: `24.0k (91.7%)`.
+     *
+     * The operator asked for "absolute + share in percents as one cell", and the reason is that
+     * they are one fact: 24.0k of what, answered by the number in the brackets. Drawing them as
+     * two rows - which is what this screen did first - puts the share on a line of its own, where
+     * it reads as a separate measurement that happens to sit underneath.
+     *
+     * Either half may be absent, and absence is [NONE] rather than a zero: a bucket with no
+     * requests has neither an absolute nor a share, and one with tokens but no cache has an
+     * absolute and no share.
+     */
+    fun absoluteAndShare(absolute: String?, share: Double?): String = when {
+        absolute == null && share == null -> NONE
+        share == null -> absolute ?: NONE
+        absolute == null -> share(share)
+        else -> "$absolute (${share(share)})"
+    }
+
     /** A request count. */
     fun count(value: Int): String = value.toString()
 

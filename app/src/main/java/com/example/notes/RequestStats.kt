@@ -21,16 +21,76 @@ import java.time.ZoneId
  */
 object RequestStats {
 
-    /** The three time axes the screen offers. */
-    enum class Axis(val label: String, val buckets: Int) {
-        /** The last twenty-four hours, one column per hour. */
-        HOUR("hour", 24),
+    /**
+     * The three time axes, each naming a **container** rather than a window.
+     *
+     * The first version had these as rolling windows — "the last 24 hours", "the last 30 days",
+     * "the last 12 months" — ending at the picked instant. That was wrong in a way that only shows
+     * when you pick a date: choosing 28 October drew a day axis of **29 September to 28 October**,
+     * so the column labelled with October's days was mostly September's, and the month axis showed
+     * Nov 25 to Oct 26 for someone who had asked about 2026.
+     *
+     * The operator's structure is the other one, and it is the only reading under which the four
+     * picker granularities and the three axes agree: **you pick a year and see its months; you pick
+     * a month and see its days; you pick a day and see its hours.** So an axis names the container
+     * its columns come from, and [container] says which one.
+     */
+    enum class Axis(val label: String) {
+        /** The twenty-four hours of the day containing the anchor. */
+        HOUR("hour"),
 
-        /** The last thirty days, one column per day. */
-        DAY("day", 30),
+        /** The days of the month containing the anchor: 28, 29, 30 or 31 of them. */
+        DAY("day"),
 
-        /** The last twelve months, one column per month. */
-        MONTH("month", 12),
+        /** The twelve months of the year containing the anchor. */
+        MONTH("month"),
+    }
+
+    /**
+     * The span an axis's columns cover, given any instant inside it.
+     *
+     * `fromMs` is inclusive and `toMs` is the last millisecond of the container, so "is this row in
+     * the table" is one comparison and needs no special case for the final bucket.
+     */
+    data class Container(
+        val fromMs: Long,
+        val toMs: Long,
+        /** The container's name, for the caption: "October 2026", "28 Oct 2026", "2026". */
+        val label: String,
+    )
+
+    /** The container of [axis] that holds [anchor]. */
+    fun container(axis: Axis, anchor: Long, zone: ZoneId = ZoneId.systemDefault()): Container {
+        val at = Instant.ofEpochMilli(anchor).atZone(zone)
+        // `atStartOfDay(zone)` rather than `atTime(0,0)`: on the day a zone springs forward,
+        // midnight does not exist, and asking for it by name throws or silently lands at 01:00.
+        fun start(local: java.time.LocalDate) = local.atStartOfDay(zone).toInstant().toEpochMilli()
+        return when (axis) {
+            Axis.HOUR -> {
+                val day = at.toLocalDate()
+                Container(
+                    fromMs = start(day),
+                    toMs = start(day.plusDays(1)) - 1,
+                    label = day.format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy")),
+                )
+            }
+            Axis.DAY -> {
+                val firstOfMonth = at.toLocalDate().withDayOfMonth(1)
+                Container(
+                    fromMs = start(firstOfMonth),
+                    toMs = start(firstOfMonth.plusMonths(1)) - 1,
+                    label = firstOfMonth.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy")),
+                )
+            }
+            Axis.MONTH -> {
+                val firstOfYear = at.toLocalDate().withDayOfYear(1)
+                Container(
+                    fromMs = start(firstOfYear),
+                    toMs = start(firstOfYear.plusYears(1)) - 1,
+                    label = firstOfYear.format(java.time.format.DateTimeFormatter.ofPattern("yyyy")),
+                )
+            }
+        }
     }
 
     /**
@@ -183,55 +243,70 @@ object RequestStats {
     )
 
     /**
-     * Sums [rows] into [columns] buckets ending at [now].
+     * Sums [rows] into the columns of the container that holds [anchor].
      *
-     * **The buckets are made from the clock, not from the data.** A day with no requests is a
-     * column of zeroes, and that is the point: a table that only showed the hours something
-     * happened would hide the shape of the day, which is what a person is looking for.
+     * **The columns come from the container, not from a subtraction.** The first version walked
+     * backwards from the anchor a fixed number of times, which is how the month axis came to show
+     * Nov 25 to Oct 26 for a person asking about 2026. Here the container names its own first and
+     * last moment, and the columns are whatever lies between them: 24 hours, or as many days as
+     * that month actually has, or twelve months.
+     *
+     * **Empty columns are drawn.** A day with no requests is a column of zeroes, because a table
+     * that only showed the spans something happened would hide the shape of the span, which is what
+     * a person looks at a cost table to see.
      */
-    fun buckets(rows: List<Row>, axis: Axis, now: Long, zone: ZoneId = ZoneId.systemDefault()): List<Bucket> {
-        val at = Instant.ofEpochMilli(now).atZone(zone)
-        // Each bucket is identified by a key, and a row is placed by computing its own key. Keys
-        // rather than ranges because the three axes differ only in how a time becomes a key.
+    fun buckets(rows: List<Row>, axis: Axis, anchor: Long, zone: ZoneId = ZoneId.systemDefault()): List<Bucket> {
+        val box = container(axis, anchor, zone)
+        fun zoneOf(ms: Long) = Instant.ofEpochMilli(ms).atZone(zone)
+
         fun keyOf(time: java.time.ZonedDateTime): String = when (axis) {
             Axis.HOUR -> time.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH"))
             Axis.DAY -> time.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd"))
             Axis.MONTH -> time.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM"))
         }
         fun labelOf(time: java.time.ZonedDateTime): String = when (axis) {
-            // **The hour, truncated, because that is what the column is.** A column labelled
-            // "09:30" that holds everything from 09:00 to 09:59 misnames itself, and the key it is
-            // stored under is already truncated - so the label has to agree with the key.
+            // **The hour is truncated because the column is an hour.** A column labelled "09:30"
+            // that holds 09:00 to 09:59 misnames itself, and the key it is stored under is already
+            // truncated - so the label has to agree with the key.
             Axis.HOUR -> time.format(java.time.format.DateTimeFormatter.ofPattern("HH:00"))
-            Axis.DAY -> time.format(java.time.format.DateTimeFormatter.ofPattern("dd MMM"))
-            Axis.MONTH -> time.format(java.time.format.DateTimeFormatter.ofPattern("MMM yy"))
+            // The day number alone, because the month is in the caption above the table; repeating
+            // it in thirty columns costs width the cells need.
+            Axis.DAY -> time.format(java.time.format.DateTimeFormatter.ofPattern("d"))
+            // The month alone, because the year is in the caption, for the same reason.
+            Axis.MONTH -> time.format(java.time.format.DateTimeFormatter.ofPattern("MMM"))
         }
 
-        // The columns, oldest first, so the table reads left to right as time passing.
-        val columns = (axis.buckets - 1 downTo 0).map { back ->
-            val when_ = when (axis) {
-                Axis.HOUR -> at.minusHours(back.toLong())
-                Axis.DAY -> at.minusDays(back.toLong())
-                Axis.MONTH -> at.minusMonths(back.toLong())
+        // Walk the container from its own first moment to its last, one step per column. Stepping
+        // by *calendar* field (plusHours/plusDays/plusMonths) rather than by a fixed millisecond
+        // count is what keeps this right across a DST change, where an hour or a day is not always
+        // the length it is on other days.
+        val steps = ArrayList<java.time.ZonedDateTime>()
+        var cursor = zoneOf(box.fromMs)
+        while (cursor.toInstant().toEpochMilli() <= box.toMs) {
+            steps.add(cursor)
+            cursor = when (axis) {
+                Axis.HOUR -> cursor.plusHours(1)
+                Axis.DAY -> cursor.plusDays(1)
+                Axis.MONTH -> cursor.plusMonths(1)
             }
-            keyOf(when_) to labelOf(when_)
         }
+        val columns = steps.map { keyOf(it) to labelOf(it) }
 
-        // A named accumulator rather than a Triple: three values of the SAME type in a Triple is a
-        // shape whose order nobody can check by eye, and the compiler binds it to the wrong nesting
-        // the moment the types repeat.
+        // A named accumulator rather than a Triple: three values of the SAME type is a shape whose
+        // order nobody can check by eye, and the compiler binds it to the wrong nesting the moment
+        // the types repeat.
         data class Sum(val turns: Stats = Stats(), val pings: Stats = Stats(), val stalls: Stats = Stats())
         val sums = columns.associate { (key, _) -> key to Sum() }.toMutableMap()
 
         for (row in rows) {
-            // **The instant, converted into the zone being displayed.** This is the whole of the
-            // timezone story: the log records instants, the table converts them, and the axis is
-            // therefore correct whatever the phone's clock is set to. Bucketing the stored clock
-            // time instead would mean a row written in Berlin was counted in the Berlin hour even
-            // while the phone was showing Tokyo's.
-            val time = Instant.ofEpochMilli(row.atMs).atZone(zone)
-            val key = keyOf(time)
-            val cell = sums[key] ?: continue
+            // **The instant, converted into the zone being displayed.** This is the whole timezone
+            // story: the log records instants, the table converts them, and the axis is therefore
+            // correct whatever the phone's clock is set to.
+            val time = zoneOf(row.atMs)
+            // Cheap rejection before the key is built: a row outside the container cannot belong to
+            // any of its columns, and a twelve-month table should not format keys for years of rows.
+            if (row.atMs < box.fromMs || row.atMs > box.toMs) continue
+            val cell = sums[keyOf(time)] ?: continue
             val add = Stats(
                 requests = 1,
                 promptTokens = row.prompt ?: 0,
@@ -243,7 +318,7 @@ object RequestStats {
                 saidChars = row.said ?: 0,
                 thinkingChars = row.thinking ?: 0,
             )
-            sums[key] = when (row.kind) {
+            sums[keyOf(time)] = when (row.kind) {
                 RequestLog.Stats.Kind.TURN -> cell.copy(turns = cell.turns + add)
                 RequestLog.Stats.Kind.PING -> cell.copy(pings = cell.pings + add)
                 RequestLog.Stats.Kind.STALL -> cell.copy(stalls = cell.stalls + add)
@@ -278,31 +353,33 @@ object RequestStats {
     }
 
     /**
-     * How many days the log covers, so the screen can say what the table is of.
+     * True when the log has any row inside [box].
      *
-     * **Counted from the rows rather than from the files**, now that a day is no longer a file: the
-     * span a person cares about is the oldest response held, which is a fact about the rows.
+     * **This replaces a function that answered a different question and answered it wrongly.** It
+     * used to return "how many days from the oldest row to now", which ignored the anchor entirely
+     * and so returned a *negative* number for a container in the past — a caption reading "-7 days
+     * kept" under a table of empty columns. Under container semantics the question a reader asks is
+     * not "how long is the log" but "does the log reach back this far", and that is one comparison.
      */
-    fun days(rows: List<Row>, now: Long, zone: ZoneId = ZoneId.systemDefault()): Int {
-        val oldest = rows.minOfOrNull { it.atMs } ?: return 0
-        val from = Instant.ofEpochMilli(oldest).atZone(zone).toLocalDate()
-        val to = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
-        return java.time.temporal.ChronoUnit.DAYS.between(from, to).toInt() + 1
-    }
+    fun covers(rows: List<Row>, box: Container): Boolean =
+        rows.any { it.atMs in box.fromMs..box.toMs }
 
-    /** The span the axis names, in words, for the screen's own caption. */
-    fun span(axis: Axis, now: Long, zone: ZoneId = ZoneId.systemDefault()): String {
-        val at = Instant.ofEpochMilli(now).atZone(zone)
-        val first = when (axis) {
-            Axis.HOUR -> at.minusHours((axis.buckets - 1).toLong())
-            Axis.DAY -> at.minusDays((axis.buckets - 1).toLong())
-            Axis.MONTH -> at.minusMonths((axis.buckets - 1).toLong())
-        }
-        fun fmt(t: java.time.ZonedDateTime) = when (axis) {
-            Axis.HOUR -> t.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
-            Axis.DAY -> t.format(java.time.format.DateTimeFormatter.ofPattern("dd MMM"))
-            Axis.MONTH -> t.format(java.time.format.DateTimeFormatter.ofPattern("MMM yy"))
-        }
-        return "${fmt(first)} to ${fmt(at)}"
-    }
+    /**
+     * The oldest instant the log holds, or null when it holds nothing.
+     *
+     * Said beside the caption when a container is empty, so a person can tell "nothing happened in
+     * October" from "the log does not start until December" — two different facts that look
+     * identical as a grid of dashes.
+     */
+    fun oldest(rows: List<Row>): Long? = rows.minOfOrNull { it.atMs }
+
+    /**
+     * The container the axis shows, in words, for the screen's caption.
+     *
+     * Replaces the old first-to-last span, which described a window. A container's name is the
+     * question that was asked ("October 2026"), and the span is a fact about the columns, so the
+     * caption says the name and the table's own headers say the rest.
+     */
+    fun span(axis: Axis, anchor: Long, zone: ZoneId = ZoneId.systemDefault()): String =
+        container(axis, anchor, zone).label
 }

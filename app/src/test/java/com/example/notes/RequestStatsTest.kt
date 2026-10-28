@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -112,15 +113,99 @@ class RequestStatsTest {
     }
 
     @Test
-    fun `the buckets come from the clock, so an idle day is still a column`() {
-        // A table that only showed the hours something happened would hide the shape of the day,
-        // which is the thing a person is looking for. Twenty-four columns, always.
+    fun `the hour axis is the whole day, so an idle hour is still a column`() {
+        // **A container, not a window.** The columns are the hours of the picked day, so the first
+        // is 00:00 and the last is 23:00 - and an hour with nothing in it is a column of zeroes
+        // rather than an absent one, because the shape of the day is what the table is for.
+        //
+        // The version this replaces walked backwards twenty-four hours from the picked instant, so
+        // its first column was 10:00 *the previous day* and it described two days while calling
+        // itself "hour".
         val at = LocalDate.parse("2026-10-28").atTime(9, 30).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val buckets = RequestStats.buckets(emptyList(), RequestStats.Axis.HOUR, at)
-        assertEquals("one column per hour", 24, buckets.size)
-        assertEquals("the last one is the hour we are in", "09:00", buckets.last().label)
-        assertEquals("the first is a day back", "10:00", buckets.first().label)
+        assertEquals("one column per hour of the day", 24, buckets.size)
+        assertEquals("the first is midnight", "00:00", buckets.first().label)
+        assertEquals("the last is eleven at night", "23:00", buckets.last().label)
         assertTrue("and every one is empty rather than absent", buckets.all { it.total.requests == 0 })
+    }
+
+    @Test
+    fun `the day axis is the days of the picked month, however many that month has`() {
+        // **February is the test that a window cannot pass.** A fixed count of thirty would give
+        // February thirty columns, two of which belong to March; a container gives it its own
+        // twenty-eight. The labels are day numbers, because the month is in the caption.
+        fun daysIn(iso: String): List<String> {
+            val at = LocalDate.parse(iso).atTime(9, 0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+            return RequestStats.buckets(emptyList(), RequestStats.Axis.DAY, at).map { it.label }
+        }
+        assertEquals("October", (1..31).map { it.toString() }, daysIn("2026-10-15"))
+        assertEquals("February, not leap", (1..28).map { it.toString() }, daysIn("2027-02-10"))
+        assertEquals("February, leap", (1..29).map { it.toString() }, daysIn("2028-02-10"))
+    }
+
+    @Test
+    fun `the month axis is the months of the picked year`() {
+        // The old month axis was "the last twelve months ending here", so picking a date in
+        // October 2026 gave November 2025 to October 2026 - a year that starts in November, which
+        // is not a year.
+        val at = LocalDate.parse("2026-10-28").atTime(9, 0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val labels = RequestStats.buckets(emptyList(), RequestStats.Axis.MONTH, at).map { it.label }
+        assertEquals("twelve", 12, labels.size)
+        assertEquals("January first", "Jan", labels.first())
+        assertEquals("December last", "Dec", labels.last())
+    }
+
+    @Test
+    fun `one selection is three views, and the anchor is the only thing that chooses`() {
+        // **This is the whole design of the screen, and the first version of it was wrong.**
+        //
+        // There is one instant and no per-axis picker. Choosing 12:00 on 25 October 2026 gives the
+        // hour axis that day's 24 hours, the day axis that month's 31 days, and the month axis all
+        // twelve months of 2026 - three containers, from one selection, at three granularities.
+        //
+        // What was built first made the picker ask for a different *thing* per axis (a year for the
+        // month axis, a day for the hour axis) and then reduced the anchor to that thing. That is
+        // not the same screen at all: changing axis threw away the part of the date the other axes
+        // needed, so "which hour" and "which year" could not be asked about one moment.
+        val at = LocalDate.parse("2026-10-25").atTime(12, 0)
+            .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val zone = ZoneId.systemDefault()
+
+        assertEquals(
+            "the hour axis is that day",
+            "25 Oct 2026",
+            RequestStats.container(RequestStats.Axis.HOUR, at, zone).label,
+        )
+        assertEquals(
+            "the day axis is that month",
+            "October 2026",
+            RequestStats.container(RequestStats.Axis.DAY, at, zone).label,
+        )
+        assertEquals(
+            "the month axis is that year",
+            "2026",
+            RequestStats.container(RequestStats.Axis.MONTH, at, zone).label,
+        )
+
+        // **And the columns really are those containers**, not merely labelled so: 24 hours of one
+        // day, 31 days of October, 12 months of the year.
+        assertEquals(24, RequestStats.buckets(emptyList(), RequestStats.Axis.HOUR, at, zone).size)
+        assertEquals(31, RequestStats.buckets(emptyList(), RequestStats.Axis.DAY, at, zone).size)
+        assertEquals(12, RequestStats.buckets(emptyList(), RequestStats.Axis.MONTH, at, zone).size)
+    }
+
+    @Test
+    fun `the hour axis keeps the hour inside the container`() {
+        // A container is a whole day, so every hour of it is a column - and the hour the person
+        // picked is inside it rather than at its edge. The old window put 12:00 at the *last*
+        // column and began a day earlier.
+        val at = LocalDate.parse("2026-10-25").atTime(12, 30)
+            .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val labels = RequestStats.buckets(emptyList(), RequestStats.Axis.HOUR, at)
+            .map { it.label }
+        assertEquals("midnight first", "00:00", labels.first())
+        assertEquals("eleven at night last", "23:00", labels.last())
+        assertTrue("and the picked hour is in the middle, not at the end", "12:00" in labels)
     }
 
     @Test
@@ -138,8 +223,8 @@ class RequestStatsTest {
         val at = LocalDate.parse("2026-10-28").atTime(9, 30).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val buckets = RequestStats.buckets(rows, RequestStats.Axis.DAY, at)
 
-        assertEquals("the 26th has its own request", 1, buckets.first { it.label == "26 Oct" }.total.requests)
-        assertEquals("and the 28th has its own", 1, buckets.first { it.label == "28 Oct" }.total.requests)
+        assertEquals("the 26th has its own request", 1, buckets.first { it.label == "26" }.total.requests)
+        assertEquals("and the 28th has its own", 1, buckets.first { it.label == "28" }.total.requests)
     }
 
     @Test
@@ -263,6 +348,18 @@ class RequestStatsTest {
         assertEquals("and the numbers survived the round trip", 1000L, rows.single().prompt)
         assertEquals("including the cache", 500L, rows.single().cached)
         assertEquals("and the thinking", 2L, rows.single().reasoning)
-        assertEquals("one day kept", 1, RequestStats.days(rows, now))
+        // **Coverage, not length.** The old assertion counted days from the oldest row to now,
+        // which ignored the anchor and returned a negative number for a container in the past.
+        assertTrue(
+            "the log covers the day it was written in",
+            RequestStats.covers(rows, RequestStats.container(RequestStats.Axis.DAY, now)),
+        )
+        assertFalse(
+            "and not a month it has never seen",
+            RequestStats.covers(
+                rows,
+                RequestStats.container(RequestStats.Axis.DAY, now - 200L * 24 * 60 * 60 * 1000),
+            ),
+        )
     }
 }

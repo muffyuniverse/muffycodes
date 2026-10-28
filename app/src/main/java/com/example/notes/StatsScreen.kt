@@ -4,6 +4,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -69,14 +70,31 @@ fun StatsScreen(
 ) {
     var axis by remember { mutableStateOf(RequestStats.Axis.DAY) }
 
-    // **Where the table ends.** The axis says how wide a bucket is; this says which bucket is the
-    // last one. It starts at now and moves when a person picks a time - which is the difference
-    // between "what did today cost" and "what did that Tuesday cost", and only one of those can be
-    // answered by a clock.
+    /**
+     * **The one instant the whole screen is about**, and the only thing the picker sets.
+     *
+     * Every view is computed from this: pick 12:00 on 25 October 2026 and the hour axis shows that
+     * day's twenty-four hours, the day axis shows October 2026, and the month axis shows all of
+     * 2026 — three containers, one selection. That is why there is no per-axis picker here: the
+     * axis says which *granularity of time* to read this instant at, so switching axis must not
+     * change the instant, and picking a date must not change the axis.
+     *
+     * It starts at [now], which gives the default the operator asked for: the current hour, the
+     * current day, the current month and the current year, all at once.
+     */
     var anchor by remember { mutableStateOf(now) }
     var picking by remember { mutableStateOf(false) }
+    // The dialog's own state, reset from `anchor` every time it is opened — a picker that kept its
+    // last selection would open a month away from the table it describes.
     val picker = rememberDatePickerState(initialSelectedDateMillis = anchor)
     val pickedMs = picker.selectedDateMillis
+    // The time of day, as three numbers the client side owns: Material's DatePicker picks a DATE,
+    // and the hour axis needs the hour. Kept separately from the date so choosing a date never
+    // silently resets 12:00 to midnight.
+    val anchorHour = java.time.Instant.ofEpochMilli(anchor)
+        .atZone(java.time.ZoneId.systemDefault()).toLocalTime()
+    var pickedHour by remember { mutableStateOf(anchorHour.hour) }
+    var pickedMinute by remember { mutableStateOf(anchorHour.minute) }
 
     // **Read when the screen opens, not while it is open.** The log is appended to on every
     // response, including the keepalives sent while nobody is looking, so a table that watched the
@@ -84,8 +102,11 @@ fun StatsScreen(
     // reader's eyes. What the report asked for was a table counted on opening, which is also the
     // only version whose numbers are stable enough to compare.
     val rows = remember(accountDir) { RequestStats.read(accountDir) }
-    val days = remember(rows, anchor) { RequestStats.days(rows, anchor) }
+    val box = remember(axis, anchor) { RequestStats.container(axis, anchor) }
     val buckets = remember(rows, axis, anchor) { RequestStats.buckets(rows, axis, anchor) }
+    // **Whether the log reaches back this far**, which is not the same as "nothing happened".
+    val covered = remember(rows, box) { RequestStats.covers(rows, box) }
+    val oldest = remember(rows) { RequestStats.oldest(rows) }
 
     Scaffold(
         topBar = {
@@ -124,15 +145,18 @@ fun StatsScreen(
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        // The span, in the app's own words, so the table never has to be counted
-                        // backwards to know what it covers.
-                        RequestStats.span(axis, anchor) +
-                            // A count with "(s)" after it is a placeholder that was never replaced.
-                            " · " + when (days) {
-                                0 -> "no log yet"
-                                1 -> "1 day kept"
-                                else -> "$days days kept"
-                            },
+                        // **The container's name, then whether the log reaches it.** Two facts,
+                        // because they answer two different questions: "what am I looking at" and
+                        // "is an empty column here because nothing happened, or because nothing was
+                        // recorded yet". The old caption answered neither - it said how many days
+                        // the whole log held, which for a container in the past was a negative
+                        // number.
+                        RequestStats.span(axis, anchor) + when {
+                            rows.isEmpty() -> " · no log yet"
+                            covered -> " · from the log"
+                            oldest == null -> " · no log yet"
+                            else -> " · the log starts " + StatsFormat.day(oldest)
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f),
@@ -140,7 +164,20 @@ fun StatsScreen(
                     // **A picker rather than only "now"**, because most cost questions are about a
                     // time that has already gone: what a Tuesday cost, and whether last month was
                     // more expensive than this one.
-                    TextButton(onClick = { Trace.tap("stats date", "open"); picking = true }) {
+                    //
+                    // One button, one meaning: it sets the instant, and the axis decides how to
+                    // read it. Labelling it per axis ("Which month") was wrong - it implied the
+                    // picker asked a different question depending on which axis was showing, when
+                    // the whole point is that one selection answers all three.
+                    TextButton(onClick = {
+                        Trace.tap("stats date", "open")
+                        // The dialog opens on what the table is showing, not on wherever it was
+                        // last left - it is a view of the anchor, not a place of its own.
+                        picker.selectedDateMillis = anchor
+                        pickedHour = anchorHour.hour
+                        pickedMinute = anchorHour.minute
+                        picking = true
+                    }) {
                         Text("When")
                     }
                 }
@@ -148,9 +185,11 @@ fun StatsScreen(
 
             if (picking) {
                 item {
-                    // **Material's own picker, in a dialog.** A hand-rolled calendar would be a
-                    // second date implementation to keep correct, and the platform's already knows
-                    // about leap years, month lengths and the first day of the week.
+                    // **Material's own calendar, plus the time of day.** The operator asked for a
+                    // picker over "hour, day, month, year" and for a standard Android picker; the
+                    // platform's picks a DATE, so the hour and minute are added underneath rather
+                    // than reimplementing a calendar to get them. That combination is the smallest
+                    // honest way to select an instant.
                     DatePickerDialog(
                         onDismissRequest = { picking = false },
                         confirmButton = {
@@ -158,15 +197,18 @@ fun StatsScreen(
                                 onClick = {
                                     pickedMs?.let { utcMidnight ->
                                         // **The picker returns UTC midnight of the chosen day.** Used
-                                        // as-is, a phone west of UTC would anchor on the previous
-                                        // local day and the table would describe a day ago. The date
-                                        // is converted: take the UTC date it names and put it at the
-                                        // *end* of that day in the device's zone, so the chosen day
-                                        // is the last bucket shown rather than the first one cut off.
+                                        // as-is, a phone west of UTC would land on the previous local
+                                        // day, so the UTC date it names is read first and then
+                                        // rebuilt in the device's zone at the chosen time of day.
+                                        //
+                                        // `atZone(...).toInstant()` on a local date-time that does not
+                                        // exist - the hour a zone springs forward - resolves forward
+                                        // to the next real instant instead of throwing, which is why
+                                        // this is safe for any hour the person can choose.
                                         val day = java.time.Instant.ofEpochMilli(utcMidnight)
                                             .atZone(java.time.ZoneOffset.UTC)
                                             .toLocalDate()
-                                        val chosen = day.atTime(23, 59, 59)
+                                        val chosen = day.atTime(pickedHour, pickedMinute)
                                             .atZone(java.time.ZoneId.systemDefault())
                                             .toInstant()
                                             .toEpochMilli()
@@ -181,7 +223,34 @@ fun StatsScreen(
                             TextButton(onClick = { picking = false }) { Text("Cancel") }
                         },
                     ) {
-                        DatePicker(state = picker)
+                        Column {
+                            DatePicker(state = picker)
+                            // The time of day. Two compact steppers rather than a clock face: a
+                            // clock is a large control for a screen whose subject is a table, and
+                            // the hour is the only part the hour axis reads.
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 24.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text("At", style = MaterialTheme.typography.bodyMedium)
+                                Spacer(Modifier.width(12.dp))
+                                TimeStepper(
+                                    label = "hour",
+                                    value = pickedHour,
+                                    range = 0..23,
+                                    onChange = { pickedHour = it },
+                                )
+                                Text(":", style = MaterialTheme.typography.bodyMedium)
+                                TimeStepper(
+                                    label = "minute",
+                                    value = pickedMinute,
+                                    range = 0..59,
+                                    onChange = { pickedMinute = it },
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -245,28 +314,22 @@ private fun KindBlock(
     // at all is still drawn: "the keepalive cost nothing" is an answer, and an absent block would
     // leave a person wondering whether the feature was working.
     val total = buckets.map(of).fold(RequestStats.Stats()) { a, b -> a + b }
-    // **One scroll for the whole block, and it starts at the newest column.**
+    // **One scroll for the whole block, and it starts at the OLDEST column.**
     //
     // The scroll is hoisted here because a state remembered inside each row is a separate scroll
     // per row: dragging one row would move its numbers off the column labels every other row is
     // still showing, and the table would quietly stop being a table.
     //
-    // It starts at the END because the newest bucket is on the right and the right is what a
-    // person opening a cost screen is asking about. Anchored at zero, the thirty-day view opens on
-    // a month of empty columns with today's numbers off-screen - which is exactly what the first
-    // picture of this screen showed.
+    // It starts at the LEFT now, and that reverses an earlier decision. When the columns were a
+    // rolling window ending at "now", the newest column was the question and the table opened at
+    // the right end. The columns are a container's contents now - the days of a month, the months
+    // of a year - and a container is read the way a calendar is: from its beginning. Opening
+    // October at 31 October would be opening a month at its last day.
+    //
+    // `scrollTo` and not `animateScrollTo` because an animated anchor is not an anchor: a picture
+    // once caught it mid-flight, three columns short, and read as a table of nothing.
     val scroll = rememberScrollState()
-    // **Anchored flush to the right, and it JUMPS there.**
-    //
-    // Flush right is what puts the newest column - the one a cost screen is usually asking about -
-    // entirely on screen. Two attempts to tidy the left edge got this wrong: rounding the target
-    // down to a whole cell scrolled back by the viewport's remainder, which clips the RIGHT edge
-    // instead, so today's column became the cut one. A table that scrolls sideways always shows a
-    // partial column at one end; the end to sacrifice is the oldest.
-    //
-    // `scrollTo` and not `animateScrollTo` because an animated anchor is not an anchor: the picture
-    // caught it mid-flight, three columns short of today, which reads as a table of nothing.
-    LaunchedEffect(scroll.maxValue) { scroll.scrollTo(scroll.maxValue) }
+    LaunchedEffect(scroll.maxValue) { scroll.scrollTo(0) }
 
     Text(
         title + "  ·  " + StatsFormat.count(total.requests) + " requests",
@@ -284,22 +347,37 @@ private fun KindBlock(
             scroll = scroll,
         )
         MetricRow("requests", buckets.map { StatsFormat.count(of(it).requests) }, scroll = scroll)
+        // **Input, cached and output, each as one cell: the absolute and its share.**
+        //
+        // `cached` is a subset of `input`, so it gets its own row rather than being added to it -
+        // but its cell carries both numbers for the same reason `input`'s does: "3.2k (91.7%)" says
+        // how much and how much of the whole in one reading. The first version drew the share on a
+        // separate muted line under the absolute, which made it look like a different measurement.
         MetricRow(
             name = "input",
             cells = buckets.map { StatsFormat.tokens(of(it).promptTokens) },
             scroll = scroll,
         )
         MetricRow(
-            // The share, directly under the thing it is a share of, so the two read as one fact.
             name = "  · cached",
-            cells = buckets.map { StatsFormat.share(of(it).cachedShare) },
+            cells = buckets.map {
+                StatsFormat.absoluteAndShare(
+                    StatsFormat.tokens(of(it).cachedTokens),
+                    of(it).cachedShare,
+                )
+            },
             scroll = scroll,
             muted = true,
         )
         MetricRow("output", buckets.map { StatsFormat.tokens(of(it).completionTokens) }, scroll = scroll)
         MetricRow(
             name = "  · thinking",
-            cells = buckets.map { StatsFormat.share(of(it).thinkingShare) },
+            cells = buckets.map {
+                StatsFormat.absoluteAndShare(
+                    StatsFormat.tokens(of(it).reasoningTokens),
+                    of(it).thinkingShare,
+                )
+            },
             scroll = scroll,
             muted = true,
         )
@@ -311,15 +389,63 @@ private fun KindBlock(
             MetricRow("  · written", buckets.map { StatsFormat.tokens(of(it).saidChars) }, scroll = scroll, muted = true)
             MetricRow("  · thought", buckets.map { StatsFormat.tokens(of(it).thinkingChars) }, scroll = scroll, muted = true)
         }
-        MetricRow("per request $", buckets.map { StatsFormat.perRequest(of(it).perRequest) }, scroll = scroll)
-        MetricRow("per M in $", buckets.map { StatsFormat.perMillion(of(it).perMillionInput) }, scroll = scroll)
-        MetricRow("per M out $", buckets.map { StatsFormat.perMillion(of(it).perMillionOutput) }, scroll = scroll)
+        MetricRow("per request", buckets.map { StatsFormat.perRequest(of(it).perRequest) }, scroll = scroll)
+        MetricRow("per M in", buckets.map { StatsFormat.perMillion(of(it).perMillionInput) }, scroll = scroll)
+        MetricRow("per M out", buckets.map { StatsFormat.perMillion(of(it).perMillionOutput) }, scroll = scroll)
         HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
     }
 }
 
-/** How wide one column is. A named constant because the scroll anchors to a multiple of it. */
-private val CELL_DP = 64
+/**
+ * One number the person steps up and down: `hour` or `minute`.
+ *
+ * **A stepper rather than a text field**, because the value is a bounded integer and typing "7" into
+ * an hour field has to answer what happens at 7 versus 07. Two buttons that wrap cannot produce an
+ * invalid time, so the confirm button never has to explain itself.
+ */
+@Composable
+private fun TimeStepper(
+    label: String,
+    value: Int,
+    range: IntRange,
+    onChange: (Int) -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        TextButton(
+            onClick = {
+                onChange(if (value <= range.first) range.last else value - 1)
+                Trace.tap("stats time", "$label-")
+            },
+        ) { Text("\u2212") }
+        Text(
+            String.format(java.util.Locale.UK, "%02d", value),
+            style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace),
+        )
+        TextButton(
+            onClick = {
+                onChange(if (value >= range.last) range.first else value + 1)
+                Trace.tap("stats time", "$label+")
+            },
+        ) { Text("+") }
+    }
+}
+
+/**
+ * How wide one column is.
+ *
+ * **Widened from 64 for the one-cell shares.** A cell now holds `24.0k (91.7%)`, which is thirteen
+ * characters; at 64dp a monospace bodySmall fits about nine, so the share would have been ellipsed
+ * in exactly the row it was added for. 104dp fits the longest realistic cell - `328.4k (100.0%)` -
+ * and costs width: 104dp instead of 64 means three columns visible on a 411dp phone rather than
+ * four and a half.
+ *
+ * The name gutter narrows from 96dp to 88dp, and the three rate rows were renamed rather than
+ * given the room: `per request $` is thirteen characters and does not fit a narrow gutter, while
+ * `per req` says the same thing in two fewer. The labels are the cheapest thing on the screen to
+ * shorten - a column is not.
+ */
+private val CELL_DP = 104
+private val GUTTER_DP = 88
 
 /**
  * One metric, as a name and one cell per bucket.
@@ -350,7 +476,7 @@ private fun MetricRow(
                 MaterialTheme.colorScheme.onSurface
             },
             maxLines = 1,
-            modifier = Modifier.width(96.dp),
+            modifier = Modifier.width(GUTTER_DP.dp),
         )
         Row(modifier = Modifier.horizontalScroll(scroll)) {
             for (cell in cells) {
