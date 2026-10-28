@@ -310,47 +310,39 @@ fun StatsScreen(
                 // shares, then the cost and the two derived rates.
                 item {
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        MetricRow(
-                            name = "",
-                            // The single column's heading: what the interval is, in hours, so the
-                            // figure has a scale rather than being a number with no extent.
-                            cells = listOf(StatsFormat.hours(span.hours)),
-                            header = true,
-                        )
-                        MetricRow("requests", listOf(StatsFormat.count(totals.total.requests)))
-                        MetricRow("input", listOf(StatsFormat.tokens(totals.total.promptTokens)))
+                        // **No column heading, because the caption above already is one.** It
+                        // reads "15 hours · from the log" and a header cell reading "15 hours"
+                        // directly beneath it is the same fact twice - which a screenshot shows at
+                        // once and no assertion would ever notice, since both are individually
+                        // true.
+                        MetricRow("requests", StatsFormat.count(totals.total.requests))
+                        MetricRow("input", StatsFormat.tokens(totals.total.promptTokens))
                         MetricRow(
                             "  · cached",
-                            listOf(
-                                StatsFormat.absoluteAndShare(
-                                    StatsFormat.tokens(totals.total.cachedTokens),
-                                    totals.total.cachedShare,
-                                ),
+                            StatsFormat.absoluteAndShare(
+                                StatsFormat.tokens(totals.total.cachedTokens),
+                                totals.total.cachedShare,
                             ),
                             muted = true,
                         )
-                        MetricRow("output", listOf(StatsFormat.tokens(totals.total.completionTokens)))
+                        MetricRow("output", StatsFormat.tokens(totals.total.completionTokens))
                         MetricRow(
                             "  · thinking",
-                            listOf(
-                                StatsFormat.absoluteAndShare(
-                                    StatsFormat.tokens(totals.total.reasoningTokens),
-                                    totals.total.thinkingShare,
-                                ),
+                            StatsFormat.absoluteAndShare(
+                                StatsFormat.tokens(totals.total.reasoningTokens),
+                                totals.total.thinkingShare,
                             ),
                             muted = true,
                         )
                         MetricRow(
                             "cost $",
-                            listOf(
-                                StatsFormat.cost(
-                                    totals.total.cost.takeIf { _ -> totals.total.costReported > 0 },
-                                ),
+                            StatsFormat.cost(
+                                totals.total.cost.takeIf { _ -> totals.total.costReported > 0 },
                             ),
                         )
-                        MetricRow("per request", listOf(StatsFormat.perRequest(totals.total.perRequest)))
-                        MetricRow("per M in", listOf(StatsFormat.perMillion(totals.total.perMillionInput)))
-                        MetricRow("per M out", listOf(StatsFormat.perMillion(totals.total.perMillionOutput)))
+                        MetricRow("per request", StatsFormat.perRequest(totals.total.perRequest))
+                        MetricRow("per M in", StatsFormat.perMillion(totals.total.perMillionInput))
+                        MetricRow("per M out", StatsFormat.perMillion(totals.total.perMillionOutput))
                         HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
                     }
                 }
@@ -361,13 +353,17 @@ fun StatsScreen(
                     item {
                         Column(modifier = Modifier.fillMaxWidth()) {
                             Text(
+                                // **Singular when it is one.** "1 requests" is the kind of thing a
+                                // screenshot catches and an assertion does not: the number was
+                                // right, the sentence around it was wrong.
                                 "Answers that stopped  ·  " +
-                                    StatsFormat.count(totals.stalls.requests) + " requests",
+                                    StatsFormat.count(totals.stalls.requests) +
+                                    if (totals.stalls.requests == 1L) " request" else " requests",
                                 style = MaterialTheme.typography.titleSmall,
                                 modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
                             )
-                            MetricRow("written", listOf(StatsFormat.tokens(totals.stalls.saidChars)))
-                            MetricRow("thought", listOf(StatsFormat.tokens(totals.stalls.thinkingChars)))
+                            MetricRow("written", StatsFormat.tokens(totals.stalls.saidChars))
+                            MetricRow("thought", StatsFormat.tokens(totals.stalls.thinkingChars))
                             HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
                         }
                     }
@@ -383,8 +379,7 @@ fun StatsScreen(
                             "reaches into a compacted hour counts that hour whole.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 12.dp),
-                    )
+                        modifier = Modifier.padding(top = 12.dp)
                 }
             }
         }
@@ -471,20 +466,11 @@ private fun TimeStepper(
  * on the right, which is what a table of one column always was.
  */
 @Composable
-private fun MetricRow(
-    name: String,
-    cells: List<String>,
-    header: Boolean = false,
-    muted: Boolean = false,
-) {
+private fun MetricRow(name: String, cell: String, muted: Boolean = false) {
     Row(modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
         Text(
             name,
-            style = if (header) {
-                MaterialTheme.typography.labelSmall
-            } else {
-                MaterialTheme.typography.bodyMedium
-            },
+            style = MaterialTheme.typography.bodyMedium,
             color = if (muted) {
                 MaterialTheme.colorScheme.onSurfaceVariant
             } else {
@@ -494,18 +480,13 @@ private fun MetricRow(
             modifier = Modifier.weight(1f),
         )
         Text(
-            cells.firstOrNull().orEmpty(),
-            style = if (header) {
-                MaterialTheme.typography.labelSmall
-            } else {
-                MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace)
-            },
-            color = if (header) {
+            cell,
+            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+            color = if (muted) {
                 MaterialTheme.colorScheme.onSurfaceVariant
             } else {
                 MaterialTheme.colorScheme.onSurface
             },
-            textAlign = TextAlign.End,
             maxLines = 1,
         )
     }
