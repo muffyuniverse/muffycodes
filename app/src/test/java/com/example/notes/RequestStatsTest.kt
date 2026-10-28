@@ -92,7 +92,7 @@ class RequestStatsTest {
     }
 
     @Test
-    fun `one pick is three columns, and each runs from its own start to the pick`() {
+    fun `one pick is five columns, and each runs from its own start to the pick`() {
         // **This is the table.** Pick 12:45 on 25 October 2026 and there are exactly three
         // columns, all ending at 12:45 and each starting at the boundary of its own span:
         //
@@ -109,24 +109,29 @@ class RequestStatsTest {
             .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val buckets = RequestStats.buckets(listOf(), at)
         assertEquals(
-            "what each column is",
-            listOf("12:00–12:45", "25 Oct", "Oct 2026"),
+            "what each column is - five nested spans of one instant",
+            listOf("12:00–12:45", "25 Oct", "Oct 2026", "2026", "all"),
             buckets.map { it.label },
         )
         assertEquals(
-            "and where it starts - the hour names both ends, the others only their start",
-            listOf("", "from 00:00", "from the 1st"),
+            "and where it starts: the hour names both ends, the rest only their start",
+            listOf("", "from 00:00", "from the 1st", "from 1 Jan", "from the first row"),
             buckets.map { it.sub },
         )
     }
 
     @Test
-    fun `all three columns stop at the pick, and start at their own boundary`() {
+    fun `every column stops at the pick, and starts at its own boundary`() {
         // The bounds themselves, not just the labels - a label can agree with a bug.
         val local = LocalDate.parse("2026-10-25").atTime(12, 45)
         val zone = ZoneId.systemDefault()
         val at = local.atZone(zone).toInstant().toEpochMilli()
-        val (hour, day, month) = RequestStats.SPANS.map { RequestStats.container(it, at, zone) }
+        // **Five spans, so index them rather than destructuring three.** The first three are the
+        // ones pinned here; year and total start at the 1st of January and at the oldest row.
+        val spans = RequestStats.SPANS.map { RequestStats.container(it, at, zone) }
+        val hour = spans[0]
+        val day = spans[1]
+        val month = spans[2]
 
         fun ms(l: java.time.LocalDateTime) = l.atZone(zone).toInstant().toEpochMilli()
 
@@ -221,21 +226,21 @@ class RequestStatsTest {
     }
 
     @Test
-    fun `the three columns overlap, because an hour is part of its day`() {
+    fun `the columns overlap, because an hour is part of its day`() {
         // **Overlap is the point, not a bug.** A request at 12:30 on the 25th belongs to all three
         // columns: it is in that hour, that day, and that month. Three disjoint windows could not
         // answer "what did this hour cost, and what is it part of".
         val rows = listOf(
             RequestStats.parse(row(day = "2026-10-25", at = "12:30:00.000", prompt = "1000", cost = "0.001"))!!,
         )
-        val at = LocalDate.parse("2026-10-25").atTime(12, 0)
+        val at = LocalDate.parse("2026-10-25").atTime(12, 45)
             .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val buckets = RequestStats.buckets(rows, at)
 
         assertEquals("counted in the hour", 1, buckets[0].total.requests)
         assertEquals("and in the day", 1, buckets[1].total.requests)
         assertEquals("and in the month", 1, buckets[2].total.requests)
-        // And the money is counted once per column, which is what makes the three comparable.
+        // And the money is counted once per column, which is what makes them comparable.
         assertEquals(0.001, buckets[0].total.cost, 1e-12)
         assertEquals(0.001, buckets[2].total.cost, 1e-12)
     }
@@ -266,7 +271,7 @@ class RequestStatsTest {
             RequestStats.parse(row(day = "2026-10-25", at = "12:30:00.000", prompt = "1000", cost = "0.001"))!!,
             RequestStats.parse(row(day = "2026-10-25", at = "12:40:00.000", kind = "stall", prompt = "", cost = ""))!!,
         )
-        val at = LocalDate.parse("2026-10-25").atTime(12, 0)
+        val at = LocalDate.parse("2026-10-25").atTime(12, 45)
             .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val hour = RequestStats.buckets(rows, at)[0]
 
@@ -280,18 +285,18 @@ class RequestStatsTest {
         // **The bug this pins was live for one edit.** The clock time was being combined with the
         // day the screen opened, which put every line from every file into today.
         //
-        // With three columns the distinction shows up inside the day as well: a row at 09:00 and a
-        // row at 12:30 are both "today" and both "October", but only one of them is in the 12:00
-        // column. A table that placed rows by the opening day could not tell them apart.
+        // The distinction shows up inside the day as well: a row at 09:00 and a row at 12:30 are
+        // both "today" and both "October", but only one of them is in the 12:00-12:45 column. A
+        // table that placed rows by the opening day could not tell them apart.
         val rows = listOf(
             RequestStats.parse(row(day = "2026-10-25", at = "09:00:00.000"))!!,
             RequestStats.parse(row(day = "2026-10-25", at = "12:30:00.000"))!!,
         )
-        val at = LocalDate.parse("2026-10-25").atTime(12, 0)
+        val at = LocalDate.parse("2026-10-25").atTime(12, 45)
             .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val buckets = RequestStats.buckets(rows, at)
 
-        assertEquals("only the 12:30 row is in the 12:00 hour", 1, buckets[0].total.requests)
+        assertEquals("only the 12:30 row is in the 12:00-12:45 hour", 1, buckets[0].total.requests)
         assertEquals("both are in the day", 2, buckets[1].total.requests)
         assertEquals("and both in the month", 2, buckets[2].total.requests)
     }
@@ -324,11 +329,15 @@ class RequestStatsTest {
             java.time.format.DateTimeFormatter.ofPattern("HH:00")
                 .format(java.time.Instant.ofEpochMilli(instant).atZone(zone))
 
-        // **The hour column is index 0**, and the whole three-column table is compared rather than
-        // a label searched for: a row outside the hour column would have been dropped, and asking
-        // the hour column directly is what catches that.
-        val berlinHour = RequestStats.buckets(rows, instant, berlinZone)[0].label
-        val laHour = RequestStats.buckets(rows, instant, laZone)[0].label
+        // **The hour column is index 0**, and it is read directly rather than searched for: a row
+        // outside the hour column would have been dropped, and asking the hour column is what
+        // catches that.
+        //
+        // The column is a **range** ending at the pick (`13:00–13:14`), so the assertion is against
+        // the label's start, not the whole label - the zone decides where the hour begins, and the
+        // pick decides where it ends in either zone.
+        val berlinHour = RequestStats.buckets(rows, instant, berlinZone)[0].label.substringBefore('–')
+        val laHour = RequestStats.buckets(rows, instant, laZone)[0].label.substringBefore('–')
 
         assertEquals("Berlin's own hour", expectedHourIn(berlinZone), berlinHour)
         assertEquals("and the hour that instant is in Los Angeles", expectedHourIn(laZone), laHour)
