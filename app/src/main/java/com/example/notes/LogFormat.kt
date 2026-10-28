@@ -23,25 +23,43 @@ import java.util.Locale
 object LogFormat {
 
     private val clock = object : ThreadLocal<SimpleDateFormat>() {
-        // **The date is in the stamp, and it is one token.** The report asked for a footer showing
-        // "time, date and id", and the record could not answer it: the stamp was `HH:mm:ss.SSS`,
-        // so a conversation that crossed midnight had two rows reading `23:59` and `00:01` with
-        // nothing to say which day either was on. Putting the date in a *second* column would have
-        // moved every column after it; putting it in the same token with a `T` between them keeps
-        // the row's shape — the parser reads the stamp as one `\S+` — so a log written by an older
-        // build still parses, and its rows simply have no date to show.
+        override fun initialValue() = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+    }
+
+    /**
+     * `14:02:11.410` — the **trace's** first column.
+     *
+     * The trace is a running log of what the app did, read by a person scrolling it and by shell
+     * scripts that count fields; its header documents `time build state id kind name detail` and
+     * its parser reads a bare time. A date here would move every field after it, so the trace keeps
+     * the shape it has.
+     */
+    fun stamp(at: Long): String = clock.get()!!.format(Date(at))
+
+    private val dayClock = object : ThreadLocal<SimpleDateFormat>() {
         override fun initialValue() = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS", Locale.US)
     }
 
-    /** `2026-10-28T14:02:11.410` — from the epoch millis the app records. */
-    fun stamp(at: Long): String = clock.get()!!.format(Date(at))
+    /**
+     * `2026-10-28T14:02:11.410` — the **record's** first column, which carries the day.
+     *
+     * Report 36 asked the chat's footer for "time, date and id", and the record could not answer
+     * it: a conversation that crosses midnight has two rows reading `23:59` and `00:01` with
+     * nothing to say which day either was on.
+     *
+     * **The date is in the same token, with a `T` between them, rather than in a new column.** The
+     * record's parser reads its stamp as one `\S+`, so a second column would have moved every
+     * column after it and stopped a log written by an older build from parsing at all. One token
+     * keeps the row's shape; an old row simply has no day to show.
+     */
+    fun recordStamp(at: Long): String = dayClock.get()!!.format(Date(at))
 
     /**
      * The date and the time, apart, for a screen that shows them separately.
      *
-     * A stamp that is only a time — one written before the date joined it — answers with a blank
-     * date rather than with today's, because a row from yesterday labelled with today is worse
-     * than a row with no date at all.
+     * A stamp that is only a time — one written before the date joined it, or a trace row — answers
+     * with a blank date rather than with today's, because a row from yesterday labelled with today
+     * is worse than a row with no date at all.
      */
     fun day(stamp: String): String = stamp.substringBefore('T', "")
     fun time(stamp: String): String = if (stamp.contains('T')) stamp.substringAfter('T') else stamp
@@ -149,7 +167,7 @@ object LogFormat {
         answers: Int = 0,
         name: String,
         detail: String,
-    ): String = recordRow(stamp(at), id, size, kind, ctx, answers, name, detail)
+    ): String = recordRow(recordStamp(at), id, size, kind, ctx, answers, name, detail)
 
     /**
      * The same record row from a stamp that is already text.

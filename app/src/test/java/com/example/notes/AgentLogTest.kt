@@ -214,7 +214,14 @@ class AgentLogTest {
         val clock = LogFormat.time(row.stamp)
         assertTrue("the day is in the stamp: ${row.stamp}", Regex("""^\d{4}-\d{2}-\d{2}$""").matches(day))
         assertTrue("and so is the time: ${row.stamp}", Regex("""^\d{2}:\d{2}:\d{2}\.\d{3}$""").matches(clock))
-        assertEquals("together they are today", LogFormat.day(LogFormat.stamp(System.currentTimeMillis())), day)
+        assertEquals(
+            "together they are today",
+            LogFormat.day(LogFormat.recordStamp(System.currentTimeMillis())),
+            day,
+        )
+        // **The trace keeps a bare time.** It is a different log with a different first column, and
+        // its header and its shell readers both count fields from there.
+        assertFalse("the trace's stamp has no date", LogFormat.stamp(0L).contains('T'))
         // **One token, so the row's columns do not move.** A stamp with a space in it would have
         // made the id look like part of the time.
         assertEquals("the stamp is one word", 1, row.stamp.split(" ").size)
