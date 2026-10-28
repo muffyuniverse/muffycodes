@@ -513,4 +513,125 @@ object RequestStats {
      */
     fun oldest(rows: List<Row>): Long? = rows.minOfOrNull { it.atMs }
 
+    // ---- rolling up ----------------------------------------------------------
+
+    /**
+     * One aggregate row's worth of numbers: what [rollup] produces for a span of raw rows.
+     *
+     * No `kind`, no `ms`, no `provider`, no `model`, no `finish`: none of them is additive, so an
+     * aggregate has nothing true to say about any of them. They are the fields a rollup loses, and
+     * losing them is the accepted price of not re-reading a year of requests to draw a month.
+     */
+    data class Rolled(
+        val fromMs: Long,
+        val span: String,
+        val requests: Long,
+        val costReported: Long,
+        val prompt: Long,
+        val cached: Long,
+        val completion: Long,
+        val reasoning: Long,
+        val cost: Double,
+        val said: Long,
+        val thinking: Long,
+    )
+
+    /**
+     * The aggregate for [span] covering the rows in [rows], or null when they hold nothing.
+     *
+     * **A pure function of rows and a unit boundary**, so the arithmetic that decides a month's
+     * money can be tested without a file, a clock or a worker. [floorOf] is the boundary of the
+     * unit — passed in rather than computed, because the zone is the caller's business and the
+     * compactor must aggregate by **UTC** to survive a clock change (see the plan, §3).
+     *
+     * **Only closed units are rolled.** A caller that asks for the current hour would be storing an
+     * aggregate that is about to stop being true, and the next append would contradict it. That
+     * decision is the caller's, which is why this function does not take a clock.
+     */
+    fun rollup(rows: List<Row>, span: String, floorOf: Long): Rolled? {
+        if (rows.isEmpty()) return null
+        var requests = 0L
+        var costReported = 0L
+        var prompt = 0L
+        var cached = 0L
+        var completion = 0L
+        var reasoning = 0L
+        var cost = 0.0
+        var said = 0L
+        var thinking = 0L
+        for (row in rows) {
+            // **`row.requests`, not 1**, for the same reason `buckets` uses it: an aggregate may
+            // already be an aggregate if a coarser level is built from a finer one, and counting
+            // every contributing row as one would make a month of hours read as 720 requests.
+            requests += row.requests
+            costReported += row.costReported
+            prompt += row.prompt ?: 0
+            cached += row.cached ?: 0
+            completion += row.completion ?: 0
+            reasoning += row.reasoning ?: 0
+            cost += row.cost ?: 0.0
+            said += row.said ?: 0
+            thinking += row.thinking ?: 0
+        }
+        return Rolled(
+            fromMs = floorOf,
+            span = span,
+            requests = requests,
+            costReported = costReported,
+            prompt = prompt,
+            cached = cached,
+            completion = completion,
+            reasoning = reasoning,
+            cost = cost,
+            said = said,
+            thinking = thinking,
+        )
+    }
+
+    /** The UTC hour that contains [ms] — the unit the compactor rolls first. */
+    fun hourFloor(ms: Long): Long = Math.floorDiv(ms, 3_600_000L) * 3_600_000L
+
+    /** The UTC day that contains [ms]. */
+    fun dayFloor(ms: Long): Long = Math.floorDiv(ms, 86_400_000L) * 86_400_000L
+
+    /** The UTC month that contains [ms], as its first millisecond. */
+    fun monthFloor(ms: Long): Long = Instant.ofEpochMilli(ms)
+        .atZone(java.time.ZoneOffset.UTC)
+        .withDayOfMonth(1).truncatedTo(java.time.temporal.ChronoUnit.DAYS)
+        .toInstant().toEpochMilli()
+
+    /** The UTC year that contains [ms], as its first millisecond. */
+    fun yearFloor(ms: Long): Long = Instant.ofEpochMilli(ms)
+        .atZone(java.time.ZoneOffset.UTC)
+        .withDayOfYear(1).truncatedTo(java.time.temporal.ChronoUnit.DAYS)
+        .toInstant().toEpochMilli()
+
+    /**
+     * **The rows that may be rolled into [span], grouped by unit**, each group only if it is closed.
+     *
+     * Closed means the unit ended before [now]: its last millisecond is in the past, so nothing can
+     * append to it any more. An open unit is returned by no group at all, which is what keeps an
+     * aggregate from being contradicted by the next append.
+     */
+    fun closable(rows: List<Row>, span: String, now: Long): Map<Long, List<Row>> {
+        val floor: (Long) -> Long = when (span) {
+            "hour" -> ::hourFloor
+            "day" -> ::dayFloor
+            "month" -> ::monthFloor
+            "year" -> ::yearFloor
+            else -> return emptyMap()
+        }
+        // The unit's width, to tell whether it has ended. Computed by asking the floor function for
+        // the next unit rather than assuming 3600000/86400000: a month and a year are not fixed
+        // widths, and an assumption of 30 days would close February two days late.
+        fun endOf(unitStart: Long): Long = when (span) {
+            "hour" -> unitStart + 3_600_000L
+            "day" -> unitStart + 86_400_000L
+            "month" -> monthFloor(unitStart + 32L * 86_400_000L)
+            else -> yearFloor(unitStart + 366L * 86_400_000L)
+        }
+        return rows
+            .groupBy { floor(it.atMs) }
+            .filterKeys { endOf(it) <= now }
+    }
 }

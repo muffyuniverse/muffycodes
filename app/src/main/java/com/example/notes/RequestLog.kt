@@ -40,6 +40,27 @@ object RequestLog {
     const val SPAN_RAW = "raw"
 
     /**
+     * The `kind` of an aggregate row.
+     *
+     * **An aggregate has no kind of its own**, because it sums turns and keepalives whose kinds
+     * differed. Writing any one of them would be false; writing an empty cell would make a reader
+     * think the line was corrupt. `all` is a word for the thing that is actually true.
+     *
+     * It is also what the parser keys on: a `kind` it does not recognise returns null, so `all`
+     * appearing in the kind column is the marker that says "read this by its span instead".
+     */
+    const val KIND_ALL = "all"
+
+    /**
+     * The `span` values an aggregate may have, narrowest first.
+     *
+     * **No `total`**: there is no total *row*, deliberately. A stored total would be a second,
+     * contradictory fact about the same money the moment any hour is rolled again. The total column
+     * is the sum of the year rows, computed when the table is drawn.
+     */
+    val AGGREGATE_SPANS = listOf("hour", "day", "month", "year")
+
+    /**
      * The columns, in order, and the reason the header is a constant rather than a literal.
      *
      * A log whose columns are only in the code that wrote them is a log that has to be reverse

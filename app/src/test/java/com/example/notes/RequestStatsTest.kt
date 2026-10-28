@@ -59,6 +59,12 @@ class RequestStatsTest {
         buildString {
             append("$utc\t$kind\t1840\tdeepinfra/fp8/flex\tdeepseek\t$prompt\t$cached\t")
             append("$completion\t$reasoning\t$cost\tlength")
+            // **`said` and `thinking` are part of the thirteen base cells** and this helper used to
+            // omit them, which was invisible until columns were appended after them: the span then
+            // landed at index 11 instead of 13 and `parse` read the cost cell as a span. A helper
+            // that writes fewer cells than the writer is a helper describing a file that never
+            // existed.
+            append("\t\t")
             // **The trailing columns are written only when asked for**, so the default helper still
             // produces exactly the line a phone already holds: thirteen cells and no span. That is
             // what makes every existing test a back-compatibility test.
@@ -253,6 +259,81 @@ class RequestStatsTest {
     }
 
     @Test
+    fun `a rollup sums what is additive and counts what is not`() {
+        // **The whole content of a rolled-up row.** Every number here is either a sum or a count,
+        // and the two behave differently: tokens and money add, the number of requests is a count
+        // that must not be computed from the money.
+        val rows = listOf(
+            RequestStats.parse(row(at = "12:10:00.000", prompt = "1000", cached = "900", completion = "10", reasoning = "2", cost = "0.001"))!!,
+            RequestStats.parse(row(at = "12:20:00.000", prompt = "2000", cached = "1800", completion = "20", reasoning = "4", cost = "0.002"))!!,
+            RequestStats.parse(row(at = "12:30:00.000", prompt = "", cached = "", completion = "", reasoning = "", cost = ""))!!,
+        )
+        val at = LocalDate.parse("2026-10-28").atTime(12, 30).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val rolled = RequestStats.rollup(rows, "hour", RequestStats.hourFloor(at))!!
+
+        assertEquals("three requests", 3L, rolled.requests)
+        assertEquals("and two of them reported a cost", 2L, rolled.costReported)
+        assertEquals("tokens add", 3000L, rolled.prompt)
+        assertEquals("including the cached part, which is part of the prompt", 2700L, rolled.cached)
+        assertEquals("money adds", 0.003, rolled.cost, 1e-12)
+        // **The average is over the two that reported**, not the three that ran. Dividing 0.003 by
+        // 3 gives a number that looks like money and is wrong; the count is what prevents it.
+        assertNotEquals("not the average over every request", 0.001, rolled.cost / rolled.requests, 1e-12)
+    }
+
+    @Test
+    fun `an aggregate sums a finer aggregate by its own counts`() {
+        // **Hours into a day.** The contributing rows are themselves aggregates covering 40
+        // requests each, so counting them as one each would make a day of hours read as "24
+        // requests" beside a cost that summed a thousand - and the two numbers would be on screen
+        // next to each other, both looking reasonable.
+        val hours = (0..23).map { h ->
+            RequestStats.parse(row(
+                at = "%02d:00:00.000".format(h), span = "hour", requests = "40", costReported = "38",
+            ))!!
+        }
+        val rolled = RequestStats.rollup(hours, "day", RequestStats.dayFloor(hours.first().atMs))!!
+        assertEquals("24 hours' worth of requests", 960L, rolled.requests)
+        assertEquals("and 24 hours' worth of reported costs", 912L, rolled.costReported)
+    }
+
+    @Test
+    fun `an open unit is never rolled, because the next append would contradict it`() {
+        // **Only closed units.** Rolling the hour we are in would write an aggregate that stops
+        // being true on the next request, and the file would then hold two rows disagreeing about
+        // the same hour - with nothing to say which is right.
+        val now = LocalDate.parse("2026-10-28").atTime(12, 30).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val rows = listOf(
+            RequestStats.parse(row(at = "11:30:00.000"))!!, // the previous hour: closed
+            RequestStats.parse(row(at = "12:10:00.000"))!!, // this hour: still open
+        )
+        val closable = RequestStats.closable(rows, "hour", now)
+
+        assertEquals("one closed hour", 1, closable.size)
+        assertTrue(
+            "and it is the 11:00 one",
+            closable.keys.single() == RequestStats.hourFloor(rows.first().atMs),
+        )
+    }
+
+    @Test
+    fun `a month is closed by its own length, not by thirty days`() {
+        // **February is 28 days and a year is 365**, so a fixed width closes a unit early or late
+        // and the aggregate is written while requests can still arrive for it. Checked on the last
+        // instant of each unit: one millisecond before the end it is open, one after it is closed.
+        val feb = LocalDate.parse("2026-02-01")
+        val febStart = RequestStats.monthFloor(
+            feb.atStartOfDay(ZoneId.of("UTC")).toInstant().toEpochMilli(),
+        )
+        val febEnd = feb.plusMonths(1).atStartOfDay(ZoneId.of("UTC")).toInstant().toEpochMilli()
+        val row = listOf(RequestStats.parse(row(day = "2026-02-15", at = "10:00:00.000"))!!)
+
+        assertTrue("February is not closed one second before it ends", RequestStats.closable(row, "month", febEnd - 1).isEmpty())
+        assertEquals("and it is closed when it ends", 1, RequestStats.closable(row, "month", febEnd).size)
+        assertEquals("the boundary is the 1st", febStart, RequestStats.monthFloor(row.first().atMs))
+    }
+
+    @Test
     fun `a line written before the span columns is read as one raw request`() {
         // **Back-compatibility, and it is not a formality.** Every line already on a phone lacks
         // the three columns that came later. Reading a missing span as anything but `raw` would
@@ -269,6 +350,23 @@ class RequestStatsTest {
         // A line with no cost at all: the count is 0, which is what the dash on screen reads.
         val free = RequestStats.parse(row(cost = ""))!!
         assertEquals("nothing reported", 0L, free.costReported)
+    }
+
+    @Test
+    fun `the test helper writes the same number of cells as the writer`() {
+        // **The helper had drifted, and the drift was invisible.** It wrote eleven base cells while
+        // the writer wrote thirteen - it omitted `said` and `thinking` - so once three columns were
+        // appended, `span` landed at index 11 and `parse` read the *cost* cell as a span. Every test
+        // using the helper was then asserting against a file shape that never existed.
+        //
+        // Compared against the real writer rather than against the number 13, so the two cannot
+        // drift apart again in either direction.
+        val written = RequestLog.line(0, RequestLog.Stats(
+            kind = RequestLog.Stats.Kind.TURN, ms = 1840, provider = "p", model = "m",
+            usage = null, finish = "stop",
+        )).split("\t").size
+        val mine = row().split("\t").size
+        assertEquals("the helper describes the same file the writer writes", written, mine)
     }
 
     @Test
