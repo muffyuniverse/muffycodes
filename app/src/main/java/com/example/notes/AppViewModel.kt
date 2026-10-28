@@ -2892,6 +2892,27 @@ class AppViewModel @JvmOverloads constructor(
      * commit the save queued a moment ago. Reading synchronously on the UI thread
      * raced the commit and showed the version before the one that was just saved.
      */
+    /**
+     * Reads the request log on the worker and hands the rows back on the main thread.
+     *
+     * **Why this cannot stay in the screen.** The stats table used to call `RequestStats.read` from
+     * inside a `remember`, which runs during composition — so the whole log was parsed on the main
+     * thread before the first frame drew. At a few hundred rows nobody notices; at ten thousand
+     * requests a day a year of history is millions of lines, and the screen would be a frozen
+     * window for as long as the disk took. This is the same arrangement `requestVersions` and
+     * every other disk read here uses: the work goes to the one worker, and the result is posted
+     * back.
+     *
+     * [onDone] is called on the main thread, so the caller may assign Compose state in it.
+     */
+    fun readRequestStats(onDone: (List<RequestStats.Row>) -> Unit) {
+        val dir = workspace?.accountDir ?: return
+        onWorker {
+            val rows = RequestStats.read(dir)
+            main.post { onDone(rows) }
+        }
+    }
+
     fun requestVersions(onDone: (List<Pair<GitService.CommitInfo, String?>>) -> Unit) {
         onWorker {
             val found = versions()

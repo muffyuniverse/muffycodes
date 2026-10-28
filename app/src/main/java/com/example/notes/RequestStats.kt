@@ -411,15 +411,26 @@ object RequestStats {
     fun read(accountDir: File): List<Row> {
         val file = RequestLog.fileFor(accountDir)
         if (!file.isFile) return emptyList()
-        return try {
+        val rows = ArrayList<Row>()
+        try {
+            // **Line by line, never `readLines()`.** `readLines()` builds a list of every line as a
+            // String *and* then a Row for each, so the peak is both at once: at ten thousand
+            // requests a day that is ~50 MB for a month and ~600 MB for a year, allocated on
+            // whichever thread called this. A `useLines` sequence holds one line at a time and
+            // keeps only the Rows, which are the thing the table actually needs.
+            //
             // **One file, one shape, one read.** A row carries its own instant, so there is no day
             // in a file name to be read against and no neighbour to fetch: the table for any zone
             // is this same single pass.
-            file.readLines().drop(1).mapNotNull { parse(it) }
+            file.useLines { lines ->
+                lines.drop(1).forEach { if (it.isNotBlank()) parse(it)?.let(rows::add) }
+            }
         } catch (t: Throwable) {
-            // A file that cannot be read contributes nothing rather than failing the table.
-            emptyList()
+            // A file that cannot be read contributes nothing rather than failing the table. A file
+            // half read contributes what it read, which is the honest half.
+            return rows
         }
+        return rows
     }
 
     /**

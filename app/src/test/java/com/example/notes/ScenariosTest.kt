@@ -133,7 +133,16 @@ class ScenariosTest {
     /** The cost table, over a real log so the numbers in the picture are numbers. */
     @Composable
     private fun stats(accountDir: java.io.File, now: Long) = Screen {
-        StatsScreen(accountDir = accountDir, onBack = {}, now = now)
+        // **The reader is handed straight through rather than left null.** A null reader means
+        // "rows were supplied already", so with none the screen would sit on "reading" for ever and
+        // the picture would be of a screen that never finished. Reading synchronously here is
+        // honest: a scenario has one account and one thread and nothing to keep responsive.
+        StatsScreen(
+            accountDir = accountDir,
+            onBack = {},
+            now = now,
+            readRows = { onDone -> onDone(RequestStats.read(accountDir)) },
+        )
     }
 
     /**

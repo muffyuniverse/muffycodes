@@ -364,6 +364,9 @@ private fun AppRoot(viewModel: AppViewModel) {
         showStats && viewModel.workspace != null -> StatsScreen(
             accountDir = viewModel.workspace!!.accountDir,
             onBack = { showStats = false },
+            // The log is read on the app's worker and posted back, never in composition: see
+            // AppViewModel.readRequestStats.
+            readRows = { onDone -> viewModel.readRequestStats(onDone) },
         )
         showTrace -> ObservabilityScreen(
             report = traceReport,

@@ -26,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -62,6 +63,8 @@ fun StatsScreen(
     accountDir: java.io.File,
     onBack: () -> Unit,
     now: Long = System.currentTimeMillis(),
+    /** Reads the log off the main thread. Null in tests, which read a temp directory directly. */
+    readRows: (((List<RequestStats.Row>) -> Unit) -> Unit)? = null,
 ) {
     /**
      * **The one instant the whole screen is about**, and the only thing the picker sets.
@@ -100,7 +103,21 @@ fun StatsScreen(
     // files would be re-reading them while the agent wrote to them — and would move under the
     // reader's eyes. What the report asked for was a table counted on opening, which is also the
     // only version whose numbers are stable enough to compare.
-    val rows = remember(accountDir) { RequestStats.read(accountDir) }
+    //
+    // **On the worker, never in composition.** This was a `remember { read(accountDir) }`, which
+    // parses the whole log on the main thread before the first frame: fine for a few hundred rows,
+    // a frozen window for a year of them. [readRows] hands the work to the view model's worker and
+    // posts the result back; when it is null the caller has given us rows already (tests).
+    var rows by remember(accountDir) { mutableStateOf<List<RequestStats.Row>>(emptyList()) }
+    var loaded by remember(accountDir) { mutableStateOf(readRows == null) }
+    LaunchedEffect(accountDir, readRows) {
+        if (readRows != null) {
+            readRows { found ->
+                rows = found
+                loaded = true
+            }
+        }
+    }
     /**
      * **Which columns are drawn.** A drawing rule, never a computation rule: every span is computed
      * from the one [anchor] whatever is ticked, and hiding a column must not move another column's
@@ -156,6 +173,9 @@ fun StatsScreen(
                         // and the sentence that makes the three columns readable: they all stop
                         // here, so the later part of the hour, day and month is not in them.
                         "up to " + StatsFormat.instant(anchor) + when {
+                            // **Not "no log yet" while the read is still running.** Those are two
+                            // different facts and only one of them is about the log.
+                            !loaded -> " · reading"
                             rows.isEmpty() -> " · no log yet"
                             covered -> ""
                             oldest == null -> " · no log yet"
@@ -259,7 +279,7 @@ fun StatsScreen(
                 }
             }
 
-            if (rows.isEmpty()) {
+            if (rows.isEmpty() && loaded) {
                 item {
                     // **An empty table is a sentence, not a grid of zeroes.** A person opening this
                     // before the agent has run should be told why it is empty rather than shown a

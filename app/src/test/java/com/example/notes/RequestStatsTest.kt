@@ -464,6 +464,31 @@ class RequestStatsTest {
     }
 
     @Test
+    fun `the read is a stream: a bad line costs that line and nothing else`() {
+        // **Why this matters beyond tidiness.** The read used to be `readLines().mapNotNull`, which
+        // is correct but allocates every line as a String at once *and* every Row at once. The
+        // streaming version is only equivalent if a line that cannot be parsed still costs exactly
+        // one line, so this pins that: three good rows, one corrupt line between them.
+        val account = tmp.newFolder("stream")
+        val day = LocalDate.parse("2026-10-28")
+        val zone = ZoneId.systemDefault()
+        fun at(h: Int) = day.atTime(h, 0).atZone(zone).toInstant().toEpochMilli()
+        for (h in listOf(9, 11, 12)) {
+            RequestLog.write(account, at(h), RequestLog.Stats(
+                kind = RequestLog.Stats.Kind.TURN, ms = 10, provider = "p", model = "m",
+            ))
+        }
+        // A line with an unparseable instant, written straight into the file: this is what a
+        // half-written record looks like after the process was killed.
+        val file = RequestLog.fileFor(account)
+        file.appendText("not-an-instant\tturn\t10\tp\tm\n")
+
+        val rows = RequestStats.read(account)
+        assertEquals("all three good rows, and the bad one dropped", 3, rows.size)
+        assertEquals("in the order they were written", listOf(at(9), at(11), at(12)), rows.map { it.atMs })
+    }
+
+    @Test
     fun `the log is read from the system project, one file per day`() {
         val account = tmp.newFolder("account")
         val now = LocalDate.parse("2026-10-28").atTime(9, 30).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
