@@ -1,6 +1,6 @@
 # The request history, and who owns which number
 
-Status: **agreed 2026-10-28**. This file records what was accepted and nothing else. Where a
+Status: **agreed 2026-10-28**, partly built — see §7. This file records what was accepted and nothing else. Where a
 proposal was dropped, it says so and why — a plan that silently keeps a rejected idea is how a
 defect gets built twice.
 
@@ -275,3 +275,42 @@ Each step is independently shippable and testable.
 - **Per-request detail beyond the open hour.** Rolled up and gone: model, duration and finish reason
   per row. Nothing displays them today. If "which model cost most last month" is ever wanted, the
   aggregate row needs a small capped model→cost map.
+
+---
+
+## 7. What is built, and what is not
+
+Built and green (CI run 40710242459):
+
+1. **Streamed read, off the main thread.** `RequestStats.read` uses `useLines`; the screen
+   reads through `AppViewModel.readRequestStats` on the worker and says "reading" until it
+   arrives. A half-read file contributes the half it read.
+2. **The three columns.** `span`, `requests`, `cost reported` — **appended, not prepended**
+   (the plan said prepended; the instant is the first cell and prepending would have made
+   every existing line unparseable). An old line reads as `raw`/1.
+3. **The rollup arithmetic**, as pure functions: `rollup`, `hourFloor`/`dayFloor`/`monthFloor`/
+   `yearFloor` in UTC, and `closable` — which computes each unit's end by asking the floor
+   function for the next unit rather than assuming 30 days, so February closes on its own length.
+4. **The compactor** (`RequestLog.compact` + `rollUp`): closed hours rolled, raw rows dropped,
+   `day`/`month`/`year` rebuilt from hours. One `writeWhole` for every rewrite, shared with
+   `prune`. An unparseable line is written back verbatim. Called from `tickAgents`, throttled to
+   ten minutes, on the worker.
+5. **Five columns from one pick** — `year` and `total` spans, and checkboxes that choose which
+   are drawn without changing any number.
+
+Not built:
+
+6. **The reader still ignores aggregates.** `buckets` filters to `span == raw`, marked temporary.
+   It must become the disjoint decomposition (§2): coarsest complete aggregates that partition
+   the span, plus one descending chain. **Until then the table only sees the current hour's raw
+   rows plus any raw rows older than the first compaction** — the aggregates exist on disk and
+   are not read.
+7. **The picker's four granularities** (§1): only a day can be picked directly today.
+8. **Percentages to three decimals** (§1a): `StatsFormat.share` renders one.
+9. **`session.log` `output`/`thinking`** and the `Bubble` wiring (§4): the footer cannot render.
+10. **`requestDays` now needs to bound the hour rows**, which is the pyramid's only retention
+    question — and it is still applied to raw rows by `prune`.
+
+**§7.6 is the one that matters next**: the compactor is writing rows the reader does not read.
+That is safe — the table is correct, it just does not benefit — but it is the whole point of the
+work so far, and it is a single function.

@@ -390,14 +390,55 @@ class RequestStatsTest {
     }
 
     @Test
-    fun `an aggregate row is not counted beside the raw rows it covers`() {
-        // **The double-counting hazard, pinned before the compactor exists.** An aggregate covers
-        // the same requests as the raw lines beneath it. Counting both would double the column with
-        // no sign of failure: the number is still a number, and still plausible.
+    fun `the coarsest aggregate speaks for its unit, and the levels beneath it stay silent`() {
+        // **The disjointness rule, which is the only thing between this table and a number that is
+        // merely plausible.** A day row and its 24 hour rows describe the same requests. Counting
+        // both doubles the day; counting only hours loses nothing but is slower. The rule is: the
+        // coarsest stored level wins, and everything beneath a covered unit is silent.
         //
-        // Until the disjoint decomposition lands, raw is the only level that exists, so an
-        // aggregate is skipped entirely. The assertion proves the filter is real rather than
-        // accidental: the raw row counts, the aggregate beside it does not.
+        // Written as three levels over one month so the assertion can tell them apart.
+        val zone = ZoneId.systemDefault()
+        val at = LocalDate.parse("2026-10-25").atTime(12, 45).atZone(zone).toInstant().toEpochMilli()
+        fun aggregate(span: String, day: String, at: String, requests: String) =
+            RequestStats.parse(
+                row(day = day, at = at, span = span, requests = requests, costReported = requests),
+            )!!
+
+        val month = aggregate("month", "2026-10-01", "00:00:00.000", "500")
+        val days = (1..24).map { d ->
+            aggregate("day", "2026-10-%02d".format(d), "00:00:00.000", "20")
+        }
+        val hour = aggregate("hour", "2026-10-25", "12:00:00.000", "3")
+        val raw = RequestStats.parse(row(day = "2026-10-25", at = "12:30:00.000"))!!
+
+        val monthColumn = RequestStats.buckets(listOf(month, hour, raw) + days, at)[2]
+        assertEquals(
+            "the month row speaks for the whole month, so nothing beneath it is added",
+            500,
+            monthColumn.total.requests,
+        )
+
+        // **And without the month row, the days are the next level down** - the same rule, one
+        // level further: a day that an hour sits inside is counted, the hour beneath it is not.
+        val withDaysOnly = RequestStats.buckets(listOf(hour, raw) + days, at)[2]
+        assertEquals("the 24 day rows", 24 * 20, withDaysOnly.total.requests)
+
+        // **And with neither, the hour and the raw row are what is left.** Nothing above them, so
+        // both count - raw is the floor and is never silenced.
+        val bare = RequestStats.buckets(listOf(hour, raw), at)[2]
+        assertEquals("the hour row and the raw row", 3 + 1, bare.total.requests)
+    }
+
+    @Test
+    fun `an hour aggregate wins over the raw rows it replaced, never beside them`() {
+        // **The direction changed, and this is the point of the pyramid.** When the compactor has
+        // rolled an hour, the raw rows for that hour are deleted - so a file should never hold both.
+        // But a compaction that crashed between writing the aggregate and rewriting the file could,
+        // and that half-written state is exactly what a reader must still get right.
+        //
+        // The rule is not "prefer raw" or "prefer the aggregate": it is that **the coarsest level
+        // speaks for its unit**. So the hour row counts and the raw row is silent, and the answer is
+        // forty - not forty-one, which is what adding both would give.
         val raw = RequestStats.parse(row(day = "2026-10-25", at = "12:30:00.000"))!!
         val aggregate = RequestStats.parse(
             row(day = "2026-10-25", at = "12:00:00.000", span = "hour", requests = "40", costReported = "40"),
@@ -406,7 +447,7 @@ class RequestStatsTest {
             .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val hour = RequestStats.buckets(listOf(raw, aggregate), at)[0]
 
-        assertEquals("one request, not forty-one", 1, hour.total.requests)
+        assertEquals("the hour row speaks for the hour, so forty - not forty-one", 40, hour.total.requests)
     }
 
     @Test

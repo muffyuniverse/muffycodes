@@ -119,6 +119,61 @@ object RequestStats {
         val sub: String,
     )
 
+    /**
+     * The stored aggregates, grouped by level, for one [buckets] draw.
+     *
+     * Keyed by level and sorted by start so [covers] can answer in a scan of one level. A month
+     * does not "equal" the days inside it, so membership has to be **containment**: the day 5 Aug
+     * is covered by the month starting 1 Aug, and a set of exact unit starts could never say so.
+     */
+    private fun row(all: List<Row>): Map<String, List<Long>> =
+        all.filter { it.span != RequestLog.SPAN_RAW }
+            .groupBy { it.span }
+            .mapValues { (_, rows) -> rows.map { it.atMs }.sorted() }
+
+    /** Whether any stored [span] aggregate covers the unit `[from, to)`. */
+    private fun covers(aggregates: Map<String, List<Long>>, span: String, from: Long, to: Long): Boolean =
+        aggregates[span].orEmpty().any { start ->
+            start <= from && to <= unitEnd(span, start)
+        }
+
+    /**
+     * Whether [r] is the level that speaks for its unit.
+     *
+     * **The disjointness rule, in one place.** The coarsest stored aggregate wins; every level
+     * beneath a covered unit stays silent. That is what makes a column a partition rather than a
+     * pile, and it is the only thing standing between the table and a number that is merely
+     * plausible.
+     *
+     * - **Raw is always counted.** Nothing covers raw: it is the floor of the pyramid, and the only
+     *   level that always exists.
+     * - **A coarser row need not be complete for the box.** Aggregates only ever exist for closed
+     *   units - the compactor refuses an open one - so "it exists" already means "it is whole". A
+     *   day row is therefore counted even when the column cuts through it, which is right: the
+     *   alternative is to descend to hours that were deleted once the day was written.
+     */
+    private fun counts(r: Row, covered: Map<String, List<Long>>): Boolean {
+        if (r.span == RequestLog.SPAN_RAW) return true
+        val start = unitFloor(r.span, r.atMs) ?: return true
+        val end = unitEnd(r.span, start)
+        val coarser = when (r.span) {
+            "hour" -> listOf("day", "month", "year")
+            "day" -> listOf("month", "year")
+            "month" -> listOf("year")
+            else -> emptyList()
+        }
+        return coarser.none { covers(covered, it, start, end) }
+    }
+
+    /** The start of the unit of [span] that holds [ms], or null for a span this code does not know. */
+    private fun unitFloor(span: String, ms: Long): Long? = when (span) {
+        "hour" -> hourFloor(ms)
+        "day" -> dayFloor(ms)
+        "month" -> monthFloor(ms)
+        "year" -> yearFloor(ms)
+        else -> null
+    }
+
     /** The span of [span] that holds [anchor]. */
     fun container(span: Span, anchor: Long, zone: ZoneId = ZoneId.systemDefault()): Container {
         val at = Instant.ofEpochMilli(anchor).atZone(zone)
@@ -420,34 +475,30 @@ object RequestStats {
      * disjoint windows could never answer it.
      */
     fun buckets(rows: List<Row>, anchor: Long, zone: ZoneId = ZoneId.systemDefault()): List<Bucket> {
+        // **The covered units, built once.** `counts` asks "does a coarser aggregate cover this
+        // row's unit", and answering that by scanning every row would be quadratic - at ten
+        // thousand raw rows, a hundred million comparisons for each of five columns. A set of
+        // (level, unit start) pairs makes it one lookup, and it is the same information.
+        val covered = row(rows)
         return SPANS.map { span ->
             val box = container(span, anchor, zone)
             var sum = Stats()
             var stalls = Stats()
             for (row in rows) {
-                // Cheap rejection first: a row outside the span cannot be in its column, and a
-                // month's column should not build a Stats for years of irrelevant rows.
-                // **Raw only, for now, and this is the line that must not be forgotten.**
+                // **Which rows this column counts, and never two levels of the same thing.**
                 //
-                // An aggregate row covers the same requests as the raw rows beneath it, so counting
-                // both would double the column - the hazard `docs/PLAN-request-history.md` §2 names,
-                // where the arithmetic produces a plausible wrong number instead of failing. Until
-                // the compactor and the disjoint decomposition land (plan step 4), raw is the only
-                // level that exists, so this filter is correct *and* it makes double counting
-                // impossible in the meantime.
+                // The hazard the plan names: an aggregate covers the same requests as the raw rows
+                // beneath it, so counting both doubles the column into a plausible wrong number.
+                // The rule is a **disjoint decomposition**: for each part of the span, take the
+                // coarsest COMPLETE aggregate that covers it, and descend into the level below only
+                // for the part no aggregate covers.
                 //
-                // Step 4 replaces it with: coarsest complete aggregates that partition the span,
-                // plus one descending chain - never two levels of different sizes at once.
-                if (row.span != RequestLog.SPAN_RAW) continue
+                // Implemented as the simplest correct form of that: a row counts if its own span's
+                // unit lies wholly inside the column *and* no row from a coarser level covers that
+                // same unit. An hour inside a day is dropped, because the day row already speaks for
+                // it; an hour in a day that has no aggregate is counted, because nothing else does.
                 if (row.atMs < box.fromMs || row.atMs > box.toMs) continue
-                // **`row.requests`, not 1.** A raw line covers one response and an aggregate covers
-                // thousands, and this is the only place that difference exists: counting every row
-                // as one would make a month column read "3 requests" while its cost summed a
-                // hundred thousand, and the per-request average derived from it would be absurd
-                // rather than merely wrong.
-                //
-                // The tokens and the money need no such treatment - they are already sums, and
-                // sums of sums are sums.
+                if (!counts(row, covered)) continue
                 val add = Stats(
                     requests = row.requests.toInt(),
                     promptTokens = row.prompt ?: 0,
@@ -624,6 +675,20 @@ object RequestStats {
         .toInstant().toEpochMilli()
 
     /**
+     * Where a unit of [span] that starts at [start] ends — the first millisecond of the next one.
+     *
+     * **Computed, never assumed.** A month and a year are not fixed widths, and assuming 30 days
+     * would close February two days late: an aggregate written while requests can still arrive for
+     * it, which is the one thing `closable` exists to prevent.
+     */
+    fun unitEnd(span: String, start: Long): Long = when (span) {
+        "hour" -> start + 3_600_000L
+        "day" -> start + 86_400_000L
+        "month" -> monthFloor(start + 32L * 86_400_000L)
+        else -> yearFloor(start + 366L * 86_400_000L)
+    }
+
+    /**
      * **The rows that may be rolled into [span], grouped by unit**, each group only if it is closed.
      *
      * Closed means the unit ended before [now]: its last millisecond is in the past, so nothing can
@@ -638,17 +703,8 @@ object RequestStats {
             "year" -> ::yearFloor
             else -> return emptyMap()
         }
-        // The unit's width, to tell whether it has ended. Computed by asking the floor function for
-        // the next unit rather than assuming 3600000/86400000: a month and a year are not fixed
-        // widths, and an assumption of 30 days would close February two days late.
-        fun endOf(unitStart: Long): Long = when (span) {
-            "hour" -> unitStart + 3_600_000L
-            "day" -> unitStart + 86_400_000L
-            "month" -> monthFloor(unitStart + 32L * 86_400_000L)
-            else -> yearFloor(unitStart + 366L * 86_400_000L)
-        }
         return rows
             .groupBy { floor(it.atMs) }
-            .filterKeys { endOf(it) <= now }
+            .filterKeys { unitEnd(span, it) <= now }
     }
 }
