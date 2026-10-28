@@ -2891,7 +2891,9 @@ class AgentTest {
             assertEquals("three symbols: $mark", 3, mark.length)
             assertTrue(
                 "all of them from the alphabet: $mark",
-                mark.all { c -> "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ".contains(c) },
+                // **The constant, not a copy of it.** A test that restated the alphabet would keep
+                // passing after somebody changed the real one.
+                mark.all { c -> Agent.MARK_ALPHABET.contains(c) },
             )
         }
     }

@@ -104,7 +104,7 @@ class Agent(
      * once, which is a flake dressed as a proof. A test supplies a sequence instead and asserts the
      * *rule* — every ping gets the tail it was given, and the tail reaches nothing but the wire.
      */
-    private val pingMark: () -> String = { Agent.mark() },
+    private val pingMark: () -> String = { mark() },
     /** The operator's limit for a `background` command; zero is "no limit". */
     private val backgroundMs: () -> Long = { 0L },
     /**
@@ -290,6 +290,22 @@ class Agent(
 
         /** Why a turn was cut short by the person stopping the agent. */
         const val BY_OPERATOR = "the agent was stopped"
+
+        /**
+         * The alphabet the keepalive's tail is drawn from: **three symbols, base62.**
+         *
+         * Base62 rather than digits, and the reason is a measurement rather than taste. The tail is
+         * the only part of a ping that is not in the provider's cache, so its cost is its *length*
+         * and not its alphabet: three digits and three base62 symbols are both about two tokens.
+         * What differs is the chance of drawing the same tail twice in a row, which is the one
+         * repeat that matters - 1.4% of 15-ping sessions for digits against 0.01% for base62, and
+         * 26% against 0.13% over 300 pings. Making a rare failure rarer by 238x for no cost is not a
+         * trade, it is a free move.
+         */
+        const val MARK_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+        /** Three symbols, freshly drawn. In the companion so a default argument can name it. */
+        fun mark(): String = (1..3).map { MARK_ALPHABET.random() }.joinToString("")
 
         /**
          * The refusals that are the person's to fix, and so the only ones a ping may hand to the
@@ -726,22 +742,6 @@ class Agent(
      * `max_tokens` bounds reasoning *on most providers*, and a provider that ignores it while
      * reasoning about an unclear request is exactly the failure this sentence prevents.
      */
-    /**
-     * The alphabet the keepalive's tail is drawn from: **three symbols, base62.**
-     *
-     * Base62 rather than digits, and the reason is a measurement rather than taste. The tail is the
-     * only part of a ping that is not in the provider's cache, so its cost is its length and not its
-     * alphabet: three digits and three base62 symbols are both about two tokens. What differs is the
-     * chance of drawing the same tail twice in a row, which is the one repeat that matters —
-     * 1.4% of 15-ping sessions for digits against 0.01% for base62, and 26% against 0.13% over 300
-     * pings. Paying nothing to make a rare failure rarer by 238× is not a trade, it is a free move.
-     */
-    private const val MARK_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-
-    /** Three symbols, freshly drawn. */
-    internal fun mark(): String =
-        (1..3).map { MARK_ALPHABET.random() }.joinToString("")
-
     private fun pingInstruction(): Msg = Msg.user(
         // **The instruction, then three random symbols.** The words are what bound the answer: the
         // same conversation with no instruction and one token allowed produced 136 tokens, because
