@@ -195,35 +195,31 @@ one gets re-litigated.
 |---|---|
 | Ignoring a file untracks it, so "Ignoring x" is true | `b31198e` |
 | The system project exists, is guarded, and holds the prompt | `203c605`, `0285bc0` |
-| 22 reports marked `closed` in `trace.log (1).txt` | — (the log is outside the repo) |
+| **All 38 reports closed** in `trace.log (1).txt` | — (the log is outside the repo) |
 | This plan, replacing six conversation documents | — |
+| The chat rebuilt as a list of bubbles, with a footer carrying date, time and id | `f8068bc`, `476f4a8`, `8f4772d` |
+| View, Edit and Diff as three modes, with a two-commit picker and an enterable changes list | `4e297b2` |
+| The record's stamp carries the day; the trace's keeps its bare time | `370879e` |
+| A row's name is forced to one word, because a space in it made the row unreadable | `5993ebe` |
 
 ### Next, in order
 
-The operator's order of 2026-10-27: **the small ones, then the chat rebuild.** Steps 1-3 are done;
-what is left starts at 4.
+**Every report is closed.** What is left is the two pieces of work the reports implied but did not
+ask for, and neither is a bug:
 
 1. ~~The ignore button's two sentences~~ — done (`494b7f0`).
 2. ~~No hidden files~~ — done (`cd87b3c`).
 3. ~~The two clocks and one unit~~ — done (`96eef42`, `ec918fd`).
-4. ~~The small three~~ — done. **#17** was already fixed (`5434a89`); **#20** and **#21** landed in
-   `f833d54` with tests in `a735bcb`.
-5. **The chat rebuild** — `PLAN-chat.md`, complete and unambiguous. Bubbles, footer (id and time;
-   thinking and output when streaming lands), the line cap, the fullscreen pages, `ask`/`conclude`
-   gone, the token column gone, `session.log`'s time column and `answers` column back.
+4. ~~The small three~~ — done (`5434a89`, `f833d54`, `a735bcb`).
+5. ~~The chat rebuild~~ — done (`f8068bc` through `8f4772d`). `PLAN-chat.md` has every step marked.
+6. ~~Diff mode~~ — done (`4e297b2`), ahead of streaming because the report that asked for it was
+   still open and the editor is not waiting on the transport.
+7. **Streaming** — `PLAN-streaming.md`, and the only item left. Parts 1-2 are done (`fea602d`: the
+   pure `Streamed` parser, three recorded fixtures, `StreamTest`); what remains is wiring it behind
+   `Door.exchange`, the three timeouts, the live footer numbers, and `exclude: false`.
 
-   **The ending is already right and needs no new mechanism.** A reply with text and no calls is a
-   conclusion (`wordsWithoutCalls`), which moves the session to idle — which is what the keepalive
-   polls. The session stops for exactly two reasons, both implemented: the operator presses Stop, or
-   the wait limit runs out (`warmDue`'s `forAt`). Removing `ask`/`conclude` removes a *duplicate* row,
-   not a behaviour.
-6. **Streaming** — `PLAN-streaming.md`. This is where the footer's thinking and output numbers come
-   from; it is also the ack/idle split that the timeout question opened.
-7. **Diff mode** — the picker, `versionsOf`, right unset, Done greyed.
-
-**Why streaming is after the chat and not before:** the chat rebuild is not blocked on it. The
-footer ships with id and time, which are recorded facts; thinking and output are not, and inventing
-them would be worse than leaving the space empty until the stream carries them.
+**Why streaming is last:** it is the only thing left, and everything it feeds is a number the footer
+already leaves out when it is unknown. A zero would be a lie; a missing part is the truth.
 
 ### Not a bug report: the chat rebuild
 
