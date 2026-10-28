@@ -408,7 +408,11 @@ class AgentTest {
         // sent again so the provider's cache is warm — so it must not add a row to the context, or
         // the next ping would be a different request and every one of them a cold prompt.
         val door = ScriptedDoor(Reply("nothing to do"))
-        val agent = agent(door)
+        // **A varying tail, because this test asserts the requests DIFFER.** The default mark in
+        // `agent()` is a fixed string so no test is at the mercy of a random draw - which means a
+        // test that needs two requests to differ has to supply the generator itself.
+        val marks = ArrayDeque(listOf("a7F", "Q2z", "019"))
+        val agent = agent(door, mark = { marks.removeFirst() })
         agent.burst("look at it")
 
         val before = log.contextRows()
