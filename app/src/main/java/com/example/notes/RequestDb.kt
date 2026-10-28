@@ -158,14 +158,55 @@ object RequestDb {
     // ---- writing ---------------------------------------------------------------------------
 
     /**
+     * The last boundary noticed by [write], **per database file.**
+     *
+     * A map keyed by the file rather than a field, because two accounts can be written to by two
+     * threads and a single `var` would let one account's boundary suppress the other's compaction.
+     */
+    private val lastBoundary = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /**
+     * Which bucket boundary a write crossed since the previous one: `MINUTE`, `HOUR`, `DAY`, or 0.
+     *
+     * **The coarsest boundary that changed, which implies everything finer.** Comparing whole days
+     * alone is not enough: two writes inside one day look identical to it, so a minute that closed
+     * between them is never rolled and the raw rows accumulate all day. Comparing the boundary makes
+     * a three-integer comparison do what three separate checks would.
+     *
+     * **A day boundary also covers a week.** A phone asleep for seven days crosses one day boundary
+     * and rolls everything the `MIN`/`MAX` query finds, so there is no separate "long gap" case.
+     */
+    internal fun crossed(previous: Long, now: Long): Long = when {
+        floorTo(previous, DAY) != floorTo(now, DAY) -> DAY
+        floorTo(previous, HOUR) != floorTo(now, HOUR) -> HOUR
+        floorTo(previous, MINUTE) != floorTo(now, MINUTE) -> MINUTE
+        else -> 0L
+    }
+
+    /**
      * One response, as a raw row.
      *
      * **Failures are swallowed**, exactly as the text log swallowed them: a record is evidence about
      * the work, never a reason for the work to fail, and a full disk must not stop an agent mid-turn.
      */
-    fun write(accountDir: File, now: Long, stats: RequestLog.Stats) {
+    fun write(accountDir: File, now: Long, stats: RequestLog.Stats, keepDays: Int = 0) {
         try {
-            open(accountDir).use { db -> insert(db, now, stats) }
+            open(accountDir).use { db ->
+                insert(db, now, stats)
+                // **The roll is driven by the boundary this write crossed**, not by a timer and not
+                // by whole days alone. A timer would have to pick a first-run delay and would roll an
+                // idle account on a schedule meaning nothing; a day comparison would leave every
+                // closed minute of the day unrolled until midnight.
+                val key = fileFor(accountDir).path
+                val previous = lastBoundary.put(key, now)
+                if (previous == null) return@use
+                val crossed = crossed(previous, now)
+                if (crossed == 0L) return@use
+                // **Retention rides on the day boundary only**, because a day-aligned cutoff cannot
+                // change within a day: running four DELETEs on every hour and minute boundary would
+                // be 1,439 no-ops a day.
+                compact(db, now, if (crossed == DAY) keepDays else 0)
+            }
         } catch (t: Throwable) {
             // Deliberately silent. See above.
         }
@@ -309,6 +350,43 @@ object RequestDb {
         // 5. **And whatever is left is minutes.** This is the tail of the interval rather than a
         //    general case, and it is always under an hour because everything above has been taken.
         if (at < to) out += sum(db, "roll_minute", "bucket", at, to)
+        return out
+    }
+
+    /**
+     * One slice, summed.
+     *
+     * **Widened outward to whole buckets.** A slice boundary that lands mid-bucket must cover the
+     * bucket it lands in rather than silently dropping it — and widening is the direction that
+     * covers *at least* what was asked for, which is the safe one: a total that quietly excluded the
+     * ends of a chosen period would look like lost requests.
+     *
+     * [RAW_SUMS] differs from [SUMS] because a raw row has no `n` to sum — it *is* one request.
+     * Keeping the two lists separate rather than fudging one is what stops SQLite from quietly
+     * putting a count into the wrong column if the widths ever line up.
+     */
+    private fun sum(
+        db: SQLiteDatabase,
+        table: String,
+        column: String,
+        from: Long,
+        to: Long,
+    ): RequestStats.Stats {
+        if (to <= from) return RequestStats.Stats()
+        val width = when (table) {
+            "roll_minute" -> MINUTE
+            "roll_hour" -> HOUR
+            "roll_day" -> DAY
+            else -> 1L
+        }
+        val lo = if (width == 1L) from else floorTo(from, width)
+        val hi = if (width == 1L) to else ceilTo(to, width)
+        val sums = if (table == "requests") RAW_SUMS else SUMS
+        var out = RequestStats.Stats()
+        db.rawQuery(
+            "SELECT $sums FROM $table WHERE $column >= ? AND $column < ?",
+            arrayOf(lo.toString(), hi.toString()),
+        ).use { c -> if (c.moveToFirst()) out = c.readStats() }
         return out
     }
 

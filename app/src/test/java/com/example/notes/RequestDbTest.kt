@@ -297,6 +297,90 @@ class RequestDbTest {
         assertEquals("two rolled and two raw, counted once each", 4, stats.requests)
     }
 
+    @Test
+    fun `a week asleep rolls the leftover minute and rebuilds its hour whole`() {
+        // **The sleep case, and the one most likely to go wrong silently.** Compaction ran, then the
+        // phone was off for a week, then one response arrives. What is left raw is a single minute
+        // from before the sleep — and the question is whether rolling *that* minute rebuilds its
+        // hour from the full set of minutes or from the one that survived.
+        //
+        // It rebuilds whole, because `rollUp` deletes the bucket and re-inserts the sum of the level
+        // below, which still holds that hour's other minutes. A version that added the leftover to an
+        // existing total would double-count; one that replaced the hour with just the leftover would
+        // lose 58 minutes. Both are plausible and neither throws.
+        repeat(6) { i -> write(base + 10 * HOUR + i * 10 * MIN) }
+        // Compact with the minute still open: 10:50 stays raw, 10:00-10:40 are rolled.
+        RequestDb.compact(db, base + 10 * HOUR + 50 * MIN)
+        val before = total(base + 10 * HOUR, base + 11 * HOUR).requests
+        assertEquals("the six responses", 6, before)
+
+        // A week later, the leftover minute (10:50) is still raw and nothing else has happened.
+        val later = base + 7 * DAY + 10 * HOUR
+        write(later)
+        RequestDb.compact(db, later)
+
+        // **The hour must still total six plus the leftover**, not one and not seven-plus-six.
+        assertEquals(
+            "the old hour is rebuilt from all its minutes, and the new response is its own",
+            6,
+            total(base + 10 * HOUR, base + 11 * HOUR).requests,
+        )
+        assertEquals("and the week-later response is counted once", 1, total(later, later + HOUR).requests)
+        assertEquals("with nothing left raw", 0, rawRows())
+    }
+
+    @Test
+    fun `the boundary a write crosses decides what is rolled`() {
+        // **The coarsest boundary, which implies the finer ones.** Comparing whole days alone is the
+        // tempting simplification and it is wrong: two writes inside one day look identical to a day
+        // comparison, so a minute that closed between them is never rolled and raw rows accumulate
+        // all day. These four cases are the whole rule.
+        val t = base + 10 * HOUR + 30 * MIN + 5_000L
+        assertEquals("same minute, nothing to close", 0L, RequestDb.crossed(t, t + 1_000L))
+        assertEquals("minute changed", MIN, RequestDb.crossed(t, t + 55_000L))
+        assertEquals("hour changed", HOUR, RequestDb.crossed(t, t + HOUR))
+        assertEquals("day changed", DAY, RequestDb.crossed(t, t + DAY))
+        // **A week is the day case with a wider range**, not a separate rule: the roll is driven by
+        // MIN/MAX of the raw rows that are actually there.
+        assertEquals("a week asleep", DAY, RequestDb.crossed(t, t + 7 * DAY))
+    }
+
+    @Test
+    fun `a write inside the same day still rolls a minute that closed`() {
+        // The failure the boundary comparison exists to prevent. With a day-only trigger the 10:00
+        // minute would stay raw until midnight and `roll_minute` would answer nothing all day.
+        write(base + 10 * HOUR + 5_000L)
+        write(base + 10 * HOUR + 35_000L)
+        write(base + 10 * HOUR + MIN + 10_000L)   // crosses the minute boundary
+
+        val rolled = db.rawQuery("SELECT COUNT(*) FROM roll_minute", null)
+            .use { if (it.moveToFirst()) it.getInt(0) else -1 }
+        assertEquals("the 10:00 minute was rolled", 1, rolled)
+        // Two responses were in that minute; the third is still raw in the open one.
+        assertEquals("and it holds both of them", 2, total(base + 10 * HOUR, base + 10 * HOUR + MIN).requests)
+        assertEquals("the open minute is read from raw", 1, total(base + 10 * HOUR + MIN, base + 11 * HOUR).requests)
+    }
+
+    @Test
+    fun `a long sleep with several leftover minutes rolls all of them`() {
+        // Not "the last one" but **every** raw row below the current minute: the range is taken from
+        // MIN/MAX of the rows themselves, so a gap of any shape rolls completely.
+        repeat(5) { i -> write(base + 10 * HOUR + i * MIN) }
+        // Nothing compacted at all — the phone was off from the start.
+        val later = base + 3 * DAY
+        write(later)
+        RequestDb.compact(db, later)
+
+        assertEquals("every leftover minute", 5, total(base + 10 * HOUR, base + 11 * HOUR).requests)
+        assertEquals("and the new one", 1, total(later, later + HOUR).requests)
+        assertEquals("nothing raw", 0, rawRows())
+    }
+
+    /** How many rows are still in the raw table. */
+    private fun rawRows(): Int =
+        db.rawQuery("SELECT COUNT(*) FROM requests", null)
+            .use { if (it.moveToFirst()) it.getInt(0) else -1 }
+
     // ---- retention ---------------------------------------------------------------------------
 
     @Test
