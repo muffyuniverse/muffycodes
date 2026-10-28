@@ -22,72 +22,78 @@ import java.time.ZoneId
 object RequestStats {
 
     /**
-     * The three time axes, each naming a **container** rather than a window.
+     * **The three spans, side by side, containing one chosen instant.**
      *
-     * The first version had these as rolling windows — "the last 24 hours", "the last 30 days",
-     * "the last 12 months" — ending at the picked instant. That was wrong in a way that only shows
-     * when you pick a date: choosing 28 October drew a day axis of **29 September to 28 October**,
-     * so the column labelled with October's days was mostly September's, and the month axis showed
-     * Nov 25 to Oct 26 for someone who had asked about 2026.
+     * Not three views and not three axes. One pick — 12:00 on 25 October 2026 — and the table has
+     * exactly three columns: the hour that instant is in, the day it is in, and the month it is in.
+     * `12:00 | 25 Oct | Oct 2026`, with the metrics as rows.
      *
-     * The operator's structure is the other one, and it is the only reading under which the four
-     * picker granularities and the three axes agree: **you pick a year and see its months; you pick
-     * a month and see its days; you pick a day and see its hours.** So an axis names the container
-     * its columns come from, and [container] says which one.
+     * This was read three different wrong ways before it was built, so the reason is worth stating:
+     *
+     * - **Not "the last 24 hours".** That was the first build, and it drew a month of columns
+     *   ending at the pick, which is a different question and cannot show October by itself.
+     * - **Not "24 hours, or 31 days, or 12 months, chosen by an axis."** That was the second, and
+     *   it made the person pick a granularity before they could see anything — when the whole point
+     *   is that one instant has an hour, a day and a month at the same time.
+     * - **Three columns, always, whatever is chosen.** The spans are what one instant *is*, so the
+     *   table shows all three at once and needs no control to switch between them.
      */
-    enum class Axis(val label: String) {
-        /** The twenty-four hours of the day containing the anchor. */
+    enum class Span(val label: String) {
+        /** The hour the instant falls in: 12:00 to 12:59. */
         HOUR("hour"),
 
-        /** The days of the month containing the anchor: 28, 29, 30 or 31 of them. */
+        /** The calendar day it falls on, in the device's zone. */
         DAY("day"),
 
-        /** The twelve months of the year containing the anchor. */
+        /** The calendar month it falls on: the 1st to the last day of that month. */
         MONTH("month"),
     }
 
+    /** The spans the table always has, in the order a person reads them: narrowest first. */
+    val SPANS: List<Span> = Span.entries
+
     /**
-     * The span an axis's columns cover, given any instant inside it.
+     * One span's bounds and name, for a given instant.
      *
-     * `fromMs` is inclusive and `toMs` is the last millisecond of the container, so "is this row in
-     * the table" is one comparison and needs no special case for the final bucket.
+     * `fromMs` is inclusive and `toMs` is the last millisecond of the span, so "is this row in this
+     * column" is one comparison and the final millisecond needs no special case.
      */
     data class Container(
         val fromMs: Long,
         val toMs: Long,
-        /** The container's name, for the caption: "October 2026", "28 Oct 2026", "2026". */
+        /** The column's heading: "12:00", "25 Oct", "Oct 2026". */
         val label: String,
     )
 
-    /** The container of [axis] that holds [anchor]. */
-    fun container(axis: Axis, anchor: Long, zone: ZoneId = ZoneId.systemDefault()): Container {
+    /** The span of [span] that holds [anchor]. */
+    fun container(span: Span, anchor: Long, zone: ZoneId = ZoneId.systemDefault()): Container {
         val at = Instant.ofEpochMilli(anchor).atZone(zone)
         // `atStartOfDay(zone)` rather than `atTime(0,0)`: on the day a zone springs forward,
-        // midnight does not exist, and asking for it by name throws or silently lands at 01:00.
+        // midnight does not exist and asking for it by name lands somewhere else or throws.
         fun start(local: java.time.LocalDate) = local.atStartOfDay(zone).toInstant().toEpochMilli()
-        return when (axis) {
-            Axis.HOUR -> {
+        return when (span) {
+            Span.HOUR -> Container(
+                // Truncated to the hour by dropping the parts below it, not by subtracting a
+                // remainder: a zone's hour is not always 3600000 ms, and a DST hour must still
+                // produce one column.
+                fromMs = at.withMinute(0).withSecond(0).withNano(0).toInstant().toEpochMilli(),
+                toMs = at.withMinute(0).withSecond(0).withNano(0).plusHours(1).toInstant().toEpochMilli() - 1,
+                label = at.format(java.time.format.DateTimeFormatter.ofPattern("HH:00")),
+            )
+            Span.DAY -> {
                 val day = at.toLocalDate()
                 Container(
                     fromMs = start(day),
                     toMs = start(day.plusDays(1)) - 1,
-                    label = day.format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy")),
+                    label = day.format(java.time.format.DateTimeFormatter.ofPattern("d MMM")),
                 )
             }
-            Axis.DAY -> {
+            Span.MONTH -> {
                 val firstOfMonth = at.toLocalDate().withDayOfMonth(1)
                 Container(
                     fromMs = start(firstOfMonth),
                     toMs = start(firstOfMonth.plusMonths(1)) - 1,
-                    label = firstOfMonth.format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy")),
-                )
-            }
-            Axis.MONTH -> {
-                val firstOfYear = at.toLocalDate().withDayOfYear(1)
-                Container(
-                    fromMs = start(firstOfYear),
-                    toMs = start(firstOfYear.plusYears(1)) - 1,
-                    label = firstOfYear.format(java.time.format.DateTimeFormatter.ofPattern("yyyy")),
+                    label = firstOfMonth.format(java.time.format.DateTimeFormatter.ofPattern("MMM yyyy")),
                 )
             }
         }
@@ -103,13 +109,11 @@ object RequestStats {
      */
     data class Bucket(
         val label: String,
-        val turns: Stats,
-        val pings: Stats,
-        /** Answers that began and then died. Billed and unreported, so they are their own line. */
+        /** Everything accounted for in this span: turns and keepalives together. */
+        val total: Stats = Stats(),
+        /** Answers that began and then died. Billed and unreported, so they are counted apart. */
         val stalls: Stats = Stats(),
-    ) {
-        val total: Stats get() = turns + pings + stalls
-    }
+    )
 
     /**
      * What one kind of request did over one span.
@@ -243,91 +247,47 @@ object RequestStats {
     )
 
     /**
-     * Sums [rows] into the columns of the container that holds [anchor].
+     * One [Bucket] per span, for the one instant chosen.
      *
-     * **The columns come from the container, not from a subtraction.** The first version walked
-     * backwards from the anchor a fixed number of times, which is how the month axis came to show
-     * Nov 25 to Oct 26 for a person asking about 2026. Here the container names its own first and
-     * last moment, and the columns are whatever lies between them: 24 hours, or as many days as
-     * that month actually has, or twelve months.
-     *
-     * **Empty columns are drawn.** A day with no requests is a column of zeroes, because a table
-     * that only showed the spans something happened would hide the shape of the span, which is what
-     * a person looks at a cost table to see.
+     * **Three columns, always** — the hour, the day and the month that instant belongs to. A row is
+     * counted into each span whose bounds contain it, which is why the three columns deliberately
+     * overlap: the hour's requests are also part of the day's, and the day's are part of the
+     * month's. That is the point of showing them together — "this hour cost X, and it is part of a
+     * day that cost Y, in a month that cost Z" is the question the table answers, and three
+     * disjoint windows could never answer it.
      */
-    fun buckets(rows: List<Row>, axis: Axis, anchor: Long, zone: ZoneId = ZoneId.systemDefault()): List<Bucket> {
-        val box = container(axis, anchor, zone)
-        fun zoneOf(ms: Long) = Instant.ofEpochMilli(ms).atZone(zone)
-
-        fun keyOf(time: java.time.ZonedDateTime): String = when (axis) {
-            Axis.HOUR -> time.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH"))
-            Axis.DAY -> time.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd"))
-            Axis.MONTH -> time.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM"))
-        }
-        fun labelOf(time: java.time.ZonedDateTime): String = when (axis) {
-            // **The hour is truncated because the column is an hour.** A column labelled "09:30"
-            // that holds 09:00 to 09:59 misnames itself, and the key it is stored under is already
-            // truncated - so the label has to agree with the key.
-            Axis.HOUR -> time.format(java.time.format.DateTimeFormatter.ofPattern("HH:00"))
-            // The day number alone, because the month is in the caption above the table; repeating
-            // it in thirty columns costs width the cells need.
-            Axis.DAY -> time.format(java.time.format.DateTimeFormatter.ofPattern("d"))
-            // The month alone, because the year is in the caption, for the same reason.
-            Axis.MONTH -> time.format(java.time.format.DateTimeFormatter.ofPattern("MMM"))
-        }
-
-        // Walk the container from its own first moment to its last, one step per column. Stepping
-        // by *calendar* field (plusHours/plusDays/plusMonths) rather than by a fixed millisecond
-        // count is what keeps this right across a DST change, where an hour or a day is not always
-        // the length it is on other days.
-        val steps = ArrayList<java.time.ZonedDateTime>()
-        var cursor = zoneOf(box.fromMs)
-        while (cursor.toInstant().toEpochMilli() <= box.toMs) {
-            steps.add(cursor)
-            cursor = when (axis) {
-                Axis.HOUR -> cursor.plusHours(1)
-                Axis.DAY -> cursor.plusDays(1)
-                Axis.MONTH -> cursor.plusMonths(1)
+    fun buckets(rows: List<Row>, anchor: Long, zone: ZoneId = ZoneId.systemDefault()): List<Bucket> {
+        return SPANS.map { span ->
+            val box = container(span, anchor, zone)
+            var sum = Stats()
+            var stalls = Stats()
+            for (row in rows) {
+                // Cheap rejection first: a row outside the span cannot be in its column, and a
+                // month's column should not build a Stats for years of irrelevant rows.
+                if (row.atMs < box.fromMs || row.atMs > box.toMs) continue
+                val add = Stats(
+                    requests = 1,
+                    promptTokens = row.prompt ?: 0,
+                    cachedTokens = row.cached ?: 0,
+                    completionTokens = row.completion ?: 0,
+                    reasoningTokens = row.reasoning ?: 0,
+                    cost = row.cost ?: 0.0,
+                    costReported = if (row.cost != null) 1 else 0,
+                    saidChars = row.said ?: 0,
+                    thinkingChars = row.thinking ?: 0,
+                )
+                when (row.kind) {
+                    // Turns and keepalives are summed together because the columns are time, not
+                    // kind: the question "what did this hour cost" has one answer, and splitting it
+                    // into two blocks per column would double every heading. The kind split is
+                    // already on the screen as its own two blocks over the same three columns.
+                    RequestLog.Stats.Kind.TURN, RequestLog.Stats.Kind.PING -> sum += add
+                    // A stall is billed but reports no totals, so it is counted apart rather than
+                    // folded in - adding it to `sum` would silently claim a cost of zero for it.
+                    RequestLog.Stats.Kind.STALL -> stalls += add
+                }
             }
-        }
-        val columns = steps.map { keyOf(it) to labelOf(it) }
-
-        // A named accumulator rather than a Triple: three values of the SAME type is a shape whose
-        // order nobody can check by eye, and the compiler binds it to the wrong nesting the moment
-        // the types repeat.
-        data class Sum(val turns: Stats = Stats(), val pings: Stats = Stats(), val stalls: Stats = Stats())
-        val sums = columns.associate { (key, _) -> key to Sum() }.toMutableMap()
-
-        for (row in rows) {
-            // **The instant, converted into the zone being displayed.** This is the whole timezone
-            // story: the log records instants, the table converts them, and the axis is therefore
-            // correct whatever the phone's clock is set to.
-            val time = zoneOf(row.atMs)
-            // Cheap rejection before the key is built: a row outside the container cannot belong to
-            // any of its columns, and a twelve-month table should not format keys for years of rows.
-            if (row.atMs < box.fromMs || row.atMs > box.toMs) continue
-            val cell = sums[keyOf(time)] ?: continue
-            val add = Stats(
-                requests = 1,
-                promptTokens = row.prompt ?: 0,
-                cachedTokens = row.cached ?: 0,
-                completionTokens = row.completion ?: 0,
-                reasoningTokens = row.reasoning ?: 0,
-                cost = row.cost ?: 0.0,
-                costReported = if (row.cost != null) 1 else 0,
-                saidChars = row.said ?: 0,
-                thinkingChars = row.thinking ?: 0,
-            )
-            sums[keyOf(time)] = when (row.kind) {
-                RequestLog.Stats.Kind.TURN -> cell.copy(turns = cell.turns + add)
-                RequestLog.Stats.Kind.PING -> cell.copy(pings = cell.pings + add)
-                RequestLog.Stats.Kind.STALL -> cell.copy(stalls = cell.stalls + add)
-            }
-        }
-
-        return columns.map { (key, label) ->
-            val sum = sums[key] ?: Sum()
-            Bucket(label = label, turns = sum.turns, pings = sum.pings, stalls = sum.stalls)
+            Bucket(label = box.label, total = sum, stalls = stalls)
         }
     }
 
@@ -373,13 +333,4 @@ object RequestStats {
      */
     fun oldest(rows: List<Row>): Long? = rows.minOfOrNull { it.atMs }
 
-    /**
-     * The container the axis shows, in words, for the screen's caption.
-     *
-     * Replaces the old first-to-last span, which described a window. A container's name is the
-     * question that was asked ("October 2026"), and the span is a fact about the columns, so the
-     * caption says the name and the table's own headers say the rest.
-     */
-    fun span(axis: Axis, anchor: Long, zone: ZoneId = ZoneId.systemDefault()): String =
-        container(axis, anchor, zone).label
 }

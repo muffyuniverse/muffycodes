@@ -94,6 +94,16 @@ object StatsFormat {
         else -> "$absolute (${share(share)})"
     }
 
+    /**
+     * The chosen instant, as a caption: `25 Oct 2026, 12:00`.
+     *
+     * In the device's zone, because it is what the picker set and what the three columns are
+     * derived from - and a person comparing the caption against the picker must not have to convert.
+     */
+    fun instant(ms: Long, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String =
+        java.time.Instant.ofEpochMilli(ms).atZone(zone)
+            .format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm"))
+
     /** A request count. */
     fun count(value: Int): String = value.toString()
 

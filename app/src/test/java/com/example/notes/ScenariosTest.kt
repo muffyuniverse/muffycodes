@@ -630,17 +630,17 @@ class ScenariosTest {
         scenario(
             compose, "24-what-it-cost",
             "What it cost.",
-            "the request log summed: the agent and the keepalive, hour by hour.",
+            "the request log summed over the hour, the day and the month of one instant.",
             screen = { stats(account, now) },
         ) {
             before()
             then("Nothing is pressed: the table is a reading of the log, counted when it opened.") {}
             after()
             result(
-                "Time across the top and metrics down the side, so every number sits beside the " +
-                    "words that say what it is. The agent and the keepalive are separate blocks " +
-                    "because on an idle day the keepalive is most of the spend and almost none of " +
-                    "the output - summed together the table would be about the wrong thing.",
+                "One instant picked, and three columns: the hour it is in, the day, and the " +
+                    "month. They overlap on purpose - the hour is part of the day, the day part of " +
+                    "the month - so the same spend appears at three widths and can be read as " +
+                    "'this hour, inside this day, inside this month'.",
             )
         }
     }
