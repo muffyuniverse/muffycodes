@@ -28,6 +28,7 @@ import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -239,6 +240,19 @@ private fun KindBlock(
     // at all is still drawn: "the keepalive cost nothing" is an answer, and an absent block would
     // leave a person wondering whether the feature was working.
     val total = buckets.map(of).fold(RequestStats.Stats()) { a, b -> a + b }
+    // **One scroll for the whole block, and it starts at the newest column.**
+    //
+    // The scroll is hoisted here because a state remembered inside each row is a separate scroll
+    // per row: dragging one row would move its numbers off the column labels every other row is
+    // still showing, and the table would quietly stop being a table.
+    //
+    // It starts at the END because the newest bucket is on the right and the right is what a
+    // person opening a cost screen is asking about. Anchored at zero, the thirty-day view opens on
+    // a month of empty columns with today's numbers off-screen - which is exactly what the first
+    // picture of this screen showed.
+    val scroll = rememberScrollState()
+    LaunchedEffect(buckets.size) { scroll.animateScrollTo(scroll.maxValue) }
+
     Text(
         title + "  ·  " + StatsFormat.count(total.requests) + " requests",
         style = MaterialTheme.typography.titleSmall,
@@ -252,35 +266,39 @@ private fun KindBlock(
             name = "",
             cells = buckets.map { it.label },
             header = true,
+            scroll = scroll,
         )
-        MetricRow("requests", buckets.map { StatsFormat.count(of(it).requests) })
+        MetricRow("requests", buckets.map { StatsFormat.count(of(it).requests) }, scroll = scroll)
         MetricRow(
             name = "input",
             cells = buckets.map { StatsFormat.tokens(of(it).promptTokens) },
+            scroll = scroll,
         )
         MetricRow(
             // The share, directly under the thing it is a share of, so the two read as one fact.
             name = "  · cached",
             cells = buckets.map { StatsFormat.share(of(it).cachedShare) },
+            scroll = scroll,
             muted = true,
         )
-        MetricRow("output", buckets.map { StatsFormat.tokens(of(it).completionTokens) })
+        MetricRow("output", buckets.map { StatsFormat.tokens(of(it).completionTokens) }, scroll = scroll)
         MetricRow(
             name = "  · thinking",
             cells = buckets.map { StatsFormat.share(of(it).thinkingShare) },
+            scroll = scroll,
             muted = true,
         )
-        MetricRow("cost $", buckets.map { StatsFormat.cost(of(it).cost.takeIf { _ -> of(it).costReported > 0 }) })
+        MetricRow("cost $", buckets.map { StatsFormat.cost(of(it).cost.takeIf { _ -> of(it).costReported > 0 }) }, scroll = scroll)
         // **Drawn only when the block has characters to show**, which is only ever the stall
         // block. It is the one number a stall has: how much had arrived before the connection died,
         // which is the closest thing to the amount that was billed.
         if (total.saidChars > 0 || total.thinkingChars > 0) {
-            MetricRow("  · written", buckets.map { StatsFormat.tokens(of(it).saidChars) }, muted = true)
-            MetricRow("  · thought", buckets.map { StatsFormat.tokens(of(it).thinkingChars) }, muted = true)
+            MetricRow("  · written", buckets.map { StatsFormat.tokens(of(it).saidChars) }, scroll = scroll, muted = true)
+            MetricRow("  · thought", buckets.map { StatsFormat.tokens(of(it).thinkingChars) }, scroll = scroll, muted = true)
         }
-        MetricRow("per request $", buckets.map { StatsFormat.perRequest(of(it).perRequest) })
-        MetricRow("per M in $", buckets.map { StatsFormat.perMillion(of(it).perMillionInput) })
-        MetricRow("per M out $", buckets.map { StatsFormat.perMillion(of(it).perMillionOutput) })
+        MetricRow("per request $", buckets.map { StatsFormat.perRequest(of(it).perRequest) }, scroll = scroll)
+        MetricRow("per M in $", buckets.map { StatsFormat.perMillion(of(it).perMillionInput) }, scroll = scroll)
+        MetricRow("per M out $", buckets.map { StatsFormat.perMillion(of(it).perMillionOutput) }, scroll = scroll)
         HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
     }
 }
@@ -296,6 +314,7 @@ private fun KindBlock(
 private fun MetricRow(
     name: String,
     cells: List<String>,
+    scroll: androidx.compose.foundation.ScrollState,
     header: Boolean = false,
     muted: Boolean = false,
 ) {
@@ -315,7 +334,7 @@ private fun MetricRow(
             maxLines = 1,
             modifier = Modifier.width(96.dp),
         )
-        Row(modifier = Modifier.horizontalScroll(rememberScrollState())) {
+        Row(modifier = Modifier.horizontalScroll(scroll)) {
             for (cell in cells) {
                 Text(
                     cell,
