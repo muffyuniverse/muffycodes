@@ -93,8 +93,13 @@ class TimeoutsTest {
     @Test
     fun `a foreground read stops on the operator's deadline, not only a slow command`() {
         // **The reason LONG had to go.** Nothing bounds a read by the size of the file any more, so
-        // a read with no deadline is a turn that does not come back. One millisecond is already past
-        // by the time the file has been opened and its path checked.
+        // a read with no deadline is a turn that does not come back.
+        //
+        // **The clock is injected, so "the deadline has passed" is a fact about the code.** This
+        // used a one-millisecond deadline and relied on the read taking longer than that, which is
+        // a race against however busy the runner is - it failed on CI while passing locally, which
+        // is the shape of a test that is measuring the machine rather than the program. A clock
+        // that is already past the deadline says the same thing every time.
         val account = File(System.getProperty("java.io.tmpdir"), "timeouts-" + System.nanoTime())
         account.mkdirs()
         val ws = Workspace(account)
@@ -103,9 +108,19 @@ class TimeoutsTest {
         File(project, "huge.log").writeText((1..20_000).joinToString("\n") { "line $it" })
         val git = ProjectGit(ws, { null }, { GitAuthor("Muffy", "muffy@example.com") })
         val log = AgentLog.open(project)
+        // **A clock that runs out between the deadline being made and the command asking.** It
+        // reads the start time once, then every later reading is two seconds on - so the deadline
+        // has expired by the time the command is checked, without the test waiting for it. A
+        // constant clock would never expire, and a real one would make the result depend on the
+        // machine.
+        var ticks = 0L
+        val clock = { if (ticks++ == 0L) 1_000_000L else 1_002_000L }
 
         val body = AgentTools(ws, "shopping", git, log)
-            .run(Call("c1", "read", """{"path":"huge.log"}"""), Deadline(1))
+            .run(
+                Call("c1", "read", """{"path":"huge.log"}"""),
+                Deadline(1_000L, now = clock),
+            )
 
         assertTrue("it is stopped rather than answered: $body", body.startsWith(AgentLog.FAILURE))
         assertTrue("and says so: $body", body.contains("stopped"))

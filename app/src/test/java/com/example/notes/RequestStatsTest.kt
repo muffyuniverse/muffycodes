@@ -107,7 +107,7 @@ class RequestStatsTest {
         val at = LocalDate.parse("2026-10-28").atTime(9, 30).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val buckets = RequestStats.buckets(emptyList(), RequestStats.Axis.HOUR, at)
         assertEquals("one column per hour", 24, buckets.size)
-        assertEquals("the last one is now", "09:00", buckets.last().label)
+        assertEquals("the last one is the hour we are in", "09:00", buckets.last().label)
         assertEquals("the first is a day back", "10:00", buckets.first().label)
         assertTrue("and every one is empty rather than absent", buckets.all { it.total.requests == 0 })
     }

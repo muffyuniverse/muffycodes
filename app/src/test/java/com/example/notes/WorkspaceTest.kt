@@ -261,8 +261,11 @@ class WorkspaceTest {
         assertEquals("the project is the repository folder", project, workspace.repoOf("Shopping"))
         assertEquals("and it is at the account root", workspace.accountDir, project.parentFile)
         assertEquals(
-            "the app's own two lines, and nothing else",
-            listOf("agent/", ".muffy/"),
+            // **Three now, and the third is the request log.** It is written on every response,
+            // including the keepalives sent while nobody is looking, so left unignored it would be
+            // the noisiest thing in the working tree.
+            "the app's own lines, and nothing else",
+            listOf("agent/", ".muffy/", "requests/"),
             File(project, ".git/info/exclude")
                 .readLines()
                 .filter { it.isNotBlank() && !it.startsWith("#") },

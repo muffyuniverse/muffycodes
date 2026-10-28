@@ -166,7 +166,10 @@ object RequestStats {
             Axis.MONTH -> time.format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM"))
         }
         fun labelOf(time: java.time.ZonedDateTime): String = when (axis) {
-            Axis.HOUR -> time.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+            // **The hour, truncated, because that is what the column is.** A column labelled
+            // "09:30" that holds everything from 09:00 to 09:59 misnames itself, and the key it is
+            // stored under is already truncated - so the label has to agree with the key.
+            Axis.HOUR -> time.format(java.time.format.DateTimeFormatter.ofPattern("HH:00"))
             Axis.DAY -> time.format(java.time.format.DateTimeFormatter.ofPattern("dd MMM"))
             Axis.MONTH -> time.format(java.time.format.DateTimeFormatter.ofPattern("MMM yy"))
         }
