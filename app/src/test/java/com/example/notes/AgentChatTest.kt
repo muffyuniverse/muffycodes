@@ -316,11 +316,14 @@ class AgentChatTest {
         // **The falsifier for reading in place.** The usage row is written *after* the reply, so a
         // reader that applied rows as it met them would have drawn this bubble already. Here a second
         // turn's accounting must land on the second turn's words and not on the first.
+        // **One operator message**, because the box shows the conversation after the last one - a
+        // fixture with two would draw only the second burst and the assertion would be about the
+        // wrong thing. Two TURNs give the two replies.
         val first = said("nothing to change")
         val second = said("now I have changed it")
         val rows = listOf(
             told("first"), turn(), first, usage(first.id, 100, 200),
-            told("second"), turn(), second, usage(second.id, 300, 400),
+            turn(), second, usage(second.id, 300, 400),
         )
         val box = AgentChat.box(rows)!!
 

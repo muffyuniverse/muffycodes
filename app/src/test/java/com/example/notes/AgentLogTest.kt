@@ -961,10 +961,13 @@ class AgentLogTest {
     }
 
     @Test
-    fun `an accounting row survives a forget and a trim`() {
+    fun `an accounting row survives a forget`() {
         // **The rewrite paths re-render every row from its own text.** A row whose numbers were held
         // beside the file instead of in it would be the one thing lost by a forget, which is exactly
         // when a person is looking back through a conversation.
+        // **A real conversation, with a task**, because a forget always has one to protect - and a
+        // fixture without one would skip the rule most likely to be broken.
+        log.told("do the thing")
         val said = log.note("agent", "keep me")
         log.usage(said, output = 111, thinking = 222)
         val forgettable = log.note("note", "forget me")
