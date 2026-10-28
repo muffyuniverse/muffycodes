@@ -2,10 +2,12 @@ package com.example.notes
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
+import android.os.Looper
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.isRoot
 import com.github.takahirom.roborazzi.captureRoboImage
 import java.io.File
+import org.robolectric.Shadows.shadowOf
 
 /**
  * One scenario, written for a person.
@@ -76,10 +78,38 @@ class ScenarioShots(
         action()
     }
 
-    /** The screen after it was done, which may be a different screen. */
+    /**
+     * The screen after it was done, which may be a different screen.
+     *
+     * **It waits for work that was posted from another thread, and `waitForIdle` does not.**
+     * Every screen that reads the repository asks the worker to do it and posts the answer back
+     * to the main looper. A compose idle wait spins the composition's own clock and never gives
+     * that post its turn, so the picture was taken of the spinner: scenario 09's "after" was a
+     * screen reading "Reading the history…", which is a true state of the app and evidence of
+     * nothing about the feature it is a picture of.
+     *
+     * So the looper is pumped until the app stops changing, and a short settle is allowed after
+     * that for a post that arrives while the last frame is being drawn. The timeout is a ceiling,
+     * not a wait: a screen with nothing to load leaves this loop on its first pass.
+     */
     fun after() {
         switchToAfter()
-        compose.waitForIdle()
+        val deadline = System.currentTimeMillis() + 5_000
+        var previous: String? = null
+        var stable = 0
+        while (System.currentTimeMillis() < deadline) {
+            shadowOf(Looper.getMainLooper()).idle()
+            compose.waitForIdle()
+            // **The screen's own signature**, not a pass counter: two passes prove only that the
+            // loop ran twice. What says the work finished is that the drawn tree stopped changing,
+            // and a post that lands mid-loop changes it.
+            val signature = compose.onAllNodes(isRoot()).fetchSemanticsNodes()
+                .joinToString("|") { it.id.toString() + it.config.toString() }
+            stable = if (signature == previous) stable + 1 else 0
+            previous = signature
+            if (stable >= 2) break
+            Thread.sleep(16)
+        }
         capture("after.png")
     }
 
