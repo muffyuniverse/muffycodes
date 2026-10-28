@@ -104,7 +104,9 @@ class AgentChatScreenTest {
         // And the call is on the same screen as the answer it produced, with its result on the
         // same line - which is the thing the navigator was making a person work for.
         compose.onNodeWithText("tree").assertExists()
-        compose.onNodeWithText("0 ·", substring = true).assertExists()
+        // **The result's own words**, not a token count: the footer is a footer now and the size
+        // column that used to be in the bubble body is gone.
+        compose.onNodeWithText("milk.txt", substring = true).assertExists()
     }
 
     @Test
