@@ -3,8 +3,10 @@ package com.example.notes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -195,8 +197,9 @@ class EditorScreenTest {
 
     @Test
     fun `a locked file opens in view and offers no way to write it`() {
-        // Locked means "can only be viewed". The switch is what would otherwise
-        // put the text field back, so it is the switch that has to refuse.
+        // Locked means "can only be viewed". **Edit** is what would otherwise put the text field
+        // back, so Edit is what has to refuse - and View is where the file already is, so it is
+        // selected rather than greyed.
         val file = scene.file("milk.txt", "two litres")
         scene.viewModel.toggleLocked(file)
 
@@ -206,24 +209,54 @@ class EditorScreenTest {
         compose.onNodeWithContentDescription("Locked, so it cannot be edited")
             .assertIsDisplayed()
         compose.onNodeWithText("Save").assertIsNotEnabled()
-        // The switch cannot put it back into editing.
-        compose.onNodeWithText("View").assertIsNotEnabled()
+        // Edit cannot put it back into editing; View is where it is and Diff is still open,
+        // because reading a file's history is not writing it.
+        compose.onNodeWithText("Edit").assertIsNotEnabled()
+        compose.onNodeWithText("Diff").assertIsEnabled()
     }
 
     @Test
-    fun `an unlocked file opens ready to be written`() {
-        // "switch enabled on enter": opening a note is asking to write it.
+    fun `every file opens in view, and Edit is a press away`() {
+        // **View is the default for everyone now.** Report 29 asked for it in as many words: "view
+        // (starts with it), edit, diff". The old behaviour opened an unlocked note ready to write,
+        // which put a cursor in the text and a keyboard on the screen before anybody had said they
+        // wanted to change anything - and made the mode chips unreadable, because there was no
+        // state in which View was the one selected.
         val file = scene.file("milk.txt", "two litres")
 
         editorFor(file)
 
-        compose.onNodeWithText("Edit").assertIsDisplayed()
+        // The text is readable, and it is not a field: there is nothing to type into.
+        compose.onNodeWithText("two litres").assertIsDisplayed()
+        compose.onAllNodes(hasSetTextAction()).assertCountEquals(0)
+        // One press, and it is.
+        compose.onNodeWithText("Edit").performClick()
         compose.onNodeWithText("two litres").performTextReplacement("three litres")
         compose.onNodeWithText("Save").performClick()
         // The write and the commit are one act on the app's worker, so the file on
         // disk answers a moment after the button does — exactly as on a phone.
         compose.waitUntil(10_000) { file.readText() == "three litres" }
         assertEquals("written", "three litres", file.readText())
+    }
+
+    @Test
+    fun `the three modes are separate buttons, and one of them is selected`() {
+        // **A switch tells you what pressing it does; a mode tells you where you are.** With one
+        // chip reading "Edit" there was nowhere to put Diff, which is why report 29 asked for the
+        // split - the third mode is not a convenience, it is what the switch was hiding.
+        val file = scene.file("milk.txt", "two litres")
+
+        editorFor(file)
+
+        for (label in listOf("View", "Edit", "Diff")) {
+            compose.onNodeWithText(label).assertIsDisplayed()
+        }
+        // View is selected, which is a fact about the state rather than about the label: the chip
+        // says `View` either way, so the assertion is that pressing it changes nothing.
+        compose.onNodeWithText("View").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("two litres").assertIsDisplayed()
+        compose.onAllNodes(hasSetTextAction()).assertCountEquals(0)
     }
 
     @Test

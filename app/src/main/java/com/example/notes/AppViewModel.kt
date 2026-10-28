@@ -1613,6 +1613,79 @@ class AppViewModel @JvmOverloads constructor(
      * The path is git's: relative to the project, `/` between folders — which is also the file's
      * place on disk, because the project's folder is the repository.
      */
+    // ---- the editor's diff mode ---------------------------------------------
+
+    /**
+     * The two commits the editor's diff is between, **as ids a person can read.**
+     *
+     * `from` is where GitHub last saw the file and `to` is `HEAD` — the pair that answers "what am I
+     * about to send", which is the question somebody opening a diff on this screen is asking. Both
+     * are replaceable: the picker offers the file's own history, so a person comparing two older
+     * versions is the same act with two other ids.
+     *
+     * **Null `from` means nothing was ever pushed**, which is not the same as "no changes": a file
+     * whose whole history is local has no synced version, and the diff is every line added. The
+     * screen says that instead of drawing a comparison against nothing.
+     */
+    var diffFrom: String? by mutableStateOf(null)
+        private set
+
+    var diffTo: String? by mutableStateOf(null)
+        private set
+
+    /** The commits that touched the file being edited, newest first, for the picker. */
+    var diffChoices: List<GitService.CommitInfo> by mutableStateOf(emptyList())
+        private set
+
+    /**
+     * Reads the two ends and the choices for [path].
+     *
+     * Called when Diff is opened rather than on every redraw: it is a walk of the file's history,
+     * and a screen that re-walked it on each recomposition would be doing that work for a frame.
+     */
+    fun openDiff(path: String) {
+        val ws = workspace ?: return
+        val project = currentProject ?: return
+        val g = git ?: return
+        onWorker {
+            val repo = g.open(project)
+            val choices = if (repo == null) {
+                emptyList()
+            } else {
+                try {
+                    GitService.log(repo, path)
+                } catch (t: Throwable) {
+                    emptyList()
+                }
+            }
+            val synced = repo?.let { GitService.lastSynced(it) }
+            main.post {
+                diffChoices = choices
+                // **The default is HEAD against the last sync**, and a person who wants two other
+                // commits picks them. `from` is the older one because a diff reads forwards.
+                diffFrom = synced
+                diffTo = choices.firstOrNull()?.id
+            }
+        }
+    }
+
+    /**
+     * The file at [path] as it was at [revision], or null when it did not exist there.
+     *
+     * **Null is a real answer**: a file added since the last sync has no version at the older end,
+     * and the diff is every line added rather than a failure.
+     */
+    fun fileAtRevision(path: String, revision: String?): String? {
+        val project = currentProject ?: return null
+        val g = git ?: return null
+        val repo = g.open(project) ?: return null
+        return try {
+            GitService.fileAt(repo, path, revision)
+        } catch (t: Throwable) {
+            null
+        }
+    }
+
     fun openChangedFile(path: String) {
         val ws = workspace ?: return
         val project = currentProject ?: return

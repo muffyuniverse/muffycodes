@@ -381,28 +381,45 @@ fun ChangesWindow(viewModel: AppViewModel) {
             } else {
                 LazyColumn(modifier = Modifier.heightIn(max = 460.dp)) {
                     items(files) { file ->
-                        Column(
+                        // **A row, not a preview.** Report 29 asked for "a list of changed files
+                        // that I can enter": what a person wants from the list is the shape of the
+                        // change — which file, how much of it — and the diff itself is one tap
+                        // away in the editor, where it has the room and the commit picker.
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable { viewModel.openChangedFile(file.path) }
-                                .padding(vertical = 8.dp, horizontal = 4.dp),
+                                .padding(vertical = 10.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(
-                                file.path,
-                                style = MaterialTheme.typography.titleSmall,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            val lines = file.lines
-                            if (lines == null) {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    file.said ?: "no preview",
+                                    file.path,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                // **The count of changed lines, which is the one fact that says
+                                // how big the change is** without making a person read it. A file
+                                // with no preview (a picture, a file too large) says why instead.
+                                val lines = file.lines
+                                Text(
+                                    text = if (lines == null) {
+                                        file.said ?: "no preview"
+                                    } else {
+                                        val added = lines.count { it.kind == GitService.DiffLine.Kind.ADDED }
+                                        val removed = lines.count { it.kind == GitService.DiffLine.Kind.REMOVED }
+                                        "+$added −$removed"
+                                    },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
-                            } else {
-                                DiffPreview(lines)
                             }
+                            Text(
+                                "›",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
                 }
@@ -425,7 +442,7 @@ fun ChangesWindow(viewModel: AppViewModel) {
  * place to read forty thousand lines and a window that tried would take a second to open.
  */
 @Composable
-private fun DiffPreview(lines: List<GitService.DiffLine>) {
+internal fun DiffPreview(lines: List<GitService.DiffLine>) {
     // **A dark theme needs a lighter green for the same job.** A dark green on a dark surface is the
     // one colour that reads as "nothing here", and this is the one line whose whole meaning is
     // "something was added".

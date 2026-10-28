@@ -21,6 +21,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -108,9 +110,20 @@ fun EditorScreen(
     // What is on disk, so that Save can say whether there is anything to save.
     var saved by remember(session) { mutableStateOf(text) }
     var name by remember(session) { mutableStateOf(file.name) }
-    // A locked or kept file is read-only, so it opens in View. Every other text file opens
-    // ready to be written, which is what opening a note is for.
-    var writing by remember(session) { mutableStateOf(!readOnly) }
+    /**
+     * **View, Edit, or Diff** — three modes, and View is where it starts.
+     *
+     * The report asked for exactly this, and the reason View is the default is the reason the old
+     * switch was wrong: a person opening a file usually wants to *read* it, and an editor that
+     * starts in Edit puts a cursor in the text and a keyboard on the screen before anybody has said
+     * they want to change anything. A locked or kept file opens in View and cannot leave it.
+     */
+    var mode by remember(session) {
+        mutableStateOf(if (readOnly) Mode.VIEW else Mode.VIEW)
+    }
+    // Kept as a name because the rest of this function asks "is the text being written" in a dozen
+    // places, and a boolean read off the mode is clearer at each of them than the comparison is.
+    val writing = mode == Mode.EDIT
     var focused by remember { mutableStateOf(false) }
     val focus = LocalFocusManager.current
 
@@ -237,25 +250,30 @@ fun EditorScreen(
                     onOpenHistory()
                 }) { Text("History") }
 
-                // View | Edit. One switch rather than two buttons, and it says which
-                // of the two you are in — "View" a person can read, "Editing" a
-                // person has to work out.
+                // **Three modes, named, and one of them is selected.** A single chip that said
+                // "Edit" or "View" was a switch: it told a person what pressing it would do, not
+                // where they were, and there was nowhere to put a third thing. Report 29 asked for
+                // separate buttons and got them.
                 if (kind == EntryKind.TEXT) {
-                    FilterChip(
-                        selected = writing,
-                        enabled = !readOnly,
-                        onClick = {
-                            if (writing) {
-                                // Leaving the editor's way of writing does not throw
-                                // anything away: what was typed is still on the
-                                // screen, and Save is still there.
-                                focus.clearFocus()
-                                commitName()
-                            }
-                            writing = !writing
-                        },
-                        label = { Text(if (writing) "Edit" else "View") },
-                    )
+                    ModeChip("View", mode == Mode.VIEW) {
+                        // **Leaving Edit does not throw anything away.** What was typed is still in
+                        // the field and Save is still there; the mode says what the screen is doing,
+                        // not what has been decided.
+                        focus.clearFocus()
+                        commitName()
+                        mode = Mode.VIEW
+                    }
+                    ModeChip("Edit", mode == Mode.EDIT, enabled = !readOnly) {
+                        mode = Mode.EDIT
+                    }
+                    // **Diff is offered on any file with a history**, which is every file in a
+                    // project: the picker's default is HEAD against the last synced commit, and a
+                    // file with nothing between them says so rather than hiding the mode.
+                    ModeChip("Diff", mode == Mode.DIFF) {
+                        focus.clearFocus()
+                        commitName()
+                        mode = Mode.DIFF
+                    }
                 }
 
                 Button(
@@ -281,7 +299,12 @@ fun EditorScreen(
                 EntryKind.IMAGE -> Picture(file = file, padding = content)
                 EntryKind.UNKNOWN -> CannotEdit(file = file, padding = content)
 
-                else -> if (writing && !readOnly) {
+                // **Diff, before the text**, because it is a different view of the file rather
+                // than a different way of editing it. It draws what changed between two commits,
+                // and the picker above it is where the two come from.
+                else -> if (mode == Mode.DIFF) {
+                    DiffMode(viewModel = viewModel, path = file.path)
+                } else if (writing && !readOnly) {
                     TextField(
                         value = text,
                         onValueChange = { text = it },
@@ -510,5 +533,114 @@ private fun CannotEdit(file: java.io.File, padding: androidx.compose.foundation.
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+/**
+ * **The three things a person can do with a file**, as a mode rather than a switch.
+ *
+ * A single chip reading "Edit" or "View" said what pressing it would do; three named chips say
+ * where you are. That difference is the whole of report 29's third request, and it is not
+ * cosmetic: with a switch there was nowhere to put a third mode, so Diff had no home.
+ */
+private enum class Mode { VIEW, EDIT, DIFF }
+
+/** One of the three, selected when it is the mode in force. */
+@Composable
+private fun ModeChip(label: String, selected: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
+    FilterChip(
+        selected = selected,
+        enabled = enabled,
+        onClick = onClick,
+        label = { Text(label) },
+    )
+}
+
+/**
+ * **Diff: two commits, and the file between them.**
+ *
+ * The default pair is `HEAD` and the last synced commit, because the question a person opening a
+ * diff on this screen is asking is "what am I about to send" — not "what has ever changed in this
+ * file". Both ends are replaceable from the file's own history, so comparing two older versions is
+ * the same act with two other ids.
+ *
+ * **Nothing is invented when an end is missing.** A file that was never pushed has no synced
+ * version, and a file added since the last sync has no version at the older end; both are said
+ * plainly, because a diff against nothing drawn as a normal diff would show every line as an
+ * addition and look like a real comparison.
+ */
+@Composable
+private fun DiffMode(viewModel: AppViewModel, path: String) {
+    var from by remember(path) { mutableStateOf<String?>(viewModel.diffFrom) }
+    var to by remember(path) { mutableStateOf<String?>(viewModel.diffTo) }
+    LaunchedEffect(path) { viewModel.openDiff(path) }
+    // The view model's read is asynchronous, so the local choice follows it until somebody picks.
+    LaunchedEffect(viewModel.diffFrom, viewModel.diffTo) {
+        if (from == null) from = viewModel.diffFrom
+        if (to == null) to = viewModel.diffTo
+    }
+
+    val before = remember(path, from) { viewModel.fileAtRevision(path, from) }
+    val after = remember(path, to) { viewModel.fileAtRevision(path, to) }
+    val choices = viewModel.diffChoices
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        // **The picker, and it says which end each is.** "From" and "to" rather than "a" and "b":
+        // a diff reads forwards, and the two ids a person picks are the older and the newer.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Picker("From", choices, from) { from = it }
+            Picker("To", choices, to) { to = it }
+        }
+        HorizontalDivider()
+        when {
+            choices.isEmpty() -> Text(
+                "This file has no history yet, so there is nothing to compare.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(8.dp),
+            )
+            // **A file added since the last sync**, which is the common case for a diff here: the
+            // older end has no version of it, so every line is new. Said rather than drawn.
+            before == null && after != null -> Column {
+                Text(
+                    "This file is new since the last sync, so every line is an addition.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(8.dp),
+                )
+                DiffPreview(after.lines().map { GitService.DiffLine(GitService.DiffLine.Kind.ADDED, it) })
+            }
+            before != null && after != null -> DiffPreview(GitService.diffLines(before, after))
+            else -> Text(
+                "There is no version of this file at one of those commits.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(8.dp),
+            )
+        }
+    }
+}
+
+/** One end of the comparison: a menu of the file's own commits. */
+@Composable
+private fun Picker(label: String, choices: List<GitService.CommitInfo>, selected: String?, onPick: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        TextButton(onClick = { open = true }) {
+            val shown = choices.firstOrNull { it.id == selected }?.shortId ?: "none"
+            Text("$label: $shown")
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            for (commit in choices) {
+                DropdownMenuItem(
+                    text = { Text("${commit.shortId} · ${commit.message.lineSequence().first()}") },
+                    onClick = {
+                        open = false
+                        onPick(commit.id)
+                        Trace.tap("diff commit", commit.shortId)
+                    },
+                )
+            }
+        }
     }
 }

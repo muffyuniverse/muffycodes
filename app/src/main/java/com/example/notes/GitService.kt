@@ -303,6 +303,24 @@ object GitService {
      * **The walk is bounded by the branch tip, not by every ref.** A stash or a dangling commit is
      * not something GitHub was told about.
      */
+    /**
+     * **The commit the remote last held** — the other end of the editor's default diff.
+     *
+     * The question "what has changed since I last synced" needs two commits, and this is the
+     * interesting one: `HEAD` is where the file is now, and this is where GitHub last saw it. The
+     * pair is the default because it answers the question a person actually asks when they open a
+     * diff — not "what changed in this file ever", but "what am I about to send".
+     *
+     * **Null when nothing was ever pushed**, which is a different answer from "the same as HEAD":
+     * a file whose whole history is local has no synced version, and a diff against nothing is
+     * every line added. The caller says that rather than pretending there is a comparison.
+     */
+    fun lastSynced(repo: Repository): String? = try {
+        repo.findRef("refs/remotes/origin/${repo.branch}")?.objectId?.name
+    } catch (t: Throwable) {
+        null
+    }
+
     fun wasPushed(repo: Repository, path: String): Boolean = try {
         val remoteRef = repo.findRef("refs/remotes/origin/${repo.branch}") ?: return false
         RevWalk(repo).use { walker ->
