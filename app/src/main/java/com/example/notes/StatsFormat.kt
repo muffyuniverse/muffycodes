@@ -105,6 +105,18 @@ object StatsFormat {
             .format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm"))
 
     /**
+     * The same moment to the **hour only**: `28 Oct 2026, 19:00`.
+     *
+     * **The interval has no minutes, so its buttons must not show any.** `instant` renders `19:23`,
+     * and using it for a picker that can only choose hours would make the button claim a precision
+     * the figures do not have - and, worse, an end of `19:23` would be displayed beside a figure
+     * that actually runs to `19:59:59`.
+     */
+    fun instantHour(ms: Long, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String =
+        java.time.Instant.ofEpochMilli(ms).atZone(zone)
+            .format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy, HH':00'"))
+
+    /**
      * An interval's length, in hours: `31 hours`, `1 hour`.
      *
      * **The column's unit**, so the figure has a scale instead of being a number with no extent.

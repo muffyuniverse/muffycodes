@@ -80,7 +80,11 @@ fun StatsScreen(
      * opening a cost screen most often wants and it is bounded.
      */
     var from by remember { mutableStateOf(dayStart(now)) }
-    var to by remember { mutableStateOf(now) }
+    // **The next hour boundary, not the current instant and not the current hour.** At 19:28 the
+    // default end is 20:00, because an end is where the interval STOPS - so "from midnight to 20:00"
+    // covers the hours 00 through 19. Storing the last millisecond of 19:00-20:00 here would label
+    // the button 19:00 while the figures covered the whole of that hour, and the two would disagree.
+    var to by remember { mutableStateOf(RequestStats.hourFloor(now) + 3_600_000L) }
     /** Which picker is open: null when neither is, `true` for the start, `false` for the end. */
     var editingStart by remember { mutableStateOf<Boolean?>(null) }
 
@@ -90,8 +94,11 @@ fun StatsScreen(
     val picker = rememberDatePickerState(initialSelectedDateMillis = pickingValue)
     val editingHour = java.time.Instant.ofEpochMilli(pickingValue)
         .atZone(java.time.ZoneId.systemDefault()).toLocalTime()
+    // **Hour only, deliberately.** The table's granularity is the hour (§1 of the plan), so a
+    // minute is not a thing a person can choose: offering one would let somebody pick 19:23 for a
+    // table that can only count whole hours, and the figure they got back would silently be a
+    // different period from the one they asked for.
     var pickedHour by remember { mutableStateOf(editingHour.hour) }
-    var pickedMinute by remember { mutableStateOf(editingHour.minute) }
 
     // **Read when the screen opens, not while it is open.** The log is appended to on every
     // response, including the keepalives sent while nobody is looking, so a table that watched the
@@ -150,10 +157,8 @@ fun StatsScreen(
                         onOpen = {
                             Trace.tap("stats from", "open")
                             picker.selectedDateMillis = from
-                            val t = java.time.Instant.ofEpochMilli(from)
-                                .atZone(java.time.ZoneId.systemDefault()).toLocalTime()
-                            pickedHour = t.hour
-                            pickedMinute = t.minute
+                            pickedHour = java.time.Instant.ofEpochMilli(from)
+                                .atZone(java.time.ZoneId.systemDefault()).hour
                             editingStart = true
                         },
                     )
@@ -163,10 +168,8 @@ fun StatsScreen(
                         onOpen = {
                             Trace.tap("stats to", "open")
                             picker.selectedDateMillis = to
-                            val t = java.time.Instant.ofEpochMilli(to)
-                                .atZone(java.time.ZoneId.systemDefault()).toLocalTime()
-                            pickedHour = t.hour
-                            pickedMinute = t.minute
+                            pickedHour = java.time.Instant.ofEpochMilli(to)
+                                .atZone(java.time.ZoneId.systemDefault()).hour
                             editingStart = false
                         },
                     )
@@ -214,7 +217,12 @@ fun StatsScreen(
                                         val day = java.time.Instant.ofEpochMilli(utcMidnight)
                                             .atZone(java.time.ZoneOffset.UTC)
                                             .toLocalDate()
-                                        val chosen = day.atTime(pickedHour, pickedMinute)
+                                        // **On the hour exactly.** No minute can be chosen, and
+                                        // `from`/`to` are snapped again by `interval()` below:
+                                        // a start is floored to its hour and an end is taken to
+                                        // the end of its hour, so the interval always covers whole
+                                        // hours and never half of one.
+                                        val chosen = day.atTime(pickedHour, 0)
                                             .atZone(java.time.ZoneId.systemDefault())
                                             .toInstant()
                                             .toEpochMilli()
@@ -234,8 +242,9 @@ fun StatsScreen(
                     ) {
                         Column {
                             DatePicker(state = picker)
-                            // The time of day. Two compact steppers rather than a clock face: a
-                            // clock is a large control for a screen whose subject is a table.
+                            // **The hour, and nothing finer.** One stepper rather than a clock face:
+                            // a clock is a large control for a screen whose subject is a table, and
+                            // it would offer minutes the table cannot count.
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -250,13 +259,8 @@ fun StatsScreen(
                                     range = 0..23,
                                     onChange = { pickedHour = it },
                                 )
-                                Text(":", style = MaterialTheme.typography.bodyMedium)
-                                TimeStepper(
-                                    label = "minute",
-                                    value = pickedMinute,
-                                    range = 0..59,
-                                    onChange = { pickedMinute = it },
-                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(":00", style = MaterialTheme.typography.bodyMedium)
                             }
                         }
                     }
@@ -394,7 +398,9 @@ private fun IntervalRow(label: String, at: Long, onOpen: () -> Unit) {
             modifier = Modifier.width(48.dp),
         )
         TextButton(onClick = onOpen) {
-            Text(StatsFormat.instant(at))
+            // **To the hour**, and for `To` this is a boundary: 20:00 means the interval stops
+            // there. Minutes would claim a precision the table does not have.
+            Text(StatsFormat.instantHour(at))
         }
     }
 }

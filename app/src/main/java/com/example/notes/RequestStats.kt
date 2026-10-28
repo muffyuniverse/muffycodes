@@ -34,17 +34,38 @@ object RequestStats {
      * hour from raw. Nothing coarser is needed to answer it, and nothing finer exists.
      */
     data class Interval(val fromMs: Long, val toMs: Long) {
-        val hours: Long get() = if (toMs < fromMs) 0 else (toMs - fromMs) / 3_600_000L + 1
+        /** How many whole hours it covers. An empty interval is zero, never negative. */
+        val hours: Long get() = if (toMs <= fromMs) 0 else (toMs - fromMs) / 3_600_000L
+
+        /** The last millisecond inside the interval, for comparing against a row. */
+        val lastMs: Long get() = toMs - 1
     }
 
     /**
-     * The interval between two picks, in either order, and never wider than the data.
+     * The interval between two picked hours, **snapped to whole hours and ordered**.
      *
-     * **Left to right regardless of which picker was moved**, because a person sets "start 9am,
-     * end 5pm" in the order they think of it, and a table that went blank when the two were
-     * swapped would look broken rather than empty.
+     * **The end is a boundary, not an hour to contain.** That distinction is the whole of it: *"if
+     * now is 19:23 then you can choose interval from 19 to 20."* From 19 to 20 is **one** hour - the
+     * hour beginning at 19 - and 20 is where it stops. Treating 20 as an hour of its own made
+     * 19-to-22 four hours, and made the To button read `19:00` while meaning through 19:59.
+     *
+     * **The earlier pick is floored**, so 19:23 starts at 19:00 rather than dropping the first 23
+     * minutes of a period the person asked for. **The later pick is rounded up to the next
+     * boundary**, so 19:28 ends at 20:00 rather than cutting the last hour short. Rounding outward
+     * means the figure always covers at least what was asked for - the safe direction, since a total
+     * that quietly excluded the end of a chosen hour would look like lost requests. A pick already
+     * on a boundary stays put as a start and moves up as an end, which is exactly what makes
+     * "from 19 to 20" one hour and not two.
+     *
+     * **Order does not matter.** A person moves whichever picker is nearest their thumb, and a table
+     * that went blank when the two were swapped would look broken rather than empty.
      */
-    fun interval(a: Long, b: Long): Interval = Interval(minOf(a, b), maxOf(a, b))
+    fun interval(a: Long, b: Long): Interval {
+        val from = hourFloor(minOf(a, b))
+        val high = hourFloor(maxOf(a, b))
+        val to = if (maxOf(a, b) == high) high else high + 3_600_000L
+        return Interval(from, to)
+    }
 
     /**
      * **The one column.** Everything the log holds for one interval, as one set of numbers.
@@ -280,12 +301,14 @@ object RequestStats {
             // millisecond, because raw rows are.
             val level = if (row.span == RequestLog.SPAN_RAW) null else row.span
             if (level == null) {
-                if (row.atMs < span.fromMs || row.atMs > span.toMs) continue
+                // **`lastMs`, not `toMs`**: the end is an exclusive boundary, so comparing
+                // against it directly would silently drop the last millisecond of the interval.
+                if (row.atMs < span.fromMs || row.atMs > span.lastMs) continue
             } else {
                 val start = unitFloor(level, row.atMs) ?: continue
                 // Touching: the unit's last millisecond is not before the interval starts, and its
                 // first is not after the interval ends.
-                if (unitEnd(level, start) - 1 < span.fromMs || start > span.toMs) continue
+                if (unitEnd(level, start) - 1 < span.fromMs || start > span.lastMs) continue
             }
             // The unit a row describes must be entirely inside the interval to be counted whole,
             // unless it is raw - see above. A coarser row that merely overlaps is still counted,
@@ -359,7 +382,7 @@ object RequestStats {
      * like a broken table. The two are different facts and only one of them is a problem.
      */
     fun covers(rows: List<Row>, span: Interval): Boolean =
-        rows.any { it.atMs in span.fromMs..span.toMs }
+        rows.any { it.atMs in span.fromMs..span.lastMs }
 
     /**
      * The oldest instant the log holds, or null when it holds nothing.

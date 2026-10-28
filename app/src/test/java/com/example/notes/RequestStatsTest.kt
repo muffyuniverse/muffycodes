@@ -110,29 +110,64 @@ class RequestStatsTest {
     }
 
     @Test
-    fun `two picks make one interval, in either order and measured in hours`() {
-        // **The revision, as arithmetic.** The operator replaced five nested spans and a checkbox
-        // row with two pickers and one column: "just 1 result column for the selected interval with
-        // per hour granularity. and no checkboxes."
+    fun `an end is a boundary, so 19 to 20 is one hour`() {
+        // **The operator's example, and the bug it caught.** "if now is 19:23 then you can choose
+        // interval from 19 to 20." From 19 to 20 is ONE hour: 20 is where it stops, not an hour to
+        // be included.
         //
-        // Order must not matter: a person setting "start 9am, end 5pm" moves whichever picker is
-        // nearest their thumb, and a table that went blank when the two were swapped would read as
-        // broken rather than as empty.
-        val nine = LocalDate.parse("2026-10-25").atTime(9, 0)
-            .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-        val five = LocalDate.parse("2026-10-25").atTime(17, 0)
-            .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        // The first version treated both picks as hours to contain, so 19-to-20 covered 19:00 to
+        // 19:59:59 *and* 20:00 to 20:59:59 - two hours - and 19-to-22 was four. Worse, the To
+        // button rendered `19:00` while the figures covered the whole of that hour.
+        val zone = ZoneId.systemDefault()
+        val day = LocalDate.parse("2026-10-25")
+        fun at(h: Int) = day.atTime(h, 0).atZone(zone).toInstant().toEpochMilli()
+        fun span(a: Int, b: Int) = RequestStats.interval(at(a), at(b))
 
-        assertEquals("left to right", RequestStats.interval(nine, five), RequestStats.interval(five, nine))
-        assertEquals("the start is the earlier pick", nine, RequestStats.interval(five, nine).fromMs)
-        assertEquals("and the end is the later", five, RequestStats.interval(five, nine).toMs)
-        // **Hours, because that is the granularity the log keeps - and both ends count.** 09:00 to
-        // 17:00 touches nine clock hours (9, 10, ... 17), because an interval ending at 17:00
-        // includes 17:00's own hour. Written as 9 rather than 8 deliberately: the arithmetic
-        // difference between an interval and a difference of instants, and the reason a person
-        // picking "nine to five" expects the 5 o'clock hour to be in the figure.
-        assertEquals("nine to five touches nine hours, both ends included", 9L, RequestStats.interval(nine, five).hours)
-        assertEquals("one instant is one hour, not zero", 1L, RequestStats.interval(nine, nine).hours)
+        assertEquals("19 to 20 is one hour", 1L, span(19, 20).hours)
+        assertEquals("and it starts at 19:00", at(19), span(19, 20).fromMs)
+        assertEquals("and stops at the 20:00 boundary", at(20), span(19, 20).toMs)
+        assertEquals("19 to 22 is three hours, not four", 3L, span(19, 22).hours)
+        assertEquals("0 to 1 is one hour", 1L, span(0, 1).hours)
+
+        // **A pick that is not on the hour snaps outward.** 19:23 as a start is floored to 19:00 so
+        // the first 23 minutes are not dropped; 19:23 as an end is rounded up to the 20:00 boundary
+        // so the last hour is not cut short. Covering at least what was asked for is the safe
+        // direction: a total that quietly excluded the end of a chosen hour would look like lost
+        // requests.
+        val partial = RequestStats.interval(
+            day.atTime(19, 23).atZone(zone).toInstant().toEpochMilli(),
+            day.atTime(21, 47).atZone(zone).toInstant().toEpochMilli(),
+        )
+        assertEquals("19:23 to 21:47 covers 19:00 to 22:00", at(22), partial.toMs)
+        assertEquals("which is three whole hours", 3L, partial.hours)
+        assertEquals("starting at 19:00", at(19), partial.fromMs)
+
+        // **Order does not matter.** A person moves whichever picker is nearest their thumb.
+        assertEquals("left to right", span(19, 20), span(20, 19))
+        assertEquals("the earlier pick is the start", at(19), span(20, 19).fromMs)
+    }
+
+    @Test
+    fun `one instant is the one hour it falls in`() {
+        // What "the current hour" means once the table is an interval: the hour containing now,
+        // whose end is the next boundary. At 19:23 that is 19:00 to 20:00 - one hour, not a
+        // 23-minute sliver and not two hours.
+        val zone = ZoneId.systemDefault()
+        val now = LocalDate.parse("2026-10-25").atTime(19, 23)
+            .atZone(zone).toInstant().toEpochMilli()
+        val span = RequestStats.interval(now, now)
+
+        assertEquals("one hour", 1L, span.hours)
+        assertEquals(
+            "from 19:00",
+            LocalDate.parse("2026-10-25").atTime(19, 0).atZone(zone).toInstant().toEpochMilli(),
+            span.fromMs,
+        )
+        assertEquals(
+            "to the 20:00 boundary",
+            LocalDate.parse("2026-10-25").atTime(20, 0).atZone(zone).toInstant().toEpochMilli(),
+            span.toMs,
+        )
     }
 
     @Test
@@ -149,15 +184,28 @@ class RequestStatsTest {
             RequestStats.parse(row(day = "2026-10-25", at = "17:00:00.000"))!!, // last
             RequestStats.parse(row(day = "2026-10-25", at = "17:01:00.000"))!!, // after
         )
+        // **09:00 to 17:00 covers the hours 9 through 16** - the 17:00 hour is where the interval
+        // stops, so the row AT 17:00 is outside it. That is the sharp end of the exclusive boundary,
+        // and it is the case an inclusive comparison would get wrong by counting a request the
+        // person did not ask for.
         val span = RequestStats.interval(at(9, 0), at(17, 0))
-        assertEquals("the three inside", 3, RequestStats.totals(rows, span).total.requests)
-
-        // The same rows, read through an interval that only holds the boundary instants: both
-        // ends must be in, or a person picking 09:00 to 17:00 loses two requests they can see.
-        assertEquals("both bounds are inside", 2, RequestStats.totals(
-            listOf(rows[1], rows[3]),
-            span,
-        ).total.requests)
+        assertEquals("the two inside, and not the one at the stopping point", 2, RequestStats.totals(rows, span).total.requests)
+        assertEquals(
+            "the row at the interval's own start is inside",
+            1,
+            RequestStats.totals(listOf(rows[1]), span).total.requests,
+        )
+        assertEquals(
+            "and the row at its stopping point is not",
+            0,
+            RequestStats.totals(listOf(rows[3]), span).total.requests,
+        )
+        // **09:00 to 18:00 does include the 17:00 hour**, which is how a person reaches it.
+        assertEquals(
+            "widening the end by one hour includes it",
+            1,
+            RequestStats.totals(listOf(rows[3]), RequestStats.interval(at(9, 0), at(18, 0))).total.requests,
+        )
     }
 
     @Test
