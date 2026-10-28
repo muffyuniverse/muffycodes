@@ -307,10 +307,9 @@ object RequestStats {
         // failure is silent in the worst way: the compactor writes correct aggregates, the reader
         // ignores them, and the table goes back to summing raw rows that are no longer there.
         //
-        // The kind of an aggregate is therefore carried as TURN, a value nothing reads: `buckets`
-        // decides by span, and a row whose span is not `raw` never reaches the kind switch below.
+        // The kind of an aggregate is therefore mapped to TURN, a value nothing reads: `buckets`
+        // decides by span, and an aggregate's kind is never consulted.
         val span = cells.getOrNull(13)?.takeIf { it.isNotBlank() } ?: RequestLog.SPAN_RAW
-        val isAggregate = span != RequestLog.SPAN_RAW
         val kind = when (cells[1]) {
             "turn" -> RequestLog.Stats.Kind.TURN
             "ping" -> RequestLog.Stats.Kind.PING
@@ -319,11 +318,13 @@ object RequestStats {
             RequestLog.KIND_ALL -> RequestLog.Stats.Kind.TURN
             else -> return null
         }
-        if (isAggregate && cells[1] != RequestLog.KIND_ALL) {
-            // A line claiming to be an aggregate but naming one response's kind is contradictory:
-            // an aggregate cannot be only a turn. Refused rather than guessed at.
-            return null
-        }
+        // **No contradiction check on the kind.** An earlier version refused a line whose span was
+        // an aggregate while its kind named one response - "an aggregate cannot be only a turn".
+        // That is true of a row the compactor writes, and it made every other producer of an
+        // aggregate line fail: a hand-written fixture, and any future level built by a path that
+        // does not go through `aggregateLine`. A reader that refuses rows it could understand is
+        // stricter than the format, and the format is what matters here - `buckets` decides by
+        // span, so the kind of an aggregate is simply not read.
         // **The instant, and nothing else, places the row.** A line without a readable one is not
         // guessed at from its clock time: a guessed timezone is worse than a missing row, because
         // it looks like a measurement.
