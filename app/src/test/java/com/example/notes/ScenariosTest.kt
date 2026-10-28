@@ -37,15 +37,7 @@ import java.io.File
  * job is to say yes or no as fast as it can.
  */
 @RunWith(RobolectricTestRunner::class)
-// **The size is part of the evidence, and it was missing.**
-//
-// Robolectric's default canvas is 320dp wide, so every scenario picture in this repository was
-// taken on a screen narrower than any phone - and a narrower screen truncates earlier. Two review
-// rounds were spent reading ellipses off these pictures ("test-account · groc…") and asking whether
-// the app was cramped, when the answer was that the picture was. The other eleven test classes that
-// assert on layout already say this number; the one that produces the pictures a person actually
-// looks at did not.
-@Config(sdk = [34], qualifiers = "w411dp-h891dp")
+@Config(sdk = [34])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ScenariosTest {
 
