@@ -65,11 +65,15 @@ fun StatsScreen(
     /**
      * **The one instant the whole screen is about**, and the only thing the picker sets.
      *
-     * Every view is computed from this: pick 12:00 on 25 October 2026 and the hour axis shows that
-     * day's twenty-four hours, the day axis shows October 2026, and the month axis shows all of
-     * 2026 — three containers, one selection. That is why there is no per-axis picker here: the
-     * axis says which *granularity of time* to read this instant at, so switching axis must not
-     * change the instant, and picking a date must not change the axis.
+     * Every column is computed from this: pick 12:00 on 25 October 2026 and the five columns are
+     * that hour, that day, that month, that year and the whole history — all ending at the pick.
+     * They are the **five spans the one instant belongs to**, not five views of it: nothing switches,
+     * and no control exists that could.
+     *
+     * (The paragraph here used to describe an "hour axis" showing a day's twenty-four hours and a
+     * "month axis" showing a year's twelve months. That was the rolling-window reading, which is a
+     * different question and was rejected twice; the control it described has been deleted, and this
+     * comment outlived it. See `docs/PLAN-request-history.md` §1.)
      *
      * It starts at [now], which gives the default the operator asked for: the current hour, the
      * current day, the current month and the current year, all at once.
