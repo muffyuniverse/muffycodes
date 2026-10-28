@@ -5,7 +5,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -73,8 +72,16 @@ class StatsScreenTest {
         compose.onAllNodesWithText(text).fetchSemanticsNodes().first()
             .boundsInWindow.bottom
 
-    /** The window's own height, so "off the bottom" can be decided rather than guessed. */
-    private fun windowHeight(): Float = compose.onRoot().fetchSemanticsNode().boundsInWindow.height
+    /**
+     * The screen's height in pixels, **from the display rather than from the composition.**
+     *
+     * `onRoot()` was the obvious way and is the wrong one: an open dialog is a second root, so
+     * asking for "the" root fails with `assertExists` the moment the thing being measured appears.
+     * The display knows how tall the screen is whether or not a dialog is on it.
+     */
+    private fun windowHeight(): Float =
+        org.robolectric.RuntimeEnvironment.getApplication()
+            .resources.displayMetrics.heightPixels.toFloat()
 
     @Test
     fun `the two picks are drawn with their instants`() {
@@ -115,7 +122,12 @@ class StatsScreenTest {
         // **A minute stepper is not a smaller control, it is a different promise.** Offering one
         // lets somebody pick 19:23 for a table that can only count whole hours.
         compose.onNodeWithText("minute").assertDoesNotExist()
-        compose.onNodeWithText(":00", substring = true).assertExists()
+        // **`onAllNodes`, not `onNode`.** ":00" also matches the From button behind the dialog, and
+        // the point is that the hour label is drawn at all - not that it is unique.
+        assertTrue(
+            "the hour is drawn as a whole hour",
+            compose.onAllNodesWithText(":00", substring = true).fetchSemanticsNodes().isNotEmpty(),
+        )
     }
 
     @Test
