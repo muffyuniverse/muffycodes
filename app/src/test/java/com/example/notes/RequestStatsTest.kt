@@ -419,9 +419,15 @@ class RequestStatsTest {
         )
 
         // **And without the month row, the days are the next level down** - the same rule, one
-        // level further: a day that an hour sits inside is counted, the hour beneath it is not.
+        // level further. The days run 1..24 and the hour is on the 25th, which no day covers, so
+        // the hour is counted too: 480 from the days plus 3 from the hour. The raw row on the 25th
+        // is silent, because the hour row speaks for its hour.
+        //
+        // **483 is the correct answer and 480 would be the bug.** Writing 480 here is what a rule
+        // that silenced every hour whenever *any* day existed would produce - a month column
+        // missing the requests of its newest day, which is the most interesting one.
         val withDaysOnly = RequestStats.buckets(listOf(hour, raw) + days, at)[2]
-        assertEquals("the 24 day rows", 24 * 20, withDaysOnly.total.requests)
+        assertEquals("the 24 day rows, plus the hour no day covers", 24 * 20 + 3, withDaysOnly.total.requests)
 
         // **And with neither, the hour row is what is left, and the raw row beneath it is silent.**
         // This is the case a half-finished compaction leaves behind: the aggregate was written and
