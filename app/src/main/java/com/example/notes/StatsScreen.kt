@@ -362,8 +362,12 @@ fun StatsScreen(
                                 style = MaterialTheme.typography.titleSmall,
                                 modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
                             )
-                            MetricRow("written", StatsFormat.tokens(totals.stalls.saidChars))
-                            MetricRow("thought", StatsFormat.tokens(totals.stalls.thinkingChars))
+                            // **Characters, and it says so.** A stalled answer has no `usage`, so
+                            // tokens are unknown and only arrived characters are known - which
+                            // meant this block counted characters while the table above counts
+                            // tokens, in the same format. See `StatsFormat.characters`.
+                            MetricRow("written", StatsFormat.characters(totals.stalls.saidChars))
+                            MetricRow("thought", StatsFormat.characters(totals.stalls.thinkingChars))
                             HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
                         }
                     }

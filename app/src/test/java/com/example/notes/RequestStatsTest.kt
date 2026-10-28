@@ -133,6 +133,27 @@ class RequestStatsTest {
     }
 
     @Test
+    fun `a character count is never printed as if it were a token count`() {
+        // **The bug this pins was on the screen, two blocks apart.** The stall block counts
+        // CHARACTERS, because a stalled answer has no `usage` and arrived characters are the only
+        // thing known. The table above it counts TOKENS. Both went through the same formatter, so
+        // `output 2.4k` and `written 2.1k` looked like the same measurement - they differ by about
+        // four on this project's own prose.
+        assertEquals("plain", "0 chars", StatsFormat.characters(0))
+        assertEquals("thousands", "2.1k chars", StatsFormat.characters(2_140))
+        assertEquals("millions", "1.5M chars", StatsFormat.characters(1_500_000))
+        // And a token count must NOT carry the word, or the fix would have moved the ambiguity
+        // rather than removed it.
+        assertFalse("no unit on tokens", StatsFormat.tokens(2_140).contains("chars"))
+        assertEquals("tokens are bare", "2.1k", StatsFormat.tokens(2_140))
+        assertNotEquals(
+            "the two blocks cannot print the same string for different units",
+            StatsFormat.tokens(2_140),
+            StatsFormat.characters(2_140),
+        )
+    }
+
+    @Test
     fun `the share rides beside its absolute in one cell`() {
         // The operator's one-cell rule: `24.0k (91.7%)`. Two rows would separate a part from the
         // whole it is a part of, which is the fact the row exists to state.

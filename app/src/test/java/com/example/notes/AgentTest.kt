@@ -4,6 +4,7 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -376,10 +377,13 @@ class AgentTest {
         agent.warm()
 
         val sent = door.pings.single()
-        assertEquals(
-            "the conversation, then the instruction",
-            "Answer with a message that contains only one dot and nothing else.",
-            sent.messages.last().text,
+        // **It now ends with a marker**, so this asserts the sentence it starts with and the fact
+        // that a marker follows - not one exact string, which would make the marker untestable.
+        assertTrue(
+            "the conversation, then the instruction: ${sent.messages.last().text}",
+            sent.messages.last().text.startsWith(
+                "Answer with a message that contains only one dot and nothing else.",
+            ),
         )
         assertEquals("as the person's own turn, so it is legal to answer", "user", sent.messages.last().role)
 
@@ -2826,6 +2830,101 @@ class AgentTest {
         // **700, not 900.** The call-only reply was charged 900 and had nowhere to put it, so the
         // figure on the words is the speaking reply's own - which is the whole claim.
         assertEquals("the words carry their own reply's numbers", 700L, agent.single().output)
+    }
+
+
+    // ---- the keepalive is never the same request twice --------------------------------------
+    //
+    // **The operator's ruling, L28198:** *"we need to attach a new dot to every subsequent keepalive
+    // message so that message never stays exactly the same."* The reason it matters is that the
+    // keepalive's only job is to make the upstream provider read its cached prefix again — and a
+    // byte-identical request is what a gateway's own response cache answers instead, so the upstream
+    // goes cold while the app believes it is warm. The failure is invisible from inside the app,
+    // which is why it needs a test rather than careful reading.
+
+    @Test
+    fun `no two pings are the same request`() {
+        val door = ScriptedDoor(Reply("nothing to do"))
+        // A clock that moves, because the marker is drawn from it.
+        var now = 1_000L
+        val agent = agent(door, clock = { now })
+        agent.burst("look at it")
+
+        agent.warm()
+        now += 240_000
+        agent.warm()
+
+        val sent = door.pings.map { it.messages.last().text }
+        assertEquals("two pings", 2, sent.size)
+        assertNotEquals(
+            "and they differ, or the upstream never sees the second one",
+            sent[0],
+            sent[1],
+        )
+    }
+
+    @Test
+    fun `the mark says it is not part of the answer`() {
+        // **A marker the model could echo would put the ping's cost back up**, and would do it in
+        // the one message nobody reads: the answer is discarded, so a ping that started writing
+        // forty tokens instead of one would only ever show up on the bill.
+        val door = ScriptedDoor(Reply("nothing to do"))
+        val agent = agent(door, clock = { 1_700_000_000_000L })
+        agent.burst("look at it")
+        agent.warm()
+
+        val text = door.pings.single().messages.last().text
+        assertTrue("the one-dot instruction survives: $text", text.contains("only one dot"))
+        assertTrue("the marker is present: $text", text.contains("1700000000000"))
+        assertTrue(
+            "and is explicitly excluded from the answer: $text",
+            text.contains("not part of your answer"),
+        )
+    }
+
+    @Test
+    fun `the mark never reaches the record`() {
+        // The exemption the rest of the ping already gets, kept for the same reason: a row holding
+        // the marker would enter the conversation, and the next real turn would be answering a
+        // message about bookkeeping that the person never sent.
+        val door = ScriptedDoor(Reply("nothing to do"))
+        val agent = agent(door, clock = { 1_700_000_000_000L })
+        agent.burst("look at it")
+        val before = log.contextRows().size
+
+        agent.warm()
+
+        assertEquals("the context did not grow", before, log.contextRows().size)
+        assertTrue(
+            "and no row mentions the marker",
+            rows().none { it.body.contains("1700000000000") || it.body.contains("bookkeeping") },
+        )
+    }
+
+    @Test
+    fun `the marker does not disturb the prefix the cache matches`() {
+        // **The whole reason a changing tail is safe.** A provider caches on the longest common
+        // prefix; the marker is appended after the entire conversation, so everything that was
+        // cached is still matched and only the last few tokens are new. A version that varied
+        // something earlier - the opening line, a row, the instructions - would defeat the very
+        // cache the keepalive exists to refresh.
+        val door = ScriptedDoor(Reply("nothing to do"))
+        var now = 1_000L
+        val agent = agent(door, clock = { now })
+        agent.burst("look at it")
+
+        agent.warm()
+        now += 240_000
+        agent.warm()
+
+        val first = door.pings[0].messages
+        val second = door.pings[1].messages
+        assertEquals("the same number of messages", first.size, second.size)
+        assertEquals(
+            "everything but the last message is byte-identical",
+            first.dropLast(1).map { it.text to it.role },
+            second.dropLast(1).map { it.text to it.role },
+        )
     }
 
 }

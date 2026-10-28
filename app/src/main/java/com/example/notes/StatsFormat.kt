@@ -29,6 +29,25 @@ object StatsFormat {
      * because "1,328,760" in a 60dp column becomes an ellipsis — which is the one thing a table
      * cannot afford. The exact number is still in the log, which is where an exact number belongs.
      */
+    /**
+     * A count of **characters**, with the unit said out loud: `2.1k chars`.
+     *
+     * **The unit is not decoration, and leaving it off was a defect.** A stalled answer has no
+     * `usage` block - the accounting arrives at the end of a stream that never ended - so the only
+     * thing known about it is how many characters had arrived. That made the stall block count
+     * characters while the table above it counts tokens, and both went through [tokens], so
+     * `output 2.4k` (tokens) and `written 2.1k` (characters) looked like the same measurement two
+     * rows apart. They differ by roughly a factor of four on this project's own text.
+     *
+     * Keeping characters is right - it is what is known, and a token count invented from them would
+     * be a guess dressed as a measurement. Saying so is what makes the two blocks readable together.
+     */
+    fun characters(value: Long): String = when {
+        value < 1_000 -> "$value chars"
+        value < 1_000_000 -> String.format(Locale.UK, "%.1fk chars", value / 1_000.0)
+        else -> String.format(Locale.UK, "%.1fM chars", value / 1_000_000.0)
+    }
+
     fun tokens(value: Long): String = when {
         value < 1_000 -> value.toString()
         value < 1_000_000 -> String.format(Locale.UK, "%.1fk", value / 1_000.0)

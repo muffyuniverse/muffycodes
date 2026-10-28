@@ -327,7 +327,7 @@ class Agent(
             // exists to keep warm, and the next real turn would be answering a question the person
             // never asked. `build` reads the record; this is the one thing added after it.
             val built = build(layers, readOpening(layers, log, AgentTools.specs()), clearedUp = false)
-            built.copy(messages = built.messages + PING_INSTRUCTION)
+            built.copy(messages = built.messages + pingInstruction())
         } catch (t: Throwable) {
             // **A request that could not be built is not a ping that got through.** This said
             // `stopping = false`, and the runner's false branch calls `warmed()` — which clears the
@@ -717,8 +717,31 @@ class Agent(
      * `max_tokens` bounds reasoning *on most providers*, and a provider that ignores it while
      * reasoning about an unclear request is exactly the failure this sentence prevents.
      */
-    private val PING_INSTRUCTION = Msg.user(
-        "Answer with a message that contains only one dot and nothing else.",
+    private fun pingInstruction(): Msg = Msg.user(
+        "Answer with a message that contains only one dot and nothing else.\n" +
+            // **A new marker on every ping, and it is the operator's ruling rather than a
+            // decoration.** L28198: *"we need to attach a new dot to every subsequent keepalive
+            // message so that message never stays exactly the same."*
+            //
+            // Without it the ping is byte-identical to the one before, and an identical request is
+            // exactly what a gateway's own response cache answers without ever reaching the
+            // upstream - so the upstream's prompt cache expires while the app believes it is warm,
+            // and the keepalive fails at its only job while looking like it is working.
+            //
+            // **Why this cannot break the cache it exists to protect.** A provider matches the
+            // longest common *prefix*, and this marker sits after the whole conversation - so the
+            // cached part is untouched and only the tail differs. An exact-match cache is defeated;
+            // a prefix cache still hits.
+            //
+            // **The number is explicitly excluded from the answer**, because the ping's measured
+            // cost is what bounds it: the same request with no instruction produced 136 tokens,
+            // with the one-dot instruction 20. A marker the model could echo would put the count
+            // back up, and would do it in the one message nobody is reading.
+            //
+            // Millis, so it cannot repeat - a counter would restart at 1 after a restart and
+            // re-send a request that had already been answered once. The clock is the injected one,
+            // so a test can hold it still and watch the marker change.
+            "The number ${clock()} is bookkeeping and is not part of your answer.",
     )
 
     /**
