@@ -358,7 +358,7 @@ fun StatsScreen(
                                 // right, the sentence around it was wrong.
                                 "Answers that stopped  ·  " +
                                     StatsFormat.count(totals.stalls.requests) +
-                                    if (totals.stalls.requests == 1L) " request" else " requests",
+                                    if (totals.stalls.requests == 1) " request" else " requests",
                                 style = MaterialTheme.typography.titleSmall,
                                 modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
                             )
@@ -379,7 +379,8 @@ fun StatsScreen(
                             "reaches into a compacted hour counts that hour whole.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 12.dp)
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
                 }
             }
         }
