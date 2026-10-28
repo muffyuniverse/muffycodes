@@ -92,32 +92,34 @@ class ScenarioShots(
      * that for a post that arrives while the last frame is being drawn. The timeout is a ceiling,
      * not a wait: a screen with nothing to load leaves this loop on its first pass.
      */
+    /**
+     * Waits for the posts a screen's own loading made, **without asking compose to go idle**.
+     *
+     * Two facts forced this shape, and both cost a red run to learn:
+     *
+     * - `waitForIdle` spins the composition's own clock and returns before a worker's answer is
+     *   posted back, so scenario 09's "after" was a picture of "Reading the history…".
+     * - A loop of compose idle waits fails every window scenario: a dialog animates for as long as
+     *   it is shown, compose is therefore never idle, and Espresso raises `AppNotIdleException`
+     *   after sixty seconds. Five windows failed exactly that way.
+     *
+     * So the wait happens on the looper, which is where the answer arrives, and the only thing it
+     * asks compose is whether the frame is ready to be drawn.
+     */
+    private fun settle() {
+        val looper = shadowOf(Looper.getMainLooper())
+        val deadline = System.currentTimeMillis() + 2_000
+        while (System.currentTimeMillis() < deadline) {
+            looper.idle()
+            Thread.sleep(20)
+        }
+    }
+
+    /** The screen after it was done, which may be a different screen. */
     fun after() {
         switchToAfter()
+        settle()
         compose.waitForIdle()
-        // **Then the looper alone, and never a second compose idle.**
-        //
-        // Asking compose to go idle again is what an open window cannot survive: a dialog animates
-        // for as long as it is shown, so a loop of idle waits trips Espresso's own never-idle guard
-        // and the scenario fails with `AppNotIdleException` — five of them did, one window each.
-        // Pumping the main looper is enough, because the answer being waited for is a post, not a
-        // frame.
-        //
-        // The loop ends on the screen's own signature rather than a pass count: two passes prove
-        // only that the loop ran twice, while a settled tree is the thing that says the work
-        // finished.
-        val deadline = System.currentTimeMillis() + 5_000
-        var previous: String? = null
-        var stable = 0
-        while (System.currentTimeMillis() < deadline) {
-            shadowOf(Looper.getMainLooper()).idle()
-            val signature = compose.onAllNodes(isRoot()).fetchSemanticsNodes()
-                .joinToString("|") { it.id.toString() + it.config.toString() }
-            stable = if (signature == previous) stable + 1 else 0
-            previous = signature
-            if (stable >= 3) break
-            Thread.sleep(16)
-        }
         capture("after.png")
     }
 
