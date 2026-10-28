@@ -2463,6 +2463,15 @@ class AppViewModel @JvmOverloads constructor(
      */
     private var serviceWanted: Boolean? = null
 
+    /**
+     * When the request log was last compacted, so a tick does not try on every pass.
+     *
+     * **Ten minutes, not every tick.** A tick is four minutes and a compaction is only ever useful
+     * once a closed hour exists to roll; running it on every tick would rewrite a file that has
+     * nothing new in it, and every rewrite is the one moment this log could lose an append.
+     */
+    private var lastCompact: Long = 0L
+
     /** The session of [project], or null when the agent is not running there. */
     fun sessionOf(project: String): AgentSession? =
         agentSessions.firstOrNull { it.project == project }
@@ -2574,11 +2583,33 @@ class AppViewModel @JvmOverloads constructor(
         }
         runner.tick(now)
         agentSessions = runner.sessions()
+        // **The log is compacted on the clock that is already running**, not on a timer of its own.
+        // Rolling a closed hour is cheap and rare, and it belongs here because this is the one place
+        // the app already wakes up on a schedule - a second scheduler would be a second thing to
+        // start, to stop, and to get wrong.
+        compactRequests(now)
         // **A session on disk needs a clock even if nobody pressed anything.** The service is
         // sticky, so the system restarts it after a kill — but not after a reboot, and not after
         // the app was force-stopped. Opening the app is the first moment the app is allowed to
         // start it again, and this is that moment.
         applyService(agentSessions)
+    }
+
+    /**
+     * Rolls the closed hours of the request log into their aggregates, on the worker.
+     *
+     * **Throttled to one attempt every ten minutes**, because a compaction that finds nothing new
+     * must not rewrite the file: every rewrite is the one moment this log could lose an append.
+     *
+     * **Nothing is reported.** A compaction that fails leaves the log whole, which is the right
+     * failure and not something the person needs to be told about - the table still reads correctly,
+     * just more slowly than it would have.
+     */
+    private fun compactRequests(now: Long) {
+        if (now - lastCompact < 10 * 60 * 1000L) return
+        lastCompact = now
+        val dir = workspace?.accountDir ?: return
+        onWorker { RequestLog.compact(dir, System.currentTimeMillis()) }
     }
 
     /**

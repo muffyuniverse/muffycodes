@@ -301,11 +301,28 @@ object RequestStats {
         // utc, time, day, kind, ms, provider, model, prompt, cached, completion, reasoning,
         // cost, finish
         if (cells.size < 10) return null
+        // **Read the span before the kind, because an aggregate has no kind of its own.** It sums
+        // turns and keepalives whose kinds differed, so its kind column says `all` - and a parser
+        // that insisted on turn/ping/stall here would drop every rolled-up row on the floor. That
+        // failure is silent in the worst way: the compactor writes correct aggregates, the reader
+        // ignores them, and the table goes back to summing raw rows that are no longer there.
+        //
+        // The kind of an aggregate is therefore carried as TURN, a value nothing reads: `buckets`
+        // decides by span, and a row whose span is not `raw` never reaches the kind switch below.
+        val span = cells.getOrNull(13)?.takeIf { it.isNotBlank() } ?: RequestLog.SPAN_RAW
+        val isAggregate = span != RequestLog.SPAN_RAW
         val kind = when (cells[1]) {
             "turn" -> RequestLog.Stats.Kind.TURN
             "ping" -> RequestLog.Stats.Kind.PING
             "stall" -> RequestLog.Stats.Kind.STALL
+            // The aggregate marker. Recognised rather than refused, and mapped to the neutral kind.
+            RequestLog.KIND_ALL -> RequestLog.Stats.Kind.TURN
             else -> return null
+        }
+        if (isAggregate && cells[1] != RequestLog.KIND_ALL) {
+            // A line claiming to be an aggregate but naming one response's kind is contradictory:
+            // an aggregate cannot be only a turn. Refused rather than guessed at.
+            return null
         }
         // **The instant, and nothing else, places the row.** A line without a readable one is not
         // guessed at from its clock time: a guessed timezone is worse than a missing row, because
@@ -330,7 +347,6 @@ object RequestStats {
          * one response, and whether it reported a cost is readable from its `cost` cell. Treating a
          * missing span as anything else would silently turn real history into an aggregate.
          */
-        val span = cells.getOrNull(13)?.takeIf { it.isNotBlank() } ?: RequestLog.SPAN_RAW
         val requests = long(14) ?: 1
         val costReported = long(15) ?: if (cost != null) 1 else 0
 

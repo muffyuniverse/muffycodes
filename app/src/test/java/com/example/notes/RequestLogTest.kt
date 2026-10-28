@@ -153,8 +153,11 @@ class RequestLogTest {
     fun `compaction rolls a closed hour into one row and drops the raw rows`() {
         val account = tmp.newFolder("compact")
         val hour = 3_600_000L
-        val now = 100 * 86_400_000L + 12 * hour
-        // Three responses in one closed hour, one in the hour in progress.
+        // **Mid-hour, deliberately.** With `now` on the hour, "an hour ago" and "a minute ago" both
+        // fall in units that have already ended - so a test written that way passes whether or not
+        // the code respects an open unit, which is the one thing it is here to check.
+        val now = 100 * 86_400_000L + 12 * hour + 30 * 60_000L
+        // Three responses in the 10:00 hour (closed), one at 12:29 (this hour, still open).
         for (i in 1..3) RequestLog.write(account, now - 2 * hour + i * 60_000L, stats(full))
         RequestLog.write(account, now - 60_000L, stats(full))
 
@@ -165,7 +168,9 @@ class RequestLogTest {
         val hours = rows.filter { it.span == "hour" }
         assertEquals("one hour aggregate", 1, hours.size)
         assertEquals("covering three requests", 3L, hours.single().requests)
-        assertEquals("with every token summed", 3L * 1000L, hours.single().prompt)
+        // **Against the fixture's own number**, not a literal: `full` says 3691 and a test that
+        // hard-codes a different value asserts a file the fixture does not produce.
+        assertEquals("with every token summed", 3L * 3691L, hours.single().prompt)
         // **And the open hour is still raw.** Rolling it would store a number the next request
         // contradicts.
         assertEquals("the current hour is untouched", 1, rows.count { it.span == RequestLog.SPAN_RAW })
@@ -178,7 +183,7 @@ class RequestLogTest {
         // rendering it back would silently drop whatever it held. Pinned by writing a line nothing
         // can parse and checking it survives a compaction unchanged.
         val account = tmp.newFolder("keep")
-        val now = 100 * 86_400_000L
+        val now = 100 * 86_400_000L + 30 * 60_000L
         RequestLog.write(account, now - 3 * 3_600_000L, stats(full))
         val odd = "this is not a row at all\tand it must survive"
         RequestLog.fileFor(account).appendText(odd + "\n")
@@ -201,8 +206,16 @@ class RequestLogTest {
         // property that makes that true: the day equals the sum of its own hours.
         val account = tmp.newFolder("derive")
         val day = 86_400_000L
-        val now = 100 * day
-        for (h in 0..23) RequestLog.write(account, now - day + h * 3_600_000L + 60_000L, stats(full))
+        // **Mid-day, not midnight.** Rolling needs the DAY to be closed, and the day holding `now`
+        // is not. Writing yesterday's 24 hours and compacting at the boundary of today is the
+        // arrangement that makes yesterday closed and today open.
+        val now = 100 * day + 12 * 3_600_000L
+        // **Anchored to the start of yesterday**, not to "a day before now": the latter is a moment
+        // *inside* yesterday and its first hours would reach back into the day before, so a
+        // count of 24 would be a count of two days' worth and the assertion would be about the
+        // wrong thing even while passing.
+        val yesterday = (now / day) * day - day
+        for (h in 0..23) RequestLog.write(account, yesterday + h * 3_600_000L + 60_000L, stats(full))
         RequestLog.compact(account, now)
         RequestLog.compact(account, now)
 
