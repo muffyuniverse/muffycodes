@@ -104,9 +104,14 @@ class AgentChatScreenTest {
         // And the call is on the same screen as the answer it produced, with its result on the
         // same line - which is the thing the navigator was making a person work for.
         compose.onNodeWithText("tree").assertExists()
-        // **The result's own words**, not a token count: the footer is a footer now and the size
-        // column that used to be in the bubble body is gone.
-        compose.onNodeWithText("milk.txt", substring = true).assertExists()
+        // **The result's own words, drawn beside the call** - not a token count, which used to
+        // lead the body and is a footer now. The project here is empty, so the result says so.
+        val call = scene.viewModel.chatBox!!.bubbles.first { it.caption == "tree" }
+        assertTrue(
+            "the call's bubble carries its result: ${call.body}",
+            call.body.isNotBlank() && call.body != call.detail,
+        )
+        compose.onNodeWithText(call.body.take(24), substring = true).assertExists()
     }
 
     @Test
