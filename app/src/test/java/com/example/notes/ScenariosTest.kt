@@ -105,6 +105,7 @@ class ScenariosTest {
     }
 
     /** The cost table, over a real log so the numbers in the picture are numbers. */
+    @Composable
     private fun stats(accountDir: java.io.File, now: Long) = Screen {
         StatsScreen(accountDir = accountDir, onBack = {}, now = now)
     }
@@ -544,7 +545,7 @@ class ScenariosTest {
         // screen said the wrong thing to a person. The numbers are written through the real log, so
         // what is pictured is what the door would have written.
         scene.signedIn()
-        val account = scene.workspace.accountDir
+        val account = scene.workspace?.accountDir ?: error("signed in, so there is one")
         val now = java.time.LocalDate.parse("2026-10-28")
             .atTime(14, 30).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
 
