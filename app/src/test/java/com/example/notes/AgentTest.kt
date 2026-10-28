@@ -412,13 +412,23 @@ class AgentTest {
         assertEquals("three pings, no turns", 3, door.pings.size)
         assertEquals("and not one question asked", 1, door.asked.size)
 
-        // **The same request every time.** One that added anything — a note, a timestamp, the
-        // ping's own row — would be a miss for ever after, and the second ping would pay full price.
+        // **The same CONVERSATION every time, and not the same request.** This used to assert the
+        // two were identical, which was the bug written down as a rule: a byte-identical request is
+        // what a gateway's own response cache answers instead of the upstream, so the upstream goes
+        // cold while the app records a successful ping. The operator's ruling (L28198) is that the
+        // message must never stay exactly the same, so the last message now carries a marker.
+        //
+        // What must be identical is everything the provider matches its cache on - the prefix.
         assertEquals("the conversation as it stood", before.size, log.contextRows().size)
         assertEquals(
-            "and the first ping sent exactly what the last one did",
-            door.pings.first().messages.map { it.role to it.text },
-            door.pings.last().messages.map { it.role to it.text },
+            "and the first ping sent the same conversation as the last",
+            door.pings.first().messages.dropLast(1).map { it.role to it.text },
+            door.pings.last().messages.dropLast(1).map { it.role to it.text },
+        )
+        assertNotEquals(
+            "but not the same request, or the upstream never sees one",
+            door.pings.first().messages.last().text,
+            door.pings.last().messages.last().text,
         )
 
         // The evidence still shows the checks — that is the only place a ping is visible.

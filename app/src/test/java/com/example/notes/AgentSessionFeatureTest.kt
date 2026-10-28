@@ -1,6 +1,7 @@
 package com.example.notes
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -314,10 +315,20 @@ class AgentSessionFeatureTest : FeatureTest() {
 
         assertEquals("the context did not grow by a ping", before, record("groceries").contextRows().size)
         assertEquals("and two pings happened", 2, door.pings.size)
+        // **The same context, not the same request.** Asserting the whole request was identical
+        // encoded the opposite of the ruling: an identical request is answered by a gateway's own
+        // response cache without reaching the upstream, so the provider's cache expires while the
+        // app records a successful ping. The prefix - what the cache matches on - must be identical;
+        // the final message now carries a marker so the request itself never repeats.
         assertEquals(
-            "the second sent exactly what the first did",
-            door.pings[0].messages.map { it.role to it.text },
-            door.pings[1].messages.map { it.role to it.text },
+            "the second sent the same conversation as the first",
+            door.pings[0].messages.dropLast(1).map { it.role to it.text },
+            door.pings[1].messages.dropLast(1).map { it.role to it.text },
+        )
+        assertNotEquals(
+            "but not the same request",
+            door.pings[0].messages.last().text,
+            door.pings[1].messages.last().text,
         )
         assertEquals("and nothing was asked", 1, door.asked.size)
     }
