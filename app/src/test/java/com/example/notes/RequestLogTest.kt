@@ -101,8 +101,8 @@ class RequestLogTest {
         // happened and its cost is unknown. The line has to survive that without a crash.
         val cells = RequestLog.line(0, stats(null)).split("\t")
         assertEquals(15, cells.size)
-        assertEquals("ping", cells[1])
-        assertEquals("", cells[5])
+        assertEquals("ping", cells[3])
+        assertEquals("", cells[7])
         assertNull("and nothing was invented", RequestLog.Stats(
             kind = RequestLog.Stats.Kind.PING,
             ms = 0,
