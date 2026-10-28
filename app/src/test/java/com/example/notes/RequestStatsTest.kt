@@ -41,10 +41,18 @@ class RequestStatsTest {
         completion: String = "1",
         reasoning: String = "1",
         cost: String = "0.0000241",
-        utc: Long = LocalDate.parse("2026-10-28").atTime(9, 14)
-            .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
-    ) = "$utc\t$at\t$day\t$kind\t1840\tdeepinfra/fp8/flex\tdeepseek\t$prompt\t$cached\t" +
-        "$completion\t$reasoning\t$cost\tlength"
+    ) = run {
+        // **The instant is derived from the day and the clock time**, in the device's zone, which
+        // is exactly what the writer does. A helper that hard-coded one instant would make every
+        // placement test pass while testing nothing.
+        val utc = LocalDate.parse(day)
+            .atTime(java.time.LocalTime.parse(at))
+            .atZone(ZoneId.systemDefault())
+            .toInstant()
+            .toEpochMilli()
+        "$utc\t$at\t$day\t$kind\t1840\tdeepinfra/fp8/flex\tdeepseek\t$prompt\t$cached\t" +
+            "$completion\t$reasoning\t$cost\tlength"
+    }
 
     @Test
     fun `cache is a share of input, because it is a part of it`() {
