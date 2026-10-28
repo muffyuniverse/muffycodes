@@ -126,9 +126,12 @@ class RequestStatsTest {
         assertEquals("left to right", RequestStats.interval(nine, five), RequestStats.interval(five, nine))
         assertEquals("the start is the earlier pick", nine, RequestStats.interval(five, nine).fromMs)
         assertEquals("and the end is the later", five, RequestStats.interval(five, nine).toMs)
-        // **Hours, because that is the granularity the log keeps.** Nine to five is eight hours of
-        // columns, both ends inclusive.
-        assertEquals("nine to five is eight hours", 8L, RequestStats.interval(nine, five).hours)
+        // **Hours, because that is the granularity the log keeps - and both ends count.** 09:00 to
+        // 17:00 touches nine clock hours (9, 10, ... 17), because an interval ending at 17:00
+        // includes 17:00's own hour. Written as 9 rather than 8 deliberately: the arithmetic
+        // difference between an interval and a difference of instants, and the reason a person
+        // picking "nine to five" expects the 5 o'clock hour to be in the figure.
+        assertEquals("nine to five touches nine hours, both ends included", 9L, RequestStats.interval(nine, five).hours)
         assertEquals("one instant is one hour, not zero", 1L, RequestStats.interval(nine, nine).hours)
     }
 
