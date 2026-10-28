@@ -238,48 +238,54 @@ fun StatsScreen(
                         dismissButton = {
                             TextButton(onClick = { editingStart = null }) { Text("Cancel") }
                         },
-                        // **The hour is the dialog's TITLE, and that is the whole fix.**
+                    ) {
+                        // **The hour is the calendar's own TITLE, and that is the whole fix.**
                         //
                         // Two attempts came before this one, and both were measured by looking at
                         // the picture rather than by a test:
                         //
                         //  1. The plain `DatePicker` filled a 320x470 dialog and the hour row sat
                         //     below the bottom of the screen - present in the tree, unreachable.
-                        //  2. Dropping the title and headline ("Select date", "October 28, 2026")
-                        //     made room, and the calendar simply grew into it. The hour row was
-                        //     still off the bottom.
+                        //  2. Dropping the `DatePicker`'s title and headline made room, and the
+                        //     calendar simply grew into it. The hour row was still off the bottom.
                         //
                         // The lesson is that **a scrolling body cannot rescue a control the person
                         // has to find**: nothing on screen says there is one, and the part of a
-                        // dialog a thumb reaches first is the top. So the hour is not in the body
-                        // at all - it is in the dialog's title slot, which Material pins above the
-                        // calendar and which therefore cannot be pushed off by anything.
-                        title = {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 24.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text("At", style = MaterialTheme.typography.bodyMedium)
-                                Spacer(Modifier.width(12.dp))
-                                TimeStepper(
-                                    label = "hour",
-                                    value = pickedHour,
-                                    range = 0..23,
-                                    onChange = { pickedHour = it },
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text(":00", style = MaterialTheme.typography.bodyMedium)
-                            }
-                        },
-                        // **The headline goes, because it repeats the navigator.** "October 28, 2026"
-                        // is the same fact as the highlighted 28 and the "October 2026" heading
-                        // directly beneath it, and on a short screen it is the difference between
-                        // the calendar fitting and not.
-                        headline = null,
-                    ) {
-                        DatePicker(state = picker, title = null)
+                        // dialog a thumb reaches first is the top. So the hour is not a row under
+                        // the calendar - it replaces the calendar's title, which Material pins above
+                        // the grid and which therefore cannot be pushed off by anything.
+                        //
+                        // **`title` here is `DatePicker`'s, not the dialog's.** The dialog has no
+                        // such parameter; the first version of this change passed it to
+                        // `DatePickerDialog` and failed to compile, which is how the distinction was
+                        // learned.
+                        DatePicker(
+                            state = picker,
+                            title = {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 24.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text("At", style = MaterialTheme.typography.bodyMedium)
+                                    Spacer(Modifier.width(12.dp))
+                                    TimeStepper(
+                                        label = "hour",
+                                        value = pickedHour,
+                                        range = 0..23,
+                                        onChange = { pickedHour = it },
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(":00", style = MaterialTheme.typography.bodyMedium)
+                                }
+                            },
+                            // **The headline goes, because it repeats the navigator.** "October
+                            // 28, 2026" is the same fact as the highlighted 28 and the "October
+                            // 2026" heading directly beneath it, and on a short screen it is the
+                            // difference between the calendar fitting and not.
+                            headline = null,
+                        )
                     }
                 }
             }
