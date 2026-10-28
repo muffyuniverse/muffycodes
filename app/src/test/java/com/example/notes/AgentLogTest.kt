@@ -230,9 +230,17 @@ class AgentLogTest {
         // **A row written by an older build still parses**, and answers with no date rather than
         // with today's - a row from yesterday labelled with today is worse than no date at all.
         val record = File(project, "agent/${AgentLog.SESSION}")
-        val old = record.readText() + "10:00:00.000    9     4 TOLD    in     - operator  an old row\n"
-        record.writeText(old)
-        val reread = AgentLog.open(project).rows().first { it.id == 9 }
+        // **Appended to whatever the app itself wrote**, so this line sits after real rows and the
+        // file's own shape is what it is parsed in - and with its newline, because a line without
+        // one is a row still being written and is deliberately not read.
+        val written = record.readText()
+        record.writeText(written + "10:00:00.000    9     4 TOLD    in     - operator  an old row\n")
+        val all = AgentLog.open(project).rows()
+        assertTrue(
+            "the old row is read at all: ${all.map { it.id }}",
+            all.any { it.id == 9 },
+        )
+        val reread = all.first { it.id == 9 }
         assertEquals("the old row's time is read", "10:00:00.000", LogFormat.time(reread.stamp))
         assertEquals("and it has no day to claim", "", LogFormat.day(reread.stamp))
     }
