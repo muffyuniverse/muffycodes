@@ -399,6 +399,9 @@ class Scenario(
         return viewModel.versions()
     }
 
+    /** True once at least [count] history reads have landed, which is the screen's own question. */
+    fun loaded(count: Int): Boolean = viewModel.historyLoaded >= count
+
     /** Puts a version back, from the history that is open. */
     fun restore(revisionId: String) {
         viewModel.restoreVersion(revisionId)

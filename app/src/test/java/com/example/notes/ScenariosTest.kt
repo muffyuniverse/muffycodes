@@ -439,6 +439,8 @@ class ScenariosTest {
         scene.file("one.txt", "the first")
         scene.open("groceries")
         val folder = File(scene.workspace!!.projectDir("groceries"), "letters")
+        // How many reads had landed before the screen mounted, so the wait can be for the next one.
+        val readsBefore = viewModel.historyLoaded
 
         scenario(
             compose, "09-a-deleted-folder-that-can-come-back",
@@ -448,6 +450,17 @@ class ScenariosTest {
             afterScreen = {
                 Screen { HistoryScreen(viewModel = viewModel, title = "letters", onBack = {}) }
             },
+            // **The only second screen in this report that reads git to draw itself**, so the only
+            // one whose first frame is a spinner. Every other one is the list the scenario came
+            // from, already drawn.
+            //
+            // The count is taken WITHOUT the `then` block having contributed to it: that block asks
+            // the view model for the list synchronously, and only `requestVersions` - which is what
+            // the screen itself calls - bumps the counter. So `readsBefore + 1` is the screen's own
+            // read landing, which is the frame worth photographing. A predicate that merely said
+            // "loaded something" would be true from the start and would photograph the spinner
+            // again, and that mistake costs a whole run to notice.
+            ready = { scene.loaded(readsBefore + 1) },
         ) {
             before()
             then(

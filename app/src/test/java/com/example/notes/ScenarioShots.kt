@@ -47,6 +47,21 @@ class ScenarioShots(
      * shows a single picture and says why.
      */
     private val switchToAfter: () -> Unit = {},
+    /**
+     * True once the screen in the second half has what it needs to draw itself.
+     *
+     * **Only the screens that read the repository need this.** `waitForIdle` spins the
+     * composition's own clock and returns before a worker's answer is posted back, so a second
+     * screen that loads was photographed mid-load - scenario 09's "after" was a picture of
+     * "Reading the history…", which is a true state of the app and evidence of nothing.
+     *
+     * The default is "already ready", so the twenty-three pictures that were right stay exactly
+     * as they were. This is a predicate rather than a pause, and a predicate over the app's own
+     * state rather than over the composition, because asking compose to go idle again is what an
+     * animating dialog can never do - five window scenarios failed that way when this was tried in
+     * the shared path.
+     */
+    private val ready: () -> Boolean = { true },
 ) {
 
     private var happened: String? = null
@@ -93,33 +108,33 @@ class ScenarioShots(
      * not a wait: a screen with nothing to load leaves this loop on its first pass.
      */
     /**
-     * Waits for the posts a screen's own loading made, **without asking compose to go idle**.
+     * The screen after it was done, which may be a different screen.
      *
-     * Two facts forced this shape, and both cost a red run to learn:
+     * **The extra wait is only for the scenarios that ask for it.** `waitForIdle` spins the
+     * composition's own clock and returns before a worker's answer is posted back, so a second
+     * screen that reads the repository was photographed mid-load — scenario 09's "after" was a
+     * picture of "Reading the history…".
      *
-     * - `waitForIdle` spins the composition's own clock and returns before a worker's answer is
-     *   posted back, so scenario 09's "after" was a picture of "Reading the history…".
-     * - A loop of compose idle waits fails every window scenario: a dialog animates for as long as
-     *   it is shown, compose is therefore never idle, and Espresso raises `AppNotIdleException`
-     *   after sixty seconds. Five windows failed exactly that way.
-     *
-     * So the wait happens on the looper, which is where the answer arrives, and the only thing it
-     * asks compose is whether the frame is ready to be drawn.
+     * The repair has to be narrow, and two earlier attempts were not: draining the looper for
+     * *every* scenario broke the five window ones with `AppNotIdleException`, because a dialog
+     * animates for as long as it is shown and never goes idle. A scenario whose second screen is
+     * already drawn therefore pays nothing here, which is twenty-three of the twenty-four.
      */
-    private fun settle() {
-        val looper = shadowOf(Looper.getMainLooper())
-        val deadline = System.currentTimeMillis() + 2_000
-        while (System.currentTimeMillis() < deadline) {
-            looper.idle()
-            Thread.sleep(20)
-        }
-    }
-
-    /** The screen after it was done, which may be a different screen. */
     fun after() {
         switchToAfter()
-        settle()
         compose.waitForIdle()
+        if (!ready()) {
+            // **The looper only.** Draining it is what delivers a worker's answer; asking compose
+            // to go idle again is the thing an animating window can never do. Guarded by `ready`,
+            // so nothing that could be a dialog ever reaches it.
+            val looper = shadowOf(Looper.getMainLooper())
+            val deadline = System.currentTimeMillis() + 10_000
+            while (!ready() && System.currentTimeMillis() < deadline) {
+                looper.idle()
+                Thread.sleep(8)
+            }
+            compose.waitForIdle()
+        }
         capture("after.png")
     }
 

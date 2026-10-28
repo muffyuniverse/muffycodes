@@ -354,6 +354,22 @@ class AppViewModel @JvmOverloads constructor(
     var historyGeneration: Int by mutableStateOf(0)
         private set
 
+    /**
+     * How many version lists have finished being read, since the app opened.
+     *
+     * **The screen's loading flag is local composable state, which nothing outside the composition
+     * can see** - and that is why the report's picture of scenario 09 was a picture of "Reading the
+     * history…". A test could not ask whether the read had finished, so it had to guess at a pause,
+     * and its guess was short.
+     *
+     * This is the same fact, kept where the app can answer it: the number of reads that have
+     * landed. The screen still owns its own spinner - a fact about one composition should stay in
+     * it - and this is only a counter of completions, which is exactly what "has the screen got
+     * its answer yet" means from outside.
+     */
+    var historyLoaded: Int by mutableStateOf(0)
+        private set
+
     /** What kind of thing the open history belongs to, so it can be previewed. */
     val historyKind: EntryKind
         get() {
@@ -2879,7 +2895,10 @@ class AppViewModel @JvmOverloads constructor(
     fun requestVersions(onDone: (List<Pair<GitService.CommitInfo, String?>>) -> Unit) {
         onWorker {
             val found = versions()
-            main.post { onDone(found) }
+            main.post {
+                onDone(found)
+                historyLoaded++
+            }
         }
     }
 
