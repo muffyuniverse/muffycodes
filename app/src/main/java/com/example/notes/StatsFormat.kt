@@ -1,0 +1,80 @@
+package com.example.notes
+
+import java.util.Locale
+
+/**
+ * How a number in the statistics table is written.
+ *
+ * **Precision is a decision about what a reader can act on, not a matter of taste.** The rule used
+ * throughout: show enough digits that two different values print differently, and no more. Cost is
+ * the case that forces this — a turn costs about $0.0001 and a ping about $0.000024, so a fixed
+ * three decimals would print both as "0.000" and a fixed five would print the turn as "0.00010",
+ * losing the difference between a cheap turn and an expensive one. Costs are therefore written to
+ * **five decimals**, and the two derived rates — which are the smallest numbers on the screen — to
+ * five as well, because they are the ones a person compares across buckets.
+ *
+ * Shares are a percentage and one decimal is enough: the difference between 95.1% and 95.2% cached
+ * is not a decision, while the difference between 95% and 5% is. They are printed with one decimal
+ * so that "0.0%" and "not measured" can still be told apart by the reader.
+ */
+object StatsFormat {
+
+    /** A dash for a number that does not exist, which is not the same as zero. */
+    const val NONE = "—"
+
+    /**
+     * A token count, grouped, with a short suffix past a thousand.
+     *
+     * Grouping because a table of six-figure token counts is unreadable without it, and a suffix
+     * because "1,328,760" in a 60dp column becomes an ellipsis — which is the one thing a table
+     * cannot afford. The exact number is still in the log, which is where an exact number belongs.
+     */
+    fun tokens(value: Long): String = when {
+        value < 1_000 -> value.toString()
+        value < 1_000_000 -> String.format(Locale.UK, "%.1fk", value / 1_000.0)
+        else -> String.format(Locale.UK, "%.1fM", value / 1_000_000.0)
+    }
+
+    /**
+     * A share, as a percentage.
+     *
+     * One decimal, and [NONE] rather than "0.0%" when there is no denominator: a bucket with no
+     * requests did not have a cache hit rate of zero, it had no requests.
+     */
+    fun share(value: Double?): String =
+        if (value == null) NONE else String.format(Locale.UK, "%.1f%%", value * 100)
+
+    /**
+     * A cost, in dollars, to **five decimals**.
+     *
+     * Five because that is the precision at which this app's individual responses become
+     * distinguishable: a ping is about $0.00002 and a turn about $0.00010, and anything coarser
+     * prints both as the same number. A bucket's total can be much larger, so the formatter widens
+     * itself rather than padding — a total of $1.50 should read "1.50000" and not "1.5".
+     */
+    fun cost(value: Double?): String =
+        if (value == null) NONE else String.format(Locale.UK, "%.5f", value)
+
+    /**
+     * A cost per million tokens, to **five decimals**.
+     *
+     * The smallest numbers on the screen and the ones most worth comparing: this is what the cache
+     * actually saved, folded into a rate. At a dollar a million, five decimals resolves to a tenth
+     * of a cent per million — finer than any difference a person would act on, which is the point
+     * at which more precision stops being information.
+     */
+    fun perMillion(value: Double?): String =
+        if (value == null) NONE else String.format(Locale.UK, "%.5f", value)
+
+    /**
+     * A cost per request, to **five decimals**.
+     *
+     * Same reasoning as [cost]: a ping per request is $0.00002, and three decimals would print it
+     * as nothing at all.
+     */
+    fun perRequest(value: Double?): String =
+        if (value == null) NONE else String.format(Locale.UK, "%.5f", value)
+
+    /** A request count. */
+    fun count(value: Int): String = value.toString()
+}

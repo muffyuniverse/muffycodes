@@ -57,8 +57,8 @@ VOCABULARY = {
     "add project", "new local project", "sync", "see changes", "rename project", "delete project",
     # the account
     "add account", "confirm add account", "remove account", "use test account",
-    # the log itself
-    "share log",
+    # the log itself, and the table counted from the request logs
+    "share log", "stats", "stats axis",
     # dialogs' buttons — the acts above, confirmed
     "confirm new file", "confirm new folder", "confirm delete", "confirm rename",
     "confirm move", "confirm copy", "confirm restore deleted", "confirm sync",

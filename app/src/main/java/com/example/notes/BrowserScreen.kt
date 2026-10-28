@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.QueryStats
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -110,6 +111,14 @@ fun BrowserScreen(
     onCopySelected: () -> Unit,
     onDeleteSelected: () -> Unit,
     onReport: () -> Unit = {},
+    /**
+     * Opens the cost table.
+     *
+     * **In the projects screen's bar, and only there.** The question it answers — "what has the
+     * model cost me" — is about the whole account rather than one folder, so it belongs where the
+     * account's own list is and not inside a project where the answer would be a subset.
+     */
+    onOpenStats: () -> Unit = {},
 ) {
     val projects = viewModel.atProjects
     val here = viewModel.path
@@ -176,6 +185,17 @@ fun BrowserScreen(
                         // project's tree nests and what you remember is a name.
                         IconButton(onClick = { viewModel.showSearch = !viewModel.showSearch }) {
                             Icon(Icons.Filled.Search, contentDescription = "Search this project")
+                        }
+                    }
+                    if (projects) {
+                        // **Only at the account root, where the bar is about the account.**
+                        // Inside a project the same button would answer a narrower question
+                        // than the one it asks, which is worse than not offering it.
+                        IconButton(onClick = { adding = false; onOpenStats() }) {
+                            Icon(
+                                Icons.Filled.QueryStats,
+                                contentDescription = "What it cost",
+                            )
                         }
                     }
                     IconButton(onClick = {

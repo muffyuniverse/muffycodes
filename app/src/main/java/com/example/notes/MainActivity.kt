@@ -118,6 +118,10 @@ private sealed interface Pending {
 private fun AppRoot(viewModel: AppViewModel) {
     var showSettings by remember { mutableStateOf(false) }
     var showTrace by remember { mutableStateOf(false) }
+    // **The cost table, opened from the projects screen's bar.** It reads the request logs when it
+    // is opened and not while it is open: the log grows on every response, so a table that watched
+    // it would move under the reader's eyes and would be re-reading files the agent was writing.
+    var showStats by remember { mutableStateOf(false) }
     // The report window. No snapshot to take: the log is already being appended to, so
     // the moment the person writes their sentence is a `REPORT` line and everything
     // above it is the context. That is the whole simplification — one stream, one
@@ -241,6 +245,7 @@ private fun AppRoot(viewModel: AppViewModel) {
     }
 
     BackHandler(enabled = showTrace) { showTrace = false }
+    BackHandler(enabled = showStats) { showStats = false }
     BackHandler(enabled = showSettings) { showSettings = false }
 
     /**
@@ -257,6 +262,7 @@ private fun AppRoot(viewModel: AppViewModel) {
             "report-opened",
             (when {
                 showTrace -> "trace"
+                showStats -> "stats"
                 showSettings -> "settings"
                 historyPath != null -> "history/${historyPath.last()}"
                 editing != null -> "editor/${editing.name}"
@@ -283,6 +289,7 @@ private fun AppRoot(viewModel: AppViewModel) {
         Trace.changed(
             "screen " + when {
                 showTrace -> "trace"
+                showStats -> "stats"
                 showSettings -> "settings"
                 historyPath != null -> "history"
                 editing != null -> "editor"
@@ -352,6 +359,12 @@ private fun AppRoot(viewModel: AppViewModel) {
     )
 
     when {
+        // **Only offered where there is an account to read**, which is the same condition the
+        // button is drawn under. `workspace` is non-null exactly when somebody is signed in.
+        showStats && viewModel.workspace != null -> StatsScreen(
+            accountDir = viewModel.workspace!!.accountDir,
+            onBack = { showStats = false },
+        )
         showTrace -> ObservabilityScreen(
             report = traceReport,
             onBack = { showTrace = false },
@@ -384,6 +397,7 @@ private fun AppRoot(viewModel: AppViewModel) {
             onRemoveAccount = { tap("remove account"); pending = Pending.RemoveAccount },
             onTestAccount = { tap("use test account"); viewModel.signInAsTestAccount() },
             onOpenTrace = { showTrace = true },
+            onOpenStats = { showStats = true },
             onReport = openReport,
         )
 
@@ -429,6 +443,10 @@ private fun AppRoot(viewModel: AppViewModel) {
                 username = viewModel.account?.login,
                 onOpenSettings = { tap("settings"); showSettings = true },
                 onReport = openReport,
+                // The act records itself: opening a table is a tap that reaches no folder, so
+                // `refresh()` cannot see it and the trace would have a hole exactly where a
+                // person would look for "did the button work".
+                onOpenStats = { tap("stats"); showStats = true },
                 actions = actions,
                 onAddProject = { tap("add project"); pending = Pending.AddProject },
                 onRowChat = { project -> viewModel.openChat(project) },
