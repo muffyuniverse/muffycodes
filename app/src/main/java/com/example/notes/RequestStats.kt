@@ -60,12 +60,46 @@ object RequestStats {
      * **Order does not matter.** A person moves whichever picker is nearest their thumb, and a table
      * that went blank when the two were swapped would look broken rather than empty.
      */
-    fun interval(a: Long, b: Long): Interval {
-        val from = hourFloor(minOf(a, b))
-        val high = hourFloor(maxOf(a, b))
-        val to = if (maxOf(a, b) == high) high else high + 3_600_000L
+    fun interval(a: Long, b: Long, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): Interval {
+        // **Whole CLOCK hours, not whole UTC hours.** The picker states a wall-clock hour, and what
+        // it must snap to is the same hour on that wall. `hourFloor` divides the UTC epoch, which
+        // lands on a local boundary only where the zone's offset is a whole number of hours -
+        // so in India (+5:30), Nepal (+5:45), Newfoundland (-3:30) or Adelaide (+9:30) a person
+        // picking 19:00 got 18:30-19:30, displayed as "18:00" because the label renders `HH:00`.
+        // Two ways wrong at once: the figure covered the wrong hour, and the button said a time
+        // that was not the interval's start.
+        //
+        // The log keeps UTC hours on purpose (see `unitFloor`), and that does not change: an
+        // aggregate must not be frozen at the local shape compaction happened to see, because two
+        // local `01:00`s exist on the day the clocks go back. So this is a *second* floor with a
+        // different meaning, and the naming has to keep them apart.
+        val from = localHourFloor(minOf(a, b), zone)
+        val high = localHourFloor(maxOf(a, b), zone)
+        // **The end is the next local hour boundary**, computed on the local timeline rather than
+        // by adding a UTC hour: across a DST change a wall-clock hour is not always 3,600,000 ms.
+        val to = if (maxOf(a, b) == high) {
+            high
+        } else {
+            java.time.Instant.ofEpochMilli(high).atZone(zone)
+                .plusHours(1).toInstant().toEpochMilli()
+        }
         return Interval(from, to)
     }
+
+    /**
+     * The start of the **wall-clock** hour [ms] falls in, in [zone].
+     *
+     * Distinct from [hourFloor], which floors the UTC epoch because the *log* stores UTC hours.
+     * They agree in every whole-hour zone and disagree by the offset's remainder everywhere else -
+     * a distinction worth two functions rather than one with a boolean, because getting it wrong
+     * is silent: the interval is simply the wrong hour, and the label agrees with itself.
+     */
+    fun localHourFloor(
+        ms: Long,
+        zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
+    ): Long = java.time.Instant.ofEpochMilli(ms).atZone(zone)
+        .truncatedTo(java.time.temporal.ChronoUnit.HOURS)
+        .toInstant().toEpochMilli()
 
     /**
      * **The one column.** Everything the log holds for one interval, as one set of numbers.

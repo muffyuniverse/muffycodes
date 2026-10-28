@@ -79,11 +79,14 @@ fun StatsScreen(
      * opening a cost screen most often wants and it is bounded.
      */
     var from by remember { mutableStateOf(dayStart(now)) }
-    // **The next hour boundary, not the current instant and not the current hour.** At 19:28 the
-    // default end is 20:00, because an end is where the interval STOPS - so "from midnight to 20:00"
-    // covers the hours 00 through 19. Storing the last millisecond of 19:00-20:00 here would label
-    // the button 19:00 while the figures covered the whole of that hour, and the two would disagree.
-    var to by remember { mutableStateOf(RequestStats.hourFloor(now) + 3_600_000L) }
+    // **The end of the hour now is in**, not the current instant and not the current hour: an end
+    // is where the interval STOPS, so "from midnight to 20:00" covers the hours 00 through 19.
+    //
+    // Asked of the same function the pickers use rather than computed here: `interval(now, now)` is
+    // the one local hour containing now, so its `toMs` is the next local boundary. A UTC
+    // `+ 3_600_000` would be a different instant in any zone whose offset is not a whole number of
+    // hours, and would drift again across a DST change.
+    var to by remember { mutableStateOf(RequestStats.interval(now, now).toMs) }
     /** Which picker is open: null when neither is, `true` for the start, `false` for the end. */
     var editingStart by remember { mutableStateOf<Boolean?>(null) }
 
