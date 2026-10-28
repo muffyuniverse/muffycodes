@@ -100,17 +100,22 @@ class StatsScreenTest {
         compose.waitForIdle()
 
         // **The hour stepper is the control this session added**, and on a 320x470 screen it sat
-        // below the bottom of the dialog: present in the tree, unreachable by a thumb. Both its
-        // half and the "Show" button that commits it must be inside the window.
+        // below the bottom of the dialog: present in the tree, unreachable by a thumb.
+        //
+        // **Anchored to Show rather than to the window's height, because the height check passed
+        // while the control was invisible.** A node inside the dialog's scrolling body reports
+        // unclipped bounds, so "its bottom is less than the screen's height" was true of a row
+        // drawn underneath the buttons. Show is pinned by Material and always drawn, so "the hour
+        // is above Show" is the claim that actually distinguishes the two states.
         val at = bottomOf("At")
+        val commit = bottomOf("Show")
         assertTrue(
-            "the hour row is on the screen: its bottom is $at of ${windowHeight()}",
-            at < windowHeight(),
+            "the hour row is above the button that commits it: $at vs $commit",
+            at < commit,
         )
         assertTrue(
-            "and so is Show, or the pick cannot be committed: " +
-                "${bottomOf("Show")} of ${windowHeight()}",
-            bottomOf("Show") < windowHeight(),
+            "and both are on the screen: $commit of ${windowHeight()}",
+            commit < windowHeight(),
         )
     }
 

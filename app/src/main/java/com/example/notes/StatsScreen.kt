@@ -1,8 +1,6 @@
 package com.example.notes
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -240,25 +238,23 @@ fun StatsScreen(
                         dismissButton = {
                             TextButton(onClick = { editingStart = null }) { Text("Cancel") }
                         },
-                    ) {
-                        // **The calendar is shrunk, and the body scrolls.**
+                        // **The hour is the dialog's TITLE, and that is the whole fix.**
                         //
-                        // Found by looking at the picture, not by a test: on a 320x470 screen the
-                        // default `DatePicker` filled the dialog and the hour stepper sat *below the
-                        // bottom of the screen* - so the one control this session added could not be
-                        // reached at all, and every assertion about it still passed because the node
-                        // exists whether or not a person can see it.
+                        // Two attempts came before this one, and both were measured by looking at
+                        // the picture rather than by a test:
                         //
-                        // The title and the headline are the two lines Material lets a caller drop
-                        // ("Select date", "October 28, 2026"), and they are the two that repeat what
-                        // the month navigator directly beneath them already says. Dropping them is
-                        // ~120dp, which is the hour row. The scroll is the backstop: a font scale or
-                        // a shorter phone must not be able to hide a control again.
-                        Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                            DatePicker(state = picker, title = null, headline = null)
-                            // **The hour, and nothing finer.** One stepper rather than a clock face:
-                            // a clock is a large control for a screen whose subject is a table, and
-                            // it would offer minutes the table cannot count.
+                        //  1. The plain `DatePicker` filled a 320x470 dialog and the hour row sat
+                        //     below the bottom of the screen - present in the tree, unreachable.
+                        //  2. Dropping the title and headline ("Select date", "October 28, 2026")
+                        //     made room, and the calendar simply grew into it. The hour row was
+                        //     still off the bottom.
+                        //
+                        // The lesson is that **a scrolling body cannot rescue a control the person
+                        // has to find**: nothing on screen says there is one, and the part of a
+                        // dialog a thumb reaches first is the top. So the hour is not in the body
+                        // at all - it is in the dialog's title slot, which Material pins above the
+                        // calendar and which therefore cannot be pushed off by anything.
+                        title = {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -276,7 +272,14 @@ fun StatsScreen(
                                 Spacer(Modifier.width(8.dp))
                                 Text(":00", style = MaterialTheme.typography.bodyMedium)
                             }
-                        }
+                        },
+                        // **The headline goes, because it repeats the navigator.** "October 28, 2026"
+                        // is the same fact as the highlighted 28 and the "October 2026" heading
+                        // directly beneath it, and on a short screen it is the difference between
+                        // the calendar fitting and not.
+                        headline = null,
+                    ) {
+                        DatePicker(state = picker, title = null)
                     }
                 }
             }
