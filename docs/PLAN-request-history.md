@@ -280,37 +280,46 @@ Each step is independently shippable and testable.
 
 ## 7. What is built, and what is not
 
-Built and green (CI run 40710242459):
+Built and green (CI run 40713779502):
 
-1. **Streamed read, off the main thread.** `RequestStats.read` uses `useLines`; the screen
-   reads through `AppViewModel.readRequestStats` on the worker and says "reading" until it
-   arrives. A half-read file contributes the half it read.
-2. **The three columns.** `span`, `requests`, `cost reported` — **appended, not prepended**
-   (the plan said prepended; the instant is the first cell and prepending would have made
-   every existing line unparseable). An old line reads as `raw`/1.
-3. **The rollup arithmetic**, as pure functions: `rollup`, `hourFloor`/`dayFloor`/`monthFloor`/
-   `yearFloor` in UTC, and `closable` — which computes each unit's end by asking the floor
-   function for the next unit rather than assuming 30 days, so February closes on its own length.
+1. **Streamed read, off the main thread.** `RequestStats.read` uses `useLines`; the screen reads
+   through `AppViewModel.readRequestStats` on the worker and says "reading" until it arrives.
+2. **The three columns.** `span`, `requests`, `cost reported` — **appended, not prepended** (the
+   plan said prepended; the instant is the first cell, so prepending would have made every line
+   already on a phone unparseable). An old line reads as `raw`/1.
+3. **The rollup arithmetic** as pure functions: `rollup`, the four `*Floor` functions in UTC, and
+   `closable`, which computes each unit's end by asking for the next unit rather than assuming 30
+   days — so February closes on its own length.
 4. **The compactor** (`RequestLog.compact` + `rollUp`): closed hours rolled, raw rows dropped,
-   `day`/`month`/`year` rebuilt from hours. One `writeWhole` for every rewrite, shared with
-   `prune`. An unparseable line is written back verbatim. Called from `tickAgents`, throttled to
-   ten minutes, on the worker.
-5. **Five columns from one pick** — `year` and `total` spans, and checkboxes that choose which
-   are drawn without changing any number.
+   `day`/`month`/`year` rebuilt from hours every time. One `writeWhole` for every rewrite, shared
+   with `prune`; an unparseable line is written back verbatim. Called from `tickAgents`, throttled
+   to ten minutes, on the worker.
+5. **Five columns from one pick** — `year` and `total` spans, and checkboxes that choose which are
+   drawn without changing any number.
+6. **The reader uses the aggregates.** Coarsest stored level speaks for its unit; every level
+   beneath a covered unit is silent. Containment, not equality, and the covered set is built once
+   per draw rather than scanned per row.
 
 Not built:
 
-6. **The reader still ignores aggregates.** `buckets` filters to `span == raw`, marked temporary.
-   It must become the disjoint decomposition (§2): coarsest complete aggregates that partition
-   the span, plus one descending chain. **Until then the table only sees the current hour's raw
-   rows plus any raw rows older than the first compaction** — the aggregates exist on disk and
-   are not read.
 7. **The picker's four granularities** (§1): only a day can be picked directly today.
 8. **Percentages to three decimals** (§1a): `StatsFormat.share` renders one.
 9. **`session.log` `output`/`thinking`** and the `Bubble` wiring (§4): the footer cannot render.
-10. **`requestDays` now needs to bound the hour rows**, which is the pyramid's only retention
-    question — and it is still applied to raw rows by `prune`.
+10. **`requestDays` still bounds raw rows.** It must bound the *hour* rows, which is the pyramid's
+    only retention question — today the knob prunes raw lines that the compactor is about to
+    consume anyway.
 
-**§7.6 is the one that matters next**: the compactor is writing rows the reader does not read.
-That is safe — the table is correct, it just does not benefit — but it is the whole point of the
-work so far, and it is a single function.
+### Three traps found while building, worth keeping
+
+Each produced a plausible wrong number rather than an error, and each was caught only by a test
+that asserted a specific figure:
+
+- **`unitEnd("raw", …)` fell through to a year.** A raw row's unit was named by its span, `raw`
+  matched none of the cases, and the else branch returned a year — so no hour could ever cover a
+  raw row and every rolled hour was counted twice.
+- **The compacted aggregate was unreadable.** `parse` refused `kind = "all"`, so correct rows were
+  written and silently ignored on the way back, and the table fell back to raw rows that had been
+  deleted.
+- **A test fixture that never created the condition it asserted.** "An open hour is untouched" was
+  tested with `now` exactly on the hour, so "a minute ago" was already closed — it would have
+  passed whether or not the code respected an open unit.
