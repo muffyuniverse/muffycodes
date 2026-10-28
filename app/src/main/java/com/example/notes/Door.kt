@@ -233,6 +233,34 @@ class OpenRouterDoor(
         )
         Result.success(reply)
     } catch (e: Exception) {
+        // **A stall is billed, and a refusal is not.** This distinction is the whole reason a
+        // failure row exists for one of them and not the other:
+        //
+        // - A refusal or an ack timeout produced no output, and OpenRouter's zero-completion
+        //   insurance means it was not charged. A row would be a row of zeroes, which is noise.
+        // - A stall happened *after* tokens were generated. Whether they were billed depends on
+        //   whether the upstream supports cancellation - some stop, some keep generating and charge
+        //   for the whole thing after the connection dies. That is money, and it left no record.
+        //
+        // The row carries what had arrived instead of a `usage` block, because there is no `usage`:
+        // the accounting arrives at the end of a stream that never ended. Blank columns say "not
+        // reported", which is true, where a zero would say "free".
+        (e as? Idle)?.let { idle ->
+            onStats?.invoke(
+                RequestLog.Stats(
+                    kind = RequestLog.Stats.Kind.STALL,
+                    ms = System.currentTimeMillis() - began,
+                    provider = provider,
+                    model = model,
+                    usage = null,
+                    finish = null,
+                    received = RequestLog.Stats.Received(
+                        said = idle.stream.said.length,
+                        thinking = idle.stream.thinking.length,
+                    ),
+                ),
+            )
+        }
         Result.failure(
             IllegalStateException(Secrets.explain(e, "The model could not be asked"))
         )
@@ -265,6 +293,9 @@ class OpenRouterDoor(
         )
         Result.success(Unit)
     } catch (e: Exception) {
+        // **No stall row here, and it is not an oversight.** A ping is not streamed, so it has no
+        // middle to die in: the request either produced a whole body or it did not, and a timeout
+        // means nothing came back. That is the unbilled case, which leaves no row at all.
         Result.failure(e)
     }
 

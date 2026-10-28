@@ -196,15 +196,22 @@ fun StatsScreen(
             } else {
                 // The two kinds, each as its own block of rows. A block is a title and its rows,
                 // and the rows line up because every block is drawn by the same function.
-                item { KindBlock("The agent", buckets, now) { it.turns } }
-                item { KindBlock("The keepalive", buckets, now) { it.pings } }
+                item { KindBlock("The agent", buckets) { it.turns } }
+                item { KindBlock("The keepalive", buckets) { it.pings } }
+                // **Only drawn when there were any**, because a permanent empty block would be a
+                // standing warning about something that usually has not happened. When it is drawn
+                // it is the one line on the screen whose cost is unknown, and that is the point.
+                if (buckets.any { it.stalls.requests > 0 }) {
+                    item { KindBlock("Answers that stopped", buckets) { it.stalls } }
+                }
                 item {
                     Text(
                         // The one thing a reader has to know to read the shares correctly, said
                         // once rather than in every row.
                         "Cached is part of input, not a column beside it. A dash is a number that " +
                             "does not exist — a span with no requests has no average, and that is " +
-                            "not the same as zero.",
+                            "not the same as zero. A stopped answer was billed but never reported " +
+                            "its totals, so its cost cannot be shown.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 12.dp),
@@ -226,7 +233,6 @@ fun StatsScreen(
 private fun KindBlock(
     title: String,
     buckets: List<RequestStats.Bucket>,
-    now: Long,
     of: (RequestStats.Bucket) -> RequestStats.Stats,
 ) {
     // The buckets, summed, so the header can say what the block comes to. A block with no requests

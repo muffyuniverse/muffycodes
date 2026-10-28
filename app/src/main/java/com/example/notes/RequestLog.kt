@@ -63,6 +63,12 @@ object RequestLog {
         "reasoning",
         "cost",
         "finish",
+        // **What had arrived, for a stall.** Blank on every other row, where `usage` is the better
+        // answer. On a stall these are the only numbers there are, and the difference between them
+        // is the difference between "the model was thinking" and "the model was writing" - which
+        // is what a person wants to know about a request they were charged for and never saw.
+        "said",
+        "thinking",
     )
 
     /**
@@ -80,13 +86,40 @@ object RequestLog {
         val model: String,
         val usage: JSONObject?,
         val finish: String?,
+        /**
+         * How much had arrived when the stream died, for a stall.
+         *
+         * Null for a finished request, where `usage` is the better answer. For a stall this is the
+         * only evidence there is: it is what distinguishes a connection that died mid-answer from
+         * one that never started, and it is the closest thing to the billed amount that exists.
+         */
+        val received: Received? = null,
     ) {
+        /** What a stalled stream had produced, in the two things the app counts as it arrives. */
+        data class Received(val said: Int, val thinking: Int)
         enum class Kind(val label: String) {
             /** A turn: the person spoke and the answer was read. */
             TURN("turn"),
 
             /** The keepalive: the conversation re-sent for the provider's cache. */
             PING("ping"),
+
+            /**
+             * An answer that began and then stopped arriving.
+             *
+             * **A row of its own, and the reason is money.** A refusal or an ack timeout produces
+             * no output, and OpenRouter's zero-completion insurance means it is not billed - so
+             * those leave no row and the table stays honest. A stall is not that: the model had
+             * already generated tokens, and whether they were billed depends on whether the
+             * upstream supports cancellation. Some do and some do not, and for the ones that do
+             * not, the whole generation is charged after the connection dies.
+             *
+             * So this row is written with `usage` absent, which leaves every token and cost column
+             * blank rather than showing a zero. A zero would say "free", and the honest answer is
+             * "we do not know" - and a blank `reasoning` would say "nothing was produced", when
+             * what is true is that something was, we just never received the accounting for it.
+             */
+            STALL("stall"),
         }
 
         val promptTokens: Int? get() = usage?.optInt("prompt_tokens")?.takeIf { usage.has("prompt_tokens") }
@@ -146,6 +179,8 @@ object RequestLog {
             num(stats.reasoningTokens),
             money(stats.cost),
             stats.finish.orEmpty(),
+            stats.received?.said?.toString().orEmpty(),
+            stats.received?.thinking?.toString().orEmpty(),
         ).joinToString("\t")
     }
 

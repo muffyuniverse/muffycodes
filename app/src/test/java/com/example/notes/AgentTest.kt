@@ -736,6 +736,39 @@ class AgentTest {
     }
 
     @Test
+    fun `a stall writes a row and a refusal writes none`() {
+        // **The rule, and the reason it is not "log every failure".** A refusal or an ack timeout
+        // produced no output, so OpenRouter's zero-completion insurance means it was not billed - a
+        // row would be a row of zeroes. A stall happened *after* tokens were generated, and whether
+        // the upstream charged for them is unknowable from here, so it must be recorded.
+        //
+        // The row's absence for a refusal is asserted by driving a door whose key is missing: the
+        // failure happens before a socket is opened, and nothing reaches the sink.
+        val written = mutableListOf<RequestLog.Stats>()
+        val refusing = OpenRouterDoor(
+            key = { null },
+            model = "deepseek/deepseek-v4.1-flash-1017",
+            provider = "deepinfra/fp8/flex",
+            effort = "max",
+            onStats = { written += it },
+        )
+
+        val end = refusing.turn(
+            Request(
+                model = "deepseek/deepseek-v4.1-flash-1017",
+                provider = "deepinfra/fp8/flex",
+                effort = "max",
+                system = "the instructions",
+                messages = listOf(Msg.user("a task")),
+                tools = emptyList(),
+            ),
+        )
+
+        assertTrue("it failed", end.isFailure)
+        assertTrue("and nothing was written down: $written", written.isEmpty())
+    }
+
+    @Test
     fun `a body with no usage block reports nothing rather than zero`() {
         // A refusal, or a provider that simply omits `usage`. Null and 0 are different facts here:
         // a cached response reports every counter as 0, so an invented zero would read as a cache

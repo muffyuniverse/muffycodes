@@ -180,6 +180,38 @@ class RequestStatsTest {
     }
 
     @Test
+    fun `a stall is a request with no cost, not a request that cost nothing`() {
+        // **The distinction this row exists for.** A refusal produces no output and is not billed,
+        // so it leaves no row. A stall happened after tokens were generated, and whether the
+        // upstream charged for them is not knowable from here - so the row is written with no
+        // `usage` and every cost column blank. A zero would say "free", and the honest answer is
+        // "we do not know".
+        val day = LocalDate.parse("2026-10-28")
+        val stallRow = "1759" + "000000\t09:14:22.301\t2026-10-28\tstall\t41000\tdeepinfra\tdeepseek\t" +
+            "\t\t\t\t\t\t120\t880"
+        val parsed = RequestStats.parse(day, stallRow)!!
+
+        assertEquals("it is a stall", RequestLog.Stats.Kind.STALL, parsed.kind)
+        assertNull("with no prompt count", parsed.prompt)
+        assertNull("and no cost, because none was reported", parsed.cost)
+        // What it did produce is kept: 120 characters said, 880 thought. That is the closest thing
+        // to the billed amount that exists for a request whose accounting never arrived.
+        assertEquals("what it had written", 120L, parsed.said)
+        assertEquals("what it was thinking", 880L, parsed.thinking)
+
+        val buckets = RequestStats.buckets(
+            listOf(parsed), RequestStats.Axis.DAY,
+            LocalDate.parse("2026-10-28").atTime(9, 30).atZone(ZoneId.systemDefault())
+                .toInstant().toEpochMilli(),
+        )
+        val today = buckets.last()
+        assertEquals("counted as a request", 1, today.stalls.requests)
+        assertEquals("in the total too", 1, today.total.requests)
+        // **The screen shows a dash here, not 0.00000.** A stall span has no cost to average.
+        assertNull("and no average cost to show", today.stalls.perRequest)
+    }
+
+    @Test
     fun `a line that does not parse is skipped, not guessed at`() {
         // The log is appended to while it is being read, so the last line may be half written. A
         // table that refused to draw because of one bad line would be a table that never drew.

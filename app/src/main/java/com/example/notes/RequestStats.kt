@@ -45,8 +45,10 @@ object RequestStats {
         val label: String,
         val turns: Stats,
         val pings: Stats,
+        /** Answers that began and then died. Billed and unreported, so they are their own line. */
+        val stalls: Stats = Stats(),
     ) {
-        val total: Stats get() = turns + pings
+        val total: Stats get() = turns + pings + stalls
     }
 
     /**
@@ -117,6 +119,7 @@ object RequestStats {
         val kind = when (cells[3]) {
             "turn" -> RequestLog.Stats.Kind.TURN
             "ping" -> RequestLog.Stats.Kind.PING
+            "stall" -> RequestLog.Stats.Kind.STALL
             else -> return null
         }
         // **The instant, and nothing else, places the row.** A line without a readable one is not
@@ -135,6 +138,8 @@ object RequestStats {
             completion = long(9),
             reasoning = long(10),
             cost = cost,
+            said = long(13),
+            thinking = long(14),
         )
     }
 
@@ -157,6 +162,9 @@ object RequestStats {
         val completion: Long?,
         val reasoning: Long?,
         val cost: Double?,
+        /** What a stalled answer had produced, when the row is a stall. Null for everything else. */
+        val said: Long? = null,
+        val thinking: Long? = null,
     )
 
     /**
@@ -195,7 +203,7 @@ object RequestStats {
         }
 
         val sums = columns.associate { (key, _) ->
-            key to (Stats() to Stats())
+            key to (Stats() to Stats() to Stats())
         }.toMutableMap()
 
         for (row in rows) {
@@ -217,14 +225,15 @@ object RequestStats {
                 costReported = if (row.cost != null) 1 else 0,
             )
             sums[key] = when (row.kind) {
-                RequestLog.Stats.Kind.TURN -> cell.first + add to cell.second
-                RequestLog.Stats.Kind.PING -> cell.first to cell.second + add
+                RequestLog.Stats.Kind.TURN -> Triple(cell.first + add, cell.second, cell.third)
+                RequestLog.Stats.Kind.PING -> Triple(cell.first, cell.second + add, cell.third)
+                RequestLog.Stats.Kind.STALL -> Triple(cell.first, cell.second, cell.third + add)
             }
         }
 
         return columns.map { (key, label) ->
-            val (turns, pings) = sums[key] ?: (Stats() to Stats())
-            Bucket(label = label, turns = turns, pings = pings)
+            val (turns, pings, stalls) = sums[key] ?: Triple(Stats(), Stats(), Stats())
+            Bucket(label = label, turns = turns, pings = pings, stalls = stalls)
         }
     }
 
