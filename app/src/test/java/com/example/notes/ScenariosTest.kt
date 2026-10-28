@@ -104,6 +104,11 @@ class ScenariosTest {
         ObservabilityScreen(report = report, onBack = {}, onShare = {}, onClear = {})
     }
 
+    /** The cost table, over a real log so the numbers in the picture are numbers. */
+    private fun stats(accountDir: java.io.File, now: Long) = Screen {
+        StatsScreen(accountDir = accountDir, onBack = {}, now = now)
+    }
+
     /**
      * A dialog, painted on its own.
      *
@@ -527,6 +532,75 @@ class ScenariosTest {
             result(
                 "The screen says how many taps were answered and shows the lines themselves, " +
                     "so a person can see the app's own account of what it did.",
+            )
+        }
+    }
+
+    @Test
+    fun `what the model cost, as the statistics screen shows it`() {
+        // **A picture of the table, because a table is the one screen whose defects a test cannot
+        // see.** A column that overflows, a block whose rows stop lining up, a share printed as a
+        // fraction, two kinds that should have been three: every assertion here would pass while the
+        // screen said the wrong thing to a person. The numbers are written through the real log, so
+        // what is pictured is what the door would have written.
+        scene.signedIn()
+        val account = scene.workspace.accountDir
+        val now = java.time.LocalDate.parse("2026-10-28")
+            .atTime(14, 30).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+
+        fun usage(prompt: Int, cached: Int, completion: Int, thinking: Int, cost: Double) =
+            org.json.JSONObject(
+                """{"prompt_tokens":$prompt,"cached_tokens":$cached,
+                    "completion_tokens":$completion,"reasoning_tokens":$thinking,"cost":$cost,
+                    "prompt_tokens_details":{"cached_tokens":$cached},
+                    "completion_tokens_details":{"reasoning_tokens":$thinking}}""",
+            )
+
+        // A morning of turns, each with a warm cache, then the keepalive alone for the afternoon -
+        // which is the shape a real day has and the one the two blocks exist to show apart.
+        var at = now - 5 * 3_600_000L
+        repeat(4) {
+            RequestLog.write(account, at, RequestLog.Stats(
+                kind = RequestLog.Stats.Kind.TURN, ms = 4_100,
+                provider = "deepinfra/fp8/flex", model = "deepseek/deepseek-v4.1-flash",
+                usage = usage(prompt = 6_000, cached = 5_500, completion = 600, thinking = 90, cost = 0.00071),
+                finish = "stop",
+            ))
+            at += 12 * 60_000L
+        }
+        at = now - 2 * 3_600_000L
+        repeat(18) {
+            RequestLog.write(account, at, RequestLog.Stats(
+                kind = RequestLog.Stats.Kind.PING, ms = 1_840,
+                provider = "deepinfra/fp8/flex", model = "deepseek/deepseek-v4.1-flash",
+                usage = usage(prompt = 3_691, cached = 3_584, completion = 1, thinking = 1, cost = 0.0000241),
+                finish = "length",
+            ))
+            at += 4 * 60_000L
+        }
+        // One answer that began and died, so the third block is in the picture rather than only in
+        // the code path.
+        RequestLog.write(account, now - 30 * 60_000L, RequestLog.Stats(
+            kind = RequestLog.Stats.Kind.STALL, ms = 92_000,
+            provider = "deepinfra/fp8/flex", model = "deepseek/deepseek-v4.1-flash",
+            usage = null, finish = null,
+            received = RequestLog.Stats.Received(said = 0, thinking = 2_140),
+        ))
+
+        scenario(
+            compose, "24-what-it-cost",
+            "What it cost.",
+            "the request log summed: the agent and the keepalive, hour by hour.",
+            screen = { stats(account, now) },
+        ) {
+            before()
+            then("Nothing is pressed: the table is a reading of the log, counted when it opened.") {}
+            after()
+            result(
+                "Time across the top and metrics down the side, so every number sits beside the " +
+                    "words that say what it is. The agent and the keepalive are separate blocks " +
+                    "because on an idle day the keepalive is most of the spend and almost none of " +
+                    "the output - summed together the table would be about the wrong thing.",
             )
         }
     }
