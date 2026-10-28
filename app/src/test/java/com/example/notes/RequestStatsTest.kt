@@ -528,7 +528,7 @@ class RequestStatsTest {
     }
 
     @Test
-    fun `the read is a stream: a bad line costs that line and nothing else`() {
+    fun `the read is a stream, so a bad line costs that line and nothing else`() {
         // **Why this matters beyond tidiness.** The read used to be `readLines().mapNotNull`, which
         // is correct but allocates every line as a String at once *and* every Row at once. The
         // streaming version is only equivalent if a line that cannot be parsed still costs exactly
@@ -540,6 +540,7 @@ class RequestStatsTest {
         for (h in listOf(9, 11, 12)) {
             RequestLog.write(account, at(h), RequestLog.Stats(
                 kind = RequestLog.Stats.Kind.TURN, ms = 10, provider = "p", model = "m",
+                usage = null, finish = null,
             ))
         }
         // A line with an unparseable instant, written straight into the file: this is what a
