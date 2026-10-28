@@ -257,7 +257,9 @@ class RequestStatsTest {
 
         val rows = RequestStats.read(account)
         assertEquals("one line, and the header was not read as one", 1, rows.size)
-        assertEquals("the day came from the file's name", LocalDate.parse("2026-10-28"), rows.single().day)
+        // **The instant survived the round trip**, which is the only time the file holds: the
+        // local day is computed when the table is drawn, not read back from the log.
+        assertEquals("the instant", now, rows.single().atMs)
         assertEquals("and the numbers survived the round trip", 1000L, rows.single().prompt)
         assertEquals("including the cache", 500L, rows.single().cached)
         assertEquals("and the thinking", 2L, rows.single().reasoning)
