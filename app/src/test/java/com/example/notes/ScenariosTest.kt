@@ -3,6 +3,7 @@ package com.example.notes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
 import org.robolectric.RuntimeEnvironment
@@ -466,7 +467,6 @@ class ScenariosTest {
         onHistory = {},
         onSelect = {},
     )
-}
 
     // ---- the two screens no scenario had reached ------------------------------
 
@@ -759,3 +759,4 @@ class ScenariosTest {
             )
         }
     }
+}

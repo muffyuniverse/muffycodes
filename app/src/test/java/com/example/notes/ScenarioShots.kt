@@ -4,7 +4,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.isRoot
-import androidx.compose.ui.test.onAllNodes
 import com.github.takahirom.roborazzi.captureRoboImage
 import java.io.File
 
