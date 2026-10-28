@@ -14,10 +14,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -851,7 +852,17 @@ fun ReportBody(
     onNote: (String) -> Unit,
 ) {
     val stuck = waiting.filter { it.waitedMs > Trace.staleMs }
-    Column(modifier = Modifier.fillMaxWidth()) {
+    // **The body scrolls, because a dialog is a fixed-height window and this body is not fixed.**
+    // With several stuck taps the last paragraph ran past the bottom edge and was cut mid-word -
+    // visible in the report scenario's own picture, and unreadable in the one window where a person
+    // is trying to describe a problem. A dialog that clips its own instructions is worse than a
+    // shorter one: it looks complete.
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = 420.dp)
+            .verticalScroll(rememberScrollState()),
+    ) {
         Text(
             "What happened, and what you were trying to do?",
             style = MaterialTheme.typography.bodyMedium,

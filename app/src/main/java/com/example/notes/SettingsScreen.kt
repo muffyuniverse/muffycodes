@@ -206,13 +206,12 @@ fun SettingsScreen(
                 TextButton(onClick = onTestAccount) { Text("Use the test account") }
             }
 
-            // **One gap, not three.** This divider carried 12dp of its own on top of the column's
-            // 6dp between rows and the button's own vertical padding, which together read as a hole
-            // between the account and the agent section rather than as a separator - visible in the
-            // settings scenario's own picture. A divider's job is to be a line; the space around it
-            // belongs to the column that holds it.
-            HorizontalDivider(modifier = Modifier.padding(top = 4.dp))
-
+            // **No divider here, because the block below already opens with one.** This line was
+            // here and the AGENT block drew its own heavier rule a few pixels under it, so the
+            // screen showed two rules with a gap between them - which reads as a rendering fault
+            // rather than as a section boundary. Visible in the settings scenario's picture. The
+            // block's own rule is the one that means something: it is the heavier weight, and it is
+            // what says where the agent's section starts.
             // ---- everything the agent needs, in one place, on this screen once ----
             //
             // **A block, not six sections.** Every row below exists for the same machine: the key

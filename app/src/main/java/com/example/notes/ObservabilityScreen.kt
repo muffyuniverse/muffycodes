@@ -22,6 +22,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 
@@ -58,7 +59,9 @@ fun ObservabilityScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
-                title = { Text("What the app did") },
+                // One line, ellipsised: a bar is a fixed height and the actions beside the title
+                // must not be squeezed by a title that decided to wrap.
+                title = { Text("What the app did", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 actions = {
                     ReportButton(onReport)
                     if (report.taps > 0) {

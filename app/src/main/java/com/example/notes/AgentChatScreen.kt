@@ -36,6 +36,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextDecoration
@@ -117,7 +118,15 @@ fun AgentChatScreen(
                     }
                 },
                 title = { Column {
-                    Text(project)
+                    // **One line, ellipsised.** Without this a long project name wrapped to two or
+                    // three lines in the bar and squeezed the actions beside it - "groceries" broke
+                    // across two lines in the chat scenario's picture and the buttons sat against
+                    // it. A title bar is a fixed height; the title gives way, not the controls.
+                    Text(
+                        project,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                     Text(
                         // **The state, in the words the notification uses.** One vocabulary for
                         // the box, the strip and the tray, so "why is it not answering" has one
