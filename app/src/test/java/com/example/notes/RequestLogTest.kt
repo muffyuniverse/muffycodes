@@ -59,7 +59,10 @@ class RequestLogTest {
 
         // The count is the contract: a column added without the header being changed would shift
         // every value one place to the right of its name.
-        assertEquals("one cell per column", 13, cells.size)
+        // **Fifteen: the eleven the first version had, plus the instant, the local day, and the
+        // two counts a stall row carries.** Bumping this is the moment to ask whether the new
+        // columns are in the header too - they are written by the same list.
+        assertEquals("one cell per column", 15, cells.size)
         assertEquals("the instant, and the only column with no zone in it", "0", cells[0])
         assertEquals("00:00:00.000", cells[1])
         assertEquals("the local day, for a person reading it", "1970-01-01", cells[2])
@@ -97,7 +100,7 @@ class RequestLogTest {
         // A ping whose answer was refused, or a provider that simply omits `usage`: the response
         // happened and its cost is unknown. The line has to survive that without a crash.
         val cells = RequestLog.line(0, stats(null)).split("\t")
-        assertEquals(13, cells.size)
+        assertEquals(15, cells.size)
         assertEquals("ping", cells[1])
         assertEquals("", cells[5])
         assertNull("and nothing was invented", RequestLog.Stats(
