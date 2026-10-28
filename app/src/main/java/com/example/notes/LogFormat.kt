@@ -23,11 +23,28 @@ import java.util.Locale
 object LogFormat {
 
     private val clock = object : ThreadLocal<SimpleDateFormat>() {
-        override fun initialValue() = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+        // **The date is in the stamp, and it is one token.** The report asked for a footer showing
+        // "time, date and id", and the record could not answer it: the stamp was `HH:mm:ss.SSS`,
+        // so a conversation that crossed midnight had two rows reading `23:59` and `00:01` with
+        // nothing to say which day either was on. Putting the date in a *second* column would have
+        // moved every column after it; putting it in the same token with a `T` between them keeps
+        // the row's shape — the parser reads the stamp as one `\S+` — so a log written by an older
+        // build still parses, and its rows simply have no date to show.
+        override fun initialValue() = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS", Locale.US)
     }
 
-    /** `14:02:11.410` — from the epoch millis the app records. */
+    /** `2026-10-28T14:02:11.410` — from the epoch millis the app records. */
     fun stamp(at: Long): String = clock.get()!!.format(Date(at))
+
+    /**
+     * The date and the time, apart, for a screen that shows them separately.
+     *
+     * A stamp that is only a time — one written before the date joined it — answers with a blank
+     * date rather than with today's, because a row from yesterday labelled with today is worse
+     * than a row with no date at all.
+     */
+    fun day(stamp: String): String = stamp.substringBefore('T', "")
+    fun time(stamp: String): String = if (stamp.contains('T')) stamp.substringAfter('T') else stamp
 
     /**
      * One row of the trace, in the fixed columns: `time build state id kind name  detail`.

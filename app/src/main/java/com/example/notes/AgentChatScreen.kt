@@ -413,17 +413,26 @@ private fun Bubble(
 }
 
 /**
- * What a bubble's footer says: **id · time · thinking · output.**
+ * What a bubble's footer says: **date · time · id · thinking · output.**
  *
- * A part that is not known is left out rather than filled with a zero — a zero is a measurement and
- * "not recorded" is not the same fact. The id is always known (it is the row's own number) and the
- * time is known for every row that was written, so in practice the absent parts are the two token
+ * The report asked for "time, date and id of the message", and the date is not decoration: a
+ * conversation that crosses midnight has two rows reading `23:59` and `00:01`, and a footer
+ * without the date cannot tell them apart. It is drawn first because that is the order a person
+ * reads a moment in — day, then clock — and the id comes after because it is a handle rather than
+ * a time.
+ *
+ * A part that is not known is left out rather than filled with a zero: a zero is a measurement and
+ * "not recorded" is not the same fact. The id is always known and the time is known for every row
+ * that was written, so in practice the absent parts are the date on an old row and the two token
  * counts, which only a streamed turn can report.
  */
 private fun footer(bubble: AgentChat.Bubble): String {
     val parts = mutableListOf<String>()
+    val day = LogFormat.day(bubble.stamp)
+    if (day.isNotBlank()) parts.add(day)
+    val clock = LogFormat.time(bubble.stamp)
+    if (clock.isNotBlank()) parts.add(clock)
     if (bubble.id > 0) parts.add("#${bubble.id}")
-    if (bubble.stamp.isNotBlank()) parts.add(bubble.stamp)
     if (bubble.thinking > 0) parts.add("thinking ${ContextBudget.short(bubble.thinking)}")
     if (bubble.output > 0) parts.add("output ${ContextBudget.short(bubble.output)}")
     return parts.joinToString(" · ")

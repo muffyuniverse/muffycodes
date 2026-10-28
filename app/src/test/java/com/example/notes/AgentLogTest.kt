@@ -196,6 +196,41 @@ class AgentLogTest {
     }
 
     @Test
+    fun `a row carries the day as well as the time, and an old row keeps its shape`() {
+        // **Report 36 asked the footer for "time, date and id".** The record could not answer it:
+        // the stamp was `HH:mm:ss.SSS`, so two rows either side of midnight read `23:59` and
+        // `00:01` with nothing to say which day either was on.
+        //
+        // The date went into the *same token*, with a `T` between them, rather than into a new
+        // column - because the parser reads the stamp as one `\S+`, so a second column would have
+        // moved every column after it and a log written by an older build would stop parsing.
+        val id = log.bookkeeping(AgentLog.NOTE, "a note", "the words")
+
+        val row = log.rows().first { it.id == id }
+        // **The two halves are what the footer draws**, and they are read out of the one token the
+        // file holds rather than out of a clock, so the test cannot agree with itself by asking the
+        // same formatter twice.
+        val day = LogFormat.day(row.stamp)
+        val clock = LogFormat.time(row.stamp)
+        assertTrue("the day is in the stamp: ${row.stamp}", Regex("""^\d{4}-\d{2}-\d{2}$""").matches(day))
+        assertTrue("and so is the time: ${row.stamp}", Regex("""^\d{2}:\d{2}:\d{2}\.\d{3}$""").matches(clock))
+        assertEquals("together they are today", LogFormat.day(LogFormat.stamp(System.currentTimeMillis())), day)
+        // **One token, so the row's columns do not move.** A stamp with a space in it would have
+        // made the id look like part of the time.
+        assertEquals("the stamp is one word", 1, row.stamp.split(" ").size)
+        assertFalse("with the date first", row.stamp.startsWith("14:"))
+
+        // **A row written by an older build still parses**, and answers with no date rather than
+        // with today's - a row from yesterday labelled with today is worse than no date at all.
+        val record = File(project, "agent/${AgentLog.SESSION}")
+        val old = record.readText() + "10:00:00.000    9     4 TOLD    in     - operator  an old row\n"
+        record.writeText(old)
+        val reread = AgentLog.open(project).rows().first { it.id == 9 }
+        assertEquals("the old row's time is read", "10:00:00.000", LogFormat.time(reread.stamp))
+        assertEquals("and it has no day to claim", "", LogFormat.day(reread.stamp))
+    }
+
+    @Test
     fun `a context file that is missing is written from the evidence`() {
         // The model's memory is the second file. If somebody deletes it, or the app is interrupted
         // between the two writes, the rows are still in the evidence — and the next open puts them
