@@ -587,20 +587,14 @@ class ProjectGitTest {
         // **The other end of the editor's default diff.** "What changed since I last synced" is a
         // question about two commits, and this is the one that is easy to get wrong: `HEAD` is
         // where the file is now, and the answer has to be where GitHub last saw it.
-        scene.project("groceries")
-        val ws = scene.workspace!!
-        val git = ProjectGit(ws, { null }, { GitAuthor("Muffy", "muffy@example.com") })
-        val bare = File(File(System.getProperty("java.io.tmpdir"), "remote-${System.nanoTime()}"), "groceries.git")
-        org.eclipse.jgit.api.Git.init()
-            .setDirectory(bare)
-            .setBare(true)
-            .setInitialBranch("main")
-            .call()
-            .close()
+        workspace.createProjectFolders("groceries").getOrThrow()
+        val git = gitFor()
+        git.init("groceries").getOrThrow()
         git.open("groceries")!!.use { GitService.setRemoteUrl(it, bare.absolutePath) }
+        val worktree = workspace.repoOf("groceries")
 
-        ws.write(File(ws.projectDir("groceries"), "milk.txt"), "two litres")
-        git.commitOutcome("groceries", "a save")
+        File(worktree, "milk.txt").writeText("two litres")
+        git.commit("groceries", "a save")
 
         // **Nothing pushed yet, so there is nothing to compare against** - which is a different
         // answer from "the same as HEAD", and the screen says it rather than drawing a diff.
@@ -617,8 +611,8 @@ class ProjectGitTest {
 
         // And a commit after the push moves HEAD away from it, which is what makes the pair useful:
         // the diff between them is exactly what is waiting to be sent.
-        ws.write(File(ws.projectDir("groceries"), "milk.txt"), "three litres")
-        git.commitOutcome("groceries", "another save")
+        File(worktree, "milk.txt").writeText("three litres")
+        git.commit("groceries", "another save")
         val head2 = git.open("groceries")!!.use { it.resolve("HEAD")?.name }
         assertNotEquals("HEAD has moved on", head2, synced)
         assertEquals(
