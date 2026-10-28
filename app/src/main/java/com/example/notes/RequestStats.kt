@@ -155,22 +155,29 @@ object RequestStats {
      *   alternative is to descend to hours that were deleted once the day was written.
      */
     private fun counts(r: Row, covered: Map<String, List<Long>>): Boolean {
-        // **A raw row's unit is the hour it falls in.** It is the finest level, so the coarser
-        // levels above it are exactly the four aggregates - and if one of those covers its hour,
-        // the raw row has already been spoken for.
-        val start = unitFloor(r.span, r.atMs) ?: hourFloor(r.atMs)
-        val end = unitEnd(r.span, start)
+        // **A raw row's unit is the hour it falls in**, and the level has to be named for that
+        // rather than carried through as `raw`: `unitEnd("raw", …)` matches none of its cases and
+        // falls through to a YEAR, so a raw row's "unit" became the whole year and no hour could
+        // ever cover it. That is a silent wrong answer, not a crash - the column simply counted one
+        // extra request for every hour that had already been rolled.
+        val level = if (r.span == RequestLog.SPAN_RAW) "hour" else r.span
+        val start = unitFloor(level, r.atMs) ?: hourFloor(r.atMs)
+        val end = unitEnd(level, start)
         // **Which levels speak for this one's unit.** An hour row describes the same hour as the
         // raw rows beneath it - it was built from them and the compactor then deletes them - so an
         // hour row silences raw rows in its hour. That is not "two levels of different sizes": it
         // is one level having replaced another, and the file can briefly hold both if a compaction
         // died between writing the aggregate and rewriting the file. Counting both would add the
         // hour to itself.
-        val coarser = when (r.span) {
-            RequestLog.SPAN_RAW -> listOf("hour", "day", "month", "year")
-            "hour" -> listOf("day", "month", "year")
-            "day" -> listOf("month", "year")
-            "month" -> listOf("year")
+        // **Raw is the only level whose description may sit one step above it**, and an hour row
+        // must not list "hour": `covers` would find the hour row itself and silence it, so a column
+        // of hour rows would read zero. They are two descriptions of one hour, and which one speaks
+        // depends on whether this row is the description or the thing described.
+        val coarser = when {
+            r.span == RequestLog.SPAN_RAW -> listOf("hour", "day", "month", "year")
+            level == "hour" -> listOf("day", "month", "year")
+            level == "day" -> listOf("month", "year")
+            level == "month" -> listOf("year")
             else -> emptyList()
         }
         return coarser.none { covers(covered, it, start, end) }

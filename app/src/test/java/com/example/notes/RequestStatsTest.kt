@@ -423,10 +423,13 @@ class RequestStatsTest {
         val withDaysOnly = RequestStats.buckets(listOf(hour, raw) + days, at)[2]
         assertEquals("the 24 day rows", 24 * 20, withDaysOnly.total.requests)
 
-        // **And with neither, the hour and the raw row are what is left.** Nothing above them, so
-        // both count - raw is the floor and is never silenced.
-        val bare = RequestStats.buckets(listOf(hour, raw), at)[2]
-        assertEquals("the hour row and the raw row", 3 + 1, bare.total.requests)
+        // **And with neither, the hour row is what is left, and the raw row beneath it is silent.**
+        // This is the case a half-finished compaction leaves behind: the aggregate was written and
+        // the raw rows were not yet deleted. They describe the same hour, so the hour row speaks for
+        // it - forty, not forty-one. Removing the hour row is what lets the raw row through, which
+        // the last assertion checks.
+        assertEquals("the hour row speaks, the raw row beneath it does not", 3, RequestStats.buckets(listOf(hour, raw), at)[2].total.requests)
+        assertEquals("with no hour row, the raw row is all there is", 1, RequestStats.buckets(listOf(raw), at)[2].total.requests)
     }
 
     @Test
