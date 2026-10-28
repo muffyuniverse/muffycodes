@@ -1,7 +1,6 @@
 package com.example.notes
 
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -65,14 +64,22 @@ import kotlinx.coroutines.withContext
  * The editor: the file's name in the top row, and its text below.
  *
  * ```text
- * [<-]  milk.txt                     <- the top row, and nothing else
+ * [<-]  milk.txt                          <- the top row, and nothing else
  *
- * History   [ Edit | View ]   [ Save ]   <- the second row, and it scrolls
+ * [ View | Edit | Diff ]                  <- the mode, on its own line
+ * History                          Save   <- the acts, on the next
  * ```
  *
- * **Two rows, because the top row belongs to the file and the second to what can
- * be done with it.** Four buttons wedged beside the name left the name — the one
- * thing the screen is about — a few characters wide.
+ * **Three rows, because the file, its state and its acts are three different things.**
+ * The top row belongs to the file; the mode is what the screen *is*; History and Save are
+ * what can be done with it. Four buttons wedged beside the name left the name — the one
+ * thing the screen is about — a few characters wide, and putting the three modes on the
+ * same line as the two acts pushed Save past the right edge of a phone.
+ *
+ * **Nothing here scrolls.** A scrolling row makes an overflow look like an absence: the
+ * button is there, a person simply cannot see it, and a primary button they have to hunt
+ * for is a button that looks missing. The rows are sized to fit, and the picture of this
+ * screen is what says whether they do.
  *
  * **Back discards.** Saving is something a person does, so the arrow really does
  * leave without keeping what was typed; the message says so when something was
@@ -256,40 +263,26 @@ fun EditorScreen(
         },
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            // **Save does not scroll.** It is the one act this row exists for, and a primary button
-            // a person has to scroll sideways to find is a button that looks missing - which is
-            // exactly what happened when the third mode arrived: the row was a single scrolling
-            // line, and three modes plus History pushed Save past the right edge. The modes and
-            // History take whatever is left and scroll within it; Save is pinned.
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+            // **Two rows, because three modes and two acts do not fit on one line on a phone.**
+            // This started as a single scrolling row; the third mode pushed Save past the right
+            // edge, and moving the modes before History only moved the problem to History. The
+            // layout the file's own header documents is the right one: the modes are a *state* and
+            // belong on their own line, and History and Save are *acts* and share the next.
+            //
+            // Nothing here scrolls now, so nothing can be hidden. That was the real fault in the
+            // one-row version: a scrolling row makes an overflow look like an absence.
+            if (kind == EntryKind.TEXT) {
                 Row(
                     modifier = Modifier
-                        .weight(1f)
-                        .horizontalScroll(rememberScrollState()),
+                        .fillMaxWidth()
+                        .padding(start = 8.dp, end = 8.dp, top = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                // **Three modes, named, and one of them is selected.** A single chip that said
-                // "Edit" or "View" was a switch: it told a person what pressing it would do, not
-                // where they were, and there was nowhere to put a third thing. Report 29 asked for
-                // separate buttons and got them.
-                //
-                // **One segmented control rather than three chips**, which is the same three named
-                // modes in a third less width. Three separate chips took so much of this row that
-                // Save - the one act the row exists for - was pushed off the right edge on a phone:
-                // the row scrolls, so nothing was unreachable, but a primary button you have to
-                // scroll sideways to find is a button that looks missing. A segmented control also
-                // says "exactly one of these" in its shape, which three independent chips cannot.
-                // **The modes come first, before History.** They are what the screen *is*; History
-                // is an act performed on it. Ordering them the other way put Diff off the right
-                // edge of the scrolling part, so a person had to scroll the row to discover a mode
-                // - which the scenario picture showed and the test then caught.
-                if (kind == EntryKind.TEXT) {
+                    // **Three modes, named, and one of them is selected.** A single chip that said
+                    // "Edit" or "View" was a switch: it told a person what pressing it would do, not
+                    // where they were, and there was nowhere to put a third thing. Report 29 asked
+                    // for separate buttons, and a segmented control is that with the "exactly one of
+                    // these" rule carried in its shape.
                     SingleChoiceSegmentedButtonRow {
                         ModeSegment("View", Mode.VIEW, selected = mode) {
                             // **Leaving Edit does not throw anything away.** What was typed is still
@@ -312,7 +305,14 @@ fun EditorScreen(
                         }
                     }
                 }
+            }
 
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 8.dp, end = 8.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 TextButton(onClick = {
                     // The name is committed first: a version list is a list of this
                     // file's versions, and the file may just have been given another
@@ -321,7 +321,9 @@ fun EditorScreen(
                     onOpenHistory()
                 }) { Text("History") }
 
-            }
+                // A spacer, so Save is at the far end rather than beside History: the two acts are
+                // not a group, and Save is the one a person reaches for.
+                Box(modifier = Modifier.weight(1f))
 
                 Button(
                     onClick = {
