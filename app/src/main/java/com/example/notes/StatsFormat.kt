@@ -41,8 +41,23 @@ object StatsFormat {
      * One decimal, and [NONE] rather than "0.0%" when there is no denominator: a bucket with no
      * requests did not have a cache hit rate of zero, it had no requests.
      */
+    /**
+     * A share of a whole, as a percentage with **three decimals**.
+     *
+     * Three, not one, because a cache share is the number a person reads to decide whether caching is
+     * working: `97.1%` cannot distinguish 97.05% from 97.149%, and the difference between "almost all
+     * of it" and "all but one request in two thousand" is exactly what the screen is being consulted
+     * for. One decimal rounds that distinction away.
+     *
+     * The trade is width - `97.100%` is six characters where `97.1%` was four - and it is worth it
+     * here because the share rides in the same cell as its absolute (`137k (97.100%)`), so the
+     * absolute keeps its own column width intact and only the parenthesised part grows.
+     *
+     * `null` is not zero: a span with no input tokens has no share, which is a different fact from a
+     * share of 0%, and the screen prints a dash for it.
+     */
     fun share(value: Double?): String =
-        if (value == null) NONE else String.format(Locale.UK, "%.1f%%", value * 100)
+        if (value == null) NONE else String.format(Locale.UK, "%.3f%%", value * 100)
 
     /**
      * A cost, in dollars, to **five decimals**.

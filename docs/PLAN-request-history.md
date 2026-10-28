@@ -79,7 +79,9 @@ column**:
 - **Cache is a share of input, not a row beside it** — `cached_tokens` is a subset of
   `prompt_tokens`, so a third absolute would count the same tokens twice.
 - **Precision**: percentages to **three** decimals where it makes sense (L28419, L28438), cost and
-  the two rates to **five**. `StatsFormat.share` renders one decimal today.
+  the two rates to **five**. `StatsFormat.share` renders three and the rest render five, both
+  pinned in `RequestStatsTest` — the format had no test at all, which is how it stayed at one
+  decimal while this line said three.
 - **`—` is not zero**: a span with no requests has no average, which is a different fact from an
   average of zero.
 
@@ -216,34 +218,32 @@ attached.
 
 ## 5. Order of work
 
+> **SUPERSEDED 2026-10-28 by §1 as revised.** Steps 4 and 5 below describe the five-column design and
+> **must not be built**: there are no five spans, no anchor, and no checkboxes. They are kept only so
+> the reasoning is not lost, and because steps 1–3 and 6 still stand. What actually happened is in §7.
+
 Each step is independently shippable and testable.
 
-1. **Stream the log and read it off the main thread.** `readLines()` materialises the whole file as
-   strings *and* one object per row, inside `remember`, on the main thread. At 10k/day that is ~50 MB
-   peak at 30 days and ~600 MB at a year. Streaming is also a **prerequisite for the compactor**,
-   which reads the same file. No data loss; it tells us what remains painful once the catastrophe is
-   gone.
-2. **Add `span`, `requests`, `cost reported`** to `RequestLog`/`RequestStats`, with `raw`/1/`0|1` for
-   existing lines and a test that old lines still parse.
-3. **Compactor**, on the existing session tick, off the UI thread: group remaining raw rows by UTC
-   hour → emit one `hour` row per **closed nonempty** hour → drop that group. Then cascade
-   `hours → day → month → year`, each only for closed units. Rewrite is temp + rename under the same
-   lock as appends; raw rows dropped only after the aggregate is durable.
-4. **Reader**: the five spans (§1) as a disjoint decomposition (§2) — a test that a span is never
-   counted twice, and a test that a rebuilt month equals the sum of its hour rows. `year` sums month
-   rows; `total` sums year rows; neither exists as a stored row.
-5. **Checkboxes** right of the date picker, one per span, all five on by default. A checkbox changes
-   which columns are drawn and **no column's number**: hiding `day` must not move `month`.
+1. ~~**Stream the log and read it off the main thread.**~~ **Done.** `readLines()` materialised the
+   whole file as strings *and* one object per row, inside `remember`, on the main thread. At 10k/day
+   that is ~50 MB peak at 30 days and ~600 MB at a year. Streaming was also a **prerequisite for the
+   compactor**, which reads the same file.
+2. ~~**Add `span`, `requests`, `cost reported`**~~ **Done**, appended rather than prepended.
+3. ~~**Compactor**, on the existing session tick, off the UI thread~~ **Done**, plus `prune` moved
+   into it (it was re-reading the whole log on every write).
+4. **Reader: the five spans (§1) as a disjoint decomposition** — **NOT DOING.** There are no five
+   spans. The disjointness rule survives because it is about *the log*, not the table: the coarsest
+   stored level speaks for its unit, so a rebuilt month is not added to the hours beneath it. The
+   table asks one interval of that structure, not five.
+5. **Checkboxes right of the date picker** — **NOT DOING.** There is one column, so there is nothing
+   to check.
 6. **The picker's four granularities.** The operator asked for a picker over **hour, day, month and
-   year** (L28599). Today there is one Material `DatePicker` (a *day*) plus hour/minute steppers, so
-   picking *year only* or *month only* is impossible. The anchor is one instant either way; the
-   question is only how much of it the picker lets a person set directly.
-
-7. **`session.log` `output`/`thinking` columns** and the `Bubble` wiring — the footer currently
-   cannot render: `Bubble.thinking`/`output` are drawn (`AgentChatScreen.kt:445`) but **no constructor
-   sets them**, and `Streamed`'s numbers are view-model state discarded at turn end.
-
----
+   year** (L28599). Today there is one Material `DatePicker` (a *day*) plus an hour stepper, so
+   picking *year only* or *month only* is impossible. **Still open, and now questionable** — see §7
+   item 10: that requirement came from the per-axis design, and with two pickers a month is
+   expressible as its first and last hour.
+7. ~~**`session.log` `output`/`thinking` columns** and the `Bubble` wiring~~ **Done.** The footer is
+   fed by `stream.shape(elapsed)`.
 
 ## 6. Not doing
 
@@ -261,11 +261,16 @@ Each step is independently shippable and testable.
 
 ## 7. What is built, and what is not
 
-Built and green (CI run 40713779502):
+> **REWRITTEN 2026-10-28.** The previous version of this section was written against the *five-column*
+> design and was wrong in both directions: it listed the five spans and the checkboxes as built (both
+> are deleted), and it listed three things as not built that are done. A checklist that describes a
+> rejected design sends the next person to build it.
+
+### Built and green
 
 1. **Streamed read, off the main thread.** `RequestStats.read` uses `useLines`; the screen reads
    through `AppViewModel.readRequestStats` on the worker and says "reading" until it arrives.
-2. **The three columns.** `span`, `requests`, `cost reported` — **appended, not prepended** (the
+2. **The three log columns.** `span`, `requests`, `cost reported` — **appended, not prepended** (the
    plan said prepended; the instant is the first cell, so prepending would have made every line
    already on a phone unparseable). An old line reads as `raw`/1.
 3. **The rollup arithmetic** as pure functions: `rollup`, the four `*Floor` functions in UTC, and
@@ -275,20 +280,31 @@ Built and green (CI run 40713779502):
    `day`/`month`/`year` rebuilt from hours every time. One `writeWhole` for every rewrite, shared
    with `prune`; an unparseable line is written back verbatim. Called from `tickAgents`, throttled
    to ten minutes, on the worker.
-5. **Five columns from one pick** — `year` and `total` spans, and checkboxes that choose which are
-   drawn without changing any number.
-6. **The reader uses the aggregates.** Coarsest stored level speaks for its unit; every level
+5. **The reader uses the aggregates.** Coarsest stored level speaks for its unit; every level
    beneath a covered unit is silent. Containment, not equality, and the covered set is built once
    per draw rather than scanned per row.
+6. **Two pickers, one column, per hour** (§1 as revised). `Interval` is `[fromMs, toMs)` with `toMs`
+   an **exclusive boundary**: "from 19 to 20" is one hour, and a single instant is the hour it falls
+   in. Snapping is outward at both ends. The minute stepper is gone — the table counts whole hours,
+   so a minute was never choosable.
+7. **Retention bounds the hour rows only** (was listed as not built). `prune` keeps every coarser row
+   regardless of age; the hours are the only level where age costs anything. `prune` also rides along
+   with `compact` rather than running on every write, which was a real performance bug.
+8. **`session.log` `output`/`thinking` and the footer** (was listed as not built). `chatLive` is fed
+   by `stream.shape(elapsed)` at `AppViewModel.kt:2727`, and `shape` renders elapsed, characters,
+   thinking, calls and tokens.
+9. **Percentages to three decimals** (§1a). `StatsFormat.share` renders `%.3f%%`; cost, per-request
+   and the two rates render five. Pinned by tests in `RequestStatsTest`, which is where the gap
+   survived unnoticed — the format had no test at all.
 
-Not built:
+### Not built
 
-7. **The picker's four granularities** (§1): only a day can be picked directly today.
-8. **Percentages to three decimals** (§1a): `StatsFormat.share` renders one.
-9. **`session.log` `output`/`thinking`** and the `Bubble` wiring (§4): the footer cannot render.
-10. **`requestDays` still bounds raw rows.** It must bound the *hour* rows, which is the pyramid's
-    only retention question — today the knob prunes raw lines that the compactor is about to
-    consume anyway.
+10. **The picker's four granularities** (§5 item 6) — **and now questionable.** There is one Material
+    `DatePicker` (a *day*) plus an hour stepper, so a month-only or year-only pick is impossible.
+    But that requirement came from the per-axis design, where the picker's granularity *was* the
+    question. With two pickers the question is an interval, and "October" is expressible as
+    1 Oct 00:00 → 1 Nov 00:00. **Decide before building:** a month/year mode may be convenience
+    rather than a requirement.
 
 ### Three traps found while building, worth keeping
 
@@ -304,3 +320,17 @@ that asserted a specific figure:
 - **A test fixture that never created the condition it asserted.** "An open hour is untouched" was
   tested with `now` exactly on the hour, so "a minute ago" was already closed — it would have
   passed whether or not the code respected an open unit.
+
+### Three more, found after
+
+- **`compact()` never added its fresh hour rows to the list `rebuild` reads.** The rows were written
+  and had no parent, so no day, month or year was ever derived from a just-rolled hour.
+- **A guard that would have emptied the pyramid.** Rebuilding only units whose start was at or after
+  the oldest surviving hour sounded careful and was backwards: a month starting on the 1st routinely
+  holds hours from the 3rd, so *its start being earlier than the oldest row means the log began
+  late*, not that rows were lost. Every real unit failed it. The protection is **ordering** —
+  `rebuild` before `prune` — not a filter.
+- **An interval end treated as an hour instead of a boundary.** Both picks were contained, so
+  19-to-20 was two hours and the `To` button read `19:00` while covering through `19:59`. An end is
+  where the interval *stops*; `hours` is now `(to - from) / 3600000`, one number that cannot
+  disagree with either endpoint.

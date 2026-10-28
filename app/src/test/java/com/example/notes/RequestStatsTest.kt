@@ -110,6 +110,39 @@ class RequestStatsTest {
     }
 
     @Test
+    fun `a share keeps three decimals, because one cannot tell working from not`() {
+        // **Three decimals is the spec (§1a), and it is a real distinction rather than fussiness.**
+        // A cache share is the number a person consults to decide whether caching is working. One
+        // decimal collapses 97.05% and 97.149% into the same "97.1%", which is the whole difference
+        // between "all but a handful" and "all but one request in two thousand".
+        //
+        // Pinned as strings because the FORMAT is the thing under test: the arithmetic was already
+        // right, and the screen was throwing the digits away on the way out.
+        assertEquals("three decimals", "97.100%", StatsFormat.share(0.971))
+        assertEquals("a share that is nearly all of it", "99.999%", StatsFormat.share(0.99999))
+        // **The case one decimal cannot express**: these two differ by a fifth of a percent and
+        // must not print the same, because at 10k requests a day that is twenty requests.
+        assertNotEquals("two close shares print differently", StatsFormat.share(0.9705), StatsFormat.share(0.97149))
+        assertEquals("and each is exact", "97.050%", StatsFormat.share(0.9705))
+        assertEquals("the low end keeps its zeros", "0.050%", StatsFormat.share(0.0005))
+        assertEquals("a share of nothing", "0.000%", StatsFormat.share(0.0))
+        assertEquals("a full share", "100.000%", StatsFormat.share(1.0))
+        // **No share is not a share of zero.** A bucket with no input tokens has nothing to divide,
+        // and printing "0.000%" would claim the cache missed when nothing was asked.
+        assertEquals("absent, not zero", StatsFormat.NONE, StatsFormat.share(null))
+    }
+
+    @Test
+    fun `the share rides beside its absolute in one cell`() {
+        // The operator's one-cell rule: `24.0k (91.7%)`. Two rows would separate a part from the
+        // whole it is a part of, which is the fact the row exists to state.
+        assertEquals("absolute and share", "24.0k (91.700%)", StatsFormat.absoluteAndShare("24.0k", 0.917))
+        assertEquals("absolute alone", "24.0k", StatsFormat.absoluteAndShare("24.0k", null))
+        assertEquals("share alone", "91.700%", StatsFormat.absoluteAndShare(null, 0.917))
+        assertEquals("neither", StatsFormat.NONE, StatsFormat.absoluteAndShare(null, null))
+    }
+
+    @Test
     fun `an end is a boundary, so 19 to 20 is one hour`() {
         // **The operator's example, and the bug it caught.** "if now is 19:23 then you can choose
         // interval from 19 to 20." From 19 to 20 is ONE hour: 20 is where it stops, not an hour to
