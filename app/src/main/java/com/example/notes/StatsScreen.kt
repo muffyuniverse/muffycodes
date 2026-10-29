@@ -127,13 +127,16 @@ fun StatsScreen(
         }
     }
     // **Closed when the screen goes.** A database handle left open keeps a WAL file and a lock
-    // alive for the life of the process, and the next `open` would find the same handle's state.
+    // alive for the life of the process.
     //
-    // **Keyed on `history`, not on `accountDir`.** The effect body runs once when its keys change
-    // and captures `history` at that moment - with `accountDir` as the key that moment is before the
-    // reader has answered, so the captured value is null and nothing is ever closed. Keying on
-    // `history` re-runs the effect when the handle arrives, and its `onDispose` then closes the
-    // handle that actually exists.
+    // **Keyed on `history`, not on `accountDir`.** The effect body captures `history` when its keys
+    // change; with `accountDir` as the key that moment is before the reader has answered, so the
+    // captured value is null and nothing is ever closed. Keying on `history` re-runs when the handle
+    // arrives, and its `onDispose` closes the one that exists.
+    //
+    // **Closing is idempotent** (`History.close`), which is what makes it safe for both this and a
+    // scenario harness to close the same handle: a caller that has to know which of the two owns it
+    // gets it wrong, and the failure surfaces as an exception from a *later* query.
     DisposableEffect(history) {
         onDispose { history?.close() }
     }

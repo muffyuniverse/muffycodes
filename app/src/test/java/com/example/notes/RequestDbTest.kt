@@ -101,12 +101,17 @@ class RequestDbTest {
         write(base + 11 * HOUR)
         write(base + 11 * HOUR + 1 * MIN)
 
-        val hour = total(base + 10 * HOUR, base + 11 * HOUR)
-        assertEquals("the two inside", 2, hour.requests)
-        // **The end is a boundary:** the response at 11:00 is the start of the next hour, not part of
-        // this one. An inclusive comparison counts it and the hour reports 3.
-        assertEquals("and not the one at the stopping point", 2, total(base + 10 * HOUR, base + 11 * HOUR).requests)
-        assertEquals("the 11:00 hour has one", 1, total(base + 11 * HOUR, base + 12 * HOUR).requests)
+        // **The end is a boundary, the start is not.** The 10:00 hour holds 10:00 and 10:30 - two -
+        // and the response written exactly at 11:00 belongs to the NEXT hour, not this one. An
+        // inclusive end would report three here and one there.
+        assertEquals("the two inside", 2, total(base + 10 * HOUR, base + 11 * HOUR).requests)
+        // **And the boundary instant is counted once, by the interval that begins at it.** That is
+        // the whole of half-open: 11:00 ends one hour and starts the next, and only one of them
+        // counts it - so the two intervals together hold exactly the rows between them, with no
+        // instant counted twice and none lost.
+        assertEquals("the boundary belongs to the next hour", 2, total(base + 11 * HOUR, base + 12 * HOUR).requests)
+        // Starting a minute early picks that row up and nothing else: the figure tracks the bounds.
+        assertEquals("9:59 added", 3, total(base + 9 * HOUR + 59 * MIN, base + 11 * HOUR).requests)
     }
 
     @Test
@@ -164,9 +169,13 @@ class RequestDbTest {
             write(base + m * MIN)
         }
         val stats = total(base + 10 * HOUR + 20 * MIN, base + 13 * HOUR + 40 * MIN)
+        // **Two, and 13:40 is the reason it is not three.** The interval is half-open, so its start
+        // (10:20) is inside and its end (13:40) is not: the response written exactly at 13:40
+        // belongs to the interval that *begins* there. My first expectation said three and named
+        // 13:40 as inside - contradicting the half-open rule the rest of this file asserts.
         assertEquals(
-            "10:20, 12:00 and 13:40 are inside; 10:10 and 13:50 are not",
-            3,
+            "10:20 and 12:00 are inside; 13:40 is the boundary, 10:10 and 13:50 are outside",
+            2,
             stats.requests,
         )
     }
@@ -182,9 +191,14 @@ class RequestDbTest {
         write(base + 6 * MIN)
 
         val stats = total(base - 5 * MIN, base + 5 * MIN)
-        assertEquals("the three inside", 3, stats.requests)
-        assertEquals("and one of them is on each side", 1, total(base, base + 5 * MIN).requests)
-        assertEquals("with the other two before", 2, total(base - 5 * MIN, base).requests)
+        // **Two: -5:00 and midnight.** The response at +5:00 is the end boundary and is excluded -
+        // the same half-open rule as everywhere else, and the reason this test straddles midnight
+        // is to prove the two halves are both read at minute granularity rather than one whole day
+        // being taken for either side.
+        assertEquals("the two inside", 2, stats.requests)
+        // And each side of the boundary is answered by its own day.
+        assertEquals("midnight to +5:00 has one", 1, total(base, base + 5 * MIN).requests)
+        assertEquals("with the other one before", 1, total(base - 5 * MIN, base).requests)
     }
 
     @Test
@@ -251,9 +265,11 @@ class RequestDbTest {
 
         RequestDb.compact(db, now)
 
-        val raw = db.rawQuery("SELECT COUNT(*) FROM requests", null)
-            .use { if (it.moveToFirst()) it.getInt(0) else 0 }
-        assertEquals("only the unclosed minute is still raw", 1, raw)
+        // **Both, because both are inside the minute in progress.** The second row is 30 seconds
+        // after the first and 30 seconds before the boundary, so the minute holding them has not
+        // closed and neither can be rolled. Counting the *minute* rather than the row is what the
+        // assertion is really about, and the first version of it said one.
+        assertEquals("both rows are in the unclosed minute", 2, rawRows())
         assertEquals("and the total is unchanged", 2, total(base + 10 * HOUR, base + 11 * HOUR).requests)
     }
 
@@ -381,7 +397,10 @@ class RequestDbTest {
 
         assertEquals("every leftover minute", 5, total(base + 10 * HOUR, base + 11 * HOUR).requests)
         assertEquals("and the new one", 1, total(later, later + HOUR).requests)
-        assertEquals("nothing raw", 0, rawRows())
+        // **One row is still raw and must be: the response just written is in the minute that has
+        // not closed yet.** "Nothing raw" would be the wrong claim - it would mean compaction had
+        // rolled a minute that is still being written to.
+        assertEquals("only the response just written", 1, rawRows())
     }
 
     /** How many rows are still in the raw table. */
@@ -428,8 +447,12 @@ class RequestDbTest {
         write(base + 10 * HOUR)
         write(base + 20 * DAY + 10 * HOUR)
 
-        // Keep 30 days from a point 20 days after the old row: the first is out, the second in.
-        RequestDb.compact(db, base + 20 * DAY + DAY, keepDays = 30)
+        // **Keep 10 days, from a point 21 days after the old row.** The cutoff lands at
+        // `now - 10 days`, which is 11 days after the old row and 10 days before the recent one, so
+        // exactly one of them is inside. The first version of this test asked for 30 days and
+        // expected the old row gone - but a 30-day cutoff from day 21 reaches back to day -9, which
+        // is before both rows. The arithmetic was right and the expectation was not.
+        RequestDb.compact(db, base + 20 * DAY + DAY, keepDays = 10)
 
         assertEquals("the old day", 0, total(base, base + DAY).requests)
         assertEquals("and the recent one", 1, total(base + 20 * DAY, base + 21 * DAY).requests)

@@ -175,23 +175,17 @@ object RequestDb {
     // ---- writing ---------------------------------------------------------------------------
 
     /**
-     * The last boundary noticed by [write], **per database file.**
+     * Which bucket boundary a write crosses, given the newest row already recorded.
      *
-     * A map keyed by the file rather than a field, because two accounts can be written to by two
-     * threads and a single `var` would let one account's boundary suppress the other's compaction.
-     */
-    private val lastBoundary = java.util.concurrent.ConcurrentHashMap<String, Long>()
-
-    /**
-     * Which bucket boundary a write crossed since the previous one: `MINUTE`, `HOUR`, `DAY`, or 0.
-     *
-     * **The coarsest boundary that changed, which implies everything finer.** Comparing whole days
+     * **The coarsest boundary that differs, which implies everything finer.** Comparing whole days
      * alone is not enough: two writes inside one day look identical to it, so a minute that closed
-     * between them is never rolled and the raw rows accumulate all day. Comparing the boundary makes
-     * a three-integer comparison do what three separate checks would.
+     * between them is never rolled and the raw rows accumulate all day.
      *
-     * **A day boundary also covers a week.** A phone asleep for seven days crosses one day boundary
-     * and rolls everything the `MIN`/`MAX` query finds, so there is no separate "long gap" case.
+     * **`previous` is read from the database, not remembered.** An in-memory "last write" would be
+     * reset by every process start - so the first write after opening the app would look like the
+     * first write ever and roll nothing, which is precisely the wrong answer for a phone that was
+     * closed all night. It would also make the trigger untestable, since a test cannot reset a
+     * static that another test already set.
      */
     internal fun crossed(previous: Long, now: Long): Long = when {
         floorTo(previous, DAY) != floorTo(now, DAY) -> DAY
@@ -209,23 +203,27 @@ object RequestDb {
     fun write(accountDir: File, now: Long, stats: RequestLog.Stats, keepDays: Int = 0) {
         try {
             open(accountDir).use { db ->
+                // **The boundary is measured against what is already stored**, read from the
+                // database rather than remembered in a field: a static would be reset by every
+                // process start, so the first write after opening the app would look like the first
+                // write ever and roll nothing - the wrong answer for a phone closed all night.
+                val previous = db.rawQuery(
+                    "SELECT MAX(utc) FROM requests WHERE utc < ?",
+                    arrayOf(now.toString()),
+                ).use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else null }
+
                 insert(db, now, stats)
-                // **The roll is driven by the boundary this write crossed**, not by a timer and not
-                // by whole days alone. A timer would have to pick a first-run delay and would roll an
-                // idle account on a schedule meaning nothing; a day comparison would leave every
-                // closed minute of the day unrolled until midnight.
-                val key = fileFor(accountDir).path
-                val previous = lastBoundary.put(key, now)
+
                 if (previous == null) return@use
-                val crossed = crossed(previous, now)
-                if (crossed == 0L) return@use
                 // **Retention rides on the day boundary only**, because a day-aligned cutoff cannot
                 // change within a day: running four DELETEs on every hour and minute boundary would
-                // be 1,439 no-ops a day.
-                compact(db, now, if (crossed == DAY) keepDays else 0)
+                // be 1,439 provable no-ops a day.
+                val crossed = crossed(previous, now)
+                if (crossed != 0L) compact(db, now, if (crossed == DAY) keepDays else 0)
             }
         } catch (t: Throwable) {
-            // Deliberately silent. See above.
+            // Deliberately silent. A record is evidence about the work, never a reason for the work
+            // to fail, and a full disk must not stop an agent mid-turn.
         }
     }
 
@@ -304,20 +302,30 @@ object RequestDb {
      */
     fun totals(db: SQLiteDatabase, fromMs: Long, toMs: Long): RequestStats.Totals {
         if (toMs <= fromMs) return RequestStats.Totals()
-        val rawFrom = db.rawQuery("SELECT MIN(utc) FROM requests", null).use { c ->
-            if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else Long.MAX_VALUE
-        }
-        val summarisedEnd = minOf(toMs, rawFrom)
-        val rawStart = maxOf(fromMs, rawFrom)
+
+        // **The boundary between summarised and raw, taken over the rows compaction actually
+        // rolls.** Not over every raw row: a stall is never compacted (see STALL_KIND), so a single
+        // stall from a month ago would pin this boundary at that instant for ever - the peel would
+        // cover nothing, every query would fall back to raw, and the rollups would be dead weight
+        // while every figure stayed correct. Silent, and it took a test to see it.
+        val rolledFrom = db.rawQuery(
+            "SELECT MIN(utc) FROM requests WHERE kind <> $STALL_KIND",
+            null,
+        ).use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else Long.MAX_VALUE }
+        val summarisedEnd = minOf(toMs, rolledFrom)
+        val rawStart = maxOf(fromMs, rolledFrom)
+
         var total = RequestStats.Stats()
-        var stalls = RequestStats.Stats()
         if (summarisedEnd > fromMs) total += peel(db, fromMs, summarisedEnd)
-        // Whatever the rollups have not reached yet, counted from its own rows - and the only place
-        // a stall can be found, because compaction never rolls one (see STALL_KIND).
         if (toMs > rawStart) {
             total += sum(db, "requests", "utc", rawStart, toMs, " AND kind <> $STALL_KIND")
-            stalls += sum(db, "requests", "utc", rawStart, toMs, " AND kind = $STALL_KIND")
         }
+
+        // **Stalls are read over the whole interval, never the raw suffix.** They are the one thing
+        // that is always raw, so bounding them by `rawStart` would miss every stall older than the
+        // oldest unrolled turn - which is most of them, since compaction keeps chasing the turns
+        // forward and leaving the stalls behind.
+        val stalls = sum(db, "requests", "utc", fromMs, toMs, " AND kind = $STALL_KIND")
         return RequestStats.Totals(total = total, stalls = stalls)
     }
 
@@ -502,7 +510,24 @@ object RequestDb {
         fun totals(fromMs: Long, toMs: Long): RequestStats.Totals =
             db?.let { totals(it, fromMs, toMs) } ?: RequestStats.Totals()
 
-        override fun close() = db?.close() ?: Unit
+        /**
+         * **Closing twice is allowed and does nothing the second time.**
+         *
+         * The screen closes the handle when it leaves, and so does every test and every scenario
+         * that opened one - because a caller that has to remember which of the two owns it will get
+         * it wrong, and the failure is `IllegalStateException` from a *later* query rather than
+         * from the close. `SQLiteDatabase.close` is documented as idempotent; this makes the
+         * contract explicit and pins the case where the same handle is shared.
+         */
+        override fun close() {
+            if (closed) return
+            closed = true
+            db?.close()
+        }
+
+        /** Whether [close] has run, so a second one is a no-op rather than a surprise. */
+        @Volatile
+        private var closed = false
     }
 
     fun oldest(db: SQLiteDatabase): Long? {
