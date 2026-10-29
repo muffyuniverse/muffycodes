@@ -693,10 +693,19 @@ private fun PresetRow(
                 // **`FilterChip`, not a `Button`.** A chip is Material's control for "one of these",
                 // and its selected state is drawn rather than described - a plain button would read
                 // as "do this" instead of "this is chosen".
+                //
+                // **Each chip says which row it belongs to**, because "15 min" is a control in both
+                // rows and the two do different things: one starts at the hour, the other starts
+                // fifteen minutes ago. A screen reader announcing "15 min, button" twice leaves a
+                // person no way to choose between them, and a test cannot tell them apart either -
+                // which is how this was found.
                 FilterChip(
                     selected = preset == selected,
                     onClick = { onPick(preset) },
                     label = { Text(preset.label, maxLines = 1) },
+                    modifier = Modifier.semantics {
+                        contentDescription = "$label ${preset.label}"
+                    },
                 )
             }
         }

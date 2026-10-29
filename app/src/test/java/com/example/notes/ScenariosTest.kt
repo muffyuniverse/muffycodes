@@ -6,7 +6,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isSelectable
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -756,7 +759,9 @@ class ScenariosTest {
             then("`6 hours` is tapped in the rolling row.") {
                 // **Scrolled into view first**: the row scrolls sideways and the chip sits past the
                 // right edge, so a tap without scrolling has no position to tap.
-                compose.onNodeWithText("6 hours").performScrollTo().performClick()
+                // **Named by row**, because "6 hours" is a chip in both rows and they mean
+                // different things: one starts at 03:00, the other six hours before the tap.
+                compose.onNodeWithContentDescription("Rolling 6 hours").performScrollTo().performClick()
                 compose.waitForIdle()
             }
             after()
@@ -806,7 +811,9 @@ class ScenariosTest {
                 // both buttons read the same date and only the From one is wanted.
                 compose.onAllNodesWithText("28 Oct 2026")[0].performClick()
                 compose.waitForIdle()
-                compose.onNodeWithText("26").performClick()
+                // **Named as a selectable, because a bare "26" is not unique in the calendar** - the
+                // year-navigation row can carry the same digits, and the day cell is the selectable one.
+                compose.onNode(hasText("26") and isSelectable()).performClick()
                 compose.onNodeWithText("Show").performClick()
                 compose.waitForIdle()
             }

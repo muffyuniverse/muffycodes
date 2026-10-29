@@ -5,6 +5,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isSelectable
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -43,13 +45,48 @@ class StatsScreenTest {
     ).apply { mkdirs() }
 
     /** 28 October 2026, 14:30 local — an afternoon, so the default interval is not a whole day. */
+    /** One response, as the log records it. Only the fields the totals read. */
+    private fun stats(cost: Double): RequestLog.Stats = RequestLog.Stats(
+        kind = RequestLog.Kind.TURN,
+        ms = 1_000,
+        provider = "test",
+        model = "test",
+        usage = org.json.JSONObject().apply {
+            put("prompt_tokens", 1_000)
+            put("completion_tokens", 100)
+            put("cost", cost)
+        },
+        finish = "stop",
+    )
+
     private val now: Long = java.time.LocalDate.parse("2026-10-28")
         .atTime(14, 30)
         .atZone(java.time.ZoneId.systemDefault())
         .toInstant()
         .toEpochMilli()
 
-    private fun draw() {
+    /**
+     * Draws the screen.
+     *
+     * **`withRows` seeds real responses into the account's database**, because the table only exists
+     * when there is something to put in it: an empty history draws a sentence instead, and a test
+     * asserting on a heading would be asserting about a screen that was never composed.
+     *
+     * **`rowsBefore` controls whether the previous period has anything in it**, which is the one
+     * thing that decides whether the previous column is drawn at all.
+     */
+    private fun draw(withRows: Boolean = false, rowsBefore: Boolean = true) {
+        if (withRows) {
+            val hour = 3_600_000L
+            if (rowsBefore) {
+                // Two responses in the period before this one, so there is a baseline to compare to.
+                RequestDb.write(account, now - 2 * hour, stats(cost = 0.002))
+                RequestDb.write(account, now - 3 * hour, stats(cost = 0.001))
+            }
+            // Two inside the current interval - today from midnight, so after 00:00.
+            RequestDb.write(account, now - 1_000L, stats(cost = 0.003))
+            RequestDb.write(account, now - 2_000L, stats(cost = 0.004))
+        }
         compose.setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
@@ -62,10 +99,11 @@ class StatsScreenTest {
                         // CI happens to run on, and every assertion below would be about a
                         // different date than the fixture names.
                         clockNow = { now },
-                        // **An empty history, opened for real.** A `History` with a null handle
-                        // reads as "no log yet" without a database file existing, which is what
-                        // these tests want: the screen's own layout, not the arithmetic.
-                        readRows = { done -> done(RequestDb.History()) },
+                        // **The real history off the account's directory**, so a test that seeds
+                        // rows sees them and a test that does not gets the empty screen. Handing
+                        // back a fixed empty `History` would make the table unreachable in every
+                        // test, which is how the heading test below was passing vacuously before.
+                        readRows = { done -> done(RequestDb.read(account)) },
                     )
                 }
             }
@@ -109,7 +147,12 @@ class StatsScreenTest {
             compose.onAllNodesWithText("28 Oct 2026").fetchSemanticsNodes().size,
         )
         compose.onNodeWithText("00:00").assertExists()
-        compose.onNodeWithText("14:30").assertExists()
+        // **Both ends read 14:30**, so this one is a count rather than an existence check.
+        assertEquals(
+            "the time at both ends",
+            2,
+            compose.onAllNodesWithText("14:30").fetchSemanticsNodes().size,
+        )
         compose.onNodeWithText("14 hours 30 minutes", substring = true).assertExists()
     }
 
@@ -121,9 +164,16 @@ class StatsScreenTest {
         compose.onNodeWithText("Rolling").assertExists()
         // **The chips past the visible width are still in the tree**, because the row scrolls rather
         // than truncates. Asserting on the last one is what tells those two apart.
-        compose.onNodeWithText("15 min").assertExists()
-        compose.onNodeWithText("total").assertExists()
-        compose.onNodeWithText("1 day").assertExists()
+        //
+        // **Named by row, because every chip exists in both.** "15 min" is a control in the clock row
+        // *and* in the rolling row, and the two mean different things - one starts at the hour's
+        // beginning, the other fifteen minutes ago. Before the chips carried their row in the
+        // description, a plain `onNodeWithText("15 min")` found two nodes and failed, which is the
+        // same ambiguity a screen reader would hit.
+        compose.onNodeWithContentDescription("Clock 15 min").assertExists()
+        compose.onNodeWithContentDescription("Clock total").assertExists()
+        compose.onNodeWithContentDescription("Clock 1 day").assertExists()
+        compose.onNodeWithContentDescription("Rolling 1 day").assertExists()
     }
 
     @Test
@@ -135,7 +185,7 @@ class StatsScreenTest {
         // **Scrolled into view first.** The row scrolls sideways and "1 week" sits past the right
         // edge on this width, so a tap without scrolling fails with "Failed to inject touch input" -
         // the node exists in the tree but has no position on screen.
-        compose.onNodeWithText("1 week").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("Clock 1 week").performScrollTo().performClick()
         compose.waitForIdle()
         // One week on the clock starts at midnight a week ago.
         compose.onNodeWithText("21 Oct 2026").assertExists()
@@ -148,14 +198,18 @@ class StatsScreenTest {
         draw()
         // **Four buttons, two per end**, because a calendar answers one question and a dial answers
         // the other. A single button per end is what forced the time into the calendar's title row.
-        compose.onNodeWithText("28 Oct 2026").assertExists()
-        compose.onNodeWithText("14:30").assertExists()
+        // **Two of each, because the default interval has today at both ends.** The From and To
+        // buttons read the same date and the same time until a picker moves one of them - which is
+        // the point of the default being a whole day so far, not a defect.
+        assertEquals("a date button per end", 2, compose.onAllNodesWithText("28 Oct 2026").fetchSemanticsNodes().size)
+        assertEquals("and a time button per end", 2, compose.onAllNodesWithText("14:30").fetchSemanticsNodes().size)
     }
 
     @Test
     fun `tapping a time opens the dial, not the calendar`() {
         draw()
-        compose.onNodeWithText("14:30").performClick()
+        // **The first of the two**, since From and To both read 14:30 until one is moved.
+        compose.onAllNodesWithText("14:30")[0].performClick()
         compose.waitForIdle()
         // **The dial is a whole dialog**, and the claim pinned here is that the two are separate:
         // tapping a *time* must not open the calendar, which is what the previous single-dialog
@@ -167,7 +221,8 @@ class StatsScreenTest {
     @Test
     fun `the dial is above the button that commits it`() {
         draw()
-        compose.onNodeWithText("14:30").performClick()
+        // **The first of the two**, since From and To both read 14:30 until one is moved.
+        compose.onAllNodesWithText("14:30")[0].performClick()
         compose.waitForIdle()
         // **The failure this session already made twice**, and the reason the check is anchored to
         // Show rather than to the window height: a control inside a dialog's scrolling body reports
@@ -181,14 +236,34 @@ class StatsScreenTest {
     }
 
     @Test
-    fun `the table names its two value columns`() {
+    fun `an empty history draws a sentence instead of a table of zeroes`() {
         draw()
+        // **No heading at all**, because there is no table. A person opening this before the agent
+        // has run is told why it is empty rather than shown a grid of dashes that reads like a fault
+        // - and the headings below would be headings over nothing.
+        compose.onNodeWithText("no log yet").assertExists()
+        compose.onNodeWithText("now").assertDoesNotExist()
+    }
+
+    @Test
+    fun `the table names its two value columns`() {
         // **A heading is needed now and was not before.** With one column the caption above the
         // table was its heading; two values per row make "which is which" a real question.
+        draw(withRows = true)
+        compose.onNodeWithText("now").assertExists()
+        // **The previous column appears once there is a baseline to compare against.** One response
+        // an hour before the interval began is enough to make the period before it real.
+        compose.onNodeWithText("previous").assertExists()
+    }
+
+    @Test
+    fun `the previous column is dropped when the log does not reach it`() {
+        // **A column of dashes beside a real one reads as "traffic collapsed"**, when the truth is
+        // that the history simply begins later. So the column goes entirely rather than filling
+        // with dashes.
         //
-        // **No previous column on an empty history**, because the log does not reach the previous
-        // period - and a column of dashes beside a real one reads as "traffic collapsed" when the
-        // truth is that the history begins later.
+        // One row *inside* the current interval, and nothing before it, is exactly that shape.
+        draw(withRows = true, rowsBefore = false)
         compose.onNodeWithText("now").assertExists()
         compose.onNodeWithText("previous").assertDoesNotExist()
     }
@@ -210,7 +285,9 @@ class StatsScreenTest {
         // precise drag that a Robolectric tap cannot make.
         compose.onAllNodesWithText("28 Oct 2026")[0].performClick()
         compose.waitForIdle()
-        compose.onNodeWithText("26").performClick()
+        // **Named as a selectable, because a bare "26" is not unique in the calendar** - the
+        // year-navigation row can carry the same digits, and the day cell is the selectable one.
+        compose.onNode(hasText("26") and isSelectable()).performClick()
         compose.onNodeWithText("Show").performClick()
         compose.waitForIdle()
 
