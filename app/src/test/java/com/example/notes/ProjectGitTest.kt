@@ -682,13 +682,16 @@ class ProjectGitTest {
         assertTrue(git.sync("Shopping").success)
 
         assertEquals("nothing to send", 0, git.changes("Shopping").total)
-        // **The record is in the LOCAL history and not on the remote, and that is the change.**
-        // This used to assert that the record had no commit at all, which was true while `agent/`
-        // was handled by `.git/info/exclude`: an ignore means git never saw the file. Unsyncing is
-        // the other act - the record is committed here like anything else, and left out of the tree
-        // that is *sent* - so the local log holds it and the remote must not.
-        assertFalse(
-            "the record is versioned on this phone",
+        // **Still excluded, and that is right for the app's OWN folders.** `agent/`, `.muffy/` and
+        // `requests/` are bookkeeping the app writes, not the person's work: there is no version of
+        // them worth keeping and no sense in which a person "unsynced" them. `.git/info/exclude`
+        // keeps them out of git entirely, which is the older and still correct answer for these.
+        //
+        // **Unsync is the different act, for the person's own files** - see `WorkspaceTest`, where
+        // an unsynced note stays committed here and is left out of the tree that is sent. The two
+        // mechanisms are deliberately not the same thing.
+        assertTrue(
+            "the record has no commit at all",
             git.log("Shopping", "${AgentLog.DIR}/session.log").isEmpty(),
         )
         // The remote is a bare repository on disk, so its branch is read directly - the same thing
