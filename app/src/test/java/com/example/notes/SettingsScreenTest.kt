@@ -233,7 +233,9 @@ class SettingsScreenTest {
         // them would have been a test that passes only by never being run against this scene. What
         // the grouping promises is that the label, the account and the buttons are one thing, and
         // that is checkable with what is on the screen.
-        compose.onNodeWithText("Signed in as").performScrollTo().assertIsDisplayed()
+        // **"Working as", not "Signed in as"**: the provisional account is a real workspace that is
+        // not signed in to anything, so the label has to be true in both states.
+        compose.onNodeWithText("Working as", substring = true).performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Switch").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Remove").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Add").performScrollTo().assertIsDisplayed()

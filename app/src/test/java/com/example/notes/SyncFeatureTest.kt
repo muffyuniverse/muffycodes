@@ -166,11 +166,13 @@ class SyncFeatureTest : FeatureTest() {
     fun `nothing can be synced when nobody is signed in`() {
         val alone = Scenario(scene.app, signIn = false)
 
-        // **Empty, and the emptiness is the point.** With no account there is no account folder, so
-        // `ensure()` never ran and even the settings project does not exist. The assertion is about
-        // "nobody signed in means nothing to sync", not about what a *signed-in* account holds.
-        assertEquals("nothing at all to sync", emptyList<String>(), alone.viewModel.projectNames)
-        alone.viewModel.sync("Shopping")
-        assertEquals("nothing happened", null, alone.viewModel.account)
+        // **The provisional workspace, which has the system project and nothing else.** Before a
+        // sign-in there is now a real account folder - so `ensure()` has run and `system/` exists -
+        // but there is no GitHub behind it, which is the thing this test is actually about. Syncing
+        // must therefore do nothing and say nothing happened.
+        assertEquals("only the app's own project", listOf(Workspace.SYSTEM_PROJECT), alone.viewModel.projectNames)
+        assertTrue("with no GitHub behind it", alone.viewModel.isProvisionalAccount)
+        alone.viewModel.sync(Workspace.SYSTEM_PROJECT)
+        assertEquals("and it stays local", true, alone.viewModel.isProvisionalAccount)
     }
 }
