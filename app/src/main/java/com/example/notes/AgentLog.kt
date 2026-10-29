@@ -107,15 +107,15 @@ class AgentLog private constructor(
          * limit has to be the sort of size that holds days, not the trace's 512 KB.
          */
         /**
-         * How big `session.log` may get before its oldest turns go — **four megabytes, and only
-         * when somebody asks for a number at all.**
+         * What `session.log` may hold before its oldest turns go — **ten million tokens.**
          *
          * **The evidence's own horizon, and the only place rows leave for good.** Clearing up takes
          * a row out of the conversation and leaves it in the file; this drops it. It is therefore a
-         * setting rather than a policy ([SettingsStore.sessionMb], zero by default), and this
-         * constant is what a caller that names no number gets.
+         * setting rather than a policy ([SettingsStore.sessionLimit]), and this constant is the
+         * default that setting starts at - high enough that a limit which fires is one somebody
+         * asked for rather than one the app chose.
          */
-        const val SESSION_LIMIT = 4L * 1024 * 1024
+        const val SESSION_LIMIT = 10_000_000L
 
         /** The row kinds. Named once, so the box, the tools and the checks agree. */
         const val TOLD = "TOLD"
@@ -913,28 +913,38 @@ class AgentLog private constructor(
      * Half the limit is the target rather than all of it, so the trim is not immediately undone
      * by the rows the next turn writes — the trace's own rule, reused rather than reinvented.
      */
-    fun trimSession(limit: Long = SESSION_LIMIT): Int {
-        // **Zero is the default and it means "keep everything".** The evidence is the only copy of
-        // the conversation that outlives the process, and deleting the oldest turns is the
-        // operator's decision, not the app's.
-        if (limit <= 0L) return 0
+    /**
+     * Keeps `session.log` under [limitTokens], deleting the oldest whole bursts.
+     *
+     * **Tokens, not bytes, and that is the operator's correction.** The limit used to be megabytes
+     * of the file on disk, which is a storage budget; what a person is actually choosing is how much
+     * conversation the agent may keep, and that is measured in the same unit the model is billed in.
+     * The record already stores each row's cost in its `size` column, so this is a sum of a column
+     * that is already there rather than a re-measurement.
+     *
+     * **Zero means "keep everything"**, and it is the default: the evidence is the only copy of the
+     * conversation that outlives the process, so deleting the oldest turns is the operator's
+     * decision rather than the app's.
+     */
+    fun trimSession(limitTokens: Long = SESSION_LIMIT): Int {
+        if (limitTokens <= 0L) return 0
         synchronized(guard) {
-            val size = try {
-                if (session.isFile) session.length() else 0L
-            } catch (t: Throwable) {
-                0L
-            }
-            if (size <= limit) return 0
             val rows = rows()
             if (rows.isEmpty()) return 0
+            // **The sum of the size column, which every row already carries.** A row's cost was
+            // measured when it was written, so asking the file for a total is a sum rather than a
+            // re-tokenisation of every line.
+            val total = rows.sumOf { it.size }
+            if (total <= limitTokens) return 0
             // **The budget is named, not implied.** A trailing lambda binds to the last
             // parameter, so `keepNewest(rows) { … }` left the budget at its default and the trim
             // dropped nothing at all — the same "a limit that does nothing" as before, one
             // parameter to the left.
             val (kept, dropped) =
-                // Bytes of the line, because this cap is about the **file on disk** — it is a
-                // storage budget, not a context one, and a file has bytes.
-                keepNewest(rows, budget = limit / 2) { row -> row.line.length.toLong() + 1 }
+                // **Tokens, from the column the record already keeps.** `size` is what the row cost
+                // when it was written, which is the same number the context budget is measured in -
+                // so the limit and the cost are one unit and there is nothing to convert.
+                keepNewest(rows, budget = limitTokens) { row -> row.size }
             if (dropped == 0) return 0
             // **The id, not a clock.** The row this trim stopped above is named by the handle the
             // record already uses, so the sentence is still checkable in the file.

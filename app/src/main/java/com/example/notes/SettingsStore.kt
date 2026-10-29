@@ -532,20 +532,35 @@ class SettingsStore(context: Context, name: String = "settings") {
         Trace.said(if (clean == 0) "a message is as tall as it is" else "a message shows $clean lines")
     }
 
-    var sessionMb: Int by mutableStateOf(prefs.getInt(KEY_SESSION_MB, DEFAULT_SESSION_MB))
+    /**
+     * The session log's ceiling, **in tokens**.
+     *
+     * **One field, and one unit.** This used to be megabytes of the file on disk, which is a
+     * storage budget; what a person is choosing is how much conversation the agent may keep, and
+     * that is measured the same way the model is billed. Report: "for session just one field: max
+     * length (in tokens with default 10000000). this mb and lines limits are to be removed."
+     *
+     * **Zero means "keep everything"**, which is still reachable - a blank field. The default is ten
+     * million, which is far above any real session: a limit that fires is a limit somebody asked for,
+     * not one the app chose.
+     */
+    var sessionTokens: Int by mutableStateOf(prefs.getInt(KEY_SESSION_TOKENS, DEFAULT_SESSION_TOKENS))
         private set
 
-    /** Sets the session log's ceiling in megabytes; zero keeps everything. */
-    fun keepSession(megabytes: Int) {
-        val clean = megabytes.coerceIn(0, MAX_SESSION_MB)
-        Trace.tap("session log", if (clean == 0) "kept whole" else "$clean MB")
-        sessionMb = clean
-        prefs.edit().putInt(KEY_SESSION_MB, clean).apply()
-        Trace.said(if (clean == 0) "the record is kept whole" else "the record is kept under $clean MB")
+    /** Sets the session log's ceiling in tokens; zero keeps everything. */
+    fun keepSession(tokens: Int) {
+        val clean = tokens.coerceIn(0, MAX_SESSION_TOKENS)
+        Trace.tap("session log", if (clean == 0) "kept whole" else "$clean tokens")
+        sessionTokens = clean
+        prefs.edit().putInt(KEY_SESSION_TOKENS, clean).apply()
+        Trace.said(
+            if (clean == 0) "the session log is kept whole"
+            else "the session log is kept under ${ContextBudget.short(clean.toLong())} tokens",
+        )
     }
 
-    /** The session log's ceiling in bytes; zero is "keep everything". */
-    val sessionBytes: Long get() = ContextBudget.sessionBytes(sessionMb)
+    /** The session log's ceiling in tokens; zero is "keep everything". */
+    val sessionLimit: Long get() = sessionTokens.toLong()
 
     /**
      * The two lengths older builds stored separately, read once for the migration.
@@ -635,6 +650,16 @@ class SettingsStore(context: Context, name: String = "settings") {
 
     /** The result limit in tokens: the number the row shows and the agent is held to. */
     const val KEY_MAX_RESULT_TOKENS = "agent_max_result_tokens"
+    const val KEY_SESSION_TOKENS = "agent_session_tokens"
+
+    /**
+     * The key an older build wrote, read once for the migration.
+     *
+     * It held megabytes, and the new limit is tokens. There is no honest conversion - a megabyte of
+     * this file is a number of tokens that depends on what was written - so a person who had set a
+     * limit gets the default rather than a figure the app invented. Keeping it would be a limit
+     * nobody chose, which is worse than the default that was asked for.
+     */
     const val KEY_SESSION_MB = "agent_session_mb"
 
     /**
@@ -718,8 +743,8 @@ class SettingsStore(context: Context, name: String = "settings") {
     const val MAX_MAX_RESULT = 4_194_304
 
     /** The session log is kept whole unless the operator says otherwise. */
-    const val DEFAULT_SESSION_MB = 0
-    const val MAX_SESSION_MB = 512
+    const val DEFAULT_SESSION_TOKENS = 10_000_000
+    const val MAX_SESSION_TOKENS = 100_000_000
 
         /** One hour: the design's default. */
         const val DEFAULT_REMIND_MINUTES = 60

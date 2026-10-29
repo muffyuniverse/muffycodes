@@ -2522,7 +2522,7 @@ class AppViewModel @JvmOverloads constructor(
                     foregroundMs = settings.foregroundMs,
                     reconnectMs = settings.reconnectMs,
                     backgroundMs = { settings.backgroundMs },
-                    sessionBytes = settings.sessionBytes,
+                    sessionTokens = settings.sessionLimit,
                     // Read at every boundary rather than captured: the person may speak or stop while
                     // this turn is waiting for an answer, and the loop has to see that when it comes.
                     cut = { interrupt },

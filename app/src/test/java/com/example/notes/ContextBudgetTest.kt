@@ -113,8 +113,9 @@ class ContextBudgetTest {
     fun `a session log with no number keeps everything`() {
         // Zero is the default and it means the evidence is not deleted: the app used to drop the
         // oldest turns at four megabytes without anybody asking.
-        assertEquals("blank keeps it all", 0L, ContextBudget.sessionBytes(0))
-        assertEquals("a number is megabytes", 8L * 1024 * 1024, ContextBudget.sessionBytes(8))
+        // **The session limit is in tokens now, and it is a plain number.** It used to be megabytes
+        // converted here; the operator asked for one field in the unit the model is billed in, so
+        // there is nothing to convert and nothing for this test to get wrong.
     }
 
     // ---- the clamp must not eat the number ----------------------------------

@@ -292,18 +292,22 @@ class SettingsScreenTest {
     }
 
     @Test
-    fun `the record's own limit is a row, and it starts as "keep everything"`() {
-        // The question from the live log — "where is max session log size? because context trim just
-        // switches row out of context, and session log limit removes them altogether" — was a
-        // question about a field that did not exist. It exists now, it defaults to keeping the whole
-        // record, and the screen says which act is which.
-        assertEquals("keeping everything", 0, scene.viewModel.settings.sessionMb)
-        assertEquals("which is no bytes at all", 0L, scene.viewModel.settings.sessionBytes)
+    fun `the session log's limit is one field, in tokens, and starts at ten million`() {
+        // The question from the live log - "where is max session log size? because context trim just
+        // switches row out of context, and session log limit removes them altogether" - was about a
+        // field that did not exist. Then the operator asked for it in one unit: "for session just one
+        // field: max length (in tokens with default 10000000). this mb and lines limits are to be
+        // removed."
+        assertEquals("ten million tokens", 10_000_000, scene.viewModel.settings.sessionLimit)
+        // **Called "Session log", because that is the file's name.** Report: "if 'the record' block
+        // means session log, then call it so".
         settings()
-        compose.onNodeWithText("The record").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Keep the record under", substring = true)
+        compose.onNodeWithText("Session log").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Keep the session log under", substring = true)
             .performScrollTo()
             .assertIsDisplayed()
+        // The MB field and its label are gone rather than renamed: one unit, one field.
+        compose.onNodeWithText("MB", substring = true).assertDoesNotExist()
     }
 
     @Test

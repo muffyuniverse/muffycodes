@@ -115,7 +115,13 @@ class Agent(
      * megabytes without being asked, so a person trimming their context could watch rows disappear
      * from a file they had understood as append-only.
      */
-    private val sessionBytes: Long = 0L,
+    /**
+     * How many tokens of `session.log` to keep; zero keeps everything.
+     *
+     * **Tokens, not bytes.** The operator's correction: the limit and the cost should be one unit,
+     * and the unit the model is billed in is the one a person is choosing about.
+     */
+    private val sessionTokens: Long = 0L,
 ) {
 
     private val tools = AgentTools(ws, project, git, log, maxResult, bg, backgroundMs)
@@ -433,7 +439,7 @@ class Agent(
             // The evidence is kept to the size the operator asked for, and a turn boundary is the
             // only place a trim cannot cut a conversation in half. Zero means they asked for nothing
             // to be removed, and then nothing is.
-            log.trimSession(sessionBytes)
+            log.trimSession(sessionTokens)
             progress()
         }
     }

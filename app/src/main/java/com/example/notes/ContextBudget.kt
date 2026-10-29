@@ -101,10 +101,6 @@ object ContextBudget {
     /** How many tokens one result may carry, as the setting is stored: 20k by default. */
     fun resultTokens(asked: Int): Long = asked.toLong()
 
-    /** The session log's size in bytes, from the operator's megabytes; zero is "keep everything". */
-    fun sessionBytes(megabytes: Int): Long =
-        if (megabytes <= 0) 0L else megabytes.toLong() * 1024L * 1024L
-
     /**
      * What one text costs, estimated in tokens.
      *

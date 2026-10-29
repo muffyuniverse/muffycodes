@@ -549,18 +549,22 @@ fun SettingsScreen(
             }
             RowDivider()
 
-            Text("The record", style = MaterialTheme.typography.titleMedium)
+            // **"Session log", not "The record".** The operator asked directly: "if 'the record'
+            // block means session log, then call it so". It does, and `agent/session.log` is the
+            // file's own name, so the label and the file now agree.
+            Text("Session log", style = MaterialTheme.typography.titleMedium)
             Text(
-                "agent/session.log is the evidence: every event, in order. Empty keeps all of it. " +
-                    "Given a number, the oldest turns go once it passes that size and a row says how " +
-                    "many — what goes there is gone, while clearing up only takes a row out of the " +
-                    "conversation and leaves it in the file.",
+                "agent/session.log is the evidence: every event, in order. It is measured in the " +
+                    "tokens the model was sent, so the limit and the cost are one number. Empty " +
+                    "keeps all of it; given a number, the oldest turns go once it passes and a row " +
+                    "says how many. What goes there is gone - clearing up only takes a row out of " +
+                    "the conversation and leaves it in the file.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             LengthField(
-                label = "Keep the record under (MB, blank = everything)",
-                value = settings.sessionMb,
+                label = "Keep the session log under (tokens, blank = everything)",
+                value = settings.sessionTokens,
                 placeholder = "everything",
                 onValueChange = { settings.keepSession(it) },
             )

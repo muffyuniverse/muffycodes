@@ -305,7 +305,7 @@ class AgentRunner(
                     bg = bg,
                     foregroundMs = settings.foregroundMs,
                     backgroundMs = { settings.backgroundMs },
-                    sessionBytes = settings.sessionBytes,
+                    sessionTokens = settings.sessionLimit,
                 )
                 if (waking == null) {
                     agent.warm() to log.rows()
