@@ -2306,7 +2306,16 @@ class AgentTest {
         // warning that costs a line and one that costs a re-read of everything.
         val dir = File(ws.accountDir, "shopping")
         val prompt = AgentPrompt.read(account, dir).message
-        val limits = ContextBudget.Limits.of(triggerAsked = 1, hardAsked = 0, ceiling = 100_000)
+        // **A real pair, not a one-token trigger.** A trigger of one has no positive integer below
+        // it, so no target can be derived and the line honestly says "cut what does not serve the
+        // task" instead of naming a size. That path is worth its own test; this one is about the
+        // sentence that names three numbers, so it needs a trigger that can have a target.
+        val limits = ContextBudget.Limits.of(
+            triggerAsked = 100,
+            hardAsked = 0,
+            targetAsked = 40,
+            ceiling = 100_000,
+        )
         val door = ScriptedDoor(Reply("done"))
 
         Agent(account, "shopping", ws, git, log, door, model(), limits = limits).burst("go")
@@ -2489,7 +2498,12 @@ class AgentTest {
         // compaction must cut at least to 'target' size with more if information is not directly
         // related to his current task". A floor, not a ceiling: exactly at the target is the least
         // that counts, and cutting further is what is wanted when rows do not serve the task.
-        val limits = ContextBudget.Limits.of(triggerAsked = 1, hardAsked = 0, ceiling = 100_000)
+        val limits = ContextBudget.Limits.of(
+            triggerAsked = 100,
+            hardAsked = 0,
+            targetAsked = 40,
+            ceiling = 100_000,
+        )
         val door = ScriptedDoor(Reply("done"))
 
         Agent(account, "shopping", ws, git, log, door, model(), limits = limits).burst("go")
@@ -2505,6 +2519,26 @@ class AgentTest {
         assertTrue("as a floor", sent.contains("Cut further if rows do not serve"))
         assertTrue("and that the ask ends there", sent.contains("then the app stops asking"))
         assertFalse("and no longer an empty 'there is no size'", sent.contains("no size to reach"))
+    }
+
+    @Test
+    fun `a trigger with no integer below it says cut, and names no size`() {
+        // **The honest fallback.** A trigger of one token is the smallest size there is, and there is
+        // no positive integer below it - so no target can be derived. The line then says what it can
+        // ("cut what does not serve the task") rather than "get it to off tokens or less", which
+        // would be a sentence about nothing. A real operator's number is thousands, so this is the
+        // test-sized edge rather than the normal path - but it is the path a scripted door takes,
+        // and a sentence that reads as nonsense there is still a sentence the model is charged for.
+        val limits = ContextBudget.Limits.of(triggerAsked = 1, hardAsked = 0, ceiling = 100_000)
+        val door = ScriptedDoor(Reply("done"))
+
+        Agent(account, "shopping", ws, git, log, door, model(), limits = limits).burst("go")
+
+        val sent = door.asked.first().system
+        assertTrue("the instruction: $sent", sent.contains("Clear up your context"))
+        assertTrue("cut what does not serve", sent.contains("Cut what does not serve the current task"))
+        assertFalse("and no size it cannot have", sent.contains("off tokens"))
+        assertTrue("with the stopping rule still said", sent.contains("the app stops asking"))
     }
 
     @Test
@@ -2573,7 +2607,12 @@ class AgentTest {
         log.told("task two")
         // A trigger of one token, so the turn is told about the target whatever the measurement —
         // the assertion is about the rule, not about the app's arithmetic.
-        val limits = ContextBudget.Limits.of(triggerAsked = 1, hardAsked = 0, ceiling = 1_000_000)
+        val limits = ContextBudget.Limits.of(
+            triggerAsked = 100,
+            hardAsked = 0,
+            targetAsked = 40,
+            ceiling = 1_000_000,
+        )
         val first = log.rows().first { it.kind == AgentLog.TOLD }
         val door = ScriptedDoor(
             Reply("", listOf(call("forget", """{"ids":[${first.id}]}"""))),

@@ -805,7 +805,15 @@ class Agent(
         // once rather than fought.
         val hard = limits.hardAt
         if (hard > 0 && size > hard) {
-            val dropped = log.trimContext(limits.targetAt)
+            // **The target is a budget for the whole request; the trim only removes rows.** The
+            // instructions and the tool specs are sent whatever happens, so the rows are allowed
+            // `target - fixed`. Passing the target straight through would have the app trim to the
+            // target *plus* the instructions, which lands the request above the number it was told
+            // to reach - and with a target below what the instructions alone cost, the difference is
+            // negative and the honest answer is "keep the newest burst and nothing else", which is
+            // what `keepNewest` already does with a budget it cannot meet.
+            val fixed = size - rows.sumOf { it.size }
+            val dropped = log.trimContext(limits.targetAt - fixed)
             if (dropped > 0) {
                 trimmed = true
                 Trace.note(

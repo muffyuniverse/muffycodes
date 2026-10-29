@@ -504,7 +504,13 @@ class AgentLog private constructor(
         synchronized(guard) {
             val all = rows()
             val inContext = all.filter { it.ctx == IN }
-            if (inContext.isEmpty() || target <= 0L) return 0
+            if (inContext.isEmpty()) return 0
+            // **A target of zero or less is "drop everything but the newest burst", not "do
+            // nothing".** The caller passes `target - what the instructions and tool specs cost`,
+            // and that can be negative when the target is below what a request costs before a
+            // single row is added. Refusing then would leave the context over a limit the app had
+            // already decided to act on; the honest act is to keep the one burst that may never go
+            // and drop the rest, which is exactly what a budget of zero means to `keepNewest`.
             // **In one pass, to the target.** This used to drop exactly one burst per request,
             // whatever the number passed in - the parameter was named `budget` and consulted only
             // to check it was not zero, so a context a hundred thousand tokens over its limit came
