@@ -614,6 +614,18 @@ private fun PageBody(page: AgentChat.Page, cap: Int, ink: Color, expanded: Boole
 private fun footer(message: AgentChat.Message, page: AgentChat.Page): String {
     val parts = mutableListOf<String>()
     if (page.id > 0) parts.add("#${page.id}")
+    // **In the context, or forgotten.** The record's own `ctx` column says which: `in` means the
+    // model is sent this row, `out` means the agent took it out with `forget`. Report: "message
+    // footer should show if a row is in context (simple check of id against context log ids), so
+    // that the displayed state is memorized or forgotten".
+    //
+    // **The word, and not only the strike-through.** A line through the text is a convention a
+    // reader has to already know; the footer says it plainly, and it says it beside the id, which is
+    // the handle the state belongs to.
+    //
+    // A page with no id is a row the app has not written yet, so it has no context state to report -
+    // and saying "forgotten" about a row that does not exist would be a claim about nothing.
+    if (page.id > 0) parts.add(if (page.forgotten) "forgotten" else "in context")
     val clock = LogFormat.time(page.stamp)
     if (clock.isNotBlank()) parts.add(clock)
     if (message.thinking > 0) parts.add("thinking ${ContextBudget.short(message.thinking)}")

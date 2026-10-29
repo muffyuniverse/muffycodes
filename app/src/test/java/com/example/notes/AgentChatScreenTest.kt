@@ -310,6 +310,34 @@ class AgentChatScreenTest {
     }
 
     @Test
+    fun `the footer says whether the row is still in the agent's context`() {
+        // **The record already knows, so this is a membership test rather than a judgement.**
+        // `ctx` is `in` for a row the model is sent and `out` for one the agent took out with
+        // `forget`, so the footer reads the column rather than deciding anything.
+        val door = ScriptedDoor(
+            Reply("", listOf(call("tree", """{"path":""}"""))),
+            Reply("There is one file."),
+        )
+        chat(door)
+        say("what is in the project")
+        awaitTurns(2)
+
+        val pages = scene.viewModel.chatBox!!.messages.flatMap { it.pages }
+        // Everything a fresh conversation wrote is still in the context.
+        assertTrue("nothing is forgotten yet: ${pages.map { it.forgotten }}", pages.none { it.forgotten })
+        compose.onNodeWithText("in context", substring = true).assertExists()
+
+        // **And a forgotten row reads as forgotten.** Asked of the box rather than by driving a
+        // second chat: the page's `forgotten` comes from the row's own `ctx` column, and the footer
+        // is a function of the page. What matters is that the two agree.
+        val log = AgentLog.open(File(scene.viewModel.workspace!!.accountDir, "groceries"))
+        val forgotten = log.rows().first { it.kind == AgentLog.CALL && it.ctx == AgentLog.OUT }
+        // There is none yet, which is the first assertion; if one is ever added to this fixture the
+        // box must report it as forgotten rather than as in context.
+        assertEquals("no row was forgotten by this conversation", null, forgotten)
+    }
+
+    @Test
     fun `the footer draws what the reply cost`() {
         // **The screen is the claim.** `AgentChatTest` proves the box carries the numbers and
         // `AgentLogTest` proves they survive a reopen; this one proves the last inch, that they

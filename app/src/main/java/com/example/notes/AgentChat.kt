@@ -125,6 +125,14 @@ object AgentChat {
         val id: Int = 0,
         val stamp: String = "",
         val failed: Boolean = false,
+        /**
+         * **Out of the context: the agent forgot this row.**
+         *
+         * Read from the row's own `ctx` column - the record already says it, and `out` is written at
+         * the moment the agent decides. This is the same fact the struck-through text draws; the
+         * footer says it in words as well, because a line through text is a convention a reader has
+         * to know and "forgotten" is not.
+         */
         val forgotten: Boolean = false,
         /** True for the agent's own words, which are drawn as markdown rather than as a line. */
         val prose: Boolean = false,
@@ -203,6 +211,14 @@ object AgentChat {
         val stamp: String = "",
         val failed: Boolean = false,
         /** Out of the context: drawn struck through, so the conversation shows what it forgot. */
+        /**
+         * **Out of the context: the agent forgot this row.**
+         *
+         * Read from the row's own `ctx` column - the record already says it, and `out` is written at
+         * the moment the agent decides. This is the same fact the struck-through text draws; the
+         * footer says it in words as well, because a line through text is a convention a reader has
+         * to know and "forgotten" is not.
+         */
         val forgotten: Boolean = false,
         /** True for the agent's own words, which are drawn as markdown rather than as a line. */
         val prose: Boolean = false,
