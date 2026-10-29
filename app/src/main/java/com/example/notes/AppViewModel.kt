@@ -2380,7 +2380,7 @@ class AppViewModel @JvmOverloads constructor(
                 // left for a tap: a project that says "synced" while GitHub holds an empty
                 // repository is the worst of both states.
                 if (pointed) {
-                    Trace.note("add to github", "$project -> $url")
+                    Trace.note("published", "$project -> $url")
                     sync(project)
                 } else {
                     message = "The repository was made, but $project could not be pointed at it"

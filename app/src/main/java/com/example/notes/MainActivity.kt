@@ -466,7 +466,7 @@ private fun AppRoot(viewModel: AppViewModel) {
                 onRowSync = { project -> tap("sync", project); pending = Pending.SyncProject(project) },
                 onRowRename = { project -> tap("rename project", project); pending = Pending.RenameProject(project) },
                 onRowDelete = { project -> tap("delete project", project); pending = Pending.DeleteProject(project) },
-                onRowPublish = { project -> tap("add to github", project); pending = Pending.PublishProject(project) },
+                onRowPublish = { project -> tap("publish", project); pending = Pending.PublishProject(project) },
                 onRowKeepLocal = { project -> tap("keep local", project); pending = Pending.KeepLocal(project) },
                 onCreateFile = { tap("new file"); viewModel.currentDir?.let { pending = Pending.NewFile(it) } },
                 onCreateFolder = { tap("new folder"); viewModel.currentDir?.let { pending = Pending.NewFolder(it) } },
@@ -923,7 +923,7 @@ private fun PublishProjectUI(viewModel: AppViewModel, project: String, dismiss: 
         licences = licences,
         onDismiss = dismiss,
         onPublish = { licence ->
-            Trace.tap("confirm add to github", "$project · $licence")
+            Trace.tap("confirm publish", "$project · $licence")
             viewModel.addProjectToGitHub(project, licence)
         },
     )
