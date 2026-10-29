@@ -476,15 +476,33 @@ class AgentLogTest {
         assertTrue("a new row makes it bigger: $first -> $second", second > first)
         assertEquals("and the count follows", 3, log.rowCount())
 
-        // **A file edited underneath is detected too.** Rewriting it by hand changes both length and
-        // mtime; the cache must not go on reporting the size of what used to be there.
+        // **A file edited underneath is detected too**, and the assertion has to be about the column
+        // the number actually comes from. `tokens()` is the sum of each row's **`size`**, which is
+        // written when the row is written - so editing a row's *body* changes the file (and so must
+        // invalidate the memo) while the total legitimately stays the same. Asserting the total moved
+        // would be asserting that a size column is re-derived from text, which is the re-tokenising
+        // the memo exists to avoid.
+        //
+        // So the edit changes a row's `size` itself - that is the column the total is the sum of, so
+        // it is the only edit that can move the number without re-tokenising anything.
+        //
+        // **Both halves of the identity are moved on purpose.** The size column is 5 wide, so a
+        // same-width rewrite would change only the mtime, and a filesystem with one-second
+        // resolution would then hand back the memo and fail this test on timing rather than on
+        // caching. Appending to the body as well moves the length, which no clock can hide.
         val file = File(project, "agent/session.log")
         val before = file.readText()
-        file.writeText(before.replace("working", "working (edited by something else)"))
+        val old = ContextBudget.tokens("working").toString().padStart(5)
+        val edited = before.lines().joinToString("\n") { line ->
+            if (line.contains("working")) line.replace(old, "900".padStart(5)) + " longer" else line
+        }
+        assertTrue("the fixture edited something", edited != before)
+        file.writeText(edited)
         assertTrue(
             "the edited file is measured again, not remembered: ${log.tokens()} vs $second",
             log.tokens() != second,
         )
+        assertEquals("and the row count is unchanged, so only the size moved", 3, log.rowCount())
     }
 
     @Test
