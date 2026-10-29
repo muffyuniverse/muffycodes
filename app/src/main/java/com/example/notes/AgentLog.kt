@@ -910,7 +910,7 @@ class AgentLog private constructor(
      * over a prefix rather than a second measurement.
      */
     private fun tokensBefore(marker: Row, all: List<Row>): Long =
-        all.filter { it.id < marker.id && it.ctx == IN }.sumOf { it.size }
+        all.filter { it.id < marker.id && it.ctx == IN }.sumOf { it.size } + droppedTokens(marker, all)
 
     /**
      * What the act took out, in tokens.
@@ -937,9 +937,18 @@ class AgentLog private constructor(
      * **Counted from the rows the marker's own id stands after**, because the count at that moment is
      * not stored and cannot be recovered any other way: the context has changed since. This is the
      * one place a count is derived rather than recorded, and it is derived from the file's own order.
+     *
+     * **Plus what the act itself took out, and this was a real bug.** The rows an act removes stop
+     * being `IN` - that is what removing means here - so counting `ctx == IN` after the fact reports
+     * the SURVIVORS, not what stood there before. "at 4 rows, to 2 taken out" describes a context
+     * that was 4 rows and became 2 when it was 6 and became 4. The number the sentence promises is
+     * `survivors + removed`, and the removed count is the one the marker already records.
+     *
+     * Nothing else can be the cause: rows are only ever appended, so every row before the marker with
+     * `id < marker.id` was in the context at that moment unless this act took it out.
      */
     private fun inContextBefore(marker: Row, all: List<Row>): Int =
-        all.filter { it.id < marker.id && it.ctx == IN }.size
+        all.count { it.id < marker.id && it.ctx == IN } + droppedCount(marker)
 
     /** How many rows [marker] says it dropped, from the ids in its own detail. */
     private fun droppedCount(marker: Row): Int =

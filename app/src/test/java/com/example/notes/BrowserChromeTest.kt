@@ -473,7 +473,11 @@ class BrowserChromeTest {
             MaterialTheme { SignInDialog(onDismiss = {}, onSignIn = {}) }
         }
 
-        compose.waitForIdle()
+        // **No `waitForIdle` here, and the reason is the window itself.** A dialog holding a text
+        // field keeps a blinking cursor on a Compose clock that never settles, so the idle wait
+        // times out after sixty seconds and reports "infinite composition loop" - a false alarm
+        // about the wrong thing. The semantics tree is already built by the time `setContent`
+        // returns, which is all this test needs: it asserts the words, not the animation.
         assertTrue("it asks for the key", there("Personal access key"))
         assertTrue("and names the scopes it needs", there("repo and delete_repo"))
         assertTrue("and says whose commits they will be", there("belongs to"))

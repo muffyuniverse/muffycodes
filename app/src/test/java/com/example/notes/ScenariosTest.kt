@@ -1164,6 +1164,12 @@ class ScenariosTest {
             screen = {
                 window { SignInDialog(onDismiss = {}, onSignIn = {}) }
             },
+            // **`ready = { true }` is the default, and it is the reason this scenario does not
+            // hang.** The window holds a text field, whose cursor blinks on a Compose clock that
+            // never settles, so a `waitForIdle` after the window is shown times out - the same
+            // failure the five earlier window scenarios hit, which is why `after()` only drains the
+            // looper and never asks compose to go idle again. Nothing here posts work from another
+            // thread, so there is nothing to drain for either.
         ) {
             before()
             then("Nothing is typed: the field is empty and the button says what it will do.") {}

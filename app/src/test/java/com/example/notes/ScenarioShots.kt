@@ -28,6 +28,9 @@ import org.robolectric.Shadows.shadowOf
  * The technical half of a failure lives in the test's own output, where an agent
  * reads it. This is the other half.
  */
+/** The identity a scenario passes when it stays on one screen, so `after` can tell. */
+private val NO_SWITCH: () -> Unit = {}
+
 class ScenarioShots(
     private val compose: ComposeContentTestRule,
     /** The folder the scenario is written into, under the build's output. */
@@ -46,7 +49,7 @@ class ScenarioShots(
      * same screen twice and calls it a before and an after is worse than one that
      * shows a single picture and says why.
      */
-    private val switchToAfter: () -> Unit = {},
+    private val switchToAfter: () -> Unit = NO_SWITCH,
     /**
      * True once the screen in the second half has what it needs to draw itself.
      *
@@ -121,8 +124,16 @@ class ScenarioShots(
      * already drawn therefore pays nothing here, which is twenty-three of the twenty-four.
      */
     fun after() {
-        switchToAfter()
-        compose.waitForIdle()
+        // **`waitForIdle` only when a screen is actually swapped, and this was a real hang.** A
+        // window holding a text field keeps a blinking cursor on a Compose clock that never
+        // settles, so an unconditional idle wait timed out after sixty seconds and reported
+        // "infinite composition loop" - a false alarm about the wrong thing. A scenario that stays
+        // on the screen it opened has nothing to settle, so it is not asked to.
+        val swaps = switchToAfter !== NO_SWITCH
+        if (swaps) {
+            switchToAfter()
+            compose.waitForIdle()
+        }
         if (!ready()) {
             // **The looper only.** Draining it is what delivers a worker's answer; asking compose
             // to go idle again is the thing an animating window can never do. Guarded by `ready`,
