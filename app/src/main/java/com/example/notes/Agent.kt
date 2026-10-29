@@ -723,6 +723,10 @@ class Agent(
             .filter { it.tokens > 0 }
             .sortedByDescending { it.tokens }
             .take(BIGGEST_ROWS)
+        // **Measured from the rows in hand, not from the memo.** This function has already read
+        // every context row to find the biggest ones - the clear-up line names them - so the sum is
+        // free here, and asking the memo would read the file a second time to avoid an addition.
+        // The memo pays where a caller has no rows: `size()`, and the trim.
         return Opening(measure(layers.message, log.contextRows(), tools), costs)
     }
 
@@ -832,6 +836,14 @@ class Agent(
      * descriptions. A measurement that left out the tool specs would be a limit the request could
      * exceed without ever being over it.
      */
+    /**
+     * What a request of these parts would cost.
+     *
+     * **The rows are summed here rather than asked of the record's memo**, because this function is
+     * also handed rows that are not the record's - `build` passes the list it has already filtered
+     * and possibly trimmed. The memo is used where the caller genuinely has no rows in hand: see
+     * [size], which is the number a person asks for.
+     */
     private fun measure(system: String, rows: List<AgentLog.Row>, tools: List<ToolSpec>): Long =
         ContextBudget.tokens(system) +
             // **The number the row already carries.** It is measured once, when the row is written,
@@ -907,11 +919,17 @@ class Agent(
      * Public because it is a question a person can have ("how full is it?") and because a test that
      * had to re-derive it would be measuring its own arithmetic rather than the app's.
      */
-    fun size(): Long = measure(
-        AgentPrompt.read(accountDir, tools.projectDir).message,
-        log.contextRows(),
-        AgentTools.specs(),
-    )
+    fun size(): Long =
+        // **The rows come from the record's memo**, because this is the question asked on a timer -
+        // "how full is it?" - and re-reading and re-summing every context row to answer it is what
+        // the memo exists to avoid. The instructions and the tool specs are counted as usual: they
+        // change rarely and are cheap, and a second memo for them would be a second thing to
+        // invalidate.
+        ContextBudget.tokens(AgentPrompt.read(accountDir, tools.projectDir).message) +
+            log.contextTokens() +
+            AgentTools.specs().sumOf {
+                ContextBudget.tokens(it.description, it.parameters.toString())
+            }
 
     fun request(): Request {
         val layers = AgentPrompt.read(accountDir, tools.projectDir)

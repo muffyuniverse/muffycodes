@@ -1027,6 +1027,38 @@ class AgentLog private constructor(
      */
     fun tokens(): Long = measure().tokens
 
+    /**
+     * **The context's size in tokens, from the same memo.**
+     *
+     * The per-turn trigger asks this on every request, including keepalives - so this is the call
+     * that made the report worth acting on. It is a separate number from [tokens] because the two
+     * measure different things: the record is everything ever written, and the context is the rows
+     * the model is sent. They change at different moments (a `forget` moves rows from one to the
+     * other without changing the record's total), so they are two memos keyed by the same file
+     * identity.
+     */
+    fun contextTokens(): Long = contextMeasure().tokens
+
+    private fun contextMeasure(): Measure = synchronized(guard) {
+        val key = context.absolutePath + "#context"
+        val length = try {
+            if (context.isFile) context.length() else 0L
+        } catch (t: Throwable) {
+            0L
+        }
+        val modified = try {
+            if (context.isFile) context.lastModified() else 0L
+        } catch (t: Throwable) {
+            0L
+        }
+        val cached = measured[key]
+        if (cached != null && cached.length == length && cached.modified == modified) return cached
+        val rows = contextRows()
+        val fresh = Measure(length, modified, rows.sumOf { it.size }, rows.size)
+        measured[key] = fresh
+        fresh
+    }
+
     /** How many rows the record holds, from the same measurement as [tokens]. */
     fun rowCount(): Int = measure().rows
 
