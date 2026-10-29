@@ -190,6 +190,112 @@ class RequestStatsTest {
     }
 
     @Test
+    fun `a rolling preset reaches back from the opening moment`() {
+        // **The operator's definition**: rolling is "just rolling" - now minus the length, with
+        // nothing snapped. 09:16 minus an hour is 08:16, not 09:00.
+        val zone = ZoneId.of("UTC")
+        val now = LocalDate.parse("2026-10-28").atTime(9, 16).atZone(zone).toInstant().toEpochMilli()
+        fun start(p: RequestStats.Preset) = p.intervalAt(now, zone).fromMs
+        fun at(h: Int, m: Int = 0, day: Int = 28) =
+            LocalDate.parse("2026-10-${day.toString().padStart(2, '0')}")
+                .atTime(h, m).atZone(zone).toInstant().toEpochMilli()
+
+        assertEquals("15 min", at(9, 1), start(RequestStats.Preset.MINUTES_15))
+        assertEquals("1 hour", at(8, 16), start(RequestStats.Preset.HOUR_1))
+        assertEquals("6 hours", at(3, 16), start(RequestStats.Preset.HOURS_6))
+        assertEquals("1 day", at(9, 16, day = 27), start(RequestStats.Preset.DAY_1))
+        assertEquals("1 week", at(9, 16, day = 21), start(RequestStats.Preset.WEEK_1))
+        // **Every one ends at the opening moment**, which is what makes the two families comparable.
+        for (p in listOf(RequestStats.Preset.MINUTES_15, RequestStats.Preset.YEAR_1)) {
+            assertEquals("${p.label} ends now", now, p.intervalAt(now, zone).toMs)
+        }
+    }
+
+    @Test
+    fun `a clock preset snaps its start to the grid`() {
+        // **The operator's distinction**: clock starts at zero minutes, zero hour, zero day of the
+        // month, zero month of the year - whichever boundary the length reaches. The end is still
+        // the opening moment, so a clock interval is always at least as wide as the rolling one.
+        val zone = ZoneId.of("UTC")
+        val now = LocalDate.parse("2026-10-28").atTime(9, 16).atZone(zone).toInstant().toEpochMilli()
+        fun start(p: RequestStats.Preset) = p.clockAt(now, zone).fromMs
+        fun at(h: Int, m: Int = 0, day: Int = 28, month: Int = 10, year: Int = 2026) =
+            LocalDate.of(year, month, day).atTime(h, m).atZone(zone).toInstant().toEpochMilli()
+
+        // **Under an hour, the grid is the hour** - which is why 15 min and 6 hours both start at
+        // 09:00: their length does not reach a coarser boundary, so the hour is where they begin.
+        assertEquals("15 min starts at the hour", at(9), start(RequestStats.Preset.MINUTES_15))
+        assertEquals("1 hour too", at(9), start(RequestStats.Preset.HOUR_1))
+        assertEquals("6 hours too", at(9), start(RequestStats.Preset.HOURS_6))
+        assertEquals("1 day starts at midnight", at(0), start(RequestStats.Preset.DAY_1))
+        assertEquals("1 week too", at(0), start(RequestStats.Preset.WEEK_1))
+        assertEquals("1 month starts on the 1st", at(0, day = 1), start(RequestStats.Preset.MONTH_1))
+        assertEquals("1 year starts on 1 January", at(0, day = 1, month = 1), start(RequestStats.Preset.YEAR_1))
+
+        // **A clock interval is never narrower than its rolling twin**, because it starts earlier.
+        for (p in RequestStats.Preset.entries.filter { it != RequestStats.Preset.TOTAL }) {
+            assertTrue(
+                "${p.label}: clock starts at or before rolling",
+                p.clockAt(now, zone).fromMs <= p.intervalAt(now, zone).fromMs,
+            )
+        }
+    }
+
+    @Test
+    fun `a quarter on the clock starts on a quarter boundary, not the first of the month`() {
+        // **The case that separates "months" from "quarters".** On 28 October a one-month clock
+        // interval starts on 1 October, which is right; a one-quarter one that also started on
+        // 1 October would be a month, not a quarter. It starts on 1 October only because October IS
+        // a quarter boundary - so the test uses a month that is not.
+        val zone = ZoneId.of("UTC")
+        val november = LocalDate.parse("2026-11-15").atTime(9, 16).atZone(zone).toInstant().toEpochMilli()
+        val quarterStart = RequestStats.Preset.QUARTER_1.clockAt(november, zone).fromMs
+        assertEquals(
+            "a quarter beginning in November starts in October",
+            LocalDate.parse("2026-10-01").atStartOfDay(zone).toInstant().toEpochMilli(),
+            quarterStart,
+        )
+        val december = LocalDate.parse("2026-12-15").atTime(9, 16).atZone(zone).toInstant().toEpochMilli()
+        assertEquals(
+            "and December is still the same quarter",
+            LocalDate.parse("2026-10-01").atStartOfDay(zone).toInstant().toEpochMilli(),
+            RequestStats.Preset.QUARTER_1.clockAt(december, zone).fromMs,
+        )
+    }
+
+    @Test
+    fun `a month back from the thirty-first clamps rather than overflowing`() {
+        // **31 October minus one month is 30 September**, not 31 September and not 1 October. Java's
+        // calendar arithmetic clamps, which is the answer a person means; a fixed 30-day subtraction
+        // would give 1 October and be wrong by a day in the other direction.
+        val zone = ZoneId.of("UTC")
+        val at = LocalDate.parse("2026-10-31").atTime(9, 16).atZone(zone).toInstant().toEpochMilli()
+        assertEquals(
+            "clamped to the last day of September",
+            LocalDate.parse("2026-09-30").atTime(9, 16).atZone(zone).toInstant().toEpochMilli(),
+            RequestStats.Preset.MONTH_1.intervalAt(at, zone).fromMs,
+        )
+    }
+
+    @Test
+    fun `total reaches back to the oldest thing the log holds`() {
+        // The one preset whose start cannot be derived from `now`, so it takes the history's own
+        // beginning. With no history it is an empty interval rather than one stretching to 1970.
+        val zone = ZoneId.of("UTC")
+        val now = LocalDate.parse("2026-10-28").atTime(9, 16).atZone(zone).toInstant().toEpochMilli()
+        val oldest = now - 400L * 86_400_000L
+        assertEquals("from the first row", oldest, RequestStats.Preset.TOTAL.intervalAt(now, zone, oldest).fromMs)
+        assertEquals("to the opening moment", now, RequestStats.Preset.TOTAL.intervalAt(now, zone, oldest).toMs)
+        // **Clock and rolling agree on total**, because there is no grid to snap to.
+        assertEquals(
+            "no grid to snap for total",
+            RequestStats.Preset.TOTAL.intervalAt(now, zone, oldest),
+            RequestStats.Preset.TOTAL.clockAt(now, zone, oldest),
+        )
+        assertEquals("and with no history it is empty", now, RequestStats.Preset.TOTAL.intervalAt(now, zone, null).fromMs)
+    }
+
+    @Test
     fun `the same instant is the same request in every zone`() {
         // **The property the single instant column exists for**, now expressed on an interval rather
         // than on a column label. A log written in Berlin and read in Los Angeles must place every

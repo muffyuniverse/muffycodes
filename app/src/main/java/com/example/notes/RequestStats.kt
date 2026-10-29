@@ -202,6 +202,115 @@ object RequestStats {
         val perMillionOutput: Double? get() = if (completionTokens == 0L) null else cost / completionTokens * 1_000_000
     }
 
+    /**
+     * One of the fixed intervals the screen offers above the table.
+     *
+     * **Two families, and the difference is where the interval STARTS.**
+     *
+     * *Clock* intervals snap the start to the grid: zero minutes, zero hour of the day, zero day of
+     * the month, zero month of the year - whichever boundary the length implies. So "1 day" on the
+     * clock is today from midnight, and "1 year" is this year from 1 January.
+     *
+     * *Rolling* intervals do not snap anything: the start is simply [now] minus the length. So "1
+     * day" rolling is the last twenty-four hours, whatever time it is.
+     *
+     * **Both end at the moment the screen was opened.** That is what makes the two families
+     * comparable: the same end, two different starts, and the difference between them is exactly the
+     * partial period the clock interval includes.
+     *
+     * **Total is a member rather than a special case**, because a person who wants "everything" is
+     * asking the same shape of question as one who wants "the last week" - and putting it on its own
+     * would need its own button, its own selected state and its own branch in the caption.
+     */
+    enum class Preset(
+        val label: String,
+        /** How far back it reaches, in calendar terms. Null for [TOTAL]. */
+        private val back: Back?,
+    ) {
+        MINUTES_15("15 min", Back.Duration(15 * 60_000L)),
+        HOUR_1("1 hour", Back.Duration(3_600_000L)),
+        HOURS_6("6 hours", Back.Duration(6 * 3_600_000L)),
+        DAY_1("1 day", Back.Days(1)),
+        WEEK_1("1 week", Back.Days(7)),
+        MONTH_1("1 month", Back.Months(1)),
+        QUARTER_1("1 quarter", Back.Months(3)),
+        YEAR_1("1 year", Back.Months(12)),
+
+        /** Everything the log holds. The only preset whose start is not derived from [now]. */
+        TOTAL("total", null),
+        ;
+
+        /**
+         * The interval this preset names, ending at [now] - **the moment the screen opened**.
+         *
+         * [oldest] is only consulted by [TOTAL], which cannot know where the history begins without
+         * asking. Every other preset is a pure function of [now], which is what lets a test pin it.
+         */
+        fun intervalAt(
+            now: Long,
+            zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
+            oldest: Long? = null,
+        ): Interval {
+            val b = back ?: return Interval(oldest ?: now, now)
+            val start = when (b) {
+                is Back.Duration -> now - b.ms
+                is Back.Days -> java.time.Instant.ofEpochMilli(now).atZone(zone)
+                    .minusDays(b.count.toLong()).toInstant().toEpochMilli()
+                is Back.Months -> java.time.Instant.ofEpochMilli(now).atZone(zone)
+                    .minusMonths(b.count.toLong()).toInstant().toEpochMilli()
+            }
+            return Interval(start, now)
+        }
+
+        /**
+         * The same length, but **with the start snapped to the grid** - zero minutes, zero hour,
+         * zero day of the month, zero month of the year, as far as the length reaches.
+         *
+         * This is the *clock* family. "1 day" becomes midnight today; "1 year" becomes 1 January.
+         * The end is still [now], which is why a clock interval is always at least as wide as the
+         * rolling one with the same name.
+         */
+        fun clockAt(
+            now: Long,
+            zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
+            oldest: Long? = null,
+        ): Interval {
+            if (this == TOTAL) return intervalAt(now, zone, oldest)
+            val at = java.time.Instant.ofEpochMilli(now).atZone(zone)
+            val start = when (back) {
+                // **Under an hour, the grid is the hour.** A fifteen-minute clock interval is the
+                // fifteen minutes beginning at the hour's start, which is what "15 min" means when
+                // the alternative - snapping to a 15-minute grid - would be a second convention.
+                is Back.Duration -> at.truncatedTo(java.time.temporal.ChronoUnit.HOURS)
+                is Back.Days -> at.truncatedTo(java.time.temporal.ChronoUnit.DAYS)
+                is Back.Months -> if (back.count >= 12) {
+                    at.withDayOfYear(1).truncatedTo(java.time.temporal.ChronoUnit.DAYS)
+                } else {
+                    // **Quarters start on a quarter boundary**, not on the 1st of the month: a
+                    // "1 quarter" clock interval that began on the 1st of October would not be a
+                    // quarter at all.
+                    val monthsIn = ((at.monthValue - 1) / back.count) * back.count
+                    at.withMonth(monthsIn + 1).withDayOfMonth(1)
+                        .truncatedTo(java.time.temporal.ChronoUnit.DAYS)
+                }
+                null -> return Interval(oldest ?: now, now)
+            }
+            return Interval(start.toInstant().toEpochMilli(), now)
+        }
+    }
+
+    /** How far a preset reaches back. Sealed so the two snap rules cannot be confused. */
+    sealed interface Back {
+        /** A length in milliseconds: minutes and hours, which have no calendar meaning. */
+        data class Duration(val ms: Long) : Back
+
+        /** A count of days, subtracted on the local timeline so DST cannot shift the wall clock. */
+        data class Days(val count: Int) : Back
+
+        /** A count of months, subtracted on the calendar so 31 Oct minus one month clamps to 30 Sep. */
+        data class Months(val count: Int) : Back
+    }
+
     /** The UTC hour that contains [ms]. The unit the log's hour table is keyed by. */
     fun hourFloor(ms: Long): Long = Math.floorDiv(ms, 3_600_000L) * 3_600_000L
 

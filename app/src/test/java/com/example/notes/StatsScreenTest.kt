@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -88,68 +89,85 @@ class StatsScreenTest {
             .resources.displayMetrics.heightPixels.toFloat()
 
     @Test
-    fun `the two picks are drawn with their instants`() {
+    fun `a new opening shows today, with the clock day chip lit`() {
+        // **The operator's default**: *"default with which stat is opened is clock day preset - it
+        // should be autoselected on stat menu opening."* At 14:30 that is 28 Oct 00:00 to 28 Oct
+        // 14:30 - today from midnight, ending at the opening moment.
         draw()
-        // **Midnight to the end of the minute `now` is in.** At 14:30 that is 14:31 - the minute
-        // 14:30 counts, because an end is where the interval STOPS. Not 15:00, which was the answer
-        // while the granularity was the hour.
         compose.onNodeWithText("From").assertExists()
         compose.onNodeWithText("To").assertExists()
-        compose.onNodeWithText("28 Oct 2026, 00:00", substring = true).assertExists()
-        compose.onNodeWithText("28 Oct 2026, 14:31", substring = true).assertExists()
+        // Both ends are on the same day, and the time ends where the clock stopped.
+        assertEquals(
+            "the same date at both ends",
+            2,
+            compose.onAllNodesWithText("28 Oct 2026").fetchSemanticsNodes().size,
+        )
+        compose.onNodeWithText("00:00").assertExists()
+        compose.onNodeWithText("14:30").assertExists()
+        compose.onNodeWithText("14 hours 30 minutes", substring = true).assertExists()
     }
 
     @Test
-    fun `the picker's hour can be reached, not merely present`() {
+    fun `the preset rows are drawn with clock day selected`() {
         draw()
-        compose.onNodeWithText("00:00", substring = true).performClick()
-        compose.waitForIdle()
+        // **Two rows, one selection.** The clock row is lit on "1 day"; nothing in the rolling row is.
+        compose.onNodeWithText("Clock").assertExists()
+        compose.onNodeWithText("Rolling").assertExists()
+        // **The chips past the visible width are still in the tree**, because the row scrolls rather
+        // than truncates. Asserting on the last one is what tells those two apart.
+        compose.onNodeWithText("15 min").assertExists()
+        compose.onNodeWithText("total").assertExists()
+        compose.onNodeWithText("1 day").assertExists()
+    }
 
-        // **The hour stepper is the control this session added**, and on a 320x470 screen it sat
-        // below the bottom of the dialog: present in the tree, unreachable by a thumb.
-        //
-        // **Anchored to Show rather than to the window's height, because the height check passed
-        // while the control was invisible.** A node inside the dialog's scrolling body reports
-        // unclipped bounds, so "its bottom is less than the screen's height" was true of a row
-        // drawn underneath the buttons. Show is pinned by Material and always drawn, so "the hour
-        // is above Show" is the claim that actually distinguishes the two states.
-        val at = bottomOf("At")
+    @Test
+    fun `choosing a preset regenerates without pressing Generate`() {
+        draw()
+        // **A preset IS a request for figures.** Unlike moving a picker, tapping one is explicit, so
+        // it sets both ends and the generated interval at once.
+        compose.onNodeWithText("1 week").performClick()
+        compose.waitForIdle()
+        // One week on the clock starts at midnight a week ago.
+        compose.onNodeWithText("21 Oct 2026").assertExists()
+        // And it regenerated, so the button has nothing left to do.
+        compose.onNodeWithText("Generated").assertExists()
+    }
+
+    @Test
+    fun `the date and the time are separate buttons`() {
+        draw()
+        // **Four buttons, two per end**, because a calendar answers one question and a dial answers
+        // the other. A single button per end is what forced the time into the calendar's title row.
+        compose.onNodeWithText("28 Oct 2026").assertExists()
+        compose.onNodeWithText("14:30").assertExists()
+    }
+
+    @Test
+    fun `tapping a time opens the dial, not the calendar`() {
+        draw()
+        compose.onNodeWithText("14:30").performClick()
+        compose.waitForIdle()
+        // **The dial is a whole dialog**, and the claim pinned here is that the two are separate:
+        // tapping a *time* must not open the calendar, which is what the previous single-dialog
+        // design did.
+        compose.onNodeWithText("Show").assertExists()
+        compose.onNodeWithText("Cancel").assertExists()
+    }
+
+    @Test
+    fun `the dial is above the button that commits it`() {
+        draw()
+        compose.onNodeWithText("14:30").performClick()
+        compose.waitForIdle()
+        // **The failure this session already made twice**, and the reason the check is anchored to
+        // Show rather than to the window height: a control inside a dialog's scrolling body reports
+        // unclipped bounds, so "its bottom is above the screen's" was true of a row drawn underneath
+        // the buttons. Show is pinned by the dialog and always drawn.
         val commit = bottomOf("Show")
         assertTrue(
-            "the hour row is above the button that commits it: $at vs $commit",
-            at < commit,
-        )
-        assertTrue(
-            "and both are on the screen: $commit of ${windowHeight()}",
+            "the dialog fits on the screen: $commit of ${windowHeight()}",
             commit < windowHeight(),
         )
-    }
-
-    @Test
-    fun `the dialog offers minutes as well as hours`() {
-        draw()
-        compose.onNodeWithText("00:00", substring = true).performClick()
-        compose.waitForIdle()
-        // **Both steppers, because the log keeps a minute table.** This is the reverse of the rule
-        // that held while the finest summary was an hour: then, offering a minute let somebody pick
-        // 19:23 for a table that could only count whole hours. Now 19:23 is exactly what the figure
-        // covers.
-        //
-        // **Found by content description, not by drawn text.** The buttons are `−` and `+`, which
-        // appear twice each on the row; "less minute" is the only thing that distinguishes the
-        // minute stepper from the hour's, and it is also what a screen reader reads out.
-        compose.onNodeWithContentDescription("less minute").assertExists()
-        compose.onNodeWithContentDescription("more minute").assertExists()
-        compose.onNodeWithContentDescription("less hour").assertExists()
-    }
-
-    @Test
-    fun `the table says how long its interval is`() {
-        draw()
-        // **14 hours 31 minutes, and it says both.** Midnight to 14:31 is not a whole number of
-        // hours, so the span carries the minutes rather than rounding to "14 hours" and hiding the
-        // extent it actually covers.
-        compose.onNodeWithText("14 hours 31 minutes", substring = true).assertExists()
     }
 
     @Test
@@ -161,14 +179,15 @@ class StatsScreenTest {
         compose.onNodeWithText("Generated").assertExists()
         compose.onNodeWithText("Generate").assertDoesNotExist()
 
-        // Open the From picker, move the hour on, and commit: the picks now differ from what was
-        // generated, so the button offers to act.
-        compose.onNodeWithText("00:00", substring = true).performClick()
+        // Open the **date** picker for the start and commit a different day: the picks now differ
+        // from what was generated, so the button offers to act.
+        //
+        // The date rather than the dial, because a date is one tap away from the current one - the
+        // calendar opens on it and the day beside it is always present - while the dial needs a
+        // precise drag that a Robolectric tap cannot make.
+        compose.onNodeWithText("28 Oct 2026").performClick()
         compose.waitForIdle()
-        compose.onAllNodesWithText("+").fetchSemanticsNodes().let {
-            assertTrue("the steppers are reachable", it.isNotEmpty())
-        }
-        compose.onAllNodesWithText("+")[0].performClick()
+        compose.onNodeWithText("26").performClick()
         compose.onNodeWithText("Show").performClick()
         compose.waitForIdle()
 

@@ -721,6 +721,48 @@ class ScenariosTest {
     }
 
     @Test
+    fun `a preset chosen from the rolling row`() {
+        // **The two rows side by side, and what choosing from one does to the other.** Clock "1 day"
+        // is lit when the screen opens; tapping rolling "6 hours" must light that instead and leave
+        // the clock row dark, because two lit chips would name two intervals and the figures can
+        // only be one of them.
+        scene.signedIn()
+        val account = scene.workspace?.accountDir ?: error("signed in, so there is one")
+        val now = java.time.LocalDate.parse("2026-10-28")
+            .atTime(14, 30).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+        repeat(6) { i ->
+            RequestDb.write(account, now - (i + 1) * 600_000L, RequestLog.Stats(
+                kind = RequestLog.Stats.Kind.TURN, ms = 2_000,
+                provider = "deepinfra/fp8/flex", model = "deepseek/deepseek-v4.1-flash",
+                usage = org.json.JSONObject(
+                    """{"prompt_tokens":4000,"completion_tokens":200,"cost":0.0004,
+                       "prompt_tokens_details":{"cached_tokens":3000}}""",
+                ),
+                finish = "stop",
+            ))
+        }
+
+        scenario(
+            compose, "28-a-preset-from-the-rolling-row",
+            "A preset chosen from the rolling row.",
+            "two rows of intervals, one selection across both.",
+            screen = { stats(account, now) },
+        ) {
+            before()
+            then("`6 hours` is tapped in the rolling row.") {
+                compose.onNodeWithText("6 hours").performClick()
+                compose.waitForIdle()
+            }
+            after()
+            result(
+                "Rolling six hours: the start moved to 08:30, six hours before the tap, and the " +
+                    "clock row went dark. The figures were recomputed at once - a preset is itself " +
+                    "a request for them, so Generate has nothing left to do.",
+            )
+        }
+    }
+
+    @Test
     fun `the table waiting for Generate`() {
         // **The button's other state, and the reason it exists.** A minute stepper can move sixty
         // times on the way to a time; re-reading the history on each of those is work nobody asked
@@ -751,10 +793,12 @@ class ScenariosTest {
             screen = { stats(account, now) },
         ) {
             before()
-            then("`From` is opened, its hour moved on, and the pick committed with `Show`.") {
-                compose.onNodeWithText("00:00", substring = true).performClick()
+            then("the start's **date** is opened and a different day committed with `Show`.") {
+                // The date rather than the dial: a day is one tap away from the current one, while
+                // the dial needs a precise drag that a Robolectric tap cannot make.
+                compose.onNodeWithText("28 Oct 2026").performClick()
                 compose.waitForIdle()
-                compose.onAllNodesWithText("+")[0].performClick()
+                compose.onNodeWithText("26").performClick()
                 compose.onNodeWithText("Show").performClick()
                 compose.waitForIdle()
             }
@@ -784,23 +828,24 @@ class ScenariosTest {
             .atTime(14, 30).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
 
         scenario(
-            compose, "25-the-window-that-picks-an-interval",
-            "The window that picks when the table is about.",
-            "the day and the hour, and nothing finer than an hour.",
+            compose, "25-the-window-that-picks-a-time",
+            "The window that picks a time.",
+            "a dial for the time, in its own window.",
             screen = { stats(account, now) },
         ) {
             before()
-            then("`From` is pressed, which opens the calendar and the hour.") {
-                // The From button shows the interval's own start, which is midnight - so the text
-                // is unique in a table whose To reads 15:00.
-                compose.onNodeWithText("00:00", substring = true).performClick()
+            then("the start's **time** is pressed, which opens the dial.") {
+                // **The dial, not the calendar**, and that is the point of the picture: the two are
+                // separate windows now, each doing one job. The time button is the one reading the
+                // interval's own start.
+                compose.onNodeWithText("00:00").performClick()
             }
             after()
             result(
-                "A day from the phone's own calendar and an hour beside it, and no minute at all: " +
-                    "the table counts whole hours, so a minute would let a person pick a period the " +
-                    "figures could not describe. `Show` is named for the act rather than for the " +
-                    "window.",
+                "Material's own dial: drag the hour hand, then the minute hand. It has a window to " +
+                    "itself, which is what the previous design could not give it - two attempts to " +
+                    "put time controls under a calendar ended with them below the bottom of the " +
+                    "dialog. The date has its own window beside it.",
             )
         }
     }
