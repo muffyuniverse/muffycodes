@@ -462,8 +462,19 @@ object RequestDb {
      * than expected is explained by the log beginning late, and a rollup row existing for a period
      * whose raw rows are gone is precisely the case that must NOT be reported as coverage.
      */
-    fun read(accountDir: File): History = try {
-        open(accountDir).use { db ->
+    fun read(accountDir: File): History {
+        // **Not `use { }`.** That closes the database on return, so every `History` handed out would
+        // be already dead and the first total would throw "attempt to re-open an already-closed
+        // object" - from a line with no visible connection to the cause. The handle is handed back
+        // open on purpose; `History` is `Closeable` so releasing it is one word.
+        val db = try {
+            open(accountDir)
+        } catch (t: Throwable) {
+            // A history that cannot be opened is an empty history, not a crash on the way to a
+            // table that would have said "no log yet" anyway.
+            return History()
+        }
+        return try {
             var oldest: Long? = null
             var newest: Long? = null
             db.rawQuery("SELECT MIN(utc), MAX(utc) FROM requests", null).use { c ->
@@ -475,21 +486,21 @@ object RequestDb {
             // **And the rollups, when the raw table has been emptied by compaction.** Without this a
             // fully compacted history would report "no log yet" while the totals answered perfectly.
             if (oldest == null) {
-                db.rawQuery(
-                    "SELECT MIN(bucket) FROM (SELECT bucket FROM roll_minute UNION ALL SELECT bucket FROM roll_hour UNION ALL SELECT bucket FROM roll_day)",
-                    null,
-                ).use { c -> if (c.moveToFirst() && !c.isNull(0)) oldest = c.getLong(0) }
-                db.rawQuery(
-                    "SELECT MAX(bucket) FROM (SELECT bucket FROM roll_minute UNION ALL SELECT bucket FROM roll_hour UNION ALL SELECT bucket FROM roll_day)",
-                    null,
-                ).use { c -> if (c.moveToFirst() && !c.isNull(0)) newest = c.getLong(0) }
+                val any = ROLL_TABLES.joinToString(" UNION ALL ") { "SELECT bucket FROM $it" }
+                db.rawQuery("SELECT MIN(bucket) FROM ($any)", null).use { c ->
+                    if (c.moveToFirst() && !c.isNull(0)) oldest = c.getLong(0)
+                }
+                db.rawQuery("SELECT MAX(bucket) FROM ($any)", null).use { c ->
+                    if (c.moveToFirst() && !c.isNull(0)) newest = c.getLong(0)
+                }
             }
             History(db = db, oldest = oldest, newest = newest)
+        } catch (t: Throwable) {
+            // **The handle is closed on this path only**, because it is the one where nobody
+            // receives it. A failure here is still an empty history rather than a crash.
+            db.close()
+            History()
         }
-    } catch (t: Throwable) {
-        // A history that cannot be opened is an empty history, not a crash on the way to a table
-        // that would have said "no log yet" anyway.
-        History(db = null, oldest = null, newest = null)
     }
 
     /**

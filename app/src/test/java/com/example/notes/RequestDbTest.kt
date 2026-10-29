@@ -197,6 +197,37 @@ class RequestDbTest {
         assertEquals("so the day is the oldest thing left", base, RequestDb.oldest(db))
     }
 
+    @Test
+    fun `a history is usable after it is handed back`() {
+        // **The bug this exists for: `read` wrapped its database in `use { }`**, which closes it on
+        // return. Every `History` handed out was already dead, and the failure appeared later as
+        // "attempt to re-open an already-closed object" from a query with no visible connection to
+        // the cause. No test caught it because every test opened its own connection and queried
+        // that; nothing exercised the handle `read` actually returns.
+        write(base + 10 * HOUR)
+        write(base + 10 * HOUR + 30 * MIN)
+
+        RequestDb.read(account).use { history ->
+            assertEquals("the oldest survives being handed back", base + 10 * HOUR, history.oldest)
+            // **And a total can be computed on it**, which is what the screen does on every draw.
+            assertEquals(
+                "and the handle still answers",
+                2,
+                history.totals(base + 10 * HOUR, base + 11 * HOUR).total.requests,
+            )
+        }
+    }
+
+    @Test
+    fun `a history can be closed twice, because two owners will both try`() {
+        // The screen and the view model each used to close it; whichever ran second threw. Closing
+        // is idempotent so neither has to know whether the other already did.
+        val history = RequestDb.read(account)
+        history.close()
+        history.close()   // must not throw
+        assertEquals("and a closed history reads as empty rather than crashing", 0, history.totals(0, 1).total.requests)
+    }
+
     // ---- the decomposition -------------------------------------------------------------------
 
     @Test
