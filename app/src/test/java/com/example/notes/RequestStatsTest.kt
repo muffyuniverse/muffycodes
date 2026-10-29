@@ -232,10 +232,37 @@ class RequestStatsTest {
         assertEquals("1 month starts on the 1st", at(0, day = 1), start(RequestStats.Preset.MONTH_1))
         assertEquals("1 year starts on 1 January", at(0, day = 1, month = 1), start(RequestStats.Preset.YEAR_1))
 
-        // **A clock interval is never narrower than its rolling twin**, because it starts earlier.
-        for (p in RequestStats.Preset.entries.filter { it != RequestStats.Preset.TOTAL }) {
+        // **The two families differ in DIRECTION, and the split is at a day.**
+        //
+        // Below a day the clock start snaps *forward* to the hour's beginning, so it is LATER than
+        // the rolling start and the interval is narrower: clock "1 hour" at 09:16 is 09:00-09:16,
+        // sixteen minutes, while rolling "1 hour" is the full hour from 08:16. At a day and above the
+        // clock start snaps *backward* to midnight, the 1st, or 1 January, so it is earlier and the
+        // interval is wider.
+        //
+        // An earlier version of this test asserted "clock is never narrower" for every preset, which
+        // is true only for the day-and-above half and was therefore wrong about three of them.
+        val subDay = listOf(
+            RequestStats.Preset.MINUTES_15,
+            RequestStats.Preset.HOUR_1,
+            RequestStats.Preset.HOURS_6,
+        )
+        for (p in subDay) {
             assertTrue(
-                "${p.label}: clock starts at or before rolling",
+                "${p.label}: clock starts later, so it covers less",
+                p.clockAt(now, zone).fromMs > p.intervalAt(now, zone).fromMs,
+            )
+        }
+        val dayAndUp = listOf(
+            RequestStats.Preset.DAY_1,
+            RequestStats.Preset.WEEK_1,
+            RequestStats.Preset.MONTH_1,
+            RequestStats.Preset.QUARTER_1,
+            RequestStats.Preset.YEAR_1,
+        )
+        for (p in dayAndUp) {
+            assertTrue(
+                "${p.label}: clock starts earlier, so it covers more",
                 p.clockAt(now, zone).fromMs <= p.intervalAt(now, zone).fromMs,
             )
         }
