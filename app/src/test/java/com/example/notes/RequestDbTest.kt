@@ -189,8 +189,11 @@ class RequestDbTest {
         // The first version of the test above asserted 05:00 for this very case and was wrong: the
         // second write crossed an hour boundary, so compaction had already run.
         write(base + 5 * HOUR)
-        write(base + 40 * HOUR)          // crosses an hour boundary -> rolls both
-        assertEquals("both rolled", 0, rawRows())
+        write(base + 40 * HOUR)          // crosses an hour boundary -> rolls the first
+        // **One row is still raw and must be**: compaction rolls strictly before the current
+        // minute, so the response just written is always raw. The point of the assertion is that
+        // the *first* row is gone from raw, which the oldest-instant check below proves.
+        assertEquals("the newest response is always raw", 1, rawRows())
         assertEquals("so the day is the oldest thing left", base, RequestDb.oldest(db))
     }
 

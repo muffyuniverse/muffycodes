@@ -24,7 +24,6 @@ import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
@@ -126,25 +125,18 @@ fun StatsScreen(
             }
         }
     }
-    // **Closed when the screen goes, and only the handle this screen opened.**
+    // **The screen reads the history and never closes it.** Whoever opens a handle closes it, and
+    // this screen does not open one - [readRows] does. An earlier version closed it in a
+    // `DisposableEffect`, which was wrong twice over:
     //
-    // Two things are being got wrong at once if this is written naively:
+    //  * `readRows` is a lambda, so its identity changes on every re-composition. That re-runs
+    //    `LaunchedEffect`, which opens a *new* handle, and the effect's `onDispose` then ran against
+    //    a handle the screen had already replaced - the next query hit "attempt to re-open an
+    //    already-closed object", thrown from a line with no visible connection to the cause.
+    //  * A screen is not the right owner anyway. It can be re-composed, previewed, or drawn twice in
+    //    one test; the view model that hands out the handle knows when it is finished with it.
     //
-    //  1. `DisposableEffect(accountDir)` captures `history` when the effect body runs, which is
-    //     before the reader has answered - so the captured value is null and nothing is closed.
-    //     Keying on `history` is what makes the effect re-run when the handle arrives.
-    //
-    //  2. **A re-composition must not close a handle that is still in use.** `LaunchedEffect`
-    //     re-runs when `accountDir` or `readRows` changes and produces a *new* handle; the
-    //     `onDispose` for the old effect then runs. Closing the current `history` there would close
-    //     the new one, and the failure appears later as `IllegalStateException` from a query that
-    //     has nothing to do with the cause - which is exactly how a scenario harness caught it.
-    //
-    // So the effect closes **the value it captured**, not whatever `history` holds by then.
-    DisposableEffect(history) {
-        val opened = history
-        onDispose { opened?.close() }
-    }
+    // The rule is the ordinary one: **the thing that opens a resource closes it.**
     // **One figure, over the interval the two pickers name.** No list, no spans, no filtering: the
     // checkbox row is gone because there is one column, and the whole "which level speaks for this
     // unit" question is answered once per draw rather than once per column.

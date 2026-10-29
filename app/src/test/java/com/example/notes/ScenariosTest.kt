@@ -143,9 +143,17 @@ class ScenariosTest {
             accountDir = accountDir,
             onBack = {},
             now = now,
-            // **Opened on this thread, closed by the screen's DisposableEffect.** A scenario has one
-            // account and one thread and nothing to keep responsive, so reading synchronously is
-            // honest here.
+            // **Opened on this thread, and never closed - deliberately.**
+            //
+            // The screen does not own the handle (the view model does, in the app), so a scenario
+            // must not expect it to be closed. Closing it here would be worse than leaking it: the
+            // content lambda is re-composed for the second half of every scenario, so the close
+            // would land on the handle the *next* composition had just opened, and the failure
+            // would surface as "attempt to re-open an already-closed object" from a query with no
+            // visible connection to the cause.
+            //
+            // The process is one test JVM and the file is a temp directory the harness deletes, so
+            // an unclosed handle costs nothing and cannot outlive the run.
             readRows = { onDone -> onDone(RequestDb.read(accountDir)) },
         )
     }

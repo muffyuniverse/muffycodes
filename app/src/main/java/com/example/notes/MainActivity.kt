@@ -363,7 +363,13 @@ private fun AppRoot(viewModel: AppViewModel) {
         // button is drawn under. `workspace` is non-null exactly when somebody is signed in.
         showStats && viewModel.workspace != null -> StatsScreen(
             accountDir = viewModel.workspace!!.accountDir,
-            onBack = { showStats = false },
+            // **Closing on the way out is the view model's job**, because it is what opened the
+            // handle - see readRequestStats. A screen closed by the wrong owner throws from an
+            // unrelated query later.
+            onBack = {
+                showStats = false
+                viewModel.closeRequestStats()
+            },
             // The log is read on the app's worker and posted back, never in composition: see
             // AppViewModel.readRequestStats.
             readRows = { onDone -> viewModel.readRequestStats(onDone) },
