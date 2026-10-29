@@ -5,6 +5,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
@@ -101,17 +102,26 @@ class AgentChatScreenTest {
         // model's own note, which is drawn under the same caption as any other thing it said.
         compose.onNodeWithText("agent").assertExists()
         compose.onNodeWithText("There is one file.", substring = true).assertExists()
-        // And the call is on the same screen as the answer it produced, with its result on the
-        // same line - which is the thing the navigator was making a person work for.
+        // **The call is a PAGE of the agent's message, and the message opens on page 1.** So the
+        // call's own caption is what is drawn, and the answer's page is a turn of the pager away -
+        // which is the shape the operator asked for: a message holds its pages, not its neighbour's.
         compose.onNodeWithText("tree").assertExists()
-        // **The result's own words, drawn beside the call** - not a token count, which used to
-        // lead the body and is a footer now. The project here is empty, so the result says so.
-        val call = scene.viewModel.chatBox!!.bubbles.first { it.caption == "tree" }
+        // **The message is a turn, not an act.** Two replies are two turns, and the one that called
+        // `tree` holds both the call and the words that closed it - so its page count is what says
+        // the grouping happened.
+        val agent = scene.viewModel.chatBox!!.messages.filter { it.side == AgentChat.Side.AGENT }
+        assertEquals("two agent messages, one per turn", 2, agent.size)
+        val calling = agent.first { m -> m.pages.any { it.caption == "tree" } }
+        assertEquals("the calling turn holds its call and its words", 2, calling.pages.size)
+        // The call's page carries the result on the same page - that is what a page IS.
+        val treePage = calling.pages.first { it.caption == "tree" }
         assertTrue(
-            "the call's bubble carries its result: ${call.body}",
-            call.body.isNotBlank() && call.body != call.detail,
+            "the call's page carries its result: ${treePage.body}",
+            treePage.body.isNotBlank() && treePage.body != treePage.detail,
         )
-        compose.onNodeWithText(call.body.take(24), substring = true).assertExists()
+        compose.onNodeWithText(treePage.body.take(24), substring = true).assertExists()
+        // And the first message is the operator's, drawn as a plain row.
+        assertEquals("the person speaks first", AgentChat.Side.OPERATOR, scene.viewModel.chatBox!!.messages.first().side)
     }
 
     @Test
@@ -249,15 +259,20 @@ class AgentChatScreenTest {
         say("what is in the project")
         awaitTurns(2)
 
-        val bubbles = scene.viewModel.chatBox!!.bubbles
-        assertTrue("every bubble has an id: ${bubbles.map { it.id }}", bubbles.all { it.id > 0 })
-        assertTrue("and a time: ${bubbles.map { it.stamp }}", bubbles.all { it.stamp.isNotBlank() })
-        // **The footer is on the screen, not only in the model.** The first bubble's id is drawn.
-        compose.onNodeWithText("#${bubbles.first().id}", substring = true).assertExists()
+        // **The footer is the AGENT's.** The operator's message is a plain row: it has no pages and
+        // no footer, because every piece of the agent's furniture around one sentence would be a
+        // frame around nothing. So the footer belongs to the messages that have something to report.
+        val agent = scene.viewModel.chatBox!!.messages.filter { it.side == AgentChat.Side.AGENT }
+        assertTrue("there is an agent message", agent.isNotEmpty())
+        val pages = agent.flatMap { it.pages }
+        assertTrue("every page has an id: ${pages.map { it.id }}", pages.all { it.id > 0 })
+        assertTrue("and a time: ${pages.map { it.stamp }}", pages.all { it.stamp.isNotBlank() })
+        // **The footer is on the screen, not only in the model.** The first page's id is drawn.
+        compose.onNodeWithText("#${pages.first().id}", substring = true).assertExists()
         // And it is the id of the row the person can find, not a position in the list.
-        assertEquals("the first bubble is the operator's own row", AgentLog.TOLD, AgentLog.open(
+        assertEquals("the first page is the call the agent made", AgentLog.CALL, AgentLog.open(
             File(scene.viewModel.workspace!!.accountDir, "groceries"),
-        ).rows().first { it.id == bubbles.first().id }.kind)
+        ).rows().first { it.id == pages.first().id }.kind)
     }
 
     @Test
@@ -314,19 +329,29 @@ class AgentChatScreenTest {
         awaitTurns(2)
 
         // The screen says how much of it it is not showing...
-        compose.onNodeWithText("more lines", substring = true).assertExists()
+        //
+        // **`onAllNodes`, because a message has several pages and each is cut on its own.** The
+        // call's page is short and the words' page is thirty lines, so only one of them should be
+        // cut - and asserting exactly one is what says the cap applies per PAGE rather than to the
+        // message as a whole.
+        assertEquals(
+            "exactly one page is cut, so the count is per page",
+            1,
+            compose.onAllNodesWithText("more lines", substring = true).fetchSemanticsNodes().size,
+        )
         // ...and the words are all still there, because the cap is a drawing rule rather than a
         // truncation: the record holds what the agent said and the page view shows all of it.
-        // **The last bubble is the agent's, and the thirty lines are all in it.** Said as a count
-        // of what is in the bubble rather than as a comparison against a number the test wrote,
-        // because the reply is thirty lines only if nothing else joined it - and the message here
-        // is the useful part of a failure.
-        val agent = scene.viewModel.chatBox!!.bubbles.last()
-        assertEquals("the last bubble is the agent's words", "agent", agent.caption)
+        // **The closing words are the last page of the agent's message.** Said as a count of what is
+        // in the page rather than as a comparison against a number the test wrote, because the reply
+        // is thirty lines only if nothing else joined it - and the message here is the useful part
+        // of a failure.
+        val agent = scene.viewModel.chatBox!!.messages.last { it.side == AgentChat.Side.AGENT }
+        val words = agent.pages.last()
+        assertEquals("the last page is the agent's words", "agent", words.caption)
         assertEquals(
-            "all thirty lines are in it: ${agent.body.take(120)}",
+            "all thirty lines are in it: ${words.body.take(120)}",
             30,
-            agent.body.lines().size,
+            words.body.lines().size,
         )
     }
 
