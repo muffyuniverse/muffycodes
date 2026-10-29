@@ -47,7 +47,7 @@ class StatsScreenTest {
     /** 28 October 2026, 14:30 local — an afternoon, so the default interval is not a whole day. */
     /** One response, as the log records it. Only the fields the totals read. */
     private fun stats(cost: Double): RequestLog.Stats = RequestLog.Stats(
-        kind = RequestLog.Kind.TURN,
+        kind = RequestLog.Stats.Kind.TURN,
         ms = 1_000,
         provider = "test",
         model = "test",
