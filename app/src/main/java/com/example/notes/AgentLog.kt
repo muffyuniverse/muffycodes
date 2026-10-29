@@ -987,6 +987,74 @@ class AgentLog private constructor(
      * by the rows the next turn writes — the trace's own rule, reused rather than reinvented.
      */
     /**
+     * **The record's size in tokens, kept rather than recounted.**
+     *
+     * Report: "we can keep size in tokens for both session and context logs cached in memory (there
+     * is a simple persistent kv storage in kotlin/android), so that on every change it is
+     * increased/decreased and we reference it instead of recalculating through all size column
+     * entries."
+     *
+     * **The total is the sum of a column that is already there.** Every row carries its own cost in
+     * `size`, written when the row was written, so the expensive part was never the addition - it was
+     * reading and parsing the file to reach the column. So the cache is not a running total that
+     * every write must remember to adjust; it is **the parsed rows and their sum**, kept for as long
+     * as the file has not changed underneath.
+     *
+     * That is a smaller and much safer thing to cache than an adjusted counter. A counter has to be
+     * right after every append, every trim, every forget and every whole-record rewrite, and a single
+     * missed decrement leaves a number that is wrong for ever with nothing to compare it against.
+     * This is a memo of a computation, and the file's own length and mtime are what invalidate it -
+     * so a record edited by another app, or by a hand on a file manager, is detected rather than
+     * trusted.
+     *
+     * **A miss costs one read; a stale hit would cost a wrong figure.** The guard is therefore the
+     * file's identity, not a promise that nothing else writes it.
+     */
+    private data class Measure(val length: Long, val modified: Long, val tokens: Long, val rows: Int)
+
+    /**
+     * The last measurement, by file.
+     *
+     * A plain map guarded by [guard], because the worker reads the record and the main thread reads
+     * the settings screen - the same reason every other write here is synchronized.
+     */
+    private val measured = mutableMapOf<String, Measure>()
+
+    /**
+     * The record's size in tokens, **from the memo when the file has not moved.**
+     *
+     * @return the total, or 0 for a record that is not there yet.
+     */
+    fun tokens(): Long = measure().tokens
+
+    /** How many rows the record holds, from the same measurement as [tokens]. */
+    fun rowCount(): Int = measure().rows
+
+    private fun measure(): Measure = synchronized(guard) {
+        val key = file.absolutePath
+        val length = try {
+            if (file.isFile) file.length() else 0L
+        } catch (t: Throwable) {
+            0L
+        }
+        val modified = try {
+            if (file.isFile) file.lastModified() else 0L
+        } catch (t: Throwable) {
+            0L
+        }
+        val cached = measured[key]
+        // **Both halves of the identity.** A length alone misses an edit that replaced a line with
+        // one of the same length; a timestamp alone misses two writes inside the filesystem's own
+        // resolution, which is a second on some phones. Together they are what a file can say about
+        // itself.
+        if (cached != null && cached.length == length && cached.modified == modified) return cached
+        val rows = rows()
+        val fresh = Measure(length, modified, rows.sumOf { it.size }, rows.size)
+        measured[key] = fresh
+        fresh
+    }
+
+    /**
      * Keeps `session.log` under [limitTokens], deleting the oldest whole bursts.
      *
      * **Tokens, not bytes, and that is the operator's correction.** The limit used to be megabytes
@@ -1002,13 +1070,12 @@ class AgentLog private constructor(
     fun trimSession(limitTokens: Long = SESSION_LIMIT): Int {
         if (limitTokens <= 0L) return 0
         synchronized(guard) {
+            // **Asked once, from the memo.** The total is the sum of the `size` column, and the memo
+            // is what keeps that sum from costing a parse of the file on every request.
+            val total = tokens()
+            if (total <= limitTokens) return 0
             val rows = rows()
             if (rows.isEmpty()) return 0
-            // **The sum of the size column, which every row already carries.** A row's cost was
-            // measured when it was written, so asking the file for a total is a sum rather than a
-            // re-tokenisation of every line.
-            val total = rows.sumOf { it.size }
-            if (total <= limitTokens) return 0
             // **The budget is named, not implied.** A trailing lambda binds to the last
             // parameter, so `keepNewest(rows) { … }` left the budget at its default and the trim
             // dropped nothing at all — the same "a limit that does nothing" as before, one

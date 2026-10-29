@@ -456,6 +456,38 @@ class AgentLogTest {
     }
 
     @Test
+    fun `the size is measured once and then remembered until the file moves`() {
+        // **The report asked for this to be cached**, and the shape of the cache matters more than
+        // the caching: a running total that every write must adjust is one missed decrement away
+        // from being wrong for ever, with nothing to compare it against. This is a memo of a
+        // computation, and the file's own length and mtime are what invalidate it.
+        log.told("a task")
+        log.note("agent", "working")
+        val first = log.tokens()
+        assertTrue("the record has a size", first > 0)
+        assertEquals("and a row count", 2, log.rowCount())
+
+        // Asked again with nothing changed, the answer is the same - which says nothing on its own.
+        assertEquals("asked twice, the same number", first, log.tokens())
+
+        // **A new row invalidates it**, because the file's length moved.
+        log.note("agent", "more work")
+        val second = log.tokens()
+        assertTrue("a new row makes it bigger: $first -> $second", second > first)
+        assertEquals("and the count follows", 3, log.rowCount())
+
+        // **A file edited underneath is detected too.** Rewriting it by hand changes both length and
+        // mtime; the cache must not go on reporting the size of what used to be there.
+        val file = File(project, "agent/session.log")
+        val before = file.readText()
+        file.writeText(before.replace("working", "working (edited by something else)"))
+        assertTrue(
+            "the edited file is measured again, not remembered: ${log.tokens()} vs $second",
+            log.tokens() != second,
+        )
+    }
+
+    @Test
     fun `the trim measures tokens, not rows`() {
         // **Two bugs are pinned here, one after the other.** First the limit was passed to the burst
         // chooser as a *row count*, so a 4 MB limit asked for two million rows and the trim could
