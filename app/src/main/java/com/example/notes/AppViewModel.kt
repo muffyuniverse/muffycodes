@@ -429,7 +429,14 @@ class AppViewModel @JvmOverloads constructor(
     /** The GitHub of the active account, or null when nobody is signed in. */
     val github: GitHub? get() = githubFor(activeLogin)
 
-    val signedIn: Boolean get() = account != null
+    /**
+     * True when there is a GitHub account behind the workspace.
+     *
+     * **Not "an account exists"**, because the provisional account is one and is not signed in to
+     * anything. Anything that needs a real account - pushing, pulling, listing repositories - asks
+     * this, and the provisional workspace answers no while still being a workspace.
+     */
+    val signedIn: Boolean get() = account != null && !isProvisionalAccount
 
     /** The active account's tree, or null when nobody is signed in. */
     val workspace: Workspace? get() = activeLogin?.let { Workspace(accounts.dirOf(it)) }
