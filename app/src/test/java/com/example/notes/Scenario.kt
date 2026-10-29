@@ -302,12 +302,20 @@ class Scenario(
      */
     fun localProject(name: String): Scenario {
         viewModel.createLocalProject(name)
-        await("local project \"$name\" to exist") {
-            viewModel.projectNames.any { it.equals(name, ignoreCase = true) }
+        // **Waits for the name the app actually made.** A local project's name goes through
+        // `Workspace.cleanName`, which lowercases it - so asking for "Shopping" makes `shopping`,
+        // and a caller that then opens "Shopping" opens a folder that is not there. Waiting on the
+        // cleaned name means the caller can use [made] and be right.
+        val made = Workspace.cleanName(name, "local")
+        await("local project \"$made\" to exist") {
+            viewModel.projectNames.any { it == made }
         }
-        await("the making of $name to finish", 60_000) { !viewModel.busy }
+        await("the making of $made to finish", 60_000) { !viewModel.busy }
         return this
     }
+
+    /** The name a project was actually given, after [Workspace.cleanName] had it. */
+    fun made(name: String): String = Workspace.cleanName(name, "local")
 
     fun project(name: String, licence: String = "mit"): Scenario {
         viewModel.createProject(name, licence)

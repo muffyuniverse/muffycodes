@@ -88,8 +88,13 @@ class RetentionFeatureTest : FeatureTest() {
         // repository to shorten, not an account to push to - and since the provisional account has
         // no GitHub behind it, asking for a GitHub project here was asking the wrong question. A
         // local project is the same repository with the same history.
+        // **The cleaned name, because a local project's name is lowercased.** Opening "Shopping"
+        // would open a folder that does not exist, `currentProject` would be null, and `historySize`
+        // would then fall back to the first project alphabetically - `system` - and measure the
+        // wrong repository while every assertion about it still looked reasonable.
+        val shopping = scene.made("Shopping")
         scene.localProject("Shopping")
-        scene.open("Shopping")
+        scene.open(shopping)
         repeat(5) { scene.file("file_$it.txt", "round $it") }
         val file = scene.file("milk.txt", "two litres")
         scene.await("the commits") { historySize() >= 5 }
