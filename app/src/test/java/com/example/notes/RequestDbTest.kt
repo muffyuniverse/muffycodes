@@ -208,7 +208,12 @@ class RequestDbTest {
         write(base + 10 * HOUR + 30 * MIN)
 
         RequestDb.read(account).use { history ->
-            assertEquals("the oldest survives being handed back", base + 10 * HOUR, history.oldest)
+            // **The day, not 10:00.** The second write crossed a minute boundary, so the 10:00
+            // response was rolled and its raw row deleted - and the finest thing that survives for
+            // that period is the day bucket. This is the same distinction the retention tests make:
+            // after compaction the detail is gone, and reporting 10:00 would promise a precision
+            // the data no longer has.
+            assertEquals("the oldest instant spans every table", base, history.oldest)
             // **And a total can be computed on it**, which is what the screen does on every draw.
             assertEquals(
                 "and the handle still answers",
