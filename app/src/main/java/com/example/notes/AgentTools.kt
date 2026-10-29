@@ -206,8 +206,15 @@ class AgentTools(
                     "line (0 puts it at the top); `text` writes the whole file. `replace` may be a " +
                     "`read` call, which copies that call's answer out of another file without it " +
                     "passing through this conversation.",
+                // **Every argument the tool reads is in the example, and that is load-bearing.**
+                // `spec()` derives the schema from this sample, so a key left out of it is an
+                // argument the model is never told it may send - while the runner still reads it and
+                // refuses a call that omits what the schema invited. `from`, `to`, `at` and `text`
+                // were described in the prose above and missing from the example, so the schema
+                // described three of the seven ways to edit a file.
                 "{\"path\":\"the file\",\"grep\":\"the text to replace\",\"replace\":\"what " +
-                    "to put there\"}",
+                    "to put there\",\"from\":1,\"to\":20,\"at\":0,\"text\":\"the whole new " +
+                    "file, when that is simpler\"}",
             ),
             spec(
                 "forget",

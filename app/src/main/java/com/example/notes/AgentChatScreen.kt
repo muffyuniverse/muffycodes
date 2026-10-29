@@ -436,12 +436,16 @@ private fun Bubble(
  * counts, which only a streamed turn can report.
  */
 private fun footer(bubble: AgentChat.Bubble): String {
+    // **The id first, because it is the handle.** A person reads this footer to find the row in
+    // `session.log` - that is what the id is for - and a handle after a date and a time is one you
+    // have to hunt for. Report: "make id first in the row".
     val parts = mutableListOf<String>()
-    val day = LogFormat.day(bubble.stamp)
-    if (day.isNotBlank()) parts.add(day)
+    if (bubble.id > 0) parts.add("#${bubble.id}")
+    // **The time, and no date.** The date is the conversation's; a list where every row repeats the
+    // same date is a column of noise, and the day is already on the screen above the list. Report:
+    // "on message footer, I dont need full datetime, only hour:minute".
     val clock = LogFormat.time(bubble.stamp)
     if (clock.isNotBlank()) parts.add(clock)
-    if (bubble.id > 0) parts.add("#${bubble.id}")
     if (bubble.thinking > 0) parts.add("thinking ${ContextBudget.short(bubble.thinking)}")
     if (bubble.output > 0) parts.add("output ${ContextBudget.short(bubble.output)}")
     return parts.joinToString(" · ")
