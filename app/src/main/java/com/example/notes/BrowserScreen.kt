@@ -723,11 +723,11 @@ private fun EntryList(viewModel: AppViewModel, actions: BrowserActions) {
                 // own folders: they can be opened, and nothing else. Renaming,
                 // moving or deleting one is how the account's tree stops being the
                 // tree the app thinks it is.
-                // **Two different things, drawn differently.** `system` is "the app owns this
-                // row", which already means no menu and no long-press. `systemLocked` is the new
-                // report-28 state: the row is *shown*, can be opened and read, and carries a lock
-                // the person did not set and cannot lift. Conflating them would either hide the
-                // row again (what the report asked to stop) or offer a toggle that does nothing.
+                // **A different question from a lock, and still its own parameter.** `system` is
+                // "the app owns this row", which already means no menu and no long-press. A held row
+                // is *shown*, can be opened and read, and carries a lock the person did not set.
+                // Conflating them would either hide the row again (what report 28 asked to stop) or
+                // offer a toggle that does nothing.
                 system = ws?.isStructural(entry.file) == true,
                 actions = actions,
                 onOpen = {
@@ -883,7 +883,9 @@ private fun EntryRow(
         // — rename, move, delete and ignore all answer "that is one of the app's own files" — and a
         // menu whose every item refuses is worse than no menu: it teaches that the app's refusals are
         // arbitrary. Report 28's word for it was "noninteractive", and this is where that lands.
-        if (!choosing && !system && !systemLocked) Box {
+        // **`hold`, not two flags.** The menu is hidden on a file the app holds for the same reason
+        // it is hidden on one the person locked: every item in it would be refused.
+        if (!choosing && !system && hold != Workspace.Hold.APP) Box {
             IconButton(onClick = { menu = true }) {
                 Icon(Icons.Filled.MoreVert, contentDescription = "More")
             }
