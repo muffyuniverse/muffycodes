@@ -143,7 +143,10 @@ class ScenariosTest {
             accountDir = accountDir,
             onBack = {},
             now = now,
-            readRows = { onDone -> onDone(RequestStats.read(accountDir)) },
+            // **Opened on this thread, closed by the screen's DisposableEffect.** A scenario has one
+            // account and one thread and nothing to keep responsive, so reading synchronously is
+            // honest here.
+            readRows = { onDone -> onDone(RequestDb.read(accountDir)) },
         )
     }
 
@@ -626,7 +629,7 @@ class ScenariosTest {
         // which is the shape a real day has and the one the two blocks exist to show apart.
         var at = now - 5 * 3_600_000L
         repeat(4) {
-            RequestLog.write(account, at, RequestLog.Stats(
+            RequestDb.write(account, at, RequestLog.Stats(
                 kind = RequestLog.Stats.Kind.TURN, ms = 4_100,
                 provider = "deepinfra/fp8/flex", model = "deepseek/deepseek-v4.1-flash",
                 usage = usage(prompt = 6_000, cached = 5_500, completion = 600, thinking = 90, cost = 0.00071),
@@ -636,7 +639,7 @@ class ScenariosTest {
         }
         at = now - 2 * 3_600_000L
         repeat(18) {
-            RequestLog.write(account, at, RequestLog.Stats(
+            RequestDb.write(account, at, RequestLog.Stats(
                 kind = RequestLog.Stats.Kind.PING, ms = 1_840,
                 provider = "deepinfra/fp8/flex", model = "deepseek/deepseek-v4.1-flash",
                 usage = usage(prompt = 3_691, cached = 3_584, completion = 1, thinking = 1, cost = 0.0000241),
@@ -646,7 +649,7 @@ class ScenariosTest {
         }
         // One answer that began and died, so the third block is in the picture rather than only in
         // the code path.
-        RequestLog.write(account, now - 30 * 60_000L, RequestLog.Stats(
+        RequestDb.write(account, now - 30 * 60_000L, RequestLog.Stats(
             kind = RequestLog.Stats.Kind.STALL, ms = 92_000,
             provider = "deepinfra/fp8/flex", model = "deepseek/deepseek-v4.1-flash",
             usage = null, finish = null,

@@ -41,7 +41,7 @@ object AgentWiring {
                     // login at write time also means a response landing after a sign-out is not
                     // filed under the account that has just gone.
                     credentials.activeLogin?.let { login ->
-                        RequestLog.write(
+                        RequestDb.write(
                             AccountStore(rootDir).dirOf(login),
                             System.currentTimeMillis(),
                             stats,

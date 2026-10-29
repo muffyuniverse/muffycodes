@@ -22,7 +22,6 @@ RequestDbTest      app/src/main/java/com/example/notes/RequestDb.kt app/src/main
 StatsScreenTest    app/src/main/java/com/example/notes/StatsScreen.kt app/src/main/java/com/example/notes/StatsFormat.kt app/src/main/java/com/example/notes/RequestStats.kt app/src/main/java/com/example/notes/RequestLog.kt app/src/main/java/com/example/notes/Workspace.kt
 StreamTest  app/src/main/java/com/example/notes/Stream.kt
 WorkspaceTest       app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AgentLog.kt
-RequestLogTest      app/src/main/java/com/example/notes/RequestLog.kt app/src/main/java/com/example/notes/Workspace.kt
 RequestStatsTest    app/src/main/java/com/example/notes/RequestStats.kt app/src/main/java/com/example/notes/RequestLog.kt app/src/main/java/com/example/notes/StatsFormat.kt app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/StatsScreen.kt
 ModelConfigTest     app/src/main/java/com/example/notes/ModelConfig.kt
 ModelCatalogueTest  app/src/main/java/com/example/notes/ModelCatalogue.kt app/src/main/java/com/example/notes/Secrets.kt

@@ -2463,15 +2463,6 @@ class AppViewModel @JvmOverloads constructor(
      */
     private var serviceWanted: Boolean? = null
 
-    /**
-     * When the request log was last compacted, so a tick does not try on every pass.
-     *
-     * **Ten minutes, not every tick.** A tick is four minutes and a compaction is only ever useful
-     * once a closed hour exists to roll; running it on every tick would rewrite a file that has
-     * nothing new in it, and every rewrite is the one moment this log could lose an append.
-     */
-    private var lastCompact: Long = 0L
-
     /** The session of [project], or null when the agent is not running there. */
     fun sessionOf(project: String): AgentSession? =
         agentSessions.firstOrNull { it.project == project }
@@ -2583,10 +2574,9 @@ class AppViewModel @JvmOverloads constructor(
         }
         runner.tick(now)
         agentSessions = runner.sessions()
-        // **The log is compacted on the clock that is already running**, not on a timer of its own.
-        // Rolling a closed hour is cheap and rare, and it belongs here because this is the one place
-        // the app already wakes up on a schedule - a second scheduler would be a second thing to
-        // start, to stop, and to get wrong.
+        // **The one moment the app already wakes up on a schedule.** Rolling is driven by writes,
+        // but a retention cutoff moves at a day boundary and a phone that was simply never used
+        // crosses that boundary with no write at all - so it is caught here, once per tick.
         compactRequests(now)
         // **A session on disk needs a clock even if nobody pressed anything.** The service is
         // sticky, so the system restarts it after a kill — but not after a reboot, and not after
@@ -2596,20 +2586,27 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /**
-     * Rolls the closed hours of the request log into their aggregates, on the worker.
+     * Tidies the request history, on the worker.
      *
-     * **Throttled to one attempt every ten minutes**, because a compaction that finds nothing new
-     * must not rewrite the file: every rewrite is the one moment this log could lose an append.
+     * **Not a timer.** The roll is driven by the boundary each write crosses (`RequestDb.write`),
+     * because that is the only trigger that can see a minute close: a clock on this screen runs only
+     * while somebody is looking, and the responses that matter most are made while the phone is in a
+     * pocket. So there is nothing periodic left to do here.
      *
-     * **Nothing is reported.** A compaction that fails leaves the log whole, which is the right
-     * failure and not something the person needs to be told about - the table still reads correctly,
-     * just more slowly than it would have.
+     * **What is left is the case the write cannot cover: nothing has been written since.** Retention
+     * moves at a day boundary, and if the app is opened a week later with no request yet, the day
+     * boundary that passed was crossed by no write at all. This is where that is caught - once per
+     * open, which is the same moment `tick` already runs.
+     *
+     * **Nothing is reported.** A compaction that fails leaves the history whole, which is the right
+     * failure: the table still reads correctly, just from more rows than it needed to.
      */
     private fun compactRequests(now: Long) {
-        if (now - lastCompact < 10 * 60 * 1000L) return
-        lastCompact = now
         val dir = workspace?.accountDir ?: return
-        onWorker { RequestLog.compact(dir, System.currentTimeMillis(), settings.requestDays) }
+        val keep = settings.requestDays
+        onWorker {
+            RequestDb.open(dir).use { db -> RequestDb.compact(db, now, keep) }
+        }
     }
 
     /**
@@ -2712,10 +2709,11 @@ class AppViewModel @JvmOverloads constructor(
             // after a sign-out cannot be filed under the wrong account.
             onStats = { stats ->
                 workspace?.let { live ->
-                    RequestLog.write(
+                    RequestDb.write(
                         live.accountDir,
                         System.currentTimeMillis(),
                         stats,
+                        settings.requestDays,
                     )
                 }
             },
@@ -2935,11 +2933,14 @@ class AppViewModel @JvmOverloads constructor(
      *
      * [onDone] is called on the main thread, so the caller may assign Compose state in it.
      */
-    fun readRequestStats(onDone: (List<RequestStats.Row>) -> Unit) {
+    fun readRequestStats(onDone: (RequestDb.History) -> Unit) {
         val dir = workspace?.accountDir ?: return
         onWorker {
-            val rows = RequestStats.read(dir)
-            main.post { onDone(rows) }
+            // **Opened on the worker and handed back open.** The screen computes a total per
+            // interval, and the pickers move; opening per draw would be a database open on every
+            // keystroke. The screen closes it when it leaves.
+            val history = RequestDb.read(dir)
+            main.post { onDone(history) }
         }
     }
 

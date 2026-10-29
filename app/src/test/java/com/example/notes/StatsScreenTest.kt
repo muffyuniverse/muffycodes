@@ -20,8 +20,8 @@ import java.io.File
 /**
  * The cost screen's own screen: what it draws, and **whether a person can reach it.**
  *
- * The arithmetic lives in `RequestStatsTest` and the numbers in the log live in `RequestLogTest`;
- * what is left is the part neither can see. A control can be present in the tree and still be
+ * The arithmetic lives in `RequestStatsTest` and the numbers themselves in `RequestDbTest`; what is
+ * left is the part neither can see. A control can be present in the tree and still be
  * outside the window, and every assertion about its existence passes while a person staring at the
  * phone finds nothing to press — which is exactly what happened to the hour stepper, and it took a
  * picture to notice.
@@ -54,7 +54,10 @@ class StatsScreenTest {
                         accountDir = account,
                         onBack = {},
                         now = now,
-                        readRows = { done -> done(emptyList()) },
+                        // **An empty history, opened for real.** A `History` with a null handle
+                        // reads as "no log yet" without a database file existing, which is what
+                        // these tests want: the screen's own layout, not the arithmetic.
+                        readRows = { done -> done(RequestDb.History()) },
                     )
                 }
             }

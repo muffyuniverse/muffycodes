@@ -437,5 +437,36 @@ class RequestDbTest {
             "and inside the system project, where the log has always lived: $file",
             file.path.contains("${Workspace.SYSTEM_PROJECT}/requests/"),
         )
+        // **The reason this is asserted and not commented.** The system project is a real project
+        // with a real repository, so a history written into it is a change waiting to be committed.
+        // If this line of APP_IGNORES were ever dropped, every response would show up as
+        // "1 changed" and the history would be the first thing anyone deletes.
+        assertTrue(
+            "and the app's own ignore list covers the folder",
+            Workspace.APP_IGNORES.any { "${RequestLog.DIR}/" == it },
+        )
+    }
+
+    @Test
+    fun `a stall is never rolled, so its kind survives compaction`() {
+        // **Why this matters beyond tidiness.** A rollup table has no `kind` column - it sums turns
+        // and keepalives together, because "what did this hour cost" has one answer. A stall cannot
+        // be summed with them (it was billed but reported no totals), and once rolled its kind is
+        // gone and no query can recover it. So compaction leaves stalls raw for ever, and the screen
+        // can keep drawing them apart however much history has been summarised.
+        val stall = RequestLog.Stats(
+            kind = RequestLog.Stats.Kind.STALL,
+            ms = 1_000, provider = "p", model = "m",
+            usage = null, finish = null,
+        )
+        write(base + 10 * HOUR, stall)
+        write(base + 10 * HOUR + MIN)          // a turn, in the same minute
+        RequestDb.compact(db, base + 11 * HOUR)
+
+        val stillRaw = rawRows()
+        assertEquals("the stall is still raw", 1, stillRaw)
+        val totals = total(base + 10 * HOUR, base + 11 * HOUR)
+        assertEquals("and counted apart from the turn", 1, totals.stalls.requests)
+        assertEquals("which is the only request in the total", 1, totals.total.requests)
     }
 }

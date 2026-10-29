@@ -66,6 +66,23 @@ object RequestDb {
     private const val DAY = 86_400_000L
 
     /** The columns an aggregate carries. One list, so the three tables cannot drift apart. */
+    /**
+     * **Stalls are never compacted, and that is what makes the kind split possible at all.**
+     *
+     * A rollup table has no `kind` column: it sums turns and keepalives together, because "what did
+     * this hour cost" has one answer. A stall cannot be summed with them - it was billed but
+     * reported no totals, so folding it in would silently claim a cost of zero for it - and once a
+     * stall has been rolled into a bucket its kind is gone and no query can recover it.
+     *
+     * So `compact` leaves every stall row raw, for ever. They are rare by nature (a stalled answer
+     * is an exceptional event, not a routine one), so keeping them costs a handful of rows rather
+     * than a tier, and the split stays exact however much history is compacted.
+     *
+     * The consequence for the readers: **every rollup row is a turn or a ping, by construction**, so
+     * `peel` needs no filter, and only the raw table is ever summed by kind.
+     */
+    private val STALL_KIND = RequestLog.Stats.Kind.STALL.ordinal
+
     private const val AGGREGATE_COLUMNS =
         "n, prompt, cached, completion, reasoning, cost, reported, said, thinking"
 
@@ -222,15 +239,19 @@ object RequestDb {
             put("cached", usage?.optJSONObject("prompt_tokens_details").intOr("cached_tokens", 0))
             put("completion", usage.intOr("completion_tokens", 0))
             put("reasoning", usage?.optJSONObject("completion_tokens_details").intOr("reasoning_tokens", 0))
-            // **Bound before the write, so "reported" and "cost" cannot disagree.** `cost` is the
-            // number and `reported` is whether the provider said it; reading the field twice is how
-            // those two drift apart.
-            val reported = usage != null && usage.has("cost")
-            put("cost", if (reported) usage.optDouble("cost") else 0.0)
+            // **Read once, into a value that cannot disagree with itself.** `cost` is the number and
+            // `reported` is whether the provider said it; reading the JSON twice is how those two
+            // drift apart, and a null cost is exactly the case where they must not.
+            //
+            // `usage?.takeIf { it.has("cost") }` rather than a `val reported = ...` flag, because
+            // Kotlin cannot smart-cast `usage` to non-null from a Boolean - the flag would compile
+            // into an error at `usage.optDouble`.
+            val cost = usage?.takeIf { it.has("cost") }?.optDouble("cost")
+            put("cost", cost ?: 0.0)
             // **Reported, not merely nonzero.** A response that reported `$0` is a measurement and
             // counts toward the average; one that reported nothing must not. This is the column that
             // keeps "free" and "unknown" apart, and it is why the average has a denominator.
-            put("reported", if (reported) 1 else 0)
+            put("reported", if (cost != null) 1 else 0)
             put("said", stats.received?.said ?: 0)
             put("thinking", stats.received?.thinking ?: 0)
             put("finish", stats.finish)
@@ -281,18 +302,23 @@ object RequestDb {
      * buckets, so the figure covers **at least** what was asked for. That is the safe direction: a
      * total that quietly excluded the ends of a chosen period would look like lost requests.
      */
-    fun totals(db: SQLiteDatabase, fromMs: Long, toMs: Long): RequestStats.Stats {
-        if (toMs <= fromMs) return RequestStats.Stats()
+    fun totals(db: SQLiteDatabase, fromMs: Long, toMs: Long): RequestStats.Totals {
+        if (toMs <= fromMs) return RequestStats.Totals()
         val rawFrom = db.rawQuery("SELECT MIN(utc) FROM requests", null).use { c ->
             if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else Long.MAX_VALUE
         }
         val summarisedEnd = minOf(toMs, rawFrom)
-        var out = RequestStats.Stats()
-        if (summarisedEnd > fromMs) out += peel(db, fromMs, summarisedEnd)
-        // Whatever the rollups have not reached yet, counted from its own rows.
         val rawStart = maxOf(fromMs, rawFrom)
-        if (toMs > rawStart) out += sum(db, "requests", "utc", rawStart, toMs)
-        return out
+        var total = RequestStats.Stats()
+        var stalls = RequestStats.Stats()
+        if (summarisedEnd > fromMs) total += peel(db, fromMs, summarisedEnd)
+        // Whatever the rollups have not reached yet, counted from its own rows - and the only place
+        // a stall can be found, because compaction never rolls one (see STALL_KIND).
+        if (toMs > rawStart) {
+            total += sum(db, "requests", "utc", rawStart, toMs, " AND kind <> $STALL_KIND")
+            stalls += sum(db, "requests", "utc", rawStart, toMs, " AND kind = $STALL_KIND")
+        }
+        return RequestStats.Totals(total = total, stalls = stalls)
     }
 
     /**
@@ -371,6 +397,8 @@ object RequestDb {
         column: String,
         from: Long,
         to: Long,
+        /** SQL appended to the `WHERE`, so stalls can be summed apart from turns. */
+        and: String = "",
     ): RequestStats.Stats {
         if (to <= from) return RequestStats.Stats()
         val width = when (table) {
@@ -384,7 +412,7 @@ object RequestDb {
         val sums = if (table == "requests") RAW_SUMS else SUMS
         var out = RequestStats.Stats()
         db.rawQuery(
-            "SELECT $sums FROM $table WHERE $column >= ? AND $column < ?",
+            "SELECT $sums FROM $table WHERE $column >= ? AND $column < ?$and",
             arrayOf(lo.toString(), hi.toString()),
         ).use { c -> if (c.moveToFirst()) out = c.readStats() }
         return out
@@ -414,6 +442,69 @@ object RequestDb {
      * The screen says "· the log starts 3 Oct" from this, and it is the honest way to explain an
      * interval wider than the history: the numbers are right, there is simply nothing older.
      */
+    /**
+     * Everything in the history, for the screen that has to answer two questions about it at once.
+     *
+     * **One read, not one per question.** The table needs the total over an interval, the oldest
+     * instant, and whether the log reaches back that far - and the screen re-derives all three
+     * whenever a picker moves. Reading per question would open the database three times per draw.
+     *
+     * **`MIN`/`MAX` come from the raw table on purpose.** They answer "where does the detail start"
+     * and "how far does it reach", which is what the screen's sentence needs: a total that is lower
+     * than expected is explained by the log beginning late, and a rollup row existing for a period
+     * whose raw rows are gone is precisely the case that must NOT be reported as coverage.
+     */
+    fun read(accountDir: File): History = try {
+        open(accountDir).use { db ->
+            var oldest: Long? = null
+            var newest: Long? = null
+            db.rawQuery("SELECT MIN(utc), MAX(utc) FROM requests", null).use { c ->
+                if (c.moveToFirst() && !c.isNull(0)) {
+                    oldest = c.getLong(0)
+                    newest = c.getLong(1)
+                }
+            }
+            // **And the rollups, when the raw table has been emptied by compaction.** Without this a
+            // fully compacted history would report "no log yet" while the totals answered perfectly.
+            if (oldest == null) {
+                db.rawQuery(
+                    "SELECT MIN(bucket) FROM (SELECT bucket FROM roll_minute UNION ALL SELECT bucket FROM roll_hour UNION ALL SELECT bucket FROM roll_day)",
+                    null,
+                ).use { c -> if (c.moveToFirst() && !c.isNull(0)) oldest = c.getLong(0) }
+                db.rawQuery(
+                    "SELECT MAX(bucket) FROM (SELECT bucket FROM roll_minute UNION ALL SELECT bucket FROM roll_hour UNION ALL SELECT bucket FROM roll_day)",
+                    null,
+                ).use { c -> if (c.moveToFirst() && !c.isNull(0)) newest = c.getLong(0) }
+            }
+            History(db = db, oldest = oldest, newest = newest)
+        }
+    } catch (t: Throwable) {
+        // A history that cannot be opened is an empty history, not a crash on the way to a table
+        // that would have said "no log yet" anyway.
+        History(db = null, oldest = null, newest = null)
+    }
+
+    /**
+     * What the screen needs besides the totals themselves.
+     *
+     * [db] is handed back rather than closed inside [read] because the totals are computed lazily
+     * per interval; [close] is the caller's to call. When the database could not be opened, [db] is
+     * null and every total is zero - which reads on screen as "no log yet".
+     */
+    class History(
+        private val db: SQLiteDatabase? = null,
+        /** The oldest raw instant, or the oldest rollup bucket when raw has been compacted away. */
+        val oldest: Long? = null,
+        /** The newest raw instant, or the newest rollup bucket. */
+        val newest: Long? = null,
+    ) : java.io.Closeable {
+        /** The totals over `[fromMs, toMs)`. Empty when there is no history at all. */
+        fun totals(fromMs: Long, toMs: Long): RequestStats.Totals =
+            db?.let { totals(it, fromMs, toMs) } ?: RequestStats.Totals()
+
+        override fun close() = db?.close() ?: Unit
+    }
+
     fun oldest(db: SQLiteDatabase): Long? {
         val candidates = buildList {
             for (table in listOf("requests") + ROLL_TABLES) {
@@ -449,7 +540,7 @@ object RequestDb {
         //    contradicted by the next request.
         val currentMinute = floorTo(now, MINUTE)
         val rolled = db.rawQuery(
-            "SELECT MIN(utc), MAX(utc) FROM requests WHERE utc < ?",
+            "SELECT MIN(utc), MAX(utc) FROM requests WHERE utc < ? AND kind <> $STALL_KIND",
             arrayOf(currentMinute.toString()),
         ).use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) to c.getLong(1) else null }
 
@@ -467,16 +558,19 @@ object RequestDb {
                 -- preserve from a previous version.
                 INSERT OR REPLACE INTO roll_minute(bucket, $AGGREGATE_COLUMNS)
                 SELECT (utc / $MINUTE) * $MINUTE, $RAW_SUMS
-                FROM requests WHERE utc < ?
+                FROM requests WHERE utc < ? AND kind <> $STALL_KIND
                 GROUP BY (utc / $MINUTE)
                 """.trimIndent(),
                 arrayOf(currentMinute),
             )
             removed = db.rawQuery(
-                "SELECT COUNT(*) FROM requests WHERE utc < ?",
+                "SELECT COUNT(*) FROM requests WHERE utc < ? AND kind <> $STALL_KIND",
                 arrayOf(currentMinute.toString()),
             ).use { c -> if (c.moveToFirst()) c.getInt(0) else 0 }
-            db.delete("requests", "utc < ?", arrayOf(currentMinute.toString()))
+            // **Stalls are left where they are** (see STALL_KIND). Deleting them would fold their
+            // kind into a bucket that has no column to hold it, and the split the screen draws would
+            // then be silently wrong - a stall's zero cost indistinguishable from a free turn.
+            db.delete("requests", "utc < ? AND kind <> $STALL_KIND", arrayOf(currentMinute.toString()))
 
             // 2. Hours covering the minutes just rolled, then days covering those hours.
             val firstHour = floorTo(first, HOUR)

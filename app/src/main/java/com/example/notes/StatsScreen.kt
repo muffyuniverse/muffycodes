@@ -24,6 +24,7 @@ import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
@@ -62,8 +63,8 @@ fun StatsScreen(
     accountDir: java.io.File,
     onBack: () -> Unit,
     now: Long = System.currentTimeMillis(),
-    /** Reads the log off the main thread. Null in tests, which read a temp directory directly. */
-    readRows: (((List<RequestStats.Row>) -> Unit) -> Unit)? = null,
+    /** Reads the history off the main thread. Null in tests, which open a temp directory directly. */
+    readRows: (((RequestDb.History) -> Unit) -> Unit)? = null,
 ) {
     /**
      * **The interval, as two picks.** The operator's revision: *"we need 2 pickers for starting and
@@ -112,25 +113,52 @@ fun StatsScreen(
     // parses the whole log on the main thread before the first frame: fine for a few hundred rows,
     // a frozen window for a year of them. [readRows] hands the work to the view model's worker and
     // posts the result back; when it is null the caller has given us rows already (tests).
-    var rows by remember(accountDir) { mutableStateOf<List<RequestStats.Row>>(emptyList()) }
+    // **The history itself, opened once and closed on the way out.** A `History` holds a database
+    // handle rather than a list of rows, because the pickers move: a total per draw from a list
+    // would have to re-scan every row, and a total per draw from SQL is one indexed range query.
+    var history by remember(accountDir) { mutableStateOf<RequestDb.History?>(null) }
     var loaded by remember(accountDir) { mutableStateOf(readRows == null) }
     LaunchedEffect(accountDir, readRows) {
         if (readRows != null) {
             readRows { found ->
-                rows = found
+                history = found
                 loaded = true
             }
         }
+    }
+    // **Closed when the screen goes.** A database handle left open keeps a WAL file and a lock
+    // alive for the life of the process, and the next `open` would find the same handle's state.
+    //
+    // **Keyed on `history`, not on `accountDir`.** The effect body runs once when its keys change
+    // and captures `history` at that moment - with `accountDir` as the key that moment is before the
+    // reader has answered, so the captured value is null and nothing is ever closed. Keying on
+    // `history` re-runs the effect when the handle arrives, and its `onDispose` then closes the
+    // handle that actually exists.
+    DisposableEffect(history) {
+        onDispose { history?.close() }
     }
     // **One figure, over the interval the two pickers name.** No list, no spans, no filtering: the
     // checkbox row is gone because there is one column, and the whole "which level speaks for this
     // unit" question is answered once per draw rather than once per column.
     val span = remember(from, to) { RequestStats.interval(from, to) }
-    val totals = remember(rows, span) { RequestStats.totals(rows, span) }
-    // **Whether the log reaches this far**, which is not the same as "nothing happened". The two
+    val totals = remember(history, span) {
+        history?.totals(span.fromMs, span.toMs) ?: RequestStats.Totals()
+    }
+    // **Whether the history reaches this far**, which is not the same as "nothing happened". The two
     // read identically in an empty table and mean different things.
-    val covered = remember(rows, span) { RequestStats.covers(rows, span) }
-    val oldest = remember(rows) { RequestStats.oldest(rows) }
+    val oldest = remember(history) { history?.oldest }
+    val covered = remember(span, oldest) { oldest != null && span.fromMs >= oldest }
+
+    // **One read, two uses.** The totals are zero in two very different situations - nothing was
+    // asked, or nothing was recorded yet - and the caption has to tell them apart.
+    //
+    // **`totals` is a key, not just `history`.** The history handle arrives before the totals are
+    // computed for a given interval, so keying on the handle alone would freeze the first interval's
+    // answer and leave the caption claiming "no log yet" after a picker moved onto real data.
+    val anyAtAll = remember(history, totals) {
+        val h = history
+        h != null && (h.oldest != null || totals.total.requests > 0)
+    }
 
     Scaffold(
         topBar = {
@@ -185,7 +213,10 @@ fun StatsScreen(
                             // **Not "no log yet" while the read is still running.** Those are two
                             // different facts and only one of them is about the log.
                             !loaded -> "reading"
-                            rows.isEmpty() -> "no log yet"
+                            // **Two different empty screens, told apart.** "Nothing was asked"
+                            // and "nothing was recorded yet" look identical in a table of zeroes,
+                            // and only the second means the screen is not showing you history.
+                            !anyAtAll -> "no log yet"
                             covered -> "from the log"
                             oldest == null -> "no log yet"
                             else -> "the log starts " + StatsFormat.instant(oldest)
@@ -293,7 +324,7 @@ fun StatsScreen(
                 }
             }
 
-            if (rows.isEmpty() && loaded) {
+            if (loaded && !anyAtAll) {
                 item {
                     // **An empty table is a sentence, not a grid of zeroes.** A person opening this
                     // before the agent has run should be told why it is empty rather than shown a
