@@ -120,64 +120,66 @@ class RequestStatsTest {
     }
 
     @Test
-    fun `an end is a boundary, so 19 to 20 is one hour`() {
-        // **The operator's example, and the bug it caught.** "if now is 19:23 then you can choose
-        // interval from 19 to 20." From 19 to 20 is ONE hour: 20 is where it stops, not an hour to
-        // be included.
+    fun `an end is a boundary, so 19 to 20 is sixty minutes`() {
+        // **The operator's example, now at minute granularity.** "if now is 19:23 then you can
+        // choose interval from 19 to 20" - from 19:00 to 20:00 is SIXTY minutes, because 20:00 is
+        // where it stops rather than a minute to be included.
         //
-        // The first version treated both picks as hours to contain, so 19-to-20 covered 19:00 to
-        // 19:59:59 *and* 20:00 to 20:59:59 - two hours - and 19-to-22 was four. Worse, the To
-        // button rendered `19:00` while the figures covered the whole of that hour.
+        // An earlier version treated both picks as hours to contain, so 19-to-20 covered 19:00 to
+        // 19:59:59 *and* 20:00 to 20:59:59 - two hours - and 19-to-22 was four.
         val zone = ZoneId.systemDefault()
         val day = LocalDate.parse("2026-10-25")
-        fun at(h: Int) = day.atTime(h, 0).atZone(zone).toInstant().toEpochMilli()
-        fun span(a: Int, b: Int) = RequestStats.interval(at(a), at(b))
+        fun at(h: Int, m: Int = 0) =
+            day.atTime(h, m).atZone(zone).toInstant().toEpochMilli()
 
-        assertEquals("19 to 20 is one hour", 1L, span(19, 20).hours)
-        assertEquals("and it starts at 19:00", at(19), span(19, 20).fromMs)
-        assertEquals("and stops at the 20:00 boundary", at(20), span(19, 20).toMs)
-        assertEquals("19 to 22 is three hours, not four", 3L, span(19, 22).hours)
-        assertEquals("0 to 1 is one hour", 1L, span(0, 1).hours)
+        val hour = RequestStats.interval(at(19), at(20))
+        assertEquals("19 to 20 is sixty minutes", 60L, hour.minutes)
+        assertEquals("and it starts at 19:00", at(19), hour.fromMs)
+        assertEquals("and stops at the 20:00 boundary", at(20), hour.toMs)
 
-        // **A pick that is not on the hour snaps outward.** 19:23 as a start is floored to 19:00 so
-        // the first 23 minutes are not dropped; 19:23 as an end is rounded up to the 20:00 boundary
-        // so the last hour is not cut short. Covering at least what was asked for is the safe
-        // direction: a total that quietly excluded the end of a chosen hour would look like lost
-        // requests.
+        // **The granularity is the minute now**, so a fifteen-minute window is an ordinary ask.
+        val quarter = RequestStats.interval(at(19, 15), at(19, 30))
+        assertEquals("19:15 to 19:30 is fifteen minutes", 15L, quarter.minutes)
+        assertEquals("starting where it was asked to", at(19, 15), quarter.fromMs)
+        assertEquals("and ending at the 19:30 boundary", at(19, 30), quarter.toMs)
+
+        // **A pick with seconds snaps outward.** 19:23:40 as a start is floored to 19:23 so the
+        // first forty seconds are not dropped; as an end it rounds up to 19:24 so the last minute
+        // is not cut short. Covering at least what was asked for is the safe direction: a total
+        // that quietly excluded the end of a chosen minute would look like lost requests.
         val partial = RequestStats.interval(
-            day.atTime(19, 23).atZone(zone).toInstant().toEpochMilli(),
-            day.atTime(21, 47).atZone(zone).toInstant().toEpochMilli(),
+            day.atTime(19, 23, 40).atZone(zone).toInstant().toEpochMilli(),
+            day.atTime(21, 47, 20).atZone(zone).toInstant().toEpochMilli(),
         )
-        assertEquals("19:23 to 21:47 covers 19:00 to 22:00", at(22), partial.toMs)
-        assertEquals("which is three whole hours", 3L, partial.hours)
-        assertEquals("starting at 19:00", at(19), partial.fromMs)
+        assertEquals("19:23:40 to 21:47:20 covers 19:23 to 21:48", at(21, 48), partial.toMs)
+        assertEquals("starting at 19:23", at(19, 23), partial.fromMs)
+        assertEquals("which is 145 minutes", 145L, partial.minutes)
 
         // **Order does not matter.** A person moves whichever picker is nearest their thumb.
-        assertEquals("left to right", span(19, 20), span(20, 19))
-        assertEquals("the earlier pick is the start", at(19), span(20, 19).fromMs)
+        assertEquals("left to right", hour, RequestStats.interval(at(20), at(19)))
+        assertEquals("the earlier pick is the start", at(19), RequestStats.interval(at(20), at(19)).fromMs)
+
+        // **Both picks on the same minute is an empty interval, not a negative one.**
+        val empty = RequestStats.interval(at(19, 30), at(19, 30))
+        assertEquals("no minutes", 0L, empty.minutes)
+        assertEquals("and no last millisecond before the first", -1L, empty.lastMs)
     }
 
     @Test
-    fun `one instant is the one hour it falls in`() {
-        // What "the current hour" means once the table is an interval: the hour containing now,
-        // whose end is the next boundary. At 19:23 that is 19:00 to 20:00 - one hour, not a
-        // 23-minute sliver and not two hours.
-        val zone = ZoneId.systemDefault()
-        val now = LocalDate.parse("2026-10-25").atTime(19, 23)
-            .atZone(zone).toInstant().toEpochMilli()
-        val span = RequestStats.interval(now, now)
-
-        assertEquals("one hour", 1L, span.hours)
-        assertEquals(
-            "from 19:00",
-            LocalDate.parse("2026-10-25").atTime(19, 0).atZone(zone).toInstant().toEpochMilli(),
-            span.fromMs,
-        )
-        assertEquals(
-            "to the 20:00 boundary",
-            LocalDate.parse("2026-10-25").atTime(20, 0).atZone(zone).toInstant().toEpochMilli(),
-            span.toMs,
-        )
+    fun `an interval reads in whichever unit suits it`() {
+        // **"0 hours" is not an answer to "how long is this interval".** Now that a minute can be
+        // picked, a fifteen-minute window is ordinary - and a day must not read as 1,440 minutes.
+        assertEquals("minutes", "15 minutes", StatsFormat.span(15))
+        assertEquals("one minute", "1 minute", StatsFormat.span(1))
+        assertEquals("zero", "0 minutes", StatsFormat.span(0))
+        // **Hours only when it is a whole number of them.** 90 minutes stays 90 minutes rather than
+        // becoming "1 hours" and losing the half hour that is the point.
+        assertEquals("a whole hour", "1 hour", StatsFormat.span(60))
+        assertEquals("whole hours", "3 hours", StatsFormat.span(180))
+        assertEquals("not a whole hour", "90 minutes", StatsFormat.span(90))
+        assertEquals("just under a day", "1439 minutes", StatsFormat.span(1439))
+        assertEquals("a day", "1 day", StatsFormat.span(1440))
+        assertEquals("days and a remainder", "2 days, 30 minutes", StatsFormat.span(2 * 1440 + 30))
     }
 
     @Test
@@ -197,7 +199,7 @@ class RequestStatsTest {
         val span = RequestStats.interval(instant - 3_600_000L, instant + 3_600_000L)
 
         // One hour either side, so the instant is inside whatever the zone says about it.
-        assertEquals("the interval is built from instants alone", 3L, span.hours)
+        assertEquals("the interval is built from instants alone", 120L, span.minutes)
         assertTrue("and contains the instant", span.fromMs <= instant && instant < span.toMs)
 
         // The clock hour still differs between the zones - that is what makes the two clients
@@ -213,13 +215,14 @@ class RequestStatsTest {
     }
 
     @Test
-    fun `the picker labels a whole hour, because the table cannot count part of one`() {
-        // **`instantHour`, not `instant`.** The table's granularity is the hour, so a picker button
-        // reading "19:23" would claim a precision the figures do not have - and an end shown as
-        // 19:23 beside a total that runs to 19:59 is actively misleading about what was counted.
+    fun `the picker labels the minute it can now choose`() {
+        // **The reverse of the rule that held while the finest summary was an hour.** Then, a
+        // button reading "19:23" claimed a precision the figures did not have. Now the log keeps a
+        // minute table, so 19:23 is exactly what the interval is - and showing 19:00 would hide the
+        // minute the person just picked.
         val zone = java.time.ZoneId.of("UTC")
         val at = LocalDate.parse("2026-10-25").atTime(19, 23).atZone(zone).toInstant().toEpochMilli()
-        assertEquals("the hour, to the minute it starts", "25 Oct 2026, 19:00", StatsFormat.instantHour(at, zone))
-        assertNotEquals("and not the instant", StatsFormat.instant(at, zone), StatsFormat.instantHour(at, zone))
+        assertEquals("the picked minute", "25 Oct 2026, 19:23", StatsFormat.instantMinute(at, zone))
+        assertEquals("which is the instant itself", StatsFormat.instant(at, zone), StatsFormat.instantMinute(at, zone))
     }
 }

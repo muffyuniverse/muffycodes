@@ -24,75 +24,82 @@ object RequestStats {
     /**
      * **An interval, half-open: `fromMs` inclusive, `toMs` EXCLUSIVE.**
      *
-     * This replaces the five nested `Span`s. The operator's revision: *"we need 2 pickers for
-     * starting and ending, and just 1 result column for the selected interval with per hour
-     * granularity."* Two pickers remove the whole question of where a column starts and stops -
-     * the person states the interval, which is the thing they actually know.
+     * Two pickers state it: *"we need 2 pickers for starting and ending, and just 1 result column
+     * for the selected interval."* Two pickers remove the whole question of where a column starts
+     * and stops - the person states the interval, which is the thing they actually know.
      *
-     * **Granularity is the hour**, which is also what the log keeps (§2 of the plan): a `hour` row
-     * covers one clock hour, so an interval reads whole hours from the aggregates and one partial
-     * hour from raw. Nothing coarser is needed to answer it, and nothing finer exists.
+     * **Granularity is the minute.** The log keeps a minute table, so a minute is the finest thing
+     * that can be *answered from an aggregate* rather than from raw rows - and a person asking what
+     * the last twenty minutes cost is asking a real question. Anything finer would be a figure the
+     * summaries cannot serve.
      */
     data class Interval(val fromMs: Long, val toMs: Long) {
-        /** How many whole hours it covers. An empty interval is zero, never negative. */
-        val hours: Long get() = if (toMs <= fromMs) 0 else (toMs - fromMs) / 3_600_000L
+        /** How many whole minutes it covers. An empty interval is zero, never negative. */
+        val minutes: Long get() = if (toMs <= fromMs) 0 else (toMs - fromMs) / 60_000L
 
         /** The last millisecond inside the interval, for comparing against a row. */
         val lastMs: Long get() = toMs - 1
     }
 
     /**
-     * The interval between two picked hours, **snapped to whole hours and ordered**.
+     * The interval between two picked minutes, **snapped to whole minutes and ordered**.
      *
-     * **The end is a boundary, not an hour to contain.** That distinction is the whole of it: *"if
-     * now is 19:23 then you can choose interval from 19 to 20."* From 19 to 20 is **one** hour - the
-     * hour beginning at 19 - and 20 is where it stops. Treating 20 as an hour of its own made
-     * 19-to-22 four hours, and made the To button read `19:00` while meaning through 19:59.
+     * **The end is a boundary, not a minute to contain.** That distinction is the whole of it: from
+     * 19:00 to 20:00 is **sixty** minutes - the hour beginning at 19 - and 20:00 is where it stops.
+     * Treating the end as a minute of its own made 19-to-22 four hours, and made the To button read
+     * `19:00` while meaning through 19:59.
      *
-     * **The earlier pick is floored**, so 19:23 starts at 19:00 rather than dropping the first 23
-     * minutes of a period the person asked for. **The later pick is rounded up to the next
-     * boundary**, so 19:28 ends at 20:00 rather than cutting the last hour short. Rounding outward
-     * means the figure always covers at least what was asked for - the safe direction, since a total
-     * that quietly excluded the end of a chosen hour would look like lost requests. A pick already
-     * on a boundary stays put as a start and moves up as an end, which is exactly what makes
-     * "from 19 to 20" one hour and not two.
+     * **The earlier pick is floored**, so 19:23:40 starts at 19:23 rather than dropping the first
+     * forty seconds of a period the person asked for. **The later pick is rounded up to the next
+     * boundary**, so 19:23:40 ends at 19:24 rather than cutting the last minute short. Rounding
+     * outward means the figure always covers at least what was asked for - the safe direction,
+     * since a total that quietly excluded the end of a chosen minute would look like lost requests.
+     * A pick already on a boundary stays put as a start and moves up as an end, which is exactly
+     * what makes "from 19:00 to 20:00" sixty minutes and not sixty-one.
      *
      * **Order does not matter.** A person moves whichever picker is nearest their thumb, and a table
      * that went blank when the two were swapped would look broken rather than empty.
      */
     fun interval(a: Long, b: Long, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): Interval {
-        // **Whole CLOCK hours, not whole UTC hours.** The picker states a wall-clock hour, and what
-        // it must snap to is the same hour on that wall. `hourFloor` divides the UTC epoch, which
-        // lands on a local boundary only where the zone's offset is a whole number of hours -
-        // so in India (+5:30), Nepal (+5:45), Newfoundland (-3:30) or Adelaide (+9:30) a person
-        // picking 19:00 got 18:30-19:30, displayed as "18:00" because the label renders `HH:00`.
-        // Two ways wrong at once: the figure covered the wrong hour, and the button said a time
-        // that was not the interval's start.
-        //
-        // The log keeps UTC hours on purpose (see `unitFloor`), and that does not change: an
-        // aggregate must not be frozen at the local shape compaction happened to see, because two
-        // local `01:00`s exist on the day the clocks go back. So this is a *second* floor with a
-        // different meaning, and the naming has to keep them apart.
-        val from = localHourFloor(minOf(a, b), zone)
-        val high = localHourFloor(maxOf(a, b), zone)
-        // **The end is the next local hour boundary**, computed on the local timeline rather than
-        // by adding a UTC hour: across a DST change a wall-clock hour is not always 3,600,000 ms.
+        // **Whole CLOCK minutes, not whole UTC minutes.** The picker states a wall-clock time, and
+        // what it must snap to is that time on the same wall. A UTC floor lands on a local boundary
+        // only where the zone's offset is a whole number of minutes, and while every real zone is,
+        // keeping the distinction costs nothing and stops the two floors being confused: the log's
+        // tables are keyed by UTC buckets on purpose (see `hourFloor`), because an aggregate must
+        // not be frozen at the local shape compaction happened to see.
+        val from = localMinuteFloor(minOf(a, b), zone)
+        val high = localMinuteFloor(maxOf(a, b), zone)
+        // **The end is the next local minute boundary**, computed on the local timeline rather than
+        // by adding a UTC minute: across a DST change a wall-clock minute is not always 60,000 ms.
         val to = if (maxOf(a, b) == high) {
             high
         } else {
             java.time.Instant.ofEpochMilli(high).atZone(zone)
-                .plusHours(1).toInstant().toEpochMilli()
+                .plusMinutes(1).toInstant().toEpochMilli()
         }
         return Interval(from, to)
     }
 
     /**
+     * The start of the **wall-clock** minute [ms] falls in, in [zone].
+     *
+     * Distinct from the UTC floors, which divide the epoch because the *log* stores UTC buckets.
+     * Keeping the two apart is what stops a picker's stated time from silently meaning a different
+     * instant: getting it wrong is silent, because the interval is simply the wrong minute and the
+     * label agrees with itself.
+     */
+    fun localMinuteFloor(
+        ms: Long,
+        zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
+    ): Long = java.time.Instant.ofEpochMilli(ms).atZone(zone)
+        .truncatedTo(java.time.temporal.ChronoUnit.MINUTES)
+        .toInstant().toEpochMilli()
+
+    /**
      * The start of the **wall-clock** hour [ms] falls in, in [zone].
      *
-     * Distinct from [hourFloor], which floors the UTC epoch because the *log* stores UTC hours.
-     * They agree in every whole-hour zone and disagree by the offset's remainder everywhere else -
-     * a distinction worth two functions rather than one with a boolean, because getting it wrong
-     * is silent: the interval is simply the wrong hour, and the label agrees with itself.
+     * Kept because the picker's hour stepper snaps on it, and because a minute floor that ignored
+     * the hour would be right by accident in every whole-hour zone and wrong nowhere obvious.
      */
     fun localHourFloor(
         ms: Long,

@@ -139,26 +139,42 @@ object StatsFormat {
             .format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm"))
 
     /**
-     * The same moment to the **hour only**: `28 Oct 2026, 19:00`.
+     * A picker's instant, to the minute: `28 Oct 2026, 19:23`.
      *
-     * **The interval has no minutes, so its buttons must not show any.** `instant` renders `19:23`,
-     * and using it for a picker that can only choose hours would make the button claim a precision
-     * the figures do not have - and, worse, an end of `19:23` would be displayed beside a figure
-     * that actually runs to `19:59:59`.
+     * **Separate from [instant] because the two answer different questions**, even though both
+     * print `HH:mm` now that minutes can be chosen. This one is a *label for a choice* - the thing
+     * the person picked - and [instant] is a *label for a fact* - where the log begins. They are
+     * allowed to diverge (one might gain a seconds field, or a relative form), and naming them
+     * apart is what keeps that a decision rather than a coincidence.
      */
-    fun instantHour(ms: Long, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String =
+    fun instantMinute(ms: Long, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String =
         java.time.Instant.ofEpochMilli(ms).atZone(zone)
-            .format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy, HH':00'"))
+            .format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm"))
 
     /**
-     * An interval's length, in hours: `31 hours`, `1 hour`.
+     * An interval's length, **in whichever unit reads best**: `45 minutes`, `3 hours`, `2 days`.
      *
-     * **The column's unit**, so the figure has a scale instead of being a number with no extent.
-     * Hours because that is the granularity the log keeps and the interval is measured at - a
-     * count of days would be wrong for a two-hour window and a count of seconds unreadable for a
-     * month.
+     * **Minutes, hours and days rather than one unit.** The pickers now state a minute, so a
+     * fifteen-minute window is an ordinary thing to ask for - and "0 hours" is not an answer to
+     * "how long is this interval". Nor is "1,440 minutes" an answer for a day.
+     *
+     * Hours are only used when the interval is a whole number of them, so `90 minutes` stays
+     * `90 minutes` rather than becoming `1 hours` and losing the half hour that is the point.
      */
-    fun hours(count: Long): String = "$count ${if (count == 1L) "hour" else "hours"}"
+    fun span(minutes: Long): String = when {
+        minutes < 60 -> "$minutes ${if (minutes == 1L) "minute" else "minutes"}"
+        minutes < 1440 && minutes % 60 == 0L -> {
+            val h = minutes / 60
+            "$h ${if (h == 1L) "hour" else "hours"}"
+        }
+        minutes < 1440 -> "$minutes minutes"
+        else -> {
+            val d = minutes / 1440
+            val rest = minutes % 1440
+            val days = "$d ${if (d == 1L) "day" else "days"}"
+            if (rest == 0L) days else "$days, $rest minutes"
+        }
+    }
 
     /** A request count. */
     fun count(value: Int): String = value.toString()

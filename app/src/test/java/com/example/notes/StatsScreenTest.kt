@@ -123,26 +123,46 @@ class StatsScreenTest {
     }
 
     @Test
-    fun `the dialog offers no minutes, because the table counts hours`() {
+    fun `the dialog offers minutes as well as hours`() {
         draw()
         compose.onNodeWithText("00:00", substring = true).performClick()
         compose.waitForIdle()
-        // **A minute stepper is not a smaller control, it is a different promise.** Offering one
-        // lets somebody pick 19:23 for a table that can only count whole hours.
-        compose.onNodeWithText("minute").assertDoesNotExist()
-        // **`onAllNodes`, not `onNode`.** ":00" also matches the From button behind the dialog, and
-        // the point is that the hour label is drawn at all - not that it is unique.
-        assertTrue(
-            "the hour is drawn as a whole hour",
-            compose.onAllNodesWithText(":00", substring = true).fetchSemanticsNodes().isNotEmpty(),
-        )
+        // **Both steppers, because the log keeps a minute table.** This is the reverse of the rule
+        // that held while the finest summary was an hour: then, offering a minute let somebody pick
+        // 19:23 for a table that could only count whole hours. Now 19:23 is exactly what the figure
+        // covers.
+        compose.onNodeWithText("minute").assertExists()
+        compose.onNodeWithText("hour").assertExists()
     }
 
     @Test
-    fun `the table says how many hours it covers`() {
+    fun `the table says how long its interval is`() {
         draw()
-        // Fifteen hours, from midnight to the 15:00 boundary - the interval's own extent, so a
-        // figure has a scale rather than being a number with no span.
+        // Midnight to the 15:00 boundary - the interval's own extent, so a figure has a scale
+        // rather than being a number with no span.
         compose.onNodeWithText("15 hours", substring = true).assertExists()
+    }
+
+    @Test
+    fun `the figures wait for Generate`() {
+        draw()
+        // **The button is there and says it has nothing to do yet**, because the picks have not
+        // moved since the screen opened. A permanently-enabled Generate is a control whose effect
+        // a person has to guess at.
+        compose.onNodeWithText("Generated").assertExists()
+        compose.onNodeWithText("Generate").assertDoesNotExist()
+
+        // Open the From picker, move the hour on, and commit: the picks now differ from what was
+        // generated, so the button offers to act.
+        compose.onNodeWithText("00:00", substring = true).performClick()
+        compose.waitForIdle()
+        compose.onAllNodesWithText("+").fetchSemanticsNodes().let {
+            assertTrue("the steppers are reachable", it.isNotEmpty())
+        }
+        compose.onAllNodesWithText("+")[0].performClick()
+        compose.onNodeWithText("Show").performClick()
+        compose.waitForIdle()
+
+        compose.onNodeWithText("Generate").assertExists()
     }
 }

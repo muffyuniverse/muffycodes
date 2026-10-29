@@ -298,14 +298,13 @@ class RequestDbTest {
 
     @Test
     fun `a local hour in a half-hour zone is still answered exactly`() {
-        // **The reason the minute tier exists at all, and it is not the case it looks like.**
+        // **Why the minute tier exists.** The log keys its tables by UTC hours, but the picker
+        // states a wall-clock time - and now a wall-clock *minute*. So most intervals begin and end
+        // off the hour grid by construction, and the peel answers those ends from the minute table.
         //
-        // The log keys its tables by UTC hours, but the picker states a *wall-clock* hour. In a
-        // whole-hour zone those coincide, so the minute table only ever serves the seam between the
-        // summarised prefix and the raw suffix. In India (+5:30), Nepal (+5:45), Adelaide (+9:30) or
-        // Newfoundland (-3:30) they never coincide: local 19:00 is 13:30 UTC, so **every** query
-        // begins and ends mid-bucket and is answered from minutes. Without the minute table those
-        // users would fall back to raw rows for every interval they ever picked.
+        // A half-hour zone makes it unavoidable rather than merely common: in India (+5:30), Nepal
+        // (+5:45), Adelaide (+9:30) or Newfoundland (-3:30) **no** local hour is a UTC hour, so even
+        // an interval picked on the hour needs minutes at both ends.
         //
         // Pinned as arithmetic on the interval rather than through the database, because the point
         // is the shape of the boundary: a start that is not on a UTC hour edge.
@@ -315,7 +314,7 @@ class RequestDbTest {
         val span = RequestStats.interval(at, at + 3_600_000L, india)
 
         assertEquals("the local hour", at, span.fromMs)
-        assertEquals("is one hour of wall clock", 1L, span.hours)
+        assertEquals("is one hour of wall clock", 60L, span.minutes)
         // **And it does not begin on a UTC hour edge**, which is what forces the minute tier.
         assertNotEquals(
             "a half-hour zone puts the interval off the UTC hour grid",
@@ -349,6 +348,66 @@ class RequestDbTest {
             "an hour later holds nothing",
             0,
             total(base + 11 * HOUR + 30 * MIN, base + 12 * HOUR + 30 * MIN).requests,
+        )
+    }
+
+    @Test
+    fun `a fifteen-minute window is exact, because a minute can be picked`() {
+        // **The case minute granularity creates.** While the finest summary was an hour, a quarter
+        // of an hour was not a thing anybody could ask for. Now it is the ordinary case, so it has
+        // to be exact rather than rounded to the hour it falls in.
+        repeat(30) { m -> write(base + 10 * HOUR + m * MIN) }
+
+        val quarter = total(base + 10 * HOUR + 5 * MIN, base + 10 * HOUR + 20 * MIN)
+        assertEquals("5, 6, ..., 19 - fifteen of them", 15, quarter.requests)
+        // And the neighbours are excluded, so the figure is not a coincidence of a widened range.
+        assertEquals("the five before", 5, total(base + 10 * HOUR, base + 10 * HOUR + 5 * MIN).requests)
+        assertEquals("the ten after", 10, total(base + 10 * HOUR + 20 * MIN, base + 10 * HOUR + 30 * MIN).requests)
+    }
+
+    @Test
+    fun `a window with a whole hour inside it uses the hour table, not sixty minutes`() {
+        // **The peel must still climb.** A window from 10:23 to 12:53 has a whole hour in the middle
+        // (11:00-12:00), and taking it as 120 minute rows would be the same answer from twice the
+        // rows. This asserts the answer, which is what a person sees; the table it came from is an
+        // efficiency that must never change the figure.
+        repeat(160) { m -> write(base + 10 * HOUR + 23 * MIN + m * MIN) }
+
+        val window = total(base + 10 * HOUR + 23 * MIN, base + 12 * HOUR + 53 * MIN)
+        assertEquals("37 before the hour, 60 in it, 53 after", 150, window.requests)
+    }
+
+    @Test
+    fun `a window with no whole hour in it is still exact`() {
+        // The case that looks like the previous one and is not: 10:23 to 11:53 has **no** whole
+        // hour, because the only hour edge is at 11:00 and 11:00-11:53 is fifty-three minutes. So
+        // the answer comes from minutes at both ends and there is nothing to climb to.
+        repeat(100) { m -> write(base + 10 * HOUR + 23 * MIN + m * MIN) }
+
+        assertEquals(
+            "90 minutes, and every one of them",
+            90,
+            total(base + 10 * HOUR + 23 * MIN, base + 11 * HOUR + 53 * MIN).requests,
+        )
+    }
+
+    @Test
+    fun `a one-minute interval holds exactly its minute`() {
+        // The finest thing that can be asked for, and the boundary rule at its sharpest: the minute
+        // beginning at 10:23 holds 10:23:00 through 10:23:59.999, and nothing at 10:24:00.
+        write(base + 10 * HOUR + 23 * MIN)
+        write(base + 10 * HOUR + 23 * MIN + 59_999L)
+        write(base + 10 * HOUR + 24 * MIN)
+
+        assertEquals(
+            "both responses inside it",
+            2,
+            total(base + 10 * HOUR + 23 * MIN, base + 10 * HOUR + 24 * MIN).requests,
+        )
+        assertEquals(
+            "and the next minute holds only its own",
+            1,
+            total(base + 10 * HOUR + 24 * MIN, base + 10 * HOUR + 25 * MIN).requests,
         )
     }
 

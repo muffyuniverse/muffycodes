@@ -671,7 +671,10 @@ class ScenariosTest {
             screen = { stats(account, now) },
         ) {
             before()
-            then("Nothing is pressed: the table is a reading of the history, counted when it opened.") {}
+            then(
+                "Nothing is pressed: the table is the history summed over the interval the " +
+                    "pickers already name, and `Generated` shows there is nothing new to ask for.",
+            ) {}
             after()
             result(
                 "Two picks and one column. The interval is stated rather than inferred: From " +
@@ -712,6 +715,53 @@ class ScenariosTest {
             result(
                 "A sentence instead of dashes. Zeroes would read as a fault and as a measurement " +
                     "at the same time, and neither is true - the log simply has nothing in it yet.",
+            )
+        }
+    }
+
+    @Test
+    fun `the table waiting for Generate`() {
+        // **The button's other state, and the reason it exists.** A minute stepper can move sixty
+        // times on the way to a time; re-reading the history on each of those is work nobody asked
+        // for, and numbers that move under a thumb are numbers a person cannot compare. So the
+        // figures describe the last generated interval, and the button says when the picks have
+        // moved away from it.
+        scene.signedIn()
+        val account = scene.workspace?.accountDir ?: error("signed in, so there is one")
+        val now = java.time.LocalDate.parse("2026-10-28")
+            .atTime(14, 30).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+        // A few responses, so the table has figures to hold still while the picks move.
+        repeat(5) { i ->
+            RequestDb.write(account, now - (i + 1) * 60_000L, RequestLog.Stats(
+                kind = RequestLog.Stats.Kind.TURN, ms = 2_000,
+                provider = "deepinfra/fp8/flex", model = "deepseek/deepseek-v4.1-flash",
+                usage = org.json.JSONObject(
+                    """{"prompt_tokens":4000,"completion_tokens":200,"cost":0.0004,
+                       "prompt_tokens_details":{"cached_tokens":3000}}""",
+                ),
+                finish = "stop",
+            ))
+        }
+
+        scenario(
+            compose, "27-the-table-waiting-for-generate",
+            "The table waiting for Generate.",
+            "picks that have moved away from the interval the figures describe.",
+            screen = { stats(account, now) },
+        ) {
+            before()
+            then("`From` is opened, its hour moved on, and the pick committed with `Show`.") {
+                compose.onNodeWithText("00:00", substring = true).performClick()
+                compose.waitForIdle()
+                compose.onAllNodesWithText("+")[0].performClick()
+                compose.onNodeWithText("Show").performClick()
+                compose.waitForIdle()
+            }
+            after()
+            result(
+                "The button now offers to Generate, and the figures above it are still the ones " +
+                    "for the interval that was last generated - not a half-set-up one. Pressing " +
+                    "it is what moves them.",
             )
         }
     }
