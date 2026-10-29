@@ -573,11 +573,6 @@ class SettingsStore(context: Context, name: String = "settings") {
         maxOf(prefs.getInt(KEY_APP_HISTORY, 0), prefs.getInt(KEY_PROJECT_HISTORY, 0))
 
     /**
-     * Reads a length typed into a field. A blank field, or anything that is not
-     * a number, means "keep everything".
-     */
-    companion object {
-        /**
      * **Every setting back to the number the app shipped with.**
      *
      * One function, because a reset that restates the defaults is a second copy of them and the two
@@ -618,6 +613,13 @@ class SettingsStore(context: Context, name: String = "settings") {
         keepRemind(DEFAULT_REMIND_MINUTES)
         Trace.said("every setting is back to what the app shipped with")
     }
+
+    /**
+     * Reads a length typed into a field. A blank field, or anything that is not
+     * a number, means "keep everything".
+     */
+    companion object {
+
 
     /**
      * The theme the app starts with.
