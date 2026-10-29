@@ -926,9 +926,15 @@ class AgentLog private constructor(
             val ids = named.toSet()
             return all.filter { it.id in ids }.sumOf { it.size }
         }
-        // A trim: what was in the context before it, and is not in it now.
-        val still = all.filter { it.ctx == IN }.map { it.id }.toSet()
-        return all.filter { it.id < marker.id && it.ctx == IN && it.id !in still }.sumOf { it.size }
+        // A trim: **every row before the marker that is no longer in the context**, which is the
+        // set the trim itself took out. Rows are only ever appended, so nothing else can have
+        // removed one - and the marker's own `at` count is derived the same way, so the two agree
+        // by construction rather than by two independent guesses.
+        //
+        // The filter used to also require `it.ctx == IN`, which is the contradiction: a row the trim
+        // removed is `app`, not `in`, so the condition excluded exactly the rows it was looking for
+        // and the sum was always zero. That is why this test expected 20 tokens and got 5.
+        return all.filter { it.id < marker.id && it.ctx != IN }.sumOf { it.size }
     }
 
     /**

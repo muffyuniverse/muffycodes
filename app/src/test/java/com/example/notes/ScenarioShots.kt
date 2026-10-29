@@ -65,6 +65,16 @@ class ScenarioShots(
      * the shared path.
      */
     private val ready: () -> Boolean = { true },
+    /**
+     * Whether the window holds a text field, whose cursor never lets the clock settle.
+     *
+     * **A field is the one thing that makes `waitForIdle` hang for ever.** Its caret blinks on the
+     * composition's own clock, so every reading of the semantics tree - which is what taking a
+     * picture does - waits for an animation that has no end. Freezing the clock is the documented
+     * answer, and it is opt-in rather than shared because the animations that *should* finish (a
+     * dialog opening, a list scrolling) are what make the other pictures correct.
+     */
+    private val frozenClock: Boolean = false,
 ) {
 
     private var happened: String? = null
@@ -82,7 +92,13 @@ class ScenarioShots(
         get() = System.getProperty("roborazzi.test.record") == "true"
 
     /** The screen before anything is done. */
-    fun before() = capture("before.png")
+    fun before() {
+        if (frozenClock) {
+            compose.mainClock.autoAdvance = false
+            compose.mainClock.advanceTimeBy(500)
+        }
+        capture("before.png")
+    }
 
     /**
      * Does something, and records it in the words a person would use.
@@ -147,6 +163,7 @@ class ScenarioShots(
             compose.waitForIdle()
         }
         capture("after.png")
+        if (frozenClock) compose.mainClock.autoAdvance = true
     }
 
     /** What came of it, in one sentence. */
@@ -232,6 +249,8 @@ fun scenario(
      * composition idle wait returns before that post lands. See [ScenarioShots.ready].
      */
     ready: () -> Boolean = { true },
+    /** See [ScenarioShots.frozenClock]: a window with a text field needs it. */
+    frozenClock: Boolean = false,
     body: ScenarioShots.() -> Unit,
 ): String {
     // One `setContent` for the whole scenario, because a Compose test rule allows
@@ -246,6 +265,7 @@ fun scenario(
         compose, folder, title, about,
         switchToAfter = { showingAfter.value = true },
         ready = ready,
+        frozenClock = frozenClock,
     )
     shots.body()
     return shots.write()

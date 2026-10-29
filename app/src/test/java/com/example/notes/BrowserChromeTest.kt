@@ -469,22 +469,32 @@ class BrowserChromeTest {
         // **The one secret the app asks for.** A field that echoed the token would leak it to
         // anybody glancing at the screen, and a window that did not say where it goes would leave a
         // person guessing whether it is being uploaded somewhere.
-        compose.setContent {
-            MaterialTheme { SignInDialog(onDismiss = {}, onSignIn = {}) }
-        }
+        // **The clock is frozen for the duration, and the reason is the window itself.** A text
+        // field's cursor blinks on a Compose clock that never settles, and every reading of the
+        // semantics tree calls `waitForIdle` internally - so `there()` below, and the rule's own
+        // teardown, both waited for an animation that never finishes. The failure was
+        // `AppNotIdleException: Compose did not get idle after 131589 attempts`, which reads as an
+        // infinite composition loop and is nothing of the kind.
+        //
+        // Frozen, then advanced once so the window is laid out; restored in `finally` because the
+        // clock belongs to the rule and every later test in this class would inherit it.
+        compose.mainClock.autoAdvance = false
+        try {
+            compose.setContent {
+                MaterialTheme { SignInDialog(onDismiss = {}, onSignIn = {}) }
+            }
+            compose.mainClock.advanceTimeBy(500)
 
-        // **No `waitForIdle` here, and the reason is the window itself.** A dialog holding a text
-        // field keeps a blinking cursor on a Compose clock that never settles, so the idle wait
-        // times out after sixty seconds and reports "infinite composition loop" - a false alarm
-        // about the wrong thing. The semantics tree is already built by the time `setContent`
-        // returns, which is all this test needs: it asserts the words, not the animation.
-        assertTrue("it asks for the key", there("Personal access key"))
-        assertTrue("and names the scopes it needs", there("repo and delete_repo"))
-        assertTrue("and says whose commits they will be", there("belongs to"))
-        assertTrue("it names GitHub in the title", there("Sign in to GitHub"))
-        // **The button is "Sign in", the title is "Sign in to GitHub"** - two different strings, and
-        // the button is disabled until something is typed, which is the rule worth stating: a window
-        // that let you press it empty would ask GitHub a question with no answer.
-        assertTrue("and offers the act", there("Sign in"))
+            assertTrue("it asks for the key", there("Personal access key"))
+            assertTrue("and names the scopes it needs", there("repo and delete_repo"))
+            assertTrue("and says whose commits they will be", there("belongs to"))
+            assertTrue("it names GitHub in the title", there("Sign in to GitHub"))
+            // **The button is "Sign in", the title is "Sign in to GitHub"** - two different strings,
+            // and the button is disabled until something is typed, which is the rule worth stating:
+            // a window that let you press it empty would ask GitHub a question with no answer.
+            assertTrue("and offers the act", there("Sign in"))
+        } finally {
+            compose.mainClock.autoAdvance = true
+        }
     }
 }
