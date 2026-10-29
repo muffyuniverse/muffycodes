@@ -260,7 +260,9 @@ class StatsScreenTest {
         // **And it says WHICH period it is**, because the rule is unusual enough that a person who
         // knows this code asked about it. The window is the same length, ending where this one
         // starts - not the whole of yesterday.
-        compose.onNodeWithText("before: 28 Oct 2026, 11:08", substring = true).assertExists()
+        // The fixture opens at 14:30, so the current interval is 00:00-14:30 - fourteen and a
+        // half hours - and the window before it begins at 09:30 on the 27th.
+        compose.onNodeWithText("before: 27 Oct 2026, 09:30", substring = true).assertExists()
     }
 
     @Test
