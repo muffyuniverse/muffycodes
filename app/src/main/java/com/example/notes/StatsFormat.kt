@@ -152,33 +152,32 @@ object StatsFormat {
             .format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm"))
 
     /**
-     * An interval's length, **in whichever units read best**: `15 minutes`, `1 hour 30 minutes`,
-     * `14 hours 31 minutes`, `2 days 3 hours`.
+     * An interval's length: `123 days 15 hours 51 minutes`, `14 hours 31 minutes`, `15 minutes`.
      *
-     * **Two units at most, and never a bare count of minutes at a size nobody reads that way.** A
-     * person asking "how long is this" wants 14h31m, not 871 minutes and not a rounded 14 hours -
-     * one is unreadable and the other is a lie about the extent. So the largest unit that fits is
-     * used, and the next one down is carried alongside when there is a remainder.
+     * **Days, hours and minutes, each shown when it is not zero.** That is how a duration is read
+     * out loud, and it keeps the figure exact at every size: `871 minutes` is unreadable, `14 hours`
+     * hides the half hour that is the point, and `14.52 hours` is not how anybody says it.
      *
-     * **Minutes below an hour**, because "0 hours" is not an answer to a fifteen-minute window and
-     * `0.25 hours` is not how anybody says it.
+     * **A zero is dropped rather than padded.** `1 day 5 minutes` says what happened; `1 day 0
+     * hours 5 minutes` makes a reader check a number that carries nothing. The one exception is an
+     * interval of no length at all, which reads `0 minutes` rather than nothing.
      *
-     * Pluralised properly, because "1 hours" is the kind of thing a screenshot catches and an
+     * **Pluralised properly**, because "1 hours" is the kind of thing a screenshot catches and an
      * assertion written by the same person does not.
      */
     fun span(minutes: Long): String {
         fun n(count: Long, one: String, many: String) = "$count ${if (count == 1L) one else many}"
-        if (minutes < 60) return n(minutes, "minute", "minutes")
-        if (minutes < 1440) {
-            val h = minutes / 60
-            val m = minutes % 60
-            val hours = n(h, "hour", "hours")
-            return if (m == 0L) hours else "$hours ${n(m, "minute", "minutes")}"
+        val days = minutes / 1440
+        val hours = (minutes % 1440) / 60
+        val mins = minutes % 60
+        val parts = buildList {
+            if (days > 0) add(n(days, "day", "days"))
+            if (hours > 0) add(n(hours, "hour", "hours"))
+            // **Minutes always appear when nothing larger does**, so an empty interval still says
+            // something rather than rendering as an empty string.
+            if (mins > 0 || isEmpty()) add(n(mins, "minute", "minutes"))
         }
-        val d = minutes / 1440
-        val h = (minutes % 1440) / 60
-        val days = n(d, "day", "days")
-        return if (h == 0L) days else "$days ${n(h, "hour", "hours")}"
+        return parts.joinToString(" ")
     }
 
     /** A request count. */

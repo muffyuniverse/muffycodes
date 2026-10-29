@@ -34,6 +34,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
@@ -502,8 +504,8 @@ private fun IntervalRow(label: String, at: Long, onOpen: () -> Unit) {
             modifier = Modifier.width(48.dp),
         )
         TextButton(onClick = onOpen) {
-            // **To the hour**, and for `To` this is a boundary: 20:00 means the interval stops
-            // there. Minutes would claim a precision the table does not have.
+            // **To the minute**, and for `To` this is a boundary: 20:00 means the interval stops
+            // there, and 19:23 means it stops at 19:23.
             Text(StatsFormat.instantMinute(at))
         }
     }
@@ -528,7 +530,14 @@ private fun TimeStepper(
 ) {
     fun step(by: Int): Int = ((value + by - range.first).mod(range.last + 1 - range.first)) + range.first
     Row(verticalAlignment = Alignment.CenterVertically) {
-        TextButton(onClick = { Trace.tap("stats time", "$label-"); onChange(step(-1)) }) {
+        // **Each button says which field it belongs to**, because "−" appears twice on one row and
+        // a screen reader (or a person with the row partly covered) has no other way to tell the
+        // hour's from the minute's. The visible glyph stays a dash: the row already reads `19 : 23`
+        // and a labelled pair of buttons would be wider than the dialog.
+        TextButton(
+            onClick = { Trace.tap("stats time", "$label-"); onChange(step(-1)) },
+            modifier = Modifier.semantics { contentDescription = "less $label" },
+        ) {
             Text("−")
         }
         Text(
@@ -538,7 +547,10 @@ private fun TimeStepper(
             String.format(java.util.Locale.UK, "%02d", value),
             style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace),
         )
-        TextButton(onClick = { Trace.tap("stats time", "$label+"); onChange(step(1)) }) {
+        TextButton(
+            onClick = { Trace.tap("stats time", "$label+"); onChange(step(1)) },
+            modifier = Modifier.semantics { contentDescription = "more $label" },
+        ) {
             Text("+")
         }
     }

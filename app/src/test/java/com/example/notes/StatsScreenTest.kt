@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import org.junit.Assert.assertTrue
@@ -133,8 +134,13 @@ class StatsScreenTest {
         // that held while the finest summary was an hour: then, offering a minute let somebody pick
         // 19:23 for a table that could only count whole hours. Now 19:23 is exactly what the figure
         // covers.
-        compose.onNodeWithText("minute").assertExists()
-        compose.onNodeWithText("hour").assertExists()
+        //
+        // **Found by content description, not by drawn text.** The buttons are `−` and `+`, which
+        // appear twice each on the row; "less minute" is the only thing that distinguishes the
+        // minute stepper from the hour's, and it is also what a screen reader reads out.
+        compose.onNodeWithContentDescription("less minute").assertExists()
+        compose.onNodeWithContentDescription("more minute").assertExists()
+        compose.onNodeWithContentDescription("less hour").assertExists()
     }
 
     @Test

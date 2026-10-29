@@ -168,28 +168,25 @@ class RequestStatsTest {
     }
 
     @Test
-    fun `an interval reads in whichever units suit it`() {
-        // **"0 hours" is not an answer to "how long is this interval".** Now that a minute can be
-        // picked, a fifteen-minute window is ordinary - and a day must not read as 1,440 minutes.
-        assertEquals("minutes", "15 minutes", StatsFormat.span(15))
+    fun `an interval reads as days, hours and minutes`() {
+        // **The operator's format: `123 days 15 hours 51 minutes`.** That is how a duration is read
+        // out loud, and it keeps the figure exact at every size - `871 minutes` is unreadable,
+        // `14 hours` hides the half hour that is the point, and `14.52 hours` is not how anybody
+        // says it.
+        assertEquals("the operator's own example", "123 days 15 hours 51 minutes", StatsFormat.span(123 * 1440 + 15 * 60 + 51))
+        assertEquals("minutes only", "15 minutes", StatsFormat.span(15))
         assertEquals("one minute", "1 minute", StatsFormat.span(1))
-        assertEquals("zero", "0 minutes", StatsFormat.span(0))
-        assertEquals("a whole hour", "1 hour", StatsFormat.span(60))
-        assertEquals("whole hours", "3 hours", StatsFormat.span(180))
-
-        // **Two units at most.** 871 minutes is 14h31m: "871 minutes" is unreadable at that size and
-        // "14 hours" would hide the half hour, so the largest unit is used with the remainder beside
-        // it. 90 minutes is the case that must NOT become "1 hours" - it carries its minutes.
-        assertEquals("minutes carried beside hours", "1 hour 30 minutes", StatsFormat.span(90))
-        assertEquals("a long interval, still exact", "14 hours 31 minutes", StatsFormat.span(871))
-        assertEquals("just under a day", "23 hours 59 minutes", StatsFormat.span(1439))
-        assertEquals("a day", "1 day", StatsFormat.span(1440))
+        assertEquals("an empty interval still says something", "0 minutes", StatsFormat.span(0))
+        assertEquals("an exact hour", "1 hour", StatsFormat.span(60))
+        assertEquals("hours and minutes", "1 hour 30 minutes", StatsFormat.span(90))
+        assertEquals("a long day", "14 hours 31 minutes", StatsFormat.span(871))
+        assertEquals("an exact day", "1 day", StatsFormat.span(1440))
         assertEquals("a day and an hour", "1 day 1 hour", StatsFormat.span(1500))
-        assertEquals("days", "2 days", StatsFormat.span(2 * 1440))
-        assertEquals("days with hours", "2 days 3 hours", StatsFormat.span(2 * 1440 + 180))
-        // **The remainder below an hour is dropped at day scale**, deliberately: "2 days 3 hours
-        // 17 minutes" is more precision than an interval that wide can be useful at.
-        assertEquals("minutes do not survive to day scale", "2 days 3 hours", StatsFormat.span(2 * 1440 + 197))
+        // **A zero unit is dropped rather than padded.** `1 day 5 minutes` says what happened;
+        // `1 day 0 hours 5 minutes` makes a reader check a number that carries nothing.
+        assertEquals("no hours to show", "1 day 5 minutes", StatsFormat.span(1445))
+        assertEquals("two days", "2 days", StatsFormat.span(2 * 1440))
+        assertEquals("all three", "2 days 3 hours 17 minutes", StatsFormat.span(2 * 1440 + 197))
     }
 
     @Test
