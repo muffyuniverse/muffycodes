@@ -703,17 +703,20 @@ private fun EntryList(viewModel: AppViewModel, actions: BrowserActions) {
             EntryRow(
                 entry = entry,
                 pinned = pinned,
-                // **The switch, read from state, not from the file.** `isLockedHere` asks
-                // `.muffy/locked.json` every time it is called, so the row's icon did not change
-                // when the lock changed — Compose had no reason to redraw it, and a person had to
-                // leave the screen and come back. Reported from the live log: "lock button changes
-                // show only after reentering the screen". `lockedPaths` is the same answer, held in
-                // state, so the row redraws the moment the set changes.
+                // **One answer, from state, not from the file.** `Workspace.hold` is the single
+                // place that says who is holding a row - the person, the app, or nobody - so this
+                // row has one branch instead of one per mechanism.
                 //
-                // A file inside a locked folder is read-only but nobody locked *it*, and a folder
-                // of twenty lock icons would read as twenty things the person did — hence
-                // `isLockedHere`'s own rule rather than `isLocked`'s.
-                locked = path != null && path in lockedPaths,
+                // `lockedPaths` is passed in rather than read: asking `.muffy/locked.json` on every
+                // call meant Compose had no reason to redraw the row when the lock changed, so a
+                // person had to leave the screen and come back. Reported from the live log: "lock
+                // button changes show only after reentering the screen".
+                //
+                // A file inside a locked folder is read-only but nobody locked *it*, and a folder of
+                // twenty lock icons would read as twenty things the person did - `hold` keeps that
+                // rule because it asks about this path only.
+                hold = ws?.hold(entry.file, lockedPaths) ?: Workspace.Hold.NONE,
+                unsync = ws?.unsync(entry.file) ?: Workspace.Unsync.NONE,
                 selected = viewModel.isSelected(entry.file),
                 choosing = viewModel.selected.isNotEmpty(),
                 // A hidden folder and the record's `agent/` are the app's
@@ -726,10 +729,6 @@ private fun EntryList(viewModel: AppViewModel, actions: BrowserActions) {
                 // the person did not set and cannot lift. Conflating them would either hide the
                 // row again (what the report asked to stop) or offer a toggle that does nothing.
                 system = ws?.isStructural(entry.file) == true,
-                // `isAppFlag` is a question about this account's files, so it needs the workspace;
-                // `isSystemLocked` is a question about a name, so it is asked of the class.
-                systemLocked = ws?.isAppFlag(entry.file) == true ||
-                    Workspace.isSystemLocked(entry.name),
                 actions = actions,
                 onOpen = {
                     if (entry.isFolder) viewModel.openChild(entry.name) else actions.onOpen(entry)
@@ -745,20 +744,27 @@ private fun EntryList(viewModel: AppViewModel, actions: BrowserActions) {
 private fun EntryRow(
     entry: Entry,
     pinned: Boolean,
-    locked: Boolean,
     selected: Boolean,
     choosing: Boolean,
     system: Boolean,
     /**
-     * True when the app keeps this row locked — **readable, and never writable by hand.**
+     * Who is holding this row, from [Workspace.hold].
      *
-     * Report 28 asked for the app's own things to stop being invisible and become read-only
-     * instead. So this is not `system`: a `system` row has no menu at all, while this one is a row a
-     * person can open, read, and see a lock on that they did not set. The lock is drawn in a colour
-     * of its own and does nothing when tapped, because a toggle that refuses to toggle is worse than
-     * a mark that never claimed to be one.
+     * **One parameter where there were two.** `locked` and `systemLocked` were the person's lock and
+     * the app's, drawn by separate branches in this function - which meant every rule about locks
+     * had to be written twice and could disagree with itself. A `Hold` is the single answer, and the
+     * branch below is the single place that decides what each answer looks like.
      */
-    systemLocked: Boolean = false,
+    hold: Workspace.Hold = Workspace.Hold.NONE,
+    /**
+     * Who is keeping this row out of the repository, from [Workspace.unsync].
+     *
+     * **It had no state at all before this.** The button was drawn the same way whatever the truth
+     * was, so a file that was already ignored still offered "Stop sending", and one the app keeps
+     * out offered a tap that could not work. The operator's rule - grey unset, black set by the
+     * person, red set by the app - is what makes the three cases visible.
+     */
+    unsync: Workspace.Unsync = Workspace.Unsync.NONE,
     actions: BrowserActions,
     onOpen: () -> Unit,
 ) {
@@ -804,15 +810,14 @@ private fun EntryRow(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        if (systemLocked) {
-            // **A mark, not a toggle.** The lock a person sets is a button; this one is a statement
-            // about a file the app keeps, so it is drawn in a colour the person's lock never uses
-            // and it is not clickable. A toggle that refuses to toggle teaches people that buttons
-            // in this list sometimes do nothing.
+        if (hold == Workspace.Hold.APP) {
+            // **A mark, not a toggle.** The app set this one, and the operator's rule is that what
+            // the app sets cannot be unset - so it is drawn in red and it is not clickable. A toggle
+            // that refuses to toggle teaches people that buttons in this list sometimes do nothing.
             Icon(
                 Icons.Filled.Lock,
                 contentDescription = "${entry.name} is kept by the app and cannot be edited",
-                tint = MaterialTheme.colorScheme.tertiary,
+                tint = APP_HOLD,
                 modifier = Modifier.padding(horizontal = 12.dp).size(20.dp),
             )
         } else if (!choosing && !system && entry.kind == EntryKind.TEXT) {
@@ -824,12 +829,16 @@ private fun EntryRow(
                 // one icon is not worth a whole dependency.
                 Icon(
                     Icons.Filled.Lock,
-                    contentDescription = if (locked) {
+                    contentDescription = if (hold == Workspace.Hold.USER) {
                         "${entry.name} is locked; tap to unlock"
                     } else {
                         "Lock ${entry.name}, so it can only be viewed"
                     },
-                    tint = if (locked) MaterialTheme.colorScheme.primary
+                    // **Grey unset, black set.** The operator's rule, and the reason it is not a
+                    // tint: a lock that is off and a lock that is on have to be told apart at a
+                    // glance down a list, and two shades of the same colour are not a glance.
+                    // `onSurface` is the ink this theme already uses for text that is simply set.
+                    tint = if (hold == Workspace.Hold.USER) MaterialTheme.colorScheme.onSurface
                     else MaterialTheme.colorScheme.outline,
                 )
             }
@@ -839,15 +848,35 @@ private fun EntryRow(
             // when they realise a key is in the repository, and a thing you reach for in a hurry
             // should not be behind a menu. It sits with Lock for the same reason: both are "keep
             // this one here".
-            IconButton(onClick = { actions.onIgnore(entry) }) {
+            // **Three states, the same rule as the lock.** Grey when nothing is set, black when the
+            // person set it, red when the app did - and the app's cannot be lifted, so its button is
+            // a mark rather than a control. A file the app keeps out of the repository is one the
+            // person cannot choose to send, and a tap that silently does nothing is the defect this
+            // rule exists to remove.
+            if (unsync == Workspace.Unsync.APP) {
                 Icon(
-                    // **The eye-with-a-slash is not in the imported set**, and one glyph is not
-                    // worth a dependency — the same decision the open padlock got. `Clear` reads as
-                    // "take this out", which is what ignoring does: out of what GitHub is told.
                     Icons.Filled.Clear,
-                    contentDescription = "Stop sending ${entry.name} to GitHub",
-                    tint = MaterialTheme.colorScheme.outline,
+                    contentDescription = "${entry.name} is kept out of the repository by the app",
+                    tint = APP_HOLD,
+                    modifier = Modifier.padding(horizontal = 12.dp).size(20.dp),
                 )
+            } else {
+                IconButton(onClick = { actions.onIgnore(entry) }) {
+                    Icon(
+                        // **The eye-with-a-slash is not in the imported set**, and one glyph is not
+                        // worth a dependency — the same decision the open padlock got. `Clear` reads
+                        // as "take this out", which is what ignoring does: out of what GitHub is
+                        // told.
+                        Icons.Filled.Clear,
+                        contentDescription = if (unsync == Workspace.Unsync.USER) {
+                            "${entry.name} is not sent to GitHub"
+                        } else {
+                            "Stop sending ${entry.name} to GitHub"
+                        },
+                        tint = if (unsync == Workspace.Unsync.USER) MaterialTheme.colorScheme.onSurface
+                        else MaterialTheme.colorScheme.outline,
+                    )
+                }
             }
         }
         // **No menu on a file the app keeps.** Every item in it would be refused by `coreProblem`
@@ -874,7 +903,7 @@ private fun EntryRow(
                 // **Not offered on a locked file.** Rename would be refused, so the item
                 // could only disappoint — the same rule Delete already followed. The model
                 // refuses it either way; hiding it is not the refusal.
-                if (!locked) {
+                if (hold != Workspace.Hold.USER) {
                     DropdownMenuItem(
                         text = { Text("Rename…") },
                         onClick = {
@@ -888,7 +917,7 @@ private fun EntryRow(
                 // unguarded item costs: tapping Move… on a locked `.gitignore` opened the
                 // destination window, and only the confirm refused. A window that exists to be
                 // refused is worse than an item that is not there.
-                if (!locked) {
+                if (hold != Workspace.Hold.USER) {
                     DropdownMenuItem(
                         text = { Text("Move…") },
                         onClick = {
@@ -908,7 +937,7 @@ private fun EntryRow(
                         actions.onCopy(entry)
                     },
                 )
-                if (!locked) {
+                if (hold != Workspace.Hold.USER) {
                     DropdownMenuItem(
                         text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
                         onClick = {
@@ -1004,3 +1033,17 @@ fun ProjectSlimRow(viewModel: AppViewModel, onSync: (String) -> Unit) {
     )
     HorizontalDivider()
 }
+
+/**
+ * The colour of a lock the app set.
+ *
+ * **Red, and not a theme slot**, because the operator's rule is that the three states are told
+ * apart by colour: grey when nothing is set, black when the person set it, red when the app did.
+ * The first two map onto slots this theme already has (`outline` and `onSurface`); there is no
+ * "error" slot that is legible as a *lock* rather than as a failure, so this is stated once here
+ * rather than guessed at each call site.
+ *
+ * Red is also the right word for it: a file the app holds is one you cannot change, and the app
+ * does not take that decision lightly - see [Workspace.Hold.APP].
+ */
+private val APP_HOLD = Color(0xFFB3261E)

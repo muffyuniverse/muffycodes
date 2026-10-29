@@ -153,6 +153,42 @@ class Workspace(val accountDir: File) {
         put(file, text)
     }
 
+    /**
+     * Writes the app's secret rule into a project's `.git/info/exclude`.
+     *
+     * **The same file [ensureIgnore] uses, and for the same reason**: this is a rule of this phone's
+     * app, not a fact about the person's repository, so it must not become a commit or be pushed. A
+     * person cloning the project would otherwise inherit a `.gitignore` line for a file that never
+     * existed in it.
+     *
+     * **Written as patterns, because the files may not exist yet.** `ensureIgnore` writes exact
+     * paths for the app's own folders, which always exist. A secret is often one somebody is about
+     * to add - a `.env` they have not made yet - so the rule is written as the shapes that catch it:
+     * `.env` and `.env.*` for the family, `*.pem` and friends for the extensions. A line for a file
+     * that is not there yet costs nothing and stops the file travelling the moment it is.
+     */
+    fun ensureSecretIgnores(projectDir: File) {
+        val git = File(projectDir, ".git")
+        if (!git.isDirectory) return
+        val file = File(git, "info" + File.separator + "exclude")
+        val current = if (file.isFile) read(file) else ""
+        val missing = SECRET_PATTERNS.filter { line ->
+            current.lineSequence().none { it.trim() == line }
+        }
+        if (missing.isEmpty()) return
+        val text = buildString {
+            append(current)
+            if (current.isNotEmpty() && !current.endsWith("\n")) appendLine()
+            if (current.isEmpty()) {
+                appendLine("# Anything that holds a credential: the app locks these and keeps them")
+                appendLine("# out of the repository, because a key that is pushed cannot be recalled.")
+            }
+            missing.forEach { appendLine(it) }
+        }
+        file.parentFile?.mkdirs()
+        put(file, text)
+    }
+
     /** The folder's contents, hidden things left out: folders first, then names. */
     fun list(dir: File): List<Entry> {
         val children = dir.listFiles() ?: return emptyList()
@@ -249,6 +285,147 @@ class Workspace(val accountDir: File) {
     fun isStructural(file: File): Boolean =
         file.isDirectory && file.name == AgentLog.DIR &&
             file.parentFile?.parentFile?.canonicalFile == accountDir.canonicalFile
+
+    /**
+     * **Who is holding a file, and why.**
+     *
+     * The app had **two** lock mechanisms and drew them with two branches: `.muffy/locked.json` for a
+     * lock a person sets, and a pair of name tests - [isAppFlag], [isSystemLocked] - for the files
+     * the app keeps. They answered the same question ("may this be written?") from two places, so
+     * every screen that asked it had to know both, and the row that showed the answer had a branch
+     * per mechanism. That is what "unify the system" is about: one answer, one place, and the
+     * mechanisms become where the answer is stored rather than what the answer *is*.
+     *
+     * The distinction that survives is **who set it**, because it decides whether it can be lifted:
+     * a person's lock is theirs to undo, and a lock the app set is a fact about the file that a tap
+     * cannot change. Report: "what is set by app cannot be unset".
+     */
+    enum class Hold {
+        /** Nobody is holding it: the person may write, rename, move or delete it. */
+        NONE,
+
+        /** The person set it. Tappable, and tapping lifts it. */
+        USER,
+
+        /** The app set it. Shown, readable, and **not liftable** - the icon is a mark, not a button. */
+        APP,
+    }
+
+    /**
+     * The hold on [file], from both mechanisms, answered once.
+     *
+     * **Order matters, and APP wins.** A file can be both - the app's flags live under `.muffy/`,
+     * which a person can also lock by hand - and when they disagree the app's answer is the true
+     * one: a flag file is not writable by hand whatever `locked.json` says, so reporting USER there
+     * would offer a toggle whose other position is still refused.
+     *
+     * [locked] is the person's set, passed in rather than read, because it is held in state by the
+     * view model: reading the file here would make the answer change without the row redrawing,
+     * which is the defect that was reported as "lock button changes show only after reentering the
+     * screen".
+     */
+    fun hold(file: File, locked: Set<String>): Hold {
+        if (appHold(file) == Hold.APP) return Hold.APP
+        val path = relative(file) ?: return Hold.NONE
+        return if (pathString(path) in locked) Hold.USER else Hold.NONE
+    }
+
+    /**
+     * **Who is keeping a file out of the repository.**
+     *
+     * The same three states as [Hold], for the same reason and with the same storage split: the
+     * person's answer is a line in the project's `.gitignore`, which is a tracked document and part
+     * of the history; the app's answer is a line in `.git/info/exclude`, which is git's per-clone
+     * list and cannot be pushed. One question - "will this be sent?" - answered from two places,
+     * which is what unifying it means.
+     *
+     * **Not liftable when [APP].** The operator's rule: "what is set by app cannot be unset". A
+     * person who could remove the app's own line would be able to send the app's bookkeeping to
+     * GitHub, which is the thing the line exists to prevent.
+     */
+    enum class Unsync {
+        /** Nothing is stopping it: the next commit will carry it. */
+        NONE,
+
+        /** The person ignored it. Tappable, and tapping lifts it. */
+        USER,
+
+        /** The app keeps it out. Shown, and **not liftable**. */
+        APP,
+    }
+
+    /**
+     * The names that hold a credential, and are therefore **held by the app**.
+     *
+     * This is the producer that makes [Hold.APP] and [Unsync.APP] real. Until it existed the app
+     * had the two states and no way to reach them, so the red mark could never be drawn and the rule
+     * "what is set by app cannot be unset" governed nothing.
+     *
+     * **A name list, and deliberately a short one.** The app cannot read a file and judge whether it
+     * holds a secret - a detector that tried would be wrong about the files somebody thought of and
+     * silently wrong about every other one. What it *can* do is recognise the handful of names that
+     * are never anything else: a `.env`, a private key, a keystore. Everything else is the person's
+     * to lock, which is why the person's lock still exists beside this one.
+     *
+     * Matched on the **name**, case-insensitively, and on the **extension** where the extension is
+     * the whole of the meaning (`*.key`, `*.pem`, `*.p12`).
+     */
+    private fun looksSecret(name: String): Boolean {
+        val lower = name.lowercase()
+        if (lower in SECRET_NAMES) return true
+        // `.env.local`, `.env.production`: the same file with a suffix saying which machine.
+        if (lower.startsWith(".env")) return true
+        val extension = lower.substringAfterLast('.', "")
+        return extension in SECRET_EXTENSIONS
+    }
+
+    /**
+     * The hold the app itself puts on [file], or [Hold.NONE].
+     *
+     * Separate from [hold] because the two are different questions: this one is "does the app
+     * *decide* to hold this", and [hold] is "is it held". Keeping them apart is what lets the app's
+     * reason be a rule about names while the person's is a stored list, without either pretending to
+     * be the other.
+     */
+    fun appHold(file: File): Hold =
+        if (isAppFlag(file) || isSystemLocked(file.name) || looksSecret(file.name)) Hold.APP
+        else Hold.NONE
+
+    /**
+     * The unsync state of [file], from both ignore files, answered once.
+     *
+     * **APP wins when both match**, for the same reason as [Hold]: the app's line is in
+     * `.git/info/exclude` and would still hold if the person's line went away, so offering a toggle
+     * would offer an act that changes nothing.
+     *
+     * The paths are compared as git matches them - the project-relative path, with a folder written
+     * with a trailing slash - because a comparison that spells a path differently from the line that
+     * wrote it finds nothing.
+     */
+    fun unsync(file: File): Unsync {
+        val project = projectOf(file) ?: return Unsync.NONE
+        val path = relative(file) ?: return Unsync.NONE
+        val inside = path.drop(1).joinToString("/").let { if (file.isDirectory) "$it/" else it }
+        if (inside.isEmpty()) return Unsync.NONE
+        val dir = projectDir(project)
+        // **A secret is kept out by the app, whether or not the line is written yet.** The line is
+        // what git reads, so `ensureSecretIgnores` writes it - but the answer to "will this be
+        // sent?" must not depend on whether a bookkeeping step has run, or the row would show grey
+        // for a file that must never travel.
+        if (looksSecret(file.name)) return Unsync.APP
+        // The app's own list next: it is the answer that cannot be lifted.
+        if (linesIn(File(dir, ".git" + File.separator + "info" + File.separator + "exclude"))
+                .any { it == inside }
+        ) {
+            return Unsync.APP
+        }
+        return if (linesIn(File(dir, IGNORE)).any { it == inside }) Unsync.USER else Unsync.NONE
+    }
+
+    /** The non-blank, non-comment lines of a file, or none when it is not there. */
+    private fun linesIn(file: File): List<String> =
+        if (!file.isFile) emptyList()
+        else read(file).lineSequence().map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("#") }.toList()
 
     /**
      * True when [file] is one of the app's own flags, which are shown and never written by hand.
@@ -373,6 +550,11 @@ class Workspace(val accountDir: File) {
         // back, and a hand-edited lock list naming a file that no longer exists is a lock with no
         // object.
         if (isAppFlag(file)) return false
+        // **A secret is held by the app, so the funnel refuses it.** The lock mark and this refusal
+        // are the same rule seen twice - a file the app will not let you write, drawn as a lock and
+        // enforced here. Without this the mark would be decoration: the editor would open the file
+        // and save it, and the red icon would have promised something the write did not honour.
+        if (looksSecret(file.name)) return false
         put(file, text)
         return true
     }
@@ -813,6 +995,7 @@ class Workspace(val accountDir: File) {
         return try {
             folder.mkdirs()
             ensureIgnore(folder)
+            ensureSecretIgnores(folder)
             Result.success(folder)
         } catch (e: Exception) {
             Result.failure(IllegalStateException("Could not make the project folder"))
@@ -930,6 +1113,50 @@ class Workspace(val accountDir: File) {
 
         /** A project's ignore file, and the two lines the app keeps in it. */
         const val IGNORE = ".gitignore"
+
+        /**
+         * Names that are a credential and nothing else.
+         *
+         * Short on purpose - see [looksSecret]. These are the ones where a person would not have to
+         * think: a file called `.env` is environment secrets, and one called `id_rsa` is a key.
+         */
+        val SECRET_NAMES = setOf(
+            ".env",
+            "id_rsa",
+            "id_dsa",
+            "id_ecdsa",
+            "id_ed25519",
+            "keystore",
+            "keystore.jks",
+            "secrets.properties",
+            "credentials.json",
+        )
+
+        /**
+         * Extensions that mean "this file is a key".
+         *
+         * The extension is the whole of the meaning for these - a `.pem` is a certificate or a key
+         * whatever it is called, which is why they are matched apart from the names above.
+         */
+        val SECRET_EXTENSIONS = setOf("pem", "key", "p12", "pfx", "jks", "keystore")
+
+        /**
+         * The git patterns that match [SECRET_NAMES] and [SECRET_EXTENSIONS].
+         *
+         * Written as patterns rather than paths because the file a person is about to make does not
+         * exist yet - see [ensureSecretIgnores]. The list is derived from the two sets above so the
+         * three cannot drift: a name added to `SECRET_NAMES` that had no pattern would be locked and
+         * still pushed, which is the one combination that must not be possible.
+         */
+        val SECRET_PATTERNS: List<String> = buildList {
+            // **A bare name, not `*/name`.** git matches a pattern with no slash against the name at
+            // any depth, so `id_rsa` already catches `keys/id_rsa`. Writing `*/id_rsa` would catch
+            // only the nested one and silently let the root's through.
+            SECRET_NAMES.forEach { add(it) }
+            // The `.env` family: `.env`, `.env.local`, `.env.production`, and so on.
+            add(".env.*")
+            SECRET_EXTENSIONS.forEach { add("*.$it") }
+        }.distinct()
         /**
          * What the app writes into a project that is **not the person's work.**
          *

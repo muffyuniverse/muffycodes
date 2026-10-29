@@ -407,4 +407,109 @@ class WorkspaceTest {
         assertTrue("the lock is read from disk", other.isLocked(file))
         assertFalse("and it refuses a write too", other.write(file, "three litres"))
     }
+
+    // ---- one answer for "who is holding this" --------------------------------
+
+    /** A project with a repository, so the two ignore files have somewhere to live. */
+    private fun project(): File {
+        val dir = File(workspace.accountDir, "shopping")
+        File(dir, ".git" + File.separator + "info").mkdirs()
+        return dir
+    }
+
+    @Test
+    fun `nobody is holding a file nobody locked`() {
+        val dir = project()
+        val file = File(dir, "milk.txt").apply { writeText("two litres") }
+
+        assertEquals("no lock", Workspace.Hold.NONE, workspace.hold(file, emptySet()))
+        assertEquals("and nothing stops it", Workspace.Unsync.NONE, workspace.unsync(file))
+    }
+
+    @Test
+    fun `the person's lock and the app's lock are the same question with different answers`() {
+        val dir = project()
+        val mine = File(dir, "milk.txt").apply { writeText("two litres") }
+        // `.muffy/locked.json` names paths from the account root, which is what `hold` compares.
+        val path = workspace.pathString(workspace.relative(mine)!!)
+
+        assertEquals("the person set this one", Workspace.Hold.USER, workspace.hold(mine, setOf(path)))
+        // **The app's flags are held whatever the person's list says**, which is why APP wins: a
+        // flag is not writable by hand, so reporting USER would offer a toggle whose other position
+        // is still refused.
+        val flag = File(File(workspace.accountDir, ".muffy"), "locked.json").apply {
+            parentFile.mkdirs()
+            writeText("[]")
+        }
+        assertEquals("and the app holds its own", Workspace.Hold.APP, workspace.hold(flag, setOf(path)))
+    }
+
+    @Test
+    fun `a secret is held by the app, and is never written`() {
+        val dir = project()
+        // **A name the app recognises without reading the file.** It cannot judge content - see
+        // `looksSecret` - so the rule is the handful of names that are never anything else.
+        val key = File(dir, ".env").apply { writeText("OPENROUTER_KEY=sk-or-...") }
+
+        assertEquals("held by the app", Workspace.Hold.APP, workspace.hold(key, emptySet()))
+        assertEquals("and kept out of the repository", Workspace.Unsync.APP, workspace.unsync(key))
+        // **The mark is not decoration.** A red lock the write funnel ignored would promise
+        // something the save did not honour.
+        assertFalse("so the funnel refuses a write", workspace.write(key, "replaced"))
+        assertEquals("and the file is untouched", "OPENROUTER_KEY=sk-or-...", key.readText())
+    }
+
+    @Test
+    fun `the extension is enough for a key, and the name is not case sensitive`() {
+        val dir = project()
+
+        assertEquals("a .pem", Workspace.Hold.APP, workspace.hold(File(dir, "server.pem"), emptySet()))
+        assertEquals("a .key", Workspace.Hold.APP, workspace.hold(File(dir, "deploy.KEY"), emptySet()))
+        assertEquals("and .ENV", Workspace.Hold.APP, workspace.hold(File(dir, ".ENV.local"), emptySet()))
+        assertEquals(
+            "but an ordinary file is not",
+            Workspace.Hold.NONE,
+            workspace.hold(File(dir, "notes.txt"), emptySet()),
+        )
+    }
+
+    @Test
+    fun `the app's secret rule is written where git reads it, and not into the person's file`() {
+        val dir = project()
+        workspace.ensureSecretIgnores(dir)
+
+        val exclude = File(dir, ".git" + File.separator + "info" + File.separator + "exclude").readText()
+        assertTrue("the .env family", exclude.lineSequence().any { it.trim() == ".env.*" })
+        assertTrue("the key extensions", exclude.lineSequence().any { it.trim() == "*.pem" })
+        // **Not `.gitignore`.** That file is tracked and pushed, so the app's rule would become a
+        // fact about the person's repository and every clone would inherit a line for a file that
+        // never existed in it.
+        assertFalse("the person's ignore file was not made", File(dir, Workspace.IGNORE).exists())
+    }
+
+    @Test
+    fun `writing the secret rule twice does not write it twice`() {
+        val dir = project()
+        workspace.ensureSecretIgnores(dir)
+        val once = File(dir, ".git" + File.separator + "info" + File.separator + "exclude").readText()
+
+        workspace.ensureSecretIgnores(dir)
+        val twice = File(dir, ".git" + File.separator + "info" + File.separator + "exclude").readText()
+
+        assertEquals("the file is unchanged", once, twice)
+        assertEquals("and no line is repeated", once.lines().size, once.lines().distinct().size)
+    }
+
+    @Test
+    fun `the person's ignore line reads as the person's, and the app's as the app's`() {
+        val dir = project()
+        val file = File(dir, "notes.txt").apply { writeText("mine") }
+        File(dir, Workspace.IGNORE).writeText("notes.txt\n")
+
+        assertEquals("the person did this one", Workspace.Unsync.USER, workspace.unsync(file))
+
+        // A line in the app's own list wins, because it would still hold if the person's went away.
+        File(dir, ".git" + File.separator + "info" + File.separator + "exclude").writeText("notes.txt\n")
+        assertEquals("and the app's wins", Workspace.Unsync.APP, workspace.unsync(file))
+    }
 }

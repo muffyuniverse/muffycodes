@@ -57,6 +57,7 @@ class ProjectGit(
         // After the repository, because the lines live in `.git/info/exclude` — they are the app's
         // own local rule, not a file in the person's repository.
         workspace.ensureIgnore(dir)
+        workspace.ensureSecretIgnores(dir)
         Result.success(Unit)
     } catch (e: Throwable) {
         Result.failure(e)
@@ -292,6 +293,7 @@ class ProjectGit(
         if (result.success) {
             open(project)?.use { repo -> GitService.scrubRemoteUrls(repo) }
             workspace.ensureIgnore(dir)
+            workspace.ensureSecretIgnores(dir)
         }
         return result
     }
