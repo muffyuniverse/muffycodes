@@ -2647,10 +2647,15 @@ class AgentTest {
             log.told("task $i")
             log.note("agent", "working on $i")
         }
-        // A small but real pair of numbers: the trigger is what the agent is asked at, and the
-        // hard limit sits above it, because the app's trim is the last resort and never the first
-        // thing that happens. The content is a few hundred tokens, so both are crossed.
-        val limits = ContextBudget.Limits.of(triggerAsked = 100, hardAsked = 140, ceiling = 100_000)
+        // A small but real set of numbers: the trigger is what the agent is asked at, the trim sits
+        // above it, and both aim at a target below them. The content is a few hundred tokens, so the
+        // trim point is crossed and the pass runs.
+        val limits = ContextBudget.Limits.of(
+            triggerAsked = 100,
+            hardAsked = 140,
+            targetAsked = 40,
+            ceiling = 100_000,
+        )
         val door = ScriptedDoor(Reply("done"))
         val before = Trace.report().lines.toSet()
 

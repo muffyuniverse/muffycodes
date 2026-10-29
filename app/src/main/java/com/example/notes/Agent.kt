@@ -948,8 +948,18 @@ class Agent(
             // trigger would land the context exactly on the point that asked for it, and the next
             // row to arrive would cross it again. The operator's correction: "both forget and trim
             // compactions should have same target but different triggers".
-            append("Get it to ${ContextBudget.short(target)} tokens or less in this one `forget` - ")
-            append("then the app stops asking. Cut further if rows do not serve the current task; ")
+            // **No target when there is none to derive.** A trigger of one token has no positive
+            // integer below it, so `targetAt` is zero - and "get it to off tokens" would be a
+            // sentence about nothing. The ask is then simply "cut what does not serve the task",
+            // which is the honest instruction when the app cannot name a size.
+            if (target > 0L) {
+                append("Get it to ${ContextBudget.short(target)} tokens or less in this one ")
+                append("`forget` - then the app stops asking. ")
+            } else {
+                append("Cut what does not serve the current task in this one `forget` - then the ")
+                append("app stops asking. ")
+            }
+            append("Cut further if rows do not serve the current task; ")
             append("anything unrelated to what you are doing now can go.")
             if (biggest.isNotEmpty()) {
                 // **The index, because the file cannot be read in one go.** A `read` of a large

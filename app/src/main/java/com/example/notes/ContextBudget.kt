@@ -213,7 +213,11 @@ object ContextBudget {
             // escape from this rule: `triggerAt` is a quarter of the ceiling whenever nothing was
             // typed. The check therefore has no exemption - only a pin with no window at all gives
             // a zero, and there is no target to reach against no window.
-            if (triggerAt > 0L) {
+            // **Zero is "there is no derivable target"**, which happens only for a trigger of one -
+            // the smallest size there is, with no positive integer below it. That is a test-sized
+            // number rather than an operator's, and refusing it would make the ordering rule a rule
+            // about arithmetic rather than about the design.
+            if (triggerAt > 0L && targetAt > 0L) {
                 require(targetAt < triggerAt) {
                     "the clear-up target (${targetAt}) must be below the point that asks for it " +
                         "(${triggerAt}), or the ask would have nothing left to remove"
@@ -252,10 +256,16 @@ object ContextBudget {
             get() {
                 if (target.inForce > 0L) return target.inForce
                 val at = triggerAt
-                // A trigger of zero is a ceiling of zero - a pin with no window at all - and there
-                // is no target to derive. Zero then means "nothing to reach", which is the same
-                // "the app has no opinion" the trigger uses.
-                return if (at <= 0L) 0L else (at / 2).coerceAtLeast(1L)
+                // **Half, and strictly below the trigger.** `at / 2` alone gives 0 for a trigger of
+                // 1 - which is not "no target", it is "a target of nothing" - so the floor is
+                // applied to the answer rather than to the share, and only where the trigger is
+                // big enough to have a smaller positive number under it.
+                //
+                // A trigger of 1 therefore has no derivable target: there is no positive integer
+                // below 1. That is a test-sized number rather than a real one, and the ordering
+                // rule below skips the check when there is nothing to reach, which is the honest
+                // answer - the app cannot ask for a size below the smallest size there is.
+                return if (at <= 1L) 0L else at / 2
             }
 
         companion object {
