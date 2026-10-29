@@ -89,11 +89,13 @@ class StatsScreenTest {
     @Test
     fun `the two picks are drawn with their instants`() {
         draw()
-        // The default interval: midnight to the next hour boundary after 14:30, which is 15:00.
+        // **Midnight to the end of the minute `now` is in.** At 14:30 that is 14:31 - the minute
+        // 14:30 counts, because an end is where the interval STOPS. Not 15:00, which was the answer
+        // while the granularity was the hour.
         compose.onNodeWithText("From").assertExists()
         compose.onNodeWithText("To").assertExists()
         compose.onNodeWithText("28 Oct 2026, 00:00", substring = true).assertExists()
-        compose.onNodeWithText("28 Oct 2026, 15:00", substring = true).assertExists()
+        compose.onNodeWithText("28 Oct 2026, 14:31", substring = true).assertExists()
     }
 
     @Test
@@ -138,9 +140,10 @@ class StatsScreenTest {
     @Test
     fun `the table says how long its interval is`() {
         draw()
-        // Midnight to the 15:00 boundary - the interval's own extent, so a figure has a scale
-        // rather than being a number with no span.
-        compose.onNodeWithText("15 hours", substring = true).assertExists()
+        // **14 hours 31 minutes, and it says both.** Midnight to 14:31 is not a whole number of
+        // hours, so the span carries the minutes rather than rounding to "14 hours" and hiding the
+        // extent it actually covers.
+        compose.onNodeWithText("14 hours 31 minutes", substring = true).assertExists()
     }
 
     @Test

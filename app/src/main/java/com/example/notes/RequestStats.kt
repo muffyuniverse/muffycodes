@@ -94,6 +94,24 @@ object RequestStats {
         .toInstant().toEpochMilli()
 
     /**
+     * The boundary just after the **minute containing** [ms] - i.e. where "up to and including now"
+     * stops.
+     *
+     * **Distinct from `interval(now, now).toMs`, which is zero-length on an exact boundary.** The
+     * screen's default interval is "midnight to now", and on the one tick where the clock lands
+     * exactly on a minute the two coincide, so that expression yields an empty interval and the
+     * screen opens showing nothing. This always moves forward by a whole minute.
+     *
+     * Computed on the local timeline rather than by adding 60,000 ms, so a zone that ever shifted
+     * by seconds cannot make the answer disagree with the label the picker prints.
+     */
+    fun endOfMinute(
+        ms: Long,
+        zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
+    ): Long = java.time.Instant.ofEpochMilli(localMinuteFloor(ms, zone)).atZone(zone)
+        .plusMinutes(1).toInstant().toEpochMilli()
+
+    /**
      * The start of the **wall-clock** hour [ms] falls in, in [zone].
      *
      * Kept because the picker's hour stepper snaps on it, and because a minute floor that ignored

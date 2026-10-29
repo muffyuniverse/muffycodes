@@ -152,28 +152,33 @@ object StatsFormat {
             .format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm"))
 
     /**
-     * An interval's length, **in whichever unit reads best**: `45 minutes`, `3 hours`, `2 days`.
+     * An interval's length, **in whichever units read best**: `15 minutes`, `1 hour 30 minutes`,
+     * `14 hours 31 minutes`, `2 days 3 hours`.
      *
-     * **Minutes, hours and days rather than one unit.** The pickers now state a minute, so a
-     * fifteen-minute window is an ordinary thing to ask for - and "0 hours" is not an answer to
-     * "how long is this interval". Nor is "1,440 minutes" an answer for a day.
+     * **Two units at most, and never a bare count of minutes at a size nobody reads that way.** A
+     * person asking "how long is this" wants 14h31m, not 871 minutes and not a rounded 14 hours -
+     * one is unreadable and the other is a lie about the extent. So the largest unit that fits is
+     * used, and the next one down is carried alongside when there is a remainder.
      *
-     * Hours are only used when the interval is a whole number of them, so `90 minutes` stays
-     * `90 minutes` rather than becoming `1 hours` and losing the half hour that is the point.
+     * **Minutes below an hour**, because "0 hours" is not an answer to a fifteen-minute window and
+     * `0.25 hours` is not how anybody says it.
+     *
+     * Pluralised properly, because "1 hours" is the kind of thing a screenshot catches and an
+     * assertion written by the same person does not.
      */
-    fun span(minutes: Long): String = when {
-        minutes < 60 -> "$minutes ${if (minutes == 1L) "minute" else "minutes"}"
-        minutes < 1440 && minutes % 60 == 0L -> {
+    fun span(minutes: Long): String {
+        fun n(count: Long, one: String, many: String) = "$count ${if (count == 1L) one else many}"
+        if (minutes < 60) return n(minutes, "minute", "minutes")
+        if (minutes < 1440) {
             val h = minutes / 60
-            "$h ${if (h == 1L) "hour" else "hours"}"
+            val m = minutes % 60
+            val hours = n(h, "hour", "hours")
+            return if (m == 0L) hours else "$hours ${n(m, "minute", "minutes")}"
         }
-        minutes < 1440 -> "$minutes minutes"
-        else -> {
-            val d = minutes / 1440
-            val rest = minutes % 1440
-            val days = "$d ${if (d == 1L) "day" else "days"}"
-            if (rest == 0L) days else "$days, $rest minutes"
-        }
+        val d = minutes / 1440
+        val h = (minutes % 1440) / 60
+        val days = n(d, "day", "days")
+        return if (h == 0L) days else "$days ${n(h, "hour", "hours")}"
     }
 
     /** A request count. */

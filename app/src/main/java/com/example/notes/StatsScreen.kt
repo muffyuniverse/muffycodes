@@ -84,10 +84,14 @@ fun StatsScreen(
     // are allowed to differ, and that difference is the whole point of the button - you can set up
     // an interval without the table moving under your hands on every stepper press.
     var from by remember { mutableStateOf(dayStart(now)) }
-    // **The next minute boundary**, not the current instant: an end is where the interval STOPS, so
-    // "from midnight to 20:00" covers the minutes up to 19:59. Asked of the same function the
-    // pickers use rather than computed here, so a zone with an odd offset cannot disagree.
-    var to by remember { mutableStateOf(RequestStats.interval(now, now).toMs) }
+    // **The end of the minute now is in**, not the current instant and not the current minute: an
+    // end is where the interval STOPS, so "from midnight to 14:31" covers the minute 14:30.
+    //
+    // `interval(now, now)` alone is NOT that answer at minute granularity: with `now` exactly on a
+    // minute boundary it returns that boundary as the end, which is a zero-length interval - the
+    // screen would open showing nothing on the one tick where the clock happens to be exact. And
+    // `interval(now, now + 60_000)` overshoots to two minutes when `now` has seconds on it.
+    var to by remember { mutableStateOf(RequestStats.endOfMinute(now)) }
     // **What the table is showing.** Starts equal to the picks, so the screen is useful before
     // anybody presses anything - a table that said "press Generate" on first open would be a
     // screen that does nothing when opened.
