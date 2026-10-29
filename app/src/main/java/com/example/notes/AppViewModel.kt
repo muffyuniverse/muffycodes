@@ -2488,6 +2488,7 @@ class AppViewModel @JvmOverloads constructor(
 
     /** The project whose conversation is on the screen, or null when none is. */
     var chatProject: String? by mutableStateOf(null)
+        private set
 
     /**
      * **What has happened to the open project's context**, for the settings block.
@@ -2509,7 +2510,6 @@ class AppViewModel @JvmOverloads constructor(
                 AgentLog.Fate()
             }
         }
-        private set
 
     /**
      * The conversation as the record last had it.
