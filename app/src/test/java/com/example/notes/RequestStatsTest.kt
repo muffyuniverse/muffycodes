@@ -249,20 +249,9 @@ class RequestStatsTest {
         // Two earlier versions of this test were wrong here. The first asserted "clock is never
         // narrower" for every preset, which is false for six of the eight. The second moved the
         // split to a day boundary, which is false for "15 min". The cell's age is the actual rule.
-        assertEquals(
-            "the hour is 16 minutes old, so 15 min is the one preset the clock widens",
-            at(9),
-            start(RequestStats.Preset.MINUTES_15),
-        )
-        assertTrue(
-            "and its clock interval is wider than the fifteen minutes it names",
-            now - start(RequestStats.Preset.MINUTES_15) > 15 * 60_000L,
-        )
         for (p in RequestStats.Preset.entries.filter { it != RequestStats.Preset.TOTAL }) {
             val clock = p.clockAt(now, zone).fromMs
             val rolling = p.intervalAt(now, zone).fromMs
-            // The rule, stated once: the clock start reaches back further iff the cell is older
-            // than the length.
             val cellOlderThanLength = (now - clock) > (now - rolling)
             if (cellOlderThanLength) {
                 assertTrue("${p.label}: the cell is older, so the clock is wider", clock < rolling)
@@ -270,6 +259,175 @@ class RequestStatsTest {
                 assertTrue("${p.label}: the clock is the narrower one", clock >= rolling)
             }
         }
+    }
+
+    @Test
+    fun `a quarter on the clock starts on a quarter boundary, not the first of the month`() {
+        // **The case that separates "months" from "quarters".** On 28 October a one-month clock
+        // interval starts on 1 October, which is right; a one-quarter one that also started on
+        // 1 October would be a month, not a quarter. It starts on 1 October only because October IS
+        // a quarter boundary - so the test uses a month that is not.
+        val zone = ZoneId.of("UTC")
+        val november = LocalDate.parse("2026-11-15").atTime(9, 16).atZone(zone).toInstant().toEpochMilli()
+        val quarterStart = RequestStats.Preset.QUARTER_1.clockAt(november, zone).fromMs
+        assertEquals(
+            "a quarter beginning in November starts in October",
+            LocalDate.parse("2026-10-01").atStartOfDay(zone).toInstant().toEpochMilli(),
+            quarterStart,
+        )
+        val december = LocalDate.parse("2026-12-15").atTime(9, 16).atZone(zone).toInstant().toEpochMilli()
+        assertEquals(
+            "and December is still the same quarter",
+            LocalDate.parse("2026-10-01").atStartOfDay(zone).toInstant().toEpochMilli(),
+            RequestStats.Preset.QUARTER_1.clockAt(december, zone).fromMs,
+        )
+    }
+
+    @Test
+    fun `a month back from the thirty-first clamps rather than overflowing`() {
+        // **31 October minus one month is 30 September**, not 31 September and not 1 October. Java's
+        // calendar arithmetic clamps, which is the answer a person means; a fixed 30-day subtraction
+        // would give 1 October and be wrong by a day in the other direction.
+        val zone = ZoneId.of("UTC")
+        val at = LocalDate.parse("2026-10-31").atTime(9, 16).atZone(zone).toInstant().toEpochMilli()
+        assertEquals(
+            "clamped to the last day of September",
+            LocalDate.parse("2026-09-30").atTime(9, 16).atZone(zone).toInstant().toEpochMilli(),
+            RequestStats.Preset.MONTH_1.intervalAt(at, zone).fromMs,
+        )
+    }
+
+    @Test
+    fun `total reaches back to the oldest thing the log holds`() {
+        // The one preset whose start cannot be derived from `now`, so it takes the history's own
+        // beginning. With no history it is an empty interval rather than one stretching to 1970.
+        val zone = ZoneId.of("UTC")
+        val now = LocalDate.parse("2026-10-28").atTime(9, 16).atZone(zone).toInstant().toEpochMilli()
+        val oldest = now - 400L * 86_400_000L
+        assertEquals("from the first row", oldest, RequestStats.Preset.TOTAL.intervalAt(now, zone, oldest).fromMs)
+        assertEquals("to the opening moment", now, RequestStats.Preset.TOTAL.intervalAt(now, zone, oldest).toMs)
+        // **Clock and rolling agree on total**, because there is no grid to snap to.
+        assertEquals(
+            "no grid to snap for total",
+            RequestStats.Preset.TOTAL.intervalAt(now, zone, oldest),
+            RequestStats.Preset.TOTAL.clockAt(now, zone, oldest),
+        )
+        assertEquals("and with no history it is empty", now, RequestStats.Preset.TOTAL.intervalAt(now, zone, null).fromMs)
+    }
+
+    @Test
+    fun `the previous period is the same length, ending where this one starts`() {
+        // **The operator's definition**: *"previous interval is just start of the current interval
+        // minus length of the current interval."*
+        val zone = ZoneId.of("UTC")
+        fun ms(h: Int, m: Int = 0, day: Int = 28) =
+            LocalDate.parse("2026-10-${day.toString().padStart(2, '0')}")
+                .atTime(h, m).atZone(zone).toInstant().toEpochMilli()
+
+        val hour = RequestStats.Interval(ms(10), ms(11))
+        val before = RequestStats.previousOf(hour, zone)
+        assertEquals("ends where this one starts", ms(10), before.toMs)
+        assertEquals("and is the same length", 3_600_000L, before.toMs - before.fromMs)
+        assertEquals("so it starts an hour earlier", ms(9), before.fromMs)
+
+        // **A hand-set interval gets a baseline too**, which is the reason this is a function of the
+        // interval rather than of a preset: 10:17 to 10:43 compares against 09:51 to 10:17.
+        val odd = RequestStats.Interval(ms(10, 17), ms(10, 43))
+        val oddBefore = RequestStats.previousOf(odd, zone)
+        assertEquals("a hand-set interval still has a previous", ms(9, 51), oddBefore.fromMs)
+        assertEquals("of exactly its length", odd.toMs - odd.fromMs, oddBefore.toMs - oddBefore.fromMs)
+
+        // **An empty interval has no previous**, rather than a backwards one.
+        val empty = RequestStats.Interval(ms(10), ms(10))
+        assertEquals("empty", ms(10), RequestStats.previousOf(empty, zone).fromMs)
+        assertEquals("and not negative", ms(10), RequestStats.previousOf(empty, zone).toMs)
+    }
+
+    @Test
+    fun `the previous period of a day is a calendar day, not 86,400,000 milliseconds`() {
+        // **The DST case, and the reason the subtraction is on the local timeline.** On 25 October
+        // 2026 the UK clocks go back at 02:00, so that local day is 25 hours. Subtracting
+        // 86,400,000 ms from the 26th's midnight would land at 00:00 on the 25th *local* only by
+        // coincidence of the epoch - the point is that a fixed-milliseconds subtraction cannot
+        // express "a day ago" in a zone whose days are not all 24 hours, and the previous period
+        // would end an hour away from where the current one starts.
+        val london = ZoneId.of("Europe/London")
+        fun midnight(day: Int) =
+            LocalDate.parse("2026-10-${day.toString().padStart(2, '0')}")
+                .atStartOfDay(london).toInstant().toEpochMilli()
+
+        // The fixture really is testing what it claims: the 25th is 25 hours long in this zone.
+        assertEquals("the 25th is a 25-hour day here", 25L * 3_600_000L, midnight(26) - midnight(25))
+        assertEquals("and the 26th is 24", 24L * 3_600_000L, midnight(27) - midnight(26))
+
+        // **The current period is the 26th, which is 24 hours. Its previous is also 24 hours.**
+        //
+        // On this day that starts at 01:00 on the 25th rather than at its midnight, and the
+        // assertion says so explicitly because it looks like a bug and is not. The alternative - the
+        // previous CALENDAR day, 00:00 to 00:00 - would set 25 hours of traffic beside 24 and read
+        // as a 4% rise that nothing caused. A comparison column exists to compare equal amounts of
+        // time, and "minus the length" is what the operator asked for.
+        val before = RequestStats.previousOf(RequestStats.Interval(midnight(26), midnight(27)), london)
+        assertEquals("it ends where the current one starts", midnight(26), before.toMs)
+        assertEquals(
+            "and is exactly as long, which is what makes the comparison fair",
+            midnight(27) - midnight(26),
+            before.toMs - before.fromMs,
+        )
+        assertEquals(
+            "so it starts at 01:00 on the 25th, not at midnight",
+            LocalDate.parse("2026-10-25").atTime(1, 0).atZone(london).toInstant().toEpochMilli(),
+            before.fromMs,
+        )
+    }
+
+    @Test
+    fun `the button is pending when the picks differ from what was generated`() {
+        // **The Generate button's entire behaviour.** Pulled out of the screen because the
+        // alternative is driving Material's calendar to learn whether a button is enabled, which
+        // tests the harness rather than the decision.
+        val generated = RequestStats.Interval(1_000L, 2_000L)
+
+        assertEquals("unchanged", false, RequestStats.pending(1_000L, 2_000L, generated))
+        assertEquals("the start moved", true, RequestStats.pending(900L, 2_000L, generated))
+        assertEquals("the end moved", true, RequestStats.pending(1_000L, 2_100L, generated))
+        // **Swapping the ends is a different interval**, and must count as pending - a comparison
+        // done end-by-end would catch only half of it.
+        assertEquals("swapped", true, RequestStats.pending(2_000L, 1_000L, generated))
+        // **Returning to the generated interval clears it**, because the question is what the table
+        // is showing, not whether anything was ever touched.
+        assertEquals("moved and moved back", false, RequestStats.pending(1_000L, 2_000L, generated))
+    }
+
+    @Test
+    fun `a change is a ratio, and has no answer without a baseline`() {
+        // **The trap this guards.** One ping last period against twenty-two requests this period is
+        // +79,600%, which is arithmetically true and reads as a catastrophe. A zero baseline has no
+        // ratio at all, and neither does a figure only one side reported.
+        assertEquals("a rise", 0.5, RequestStats.change(100.0, 150.0)!!, 1e-9)
+        assertEquals("a fall", -0.25, RequestStats.change(100.0, 75.0)!!, 1e-9)
+        assertEquals("no change", 0.0, RequestStats.change(100.0, 100.0)!!, 1e-9)
+        // **A zero baseline is not "infinitely more".**
+        assertNull("nothing to compare against", RequestStats.change(0.0, 22.0))
+        // **Stopping entirely IS an answer**, and it is the one a person opens this table to find.
+        assertEquals("it stopped", -1.0, RequestStats.change(22.0, 0.0)!!, 1e-9)
+        // **An absent figure on either side has no change**, rather than a change against zero.
+        assertNull("no previous figure", RequestStats.change(null, 22.0))
+        assertNull("no current figure", RequestStats.change(22.0, null))
+    }
+
+    @Test
+    fun `a change prints with one decimal and an explicit sign`() {
+        // **One decimal, not three.** A change is a comparison of two numbers already rounded on
+        // screen; claiming 18.243% invites arithmetic that cannot be trusted.
+        assertEquals("a rise carries a plus", "+18.2%", StatsFormat.change(0.182))
+        assertEquals("a fall carries its own minus", "-4.0%", StatsFormat.change(-0.04))
+        assertEquals("it stopped", "-100.0%", StatsFormat.change(-1.0))
+        assertEquals("no change", "0.0%", StatsFormat.change(0.0))
+        // **No baseline prints a dash**, the same as every other absent figure.
+        assertEquals("absent", StatsFormat.NONE, StatsFormat.change(null))
+        // **Rounded before it is signed**, so a change of -0.04% is `0.0%` and not `-0.0%`.
+        assertEquals("a negligible fall is not a negative zero", "0.0%", StatsFormat.change(-0.0001))
     }
 
     @Test

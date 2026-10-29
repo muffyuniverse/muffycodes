@@ -145,7 +145,7 @@ fun StatsScreen(
 
     /** True when the picks have moved since the last Generate, so the button can say so. */
     val pending = remember(from, to, generated) {
-        RequestStats.interval(from, to) != generated
+        RequestStats.pending(from, to, generated)
     }
 
     /**

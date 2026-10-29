@@ -310,6 +310,22 @@ object RequestStats {
     }
 
     /**
+     * Whether the pickers have moved away from the interval the figures describe.
+     *
+     * **The Generate button's whole behaviour is this one comparison**, and it is a function of the
+     * two ends and what was last generated - nothing about a picker, a dialog, or Material. Pulled
+     * out of the screen so it can be asserted directly: a test that has to drive a calendar to learn
+     * whether a button is enabled is a test of Material's picker, not of this decision.
+     *
+     * **Compared as an [Interval], not as two longs.** `from` and `to` are separate pieces of state
+     * and either can move; what matters is the pair. Comparing them separately would also be wrong
+     * in a subtle case - swapping the two ends describes a different interval and must count as
+     * pending, while a naive `from != generated.from` would catch only half of it.
+     */
+    fun pending(fromMs: Long, toMs: Long, generated: Interval): Boolean =
+        interval(fromMs, toMs) != generated
+
+    /**
      * The period immediately before [current]: **the same length, ending where it starts.**
      *
      * The operator's definition - *"previous interval is just start of the current interval minus

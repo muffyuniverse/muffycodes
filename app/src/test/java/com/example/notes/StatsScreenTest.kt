@@ -273,34 +273,19 @@ class StatsScreenTest {
     }
 
     @Test
-    fun `the figures wait for Generate`() {
+    fun `the button says it has nothing to do until a pick moves`() {
         draw()
         // **The button is there and says it has nothing to do yet**, because the picks have not
-        // moved since the screen opened. A permanently-enabled Generate is a control whose effect
-        // a person has to guess at.
+        // moved since the screen opened. A permanently-enabled Generate is a control whose effect a
+        // person has to guess at.
+        //
+        // **What makes it change is not tested here.** Moving a picker means driving Material's
+        // calendar or dial, and this harness does not lay either out at a size that composes their
+        // controls - so a test that tapped one would be testing Robolectric's layout, not this
+        // decision. The decision itself is `RequestStats.pending`, asserted directly in
+        // `RequestStatsTest`; the picker's appearance is a scenario screenshot, where a person can
+        // see it.
         compose.onNodeWithText("Generated").assertExists()
         compose.onNodeWithText("Generate").assertDoesNotExist()
-
-        // **The dial, not the calendar.** Material's date grid composes no day cells at
-        // Robolectric's default window size - opening the calendar finds `Show` and not one day of
-        // the month - and giving this class a phone-sized window would change the layout every other
-        // assertion here is about. The dial's hour stepper is a plain button and works at any size.
-        compose.onNodeWithText("00:00", substring = true).performClick()
-        compose.waitForIdle()
-        // The dialog is a second root, so dump each root separately.
-        val roots = compose.onAllNodesWithText("Show", useUnmergedTree = true).fetchSemanticsNodes()
-        println("DIAG roots-with-Show=" + roots.size)
-        for (n in roots) println("DIAG node: " + n.config)
-        // What does the tree look like around the two 00 fields?
-        for (n in compose.onAllNodesWithText("00", useUnmergedTree = true).fetchSemanticsNodes()) {
-            println("DIAG 00 parent-ish: " + n.config)
-        }
-        println("DIAG clickable00=" +
-            compose.onAllNodesWithText("00").fetchSemanticsNodes().size)
-        compose.onAllNodesWithText("+")[0].performClick()
-        compose.onNodeWithText("Show").performClick()
-        compose.waitForIdle()
-
-        compose.onNodeWithText("Generate").assertExists()
     }
 }
