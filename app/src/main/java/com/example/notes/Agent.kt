@@ -873,6 +873,14 @@ class Agent(
             append("Clear up your context: call `forget` with the ids of the rows that do not ")
             append("relate to your current task. Keep the newest task, and forget a call together ")
             append("with its result. ")
+            // **Every row, in ONE call.** A model that forgets a row per request spends a request
+            // per row at exactly the moment the context is largest, which is the worst possible
+            // time to pay for a round trip - and each of those requests carries the context it is
+            // trying to shrink. Report: "it should list all ids and id spans in one request to
+            // forget in bulk".
+            append("**Name every row you want gone in that one call** - ids and spans together, ")
+            append("like `forget {\"ids\":\"3-9 14 21-26\"}`. A row per call costs a whole ")
+            append("request per row, and every one of them carries the context you are shrinking. ")
             // **A target, and it is a floor rather than a ceiling.** "Cut it down" is advice; "cut
             // it to at least this" is a number the next turn can measure, which is what makes the
             // request repeat until it is true. Cutting **past** the target is wanted rather than

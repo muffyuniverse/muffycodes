@@ -34,6 +34,17 @@ class AgentTools(
      * idle and the number that applies is the one in force when somebody asked for the work.
      */
     private val backgroundMs: () -> Long = { 0L },
+    /**
+     * The clear-up point in tokens, or zero when the operator set no trigger.
+     *
+     * **Read per call, like [backgroundMs], and for the same reason**: the setting can change while
+     * an agent is idle, and the number that applies is the one in force when the call arrives rather
+     * than the one that was in force when the runner was built.
+     *
+     * It is here because `forget` refuses when the context is **under** it - see [forget]. The rule
+     * belongs with the act, not with the screen that draws the number.
+     */
+    private val triggerTokens: () -> Long = { 0L },
 ) {
 
     /** The project's own folder: what the agent stands in. */
@@ -218,9 +229,12 @@ class AgentTools(
             ),
             spec(
                 "forget",
-                "Take rows out of your context when it is too big. The rows stay in the record. " +
-                    "`ids` names rows: one number, several, or a range like `7-12` — both ends " +
-                    "included — so \"2 5 7-12 14\" forgets ten rows in one call.",
+                "Take rows out of your context **when the app asks you to** - it refuses otherwise, " +
+                    "because a context that fits has nothing to clear. The rows stay in the record. " +
+                    "`ids` names rows: one number, several, or a range like `7-12` - both ends " +
+                    "included - so \"2 5 7-12 14\" forgets ten rows in **one call**. Name every row " +
+                    "you want gone in that one call: a row per request spends a request per row at " +
+                    "the moment your context is largest.",
                 """{"ids":"2 5 7-12 14"}""",
             ),
             spec(
@@ -1126,6 +1140,30 @@ class AgentTools(
      * and [AgentLog.forget] flips the named rows.
      */
     private fun forget(args: JSONObject): String {
+        // **Refused unless the app asked, and the numbers are in the refusal.**
+        //
+        // Compaction is the app's call rather than the agent's habit: a model free to forget whenever
+        // a result looks verbose will forget exactly when the result matters, and the person reading
+        // the record afterwards sees a conversation pruned for reasons nobody asked for. Under the
+        // trigger there is no problem to solve - the context fits - so the only effect of forgetting
+        // is losing rows the person paid to put there.
+        //
+        // **It is refused rather than hidden.** The tool stays in the spec, because it is the tool the
+        // clear-up line names; a model that calls it early gets a sentence saying why, which teaches
+        // it the rule. A tool that vanished would look like a bug in the request.
+        //
+        // The two numbers are given because a model told only "no" cannot tell whether it is close.
+        val trigger = triggerTokens()
+        if (trigger > 0L) {
+            val size = log.contextTokens()
+            if (size <= trigger) {
+                return refusal(
+                    "Your context is about ${ContextBudget.short(size)} tokens, under the " +
+                        "${ContextBudget.short(trigger)} clear-up point, so nothing needs to go. " +
+                        "Forget only when you are asked to, and name every row in one call.",
+                )
+            }
+        }
         val ids = idsIn(args).getOrElse { return refusal(it.message ?: "those ids cannot be used") }
         val problem = AgentLog.forgetProblem(log.rows(), ids)
         if (problem != null) return refusal(problem)

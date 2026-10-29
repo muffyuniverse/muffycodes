@@ -1822,6 +1822,52 @@ class AgentTest {
     )
 
     @Test
+    fun `forget is refused while the context fits, and the refusal names both numbers`() {
+        // **Compaction is the app's call, not the agent's habit.** A model free to forget whenever a
+        // result looks verbose will forget exactly when the result matters, and the person reading
+        // the record afterwards sees a conversation pruned for reasons nobody asked for. Under the
+        // trigger there is no problem to solve: the context fits, so the only effect of forgetting is
+        // losing rows the person paid to put there.
+        //
+        // **Refused rather than hidden**, because the tool is the one the clear-up line names; a
+        // model that calls it early gets a sentence that teaches it the rule, where a tool that
+        // vanished would look like a bug in the request.
+        log.told("task one")
+        val call = (log.call("read", """{"path":"milk.txt"}""")).also { lastCall = it }
+        log.got("read", "0\ntwo litres", answers = call)
+        log.note("agent", "the milk is there")
+        val over = AgentTools(ws, "shopping", git, log, triggerTokens = { 1L })
+        val under = AgentTools(ws, "shopping", git, log, triggerTokens = { 1_000_000L })
+
+        // `call` is the ROW id, which is what `forget` names.
+        val ids = JSONObject().put("ids", org.json.JSONArray(listOf(call))).toString()
+        val refused = under.run(Call("c1", "forget", ids))
+        assertTrue("refused: $refused", refused.startsWith(AgentLog.FAILURE))
+        // **Both numbers, because a model told only "no" cannot tell whether it is close.**
+        assertTrue("says where it is: $refused", refused.contains("tokens"))
+        assertTrue("and where the point is: $refused", refused.contains("clear-up point"))
+
+        // Over the trigger, the same call is the act it was asked to be.
+        val done = over.run(Call("c2", "forget", ids))
+        assertTrue("allowed over the trigger: $done", done.startsWith(AgentLog.SUCCESS))
+    }
+
+    @Test
+    fun `forget is not refused when the operator set no trigger at all`() {
+        // **Zero means "the app has no opinion"**, which is the default: a trigger of zero is
+        // resolved from the model's own window by `ContextBudget.Limits`, and a caller that has not
+        // resolved one - a test, a scripted door - must not be refused on arithmetic nobody asked
+        // for.
+        log.told("task one")
+        val call = (log.call("read", """{"path":"milk.txt"}""")).also { lastCall = it }
+        log.got("read", "0\ntwo litres", answers = call)
+        val none = AgentTools(ws, "shopping", git, log, triggerTokens = { 0L })
+
+        val answer = none.run(Call("c1", "forget", JSONObject().put("ids", org.json.JSONArray(listOf(call))).toString()))
+        assertTrue("allowed with no trigger: $answer", answer.startsWith(AgentLog.SUCCESS))
+    }
+
+    @Test
     fun `forgetting a pair takes it out of the context and leaves the text on the record`() {
         log.told("task one")
         val call = (log.call("read", """{"path":"milk.txt"}""")).also { lastCall = it }
@@ -2266,6 +2312,12 @@ class AgentTest {
         assertTrue("the size it was over", sent.contains("tokens when this turn began"))
         assertTrue("the limit the target comes from", sent.contains("The limit is"))
         assertTrue("and the wall behind it", sent.contains("takes 100k tokens of input"))
+        // **And one call, in bulk.** A model that forgets a row per request spends a request per row
+        // at exactly the moment the context is largest, and every one of those requests carries the
+        // context it is trying to shrink. Report: "it should list all ids and id spans in one request
+        // to forget in bulk".
+        assertTrue("says one call: $sent", sent.contains("in that one call"))
+        assertTrue("and shows a span", sent.contains("3-9"))
         assertTrue("the instructions are still the prefix", sent.startsWith(prompt.trim()))
         assertTrue(
             "and the line is after them, not inside them",

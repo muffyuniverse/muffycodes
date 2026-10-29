@@ -305,6 +305,12 @@ class AgentRunner(
                     bg = bg,
                     foregroundMs = settings.foregroundMs,
                     backgroundMs = { settings.backgroundMs },
+                    // **The clear-up point, read per call.** `forget` refuses under it, so the
+                    // number that applies is the one in force when the call arrives - not the one
+                    // that was in force when this runner was built. `limits` is already built here
+                    // from the model's own window, so the trigger is its own resolved number rather
+                    // than a second reading of the settings.
+                    triggerTokens = { limits.triggerAt },
                     sessionTokens = settings.sessionLimit,
                 )
                 if (waking == null) {

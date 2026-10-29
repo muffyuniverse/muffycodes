@@ -2703,6 +2703,24 @@ class AppViewModel @JvmOverloads constructor(
                     foregroundMs = settings.foregroundMs,
                     reconnectMs = settings.reconnectMs,
                     backgroundMs = { settings.backgroundMs },
+                    // **The clear-up point, read per call.** `forget` refuses under it, so the
+                    // number that applies is the one in force when the call arrives - not the one
+                    // that was in force when the chat screen was opened.
+                    triggerTokens = {
+                        // **The same numbers the settings screen shows**, resolved the same way:
+                        // the trigger and hard limit as asked for, clamped by this pin's own window.
+                        // A second derivation here would be a second answer to "how full is the
+                        // context allowed to be", and the two could disagree.
+                        ContextBudget.Limits.of(
+                            triggerAsked = settings.triggerTokens.toLong(),
+                            hardAsked = settings.hardTokens.toLong(),
+                            ceiling = ContextBudget.ceiling(
+                                pin = modelConfig.active.provider,
+                                contextLength = modelInfo?.contextLength,
+                                maxOutput = modelInfo?.maxOutput,
+                            ),
+                        ).triggerAt
+                    },
                     sessionTokens = settings.sessionLimit,
                     // Read at every boundary rather than captured: the person may speak or stop while
                     // this turn is waiting for an answer, and the loop has to see that when it comes.
