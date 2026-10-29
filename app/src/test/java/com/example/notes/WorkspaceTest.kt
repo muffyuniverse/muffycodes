@@ -501,15 +501,43 @@ class WorkspaceTest {
     }
 
     @Test
-    fun `the person's ignore line reads as the person's, and the app's as the app's`() {
+    fun `unsync is a list of paths this phone keeps, not a git ignore`() {
+        // **The distinction the whole feature turns on.** A `.gitignore` line would untrack the file:
+        // out of the index, out of future commits, unversioned here. Unsyncing leaves it tracked and
+        // committed and only keeps it out of the tree that is *sent*, so the answer lives in the
+        // app's own flags beside pins and locks.
         val dir = project()
         val file = File(dir, "notes.txt").apply { writeText("mine") }
+
+        assertEquals("nothing yet", Workspace.Unsync.NONE, workspace.unsync(file))
+        // A `.gitignore` line is NOT an unsync - it is a different act with a different consequence.
         File(dir, Workspace.IGNORE).writeText("notes.txt\n")
+        assertEquals("an ignore is not an unsync", Workspace.Unsync.NONE, workspace.unsync(file))
 
-        assertEquals("the person did this one", Workspace.Unsync.USER, workspace.unsync(file))
+        val path = workspace.pathString(workspace.relative(file)!!)
+        workspace.setUnsynced(setOf(path))
+        assertEquals("the person unsynced it", Workspace.Unsync.USER, workspace.unsync(file))
+        assertEquals("and it is left out of what is sent", listOf("notes.txt"), workspace.unsentFrom("shopping"))
 
-        // A line in the app's own list wins, because it would still hold if the person's went away.
-        File(dir, ".git" + File.separator + "info" + File.separator + "exclude").writeText("notes.txt\n")
-        assertEquals("and the app's wins", Workspace.Unsync.APP, workspace.unsync(file))
+        // And back again: the toggle has two directions, which the ignore button never had.
+        workspace.setUnsynced(emptySet())
+        assertEquals("and it is sent again", Workspace.Unsync.NONE, workspace.unsync(file))
+        assertTrue("with nothing left out", workspace.unsentFrom("shopping").isEmpty())
+    }
+
+    @Test
+    fun `a secret is left out of what is sent even though it is never named`() {
+        val dir = project()
+        File(dir, ".env").writeText("KEY=sk-or-...")
+        File(dir, "notes.txt").writeText("mine")
+
+        // **Found by walking, not by the stored list.** The app's rule is about names, so the only
+        // way to apply it is to look at what is actually in the project - a stored list could not
+        // know about a file somebody made a second ago.
+        assertEquals(
+            "the secret is left out and the note is not",
+            listOf(".env"),
+            workspace.unsentFrom("shopping"),
+        )
     }
 }

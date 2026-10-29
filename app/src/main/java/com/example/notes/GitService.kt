@@ -1231,7 +1231,10 @@ object GitService {
                 val command = git.push()
                     .setRemote("origin")
                     .setForce(true)
-                    .setRefSpecs(RefSpec("$commit:refs/heads/$onto"))
+                    // **`.name`, because a `RefSpec` parses a string and an `ObjectId` renders as
+                    // `AnyObjectId[e55...]`** - which git rejects as "Invalid ref name", and the
+                    // sync then looked like a push that failed for no stated reason.
+                    .setRefSpecs(RefSpec("${commit.name}:refs/heads/$onto"))
                 credentials(token)?.let { command.setCredentialsProvider(it) }
                 val results = command.call()
                 val updates = results.flatMap { it.remoteUpdates }
@@ -1301,6 +1304,32 @@ object GitService {
         } catch (e: Throwable) {
             null
         }
+
+    /**
+     * Every path held by [ref], or none when it does not resolve.
+     *
+     * **The question "did this file travel?" has one honest answer: what the ref holds.** A working
+     * tree says what is on disk here, and a local log says what this phone committed; only the
+     * remote's own ref says what GitHub was given. Used by the unsync tests, and by anything that
+     * wants to check a push rather than assume it.
+     */
+    fun treePaths(repo: Repository, ref: AnyObjectId?): List<String> {
+        if (ref == null) return emptyList()
+        return try {
+            RevWalk(repo).use { walk ->
+                val tree = walk.parseCommit(ref).tree
+                TreeWalk(repo).use { tw ->
+                    tw.addTree(tree)
+                    tw.isRecursive = true
+                    val out = mutableListOf<String>()
+                    while (tw.next()) out += tw.pathString
+                    out.sorted()
+                }
+            }
+        } catch (e: Throwable) {
+            emptyList()
+        }
+    }
 
     /** Pulls from the remote into the current branch. */
     fun pull(repo: Repository, token: String?): RemoteResult {

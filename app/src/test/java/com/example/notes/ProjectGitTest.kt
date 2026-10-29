@@ -682,7 +682,25 @@ class ProjectGitTest {
         assertTrue(git.sync("Shopping").success)
 
         assertEquals("nothing to send", 0, git.changes("Shopping").total)
-        assertTrue(git.log("Shopping", "${AgentLog.DIR}/session.log").isEmpty())
+        // **The record is in the LOCAL history and not on the remote, and that is the change.**
+        // This used to assert that the record had no commit at all, which was true while `agent/`
+        // was handled by `.git/info/exclude`: an ignore means git never saw the file. Unsyncing is
+        // the other act - the record is committed here like anything else, and left out of the tree
+        // that is *sent* - so the local log holds it and the remote must not.
+        assertFalse(
+            "the record is versioned on this phone",
+            git.log("Shopping", "${AgentLog.DIR}/session.log").isEmpty(),
+        )
+        // The remote is a bare repository on disk, so its branch is read directly - the same thing
+        // a clone would see, and the only place that answers "did this travel?".
+        val sent = org.eclipse.jgit.api.Git.open(bare).use { remote ->
+            GitService.treePaths(remote.repository, remote.repository.resolve("refs/heads/main")
+                ?: remote.repository.resolve("refs/heads/master"))
+        }
+        assertTrue(
+            "and never reaches the remote",
+            sent.none { it.startsWith(AgentLog.DIR + "/") },
+        )
     }
 
     // ---- the file being written is never content --------------------------------------------
