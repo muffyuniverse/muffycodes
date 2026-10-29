@@ -306,7 +306,6 @@ fun StatsScreen(
                         selected = rollingPick,
                         onPick = { applyPreset(it, clock = false) },
                     )
-                    )
                     Text(
                         // **What the interval is, and whether the log reaches it.** Two facts,
                         // because they answer different questions: "what am I looking at" and "is
