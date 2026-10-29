@@ -82,6 +82,15 @@ fun StatsScreen(
     clockNow: () -> Long = { System.currentTimeMillis() },
     /** Reads the history off the main thread. Null in tests, which open a temp directory directly. */
     readRows: (((RequestDb.History) -> Unit) -> Unit)? = null,
+    /**
+     * Opens the report window.
+     *
+     * **Here because this is a screen a person reads figures off**, and a figure that looks wrong is
+     * exactly when somebody wants to say so - with the interval they were looking at already in the
+     * log behind them. Every other top bar in the app carries the button, so its absence here was a
+     * gap rather than a decision. Report: "add debug icon to stats menu as well".
+     */
+    onReport: () -> Unit = {},
 ) {
     /**
      * **The interval, as two picks.** The operator's revision: *"we need 2 pickers for starting and
@@ -283,7 +292,12 @@ fun StatsScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
-                title = { Text("What it cost", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                // **"Account statistics", not "What it cost".** The screen reports tokens, requests
+                // and time as well as money, so a title about cost described one of its rows. The
+                // name is also what the button that opens it is called, which is what a person
+                // carries between the two screens.
+                title = { Text("Account statistics", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                actions = { ReportButton(onReport) },
             )
         },
     ) { padding ->

@@ -805,6 +805,45 @@ fun ChatButton(onClick: () -> Unit) {
 }
 
 /**
+ * The account's statistics: three bars of different heights, drawn rather than imported.
+ *
+ * **`Info` was the wrong icon and was standing in for one that was not available.** It said
+ * "about this app", which is a different thing from "what this account has spent" - and it was
+ * chosen only because `QueryStats` and `BarChart` live in material-icons-extended, a dependency
+ * this app does not carry for one glyph. Three bars are the same drawing at every size and answer
+ * to the theme like any other icon. Report: "change statistics icon something more appropriate".
+ */
+@Composable
+fun StatsButton(onClick: () -> Unit) {
+    val ink = MaterialTheme.colorScheme.onSurfaceVariant
+    IconButton(onClick = onClick) {
+        Canvas(
+            modifier = Modifier
+                .size(22.dp)
+                // On the drawing, because that is what a screen reader announces for the button.
+                .semantics { contentDescription = "Account statistics" },
+        ) {
+            val w = size.width
+            val h = size.height
+            // **Three bars, rising to the right**, which is what a chart of anything looks like and
+            // is read as "figures" at a glance. Filled rather than stroked: at 22dp three outlines
+            // that narrow turn into one smudge.
+            val bar = w * 0.16f
+            val gap = (w - bar * 3) / 4f
+            val heights = listOf(0.42f, 0.66f, 0.90f)
+            heights.forEachIndexed { i, tall ->
+                val left = gap + i * (bar + gap)
+                drawRect(
+                    color = ink,
+                    topLeft = Offset(left, h * (1f - tall)),
+                    size = Size(bar, h * tall),
+                )
+            }
+        }
+    }
+}
+
+/**
  * Says what went wrong, as a line in the app's log.
  *
  * **Nothing is captured here.** The log has been appended to since the app opened, so

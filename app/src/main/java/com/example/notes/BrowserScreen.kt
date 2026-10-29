@@ -25,7 +25,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Search
@@ -191,17 +190,11 @@ fun BrowserScreen(
                         // **Only at the account root, where the bar is about the account.**
                         // Inside a project the same button would answer a narrower question
                         // than the one it asks, which is worse than not offering it.
-                        IconButton(onClick = { adding = false; onOpenStats() }) {
-                            Icon(
-                                // **A core icon, not `QueryStats`.** That one lives in the
-                                // extended set, which this app does not depend on: importing it
-                                // compiled locally and failed on CI, which is the worst kind of
-                                // difference. `Info` is in the core set and says the same thing -
-                                // this shows you facts rather than changing anything.
-                                Icons.Filled.Info,
-                                contentDescription = "What it cost",
-                            )
-                        }
+                        // **A drawn chart, not `Info`.** `Info` said "about this app"; the screen
+                        // says what this account has spent. `QueryStats` and `BarChart` are in
+                        // material-icons-extended, which this app does not carry for one glyph, so
+                        // the icon is drawn - the same answer `ReportButton` and `ChatButton` use.
+                        StatsButton(onClick = { adding = false; onOpenStats() })
                     }
                     IconButton(onClick = {
                         // An outside action runs *after* the add menu has closed, so
@@ -890,13 +883,20 @@ private fun EntryRow(
                         },
                     )
                 }
-                DropdownMenuItem(
-                    text = { Text("Move…") },
-                    onClick = {
-                        menu = false
-                        actions.onMove(entry)
-                    },
-                )
+                // **Not offered on a locked file, for the same reason as Rename.** Moving is a
+                // change to the file, so `Workspace.move` refuses it — and the trace shows what an
+                // unguarded item costs: tapping Move… on a locked `.gitignore` opened the
+                // destination window, and only the confirm refused. A window that exists to be
+                // refused is worse than an item that is not there.
+                if (!locked) {
+                    DropdownMenuItem(
+                        text = { Text("Move…") },
+                        onClick = {
+                            menu = false
+                            actions.onMove(entry)
+                        },
+                    )
+                }
                 // **Copy stays on a locked file, and that is what a lock means.** It
                 // says "do not change this"; reading it and making another copy
                 // elsewhere changes nothing here, so refusing it would stretch the lock

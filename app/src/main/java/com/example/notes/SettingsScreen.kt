@@ -599,8 +599,10 @@ fun SettingsScreen(
                 placeholder = "once",
                 onValueChange = { settings.keepRemind(it) },
             )
-            RowDivider()
-
+            // **One rule, not two.** This block used to end with a `RowDivider()` and then the
+            // section rule - a faint line, a gap, then a heavier one, which reads as a mistake
+            // rather than as an ending. The section rule already ends the block, so the row rule
+            // is gone. Report: "reminders and running blocks have 2 horizontal lines under them".
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
             // ---- what the app did ----
@@ -733,8 +735,7 @@ fun SettingsScreen(
                     enabled = viewModel.agentSessions.any { it.running },
                 ) { Text("Stop all") }
             }
-            RowDivider()
-
+            // **One rule here too.** Same defect as Reminders, found in the same report.
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
             // ---- what Android does to it in a pocket ----

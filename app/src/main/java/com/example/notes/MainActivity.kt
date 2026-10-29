@@ -373,6 +373,7 @@ private fun AppRoot(viewModel: AppViewModel) {
             // The log is read on the app's worker and posted back, never in composition: see
             // AppViewModel.readRequestStats.
             readRows = { onDone -> viewModel.readRequestStats(onDone) },
+            onReport = openReport,
         )
         showTrace -> ObservabilityScreen(
             report = traceReport,

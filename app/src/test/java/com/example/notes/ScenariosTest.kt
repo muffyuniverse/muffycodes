@@ -672,7 +672,7 @@ class ScenariosTest {
 
         scenario(
             compose, "24-what-it-cost",
-            "What it cost.",
+            "Account statistics.",
             "the request history summed over an interval chosen with two pickers.",
             screen = { stats(account, now) },
         ) {
@@ -711,7 +711,7 @@ class ScenariosTest {
 
         scenario(
             compose, "26-what-it-cost-before-anything",
-            "What it cost, before anything was asked.",
+            "Account statistics, before anything was asked.",
             "an empty history, which has to say so rather than show a grid of zeroes.",
             screen = { stats(account, now) },
         ) {
