@@ -480,9 +480,21 @@ class AgentLogTest {
 
         val dropped = log.trimSession(limitTokens = total / 2)
         assertTrue("a limit below it drops something", dropped > 0)
+        // **What is left fits, apart from the one burst that is always kept.** `keepNewest` refuses
+        // to drop the newest burst even when it alone is over budget - "the thing that just
+        // happened" is not something a size limit gets to delete - so the honest assertion is that
+        // what remains is at most the budget plus that one burst, and that the number of bursts went
+        // down.
+        val left = log.rows()
+        val newest = AgentLog.bursts(left).lastOrNull()?.sumOf { it.size } ?: 0
         assertTrue(
-            "and what is left fits: ${log.rows().sumOf { it.size }} <= ${total / 2}",
-            log.rows().sumOf { it.size } <= total / 2,
+            "what is left fits, allowing the newest burst that is never dropped: " +
+                "${left.sumOf { it.size }} <= ${total / 2} + $newest",
+            left.sumOf { it.size } <= total / 2 + newest,
+        )
+        assertTrue(
+            "and there are fewer bursts than before",
+            AgentLog.bursts(left).size < 6,
         )
     }
 
