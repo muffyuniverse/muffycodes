@@ -1268,9 +1268,21 @@ object GitService {
             RevWalk(repo).use { walk ->
                 val tree = walk.parseCommit(head).tree
                 val cache = org.eclipse.jgit.dircache.DirCache.newInCore()
-                org.eclipse.jgit.dircache.DirCacheBuilder.newBuilder(cache)
-                    .addTree(ByteArray(0), org.eclipse.jgit.dircache.DirCacheEntry.STAGE_0, repo, tree)
-                    .finish()
+                // **`addTree` copies the tree in whole**, recursively, so every nested entry arrives
+                // with its own id and mode; only then are the omitted paths taken out, which is what
+                // keeps everything else byte-identical to `HEAD`. The signature is
+                // `addTree(prefix, stage, reader, tree)` - an instance method on the builder.
+                // `DirCacheBuilder` is not `AutoCloseable`, so the reader is the only thing closed.
+                repo.newObjectReader().use { reader ->
+                    val builder = cache.builder()
+                    builder.addTree(
+                        ByteArray(0),
+                        org.eclipse.jgit.dircache.DirCacheEntry.STAGE_0,
+                        reader,
+                        tree,
+                    )
+                    builder.finish()
+                }
                 // **`DeleteTree`, not `DeletePath`.** A path that names a folder has to take its
                 // contents with it, and `DeletePath` removes one entry - so unsyncing `keys/` would
                 // have left `keys/id_rsa` in the tree that was sent, which is the one outcome this

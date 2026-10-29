@@ -415,6 +415,43 @@ class Workspace(val accountDir: File) {
     }
 
     /**
+     * The names that hold a credential, and are therefore **held by the app**.
+     *
+     * This is the producer that makes [Hold.APP] and [Unsync.APP] real. Until it existed the app had
+     * the two states and no way to reach them, so the red mark could never be drawn and the rule
+     * "what is set by app cannot be unset" governed nothing.
+     *
+     * **A name list, and deliberately a short one.** The app cannot read a file and judge whether it
+     * holds a secret - a detector that tried would be wrong about the files somebody thought of and
+     * silently wrong about every other one. What it *can* do is recognise the handful of names that
+     * are never anything else: a `.env`, a private key, a keystore. Everything else is the person's
+     * to lock, which is why the person's lock still exists beside this one.
+     *
+     * Matched on the **name**, case-insensitively, and on the **extension** where the extension is
+     * the whole of the meaning (`*.key`, `*.pem`, `*.p12`).
+     */
+    private fun looksSecret(name: String): Boolean {
+        val lower = name.lowercase()
+        if (lower in SECRET_NAMES) return true
+        // `.env.local`, `.env.production`: the same file with a suffix saying which machine.
+        if (lower.startsWith(".env")) return true
+        val extension = lower.substringAfterLast('.', "")
+        return extension in SECRET_EXTENSIONS
+    }
+
+    /**
+     * The hold the app itself puts on [file], or [Hold.NONE].
+     *
+     * Separate from [hold] because the two are different questions: this one is "does the app
+     * *decide* to hold this", and [hold] is "is it held". Keeping them apart is what lets the app's
+     * reason be a rule about names while the person's is a stored list, without either pretending to
+     * be the other.
+     */
+    fun appHold(file: File): Hold =
+        if (isAppFlag(file) || isSystemLocked(file.name) || looksSecret(file.name)) Hold.APP
+        else Hold.NONE
+
+    /**
      * True when [file] is one of the app's own flags, which are shown and never written by hand.
      *
      * **Report 28's other half.** `.muffy/` holds `agents.json`, `locked.json` and `pins.json` — the
