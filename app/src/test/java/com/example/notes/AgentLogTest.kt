@@ -456,21 +456,33 @@ class AgentLogTest {
     }
 
     @Test
-    fun `the trim measures bytes, not rows`() {
-        // The bug this pins: `limit` was passed to the burst chooser as a *row count*, so a 4 MB
-        // limit asked for two million rows — more than this app will ever write — and the trim
-        // could never fire. A limit that means nothing is a limit that does nothing.
+    fun `the trim measures tokens, not rows`() {
+        // **Two bugs are pinned here, one after the other.** First the limit was passed to the burst
+        // chooser as a *row count*, so a 4 MB limit asked for two million rows and the trim could
+        // never fire. Then it was bytes, which is a storage budget rather than a statement about how
+        // much conversation is kept - and the operator asked for the unit the model is billed in.
+        //
+        // A row's `size` column already holds its token cost, so the trim is a sum of a column that
+        // is there rather than a re-measurement. This test is what says the sum is used: a limit
+        // below the total must drop rows, and a limit above it must not.
         repeat(6) { n ->
             log.told("task $n " + "x".repeat(200))
             log.note("agent", "done")
         }
+        val total = log.rows().sumOf { it.size }
+        assertTrue("the fixture is big enough to have a total", total > 0)
 
-        val dropped = log.trimSession(limitTokens = 1_500)
+        // A budget under the total, and one over it: the same fixture, two answers.
+        val kept = AgentLog.open(project).let { fresh ->
+            fresh.trimSession(limitTokens = total + 1)
+        }
+        assertEquals("a limit above the total drops nothing", 0, kept)
 
-        assertTrue("a limit of 1.5 KB keeps about 750 bytes, not 750 rows", dropped > 0)
+        val dropped = log.trimSession(limitTokens = total / 2)
+        assertTrue("a limit below it drops something", dropped > 0)
         assertTrue(
-            "and the record is smaller than the limit",
-            File(project, "agent/session.log").length() < 1_500,
+            "and what is left fits: ${log.rows().sumOf { it.size }} <= ${total / 2}",
+            log.rows().sumOf { it.size } <= total / 2,
         )
     }
 
@@ -613,8 +625,10 @@ class AgentLogTest {
         }
         val before = log.rows().maxOf { it.id }
 
-        // A limit small enough that the trim really drops rows.
-        val dropped = log.trimSession(limitTokens = 400)
+        // A limit small enough that the trim really drops rows. **Half the total**, so it is the
+        // fixture's own size that decides and not a number written here that a change to `tokens()`
+        // would silently invalidate.
+        val dropped = log.trimSession(limitTokens = log.rows().sumOf { it.size } / 2)
         assertTrue("the trim happened: dropped $dropped", dropped > 0)
         val after = log.rows()
         assertTrue("and it took the oldest", after.none { it.body == "task 1" })

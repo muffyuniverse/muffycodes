@@ -838,6 +838,64 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /**
+     * Adds a provider to a model's list.
+     *
+     * **The providers of a model are a list the person chooses**, not a fact the app derives: one
+     * model is served by many endpoints, they differ in price and in window, and pinning to one is
+     * how a person says which they want. So adding one is a choice from the endpoints OpenRouter
+     * publishes for that model - never a typed tag. Report: "you are prompted to give model tag
+     * instead of opening a list of available providers for current model".
+     */
+    fun addProvider(model: String, tag: String): Result<Unit> {
+        val clean = tag.trim()
+        if (clean.isEmpty()) return Result.failure(IllegalArgumentException("A provider needs a tag"))
+        val choice = modelConfig.models.firstOrNull { it.id == model }
+            ?: return Result.failure(IllegalArgumentException("$model is not in the list"))
+        if (choice.providers.any { it == clean }) {
+            return Result.failure(IllegalArgumentException("$clean is already allowed for $model"))
+        }
+        Trace.tap("add provider", clean)
+        val next = modelConfig.models.map {
+            if (it.id == model) it.copy(providers = it.providers + clean) else it
+        }
+        writeModelConfig(modelConfig.copy(models = next), "Allowed $clean for $model")
+        return Result.success(Unit)
+    }
+
+    /**
+     * Takes a provider out of a model's list.
+     *
+     * **The one in use is refused**, because removing it would leave the agent pinned to an endpoint
+     * its own config no longer lists - a state the picker could not show and the next request would
+     * fail on. Choosing another provider first is one tap; discovering the breakage later is not.
+     */
+    fun removeProvider(model: String, tag: String): Result<Unit> {
+        if (model == modelConfig.active.model && tag == modelConfig.active.provider) {
+            return Result.failure(
+                IllegalArgumentException("That is the provider in use, so choose another first")
+            )
+        }
+        val choice = modelConfig.models.firstOrNull { it.id == model }
+            ?: return Result.failure(IllegalArgumentException("$model is not in the list"))
+        if (choice.providers.none { it == tag }) {
+            return Result.failure(IllegalArgumentException("$tag is not allowed for $model"))
+        }
+        if (choice.providers.size == 1) {
+            // A model with no provider is a model that cannot be asked anything, so the last one is
+            // kept rather than left behind as an entry that looks usable and is not.
+            return Result.failure(
+                IllegalArgumentException("$model would have no provider left; remove the model instead")
+            )
+        }
+        Trace.tap("remove provider", tag)
+        val next = modelConfig.models.map {
+            if (it.id == model) it.copy(providers = it.providers - tag) else it
+        }
+        writeModelConfig(modelConfig.copy(models = next), "Stopped allowing $tag for $model")
+        return Result.success(Unit)
+    }
+
+    /**
      * Puts back the config the app shipped.
      *
      * From the build's own copy, not from the account's history: the two are different acts. A

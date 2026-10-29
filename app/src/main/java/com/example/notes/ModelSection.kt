@@ -397,11 +397,26 @@ private fun ModelPicker(
         },
     )
 
+    // **The dialog follows the step.** "Add" on the provider step used to open "Add a model", which
+    // asked for a model id when the person was choosing an endpoint - and "Remove" opened "Remove a
+    // model", which could delete the very model whose providers they were editing. Report: "when you
+    // open provider selection window and click on add or remove you are prompted to give model tag
+    // instead of opening a list of available providers for current model (we already should have a
+    // function for that somewhere) to add, and remove should should just remove selected provider
+    // from saved providers list".
     if (adding) {
-        AddModelDialog(viewModel = viewModel, onDismiss = { adding = false })
+        if (what == PROVIDER) {
+            AddProviderDialog(viewModel = viewModel, model = active.model, onDismiss = { adding = false })
+        } else {
+            AddModelDialog(viewModel = viewModel, onDismiss = { adding = false })
+        }
     }
     if (removing) {
-        RemoveModelDialog(viewModel = viewModel, onDismiss = { removing = false })
+        if (what == PROVIDER) {
+            RemoveProviderDialog(viewModel = viewModel, model = active.model, onDismiss = { removing = false })
+        } else {
+            RemoveModelDialog(viewModel = viewModel, onDismiss = { removing = false })
+        }
     }
 }
 
@@ -584,6 +599,147 @@ private fun AddModelDialog(viewModel: AppViewModel, onDismiss: () -> Unit) {
             ) { Text("Add") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/**
+ * Allowing another endpoint for [model] — **from the list OpenRouter publishes, not a typed tag.**
+ *
+ * The report's words: "you are prompted to give model tag instead of opening a list of availiable
+ * providers for current model (we already should have a function for that somewhere) to add". We do:
+ * `modelEndpoints` is the same catalogue read the picker already uses, and the endpoints it does not
+ * list are not usable anyway.
+ *
+ * **The ones already allowed are shown, not offered.** A list that included them would make a
+ * second tap on one look like it did something.
+ */
+@Composable
+private fun AddProviderDialog(viewModel: AppViewModel, model: String, onDismiss: () -> Unit) {
+    var failure by remember { mutableStateOf<String?>(null) }
+    val allowed = viewModel.modelConfig.providersOf(model)
+    val endpoints = viewModel.modelEndpoints
+    val free = endpoints.filterNot { it.tag in allowed }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Allow another provider") },
+        text = {
+            Column {
+                Text(
+                    "Which endpoint may answer for $model. Prices and windows differ per endpoint.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (endpoints.isEmpty()) {
+                    // Said rather than left blank: an empty list here means the catalogue has not
+                    // been read, which is a different fact from "there are no others".
+                    Text(
+                        "The endpoint list has not been read yet. Open the provider picker once " +
+                            "and it will be.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 320.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    free.forEach { endpoint ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    viewModel.addProvider(model, endpoint.tag).fold(
+                                        onSuccess = { onDismiss() },
+                                        onFailure = { failure = it.message },
+                                    )
+                                }
+                                .padding(vertical = 8.dp),
+                        ) {
+                            Text(endpoint.tag, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                text = "${endpoint.providerName} · " +
+                                    (endpoint.contextLength?.let { tokens(it) } ?: "—") + " context",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        HorizontalDivider()
+                    }
+                }
+                if (failure != null) {
+                    Text(
+                        text = failure!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+    )
+}
+
+/**
+ * Stopping one endpoint answering for [model] — **the selected one, not a typed tag.**
+ *
+ * The list is the model's own providers, so removing is a tap on the one to stop rather than a
+ * sentence that has to match what the file holds exactly.
+ */
+@Composable
+private fun RemoveProviderDialog(viewModel: AppViewModel, model: String, onDismiss: () -> Unit) {
+    var failure by remember { mutableStateOf<String?>(null) }
+    val allowed = viewModel.modelConfig.providersOf(model)
+    val inUse = viewModel.modelConfig.active.provider
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Stop allowing a provider") },
+        text = {
+            Column {
+                Text(
+                    "Which endpoint may no longer answer for $model.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 320.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    allowed.forEach { tag ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    viewModel.removeProvider(model, tag).fold(
+                                        onSuccess = { onDismiss() },
+                                        onFailure = { failure = it.message },
+                                    )
+                                }
+                                .padding(vertical = 8.dp),
+                        ) {
+                            Text(
+                                text = if (tag == inUse) "$tag — in use" else tag,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        HorizontalDivider()
+                    }
+                }
+                if (failure != null) {
+                    Text(
+                        text = failure!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
     )
 }
 
