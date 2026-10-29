@@ -79,7 +79,15 @@ class RequestDbTest {
 
     private fun write(at: Long, stats: RequestLog.Stats = response(at)) = RequestDb.insert(db, at, stats)
 
-    private fun total(from: Long, to: Long) = RequestDb.totals(db, from, to)
+    /**
+     * The totals over an interval, **unwrapped to the turns-and-pings part.**
+     *
+     * `totals` returns a [RequestStats.Totals] - a total plus the stalls counted apart from it -
+     * because those are two different facts and folding them would claim a cost of zero for a stall.
+     * Almost every test here is about the ordinary requests, so this returns that half; the one test
+     * that is about the split reads `.stalls` itself.
+     */
+    private fun total(from: Long, to: Long) = RequestDb.totals(db, from, to).total
 
     // ---- reading what was written ------------------------------------------------------------
 
@@ -465,8 +473,14 @@ class RequestDbTest {
 
         val stillRaw = rawRows()
         assertEquals("the stall is still raw", 1, stillRaw)
-        val totals = total(base + 10 * HOUR, base + 11 * HOUR)
-        assertEquals("and counted apart from the turn", 1, totals.stalls.requests)
-        assertEquals("which is the only request in the total", 1, totals.total.requests)
+        // Read unwrapped, because this is the one test about the split itself.
+        val both = RequestDb.totals(db, base + 10 * HOUR, base + 11 * HOUR)
+        assertEquals("the turn is in the total", 1, both.total.requests)
+        assertEquals("and the stall is counted apart", 1, both.stalls.requests)
+        // **A stall's cost is unknown, not zero**, so it must not touch the average: the turn
+        // reported a cost and the stall reported nothing, and one reported cost over one request is
+        // the honest answer.
+        assertEquals("only the turn reported a cost", 1, both.total.costReported)
+        assertEquals("so the stall did not enter the denominator", 1.0, both.total.perRequest!!, 1e-9)
     }
 }
