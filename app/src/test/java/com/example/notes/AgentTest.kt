@@ -2722,6 +2722,57 @@ class AgentTest {
     }
 
     @Test
+    fun `the trim aims at the target for the whole request, not the target for the rows`() {
+        // **A bug that shipped and was caught by a test going red**, pinned so it cannot return.
+        // `limits.targetAt` is a budget for the REQUEST; the instructions and the tool specs are sent
+        // whatever happens. The trim was handed the whole target, so it cut the rows down to it and
+        // the request then landed at the target PLUS the fixed cost - above the number the app had
+        // just decided to reach.
+        //
+        // The assertion is about the resulting REQUEST, not about how many rows went: a test that
+        // only counted rows would pass with the arithmetic wrong by the size of the instructions,
+        // which is exactly how this shipped.
+        for (i in 1..6) {
+            log.told("task $i")
+            log.note("agent", "working on $i")
+        }
+        // The target is below what the instructions and specs alone cost, so `target - fixed` is
+        // negative. That is the case the guard used to refuse outright.
+        val limits = ContextBudget.Limits.of(
+            triggerAsked = 100,
+            hardAsked = 140,
+            targetAsked = 40,
+            ceiling = 100_000,
+        )
+        val door = ScriptedDoor(Reply("done"))
+        val agent = Agent(account, "shopping", ws, git, log, door, model(), limits = limits)
+        val before = agent.size()
+
+        agent.burst("the seventh")
+
+        // **The request that went out is smaller than the context that stood before it.** With the
+        // old arithmetic the trim refused (a negative budget) and the request was the whole context
+        // plus the new row, which is larger.
+        val sent = door.asked.first()
+        // **Measured the way the app measures a request** - the system message, every row, and the
+        // tool specs it actually sent - so the number is comparable with `agent.size()`, which uses
+        // the same three parts.
+        val sentSize = ContextBudget.tokens(sent.system) +
+            sent.messages.sumOf { ContextBudget.tokens(it.text) } +
+            sent.tools.sumOf { ContextBudget.tokens(it.description, it.parameters.toString()) }
+        assertTrue(
+            "the trim ran and the request is smaller: $sentSize vs $before",
+            sentSize < before,
+        )
+        // **And the newest task is never what went.** A size limit does not get to delete the thing
+        // being worked on, which is the same rule `forgetProblem` enforces for the agent.
+        assertTrue(
+            "the task survives: ${sent.messages.map { it.text }}",
+            sent.messages.any { it.text == "the seventh" },
+        )
+    }
+
+    @Test
     fun `the trace says which model and endpoint answered the turn`() {
         val before = Trace.report().lines.toSet()
         val door = ScriptedDoor(Reply("done"))

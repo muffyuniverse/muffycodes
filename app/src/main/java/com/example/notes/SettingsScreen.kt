@@ -381,12 +381,16 @@ fun SettingsScreen(
                 "Compacted by the agent",
                 at = fate.compactedAt,
                 to = fate.compactedTo,
+                atTokens = fate.compactedAtTokens,
+                toTokens = fate.compactedToTokens,
                 none = "The agent has not cleared anything up yet.",
             )
             FateLine(
                 "Trimmed by the app",
                 at = fate.trimmedAt,
                 to = fate.trimmedTo,
+                atTokens = fate.trimmedAtTokens,
+                toTokens = fate.trimmedToTokens,
                 none = "The app has not had to trim this context.",
             )
             RowDivider()
@@ -979,7 +983,14 @@ private fun SwitchAccountDialog(
  * that has not happened".
  */
 @Composable
-private fun FateLine(label: String, at: Int?, to: Int?, none: String) {
+private fun FateLine(
+    label: String,
+    at: Int?,
+    to: Int?,
+    atTokens: Long?,
+    toTokens: Long?,
+    none: String,
+) {
     if (at == null || to == null) {
         Text(
             text = "$label: $none",
@@ -988,11 +999,29 @@ private fun FateLine(label: String, at: Int?, to: Int?, none: String) {
         )
         return
     }
+    // **Tokens first, because that is the unit the limits above are in.** The reader has just been
+    // told "forget at 49k · trim at 98k · both to 24k"; a sentence that answered only in rows made
+    // them convert between two units with nothing offering the conversion. The row count stays in
+    // parentheses because it is the one figure they can check by counting lines in the file - so
+    // each number does the job the other cannot.
+    //
+    // **"at" and "to", in that order, because that is how a person says it**: there were 49k tokens,
+    // and afterwards there were 24k. The parenthetical says what it took, which is the difference
+    // between the two and the only arithmetic the reader would otherwise do.
+    val taken = if (atTokens != null && toTokens != null) {
+        (atTokens - toTokens).coerceAtLeast(0)
+    } else {
+        null
+    }
+    val text = if (atTokens != null && toTokens != null) {
+        "$label: at ${ContextBudget.short(atTokens)} tokens ($at rows), " +
+            "to ${ContextBudget.short(toTokens)} ($to taken out, " +
+            "${taken?.let { ContextBudget.short(it) }} tokens)"
+    } else {
+        "$label: at $at rows, to ${(at - to).coerceAtLeast(0)} ($to taken out)"
+    }
     Text(
-        // **"at" and "to", in that order, because that is how a person says it**: there were twelve
-        // rows, and afterwards there were nine. The parenthetical says what it took, which is the
-        // difference between the two and the only arithmetic the reader would otherwise do.
-        text = "$label: at $at rows, to ${(at - to).coerceAtLeast(0)} ($to taken out)",
+        text = text,
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )

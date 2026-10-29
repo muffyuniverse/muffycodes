@@ -719,7 +719,7 @@ class AgentLogTest {
         val before = log.rows().maxOf { it.id }
         // One pass, aimed at a budget nothing fits under, so every conversation but the newest
         // goes — which is the rule being relied on here, not a detail of it.
-        log.trimContext(target = 1)
+        log.trimContext(rowsBudget = 1)
         assertTrue(
             "only the newest task is left: ${log.contextRows().map { it.body }}",
             log.contextRows().none { it.body == "task 1" || it.body == "task 2" || it.body == "task 3" },
@@ -857,7 +857,7 @@ class AgentLogTest {
         // A budget that one conversation cannot fit under, so the pass takes more than one: two
         // rows of about three tokens each are dropped, and the walk stops when the next would not
         // fit. The newest burst is always kept, whatever the budget.
-        val dropped = log.trimContext(target = 1)
+        val dropped = log.trimContext(rowsBudget = 1)
 
         assertTrue("more than one conversation went: $dropped", dropped > 2)
         assertEquals(
@@ -885,13 +885,76 @@ class AgentLogTest {
         log.told("the only task")
         log.note("agent", "working")
 
-        val dropped = log.trimContext(target = 1)
+        val dropped = log.trimContext(rowsBudget = 1)
 
         assertEquals("nothing is dropped", 0, dropped)
         assertEquals("and the task is still there", 2, log.contextRows().size)
     }
 
     // ---- the audit: the `out` column is his judgement ------------------------
+
+    @Test
+    fun `the fate of a context is reported in tokens and in rows, and the two agree`() {
+        // **The unit the limits are in, and the count a person can check.** The settings screen shows
+        // "forget at 49k · trim at 98k · both to 24k" a few lines above this block, so a block that
+        // answered only in rows made the reader convert between two units with nothing offering the
+        // conversion. Both are reported now, and this asserts the numbers rather than the presence of
+        // fields: a row count cannot be wrong by a little, so a test that only checked it existed
+        // would pass with the token sum wrong by any amount.
+        log.told("make the list")
+        val milkCall = (log.call("read", """{"path":"milk.txt"}""")).also { lastCall = it }
+        val milkGot = log.got("read", "0\ntwo litres", answers = lastCall)
+        val eggCall = (log.call("read", """{"path":"eggs.txt"}""")).also { lastCall = it }
+        log.got("read", "0\na dozen", answers = eggCall)
+        log.note("agent", "the eggs matter, the milk does not")
+
+        val before = log.contextRows()
+        val sizeBefore = before.sumOf { it.size }
+        log.forget(setOf(milkCall, milkGot))
+
+        val fate = log.fate()
+        assertEquals("the rows that were in the context", before.size, fate.compactedAt)
+        assertEquals("the rows it took out", 2, fate.compactedTo)
+        assertEquals(
+            "and the same moment measured in tokens",
+            sizeBefore,
+            fate.compactedAtTokens,
+        )
+        assertEquals(
+            "what those two rows cost, summed from their own size column",
+            before.filter { it.id == milkCall || it.id == milkGot }.sumOf { it.size },
+            fate.compactedToTokens,
+        )
+        // **The pair is not the whole context**, so this cannot pass by reporting the same number
+        // twice: the rows left behind cost something, and the difference is exactly what went.
+        assertTrue("something was left", fate.compactedAtTokens!! > fate.compactedToTokens!!)
+    }
+
+    @Test
+    fun `the fate of a trim is reported in tokens, and the app's act is not the agent's`() {
+        // **The other marker, and it records itself differently.** A `forget` names the ids it took;
+        // a trim names only a count. Reading the token cost of a trim therefore has to recover its
+        // rows from the file - the ones that were `in` before the marker and are not `in` now - and
+        // this is the test that would fail if that recovery silently returned zero.
+        for (i in 1..4) {
+            log.told("task $i")
+            log.note("agent", "work on $i")
+        }
+        val before = log.contextRows()
+        val sizeBefore = before.sumOf { it.size }
+        log.trimContext(rowsBudget = 1)
+
+        val fate = log.fate()
+        assertEquals("the rows that were in the context", before.size, fate.trimmedAt)
+        assertTrue("some were taken out: ${fate.trimmedTo}", fate.trimmedTo!! > 0)
+        assertEquals("and the moment in tokens", sizeBefore, fate.trimmedAtTokens)
+        assertEquals(
+            "with the cost of what went, summed from the rows' own size",
+            before.filter { it.id !in log.contextRows().map { r -> r.id } }.sumOf { it.size },
+            fate.trimmedToTokens,
+        )
+        assertEquals("the agent compacted nothing, so that half is absent", null, fate.compactedAt)
+    }
 
     @Test
     fun `what the agent forgot is exactly what it named, and nothing else`() {
@@ -929,7 +992,7 @@ class AgentLogTest {
             log.bookkeeping(AgentLog.NOTE, "ping", "kept warm")
         }
         log.bookkeeping(AgentLog.NOTE, "retry", "reconnected after 3 tries")
-        log.trimContext(target = 1)
+        log.trimContext(rowsBudget = 1)
 
         assertTrue(
             "nothing here is his: ${log.rows().filter { it.ctx == AgentLog.OUT }.map { it.body }}",

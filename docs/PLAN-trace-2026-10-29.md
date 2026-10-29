@@ -117,41 +117,44 @@ independent of it.
 
 ---
 
-## 2. Reports from this trace, and their state
+## 2. Reports from this trace
 
-> **This table is out of date.** It was written before the work landed and still says "open" about
-> items that are closed. The current state of every report is in
-> `AUDIT-2026-10-29-consolidated.md` §3; this section is kept only for the reasoning it records
-> about what each report *meant*.
+**The state column is deleted on purpose.** It was written before the work landed, it said "open"
+about items that closed hours later, and keeping two tables that must agree is exactly what produced
+the confusion this plan is now careful about. The current state of every report is in
+`AUDIT-2026-10-29-consolidated.md` §3, which is the only file that claims to know.
 
-| # | Report | State |
+What follows is the part worth keeping: **what each report meant**, which is not recoverable from a
+state column and is the reason the item was filed at all.
+
+| # | Report | What it was asking for |
 |---|---|---|
-| 1 | Make all text selectable, to copy to the clipboard | **open** |
-| 2 | Why sign in for the system folder or a local project? | **done** — provisional `~local` account |
-| 3 | Remove "sign in to begin"; open README on first launch | **done** — `0346358`, `6b84d6d` |
-| 4 | Context block: clarify compacted/trimmed at/to | **open** |
-| 5 | Rename the timeout block to "command execution timeouts" | **done** — "While the app works on this phone" |
-| 6 | Rename to "model response timeouts" | **done** |
-| 7 | Three fields: connection, stalling, reconnect | **done** |
-| 8 | Keep descriptions short | **done** |
-| 9 | If "the record" means session log, call it so | **open** — the block is still titled "The record" |
-| 10 | Session: one field, max length in tokens (default 10,000,000); drop MB and line limits | **open** |
-| 11 | Over the limit, delete the oldest bubble (its full span); cache sizes in a KV store | **open** — depends on the turn grouping above |
-| 12 | Reminders and Running have two horizontal lines | **done** — `4efed9d` |
-| 13 | Add the debug icon to the stats screen | **done** — `4efed9d` |
-| 14 | Rename "What it costs" → "Account statistics" | **done** — `4efed9d` |
-| 15 | A better statistics icon; turn the gitignore icon into **unsync** | **done** — drawn chart; unsync rebuilt (`f5fb51c`) |
-| 16 | Lock/unsync: grey unset, black by user, red by app | **done** — `Workspace.Hold` / `Unsync` |
-| 17 | Why does a locked file still offer Move? | **done** — `4efed9d` |
-| 18 | Local projects should not have a sync bar | **done** — already `isLocalProject`-guarded |
-| 19 | Local projects should have "add to GitHub"; the local↔synced cycle must be complete | **open** |
-| 20 | Footer: hour:minute only, id first | **done** — `0128a1f` |
-| 21 | Remove "1 session bar" | **done** — no such string remains |
-| 22 | After setting the key, "no OpenRouter key on this account" still shows | **open** — likely fixed by the 400 fix, needs a re-test |
-| 23 | Provider picker: Add/Remove should list providers for the model, not ask for a tag | **open** |
-| 24 | Effort popup needs one select button, not a template per option | **open** |
-| 25 | Move Reset from the agent block to the bottom of settings, resetting to defaults | **open** — needs a decision on where defaults live |
-| 26 | Make the themes truly different; rename dark chocolate → chocolate | **open** |
+| 1 | Make all text selectable | the app reports things a person then wants to send somewhere |
+| 2 | Why sign in for a local project? | nothing about a local project needs a GitHub account |
+| 3 | Remove "sign in to begin" | the app should be usable before anybody signs in |
+| 4 | Context block: compacted/trimmed at/to | two different hands do two different things, and one number would hide the second |
+| 5 | Rename the command-timeout block | "while this app works on this phone" named a circumstance, not the thing being limited |
+| 6 | Rename the model-timeout block | the same, for the other machine |
+| 7 | Three fields: connection, stalling, reconnect | three timeouts in a row in two units, with "wait" and "stop" used for both |
+| 8 | Keep descriptions short | a description long enough to be a paragraph is not read |
+| 9 | If "the record" means session log, call it so | a name that has to be explained is the wrong name |
+| 10 | Session limit in tokens | the unit the model is billed in is the unit a person is choosing about |
+| 11 | Delete the oldest bubble's full span; cache sizes | a conversation cut in half is not a conversation, and a size that is recomputed every turn is a cost |
+| 12 | Two horizontal lines under Reminders/Running | they are two different things and read as one |
+| 13 | Debug icon on the stats screen | the screen existed and could not be reached |
+| 14 | "What it costs" → "Account statistics" | the screen is about more than cost |
+| 15 | Better stats icon; gitignore → unsync | the icon was a placeholder; the act was not "ignore" |
+| 16 | Lock/unsync colour states | grey/black/red is who did it, which the icon could not say |
+| 17 | Locked file still offers Move | an act offered that cannot be done |
+| 18 | No sync bar on a local project | a bar that reports nothing |
+| 19 | Local projects get "add to GitHub" | the cycle had one direction and needed two |
+| 20 | Footer hour:minute, id first | the id is what `forget` takes, so it is what a person needs |
+| 21 | Remove "1 session bar" | a count of one thing, said as if it were news |
+| 22 | Key set but "no key" still shows | a sentence that outlived the fact it described |
+| 23 | Provider Add/Remove lists endpoints | the screen was asking for a tag when it should be choosing from what exists |
+| 24 | Effort popup needs one select | a template per option, when a tap is the choice |
+| 25 | Reset at the bottom of settings | resetting is a last-resort act, not one beside the controls you use |
+| 26 | Themes truly different; Chocolate | five palettes that were five browns is not a choice |
 
 ---
 

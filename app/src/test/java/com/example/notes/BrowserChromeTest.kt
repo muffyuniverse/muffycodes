@@ -413,4 +413,74 @@ class BrowserChromeTest {
         awaitText("note.txt")
         assertTrue("a real folder keeps its Add", thereIcon("Add"))
     }
+
+    // ---- the three windows nothing was asserting the words of ------------------
+
+    @Test
+    fun `the publishing window names the direction and the licence it will use`() {
+        // **The direction is the whole risk.** The same row offers the opposite act when a project
+        // is already synced, so a window that did not say which way it goes could publish something
+        // a person meant to keep private. And a default licence that is not shown is a decision made
+        // on their behalf.
+        compose.setContent {
+            MaterialTheme {
+                PublishProjectDialog(
+                    project = "groceries",
+                    licences = listOf(
+                        Licence("gpl-3.0", "GNU General Public License v3.0"),
+                        Licence("mit", "MIT License"),
+                    ),
+                    onDismiss = {},
+                    onPublish = {},
+                )
+            }
+        }
+
+        compose.waitForIdle()
+        assertTrue("it says where the project is going", there("Put groceries on GitHub"))
+        // The licence's own NAME, not its key: the window says "Licence: GNU General Public
+        // License v3.0", and a test that looked for "gpl-3.0" would be asserting the wire format
+        // rather than the sentence a person reads.
+        assertTrue("and which licence it will publish under", there("Licence: GNU General Public"))
+        assertFalse("and it is not the keep-local window", there("only on this phone"))
+    }
+
+    @Test
+    fun `the keep-local window promises that nothing is deleted`() {
+        // **The sentence that makes the choice safe.** A person deciding to stop syncing needs to
+        // know their history survives and their repository is still there; a window that only said
+        // "keep local" would read as "delete the remote".
+        compose.setContent {
+            MaterialTheme {
+                KeepLocalDialog(project = "groceries", onDismiss = {}, onKeepLocal = {})
+            }
+        }
+
+        compose.waitForIdle()
+        assertTrue("it names the project", there("groceries"))
+        assertTrue("and says nothing is removed", there("stays here"))
+        assertTrue("including the repository", there("stays on GitHub"))
+        assertTrue("while pointing at the act that does delete", there("Delete everywhere"))
+        assertFalse("and it is not the publishing window", there("Put groceries on GitHub"))
+    }
+
+    @Test
+    fun `the sign-in window masks the token and says where it is kept`() {
+        // **The one secret the app asks for.** A field that echoed the token would leak it to
+        // anybody glancing at the screen, and a window that did not say where it goes would leave a
+        // person guessing whether it is being uploaded somewhere.
+        compose.setContent {
+            MaterialTheme { SignInDialog(onDismiss = {}, onSignIn = {}) }
+        }
+
+        compose.waitForIdle()
+        assertTrue("it asks for the key", there("Personal access key"))
+        assertTrue("and names the scopes it needs", there("repo and delete_repo"))
+        assertTrue("and says whose commits they will be", there("belongs to"))
+        assertTrue("it names GitHub in the title", there("Sign in to GitHub"))
+        // **The button is "Sign in", the title is "Sign in to GitHub"** - two different strings, and
+        // the button is disabled until something is typed, which is the rule worth stating: a window
+        // that let you press it empty would ask GitHub a question with no answer.
+        assertTrue("and offers the act", there("Sign in"))
+    }
 }

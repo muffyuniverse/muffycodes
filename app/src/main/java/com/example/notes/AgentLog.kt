@@ -500,17 +500,23 @@ class AgentLog private constructor(
      * [Agent.messages] renders, and it never enters `context.log`: the rows that leave are removed
      * from that file, and the marker is not one of them.
      */
-    fun trimContext(target: Long): Int {
+    fun trimContext(rowsBudget: Long): Int {
         synchronized(guard) {
             val all = rows()
             val inContext = all.filter { it.ctx == IN }
             if (inContext.isEmpty()) return 0
-            // **A target of zero or less is "drop everything but the newest burst", not "do
-            // nothing".** The caller passes `target - what the instructions and tool specs cost`,
-            // and that can be negative when the target is below what a request costs before a
-            // single row is added. Refusing then would leave the context over a limit the app had
-            // already decided to act on; the honest act is to keep the one burst that may never go
-            // and drop the rest, which is exactly what a budget of zero means to `keepNewest`.
+            // **`rowsBudget`, not `target`, and the name is the fix for a real bug.** This is a
+            // budget for the ROWS ONLY: the instructions and the tool specs are sent whatever
+            // happens, so the caller passes `target - fixed`. The parameter used to be called
+            // `target` and was passed the whole target, so the app trimmed the rows to the target
+            // and then added the instructions on top - landing the request ABOVE the number it had
+            // just decided to reach. A name that says which budget it is stops that returning.
+            //
+            // **Zero or less is "drop everything but the newest burst", not "do nothing".** That
+            // happens when the target is below what a request costs before a single row is added.
+            // Refusing then would leave the context over a limit the app had already decided to act
+            // on; the honest act is to keep the one burst that may never go and drop the rest, which
+            // is exactly what a budget of zero means to `keepNewest`.
             // **In one pass, to the target.** This used to drop exactly one burst per request,
             // whatever the number passed in - the parameter was named `budget` and consulted only
             // to check it was not zero, so a context a hundred thousand tokens over its limit came
@@ -524,7 +530,7 @@ class AgentLog private constructor(
             // when the next burst would not fit, so a conversation is never cut in half and the
             // thing that just happened is never deleted - a size limit does not get to remove the
             // task being worked on, which is the same rule `forgetProblem` enforces for the agent.
-            val (keptRows, dropped) = keepNewest(inContext, budget = target) { it.size }
+            val (keptRows, dropped) = keepNewest(inContext, budget = rowsBudget) { it.size }
             if (dropped == 0) return 0
             // Nothing to drop, or nothing that may be: a context that is one conversation is a
             // conversation, and cutting it would leave a task with no task.
@@ -848,6 +854,28 @@ class AgentLog private constructor(
         val trimmedAt: Int? = null,
         /** Rows the app took out in that act. */
         val trimmedTo: Int? = null,
+        /**
+         * **The same four numbers in tokens**, because every other size in the app is in tokens.
+         *
+         * The rows above are kept rather than replaced: a row count is the one figure a person can
+         * check by counting lines in `context.log`, and it is what the markers themselves record. But
+         * the settings screen shows "forget at 49k · trim at 98k · both to 24k" eight lines above
+         * this block, so a block that answered only in rows made the reader convert between two units
+         * with nothing offering the conversion. The token total is the number the limits are in, and
+         * the row count is the number that can be verified - so both are reported and neither is
+         * derived from the other.
+         *
+         * **Computed from the rows' own `size`, not re-tokenised.** The context was measured in
+         * tokens when it was written; the prefix that stood before the marker is the sum of those
+         * stored numbers, which is the same arithmetic [contextTokens] does over the whole file.
+         */
+        val compactedAtTokens: Long? = null,
+        /** Tokens the agent took out in that act. */
+        val compactedToTokens: Long? = null,
+        /** Tokens in the context when the app last trimmed, or null if it never has. */
+        val trimmedAtTokens: Long? = null,
+        /** Tokens the app took out in that act. */
+        val trimmedToTokens: Long? = null,
     )
 
     /**
@@ -866,7 +894,41 @@ class AgentLog private constructor(
             compactedTo = forgotten?.let { droppedCount(it) },
             trimmedAt = trimmed?.let { inContextBefore(it, all) },
             trimmedTo = trimmed?.let { droppedCount(it) },
+            compactedAtTokens = forgotten?.let { tokensBefore(it, all) },
+            compactedToTokens = forgotten?.let { droppedTokens(it, all) },
+            trimmedAtTokens = trimmed?.let { tokensBefore(it, all) },
+            trimmedToTokens = trimmed?.let { droppedTokens(it, all) },
         )
+    }
+
+    /**
+     * What the context cost in tokens when [marker] was written.
+     *
+     * **The prefix sum of the rows' own `size`**, which is the same number [contextTokens] would have
+     * answered at that moment - the rows before the marker that were `in`, added up. Nothing is
+     * re-tokenised: the cost of a row was measured once when the row was written, and this is a sum
+     * over a prefix rather than a second measurement.
+     */
+    private fun tokensBefore(marker: Row, all: List<Row>): Long =
+        all.filter { it.id < marker.id && it.ctx == IN }.sumOf { it.size }
+
+    /**
+     * What the act took out, in tokens.
+     *
+     * **The two acts record their removals differently**, and this reads both. A `forget` names the
+     * ids it removed, so the cost is the sum of those rows' sizes. A `trim` names only a count, so its
+     * rows are recovered the same way its count is: the ones that were `in` before the marker and are
+     * not `in` now. Both are facts the file already holds; neither is a running total.
+     */
+    private fun droppedTokens(marker: Row, all: List<Row>): Long {
+        val named = marker.detail.split(',').mapNotNull { it.trim().toIntOrNull() }
+        if (named.isNotEmpty()) {
+            val ids = named.toSet()
+            return all.filter { it.id in ids }.sumOf { it.size }
+        }
+        // A trim: what was in the context before it, and is not in it now.
+        val still = all.filter { it.ctx == IN }.map { it.id }.toSet()
+        return all.filter { it.id < marker.id && it.ctx == IN && it.id !in still }.sumOf { it.size }
     }
 
     /**

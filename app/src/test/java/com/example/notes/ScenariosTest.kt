@@ -1089,4 +1089,127 @@ class ScenariosTest {
             )
         }
     }
+
+    @Test
+    fun `the window that puts a local project on GitHub`() {
+        // **The other half of the local<->synced cycle**, and the one place a licence is chosen.
+        // Pictured because the licence row is a control with a default that a person has to be able
+        // to see and change - a dialog that silently published everything as GPL-3.0 would be a
+        // decision made on their behalf.
+        scenario(
+            compose, "29-a-window-publishing",
+            "A window putting a local project on GitHub.",
+            "the licence a published project has to declare, before anything is sent anywhere.",
+            screen = {
+                window {
+                    PublishProjectDialog(
+                        project = "groceries",
+                        licences = listOf(
+                            Licence("gpl-3.0", "GNU General Public License v3.0"),
+                            Licence("mit", "MIT License"),
+                            Licence("apache-2.0", "Apache License 2.0"),
+                        ),
+                        onDismiss = {},
+                        onPublish = {},
+                    )
+                }
+            },
+        ) {
+            before()
+            then("Nothing is published: the licence is shown with its default, and changing it is one tap.") {}
+            after()
+            result(
+                "The direction is named in the title - this project goes TO GitHub - because the " +
+                    "same row offers the opposite act when the project is already synced, and the " +
+                    "two must never be confused. GPL-3.0 is chosen by default and said so, rather " +
+                    "than left blank for a person who does not know what to pick.",
+            )
+        }
+    }
+
+    @Test
+    fun `the window that keeps a synced project on this phone`() {
+        // **The opposite direction, and it promises nothing it does not do.** The repository stays
+        // on GitHub; what stops is the sending. Pictured because the sentence that says so is the
+        // whole dialog - a person deciding whether to do this needs to know their history survives.
+        scenario(
+            compose, "30-a-window-keeping-local",
+            "A window keeping a synced project on this phone only.",
+            "the promise that nothing is deleted, and the way to delete it if that is what was meant.",
+            screen = {
+                window {
+                    KeepLocalDialog(project = "groceries", onDismiss = {}, onKeepLocal = {})
+                }
+            },
+        ) {
+            before()
+            then("Nothing is kept local: the window explains before it acts.") {}
+            after()
+            result(
+                "It says what stays (every version, here) and what happens to the remote (nothing, " +
+                    "it keeps what was pushed) and names the other act for somebody who wanted " +
+                    "that - Delete everywhere - rather than leaving them to guess.",
+            )
+        }
+    }
+
+    @Test
+    fun `the window that asks for a GitHub token`() {
+        // **The one window that asks for a secret**, and it is pictured so the masked field and the
+        // sentence about where the token goes can be reviewed without signing in on a phone.
+        scenario(
+            compose, "31-a-window-signing-in",
+            "A window asking for a GitHub token.",
+            "the only secret the app asks for, with the sentence that says where it is kept.",
+            screen = {
+                window { SignInDialog(onDismiss = {}, onSignIn = {}) }
+            },
+        ) {
+            before()
+            then("Nothing is typed: the field is empty and the button says what it will do.") {}
+            after()
+            result(
+                "The field is masked, the sentence says the token stays on this phone, and the " +
+                    "button is the act rather than a checkbox - a person who has pasted a token " +
+                    "should not have to find a second control to use it.",
+            )
+        }
+    }
+
+    @Test
+    fun `the window that picks where a thing goes`() {
+        // **A browser, not a list of paths.** The reported defect was a flat list of every folder,
+        // whose shape was invisible; this is one layer at a time, with the folder being moved shown
+        // as unchoosable rather than absent.
+        val root = File(scene.root, "place-root").apply { mkdirs() }
+        val notes = File(root, "notes").apply { mkdirs() }
+        File(root, "photos").mkdirs()
+        File(notes, "drafts").mkdirs()
+        scenario(
+            compose, "32-a-window-choosing-a-place",
+            "A window choosing where a folder goes.",
+            "one layer of the account at a time, with the folder being moved offered but not choosable.",
+            screen = {
+                window {
+                    PlaceDialog(
+                        title = "Move notes",
+                        verb = "Move",
+                        root = root,
+                        forbidden = listOf(notes),
+                        onDismiss = {},
+                        onPick = {},
+                    )
+                }
+            },
+        ) {
+            before()
+            then("Nothing is moved: the current folder is shown and its children are listed.") {}
+            after()
+            result(
+                "The verb is a parameter and every sentence is built from it, so a copy can never " +
+                    "be described with the word move - which is the one way a person could be told " +
+                    "the wrong thing about whether their original still exists.",
+            )
+        }
+    }
 }
