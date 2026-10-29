@@ -122,10 +122,15 @@ class AgentChatScreenTest {
         // **The message is a turn, not an act.** Two replies are two turns, and the one that called
         // `tree` holds both the call and the words that closed it - so its page count is what says
         // the grouping happened.
+        // **One exchange is ONE agent message**, holding the call and the words that closed it as
+        // its pages. It is not one message per request: a request is a turn, and a turn is smaller
+        // than the thing the person asked about.
         val agent = scene.viewModel.chatBox!!.messages.filter { it.side == AgentChat.Side.AGENT }
-        assertEquals("two agent messages, one per turn", 2, agent.size)
-        val calling = agent.first { m -> m.pages.any { it.caption == "tree" } }
-        assertEquals("the calling turn holds its call and its words", 2, calling.pages.size)
+        assertEquals("one agent message for the one exchange", 1, agent.size)
+        val calling = agent.first()
+        assertEquals("holding the call and the words that closed it", 2, calling.pages.size)
+        assertEquals("the call first", "tree", calling.pages[0].caption)
+        assertEquals("the closing words last", true, calling.pages.last().closing)
         // The call's page carries the result on the same page - that is what a page IS.
         val treePage = calling.pages.first { it.caption == "tree" }
         assertTrue(
