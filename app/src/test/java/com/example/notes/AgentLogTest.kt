@@ -730,10 +730,12 @@ class AgentLogTest {
             log.contextRows().count { it.name == "trimmed" },
         )
         assertEquals(
-            // Each marker reports its own trim, and the total is the sum — a running total kept by
-            // reading the previous marker back would count those rows again on every trim.
-            "three trims of two rows, and the markers say so",
-            listOf(2, 2, 2),
+            // **One marker for one act, and it reports only what that act did.** The pass took three
+            // conversations at once, so there is one marker saying six rows - not three markers of
+            // two. Each marker reports its own trim and the total is the sum, so a running total
+            // kept by reading the previous marker back would count those rows again on every trim.
+            "one trim of six rows, and the marker says so",
+            listOf(6),
             log.rows().filter { it.name == "trimmed" }.map {
                 it.body.substringBefore(' ').toInt()
             },
