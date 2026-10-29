@@ -532,9 +532,30 @@ class OpenRouterDoor(
         null
     }
 
-    /** The provider's own sentence, which is always more useful than the number. */
+    /**
+     * The provider's own sentence, which is always more useful than the number.
+     *
+     * **The wrapper is not the answer.** OpenRouter reports a provider's refusal as
+     * `{"error":{"message":"Provider returned error", "metadata":{"raw":"{...the real one...}"}}}` -
+     * so reading only `error.message` printed "Provider returned error" for every distinct failure,
+     * and the sentence that said *why* (`Invalid schema for function 'forget'…`) sat one level
+     * deeper, unread. That is how a chat that never worked reported one useless line.
+     *
+     * The `raw` payload is itself a JSON document, so it is unwrapped when it parses, and shown as
+     * it stands when it does not.
+     */
     private fun why(body: String): String = try {
-        val said = JSONObject(body).optJSONObject("error")?.optString("message").orEmpty()
+        val error = JSONObject(body).optJSONObject("error")
+        val wrapper = error?.optString("message").orEmpty()
+        val raw = error?.optJSONObject("metadata")?.optString("raw").orEmpty()
+        val inner = if (raw.isBlank()) "" else try {
+            JSONObject(raw).optJSONObject("error")?.optString("message").orEmpty()
+        } catch (t: Throwable) {
+            raw.take(300)
+        }
+        // The inner sentence alone when it exists: it says what failed, and the wrapper only says
+        // that something did.
+        val said = inner.ifBlank { wrapper }
         if (said.isBlank()) "" else ": $said"
     } catch (t: Throwable) {
         if (body.isBlank()) "" else ": ${body.take(200)}"

@@ -1,5 +1,6 @@
 package com.example.notes
 
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.InputStreamReader
@@ -257,11 +258,56 @@ class AgentTools(
             ),
         )
 
-        private fun spec(name: String, description: String, parameters: String) = ToolSpec(
-            name = name,
-            description = description,
-            parameters = JSONObject(parameters),
-        )
+        /**
+         * One tool, described to the model.
+         *
+         * **The parameters here are written as an EXAMPLE, and this is where it becomes a schema.**
+         * Every call site passes something like `{"ids":"2 5 7-12 14"}` - a filled-in sample, which
+         * is far easier to read and to keep honest than a tree of `type`/`description` objects - and
+         * this function wraps it in the one thing JSON Schema requires and an example cannot say:
+         * `{"type":"object","properties":{...}}`.
+         *
+         * **The wrap is not cosmetic, and its absence was a 400 on every chat request.** OpenRouter
+         * forwarded the bare example to DeepSeek, which refused the whole request with
+         * `Invalid schema for function 'forget': schema must be a JSON Schema of 'type: "object"',
+         * got 'type: null'`. The app reported only OpenRouter's wrapper sentence - "Provider
+         * returned error" - because the provider's own words are inside `error.metadata.raw`, which
+         * `why()` did not read. Two defects, one symptom: a chat that never answered.
+         */
+        private fun spec(name: String, description: String, parameters: String): ToolSpec {
+            val example = JSONObject(parameters)
+            val properties = JSONObject()
+            example.keys().forEach { key ->
+                properties.put(
+                    key,
+                    JSONObject().put("type", typeOf(example.get(key))).put("description", describe(example.get(key))),
+                )
+            }
+            return ToolSpec(
+                name = name,
+                description = description,
+                parameters = JSONObject()
+                    .put("type", "object")
+                    .put("properties", properties)
+                    .put("required", JSONArray(example.keys().asSequence().toList())),
+            )
+        }
+
+        /** The JSON Schema type of an example value, which is all an example can say. */
+        private fun typeOf(value: Any?): String = when (value) {
+            is Boolean -> "boolean"
+            is Int, is Long, is Double -> "number"
+            is JSONObject -> "object"
+            is JSONArray -> "array"
+            else -> "string"
+        }
+
+        /** The example's own value, read as the field's description. */
+        private fun describe(value: Any?): String = when (value) {
+            null, JSONObject.NULL -> ""
+            is JSONObject, is JSONArray -> value.toString()
+            else -> value.toString()
+        }
     }
 
     // ---- running ------------------------------------------------------------
