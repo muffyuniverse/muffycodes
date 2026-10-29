@@ -265,16 +265,44 @@ private fun ModelPicker(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { chosen = row }
+                                // **On the effort ladder a tap IS the choice.** Everywhere else the
+                                // row is marked and then Select confirms, because a model or a
+                                // provider can fail and a person wants to see the price before
+                                // committing. An effort level cannot fail - it is one of the values
+                                // the model publishes - so a mark plus a button is two controls for
+                                // one decision. Report: "effort popup needs just one select button".
+                                .clickable {
+                                    if (what == EFFORT) {
+                                        Trace.tap("effort", row)
+                                        viewModel.chooseModel(
+                                            active.model, active.provider, row,
+                                            info?.efforts.orEmpty(),
+                                        )
+                                        onDismiss()
+                                    } else {
+                                        chosen = row
+                                    }
+                                }
                                 .padding(vertical = 6.dp),
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
+                                // **No dot on the effort ladder**, for the same reason: a row that
+                                // takes effect on tap does not also need a mark saying it is the one
+                                // that would take effect. It shows which is current instead, in
+                                // words, because that is a fact about the model rather than a
+                                // selection.
+                                if (what != EFFORT) {
+                                    Text(
+                                        text = if (picked) "● " else "○ ",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                }
                                 Text(
-                                    text = if (picked) "● " else "○ ",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                )
-                                Text(
-                                    text = row,
+                                    text = if (what == EFFORT && row == current(what, active)) {
+                                        "$row — in use"
+                                    } else {
+                                        row
+                                    },
                                     style = MaterialTheme.typography.bodyMedium,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
@@ -354,12 +382,16 @@ private fun ModelPicker(
             ) { Text("Select") }
         },
         dismissButton = {
-            // **Add and Remove live here**, beside the list they change — on every step of the
-            // choice, because a model is added with its endpoints and one is removed from the
-            // model in use. Neither is on the settings screen any more.
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = { adding = true }) { Text("Add") }
-TextButton(onClick = { removing = true }) { Text("Remove") }
+                // **Add and Remove are about MODELS and PROVIDERS, not about effort.** They used to
+                // be on every step, which put "Add" beside a list of effort levels - a control that
+                // could only confuse, because there is nothing to add to a ladder the model
+                // publishes. Report: "effort popup needs just one select button. It seems as if you
+                // used same template for every option which is wrong."
+                if (what != EFFORT) {
+                    TextButton(onClick = { adding = true }) { Text("Add") }
+                    TextButton(onClick = { removing = true }) { Text("Remove") }
+                }
                 TextButton(onClick = onDismiss) { Text("Cancel") }
             }
         },

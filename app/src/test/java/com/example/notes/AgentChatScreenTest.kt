@@ -327,14 +327,18 @@ class AgentChatScreenTest {
         assertTrue("nothing is forgotten yet: ${pages.map { it.forgotten }}", pages.none { it.forgotten })
         compose.onNodeWithText("in context", substring = true).assertExists()
 
-        // **And a forgotten row reads as forgotten.** Asked of the box rather than by driving a
-        // second chat: the page's `forgotten` comes from the row's own `ctx` column, and the footer
-        // is a function of the page. What matters is that the two agree.
+        // **And the word follows the row's own `ctx` column, not a separate idea of it.** That is
+        // the whole claim: the footer is a function of the page, and the page's `forgotten` is read
+        // from the record. So a row the record says is `out` must read as forgotten, and this
+        // fixture has none - which the assertion above already said. Asking the file for a row that
+        // is not there would be testing `first()`.
         val log = AgentLog.open(File(scene.viewModel.workspace!!.accountDir, "groceries"))
-        val forgotten = log.rows().first { it.kind == AgentLog.CALL && it.ctx == AgentLog.OUT }
-        // There is none yet, which is the first assertion; if one is ever added to this fixture the
-        // box must report it as forgotten rather than as in context.
-        assertEquals("no row was forgotten by this conversation", null, forgotten)
+        assertEquals(
+            "every page's state matches the row it came from",
+            pages.map { it.id to it.forgotten },
+            log.rows().filter { row -> pages.any { it.id == row.id } }
+                .map { it.id to (it.ctx == AgentLog.OUT) },
+        )
     }
 
     @Test
