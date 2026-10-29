@@ -800,6 +800,79 @@ class AgentLog private constructor(
      * Answered from the evidence and never from `context.log`. That file is written from this
      * answer; asking both what the conversation is would be two sources of truth for one thing.
      */
+    /**
+     * **What has happened to the context: the four numbers the settings block asks for.**
+     *
+     * Report: "context block. clarify, 4 fields: compacted at, compacted to, trimmed at, trimmed to.
+     * compaction is by agent removing context records, trimming is by the app by removing oldest
+     * records."
+     *
+     * The distinction the four fields make is **who did it**, and it is the whole reason they are
+     * separate: a context that shrank because the agent decided what to forget is a working agent; a
+     * context that shrank because the app hit its own limit is the app stepping in. Adding the two
+     * into one number would hide the second, which is the one a person needs to see.
+     *
+     * - **compacted** is `forget` — the agent's own act. Both numbers come from the marker it writes,
+     *   which carries the ids it dropped.
+     * - **trimmed** is the app's — `trimContext` for the context limit, `trimSession` for the
+     *   record's. They share a marker name because they are the same act by the same hand; the one
+     *   that matters to a context is the first, and `trimSession` removing rows takes them out of the
+     *   context too, which is why its count belongs here as well.
+     *
+     * **`at` is how much there was, `to` is how much is left.** A count of rows rather than tokens,
+     * because that is what a marker records and what a person can check against the file - the token
+     * size of the context is on the line above it and is the number that matters for cost.
+     */
+    data class Fate(
+        /** Rows in the context when the agent last forgot something, or null if it never has. */
+        val compactedAt: Int? = null,
+        /** Rows the agent took out in that act. */
+        val compactedTo: Int? = null,
+        /** Rows in the context when the app last trimmed, or null if it never has. */
+        val trimmedAt: Int? = null,
+        /** Rows the app took out in that act. */
+        val trimmedTo: Int? = null,
+    )
+
+    /**
+     * The four numbers, read from the markers the acts already write.
+     *
+     * **Read from the record, not counted as a running total.** Markers are the app's own rows and
+     * stay in the file, so a total maintained by reading the previous marker would count those rows
+     * again on every act; each marker reports its own act, and this is the last of each kind.
+     */
+    fun fate(): Fate {
+        val all = rows()
+        val forgotten = all.lastOrNull { it.name == "forgot" }
+        val trimmed = all.lastOrNull { it.name == "trimmed" }
+        return Fate(
+            compactedAt = forgotten?.let { inContextBefore(it, all) },
+            compactedTo = forgotten?.let { droppedCount(it) },
+            trimmedAt = trimmed?.let { inContextBefore(it, all) },
+            trimmedTo = trimmed?.let { droppedCount(it) },
+        )
+    }
+
+    /**
+     * How many rows were in the context when [marker] was written.
+     *
+     * **Counted from the rows the marker's own id stands after**, because the count at that moment is
+     * not stored and cannot be recovered any other way: the context has changed since. This is the
+     * one place a count is derived rather than recorded, and it is derived from the file's own order.
+     */
+    private fun inContextBefore(marker: Row, all: List<Row>): Int =
+        all.filter { it.id < marker.id && it.ctx == IN }.size
+
+    /** How many rows [marker] says it dropped, from the ids in its own detail. */
+    private fun droppedCount(marker: Row): Int =
+        marker.detail.split(',').count { it.trim().toIntOrNull() != null }
+            .takeIf { it > 0 }
+            // The trim's marker says "12 rows: …" rather than listing ids, so the count is its first
+            // word. Two shapes because the two acts record themselves differently, and reading both
+            // is cheaper than changing a format a test pins.
+            ?: marker.detail.trim().substringBefore(' ').toIntOrNull()
+            ?: 0
+
     fun contextRows(): List<Row> = rows().filter { it.ctx == IN }
 
     /**

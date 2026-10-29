@@ -1116,9 +1116,19 @@ object GitService {
      */
     fun removeRemote(repo: Repository) {
         val config = repo.config
+        // **`unsetSection` takes the section and the subsection only**, and it drops every key in
+        // that subsection - which is what removing a remote is: the url, the fetch refspec and the
+        // push refspec all go together. The branch's own tracking settings are cleared separately,
+        // because a branch pointing at a remote that no longer exists is a branch whose next pull
+        // has nowhere to go.
+        val branch = currentBranch(repo)
         config.unsetSection("remote", "origin")
-        config.unsetSection("branch", currentBranch(repo) ?: "main", "remote")
-        config.unsetSection("branch", currentBranch(repo) ?: "main", "merge")
+        if (branch != null) {
+            // `unset`, not `setString(…, null)`: JGit's three-argument `unset` removes one key, and
+            // passing a null value would write the string "null" into a config file git reads.
+            config.unset("branch", branch, "remote")
+            config.unset("branch", branch, "merge")
+        }
         config.save()
     }
 

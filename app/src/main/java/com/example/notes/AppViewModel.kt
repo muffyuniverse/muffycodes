@@ -2488,6 +2488,27 @@ class AppViewModel @JvmOverloads constructor(
 
     /** The project whose conversation is on the screen, or null when none is. */
     var chatProject: String? by mutableStateOf(null)
+
+    /**
+     * **What has happened to the open project's context**, for the settings block.
+     *
+     * Read on demand rather than held in state: it changes only when the agent forgets something or
+     * the app trims, and both are visible on the chat screen the moment they happen - so a settings
+     * screen that read it once when it opened would be showing a number from before the thing the
+     * person is looking at.
+     */
+    val contextFate: AgentLog.Fate
+        get() {
+            val project = chatProject ?: return AgentLog.Fate()
+            val ws = workspace ?: return AgentLog.Fate()
+            return try {
+                AgentLog.open(ws.projectDir(project)).fate()
+            } catch (t: Throwable) {
+                // A record that will not parse is a record with nothing to report, not a crash on
+                // the settings screen.
+                AgentLog.Fate()
+            }
+        }
         private set
 
     /**

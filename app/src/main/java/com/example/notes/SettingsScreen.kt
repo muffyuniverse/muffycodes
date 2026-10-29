@@ -324,6 +324,37 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary,
             )
+
+            // ---- what has actually happened to this context ----
+            //
+            // **Four fields, because two different hands do two different things.** Report: "context
+            // block. clarify, 4 fields: compacted at, compacted to, trimmed at, trimmed to.
+            // compaction is by agent removing context records, trimming is by the app by removing
+            // oldest records."
+            //
+            // The distinction is the whole point: a context that shrank because the agent chose what
+            // to forget is a working agent, and one that shrank because the app hit its own limit is
+            // the app stepping in. One number for both would hide the second, which is the one a
+            // person needs to notice.
+            val fate = viewModel.contextFate
+            Text(
+                "What has happened to the context",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 10.dp),
+            )
+            FateLine(
+                "Compacted by the agent",
+                at = fate.compactedAt,
+                to = fate.compactedTo,
+                none = "The agent has not cleared anything up yet.",
+            )
+            FateLine(
+                "Trimmed by the app",
+                at = fate.trimmedAt,
+                to = fate.trimmedTo,
+                none = "The app has not had to trim this context.",
+            )
             RowDivider()
 
             // ---- the two clocks: work on this phone, and the wait for the model ----
@@ -902,6 +933,34 @@ private fun SwitchAccountDialog(
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+    )
+}
+
+/**
+ * One of the two fates: **how much there was, and how much is left.**
+ *
+ * `at` and `to` are row counts, because that is what the record's markers report and what a person
+ * can check against the file. Null means the act has never happened, which is said in a sentence
+ * rather than shown as two dashes - a dash reads as "a number I do not have", and this is "a thing
+ * that has not happened".
+ */
+@Composable
+private fun FateLine(label: String, at: Int?, to: Int?, none: String) {
+    if (at == null || to == null) {
+        Text(
+            text = "$label: $none",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        return
+    }
+    Text(
+        // **"at" and "to", in that order, because that is how a person says it**: there were twelve
+        // rows, and afterwards there were nine. The parenthetical says what it took, which is the
+        // difference between the two and the only arithmetic the reader would otherwise do.
+        text = "$label: at $at rows, to ${(at - to).coerceAtLeast(0)} ($to taken out)",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
 
