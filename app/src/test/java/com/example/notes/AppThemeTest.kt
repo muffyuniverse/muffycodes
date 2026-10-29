@@ -60,6 +60,38 @@ class AppThemeTest {
     }
 
     @Test
+    fun `the themes are told apart, not merely unequal`() {
+        // **This is the report, and the old test could not see it.** "make themes truely different
+        // in their colour schemes" - and all five primaries were browns within about twenty per
+        // channel (`#8A6D3B`, `#8B5722`, `#7A5900`, `#6B4423`, `#4E3423`). Every one was distinct,
+        // so `no two themes are the same palette` passed while a person choosing between them was
+        // choosing between five shades of the same page.
+        //
+        // A colour is told apart from another when it is far enough away to name differently. The
+        // measure is the sum of the channel distances, which is crude and exactly right here: it
+        // says "these are not the same colour", which is the claim the report makes.
+        fun distance(a: androidx.compose.ui.graphics.Color, b: androidx.compose.ui.graphics.Color): Int {
+            val dr = kotlin.math.abs(a.red - b.red) * 255
+            val dg = kotlin.math.abs(a.green - b.green) * 255
+            val db = kotlin.math.abs(a.blue - b.blue) * 255
+            return (dr + dg + db).toInt()
+        }
+
+        val primaries = AppTheme.entries.map { it.name to it.lightScheme().primary }
+        for (i in primaries.indices) {
+            for (j in i + 1 until primaries.size) {
+                val (an, a) = primaries[i]
+                val (bn, b) = primaries[j]
+                val apart = distance(a, b)
+                assertTrue(
+                    "$an and $bn are only $apart apart, which is two shades of one colour",
+                    apart >= 60,
+                )
+            }
+        }
+    }
+
+    @Test
     fun `no two themes have the same swatch`() {
         // Given the colour shown for each theme in the settings
         val swatches = AppTheme.entries.map { it.swatch }
