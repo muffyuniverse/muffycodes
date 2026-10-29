@@ -50,28 +50,45 @@ currently skips it. It becomes the divider — no new bookkeeping, and nothing i
 note when the reply has text, and a reply with text and no calls is what ends the turn. So the last
 page is not a new row kind; it is the `agent` note that closes the turn.
 
-## 2. Height: a message is as tall as its tallest page
+## 2. Height: the active page's own height, bounded by the cap
 
-**The rule.** A message's height is set by its **tallest page** — the page with the most content —
-and every page is drawn in that height. Paging therefore never changes the message's height, and the
-list never jumps as a person turns pages.
+**A message is as tall as the page being shown**, not as its tallest page. Swapping pages resizes
+the message.
 
-That is the whole point of it: a pager whose box resizes on every page makes the list beneath it
-move, and the reader loses their place in the conversation to follow the text.
+**This reverses the earlier rule, and the reason is worth keeping.** Tallest-page was specified to
+stop the list moving, and it does — at the cost of a one-line page reserving twenty lines of blank
+space, in a chat that is already height-capped. That reads as a broken message rather than as a
+reserved box, and the page indicator already says there are more pages without the space having to
+prove it.
 
-## 3. The height cap, in lines, from settings
+### The two things that make a resizing message safe
 
-- **Set in settings, as a number of lines.** `bubbleLines` already exists
-  (`DEFAULT_BUBBLE_LINES = 0` = no cap). Lines rather than a fraction of the screen because "eight
-  lines" is a statement about the text and "40% of the window" is a statement about the phone.
-- **When the message's height exceeds the cap**, only the first part is shown, and **the last visible
-  line says how many lines are hidden and that expanding will show them.** A message that simply
-  stopped would be indistinguishable from one that finished — the sentence is what makes truncation
-  honest.
-- **The cap applies to the tallest page**, because that is the message's height (§2). So a message
-  is truncated when *any* page is taller than the cap, and the count in the sentence is that page's
-  hidden lines.
-- **`0` means no cap**, and then the sentence never appears.
+The cost of a dynamic height is **not** computation. A swap is one tap: the box re-measures, the
+messages below are re-positioned but **not recomposed** (their inputs did not change), and messages
+below the fold are not composed at all in a `LazyColumn`. That is one measure pass over the visible
+rows.
+
+The cost is that things move, and two rules keep that from being a nuisance:
+
+1. **The pager is anchored to the message's TOP**, beside the fullscreen icon — never at the bottom
+   of the box. A box that shrinks with its controls inside it moves the buttons out from under the
+   finger that just tapped one, so the person has to chase it. Anchored at the top, the message grows
+   and shrinks downward and the controls never move.
+2. **A swap keeps the message's top in place.** The list scrolls to accommodate, so the new page is
+   read from its beginning. Without this a taller page grows past the fold and the reader is looking
+   at its middle.
+
+Both are layout rules, and both are cheap. Neither needs the height to be fixed.
+
+**Animating the height is optional.** `animateContentSize()` makes the shift smooth rather than a
+jump; it costs about twenty extra measure passes of text, which is still nothing. Worth having, not
+worth planning around.
+
+### Rejected: growth-only
+
+A middle option — never shrink below the tallest page seen so far — removes the upward push but keeps
+the wasted space once a long page has been visited, and makes the height depend on the order pages
+were read. Two rules instead of one, for a worse result.
 
 ## 4. Fullscreen: an icon in the message's top-right corner
 
@@ -101,8 +118,9 @@ gets slower the longer it runs, and "scroll to the bottom" has to measure the wh
 | `AgentChat.Bubble` | one bubble = one call+result, or the agent's words | one bubble = one turn; `pages: List<Page>`, the words as the last page |
 | `AgentChat.bubbles()` | emits per `CALL`/`GOT`; skips `TURN` | groups by `TURN`; `TURN` is the divider |
 | `AgentChatScreen` | `Column` + `verticalScroll` in a 75%-height box | `LazyColumn`, scrolled to the last index on open |
-| The cap | `bubbleLines` truncates a single `detail` string | applies to the tallest page; the sentence counts that page's hidden lines |
+| The cap | `bubbleLines` truncates a single `detail` string | applies to the active page; the sentence counts that page's hidden lines |
 | Fullscreen | a `TextButton`/tap on the bubble, one `verticalScroll` | top-right icon; pager over the pages; uncapped |
+| The pager | — | anchored to the message's **top**, so a resizing box never moves it |
 | The operator's message | a bubble with a caption and a footer | a plain row |
 
 ## 7. What this does **not** change
@@ -119,7 +137,7 @@ gets slower the longer it runs, and "scroll to the bottom" has to measure the wh
 
 1. **Regroup.** One message per turn, pages inside it, the words last. Keep the current drawing (the
    pages stacked). Ship — this is the shape the operator asked for and it needs no new UI.
-2. **The cap, applied to the tallest page**, with the hidden-lines sentence.
+2. **The cap, applied to the active page**, with the hidden-lines sentence.
 3. **The fullscreen icon and the pager.**
 4. **`LazyColumn` + open at the bottom.**
 5. **The operator's row as a plain row.**
