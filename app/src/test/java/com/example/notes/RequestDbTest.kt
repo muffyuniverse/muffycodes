@@ -2,6 +2,7 @@ package com.example.notes
 
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -10,6 +11,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.json.JSONObject
+import java.time.LocalDate
 import java.io.File
 
 /**
@@ -77,7 +79,23 @@ class RequestDbTest {
         finish = "stop",
     )
 
-    private fun write(at: Long, stats: RequestLog.Stats = response(at)) = RequestDb.insert(db, at, stats)
+    /**
+     * A response written **through the real path**, on this test's own connection.
+     *
+     * `RequestDb.write` opens a connection of its own, and the boundary trigger reads the previous
+     * instant from inside that connection - so a test that called it would roll on one handle and
+     * then assert on another, which reads as "compaction did not happen". This drives the same two
+     * steps in the same order on [db], so the trigger is still exercised end to end.
+     */
+    private fun write(at: Long, stats: RequestLog.Stats = response(at)) {
+        val previous = db.rawQuery(
+            "SELECT MAX(utc) FROM requests WHERE utc < ?",
+            arrayOf(at.toString()),
+        ).use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else null }
+        RequestDb.insert(db, at, stats)
+        val crossed = previous?.let { RequestDb.crossed(it, at) } ?: 0L
+        if (crossed != 0L) RequestDb.compact(db, at, if (crossed == 86400000L) 0 else 0)
+    }
 
     /**
      * The totals over an interval, **unwrapped to the turns-and-pings part.**
@@ -221,6 +239,62 @@ class RequestDbTest {
         assertEquals("the two that exist", 2, total(base - 30 * DAY, base + 30 * DAY).requests)
     }
 
+    @Test
+    fun `a local hour in a half-hour zone is still answered exactly`() {
+        // **The reason the minute tier exists at all, and it is not the case it looks like.**
+        //
+        // The log keys its tables by UTC hours, but the picker states a *wall-clock* hour. In a
+        // whole-hour zone those coincide, so the minute table only ever serves the seam between the
+        // summarised prefix and the raw suffix. In India (+5:30), Nepal (+5:45), Adelaide (+9:30) or
+        // Newfoundland (-3:30) they never coincide: local 19:00 is 13:30 UTC, so **every** query
+        // begins and ends mid-bucket and is answered from minutes. Without the minute table those
+        // users would fall back to raw rows for every interval they ever picked.
+        //
+        // Pinned as arithmetic on the interval rather than through the database, because the point
+        // is the shape of the boundary: a start that is not on a UTC hour edge.
+        val india = java.time.ZoneId.of("Asia/Kolkata")
+        val day = LocalDate.parse("2026-10-25")
+        val at = day.atTime(19, 0).atZone(india).toInstant().toEpochMilli()
+        val span = RequestStats.interval(at, at + 3_600_000L, india)
+
+        assertEquals("the local hour", at, span.fromMs)
+        assertEquals("is one hour of wall clock", 1L, span.hours)
+        // **And it does not begin on a UTC hour edge**, which is what forces the minute tier.
+        assertNotEquals(
+            "a half-hour zone puts the interval off the UTC hour grid",
+            0L,
+            Math.floorMod(span.fromMs, HOUR),
+        )
+    }
+
+    @Test
+    fun `an interval that starts off the hour grid is exact, not rounded`() {
+        // The same hazard as `a local hour in a half-hour zone`, but driven through the database so
+        // the peel itself is what is being checked: a start 30 minutes into a UTC hour must read
+        // those 30 minutes at minute granularity and the rest at hour granularity, with no gap and
+        // no overlap between the two.
+        var at = base + 10 * HOUR + 30 * MIN
+        repeat(6) {
+            write(at)
+            at += 10 * MIN
+        }
+        RequestDb.compact(db, base + 12 * HOUR)
+
+        // 10:30 .. 11:30 - half of it off the grid at the start.
+        assertEquals(
+            "six responses, all counted once",
+            6,
+            total(base + 10 * HOUR + 30 * MIN, base + 11 * HOUR + 30 * MIN).requests,
+        )
+        // And the same interval one hour on holds none of them, so the first figure is not a
+        // coincidence of a whole-hour widening.
+        assertEquals(
+            "an hour later holds nothing",
+            0,
+            total(base + 11 * HOUR + 30 * MIN, base + 12 * HOUR + 30 * MIN).requests,
+        )
+    }
+
     // ---- compaction is a cache, and must not change an answer ---------------------------------
 
     @Test
@@ -350,7 +424,11 @@ class RequestDbTest {
             total(base + 10 * HOUR, base + 11 * HOUR).requests,
         )
         assertEquals("and the week-later response is counted once", 1, total(later, later + HOUR).requests)
-        assertEquals("with nothing left raw", 0, rawRows())
+        // **One row is still raw, and must be.** The response just written is at `later` itself,
+        // and compaction only rolls what is strictly *before* the current minute - so the newest
+        // response is always raw. Claiming zero here would mean the minute in progress had been
+        // rolled, which is the one thing compaction must never do.
+        assertEquals("only the response just written", 1, rawRows())
     }
 
     @Test
