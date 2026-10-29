@@ -332,7 +332,8 @@ fun StatsScreen(
                     Text(
                         "Nothing has been asked of the model yet, so there is nothing to count. " +
                             "Each response is written down as it happens, in the system project's " +
-                            "requests folder.",
+                            "requests folder - one row in a database, so a year of history costs " +
+                            "a sum per hour rather than a re-reading of every response.",
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(top = 8.dp),
                     )

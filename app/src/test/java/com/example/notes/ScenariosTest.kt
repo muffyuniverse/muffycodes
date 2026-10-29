@@ -667,27 +667,62 @@ class ScenariosTest {
         scenario(
             compose, "24-what-it-cost",
             "What it cost.",
-            "the request log summed over an interval chosen with two pickers.",
+            "the request history summed over an interval chosen with two pickers.",
             screen = { stats(account, now) },
         ) {
             before()
-            then("Nothing is pressed: the table is a reading of the log, counted when it opened.") {}
+            then("Nothing is pressed: the table is a reading of the history, counted when it opened.") {}
             after()
             result(
                 "Two picks and one column. The interval is stated rather than inferred: From " +
                     "and To sit above the table, and every number below is that interval summed. " +
                     "One figure per metric, which is what a person asks for - not five nested " +
-                    "views of one instant that each need a rule for where they start.",
+                    "views of one instant that each need a rule for where they start. " +
+                    "The 22 requests are read from three SQLite tables - minutes, hours, days - " +
+                    "cut into disjoint slices so nothing is counted twice, which is the whole " +
+                    "reason the levels are separate tables rather than lines in one file.",
+            )
+        }
+    }
+
+    @Test
+    fun `what it cost before anything was asked`() {
+        // **The other empty screen, and it is not the same one.** A table of zeroes and a sentence
+        // saying nothing has been asked yet look completely different to a person deciding whether
+        // the app is broken - and until now only the populated version was ever pictured.
+        scene.signedIn()
+        val account = scene.workspace?.accountDir ?: error("signed in, so there is one")
+        // **Its own database, deliberately.** This class shares one lazily-built `scene` across its
+        // tests, so a scenario that wrote responses would leave them here and this screen would not
+        // be empty at all - it would show the previous test's numbers under a caption claiming
+        // nothing had been asked. Deleting the file is the honest way to say "a fresh install".
+        RequestDb.delete(account)
+        val now = java.time.LocalDate.parse("2026-10-28")
+            .atTime(14, 30).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+
+        scenario(
+            compose, "26-what-it-cost-before-anything",
+            "What it cost, before anything was asked.",
+            "an empty history, which has to say so rather than show a grid of zeroes.",
+            screen = { stats(account, now) },
+        ) {
+            before()
+            then("Nothing is pressed: there is nothing to press for.") {}
+            after()
+            result(
+                "A sentence instead of dashes. Zeroes would read as a fault and as a measurement " +
+                    "at the same time, and neither is true - the log simply has nothing in it yet.",
             )
         }
     }
 
     @Test
     fun `the window that picks when the table is about`() {
-        // **The one popup the cost table has, and the only place a minute could be chosen.** The
-        // table counts whole hours, so the dialog offers the hour alone - and that is a decision
-        // only a picture can confirm, because "the minute stepper is gone" is true of a dialog that
-        // might have lost the hour too.
+        // **The one popup the cost table has, and it offers no minute at all.** The table counts
+        // whole hours, so the dialog offers the hour alone - a decision only a picture can confirm,
+        // because "the minute stepper is gone" is equally true of a dialog that lost the hour too.
+        // The `:00` beside the stepper is the whole of the fix: it says the value IS the hour, not
+        // the hour part of a time that has minutes somewhere else.
         //
         // Material's calendar is above the steppers: the day is the platform's own picker because a
         // hand-written calendar is a month of work that would still not match the phone's, and only

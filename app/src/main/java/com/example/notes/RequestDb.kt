@@ -126,6 +126,24 @@ object RequestDb {
     fun fileFor(accountDir: File): File =
         File(File(File(accountDir, Workspace.SYSTEM_PROJECT), RequestLog.DIR), FILE)
 
+    /**
+     * Deletes the history entirely - **including the write-ahead log and its index.**
+     *
+     * The three files are one database: with write-ahead logging on, the `.db` is not the whole
+     * truth until the log is checkpointed, so deleting it alone leaves SQLite to replay the `-wal`
+     * on the next open and the "empty" database comes back with rows in it. That would look like a
+     * failure of whatever asked for an empty history rather than a failure of the delete.
+     *
+     * Used by a scenario that pictures the empty screen, and available for a "clear history" the
+     * settings screen may grow.
+     */
+    fun delete(accountDir: File) {
+        val db = fileFor(accountDir)
+        for (suffix in listOf("", "-wal", "-shm")) {
+            File(db.path + suffix).delete()
+        }
+    }
+
     private fun create(db: SQLiteDatabase) {
         db.execSQL(
             """
