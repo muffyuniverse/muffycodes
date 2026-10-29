@@ -287,11 +287,16 @@ class StatsScreenTest {
         // assertion here is about. The dial's hour stepper is a plain button and works at any size.
         compose.onNodeWithText("00:00", substring = true).performClick()
         compose.waitForIdle()
-        println("DIAG DIAL: 00=" + compose.onAllNodesWithText("00").fetchSemanticsNodes().size +
-            " 14=" + compose.onAllNodesWithText("14").fetchSemanticsNodes().size +
-            " HOUR=" + compose.onAllNodesWithText("HOUR", substring = true).fetchSemanticsNodes().size +
-            " minutes=" + compose.onAllNodesWithText("minutes", substring = true).fetchSemanticsNodes().size +
-            " Show=" + compose.onAllNodesWithText("Show").fetchSemanticsNodes().size)
+        // The dialog is a second root, so dump each root separately.
+        val roots = compose.onAllNodesWithText("Show", useUnmergedTree = true).fetchSemanticsNodes()
+        println("DIAG roots-with-Show=" + roots.size)
+        for (n in roots) println("DIAG node: " + n.config)
+        // What does the tree look like around the two 00 fields?
+        for (n in compose.onAllNodesWithText("00", useUnmergedTree = true).fetchSemanticsNodes()) {
+            println("DIAG 00 parent-ish: " + n.config)
+        }
+        println("DIAG clickable00=" +
+            compose.onAllNodesWithText("00").fetchSemanticsNodes().size)
         compose.onAllNodesWithText("+")[0].performClick()
         compose.onNodeWithText("Show").performClick()
         compose.waitForIdle()
