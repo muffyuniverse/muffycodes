@@ -913,8 +913,12 @@ class AgentTest {
         // the model in the spec it is sent — as a backticked name or as a field of the example.
         for (spec in AgentTools.specs()) {
             val keys = AgentTools.KEYS[spec.name] ?: continue
-            val taught = spec.description + " " + spec.parameters.keys().asSequence().joinToString(" ")
-            val silent = keys.filterNot { taught.contains("`$it`") || spec.parameters.has(it) }
+            // **`properties`, not `parameters`.** The parameters are a JSON Schema now -
+            // `{"type":"object","properties":…,"required":[…]}` - because a bare example was refused
+            // by the provider outright. The keys the model is shown are the schema's properties.
+            val described = spec.parameters.optJSONObject("properties") ?: continue
+            val taught = spec.description + " " + described.keys().asSequence().joinToString(" ")
+            val silent = keys.filterNot { taught.contains("`$it`") || described.has(it) }
             assertTrue("${spec.name} accepts no undescribed key: $silent", silent.isEmpty())
         }
     }
@@ -1648,7 +1652,11 @@ class AgentTest {
         val specs = AgentTools.specs()
         for (spec in specs) {
             val took = AgentTools.KEYS[spec.name] ?: error("${spec.name} declares no keys")
-            val shown = spec.parameters.keys().asSequence().toSet()
+            // **The schema's properties, which is where the example now lives.** The example is
+            // wrapped in `{"type":"object","properties":…}` before it is sent, so reading
+            // `parameters` directly would compare the wrapper's three keys against the tool's.
+            val shown = spec.parameters.optJSONObject("properties")?.keys()?.asSequence()?.toSet()
+                ?: error("${spec.name} has no properties")
             assertEquals(
                 "${spec.name}'s example shows only keys it takes",
                 emptySet<String>(),
