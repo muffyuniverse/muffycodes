@@ -469,16 +469,29 @@ object AgentChat {
                 ),
             )
         }
-        for (turn in turns(conversation)) {
-            // A turn that only kept the conversation warm is the idle line, not a message.
-            if (turn.idle) continue
+        // **A BURST, not a turn.** `AgentLog.TURN` is written before every request, so one request
+        // is one turn - and a reply that calls a tool and then speaks is TWO turns, which grouped
+        // as two messages would put the call and the words that close it in different messages. The
+        // unit the operator asked for is everything the agent did about one thing the person said,
+        // and that is the burst: `TOLD` starts one, and the next `TOLD` ends it.
+        for (burst in AgentLog.bursts(conversation)) {
+            // The first burst is the operator's own message and the work that answered it. Its
+            // `TOLD` row is drawn above as the operator's message, so the burst is drawn here as
+            // the agent's - the two halves of one exchange.
+            if (burst.none { it.kind != AgentLog.TOLD }) continue
+            // A burst that only kept the conversation warm is the idle line, not a message.
+            if (burst.none { it.kind == AgentLog.CALL } &&
+                burst.any { it.kind == AgentLog.NOTE && it.name == PING }
+            ) {
+                continue
+            }
             val pages = mutableListOf<Page>()
             val pending = mutableMapOf<Int, AgentLog.Row>()
             var words: Page? = null
             // **The accounting rides on the closing words**, so the footer shows what the turn cost
             // against the sentence that ended it.
             var wordsCost: Spend? = null
-            for (row in turn.rows) {
+            for (row in burst) {
                 if (row.broken) {
                     pages.add(
                         Page(
@@ -495,6 +508,8 @@ object AgentChat {
                 }
                 val forgot = row.ctx == AgentLog.OUT
                 when (row.kind) {
+                    // The operator's own line is the message above, not a page of this one.
+                    AgentLog.TOLD -> Unit
                     AgentLog.CALL -> pending[row.id] = row
                     AgentLog.GOT -> {
                         val call = pending.remove(row.answers)
