@@ -169,11 +169,29 @@ class RequestDbTest {
     }
 
     @Test
-    fun `the oldest instant is reported, so the screen can say where the log starts`() {
+    fun `the oldest instant is the first thing written, while it is still raw`() {
         assertNull("an empty database has no beginning", RequestDb.oldest(db))
+        // **Two writes in the same minute**, so the boundary trigger rolls nothing and both rows
+        // stay raw. That is what this test is about; the next one is about the other case.
         write(base + 5 * HOUR)
-        write(base + 40 * HOUR)
+        write(base + 5 * HOUR + 30_000L)
         assertEquals("the first thing written", base + 5 * HOUR, RequestDb.oldest(db))
+    }
+
+    @Test
+    fun `once the detail is rolled away, the oldest instant is the bucket that survives`() {
+        // **The distinction the screen's sentence needs.** After compaction the raw instants are
+        // gone and the finest thing left is a day bucket, so `oldest` reports the *day* rather than
+        // the response that happened to be first. Claiming 05:00 would promise a precision the data
+        // no longer has - and the caption would then say "the log starts 05:00" beside figures
+        // counted from whole days.
+        //
+        // The first version of the test above asserted 05:00 for this very case and was wrong: the
+        // second write crossed an hour boundary, so compaction had already run.
+        write(base + 5 * HOUR)
+        write(base + 40 * HOUR)          // crosses an hour boundary -> rolls both
+        assertEquals("both rolled", 0, rawRows())
+        assertEquals("so the day is the oldest thing left", base, RequestDb.oldest(db))
     }
 
     // ---- the decomposition -------------------------------------------------------------------

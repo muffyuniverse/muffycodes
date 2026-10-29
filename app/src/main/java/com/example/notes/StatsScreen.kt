@@ -126,19 +126,24 @@ fun StatsScreen(
             }
         }
     }
-    // **Closed when the screen goes.** A database handle left open keeps a WAL file and a lock
-    // alive for the life of the process.
+    // **Closed when the screen goes, and only the handle this screen opened.**
     //
-    // **Keyed on `history`, not on `accountDir`.** The effect body captures `history` when its keys
-    // change; with `accountDir` as the key that moment is before the reader has answered, so the
-    // captured value is null and nothing is ever closed. Keying on `history` re-runs when the handle
-    // arrives, and its `onDispose` closes the one that exists.
+    // Two things are being got wrong at once if this is written naively:
     //
-    // **Closing is idempotent** (`History.close`), which is what makes it safe for both this and a
-    // scenario harness to close the same handle: a caller that has to know which of the two owns it
-    // gets it wrong, and the failure surfaces as an exception from a *later* query.
+    //  1. `DisposableEffect(accountDir)` captures `history` when the effect body runs, which is
+    //     before the reader has answered - so the captured value is null and nothing is closed.
+    //     Keying on `history` is what makes the effect re-run when the handle arrives.
+    //
+    //  2. **A re-composition must not close a handle that is still in use.** `LaunchedEffect`
+    //     re-runs when `accountDir` or `readRows` changes and produces a *new* handle; the
+    //     `onDispose` for the old effect then runs. Closing the current `history` there would close
+    //     the new one, and the failure appears later as `IllegalStateException` from a query that
+    //     has nothing to do with the cause - which is exactly how a scenario harness caught it.
+    //
+    // So the effect closes **the value it captured**, not whatever `history` holds by then.
     DisposableEffect(history) {
-        onDispose { history?.close() }
+        val opened = history
+        onDispose { opened?.close() }
     }
     // **One figure, over the interval the two pickers name.** No list, no spans, no filtering: the
     // checkbox row is gone because there is one column, and the whole "which level speaks for this
