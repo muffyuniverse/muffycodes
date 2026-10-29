@@ -286,7 +286,7 @@ object RequestStats {
                 // "1 day" - today's midnight - so the chip named a week and covered a few hours.
                 // The clock family's rule is "the start of the current calendar period", so a week
                 // begins on its first day: Monday, by the ISO week the rest of this app uses.
-                is Back.Days -> if (b.count >= 7) {
+                is Back.Days -> if (back.count >= 7) {
                     at.with(
                         java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY),
                     ).truncatedTo(java.time.temporal.ChronoUnit.DAYS)
