@@ -721,6 +721,50 @@ fun SettingsScreen(
                 placeholder = "all of them",
                 onValueChange = { settings.keepRequests(it) },
             )
+
+            // ---- back to what the app shipped with ----
+            //
+            // **At the bottom, and last, because it is the one button here that undoes the others.**
+            // It used to live in the agent block, where it read as "reset the agent" and left every
+            // other setting alone. Report: "remove reset button from agent block and add reset
+            // settings to the bottom of settings menu (it should return settings to defaults)".
+            //
+            // **Asked before it happens**, because it is a single press that discards a screen of
+            // choices and there is no undo for a preference.
+            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+            Text("Back to defaults", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Every setting on this screen returns to what the app shipped with. Files, " +
+                    "projects and the record are not touched.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            var confirmingReset by remember { mutableStateOf(false) }
+            TextButton(onClick = { confirmingReset = true }) {
+                Text("Reset settings", color = MaterialTheme.colorScheme.error)
+            }
+            if (confirmingReset) {
+                AlertDialog(
+                    onDismissRequest = { confirmingReset = false },
+                    title = { Text("Reset every setting?") },
+                    text = {
+                        Text(
+                            "The themes, the limits, the timeouts and the agent's settings all go " +
+                                "back to what the app shipped with. Nothing you have written is " +
+                                "touched.",
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            confirmingReset = false
+                            settings.reset()
+                        }) { Text("Reset") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { confirmingReset = false }) { Text("Cancel") }
+                    },
+                )
+            }
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
             // ---- every one on this phone, and one switch ----

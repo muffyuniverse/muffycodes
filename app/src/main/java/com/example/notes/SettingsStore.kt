@@ -27,7 +27,7 @@ class SettingsStore(context: Context, name: String = "settings") {
 
     var theme: AppTheme by mutableStateOf(
         AppTheme.entries.firstOrNull { it.name == prefs.getString(KEY_THEME, null) }
-            ?: AppTheme.CARAMEL
+            ?: DEFAULT_THEME
     )
         private set
 
@@ -577,7 +577,58 @@ class SettingsStore(context: Context, name: String = "settings") {
      * a number, means "keep everything".
      */
     companion object {
-        const val KEY_THEME = "theme"
+        /**
+     * **Every setting back to the number the app shipped with.**
+     *
+     * One function, because a reset that restates the defaults is a second copy of them and the two
+     * drift: a default changed at its read site would leave the reset restoring the old value, and
+     * nothing would say so. Every value here is the same `DEFAULT_*` constant its reader uses, so
+     * there is exactly one statement of each number in the app.
+     *
+     * **`readmeShown` is deliberately NOT reset.** It is not a preference; it records that the app
+     * has already shown its own introduction, and resetting it would open the README again on the
+     * next launch - which is a side effect nobody asking for "restore defaults" expects.
+     *
+     * The theme IS reset, to the one the app starts with, because it is the most visible setting on
+     * the screen and a reset that left it alone would look like it had not worked.
+     */
+    fun reset() {
+        Trace.tap("reset settings")
+        // **Theme first**, because it repaints the screen the button was pressed on - and to the
+        // theme the app actually starts with, which is `CARAMEL` rather than whichever enum member
+        // happens to be first. A reset to the wrong theme is a reset that looks like a bug.
+        selectTheme(DEFAULT_THEME)
+        selectDarkVariant(false)
+        keepHistory(0)
+        keepRequests(0)
+        keepTrigger(0)
+        keepHard(0)
+        keepWarm(true)
+        keepPoll(0)
+        keepWarmFor(DEFAULT_WARM_MINUTES)
+        keepForeground(DEFAULT_FOREGROUND_SECONDS)
+        keepBackground(DEFAULT_BACKGROUND_SECONDS)
+        keepReconnect(DEFAULT_RECONNECT_SECONDS)
+        keepTimeout(DEFAULT_TIMEOUT_SECONDS)
+        keepAck(DEFAULT_ACK_SECONDS)
+        keepGap(DEFAULT_GAP_SECONDS)
+        keepMaxResult(DEFAULT_MAX_RESULT)
+        keepBubbleLines(DEFAULT_BUBBLE_LINES)
+        keepSession(DEFAULT_SESSION_TOKENS)
+        keepRemind(DEFAULT_REMIND_MINUTES)
+        Trace.said("every setting is back to what the app shipped with")
+    }
+
+    /**
+     * The theme the app starts with.
+     *
+     * Named rather than written as `AppTheme.entries.first()`, because "the first one" is a fact
+     * about the enum's declaration order and not a decision - and a reset that restored the wrong
+     * theme would be the first thing a person noticed.
+     */
+    val DEFAULT_THEME = AppTheme.CARAMEL
+
+    const val KEY_THEME = "theme"
         const val KEY_DARK = "use_dark"
         const val KEY_LIVE = "live_trace"
         const val KEY_HISTORY = "history_length"

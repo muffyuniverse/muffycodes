@@ -71,7 +71,7 @@ VOCABULARY = {
     "confirm move", "confirm copy", "confirm restore deleted", "confirm sync",
     "confirm rename project", "confirm delete project", "confirm remove account",
     # settings, which go through the store rather than the view model
-    "theme", "dark", "light", "history limit",
+    "theme", "dark", "light", "history limit", "reset settings",
     # the agent's model: the three lists, the two ways to change the list of models, and the
     # catalogue the numbers come from. A list opened and closed is not here — it changed nothing.
     "reset model config", "set model key", "save key",
