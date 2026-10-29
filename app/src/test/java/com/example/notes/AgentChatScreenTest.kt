@@ -98,10 +98,23 @@ class AgentChatScreenTest {
         // press ‹ to see the call that produced the answer they were reading; a conversation is a
         // list and a list scrolls.
         compose.onNodeWithText("what is in the project", substring = true).assertExists()
-        // **The caption is `agent`, not `concluded`.** The `CONCLUDE` row is gone; the ending is the
-        // model's own note, which is drawn under the same caption as any other thing it said.
-        compose.onNodeWithText("agent").assertExists()
-        compose.onNodeWithText("There is one file.", substring = true).assertExists()
+        // **The closing words are a PAGE, so they are behind the pager.** The message opens on page
+        // one - the call - and the words that ended it are the last page. That is the shape the
+        // operator asked for: a message holds its pages, and a call and its closing words are one
+        // message rather than two.
+        val agentBox = scene.viewModel.chatBox!!.messages.filter { it.side == AgentChat.Side.AGENT }
+        val withWords = agentBox.first { m -> m.pages.any { it.closing } }
+        assertEquals(
+            "the closing page is last",
+            true,
+            withWords.pages.last().closing,
+        )
+        assertTrue(
+            "and it holds the words: ${withWords.pages.last().body}",
+            withWords.pages.last().body.contains("There is one file."),
+        )
+        // The pager says there is more than one page, which is how a person knows to turn.
+        compose.onNodeWithText("1/2", substring = true).assertExists()
         // **The call is a PAGE of the agent's message, and the message opens on page 1.** So the
         // call's own caption is what is drawn, and the answer's page is a turn of the pager away -
         // which is the shape the operator asked for: a message holds its pages, not its neighbour's.

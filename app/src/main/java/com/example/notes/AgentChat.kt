@@ -126,8 +126,23 @@ object AgentChat {
         val stamp: String = "",
         val failed: Boolean = false,
         val forgotten: Boolean = false,
-        /** True for the closing words, which are drawn as markdown rather than as a line. */
+        /** True for the agent's own words, which are drawn as markdown rather than as a line. */
         val prose: Boolean = false,
+        /**
+         * **True for the reply that ended the burst: the agent spoke and called nothing.**
+         *
+         * The three kinds of page, and this is what tells the third apart:
+         *
+         *  - a **tool call and its result** - a `CALL` and the `GOT` that names it;
+         *  - the agent **speaking mid-work** - a note written while it still had calls to make;
+         *  - the **closing message** - the last note in the burst, after the last call.
+         *
+         * **It is decided by position, not by a row of its own.** The record already says which
+         * reply was last - it is the one with no call after it - and a `CONCLUDE` row saying so was
+         * removed precisely because it duplicated the words it was marking. So this is read off the
+         * order, which is the same thing the loop does when it decides a turn has ended.
+         */
+        val closing: Boolean = false,
     )
 
     /**
@@ -280,7 +295,16 @@ object AgentChat {
      * has exactly one - so the inline form here would not compile, and wrapping the pair in a holder
      * to qualify would cost an allocation to save none.
      */
-    data class Spend(val output: Long, val thinking: Long)
+    data class Spend(val output: Long, val thinking: Long) {
+        /**
+         * **One message can make several requests, so its figures are a sum.**
+         *
+         * A burst is what the operator asked to see as one message, and a burst may contain a
+         * request that called a tool and a request that spoke afterwards. The footer is one per
+         * message, so it reports what all of them cost rather than what the last one did.
+         */
+        operator fun plus(other: Spend) = Spend(output + other.output, thinking + other.thinking)
+    }
 
     /**
      * Reads `out=123 think=45`, **and tolerates either half being missing.**
@@ -492,10 +516,9 @@ object AgentChat {
             }
             val pages = mutableListOf<Page>()
             val pending = mutableMapOf<Int, AgentLog.Row>()
-            var words: Page? = null
-            // **The accounting rides on the closing words**, so the footer shows what the turn cost
-            // against the sentence that ended it.
-            var wordsCost: Spend? = null
+            // **What the whole burst cost**, summed across its replies: the footer is one per
+            // message, and the message is the burst.
+            var spent = Spend(0, 0)
             for (row in burst) {
                 if (row.broken) {
                     pages.add(
@@ -555,19 +578,29 @@ object AgentChat {
                         // `agent` note beside it, and drawing both would say the ending twice.
                         "ended" -> Unit
                         "agent" -> {
-                            val cost = charged[row.id]
-                            words = Page(
-                                caption = "agent",
-                                body = row.body,
-                                detail = row.body,
-                                id = row.id,
-                                stamp = row.stamp,
-                                forgotten = forgot,
-                                prose = true,
+                            // **Every thing the agent said is a page, not just the last one.**
+                            //
+                            // This used to keep a single `words` slot, which OVERWROTE: a burst
+                            // with two requests - call, speak, call, speak - kept only the second
+                            // utterance and silently lost the first. The operator's model is the
+                            // right one: a message is a container of pages holding everything the
+                            // agent did, and the closing words are simply its LAST page. So an
+                            // utterance is appended like any other page, and "ends with a finishing
+                            // message" is a property of the order rather than of a special case.
+                            pages.add(
+                                Page(
+                                    caption = "agent",
+                                    body = row.body,
+                                    detail = row.body,
+                                    id = row.id,
+                                    stamp = row.stamp,
+                                    forgotten = forgot,
+                                    prose = true,
+                                ),
                             )
-                            // The accounting is read below, from this page's id: the footer is one
-                            // per message, and a figure per page would invite adding them up.
-                            wordsCost = cost
+                            // **Summed, because the footer is one per message.** A burst can make
+                            // several requests, and the message reports what all of them cost.
+                            charged[row.id]?.let { spent = spent + it }
                         }
                         // "stopped" and its reason, most of all: the only thing a failed turn has to
                         // say, so it is drawn.
@@ -585,20 +618,27 @@ object AgentChat {
                     else -> Unit
                 }
             }
-            // **The closing words are the last page.** Appended rather than emitted in place, so a
-            // turn that spoke and then called a tool still ends with its words - which is what
-            // "ends with a finishing message from the agent" asks for.
-            if (words != null) pages.add(words)
             if (pages.isEmpty()) continue
-            val spend = wordsCost
+            // **The closing page is the last thing the agent said**, and only when nothing was
+            // called after it - which is exactly the reply that made no calls. A burst that ended
+            // on a tool result has no closing page: the agent stopped mid-work, and saying otherwise
+            // would put a full stop where the record has none.
+            val lastSaid = pages.indexOfLast { it.prose }
+            val lastCall = pages.indexOfLast { it.caption != "agent" && it.prose.not() && !it.closing }
+            val closingAt = if (lastSaid > lastCall) lastSaid else -1
+            if (closingAt >= 0) pages[closingAt] = pages[closingAt].copy(closing = true)
+            // **The pages are already in the order they happened**, so the agent's last utterance is
+            // the last page - which is what "ends with a finishing message from the agent" means.
+            // Nothing is reordered to make that true; it is true because the record is a chronology.
+            val spend = spent
             out.add(
                 Message(
                     side = Side.AGENT,
                     pages = pages,
                     id = pages.first().id,
                     stamp = pages.first().stamp,
-                    thinking = spend?.thinking ?: 0,
-                    output = spend?.output ?: 0,
+                    thinking = spend.thinking,
+                    output = spend.output,
                 ),
             )
         }
