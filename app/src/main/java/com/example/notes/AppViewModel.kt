@@ -2324,6 +2324,108 @@ class AppViewModel @JvmOverloads constructor(
         }
     }
 
+    /**
+     * **Gives a local project a GitHub repository** — local → synced.
+     *
+     * The operator's report: "local projects should have add to github option. and synced already
+     * give ability to keep the project as local in delete, right? make sure that the state change
+     * cycle (local<>synced) is complete and without errors."
+     *
+     * **The history goes up with it.** A local project has been committing since it was made - that
+     * is what makes it a project rather than a folder - so the repository is created empty and the
+     * first sync carries every version that already exists. Nothing is rewritten and nothing is
+     * copied: the project's folder *is* the repository.
+     *
+     * **The licence IS asked for, and that is the operator's correction.** A project on this phone
+     * has no licence file, because there was nothing to seed; the moment it is published it is a
+     * repository somebody can find, use and quote, so the terms it is offered under are a real
+     * decision rather than a detail. The app's policy is that everything it publishes is open
+     * source, so the dialog offers the licences GitHub publishes and starts on GPL-3.0.
+     */
+    fun addProjectToGitHub(project: String, licence: String, onDone: (Boolean) -> Unit = {}) {
+        val ws = workspace ?: return
+        val api = github
+        val login = activeLogin
+        val token = login?.let { credentials.token(it) }.orEmpty()
+        if (api == null || login == null) {
+            message = "Sign in to GitHub first: a local project becomes synced by getting a repository"
+            onDone(false)
+            return
+        }
+        if (!isLocalProject(project)) {
+            message = "$project already has a GitHub repository"
+            onDone(false)
+            return
+        }
+        busy = true
+        onWorker {
+            // **Seeded with the licence, which is the whole point of asking.** GitHub writes the
+            // file as part of creating the repository; the first sync then carries the project's
+            // own history on top of it.
+            val created = api.createRepo(token, project, licence)
+            if (created.error != null) {
+                main.post {
+                    busy = false
+                    message = created.error
+                    onDone(false)
+                }
+                return@onWorker
+            }
+            val url = created.value?.cloneUrl?.takeIf { it.isNotBlank() }
+                ?: api.cloneUrlFor(login, project)
+            val pointed = git?.makeRemote(project, url) ?: false
+            main.post {
+                busy = false
+                // **The first sync is what actually sends it**, and it runs here rather than being
+                // left for a tap: a project that says "synced" while GitHub holds an empty
+                // repository is the worst of both states.
+                if (pointed) {
+                    Trace.note("add to github", "$project -> $url")
+                    sync(project)
+                } else {
+                    message = "The repository was made, but $project could not be pointed at it"
+                }
+                refresh()
+                onDone(pointed)
+            }
+        }
+    }
+
+    /**
+     * **Takes a project's GitHub repository away from this phone** — synced → local.
+     *
+     * Every commit stays. The history is in this phone's repository, so the project keeps every
+     * version it has and simply stops having somewhere to send them.
+     *
+     * **What is on GitHub stays on GitHub**, and the window says so before this runs: removing the
+     * remote is a statement about this phone, not about the server, and "keep as local" that quietly
+     * left a public copy behind would be a promise the app could not keep. Deleting the repository
+     * itself is the other act, "delete everywhere".
+     */
+    fun keepProjectLocal(project: String, onDone: (Boolean) -> Unit = {}) {
+        if (Workspace.isSystem(project)) {
+            message = "\"$project\" is where this account's settings live, so it stays"
+            onDone(false)
+            return
+        }
+        if (isLocalProject(project)) {
+            message = "$project is already only on this phone"
+            onDone(false)
+            return
+        }
+        val hadRemote = git?.remoteUrl(project)
+        val ok = git?.makeLocal(project) ?: false
+        Trace.tap("keep local", project)
+        message = if (ok) {
+            "$project is local now. Everything it holds is still here, and its repository is " +
+                "still on GitHub" + (hadRemote?.let { " at $it" } ?: "")
+        } else {
+            "$project could not be made local"
+        }
+        refresh()
+        onDone(ok)
+    }
+
     /** The account's public repositories, for the add window (§6). */
     fun listRepositories(onDone: (List<Repo>, String?) -> Unit) {
         val api = github

@@ -323,6 +323,100 @@ fun AddProjectDialog(
     )
 }
 
+/**
+ * **Publishing a local project: which licence it goes out under.**
+ *
+ * The name is not asked for - the project already has one, and GitHub is told it - so the only
+ * question is the licence, and it is a real one: a project on this phone has no licence file because
+ * there was nothing to seed, and the moment it is on GitHub somebody can find, use and quote it.
+ *
+ * **Starts on GPL-3.0**, which is the app's policy for everything it publishes: open source, and the
+ * same licence the app itself carries. A person who wants another picks it here.
+ */
+@Composable
+fun PublishProjectDialog(
+    project: String,
+    licences: List<Licence>,
+    onDismiss: () -> Unit,
+    onPublish: (licence: String) -> Unit,
+) {
+    var licence by remember { mutableStateOf("gpl-3.0") }
+    var showLicences by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Put $project on GitHub") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "A repository is made and everything this project already holds is sent to " +
+                        "it. Its history goes up as it is - nothing is rewritten.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showLicences = !showLicences },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Licence: ${licences.firstOrNull { it.key == licence }?.name ?: licence}")
+                }
+                if (showLicences && licences.isNotEmpty()) {
+                    Column(modifier = Modifier.heightIn(max = 200.dp)) {
+                        LazyColumn {
+                            items(licences) { item ->
+                                Text(
+                                    text = item.name,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            licence = item.key
+                                            showLicences = false
+                                        }
+                                        .padding(vertical = 8.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onPublish(licence); onDismiss() }) { Text("Publish") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/**
+ * **Keeping a synced project on this phone only.**
+ *
+ * Asked because it cannot be undone from here and because the repository stays on GitHub: removing
+ * the remote is a statement about this phone, not about the server, and a person who expected the
+ * copy to disappear would be wrong in a way that matters. Deleting the repository is the other act.
+ */
+@Composable
+fun KeepLocalDialog(
+    project: String,
+    onDismiss: () -> Unit,
+    onKeepLocal: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Keep $project only on this phone") },
+        text = {
+            Text(
+                "Every version stays here and the project stops being sent anywhere.\n\n" +
+                    "Its repository stays on GitHub, with everything already pushed to it. To " +
+                    "remove that too, use Delete everywhere.",
+            )
+        },
+        confirmButton = { TextButton(onClick = { onKeepLocal(); onDismiss() }) { Text("Keep local") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
 /** The create dialog: a name and a licence (§4.1). */
 @Composable
 fun NewProjectDialog(

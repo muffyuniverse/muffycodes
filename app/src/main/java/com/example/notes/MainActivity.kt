@@ -93,6 +93,10 @@ private sealed interface Pending {
     data object RemoveAccount : Pending
     data class RenameProject(val project: String) : Pending
     data class DeleteProject(val project: String) : Pending
+    /** Local -> synced: a repository, seeded with the licence the person picks. */
+    data class PublishProject(val project: String) : Pending
+    /** Synced -> local: the remote goes, every version stays. */
+    data class KeepLocal(val project: String) : Pending
     data class RenameEntry(val entry: Entry) : Pending
     data class NewFile(val folder: File) : Pending
     data class NewFolder(val folder: File) : Pending
@@ -462,6 +466,8 @@ private fun AppRoot(viewModel: AppViewModel) {
                 onRowSync = { project -> tap("sync", project); pending = Pending.SyncProject(project) },
                 onRowRename = { project -> tap("rename project", project); pending = Pending.RenameProject(project) },
                 onRowDelete = { project -> tap("delete project", project); pending = Pending.DeleteProject(project) },
+                onRowPublish = { project -> tap("add to github", project); pending = Pending.PublishProject(project) },
+                onRowKeepLocal = { project -> tap("keep local", project); pending = Pending.KeepLocal(project) },
                 onCreateFile = { tap("new file"); viewModel.currentDir?.let { pending = Pending.NewFile(it) } },
                 onCreateFolder = { tap("new folder"); viewModel.currentDir?.let { pending = Pending.NewFolder(it) } },
                 onUploadFiles = { pickingFiles = tap("upload files"); pickFiles.launch(arrayOf("*/*")) },
@@ -657,6 +663,21 @@ private fun Dialogs(
                       Trace.tap("confirm rename project", pending.project)
                       viewModel.renameProject(pending.project, name)
                   },
+        )
+
+        is Pending.PublishProject -> PublishProjectUI(
+            viewModel = viewModel,
+            project = pending.project,
+            dismiss = dismiss,
+        )
+
+        is Pending.KeepLocal -> KeepLocalDialog(
+            project = pending.project,
+            onDismiss = dismiss,
+            onKeepLocal = {
+                Trace.tap("confirm keep local", pending.project)
+                viewModel.keepProjectLocal(pending.project)
+            },
         )
 
         is Pending.DeleteProject -> DeleteProjectDialog(
@@ -879,6 +900,32 @@ private fun RestoreDeletedDialog(
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/**
+ * Publishing a local project: **the licence list first**, because a published project has to say
+ * what it may be used for.
+ *
+ * The same read as `NewProjectUI`, and for the same reason: the licences are GitHub's, so they are
+ * fetched rather than written into the app. A failure to read them is not fatal - the dialog starts
+ * on GPL-3.0 and the list is simply empty - because a project must still be publishable on a phone
+ * with no network.
+ */
+@Composable
+private fun PublishProjectUI(viewModel: AppViewModel, project: String, dismiss: () -> Unit) {
+    var licences by remember { mutableStateOf<List<Licence>>(emptyList()) }
+    LaunchedEffect(Unit) {
+        viewModel.listLicences { licences = it }
+    }
+    PublishProjectDialog(
+        project = project,
+        licences = licences,
+        onDismiss = dismiss,
+        onPublish = { licence ->
+            Trace.tap("confirm add to github", "$project · $licence")
+            viewModel.addProjectToGitHub(project, licence)
+        },
     )
 }
 

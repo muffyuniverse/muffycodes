@@ -318,6 +318,42 @@ class ProjectGit(
     }
 
     /** The remote of the project, or null. */
+    /**
+     * Gives a local project somewhere to push — **local → synced.**
+     *
+     * The other half of the cycle. A local project is one with no remote, so syncing it is a matter
+     * of creating the repository on GitHub and pointing at it; the history that is already on the
+     * phone goes up with the first sync.
+     */
+    fun makeRemote(project: String, url: String): Boolean {
+        val repo = open(project) ?: return false
+        return try {
+            repo.use { GitService.setRemoteUrl(it, url) }
+            true
+        } catch (e: Throwable) {
+            lastError = Secrets.describe(e)
+            false
+        }
+    }
+
+    /**
+     * Takes a project's remote away — **synced → local.**
+     *
+     * Every commit stays: the history is in this phone's repository, and removing the remote only
+     * stops there being somewhere to send it. What is already on GitHub stays there, which is why
+     * the screen asks before doing this.
+     */
+    fun makeLocal(project: String): Boolean {
+        val repo = open(project) ?: return false
+        return try {
+            repo.use { GitService.removeRemote(it) }
+            true
+        } catch (e: Throwable) {
+            lastError = Secrets.describe(e)
+            false
+        }
+    }
+
     fun remoteUrl(project: String): String? {
         val repo = open(project) ?: return null
         return repo.use { GitService.remoteUrl(it) }

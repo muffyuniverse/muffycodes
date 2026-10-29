@@ -101,6 +101,10 @@ fun BrowserScreen(
     onRowSync: (String) -> Unit,
     onRowRename: (String) -> Unit,
     onRowDelete: (String) -> Unit,
+    /** Local -> synced. Asks for a licence first, because publishing is a decision. */
+    onRowPublish: (String) -> Unit = {},
+    /** Synced -> local. Asks first, because the repository stays on GitHub. */
+    onRowKeepLocal: (String) -> Unit = {},
     onCreateFile: () -> Unit,
     onCreateFolder: () -> Unit,
     onUploadFiles: () -> Unit,
@@ -324,7 +328,10 @@ fun BrowserScreen(
                             "their repositories, and the files you keep beside them.",
                     )
                 } else if (projects) {
-                    ProjectList(viewModel, onRowChat, onRowSync, onRowRename, onRowDelete)
+                    ProjectList(
+                        viewModel, onRowChat, onRowSync, onRowRename, onRowDelete,
+                        onRowPublish, onRowKeepLocal,
+                    )
                 } else {
                     EntryList(viewModel, actions)
                 }
@@ -574,6 +581,10 @@ private fun ProjectList(
     onSync: (String) -> Unit,
     onRename: (String) -> Unit,
     onDelete: (String) -> Unit,
+    /** Local -> synced: give it a repository, which asks for a licence first. */
+    onPublish: (String) -> Unit,
+    /** Synced -> local: take the remote away, keeping every version here. */
+    onKeepLocal: (String) -> Unit,
 ) {
     val names = viewModel.projectNames
     if (names.isEmpty()) {
@@ -632,14 +643,33 @@ private fun ProjectList(
                                     onChat(name)
                                 },
                             )
-                            // **Not offered on a local project.** It has no remote, so the item
-                            // could only say no — the rule a locked file's Rename already follows.
-                            if (!viewModel.isLocalProject(name)) {
+                            // **The two directions of one cycle, and only the one that applies.**
+                            // A local project has no remote, so Sync could only say no - the rule a
+                            // locked file's Rename already follows - and what it CAN do is get one.
+                            // A synced project is offered the way back. Report: "local projects
+                            // should have add to github option ... make sure that the state change
+                            // cycle (local<>synced) is complete and without errors".
+                            if (viewModel.isLocalProject(name)) {
+                                DropdownMenuItem(
+                                    text = { Text("Put on GitHub…") },
+                                    onClick = {
+                                        menu = false
+                                        onPublish(name)
+                                    },
+                                )
+                            } else {
                                 DropdownMenuItem(
                                     text = { Text("Sync") },
                                     onClick = {
                                         menu = false
                                         onSync(name)
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Keep local only…") },
+                                    onClick = {
+                                        menu = false
+                                        onKeepLocal(name)
                                     },
                                 )
                             }

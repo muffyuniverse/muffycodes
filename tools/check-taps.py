@@ -59,6 +59,8 @@ VOCABULARY = {
     "new file", "new folder", "upload files", "upload folder", "restore deleted",
     # projects
     "add project", "new local project", "sync", "see changes", "rename project", "delete project",
+    # the local<->synced cycle: giving a local project a repository, and taking it back
+    "add to github", "keep local", "confirm add to github", "confirm keep local",
     # the account
     "add account", "confirm add account", "remove account", "use test account",
     # the log itself, and the table counted from the request logs

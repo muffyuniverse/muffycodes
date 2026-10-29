@@ -1102,6 +1102,26 @@ object GitService {
     fun remoteUrl(repo: Repository): String? =
         repo.config.getString("remote", "origin", "url")
 
+    /**
+     * Takes the remote away, **leaving every commit where it is.**
+     *
+     * This is the synced -> local direction of the cycle the operator asked about. It removes the
+     * `origin` remote, and touches nothing else: the history is in the local repository, so the
+     * project keeps every version it has and simply stops having somewhere to send them.
+     *
+     * **What is on GitHub stays on GitHub.** Removing the remote is a statement about this phone,
+     * not about the server - the repository is still there and anybody with access can still read
+     * it. The caller says so, because "keep as local" that quietly left a public copy behind would
+     * be a promise the app could not keep.
+     */
+    fun removeRemote(repo: Repository) {
+        val config = repo.config
+        config.unsetSection("remote", "origin")
+        config.unsetSection("branch", currentBranch(repo) ?: "main", "remote")
+        config.unsetSection("branch", currentBranch(repo) ?: "main", "merge")
+        config.save()
+    }
+
     /** Sets (or replaces) the URL of the "origin" remote. */
     fun setRemoteUrl(repo: Repository, url: String) {
         val config = repo.config
