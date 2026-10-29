@@ -306,11 +306,14 @@ object RequestStats {
      * length of the current interval"* - and the only one that also works for an interval set by
      * hand, which is why this is a function of the interval rather than of a preset.
      *
-     * **Subtracted on the local timeline, not the epoch.** A local day is 23 or 25 hours on the two
-     * days a year the clocks change; subtracting 86,400,000 ms from a local midnight would land an
-     * hour away from the previous midnight and leave a gap or an overlap that no figure would
-     * explain. `ZonedDateTime.minus(Duration)` subtracts wall-clock time, which is what "the same
-     * length ago" means to a person reading local times.
+     * **Subtracted as a DURATION on the instant timeline**, so the previous period is exactly as
+     * long as the current one. On the two days a year the clocks change that makes it *not* begin at
+     * the previous local midnight: the UK's 25 October 2026 is 25 hours, so the 24-hour period before
+     * the 26th's midnight starts at 01:00 on the 25th.
+     *
+     * That is deliberate. The alternative - the previous *calendar* day, 00:00 to 00:00 - would put
+     * 25 hours of traffic beside 24 and read as a 4% rise that nothing caused. "Minus the length" is
+     * the operator's own wording, and length is a duration.
      *
      * **Not re-derived from the preset.** Re-running `clockAt` on the earlier start would snap to a
      * different grid cell - clock "1 month" a month ago starts on the 1st of that month, a period of
