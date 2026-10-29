@@ -475,25 +475,23 @@ object RequestDb {
             return History()
         }
         return try {
-            var oldest: Long? = null
-            var newest: Long? = null
-            db.rawQuery("SELECT MIN(utc), MAX(utc) FROM requests", null).use { c ->
-                if (c.moveToFirst() && !c.isNull(0)) {
-                    oldest = c.getLong(0)
-                    newest = c.getLong(1)
-                }
-            }
-            // **And the rollups, when the raw table has been emptied by compaction.** Without this a
-            // fully compacted history would report "no log yet" while the totals answered perfectly.
-            if (oldest == null) {
-                val any = ROLL_TABLES.joinToString(" UNION ALL ") { "SELECT bucket FROM $it" }
-                db.rawQuery("SELECT MIN(bucket) FROM ($any)", null).use { c ->
-                    if (c.moveToFirst() && !c.isNull(0)) oldest = c.getLong(0)
-                }
-                db.rawQuery("SELECT MAX(bucket) FROM ($any)", null).use { c ->
-                    if (c.moveToFirst() && !c.isNull(0)) newest = c.getLong(0)
-                }
-            }
+            // **The minimum over EVERY table, always - not raw first and rollups only as a
+            // fallback.** Those two disagree the moment compaction has rolled anything: raw then
+            // holds only the newest responses, so its minimum is later than the oldest bucket, and
+            // the caption would say "the log starts 10:30" while a total over 10:00-10:30 answered
+            // with data. The figure and the sentence would contradict each other, which is the one
+            // thing this screen exists not to do.
+            //
+            // Written as one union so SQLite computes the extreme, rather than four queries and a
+            // `minOf` in Kotlin: the same answer, one round trip, and no chance of a null slipping
+            // past a comparison.
+            val union = listOf("SELECT utc AS t FROM requests") +
+                ROLL_TABLES.map { "SELECT bucket AS t FROM $it" }
+            fun extreme(pick: String): Long? =
+                db.rawQuery("SELECT $pick(t) FROM (${union.joinToString(" UNION ALL ")})", null)
+                    .use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else null }
+            val oldest = extreme("MIN")
+            val newest = extreme("MAX")
             History(db = db, oldest = oldest, newest = newest)
         } catch (t: Throwable) {
             // **The handle is closed on this path only**, because it is the one where nobody
@@ -512,23 +510,36 @@ object RequestDb {
      */
     class History(
         private val db: SQLiteDatabase? = null,
-        /** The oldest raw instant, or the oldest rollup bucket when raw has been compacted away. */
+        /** The earliest instant any table holds - raw or summarised. */
         val oldest: Long? = null,
-        /** The newest raw instant, or the newest rollup bucket. */
+        /** The latest instant any table holds. */
         val newest: Long? = null,
     ) : java.io.Closeable {
-        /** The totals over `[fromMs, toMs)`. Empty when there is no history at all. */
-        fun totals(fromMs: Long, toMs: Long): RequestStats.Totals =
-            db?.let { totals(it, fromMs, toMs) } ?: RequestStats.Totals()
+        /**
+         * The totals over `[fromMs, toMs)`. Empty when there is no history at all.
+         *
+         * **A closed history reads as empty rather than throwing.** The alternative is that a late
+         * recomposition - after the owner has released the handle - crashes the screen, and "the
+         * numbers stopped" is a far better failure than "the app stopped".
+         */
+        fun totals(fromMs: Long, toMs: Long): RequestStats.Totals {
+            val open = db
+            if (open == null || closed) return RequestStats.Totals()
+            return try {
+                totals(open, fromMs, toMs)
+            } catch (t: Throwable) {
+                RequestStats.Totals()
+            }
+        }
 
         /**
          * **Closing twice is allowed and does nothing the second time.**
          *
-         * The screen closes the handle when it leaves, and so does every test and every scenario
-         * that opened one - because a caller that has to remember which of the two owns it will get
-         * it wrong, and the failure is `IllegalStateException` from a *later* query rather than
-         * from the close. `SQLiteDatabase.close` is documented as idempotent; this makes the
-         * contract explicit and pins the case where the same handle is shared.
+         * Two owners will both try: the view model releases the handle when a new read replaces it,
+         * and a test or scenario releases the one it opened. A caller that has to remember which of
+         * the two already ran will get it wrong, and the failure is an `IllegalStateException` from
+         * a *later* query rather than from the close. `SQLiteDatabase.close` is documented as
+         * idempotent; this makes the contract explicit rather than implied.
          */
         override fun close() {
             if (closed) return
