@@ -144,6 +144,9 @@ class ScenariosTest {
             accountDir = accountDir,
             onBack = {},
             now = now,
+            // **The clock a preset reads when tapped**, pinned so a picture does not depend on the
+            // day CI runs.
+            clockNow = { now },
             // **Opened on this thread, and never closed - deliberately.**
             //
             // The screen does not own the handle (the view model does, in the app), so a scenario

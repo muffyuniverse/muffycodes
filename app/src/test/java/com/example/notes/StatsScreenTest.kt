@@ -56,6 +56,11 @@ class StatsScreenTest {
                         accountDir = account,
                         onBack = {},
                         now = now,
+                        // **The clock a preset reads when tapped**, pinned to the same fixture
+                        // instant. Without this the screen would measure "today" from whatever day
+                        // CI happens to run on, and every assertion below would be about a
+                        // different date than the fixture names.
+                        clockNow = { now },
                         // **An empty history, opened for real.** A `History` with a null handle
                         // reads as "no log yet" without a database file existing, which is what
                         // these tests want: the screen's own layout, not the arithmetic.

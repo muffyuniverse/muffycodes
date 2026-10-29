@@ -71,6 +71,15 @@ fun StatsScreen(
     accountDir: java.io.File,
     onBack: () -> Unit,
     now: Long = System.currentTimeMillis(),
+    /**
+     * The device's clock, **read when a preset is tapped** - not when the screen opened.
+     *
+     * A parameter rather than a direct `System.currentTimeMillis()` so a test can pin it: the
+     * default is the real clock, which is what the app wants, and a test passes a function that
+     * returns its own fixture instant. Without this every screen test would assert against whatever
+     * day CI happens to run on.
+     */
+    clockNow: () -> Long = { System.currentTimeMillis() },
     /** Reads the history off the main thread. Null in tests, which open a temp directory directly. */
     readRows: (((RequestDb.History) -> Unit) -> Unit)? = null,
 ) {
@@ -143,7 +152,10 @@ fun StatsScreen(
      * chips are lit and therefore no rule for what two lit chips would mean.
      */
     fun applyPreset(preset: RequestStats.Preset, clock: Boolean) {
-        val at = System.currentTimeMillis()
+        // **The clock at the moment of the tap**, which is the operator's rule: a screen left open
+        // for an hour then asked for "1 hour" must answer about the last hour, not the hour before
+        // it was opened.
+        val at = clockNow()
         val span = if (clock) preset.clockAt(at, oldest = history?.oldest)
         else preset.intervalAt(at, oldest = history?.oldest)
         if (clock) { clockPick = preset; rollingPick = null }
