@@ -1839,13 +1839,17 @@ class AgentTest {
         val over = AgentTools(ws, "shopping", git, log, triggerTokens = { 1L })
         val under = AgentTools(ws, "shopping", git, log, triggerTokens = { 1_000_000L })
 
-        // `call` is the ROW id, which is what `forget` names.
-        val ids = JSONObject().put("ids", org.json.JSONArray(listOf(call))).toString()
+        // **Both halves of the pair**, because `forget` refuses half a pair whatever the size: a call
+        // without its result leaves the conversation with an unanswered tool call, which every
+        // endpoint refuses. `got()` returns the result's own row id.
+        val got = log.rows().last { it.kind == AgentLog.GOT }
+        val ids = JSONObject().put("ids", org.json.JSONArray(listOf(call, got.id))).toString()
         val refused = under.run(Call("c1", "forget", ids))
         assertTrue("refused: $refused", refused.startsWith(AgentLog.FAILURE))
         // **Both numbers, because a model told only "no" cannot tell whether it is close.**
         assertTrue("says where it is: $refused", refused.contains("tokens"))
         assertTrue("and where the point is: $refused", refused.contains("clear-up point"))
+        assertTrue("and that one call is enough: $refused", refused.contains("in one call"))
 
         // Over the trigger, the same call is the act it was asked to be.
         val done = over.run(Call("c2", "forget", ids))
@@ -1863,7 +1867,10 @@ class AgentTest {
         log.got("read", "0\ntwo litres", answers = call)
         val none = AgentTools(ws, "shopping", git, log, triggerTokens = { 0L })
 
-        val answer = none.run(Call("c1", "forget", JSONObject().put("ids", org.json.JSONArray(listOf(call))).toString()))
+        val got = log.rows().last { it.kind == AgentLog.GOT }
+        val answer = none.run(
+            Call("c1", "forget", JSONObject().put("ids", org.json.JSONArray(listOf(call, got.id))).toString()),
+        )
         assertTrue("allowed with no trigger: $answer", answer.startsWith(AgentLog.SUCCESS))
     }
 
@@ -2309,15 +2316,23 @@ class AgentTest {
         // The three numbers are named for what they are, and **not pinned to a value here**: the
         // size is an estimate and a test that spelled it would be testing arithmetic rather than
         // the sentence. What matters is that each is present and says which it is.
-        assertTrue("the size it was over", sent.contains("tokens when this turn began"))
-        assertTrue("the limit the target comes from", sent.contains("The limit is"))
+        // The numbers are named for what they are, and **not pinned to a value**: the size is an
+        // estimate and a test that spelled it would be testing arithmetic rather than the sentence.
+        assertTrue("where it is now", sent.contains("Your context is about"))
+        assertTrue("and that it is over", sent.contains("over the"))
+        assertTrue("the point it stops asking at", sent.contains("-token point where the app"))
         assertTrue("and the wall behind it", sent.contains("takes 100k tokens of input"))
         // **And one call, in bulk.** A model that forgets a row per request spends a request per row
         // at exactly the moment the context is largest, and every one of those requests carries the
         // context it is trying to shrink. Report: "it should list all ids and id spans in one request
         // to forget in bulk".
-        assertTrue("says one call: $sent", sent.contains("in that one call"))
+        assertTrue("says one call: $sent", sent.contains("in this one `forget`"))
         assertTrue("and shows a span", sent.contains("3-9"))
+        // **And that the ask stops there**, because the whole point of the target is one call and one
+        // measurement: a model that thought it would be nagged again might forget far more than it
+        // needed, and one that thought it had to reach the number in several passes would pay a
+        // round trip per pass.
+        assertTrue("and that it stops: $sent", sent.contains("the app stops asking"))
         assertTrue("the instructions are still the prefix", sent.startsWith(prompt.trim()))
         assertTrue(
             "and the line is after them, not inside them",

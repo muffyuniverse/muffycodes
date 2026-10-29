@@ -44,7 +44,32 @@ good. Compaction never deletes anything — `forget` flips a row's `ctx` to `out
   the trigger mid-way is asked at its next turn, not immediately. That is deliberate: the trigger is
   a budget for a request, and a request already on the wire cannot be un-sent.
 
-## 3. What the ask says
+## 3. It asks on every request while over — and stops the moment it is not
+
+This is the part that makes the whole design economical, and the operator stated it as a rule:
+
+> it should stop asking when context is below compaction trigger. that is explicitely done so that
+> there is just one forget call and one cache miss
+
+The condition is one expression, evaluated per request:
+
+```
+trigger > 0 && size > trigger && !trimmed
+```
+
+- **`size` is the measurement this request was built from** — not the size the turn opened at. The
+  old code read `opening.size`, measured once before the loop and never changing, so within a turn the
+  sentence kept being appended after the agent had already forgotten enough. It was stopped only by a
+  separate `clearedUp` flag that required the app to *notice* a row leave the context — a second
+  answer to the question the size already answers, and one that cost **two reads of the context file
+  per turn**, which is precisely the cache miss the size memo exists to avoid. Both are gone.
+- **`!trimmed`** — the app's own trim already ran, so the warning would describe a context that no
+  longer exists.
+- **Below the trigger there is no sentence at all.** One `forget` takes the context under the point,
+  the next request measures it, and the turn goes quiet. No second call, no second measurement, no
+  nagging a model into deleting rows that matter in order to satisfy a sentence that is already true.
+
+## 4. What the ask says
 
 The clear-up line goes in the request when `opening.size > limits.triggerAt`. It must give the agent
 **three numbers and one command**, because a model told only "you are over your limit" has no way to
@@ -65,7 +90,7 @@ The line also names the biggest rows by `context.log` line number, because the f
 one go — a `read` stops at the tool's own limit — so a model deciding what to remove would otherwise
 page through it a request at a time.
 
-## 4. `forget` is unavailable unless the app asked
+## 5. `forget` is unavailable unless the app asked
 
 **`forget` refuses when the context is under the trigger.** This is the third correction, and it is a
 rule about authority rather than about safety:
@@ -93,7 +118,7 @@ Forget only when you are asked to, and name every row in one call.
 the way it already has `backgroundMs` — read per call, because the setting can change while an agent is
 idle and the number that applies is the one in force when the call arrives.
 
-## 5. What this does not change
+## 6. What this does not change
 
 - **`forget` still cannot carry text.** It names ids, so compaction cannot alter what the record says.
 - **The three refusals stay**: an unknown id, the newest task, and half a pair.
@@ -101,7 +126,7 @@ idle and the number that applies is the one in force when the call arrives.
 - **`ctx = out` stays the only trace of a compaction**, so the audit remains a column rather than a
   claim.
 
-## 6. Order
+## 7. Order
 
 1. `AgentTools.triggerTokens` and the refusal in `forget` — the rule.
 2. The clear-up line's wording: the three numbers, and "in one call".

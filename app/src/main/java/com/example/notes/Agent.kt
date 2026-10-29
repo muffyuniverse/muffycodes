@@ -367,7 +367,7 @@ class Agent(
             // not a row in the record: a `TOLD` row here would enter the conversation the ping
             // exists to keep warm, and the next real turn would be answering a question the person
             // never asked. `build` reads the record; this is the one thing added after it.
-            val built = build(layers, readOpening(layers, log, AgentTools.specs()), clearedUp = false)
+            val built = build(layers, readOpening(layers, log, AgentTools.specs()))
             built.copy(messages = built.messages + pingInstruction())
         } catch (t: Throwable) {
             // **A request that could not be built is not a ping that got through.** This said
@@ -471,10 +471,15 @@ class Agent(
 
         var idle = 0
         var requests = 0
-        // Watched only when the warning was actually shown: the count is a file read, and the only
-        // turn that cares is the one where the app is asking for a clear-up.
-        val watching = limits.triggerAt > 0 && opening.size > limits.triggerAt
-        var clearedUp = false
+        // **No watch, and no `clearedUp` flag.** Whether the clear-up worked is answered by the
+        // measurement the next request is already built from: `size <= trigger`. Watching the row
+        // count was a second answer to the same question, and it cost **two reads of the context
+        // file per turn** - the exact cache miss the size memo exists to avoid.
+        //
+        // The operator's words: "it should stop asking when context is below compaction trigger.
+        // that is explicitely done so that there is just one forget call and one cache miss."
+        //
+        // One `forget`, one measurement, and the loop stops asking because the number says so.
         while (requests < maxRequests) {
             // Before the request: nothing is sent for a turn that has been called off.
             cut()?.let { return finish(cutShort(it, emptyList())) }
@@ -482,7 +487,7 @@ class Agent(
             requests++
             // The boundary the box counts turns by, and the app's own row, not the model's.
             log.bookkeeping(AgentLog.TURN, "turn", "$requests")
-            val request = build(layers, opening, clearedUp)
+            val request = build(layers, opening)
             // **The shape of the request, once per turn the person started.** Which model, which
             // pinned endpoint, how big the conversation had grown: the three things needed to
             // explain a refusal or a bill, and nowhere else on the trace. Not traced for a poll —
@@ -517,11 +522,7 @@ class Agent(
             // the agent saying something and calling nothing.
             if (reply.calls.isEmpty()) return finish(wordsWithoutCalls(reply))
 
-            // **Measured, not asked.** Whether the clear-up happened is the context getting shorter
-            // on disk, not the model saying that it did.
-            val rowsBefore = if (watching) log.contextRows().size else 0
             val moved = work(reply.calls)
-            if (watching && log.contextRows().size < rowsBefore) clearedUp = true
             if (moved) idle = 0 else idle++
             progress()
         }
@@ -782,7 +783,7 @@ class Agent(
         "Answer with a message that contains only one dot and nothing else. " + pingMark(),
     )
 
-    private fun build(layers: AgentPrompt.Layers, opening: Opening, clearedUp: Boolean): Request {
+    private fun build(layers: AgentPrompt.Layers, opening: Opening): Request {
         val tools = AgentTools.specs()
         var rows = log.contextRows()
         val size = measure(layers.message, rows, tools)
@@ -818,13 +819,23 @@ class Agent(
         // a refusal for the wrong reason. What it does is *stop asking*: once an edit in this turn
         // took the context under the target, the rest of the turn is not nagged, which is what
         // keeps a model from deleting rows that matter to satisfy a sentence that is already true.
-        val done = clearedUp && size <= trigger
-        val line = if (trigger > 0 && opening.size > trigger && !trimmed && !done) {
+        // **The one condition, and it is the size NOW.**
+        //
+        // It used to read `opening.size`, measured once before the loop and never changing - so
+        // within a turn the sentence kept being added after the agent had already forgotten enough,
+        // stopped only by a separate `clearedUp` flag that required the app to *notice* a row leave.
+        // A model that forgot in a way the row count did not show - two rows out, two rows in, from a
+        // `read` still running - kept being told to clear up a context that already fitted.
+        //
+        // `size` is the measurement this request was built from, so asking about it and naming it are
+        // the same statement. Below the trigger there is nothing to say, and the turn goes quiet
+        // after the single `forget` that took it there.
+        val line = if (trigger > 0 && size > trigger && !trimmed) {
             Trace.note(
                 "agent-clear-up",
-                "$project · ${ContextBudget.short(opening.size)} over ${ContextBudget.short(trigger)}",
+                "$project · ${ContextBudget.short(size)} over ${ContextBudget.short(trigger)}",
             )
-            clearUpLine(opening.size, trigger, limits.trigger.ceiling, opening.biggest)
+            clearUpLine(size, trigger, limits.trigger.ceiling, opening.biggest)
         } else {
             null
         }
@@ -874,9 +885,18 @@ class Agent(
      */
     private fun clearUpLine(size: Long, trigger: Long, ceiling: Long, biggest: List<RowCost>): String =
         buildString {
-            append("Your context was about ${ContextBudget.short(size)} tokens when this turn began. ")
-            append("The limit is ${ContextBudget.short(trigger)} tokens, and this endpoint takes ")
-            append("${ContextBudget.short(ceiling)} tokens of input. ")
+            // **Three numbers, and each says which it is.** A model told only "you are over your
+            // limit" cannot judge how much to remove: it does not know how far over, and it does not
+            // know whether the limit is a budget it is being asked to respect or a wall that would
+            // refuse the request outright. Naming all three makes the decision arithmetic.
+            //
+            // "is", not "was when this turn began": the number is the measurement this very request
+            // was built from, so a context that already shrank is described as it is now. The old
+            // wording described the turn's opening size, which stopped being true the moment the
+            // agent acted on it.
+            append("Your context is about ${ContextBudget.short(size)} tokens, over the ")
+            append("${ContextBudget.short(trigger)}-token point where the app asks you to clear up. ")
+            append("This endpoint takes ${ContextBudget.short(ceiling)} tokens of input. ")
             // **By id, and that is the whole command.** `forget` names rows; it cannot carry text,
             // so compaction cannot change what the record says — which is what makes the context
             // auditable afterwards rather than a claim the model made about it.
@@ -897,9 +917,19 @@ class Agent(
             // tolerated: rows that do not serve the current task have no place in the context at
             // any size, and a model told to stop exactly at a number keeps the near-irrelevant
             // ones that come before it.
-            append("Compaction target: get it to ${ContextBudget.short(trigger)} tokens or less — ")
-            append("cut at least to that, and further if the rows do not serve the current task. ")
-            append("Anything not related to what you are doing now can go.")
+            // **The target, stated once, as a floor.** "Cut it down" is advice; "cut it to at least
+            // this" is a number the next request can measure, which is what makes the ask stop being
+            // repeated the moment it is true. Cutting **past** the target is wanted rather than
+            // tolerated: rows that do not serve the current task have no place in the context at any
+            // size, and a model told to stop exactly at a number keeps the near-irrelevant ones that
+            // come just before it.
+            //
+            // **And the stopping rule is stated with it**, because the agent has to know the ask is
+            // not a per-request nag: one `forget` that takes the context under this point is the
+            // whole job, and the app goes quiet - one call, one measurement, no second cache miss.
+            append("Get it to ${ContextBudget.short(trigger)} tokens or less in this one `forget` - ")
+            append("then the app stops asking. Cut further if rows do not serve the current task; ")
+            append("anything unrelated to what you are doing now can go.")
             if (biggest.isNotEmpty()) {
                 // **The index, because the file cannot be read in one go.** A `read` of a large
                 // context stops at the tool's own limit, so a model deciding what to remove either
@@ -951,7 +981,7 @@ class Agent(
 
     fun request(): Request {
         val layers = AgentPrompt.read(accountDir, tools.projectDir)
-        return build(layers, readOpening(layers, log, AgentTools.specs()), clearedUp = false)
+        return build(layers, readOpening(layers, log, AgentTools.specs()))
     }
 
     /**
