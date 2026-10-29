@@ -9,6 +9,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import org.robolectric.RuntimeEnvironment
 import androidx.test.espresso.IdlingPolicies
 import java.util.concurrent.TimeUnit
@@ -753,7 +754,9 @@ class ScenariosTest {
         ) {
             before()
             then("`6 hours` is tapped in the rolling row.") {
-                compose.onNodeWithText("6 hours").performClick()
+                // **Scrolled into view first**: the row scrolls sideways and the chip sits past the
+                // right edge, so a tap without scrolling has no position to tap.
+                compose.onNodeWithText("6 hours").performScrollTo().performClick()
                 compose.waitForIdle()
             }
             after()
@@ -799,7 +802,9 @@ class ScenariosTest {
             then("the start's **date** is opened and a different day committed with `Show`.") {
                 // The date rather than the dial: a day is one tap away from the current one, while
                 // the dial needs a precise drag that a Robolectric tap cannot make.
-                compose.onNodeWithText("28 Oct 2026").performClick()
+                // **The first of the two**, because the default interval is today at both ends - so
+                // both buttons read the same date and only the From one is wanted.
+                compose.onAllNodesWithText("28 Oct 2026")[0].performClick()
                 compose.waitForIdle()
                 compose.onNodeWithText("26").performClick()
                 compose.onNodeWithText("Show").performClick()

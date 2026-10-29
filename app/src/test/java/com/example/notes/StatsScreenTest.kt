@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -130,7 +131,11 @@ class StatsScreenTest {
         draw()
         // **A preset IS a request for figures.** Unlike moving a picker, tapping one is explicit, so
         // it sets both ends and the generated interval at once.
-        compose.onNodeWithText("1 week").performClick()
+        //
+        // **Scrolled into view first.** The row scrolls sideways and "1 week" sits past the right
+        // edge on this width, so a tap without scrolling fails with "Failed to inject touch input" -
+        // the node exists in the tree but has no position on screen.
+        compose.onNodeWithText("1 week").performScrollTo().performClick()
         compose.waitForIdle()
         // One week on the clock starts at midnight a week ago.
         compose.onNodeWithText("21 Oct 2026").assertExists()
@@ -190,7 +195,7 @@ class StatsScreenTest {
         // The date rather than the dial, because a date is one tap away from the current one - the
         // calendar opens on it and the day beside it is always present - while the dial needs a
         // precise drag that a Robolectric tap cannot make.
-        compose.onNodeWithText("28 Oct 2026").performClick()
+        compose.onAllNodesWithText("28 Oct 2026")[0].performClick()
         compose.waitForIdle()
         compose.onNodeWithText("26").performClick()
         compose.onNodeWithText("Show").performClick()
