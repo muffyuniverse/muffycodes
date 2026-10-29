@@ -122,9 +122,19 @@ class Agent(
      * and the unit the model is billed in is the one a person is choosing about.
      */
     private val sessionTokens: Long = 0L,
+    /**
+     * The clear-up point in tokens, read when a tool is called rather than when the agent was built.
+     *
+     * **`forget` refuses under it**, and the refusal belongs with the act rather than with the screen
+     * that draws the number - so the agent carries it to the tools the way it carries the operator's
+     * background limit. Zero means "the app has no opinion", which refuses nothing.
+     */
+    private val triggerTokens: () -> Long = { 0L },
 ) {
 
-    private val tools = AgentTools(ws, project, git, log, maxResult, bg, backgroundMs)
+    private val tools = AgentTools(
+        ws, project, git, log, maxResult, bg, backgroundMs, triggerTokens,
+    )
 
     /** How a turn ended. */
     sealed class End {
