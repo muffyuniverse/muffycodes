@@ -2495,9 +2495,15 @@ class AgentTest {
         Agent(account, "shopping", ws, git, log, door, model(), limits = limits).burst("go")
 
         val sent = door.asked.first().system
-        assertTrue("a target, named: $sent", sent.contains("Compaction target"))
-        assertTrue("as a floor", sent.contains("at least to that"))
-        assertTrue("with cutting further wanted", sent.contains("further if the rows do not serve"))
+        // **The target is stated once, with the stopping rule beside it.** The old wording announced
+        // it as "Compaction target:" in a separate paragraph from the size, so the two numbers a
+        // model has to compare were two paragraphs apart; and it did not say the ask ends, which is
+        // what makes one `forget` enough. Report: "it should stop asking when context is below
+        // compaction trigger. that is explicitely done so that there is just one forget call and one
+        // cache miss."
+        assertTrue("a target, named: $sent", sent.contains("tokens or less in this one `forget`"))
+        assertTrue("as a floor", sent.contains("Cut further if rows do not serve"))
+        assertTrue("and that the ask ends there", sent.contains("then the app stops asking"))
         assertFalse("and no longer an empty 'there is no size'", sent.contains("no size to reach"))
     }
 
@@ -2579,7 +2585,7 @@ class AgentTest {
         agent.burst("clear it up")
         assertTrue(
             "the first turn was told: ${door.asked.first().system.takeLast(200)}",
-            door.asked.first().system.contains("Compaction target"),
+            door.asked.first().system.contains("tokens or less in this one `forget`"),
         )
         val got = log.rows().first { it.kind == AgentLog.GOT }
         assertTrue(
@@ -2608,9 +2614,11 @@ class AgentTest {
         val afterDoor = ScriptedDoor(Reply("ok"))
         agent(afterDoor, lenient).burst("again")
 
+        // **Asserted against the sentence that would be there**, not against a phrase from an older
+        // wording: a negative assertion on text that no longer exists passes whatever the code does.
         assertFalse(
             "under the target, the next turn says nothing: ${afterDoor.asked.last().system.takeLast(120)}",
-            afterDoor.asked.last().system.contains("Compaction target"),
+            afterDoor.asked.last().system.contains("Clear up your context"),
         )
     }
 
