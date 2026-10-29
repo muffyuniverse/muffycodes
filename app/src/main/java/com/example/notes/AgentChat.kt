@@ -230,8 +230,10 @@ object AgentChat {
      */
     fun conversation(rows: List<AgentLog.Row>): List<AgentLog.Row>? {
         val bursts = AgentLog.bursts(rows)
-        val start = bursts.indexOfFirst { burst -> burst.any { it.kind == AgentLog.TOLD } }
-        if (start < 0) return null
+        // **Nothing is dropped from the front any more.** A record whose oldest burst has no operator
+        // message - because a trim took it - still holds work the agent did, and the operator asked
+        // for the list "from the beginning of the session log to the last message".
+        if (bursts.none { burst -> burst.any { it.kind == AgentLog.TOLD } }) return null
         // **From the first operator message to the end of the record.** This used to drop everything
         // before the *last* one, because the box drew one exchange at a time and a navigator moved
         // between them. The box is a list now, and the operator asked for it "from the beginning of
@@ -240,7 +242,7 @@ object AgentChat {
         //
         // The trim still removes whole bursts from the front, so the first message here is wherever
         // the record now begins rather than where the session did.
-        return bursts.drop(start).flatten()
+        return bursts.flatten()
     }
 
     /**
@@ -484,20 +486,6 @@ object AgentChat {
         val charged = conversation.mapNotNull { row ->
             if (row.kind == AgentLog.USAGE) row.answers to spend(row.detail) else null
         }.toMap()
-        // The operator's message opens the conversation, and the record holds exactly one per
-        // burst - see `conversation()`, which starts the burst at it.
-        val told = conversation.firstOrNull { it.kind == AgentLog.TOLD }
-        if (told != null) {
-            out.add(
-                Message(
-                    side = Side.OPERATOR,
-                    body = told.body,
-                    id = told.id,
-                    stamp = told.stamp,
-                    forgotten = told.ctx == AgentLog.OUT,
-                ),
-            )
-        }
         // **A BURST, not a turn.** `AgentLog.TURN` is written before every request, so one request
         // is one turn - and a reply that calls a tool and then speaks is TWO turns, which grouped
         // as two messages would put the call and the words that close it in different messages. The
@@ -507,6 +495,20 @@ object AgentChat {
             // The first burst is the operator's own message and the work that answered it. Its
             // `TOLD` row is drawn above as the operator's message, so the burst is drawn here as
             // the agent's - the two halves of one exchange.
+            // **The operator's message, once per burst.** It is the `TOLD` that starts the burst, and
+            // emitting it here rather than once for the conversation is what makes the list
+            // alternate: every exchange gets its own question before its own answer.
+            burst.firstOrNull { it.kind == AgentLog.TOLD }?.let { told ->
+                out.add(
+                    Message(
+                        side = Side.OPERATOR,
+                        body = told.body,
+                        id = told.id,
+                        stamp = told.stamp,
+                        forgotten = told.ctx == AgentLog.OUT,
+                    ),
+                )
+            }
             if (burst.none { it.kind != AgentLog.TOLD }) continue
             // A burst that only kept the conversation warm is the idle line, not a message.
             if (burst.none { it.kind == AgentLog.CALL } &&
@@ -648,13 +650,16 @@ object AgentChat {
     /** The whole conversation as the box draws it, or null when there is none yet. */
     fun box(rows: List<AgentLog.Row>): Box? {
         val conversation = conversation(rows) ?: return null
-        val told = conversation.firstOrNull { it.kind == AgentLog.TOLD } ?: return null
+        // **The first thing the person said, or empty when a trim took it.** A record whose oldest
+        // burst has no operator message is still a conversation the agent had - work was done and
+        // the evidence is there - so the box draws it rather than showing nothing at all.
+        val told = conversation.firstOrNull { it.kind == AgentLog.TOLD }
         val all = turns(conversation)
         var productive = all.size
         while (productive > 0 && all[productive - 1].idle) productive--
         val idle = all.subList(productive, all.size)
         return Box(
-            told = told.body,
+            told = told?.body.orEmpty(),
             turns = all.subList(0, productive),
             idle = if (idle.isEmpty()) {
                 null
