@@ -181,6 +181,19 @@ class StatsScreenTest {
     }
 
     @Test
+    fun `the table names its two value columns`() {
+        draw()
+        // **A heading is needed now and was not before.** With one column the caption above the
+        // table was its heading; two values per row make "which is which" a real question.
+        //
+        // **No previous column on an empty history**, because the log does not reach the previous
+        // period - and a column of dashes beside a real one reads as "traffic collapsed" when the
+        // truth is that the history begins later.
+        compose.onNodeWithText("now").assertExists()
+        compose.onNodeWithText("previous").assertDoesNotExist()
+    }
+
+    @Test
     fun `the figures wait for Generate`() {
         draw()
         // **The button is there and says it has nothing to do yet**, because the picks have not

@@ -248,6 +248,21 @@ fun StatsScreen(
     // read identically in an empty table and mean different things.
     val oldest = remember(history) { history?.oldest }
     val covered = remember(span, oldest) { oldest != null && span.fromMs >= oldest }
+    // **The period immediately before it**, for the comparison column. The operator's definition:
+    // the same length, ending where the current interval starts - so a hand-set interval gets a
+    // baseline too, which is the whole reason it is computed from the span rather than from a preset.
+    //
+    // **It is not shown when the history does not reach it.** A previous column of dashes beside a
+    // real current column reads as "traffic collapsed", when the truth is that the log begins after
+    // the previous period did. `oldest` decides that, and the column is dropped entirely.
+    val previousSpan = remember(span) { RequestStats.previousOf(span) }
+    val previousTotals = remember(history, previousSpan) {
+        history?.totals(previousSpan.fromMs, previousSpan.toMs) ?: RequestStats.Totals()
+    }
+    val showPrevious = remember(previousSpan, oldest) {
+        oldest != null && previousSpan.fromMs >= oldest
+    }
+
 
     // **One read, two uses.** The totals are zero in two very different situations - nothing was
     // asked, or nothing was recorded yet - and the caption has to tell them apart.
@@ -446,45 +461,117 @@ fun StatsScreen(
                     )
                 }
             } else {
-                // **One column.** The operator's revision: "just 1 result column for the selected
-                // interval with per hour granularity. and no checkboxes." The rows are the metrics
-                // named in L28419, in the order they were named - the counts, the tokens with their
-                // shares, then the cost and the two derived rates.
+                // **Three columns: previous, current, and how they differ.** The operator's
+                // revision: *"metrics, prev interval, current interval, relative change"*. A figure
+                // on its own says nothing about whether it is good - "3h 14m" is only informative
+                // beside what the period before it cost.
+                //
+                // **The previous column disappears when the log does not reach it**, because a
+                // column of dashes beside a real one reads as "traffic collapsed" when the truth is
+                // that the history simply begins later.
                 item {
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        // **No column heading, because the caption above already is one.** It
-                        // reads "15 hours · from the log" and a header cell reading "15 hours"
-                        // directly beneath it is the same fact twice - which a screenshot shows at
-                        // once and no assertion would ever notice, since both are individually
-                        // true.
-                        MetricRow("requests", StatsFormat.count(totals.total.requests))
-                        MetricRow("input", StatsFormat.tokens(totals.total.promptTokens))
-                        MetricRow(
+                        // **One heading, because the caption above is not one.** The columns have
+                        // two different values now, so "which is which" is a real question and the
+                        // answer has to be on screen. The headings are right-aligned to match the
+                        // figures beneath them.
+                        ColumnHeading(showPrevious = showPrevious)
+                        val t = totals.total
+                        val p = previousTotals.total
+                        CompareRow(
+                            "requests",
+                            previous = StatsFormat.count(p.requests).takeIf { showPrevious },
+                            current = StatsFormat.count(t.requests),
+                            change = StatsFormat.change(
+                                RequestStats.change(p.requests.toDouble(), t.requests.toDouble())
+                                    .takeIf { showPrevious },
+                            ),
+                        )
+                        CompareRow(
+                            "input",
+                            previous = StatsFormat.tokens(p.promptTokens).takeIf { showPrevious },
+                            current = StatsFormat.tokens(t.promptTokens),
+                            change = StatsFormat.change(
+                                RequestStats.change(p.promptTokens.toDouble(), t.promptTokens.toDouble())
+                                    .takeIf { showPrevious },
+                            ),
+                        )
+                        // **The shares carry no change column**, deliberately. A cache share moving
+                        // from 95.6% to 95.9% is +0.3 percentage points, which is not a relative
+                        // change and would read as +0.3% - a number that is both wrong and
+                        // reassuring. The absolute beside it already moved.
+                        CompareRow(
                             "  · cached",
-                            StatsFormat.absoluteAndShare(
-                                StatsFormat.tokens(totals.total.cachedTokens),
-                                totals.total.cachedShare,
+                            previous = StatsFormat.absoluteAndShare(
+                                StatsFormat.tokens(p.cachedTokens), p.cachedShare,
+                            ).takeIf { showPrevious },
+                            current = StatsFormat.absoluteAndShare(
+                                StatsFormat.tokens(t.cachedTokens), t.cachedShare,
                             ),
+                            change = StatsFormat.NONE,
                             muted = true,
                         )
-                        MetricRow("output", StatsFormat.tokens(totals.total.completionTokens))
-                        MetricRow(
+                        CompareRow(
+                            "output",
+                            previous = StatsFormat.tokens(p.completionTokens).takeIf { showPrevious },
+                            current = StatsFormat.tokens(t.completionTokens),
+                            change = StatsFormat.change(
+                                RequestStats.change(
+                                    p.completionTokens.toDouble(), t.completionTokens.toDouble(),
+                                ).takeIf { showPrevious },
+                            ),
+                        )
+                        CompareRow(
                             "  · thinking",
-                            StatsFormat.absoluteAndShare(
-                                StatsFormat.tokens(totals.total.reasoningTokens),
-                                totals.total.thinkingShare,
+                            previous = StatsFormat.absoluteAndShare(
+                                StatsFormat.tokens(p.reasoningTokens), p.thinkingShare,
+                            ).takeIf { showPrevious },
+                            current = StatsFormat.absoluteAndShare(
+                                StatsFormat.tokens(t.reasoningTokens), t.thinkingShare,
                             ),
+                            change = StatsFormat.NONE,
                             muted = true,
                         )
-                        MetricRow(
+                        CompareRow(
                             "cost $",
-                            StatsFormat.cost(
-                                totals.total.cost.takeIf { _ -> totals.total.costReported > 0 },
+                            previous = StatsFormat.cost(
+                                p.cost.takeIf { p.costReported > 0 },
+                            ).takeIf { showPrevious },
+                            current = StatsFormat.cost(t.cost.takeIf { t.costReported > 0 }),
+                            change = StatsFormat.change(
+                                RequestStats.change(
+                                    p.cost.takeIf { p.costReported > 0 },
+                                    t.cost.takeIf { t.costReported > 0 },
+                                ).takeIf { showPrevious },
                             ),
                         )
-                        MetricRow("per request", StatsFormat.perRequest(totals.total.perRequest))
-                        MetricRow("per M in", StatsFormat.perMillion(totals.total.perMillionInput))
-                        MetricRow("per M out", StatsFormat.perMillion(totals.total.perMillionOutput))
+                        CompareRow(
+                            "per request",
+                            previous = StatsFormat.perRequest(p.perRequest).takeIf { showPrevious },
+                            current = StatsFormat.perRequest(t.perRequest),
+                            change = StatsFormat.change(
+                                RequestStats.change(p.perRequest, t.perRequest)
+                                    .takeIf { showPrevious },
+                            ),
+                        )
+                        CompareRow(
+                            "per M in",
+                            previous = StatsFormat.perMillion(p.perMillionInput).takeIf { showPrevious },
+                            current = StatsFormat.perMillion(t.perMillionInput),
+                            change = StatsFormat.change(
+                                RequestStats.change(p.perMillionInput, t.perMillionInput)
+                                    .takeIf { showPrevious },
+                            ),
+                        )
+                        CompareRow(
+                            "per M out",
+                            previous = StatsFormat.perMillion(p.perMillionOutput).takeIf { showPrevious },
+                            current = StatsFormat.perMillion(t.perMillionOutput),
+                            change = StatsFormat.change(
+                                RequestStats.change(p.perMillionOutput, t.perMillionOutput)
+                                    .takeIf { showPrevious },
+                            ),
+                        )
                         HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
                     }
                 }
@@ -650,6 +737,101 @@ private fun TimeDialog(
 }
 
 /**
+ * The three column headings, right-aligned over the figures they name.
+ *
+ * **A heading is needed now and was not before.** With one column the caption above the table was
+ * already its heading - "15 hours · from the log" said what the figures were. Two different values
+ * per row make "which is which" a real question, and a table where a person has to guess the answer
+ * is a table that will be misread.
+ *
+ * **No heading over the change column**, because `+18.2%` is unambiguous once the two columns beside
+ * it are named.
+ */
+@Composable
+private fun ColumnHeading(showPrevious: Boolean) {
+    Row(modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
+        // The name column, empty here so the headings line up with the figures below.
+        Spacer(modifier = Modifier.weight(1f))
+        if (showPrevious) {
+            Text(
+                "previous",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.End,
+                maxLines = 1,
+                modifier = Modifier.width(PREVIOUS_WIDTH),
+            )
+        }
+        Text(
+            "now",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.End,
+            maxLines = 1,
+            modifier = Modifier.width(CURRENT_WIDTH),
+        )
+        Text(
+            "",
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.width(CHANGE_WIDTH),
+        )
+    }
+}
+
+/**
+ * One metric across three columns: **previous, current, and the relative change.**
+ *
+ * **A null previous renders a dash, not a blank.** A blank cell reads as "nothing was counted",
+ * while a dash says "there is no such figure" - the same distinction the averages already make.
+ */
+@Composable
+private fun CompareRow(
+    name: String,
+    previous: String?,
+    current: String,
+    change: String,
+    muted: Boolean = false,
+) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
+        Text(
+            name,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (muted) MaterialTheme.colorScheme.onSurfaceVariant
+            else MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            modifier = Modifier.weight(1f),
+        )
+        if (previous != null) {
+            Text(
+                previous,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.End,
+                maxLines = 1,
+                modifier = Modifier.width(PREVIOUS_WIDTH),
+            )
+        }
+        Text(
+            current,
+            style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+            color = if (muted) MaterialTheme.colorScheme.onSurfaceVariant
+            else MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.End,
+            maxLines = 1,
+            modifier = Modifier.width(CURRENT_WIDTH),
+        )
+        Text(
+            change,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.End,
+            maxLines = 1,
+            modifier = Modifier.width(CHANGE_WIDTH),
+        )
+    }
+}
+
+/**
  * One metric, as a name and its number.
  *
  * **One cell, not a row of them.** There is a single column now, so the transposed table and its
@@ -684,3 +866,17 @@ private fun MetricRow(name: String, cell: String, muted: Boolean = false) {
 }
 
 
+
+/**
+ * The three figure columns, in dp.
+ *
+ * **Fixed rather than weighted**, so the columns line up between rows even when one cell is a dash
+ * and another is `1.35393` - a weighted row would put each row's decimal point in a different place,
+ * which is the one thing a table of numbers must never do.
+ *
+ * The change column is narrower than the others because `+18.2%` is never longer than `1.35393`
+ * beside a token count, and on a 360dp phone every dp of the name column is worth having.
+ */
+private val PREVIOUS_WIDTH = 76.dp
+private val CURRENT_WIDTH = 84.dp
+private val CHANGE_WIDTH = 64.dp

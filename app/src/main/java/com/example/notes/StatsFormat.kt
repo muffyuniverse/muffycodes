@@ -180,6 +180,30 @@ object StatsFormat {
         return parts.joinToString(" ")
     }
 
+    /**
+     * A relative change: `+18.2%`, `-4.0%`, `-100.0%`.
+     *
+     * **One decimal, not three.** A change is a comparison, and a comparison that claims 18.243%
+     * precision invites arithmetic on two numbers that are each already rounded on screen. The
+     * shares keep three decimals because they are measurements of a thing; this is a difference
+     * between two of them.
+     *
+     * **An explicit sign on the rise**, because a bare `18.2%` beside `-4.0%` reads as two
+     * magnitudes rather than as a rise and a fall. A fall carries its own minus, which is why only
+     * the positive case needs one added.
+     */
+    fun change(value: Double?): String = when {
+        value == null -> NONE
+        // **Rounded first, then signed**, so a change of -0.04% prints `0.0%` rather than `-0.0%`.
+        else -> {
+            val percent = Math.round(value * 1000.0) / 10.0
+            when {
+                percent > 0.0 -> "+" + String.format(java.util.Locale.UK, "%.1f%%", percent)
+                else -> String.format(java.util.Locale.UK, "%.1f%%", percent)
+            }
+        }
+    }
+
     /** A request count. */
     fun count(value: Int): String = value.toString()
 

@@ -299,6 +299,35 @@ object RequestStats {
         }
     }
 
+    /**
+     * The period immediately before [current]: **the same length, ending where it starts.**
+     *
+     * The operator's definition - *"previous interval is just start of the current interval minus
+     * length of the current interval"* - and the only one that also works for an interval set by
+     * hand, which is why this is a function of the interval rather than of a preset.
+     *
+     * **Subtracted on the local timeline, not the epoch.** A local day is 23 or 25 hours on the two
+     * days a year the clocks change; subtracting 86,400,000 ms from a local midnight would land an
+     * hour away from the previous midnight and leave a gap or an overlap that no figure would
+     * explain. `ZonedDateTime.minus(Duration)` subtracts wall-clock time, which is what "the same
+     * length ago" means to a person reading local times.
+     *
+     * **Not re-derived from the preset.** Re-running `clockAt` on the earlier start would snap to a
+     * different grid cell - clock "1 month" a month ago starts on the 1st of that month, a period of
+     * the wrong length - and `intervalAt` would measure from the wrong instant. Subtraction is exact
+     * by construction.
+     */
+    fun previousOf(
+        current: Interval,
+        zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
+    ): Interval {
+        val length = current.toMs - current.fromMs
+        if (length <= 0) return Interval(current.fromMs, current.fromMs)
+        val start = java.time.Instant.ofEpochMilli(current.fromMs).atZone(zone)
+        val before = start.minus(java.time.Duration.ofMillis(length)).toInstant().toEpochMilli()
+        return Interval(before, current.fromMs)
+    }
+
     /** How far a preset reaches back. Sealed so the two snap rules cannot be confused. */
     sealed interface Back {
         /** A length in milliseconds: minutes and hours, which have no calendar meaning. */
@@ -309,6 +338,29 @@ object RequestStats {
 
         /** A count of months, subtracted on the calendar so 31 Oct minus one month clamps to 30 Sep. */
         data class Months(val count: Int) : Back
+    }
+
+    /**
+     * How one figure changed from the previous period to this one.
+     *
+     * **A ratio, and null when there is nothing to compare against.** That null is the whole point:
+     * a previous period of one ping against a current period of twenty-two requests is
+     * arithmetically +79,600%, and printing it would look like a catastrophe rather than like a
+     * period that barely had any traffic. The screen draws a dash, the same way it does for an
+     * average with no denominator.
+     *
+     * **`-100%` is a real answer and is kept.** Current zero against a previous non-zero is a
+     * genuine "it stopped", which is exactly what a person opens this table to find out.
+     *
+     * **Both sides must be present**, so a figure that only one period reported has no change
+     * rather than a change computed against zero.
+     */
+    fun change(previous: Double?, current: Double?): Double? {
+        if (previous == null || current == null) return null
+        // **A zero baseline has no ratio.** Division would give infinity, and "infinitely more" is
+        // not a measurement.
+        if (previous == 0.0) return null
+        return (current - previous) / previous
     }
 
     /** The UTC hour that contains [ms]. The unit the log's hour table is keyed by. */

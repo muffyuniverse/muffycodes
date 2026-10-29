@@ -323,6 +323,89 @@ class RequestStatsTest {
     }
 
     @Test
+    fun `the previous period is the same length, ending where this one starts`() {
+        // **The operator's definition**: *"previous interval is just start of the current interval
+        // minus length of the current interval."*
+        val zone = ZoneId.of("UTC")
+        fun ms(h: Int, m: Int = 0, day: Int = 28) =
+            LocalDate.parse("2026-10-${day.toString().padStart(2, '0')}")
+                .atTime(h, m).atZone(zone).toInstant().toEpochMilli()
+
+        val hour = RequestStats.Interval(ms(10), ms(11))
+        val before = RequestStats.previousOf(hour, zone)
+        assertEquals("ends where this one starts", ms(10), before.toMs)
+        assertEquals("and is the same length", 3_600_000L, before.toMs - before.fromMs)
+        assertEquals("so it starts an hour earlier", ms(9), before.fromMs)
+
+        // **A hand-set interval gets a baseline too**, which is the reason this is a function of the
+        // interval rather than of a preset: 10:17 to 10:43 compares against 09:51 to 10:17.
+        val odd = RequestStats.Interval(ms(10, 17), ms(10, 43))
+        val oddBefore = RequestStats.previousOf(odd, zone)
+        assertEquals("a hand-set interval still has a previous", ms(9, 51), oddBefore.fromMs)
+        assertEquals("of exactly its length", odd.toMs - odd.fromMs, oddBefore.toMs - oddBefore.fromMs)
+
+        // **An empty interval has no previous**, rather than a backwards one.
+        val empty = RequestStats.Interval(ms(10), ms(10))
+        assertEquals("empty", ms(10), RequestStats.previousOf(empty, zone).fromMs)
+        assertEquals("and not negative", ms(10), RequestStats.previousOf(empty, zone).toMs)
+    }
+
+    @Test
+    fun `the previous period of a day is a calendar day, not 86,400,000 milliseconds`() {
+        // **The DST case, and the reason the subtraction is on the local timeline.** On 25 October
+        // 2026 the UK clocks go back at 02:00, so that local day is 25 hours. Subtracting
+        // 86,400,000 ms from the 26th's midnight would land at 00:00 on the 25th *local* only by
+        // coincidence of the epoch - the point is that a fixed-milliseconds subtraction cannot
+        // express "a day ago" in a zone whose days are not all 24 hours, and the previous period
+        // would end an hour away from where the current one starts.
+        val london = ZoneId.of("Europe/London")
+        fun midnight(day: Int) =
+            LocalDate.parse("2026-10-${day.toString().padStart(2, '0')}")
+                .atStartOfDay(london).toInstant().toEpochMilli()
+
+        // The fixture really is testing what it claims: the 25th is 25 hours long in this zone.
+        assertEquals("the 25th is a 25-hour day here", 25L * 3_600_000L, midnight(26) - midnight(25))
+        assertEquals("and the 26th is 24", 24L * 3_600_000L, midnight(27) - midnight(26))
+
+        // The current period is the 26th. Its previous is the 25th - a 25-hour day.
+        val before = RequestStats.previousOf(RequestStats.Interval(midnight(26), midnight(27)), london)
+        assertEquals("it begins at the 25th's own midnight", midnight(25), before.fromMs)
+        assertEquals("and ends where the current one starts", midnight(26), before.toMs)
+        assertEquals("so it is 25 hours, not 24", 25L * 3_600_000L, before.toMs - before.fromMs)
+    }
+
+    @Test
+    fun `a change is a ratio, and has no answer without a baseline`() {
+        // **The trap this guards.** One ping last period against twenty-two requests this period is
+        // +79,600%, which is arithmetically true and reads as a catastrophe. A zero baseline has no
+        // ratio at all, and neither does a figure only one side reported.
+        assertEquals("a rise", 0.5, RequestStats.change(100.0, 150.0)!!, 1e-9)
+        assertEquals("a fall", -0.25, RequestStats.change(100.0, 75.0)!!, 1e-9)
+        assertEquals("no change", 0.0, RequestStats.change(100.0, 100.0)!!, 1e-9)
+        // **A zero baseline is not "infinitely more".**
+        assertNull("nothing to compare against", RequestStats.change(0.0, 22.0))
+        // **Stopping entirely IS an answer**, and it is the one a person opens this table to find.
+        assertEquals("it stopped", -1.0, RequestStats.change(22.0, 0.0)!!, 1e-9)
+        // **An absent figure on either side has no change**, rather than a change against zero.
+        assertNull("no previous figure", RequestStats.change(null, 22.0))
+        assertNull("no current figure", RequestStats.change(22.0, null))
+    }
+
+    @Test
+    fun `a change prints with one decimal and an explicit sign`() {
+        // **One decimal, not three.** A change is a comparison of two numbers already rounded on
+        // screen; claiming 18.243% invites arithmetic that cannot be trusted.
+        assertEquals("a rise carries a plus", "+18.2%", StatsFormat.change(0.182))
+        assertEquals("a fall carries its own minus", "-4.0%", StatsFormat.change(-0.04))
+        assertEquals("it stopped", "-100.0%", StatsFormat.change(-1.0))
+        assertEquals("no change", "0.0%", StatsFormat.change(0.0))
+        // **No baseline prints a dash**, the same as every other absent figure.
+        assertEquals("absent", StatsFormat.NONE, StatsFormat.change(null))
+        // **Rounded before it is signed**, so a change of -0.04% is `0.0%` and not `-0.0%`.
+        assertEquals("a negligible fall is not a negative zero", "0.0%", StatsFormat.change(-0.0001))
+    }
+
+    @Test
     fun `the same instant is the same request in every zone`() {
         // **The property the single instant column exists for**, now expressed on an interval rather
         // than on a column label. A log written in Berlin and read in Los Angeles must place every
