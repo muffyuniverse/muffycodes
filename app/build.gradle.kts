@@ -325,7 +325,7 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     // android.jar's org.json is a stub that throws at runtime; the JVM unit tests
     // need a real implementation on the classpath.
-    testImplementation("org.json:json:20231013")
+    testImplementation("org.json:json:20260814")
 
     // Robolectric runs the real Android framework on the plain JVM, so the
     // screens can be driven by the names of their parts without an emulator:
