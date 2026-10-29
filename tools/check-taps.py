@@ -50,7 +50,9 @@ VOCABULARY = {
     # a row's own switches
     "lock", "unlock", "pin", "unpin", "select", "unselect",
     # what a row's menu offers, and what the selection bar offers
-    "move", "copy", "delete", "rename", "add to gitignore",
+    # `unsync` / `sync again` are the pair that replaced `add to gitignore`: the act is not an
+    # ignore (which would untrack the file) but keeping it off GitHub while it stays tracked here.
+    "move", "copy", "delete", "rename", "add to gitignore", "unsync", "sync again",
     # making things
     "new file", "new folder", "upload files", "upload folder", "restore deleted",
     # projects

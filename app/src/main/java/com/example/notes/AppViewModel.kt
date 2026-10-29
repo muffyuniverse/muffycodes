@@ -152,6 +152,15 @@ class AppViewModel @JvmOverloads constructor(
         private set
 
     /**
+     * The paths kept off GitHub, as paths from the account root.
+     *
+     * Held in state for the same reason [lockedPaths] is: the row's icon has to redraw when it
+     * changes, and asking `.muffy/unsync.json` on every call gave Compose no reason to.
+     */
+    var unsyncedPaths: Set<String> by mutableStateOf(emptySet())
+        private set
+
+    /**
      * The agent sessions this phone is running, read from `.muffy/agents.json`.
      *
      * **Declared here, with the other state, and not with the methods below.** `refresh()` writes
@@ -616,6 +625,7 @@ class AppViewModel @JvmOverloads constructor(
         entries = currentDir?.let { ws.list(it) } ?: emptyList()
         pins = ws.pins()
         lockedPaths = ws.locked()
+        unsyncedPaths = ws.unsynced()
         agentSessions = AgentSessions(ws.accountDir).read()
         // The first refresh of a new process is where a session that survived a reboot gets its
         // clock back: the answer is read here, but nothing else in a refresh would start it.
@@ -1298,6 +1308,57 @@ class AppViewModel @JvmOverloads constructor(
         }
         refresh()
         commitProject(project, "Ignored $inside")
+    }
+
+    /**
+     * Keeps [file] off GitHub, or sends it again — **one act, both directions.**
+     *
+     * **Not `.gitignore`.** An ignore would untrack the file: out of the index, out of future
+     * commits, unversioned on the phone. Unsyncing is the other thing: the file stays tracked, every
+     * save still makes a version, the local history keeps all of them, and only the tree that is
+     * *sent* leaves it out. The operator's distinction, and the reason the button is not called
+     * Ignore.
+     *
+     * A file the app holds - a secret, or the app's own bookkeeping - cannot be unsynced *or*
+     * synced: the app already keeps it off GitHub, and a tap that claimed to change that would be
+     * lying. Those are drawn as marks rather than buttons, so this should not be reached; the guard
+     * is here so the rule lives with the act rather than only with the drawing.
+     */
+    fun toggleUnsynced(file: File) {
+        val ws = workspace ?: return
+        if (ws.unsync(file) == Workspace.Unsync.APP) {
+            message = "The app keeps ${file.name} off GitHub, and only the app can change that"
+            return
+        }
+        val path = ws.relative(file) ?: return
+        val key = ws.pathString(path)
+        val was = key in unsyncedPaths
+        Trace.tap(if (was) "sync again" else "unsync", file.name)
+        val next = if (was) unsyncedPaths - key else unsyncedPaths + key
+        ws.setUnsynced(next)
+        unsyncedPaths = next
+        // **Said, because the state is not visible in the file.** A lock shows on the row; whether a
+        // file will be sent is a fact about the next push, so the sentence is where a person learns
+        // it - and the sentence differs by direction, because only one of them has a caveat.
+        message = if (was) {
+            "${file.name} will be sent again on the next sync"
+        } else {
+            // **The caveat, and only when it is true.** Unsyncing stops future sends; it does not
+            // take back what GitHub already has. Saying so on a file that was never pushed would be
+            // noise, so the question is asked of the repository.
+            val project = ws.projectOf(file)
+            val inside = path.drop(1).joinToString("/")
+            val pushed = project != null && git?.open(project)?.use { repo ->
+                GitService.wasPushed(repo, inside)
+            } == true
+            if (pushed) {
+                "${file.name} will not be sent again. Its earlier versions stay on GitHub — this " +
+                    "stops future sends, it does not take back what was sent."
+            } else {
+                "${file.name} will not be sent to GitHub"
+            }
+        }
+        refresh()
     }
 
     /** True when [file] may not be written — itself, or because a folder above it is.

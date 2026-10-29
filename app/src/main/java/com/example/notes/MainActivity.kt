@@ -355,7 +355,7 @@ private fun AppRoot(viewModel: AppViewModel) {
         onHistory = { entry -> viewModel.openHistory(entry.file) },
         onSelect = { entry -> viewModel.toggleSelected(entry.file) },
         // The act records its own tap: it is the view model that knows the path git will match.
-        onIgnore = { entry -> viewModel.ignoreInGit(entry.file) },
+        onIgnore = { entry -> viewModel.toggleUnsynced(entry.file) },
     )
 
     when {

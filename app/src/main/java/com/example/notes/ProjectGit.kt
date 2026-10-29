@@ -185,11 +185,30 @@ class ProjectGit(
                 // this phone's copy and leave the repository as long as it was —
                 // the length would only appear to take effect on the next sync.
                 prune(it)
+                // **What is sent is `HEAD` minus the unsynced paths.** The local commit is already
+                // made above and stays exactly as it is; the push derives a tree without them, so a
+                // file the person unsynced keeps every version it has on this phone and never
+                // reaches GitHub. An empty list falls through to the ordinary push.
+                val omitted = workspace.unsentFrom(project)
+                if (omitted.isNotEmpty()) {
+                    Trace.note(
+                        "not sent",
+                        "$project: ${omitted.size} — " +
+                            omitted.take(12).joinToString(", ") +
+                            (if (omitted.size > 12) " +${omitted.size - 12} more" else ""),
+                    )
+                }
                 // A push that fails leaves the row saying there is work to send, which is the
                 // truth, and is what makes the button something a person can press again — nothing
                 // has to be recorded either way, because the count is asked of the repository
                 // (see [changes]).
-                GitService.pushForce(it, tokenProvider())
+                GitService.pushWithout(
+                    it,
+                    tokenProvider(),
+                    omitted,
+                    authorProvider(),
+                    note.trim().ifBlank { "Sync" },
+                )
             } catch (e: Throwable) {
                 GitService.RemoteResult(Secrets.describe(e), false)
             }

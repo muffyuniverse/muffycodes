@@ -331,103 +331,91 @@ class Workspace(val accountDir: File) {
     }
 
     /**
-     * **Who is keeping a file out of the repository.**
+     * **Who is keeping a file off GitHub.**
      *
-     * The same three states as [Hold], for the same reason and with the same storage split: the
-     * person's answer is a line in the project's `.gitignore`, which is a tracked document and part
-     * of the history; the app's answer is a line in `.git/info/exclude`, which is git's per-clone
-     * list and cannot be pushed. One question - "will this be sent?" - answered from two places,
-     * which is what unifying it means.
+     * **This is not `.gitignore`, and the difference is the whole point.** An ignore makes a file
+     * *untracked*: git stops seeing it, it leaves the index, it stops being committed, and on the
+     * phone it becomes a file the app no longer versions. The operator's word for what they wanted
+     * is **unsync**, and it is a different act: the file stays tracked, stays committed, stays in the
+     * local history with every version it ever had - and simply is not *sent*.
      *
-     * **Not liftable when [APP].** The operator's rule: "what is set by app cannot be unset". A
-     * person who could remove the app's own line would be able to send the app's bookkeeping to
-     * GitHub, which is the thing the line exists to prevent.
+     * So the answer is not stored in a git file at all. It is a list of paths this phone keeps, the
+     * same shape as `pins.json` and `locked.json`, and it is read at **push time**: the tree that
+     * goes to GitHub is derived from `HEAD` with these paths left out. Local `HEAD` is never
+     * rewritten, so nothing a person did on this phone is lost.
+     *
+     * [USER] is a path on that list. [APP] is the same list, plus the app's own secret rule - see
+     * [appHold] - which the person cannot lift.
      */
     enum class Unsync {
-        /** Nothing is stopping it: the next commit will carry it. */
+        /** Sent as normal. */
         NONE,
 
-        /** The person ignored it. Tappable, and tapping lifts it. */
+        /** The person unsynced it. Tappable, and tapping syncs it again. */
         USER,
 
-        /** The app keeps it out. Shown, and **not liftable**. */
+        /** The app keeps it off GitHub. Shown, and **not liftable**. */
         APP,
     }
 
-    /**
-     * The names that hold a credential, and are therefore **held by the app**.
-     *
-     * This is the producer that makes [Hold.APP] and [Unsync.APP] real. Until it existed the app
-     * had the two states and no way to reach them, so the red mark could never be drawn and the rule
-     * "what is set by app cannot be unset" governed nothing.
-     *
-     * **A name list, and deliberately a short one.** The app cannot read a file and judge whether it
-     * holds a secret - a detector that tried would be wrong about the files somebody thought of and
-     * silently wrong about every other one. What it *can* do is recognise the handful of names that
-     * are never anything else: a `.env`, a private key, a keystore. Everything else is the person's
-     * to lock, which is why the person's lock still exists beside this one.
-     *
-     * Matched on the **name**, case-insensitively, and on the **extension** where the extension is
-     * the whole of the meaning (`*.key`, `*.pem`, `*.p12`).
-     */
-    private fun looksSecret(name: String): Boolean {
-        val lower = name.lowercase()
-        if (lower in SECRET_NAMES) return true
-        // `.env.local`, `.env.production`: the same file with a suffix saying which machine.
-        if (lower.startsWith(".env")) return true
-        val extension = lower.substringAfterLast('.', "")
-        return extension in SECRET_EXTENSIONS
-    }
+    /** The paths the person has unsynced, as paths from the account root. */
+    fun unsynced(): Set<String> = readFlags(UNSYNC_FILE)
+
+    /** Replaces the unsynced paths. */
+    fun setUnsynced(paths: Set<String>) = writeFlags(UNSYNC_FILE, paths)
 
     /**
-     * The hold the app itself puts on [file], or [Hold.NONE].
+     * The unsync state of [file], answered once.
      *
-     * Separate from [hold] because the two are different questions: this one is "does the app
-     * *decide* to hold this", and [hold] is "is it held". Keeping them apart is what lets the app's
-     * reason be a rule about names while the person's is a stored list, without either pretending to
-     * be the other.
-     */
-    fun appHold(file: File): Hold =
-        if (isAppFlag(file) || isSystemLocked(file.name) || looksSecret(file.name)) Hold.APP
-        else Hold.NONE
-
-    /**
-     * The unsync state of [file], from both ignore files, answered once.
-     *
-     * **APP wins when both match**, for the same reason as [Hold]: the app's line is in
-     * `.git/info/exclude` and would still hold if the person's line went away, so offering a toggle
-     * would offer an act that changes nothing.
-     *
-     * The paths are compared as git matches them - the project-relative path, with a folder written
-     * with a trailing slash - because a comparison that spells a path differently from the line that
-     * wrote it finds nothing.
+     * **APP wins**, because the app's rule cannot be lifted: reporting USER on a secret would offer
+     * a toggle whose other position is still refused.
      */
     fun unsync(file: File): Unsync {
-        val project = projectOf(file) ?: return Unsync.NONE
+        if (appHold(file) == Hold.APP) return Unsync.APP
         val path = relative(file) ?: return Unsync.NONE
-        val inside = path.drop(1).joinToString("/").let { if (file.isDirectory) "$it/" else it }
-        if (inside.isEmpty()) return Unsync.NONE
-        val dir = projectDir(project)
-        // **A secret is kept out by the app, whether or not the line is written yet.** The line is
-        // what git reads, so `ensureSecretIgnores` writes it - but the answer to "will this be
-        // sent?" must not depend on whether a bookkeeping step has run, or the row would show grey
-        // for a file that must never travel.
-        if (looksSecret(file.name)) return Unsync.APP
-        // The app's own list next: it is the answer that cannot be lifted.
-        if (linesIn(File(dir, ".git" + File.separator + "info" + File.separator + "exclude"))
-                .any { it == inside }
-        ) {
-            return Unsync.APP
-        }
-        return if (linesIn(File(dir, IGNORE)).any { it == inside }) Unsync.USER else Unsync.NONE
+        return if (pathString(path) in unsynced()) Unsync.USER else Unsync.NONE
     }
 
-    /** The non-blank, non-comment lines of a file, or none when it is not there. */
-    private fun linesIn(file: File): List<String> =
-        if (!file.isFile) emptyList()
-        else read(file).lineSequence().map { it.trim() }.filter { it.isNotEmpty() && !it.startsWith("#") }.toList()
+    /**
+     * The project-relative paths to leave out of the tree that goes to GitHub.
+     *
+     * **What the push actually uses.** A path is left out when the person unsynced it or the app
+     * holds it - and a folder takes its contents with it, which is the rule a person expects from
+     * "do not send this" and the one that makes unsyncing a folder mean something.
+     *
+     * Only this project's paths are returned, because that is the only tree being sent: an unsync in
+     * another project is not this one's business.
+     */
+    fun unsentFrom(project: String): List<String> {
+        val dir = projectDir(project)
+        val paths = unsynced()
+        val out = sortedSetOf<String>()
+        // The person's list first, as project-relative paths.
+        paths.forEach { key ->
+            val prefix = "$project/"
+            if (key.startsWith(prefix)) out += key.removePrefix(prefix)
+        }
+        // Then the app's rule, walked from what is actually in the project: the secret patterns are
+        // about names, so they have to be matched against real files rather than guessed at.
+        dir.walkTopDown().forEach { file ->
+            if (file == dir) return@forEach
+            val rel = file.absolutePath.removePrefix(dir.absolutePath).removePrefix("/")
+                .replace(File.separatorChar, '/')
+            if (rel.isEmpty()) return@forEach
+            if (appHold(file) == Hold.APP) {
+                out += rel
+                if (file.isDirectory) out += dir.walkTopDown()
+                    .filter { it != dir && it.absolutePath.startsWith(file.absolutePath) }
+                    .map { it.absolutePath.removePrefix(dir.absolutePath).removePrefix("/")
+                        .replace(File.separatorChar, '/') }
+                    .toList()
+            }
+        }
+        return out.toList()
+    }
 
     /**
+     * True when [file] is one of the app's own flags    /**
      * True when [file] is one of the app's own flags, which are shown and never written by hand.
      *
      * **Report 28's other half.** `.muffy/` holds `agents.json`, `locked.json` and `pins.json` — the
@@ -1189,6 +1177,17 @@ class Workspace(val accountDir: File) {
 
         const val PINS_FILE = "pins.json"
         const val LOCKED_FILE = "locked.json"
+
+        /**
+         * The paths the person keeps off GitHub.
+         *
+         * **Not a git file, and that is deliberate.** A `.gitignore` line would make the path
+         * *untracked* - out of the index, out of every future commit, unversioned on the phone. What
+         * was asked for is the opposite: keep versioning it here, and leave it out of what is sent.
+         * So the list is the app's own, beside `pins.json` and `locked.json`, and the push derives
+         * the tree it sends from it.
+         */
+        const val UNSYNC_FILE = "unsync.json"
 
         /** git's own store. Not shown, because it is not a file a person browses. */
         const val GIT_DIR = ".git"
