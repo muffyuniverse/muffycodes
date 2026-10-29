@@ -357,8 +357,27 @@ fun StatsScreen(
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 2.dp, bottom = 6.dp),
+                        modifier = Modifier.padding(top = 2.dp, bottom = 0.dp),
                     )
+                    if (showPrevious) {
+                        // **The previous window, named in full.** Its rule is unusual enough that a
+                        // person who knows this code asked about it: it is the same LENGTH, ending
+                        // where the current interval starts - not the whole of yesterday. Without
+                        // this line the reader has to infer the window from the arithmetic, and the
+                        // natural guess ("all of yesterday") is the one that would report a 46% drop
+                        // caused by the day not being over yet.
+                        //
+                        // **Both ends, because a length alone does not locate it.** "12 hours 52
+                        // minutes" beside "12 hours 52 minutes" still leaves the reader guessing
+                        // whether it is the period before this one or yesterday's same span.
+                        Text(
+                            "before: " + StatsFormat.instantMinute(previousSpan.fromMs) +
+                                " to " + StatsFormat.instantMinute(previousSpan.toMs),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 6.dp),
+                        )
+                    }
                     // **Generate, because the table is a query and not a live view.** The figures
                     // are computed on press rather than on every stepper tick: a minute stepper can
                     // move sixty times on the way to a time, and re-reading the history on each of
@@ -475,7 +494,7 @@ fun StatsScreen(
                         // two different values now, so "which is which" is a real question and the
                         // answer has to be on screen. The headings are right-aligned to match the
                         // figures beneath them.
-                        ColumnHeading(showPrevious = showPrevious)
+                        ColumnHeading(showPrevious = showPrevious, previousSpan = previousSpan)
                         val t = totals.total
                         val p = previousTotals.total
                         CompareRow(
@@ -757,13 +776,17 @@ private fun TimeDialog(
  * it are named.
  */
 @Composable
-private fun ColumnHeading(showPrevious: Boolean) {
+private fun ColumnHeading(showPrevious: Boolean, previousSpan: RequestStats.Interval) {
     Row(modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
         // The name column, empty here so the headings line up with the figures below.
         Spacer(modifier = Modifier.weight(1f))
         if (showPrevious) {
             Text(
-                "previous",
+                // **"before", not "previous".** The word alone does not say *what* the period is,
+                // and the honest answer is unusual enough to be worth stating: it is the same
+                // length, ending where this one starts. Not the whole of yesterday - comparing
+                // twelve hours against twenty-four would report a 46% drop caused by nothing.
+                "before",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.End,

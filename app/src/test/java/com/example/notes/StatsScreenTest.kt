@@ -255,9 +255,12 @@ class StatsScreenTest {
         // table was its heading; two values per row make "which is which" a real question.
         draw(withRows = true)
         compose.onNodeWithText("now").assertExists()
-        // **The previous column appears once there is a baseline to compare against.** One response
-        // an hour before the interval began is enough to make the period before it real.
-        compose.onNodeWithText("previous").assertExists()
+        // **The previous column appears once there is a baseline to compare against.**
+        compose.onNodeWithText("before").assertExists()
+        // **And it says WHICH period it is**, because the rule is unusual enough that a person who
+        // knows this code asked about it. The window is the same length, ending where this one
+        // starts - not the whole of yesterday.
+        compose.onNodeWithText("before: 28 Oct 2026, 11:08", substring = true).assertExists()
     }
 
     @Test
@@ -269,7 +272,7 @@ class StatsScreenTest {
         // One row *inside* the current interval, and nothing before it, is exactly that shape.
         draw(withRows = true, rowsBefore = false)
         compose.onNodeWithText("now").assertExists()
-        compose.onNodeWithText("previous").assertDoesNotExist()
+        compose.onNodeWithText("before").assertDoesNotExist()
     }
 
     @Test
