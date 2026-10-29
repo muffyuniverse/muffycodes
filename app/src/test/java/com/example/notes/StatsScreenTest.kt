@@ -11,8 +11,6 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
-import androidx.compose.ui.test.onRoot
-import androidx.compose.ui.test.printToString
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -289,7 +287,11 @@ class StatsScreenTest {
         // assertion here is about. The dial's hour stepper is a plain button and works at any size.
         compose.onNodeWithText("00:00", substring = true).performClick()
         compose.waitForIdle()
-        println("DIAG DIAL\n" + compose.onRoot(useUnmergedTree = true).printToString(maxDepth = 12))
+        println("DIAG DIAL: 00=" + compose.onAllNodesWithText("00").fetchSemanticsNodes().size +
+            " 14=" + compose.onAllNodesWithText("14").fetchSemanticsNodes().size +
+            " HOUR=" + compose.onAllNodesWithText("HOUR", substring = true).fetchSemanticsNodes().size +
+            " minutes=" + compose.onAllNodesWithText("minutes", substring = true).fetchSemanticsNodes().size +
+            " Show=" + compose.onAllNodesWithText("Show").fetchSemanticsNodes().size)
         compose.onAllNodesWithText("+")[0].performClick()
         compose.onNodeWithText("Show").performClick()
         compose.waitForIdle()
