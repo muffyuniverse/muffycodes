@@ -282,7 +282,17 @@ object RequestStats {
                 // fifteen minutes beginning at the hour's start, which is what "15 min" means when
                 // the alternative - snapping to a 15-minute grid - would be a second convention.
                 is Back.Duration -> at.truncatedTo(java.time.temporal.ChronoUnit.HOURS)
-                is Back.Days -> at.truncatedTo(java.time.temporal.ChronoUnit.DAYS)
+                // **A week is not a day.** Truncating to DAYS gave "1 week" the same start as
+                // "1 day" - today's midnight - so the chip named a week and covered a few hours.
+                // The clock family's rule is "the start of the current calendar period", so a week
+                // begins on its first day: Monday, by the ISO week the rest of this app uses.
+                is Back.Days -> if (b.count >= 7) {
+                    at.with(
+                        java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY),
+                    ).truncatedTo(java.time.temporal.ChronoUnit.DAYS)
+                } else {
+                    at.truncatedTo(java.time.temporal.ChronoUnit.DAYS)
+                }
                 is Back.Months -> if (back.count >= 12) {
                     at.withDayOfYear(1).truncatedTo(java.time.temporal.ChronoUnit.DAYS)
                 } else {

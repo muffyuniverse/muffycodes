@@ -228,7 +228,10 @@ class RequestStatsTest {
         assertEquals("1 hour too", at(9), start(RequestStats.Preset.HOUR_1))
         assertEquals("6 hours too", at(9), start(RequestStats.Preset.HOURS_6))
         assertEquals("1 day starts at midnight", at(0), start(RequestStats.Preset.DAY_1))
-        assertEquals("1 week too", at(0), start(RequestStats.Preset.WEEK_1))
+        // **A week starts on a Monday, not at today's midnight.** Truncating to DAYS gave "1 week"
+        // exactly the same interval as "1 day", so the chip named a week and covered a few hours.
+        // 28 Oct 2026 is a Wednesday, so the week began on Monday the 26th.
+        assertEquals("1 week starts on Monday", at(0, day = 26), start(RequestStats.Preset.WEEK_1))
         assertEquals("1 month starts on the 1st", at(0, day = 1), start(RequestStats.Preset.MONTH_1))
         assertEquals("1 year starts on 1 January", at(0, day = 1, month = 1), start(RequestStats.Preset.YEAR_1))
 

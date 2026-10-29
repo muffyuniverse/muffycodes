@@ -6,7 +6,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.isSelectable
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -79,9 +79,14 @@ class StatsScreenTest {
         if (withRows) {
             val hour = 3_600_000L
             if (rowsBefore) {
-                // Two responses in the period before this one, so there is a baseline to compare to.
-                RequestDb.write(account, now - 2 * hour, stats(cost = 0.002))
-                RequestDb.write(account, now - 3 * hour, stats(cost = 0.001))
+                // **Yesterday, not a few hours ago.** The default interval is today from midnight,
+                // so its previous period is the whole of yesterday - a row two hours before *now*
+                // would sit inside the current interval and prove nothing about the baseline.
+                val midnight = java.time.LocalDate.parse("2026-10-28")
+                    .atStartOfDay(java.time.ZoneId.systemDefault())
+                    .toInstant().toEpochMilli()
+                RequestDb.write(account, midnight - 2 * hour, stats(cost = 0.002))
+                RequestDb.write(account, midnight - 3 * hour, stats(cost = 0.001))
             }
             // Two inside the current interval - today from midnight, so after 00:00.
             RequestDb.write(account, now - 1_000L, stats(cost = 0.003))
@@ -147,12 +152,9 @@ class StatsScreenTest {
             compose.onAllNodesWithText("28 Oct 2026").fetchSemanticsNodes().size,
         )
         compose.onNodeWithText("00:00").assertExists()
-        // **Both ends read 14:30**, so this one is a count rather than an existence check.
-        assertEquals(
-            "the time at both ends",
-            2,
-            compose.onAllNodesWithText("14:30").fetchSemanticsNodes().size,
-        )
+        // **The two ends read DIFFERENT times**, and that is the default working: the interval is
+        // today from midnight, so From is 00:00 and To is where the clock stopped.
+        compose.onNodeWithText("14:30").assertExists()
         compose.onNodeWithText("14 hours 30 minutes", substring = true).assertExists()
     }
 
@@ -187,8 +189,9 @@ class StatsScreenTest {
         // the node exists in the tree but has no position on screen.
         compose.onNodeWithContentDescription("Clock 1 week").performScrollTo().performClick()
         compose.waitForIdle()
-        // One week on the clock starts at midnight a week ago.
-        compose.onNodeWithText("21 Oct 2026").assertExists()
+        // **One week on the clock starts on the Monday of the current week**, which for 28 Oct 2026
+        // - a Wednesday - is the 26th. It used to start at today's midnight, the same as "1 day".
+        compose.onNodeWithText("26 Oct 2026").assertExists()
         // And it regenerated, so the button has nothing left to do.
         compose.onNodeWithText("Generated").assertExists()
     }
@@ -202,14 +205,16 @@ class StatsScreenTest {
         // buttons read the same date and the same time until a picker moves one of them - which is
         // the point of the default being a whole day so far, not a defect.
         assertEquals("a date button per end", 2, compose.onAllNodesWithText("28 Oct 2026").fetchSemanticsNodes().size)
-        assertEquals("and a time button per end", 2, compose.onAllNodesWithText("14:30").fetchSemanticsNodes().size)
+        // **The times differ**, because the default interval starts at midnight: From is 00:00 and
+        // To is the opening moment. Two identical times would mean the default had not been applied.
+        compose.onNodeWithText("00:00").assertExists()
+        compose.onNodeWithText("14:30").assertExists()
     }
 
     @Test
     fun `tapping a time opens the dial, not the calendar`() {
         draw()
-        // **The first of the two**, since From and To both read 14:30 until one is moved.
-        compose.onAllNodesWithText("14:30")[0].performClick()
+        compose.onNodeWithText("14:30").performClick()
         compose.waitForIdle()
         // **The dial is a whole dialog**, and the claim pinned here is that the two are separate:
         // tapping a *time* must not open the calendar, which is what the previous single-dialog
@@ -221,8 +226,7 @@ class StatsScreenTest {
     @Test
     fun `the dial is above the button that commits it`() {
         draw()
-        // **The first of the two**, since From and To both read 14:30 until one is moved.
-        compose.onAllNodesWithText("14:30")[0].performClick()
+        compose.onNodeWithText("14:30").performClick()
         compose.waitForIdle()
         // **The failure this session already made twice**, and the reason the check is anchored to
         // Show rather than to the window height: a control inside a dialog's scrolling body reports
@@ -241,7 +245,8 @@ class StatsScreenTest {
         // **No heading at all**, because there is no table. A person opening this before the agent
         // has run is told why it is empty rather than shown a grid of dashes that reads like a fault
         // - and the headings below would be headings over nothing.
-        compose.onNodeWithText("no log yet").assertExists()
+        // **Substring, because the caption is one string**: "14 hours 30 minutes · no log yet".
+        compose.onNodeWithText("no log yet", substring = true).assertExists()
         compose.onNodeWithText("now").assertDoesNotExist()
     }
 
@@ -287,7 +292,7 @@ class StatsScreenTest {
         compose.waitForIdle()
         // **Named as a selectable, because a bare "26" is not unique in the calendar** - the
         // year-navigation row can carry the same digits, and the day cell is the selectable one.
-        compose.onNode(hasText("26") and isSelectable()).performClick()
+        compose.onNode(hasText("26") and hasClickAction()).performClick()
         compose.onNodeWithText("Show").performClick()
         compose.waitForIdle()
 
