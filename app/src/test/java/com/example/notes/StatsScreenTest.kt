@@ -7,7 +7,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.hasClickAction
-import androidx.compose.ui.test.onAllNodes
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.printToString
@@ -294,18 +293,14 @@ class StatsScreenTest {
         compose.onAllNodesWithText("28 Oct 2026")[0].performClick()
         compose.waitForIdle()
         // TEMPORARY DIAGNOSTIC
-        run {
-            fun count(matcher: androidx.compose.ui.test.SemanticsMatcher) =
-                compose.onAllNodes(matcher).fetchSemanticsNodes().size
-            println("DIAG roots=" + count(androidx.compose.ui.test.isRoot()))
-            println("DIAG Show=" + count(hasText("Show")))
-            println("DIAG 28oct=" + count(hasText("28 Oct 2026")))
-            println("DIAG 28octClickable=" + count(hasText("28 Oct 2026") and hasClickAction()))
-            println("DIAG 26merged=" + count(hasText("26")))
-            println("DIAG 26unmerged=" + compose.onAllNodes(hasText("26"), useUnmergedTree = true).fetchSemanticsNodes().size)
-            println("DIAG 26clickable=" + count(hasText("26") and hasClickAction()))
-            println("DIAG TEXTDUMP\n" + compose.onRoot(useUnmergedTree = true).printToString(maxDepth = 3))
-        }
+        println("DIAG show=" + compose.onAllNodesWithText("Show").fetchSemanticsNodes().size)
+        println("DIAG 28oct=" + compose.onAllNodesWithText("28 Oct 2026").fetchSemanticsNodes().size)
+        println(
+            "DIAG 26=" + compose.onAllNodesWithText("26").fetchSemanticsNodes().size +
+                " unmerged=" + compose.onAllNodesWithText("26", useUnmergedTree = true)
+                    .fetchSemanticsNodes().size,
+        )
+        println("DIAG TREE\n" + compose.onRoot(useUnmergedTree = true).printToString(maxDepth = 4))
         compose.onNodeWithText("Show").performClick()
         compose.waitForIdle()
 
