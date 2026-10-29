@@ -87,6 +87,77 @@ object AgentChat {
          * division and neither can be derived from the other.
          */
         val bubbles: List<Bubble> = emptyList(),
+        /**
+         * The conversation as **messages**: one per side, alternating, oldest first.
+         *
+         * This is what the screen draws. [bubbles] is kept for the tests that pin the per-act
+         * reading, and because the two units answer different questions - a bubble is "what
+         * happened", a message is "who said it and what did they do about it".
+         */
+        val messages: List<Message> = emptyList(),
+    )
+
+    /**
+     * **Who a message is from**, which is the only thing that decides how it is drawn.
+     *
+     * Two sides, and they look different on purpose: the operator's message is a plain row with no
+     * pages and no footer, because it has no tool calls and no turns; the agent's is a container of
+     * pages with a footer, because a turn does. Report: "user messages are less complicated - they
+     * dont have multiple toolcalls and turns, - they are just a plain message row".
+     */
+    enum class Side { OPERATOR, AGENT }
+
+    /**
+     * **One page of an agent's message: one tool call and what came back.**
+     *
+     * A call and its result are one page because they are one act - the tool was run and this is
+     * what it said - and two pages would make a person turn a page to read the answer to the
+     * question they just read.
+     */
+    data class Page(
+        /** The tool's name, or `agent` for the closing words. */
+        val caption: String,
+        /** The one line the result reduces to, for the page's own body. */
+        val body: String,
+        /** The whole of it: the arguments and the full result. */
+        val detail: String,
+        /** The row's number, which is how a person finds it in `session.log`. */
+        val id: Int = 0,
+        val stamp: String = "",
+        val failed: Boolean = false,
+        val forgotten: Boolean = false,
+        /** True for the closing words, which are drawn as markdown rather than as a line. */
+        val prose: Boolean = false,
+    )
+
+    /**
+     * **One message: a side of the conversation, not one act.**
+     *
+     * The operator asked for a list that alternates `user · agent · user · agent` from the first row
+     * of the record to the last. So a message is **one turn** of the agent - every call and result
+     * it made, as pages, ending with the words it said - and the operator's is a single plain row.
+     *
+     * **This replaces the bubble-per-act unit**, which drew `user · call · call · call · agent-words`
+     * and was the shape that was reported as wrong. The record did not change: `AgentLog.TURN`
+     * already divides it, and [bubbles] used to skip that row.
+     */
+    data class Message(
+        val side: Side,
+        /**
+         * The pages, for an agent's message: one per call, then the closing words.
+         *
+         * **Empty for the operator's**, which is the whole of what "plain row" means - there is
+         * nothing to turn to.
+         */
+        val pages: List<Page> = emptyList(),
+        /** The words, for the operator's message; empty for the agent's, whose words are a page. */
+        val body: String = "",
+        /** The row's number, for the footer. The operator's message carries its own too. */
+        val id: Int = 0,
+        val stamp: String = "",
+        val forgotten: Boolean = false,
+        val thinking: Long = 0,
+        val output: Long = 0,
     )
 
     /**
@@ -360,6 +431,160 @@ object AgentChat {
         return out
     }
 
+    /**
+     * The conversation as **messages**: one per side, alternating, oldest first.
+     *
+     * The shape the operator asked for, and the unit is a turn:
+     *
+     *  - **The operator's message** is a plain row. No pages, no footer - it has no calls.
+     *  - **The agent's message** is one turn: a page per call-and-result, then **the closing words
+     *    as the last page.** That is what "ends with a finishing message from the agent" means: the
+     *    ending is the last thing in the message, not a message of its own.
+     *
+     * **The turn boundary is `AgentLog.TURN`**, which the record already writes before each request.
+     * Nothing is inferred from gaps, and no new bookkeeping is needed - [bubbles] simply skipped that
+     * row, which is why it drew a bubble per act.
+     *
+     * A turn that only kept the conversation warm has no pages and is not drawn: forty pings would
+     * be forty empty messages, and [Box.idle] is the one line that says the agent is still there.
+     */
+    fun messages(conversation: List<AgentLog.Row>): List<Message> {
+        val out = mutableListOf<Message>()
+        // **What each reply was charged for, by the row it accounts for.** Built up front because
+        // the usage row is written after the reply and so sits *below* the page it describes.
+        val charged = conversation.mapNotNull { row ->
+            if (row.kind == AgentLog.USAGE) row.answers to spend(row.detail) else null
+        }.toMap()
+        // The operator's message opens the conversation, and the record holds exactly one per
+        // burst - see `conversation()`, which starts the burst at it.
+        val told = conversation.firstOrNull { it.kind == AgentLog.TOLD }
+        if (told != null) {
+            out.add(
+                Message(
+                    side = Side.OPERATOR,
+                    body = told.body,
+                    id = told.id,
+                    stamp = told.stamp,
+                    forgotten = told.ctx == AgentLog.OUT,
+                ),
+            )
+        }
+        for (turn in turns(conversation)) {
+            // A turn that only kept the conversation warm is the idle line, not a message.
+            if (turn.idle) continue
+            val pages = mutableListOf<Page>()
+            val pending = mutableMapOf<Int, AgentLog.Row>()
+            var words: Page? = null
+            // **The accounting rides on the closing words**, so the footer shows what the turn cost
+            // against the sentence that ended it.
+            var wordsCost: Spend? = null
+            for (row in turn.rows) {
+                if (row.broken) {
+                    pages.add(
+                        Page(
+                            caption = "unreadable",
+                            body = oneLine(row.detail, 120),
+                            detail = row.detail,
+                            id = row.id,
+                            stamp = row.stamp,
+                            failed = true,
+                            forgotten = row.ctx == AgentLog.OUT,
+                        ),
+                    )
+                    continue
+                }
+                val forgot = row.ctx == AgentLog.OUT
+                when (row.kind) {
+                    AgentLog.CALL -> pending[row.id] = row
+                    AgentLog.GOT -> {
+                        val call = pending.remove(row.answers)
+                        if (call == null) {
+                            // A result whose call is not in this turn: a seal written when the app
+                            // was reopened. Drawn where it stands, so an interrupted turn is visible
+                            // rather than silently missing its answer.
+                            pages.add(
+                                Page(
+                                    caption = row.name,
+                                    body = summary(row.body),
+                                    detail = row.body,
+                                    id = row.id,
+                                    stamp = row.stamp,
+                                    failed = failed(row.body),
+                                    forgotten = forgot,
+                                ),
+                            )
+                        } else {
+                            // **One page, carrying the call's id** - the call is what a person looks
+                            // for in the record, and the result is the same act.
+                            pages.add(
+                                Page(
+                                    caption = call.name,
+                                    body = summary(row.body),
+                                    detail = "asked with ${call.body}\n\nanswered with ${row.body}",
+                                    id = call.id,
+                                    stamp = call.stamp,
+                                    failed = failed(row.body),
+                                    forgotten = forgot || call.ctx == AgentLog.OUT,
+                                ),
+                            )
+                        }
+                    }
+                    AgentLog.NOTE -> when (row.name) {
+                        PING -> Unit
+                        // **`ended` is machinery, not conversation.** The words themselves are the
+                        // `agent` note beside it, and drawing both would say the ending twice.
+                        "ended" -> Unit
+                        "agent" -> {
+                            val cost = charged[row.id]
+                            words = Page(
+                                caption = "agent",
+                                body = row.body,
+                                detail = row.body,
+                                id = row.id,
+                                stamp = row.stamp,
+                                forgotten = forgot,
+                                prose = true,
+                            )
+                            // The accounting is read below, from this page's id: the footer is one
+                            // per message, and a figure per page would invite adding them up.
+                            wordsCost = cost
+                        }
+                        // "stopped" and its reason, most of all: the only thing a failed turn has to
+                        // say, so it is drawn.
+                        else -> pages.add(
+                            Page(
+                                caption = row.name,
+                                body = oneLine(row.body, 200),
+                                detail = row.body,
+                                id = row.id,
+                                stamp = row.stamp,
+                                forgotten = forgot,
+                            ),
+                        )
+                    }
+                    else -> Unit
+                }
+            }
+            // **The closing words are the last page.** Appended rather than emitted in place, so a
+            // turn that spoke and then called a tool still ends with its words - which is what
+            // "ends with a finishing message from the agent" asks for.
+            if (words != null) pages.add(words)
+            if (pages.isEmpty()) continue
+            val spend = wordsCost
+            out.add(
+                Message(
+                    side = Side.AGENT,
+                    pages = pages,
+                    id = pages.first().id,
+                    stamp = pages.first().stamp,
+                    thinking = spend?.thinking ?: 0,
+                    output = spend?.output ?: 0,
+                ),
+            )
+        }
+        return out
+    }
+
     /** The whole conversation as the box draws it, or null when there is none yet. */
     fun box(rows: List<AgentLog.Row>): Box? {
         val conversation = conversation(rows) ?: return null
@@ -382,6 +607,7 @@ object AgentChat {
                 if (since == null) checks else "idle since #$since · $checks"
             },
             bubbles = bubbles(conversation),
+            messages = messages(conversation),
         )
     }
 

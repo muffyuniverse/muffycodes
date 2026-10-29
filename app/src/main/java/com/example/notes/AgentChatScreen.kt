@@ -1,6 +1,16 @@
 package com.example.notes
 
-import androidx.compose.foundation.clickable
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -16,6 +26,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -36,6 +47,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
@@ -98,12 +111,30 @@ fun AgentChatScreen(
      * inside a taller list, which is two scrolls fighting; fullscreen shows the same text one screen
      * at a time, so there is one scroll and it is the one a person expects.
      */
-    var page by remember(generation) { mutableStateOf<AgentChat.Bubble?>(null) }
-    val scroll = rememberScrollState()
+    var page by remember(generation) { mutableStateOf<Fullscreen?>(null) }
+    /**
+     * The list, and **where it starts: at the bottom.**
+     *
+     * "Pinned to the bottom" is the opening position, not a lock - once the person scrolls, the list
+     * stays where they put it. A `LazyColumn` is what makes that affordable: a `Column` inside
+     * `verticalScroll` composes every message, so a long session gets slower the longer it runs and
+     * "scroll to the bottom" has to measure all of it first.
+     */
+    val list = rememberLazyListState()
 
-    // A new bubble is the thing being waited for, so the box follows it to the bottom.
-    LaunchedEffect(box?.bubbles?.size, generation) {
-        scroll.animateScrollTo(scroll.maxValue)
+    /**
+     * **The page each message is showing**, by message id.
+     *
+     * A page index per message rather than one shared cursor, because a person turns to page 3 of
+     * one result and then reads the next message from its beginning - a single cursor would carry
+     * page 3 into a message that may not have three pages.
+     */
+    var showing by remember(generation) { mutableStateOf<Map<Int, Int>>(emptyMap()) }
+
+    // A new message is the thing being waited for, so the list follows it to the bottom.
+    LaunchedEffect(box?.messages?.size, generation) {
+        val last = (box?.messages?.size ?: 0) - 1
+        if (last >= 0) list.animateScrollToItem(last)
     }
 
     Scaffold(
@@ -201,58 +232,59 @@ fun AgentChatScreen(
             // answer they were reading, which is the opposite of what a transcript should ask of
             // them.
 
-            // **At most three quarters of the window, and scrolls beyond that.** The
-            // conversation is not the whole screen: the line a person speaks in stays visible
-            // and reachable, which is also what keeps it above the keyboard.
+            // **At most three quarters of the window, and scrolls beyond that.** The conversation is
+            // not the whole screen: the line a person speaks in stays visible and reachable, which
+            // is also what keeps it above the keyboard.
             BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = maxHeight * 0.75f)
-                        .verticalScroll(scroll)
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    if (box == null) {
-                        Text(
-                            "Nothing said yet. Write a request below and the agent will work " +
-                                "on this project.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    } else {
-                        // **Every bubble, oldest first, and the list lasts as long as the
-                        // session.** That is the whole shape: what the person asked, what the agent
-                        // did about it, and what it finally said.
-                        for (bubble in box.bubbles) {
-                            Bubble(
-                                bubble = bubble,
-                                expanded = opened == bubble.id,
+                if (box == null) {
+                    Text(
+                        "Nothing said yet. Write a request below and the agent will work " +
+                            "on this project.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    )
+                } else {
+                    LazyColumn(
+                        state = list,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = maxHeight * 0.75f),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        // **Every message, oldest first, alternating by side.** That is the whole
+                        // shape: what the person asked, what the agent did about it, what the person
+                        // asked next. The list lasts as long as the session.
+                        items(box.messages, key = { it.id }) { message ->
+                            MessageRow(
+                                message = message,
+                                at = showing[message.id] ?: 0,
                                 cap = viewModel.settings.bubbleLines,
-                                onOpen = {
-                                    // **Fullscreen is a page view, not a bigger bubble.** The same
-                                    // text, one screen at a time, so a long result is read by
-                                    // turning pages rather than by scrolling a tall box inside a
-                                    // taller list.
-                                    page = bubble
-                                    Trace.tap("bubble page", "#${bubble.id}")
+                                onTurn = { delta ->
+                                    val pages = message.pages.size
+                                    if (pages > 1) {
+                                        val now = showing[message.id] ?: 0
+                                        val next = (now + delta).coerceIn(0, pages - 1)
+                                        showing = showing + (message.id to next)
+                                        Trace.tap("message page", "#${message.id} ${next + 1}/$pages")
+                                    }
                                 },
-                                onTap = {
-                                    // **One open at a time, keyed by the row's id.** A set of open
-                                    // bubbles would let a person expand six and lose the thread; and
-                                    // an id is what the record uses, so the state survives a redraw
-                                    // that reorders nothing but re-reads everything.
-                                    opened = if (opened == bubble.id) 0 else bubble.id
-                                    Trace.tap("bubble", "#${bubble.id}")
+                                onFullscreen = { index ->
+                                    page = Fullscreen(message, index)
+                                    Trace.tap("message fullscreen", "#${message.id}")
                                 },
                             )
                         }
                         if (box.idle != null) {
-                            Text(
-                                box.idle,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            item {
+                                Text(
+                                    box.idle,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(vertical = 4.dp),
+                                )
+                            }
                         }
                     }
                 }
@@ -287,42 +319,61 @@ fun AgentChatScreen(
         }
     }
 
-    // **The page view, over everything.** Not a new screen: the same bubble, one screen at a time,
+    // **The page view, over everything.** Not a new screen: the same pages, one screen at a time,
     // with a way back. It is drawn last so it covers the list and the composer both - a person
     // reading a long result is not about to type.
+    //
+    // **Uncapped, and that is the whole reason it exists.** In the list a page is cut at the height
+    // cap; here it is read in full, scrolling, and the pages of that one message can be swapped.
     page?.let { open ->
+        val pages = open.message.pages
+        var at by remember(open.message.id) { mutableStateOf(open.at.coerceIn(0, (pages.size - 1).coerceAtLeast(0))) }
+        val shown = pages.getOrNull(at)
         Surface(modifier = Modifier.fillMaxSize()) {
             Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        open.caption,
+                        shown?.caption ?: "message",
                         style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier.weight(1f),
                     )
+                    if (pages.size > 1) {
+                        TextButton(
+                            onClick = { if (at > 0) at-- },
+                            enabled = at > 0,
+                        ) { Text("‹") }
+                        Text(
+                            "${at + 1}/${pages.size}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        TextButton(
+                            onClick = { if (at < pages.size - 1) at++ },
+                            enabled = at < pages.size - 1,
+                        ) { Text("›") }
+                    }
                     TextButton(onClick = {
                         page = null
-                        Trace.tap("close page", "#${open.id}")
+                        Trace.tap("close page", "#${open.message.id}")
                     }) { Text("Close") }
                 }
-                Text(
-                    footer(open),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline,
-                )
+                if (shown != null) {
+                    Text(
+                        footer(open.message, shown),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+                }
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                // **A fresh scroll per page**, so turning the page starts at its beginning rather
+                // than wherever the last one was scrolled to.
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState()),
                 ) {
-                    if (open.prose) {
-                        MarkdownBody(text = open.detail)
-                    } else {
-                        Text(
-                            open.detail.ifBlank { open.body },
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontFamily = FontFamily.Monospace,
-                        )
+                    if (shown != null) {
+                        PageBody(page = shown, cap = 0, ink = MaterialTheme.colorScheme.onSurface, expanded = true)
                     }
                 }
             }
@@ -345,108 +396,174 @@ fun AgentChatScreen(
  * **The time is a time, not a date.** The date belongs to the conversation; a list where every
  * bubble repeats it is a column of noise.
  */
+/** What the fullscreen view is showing: one message, at one of its pages. */
+private data class Fullscreen(val message: AgentChat.Message, val at: Int)
+
+/**
+ * **One message.** Two sides, drawn differently, because they are different things.
+ *
+ * The operator's is a **plain row**: their words, right-aligned on a tinted surface, with no pages,
+ * no caption and no footer. It has no tool calls and no turns, so every piece of the agent's
+ * furniture would be a frame around one sentence. Report: "user messages are less complicated -
+ * they dont have multiple toolcalls and turns, - they are just a plain message row".
+ *
+ * The agent's is a **container of pages** on a surface of its own colour: the call and its result
+ * for the page being shown, a pager when there is more than one, the closing words as the last
+ * page, and a footer saying which row it was and what the turn cost.
+ */
 @Composable
-private fun Bubble(
-    bubble: AgentChat.Bubble,
-    expanded: Boolean,
+private fun MessageRow(
+    message: AgentChat.Message,
+    at: Int,
     cap: Int,
-    onOpen: () -> Unit,
-    onTap: () -> Unit,
+    onTurn: (Int) -> Unit,
+    onFullscreen: (Int) -> Unit,
 ) {
-    // **Cut at the cap and say so.** The last line is the app telling the truth about the message
-    // rather than the message looking shorter than it is - a bubble that simply stopped would be
-    // indistinguishable from one that had finished.
-    val lines = bubble.body.lines()
-    val cut = cap > 0 && !expanded && lines.size > cap
-    val shown = if (cut) lines.take(cap).joinToString("\n") else bubble.body
-    val continuing = if (cut) "\n… ${lines.size - cap} more lines — tap to read" else ""
+    val mine = message.side == AgentChat.Side.OPERATOR
+    // **Two colours, and they are surfaces rather than text colours.** The sides have to be told
+    // apart at a glance down a list without either one shouting: the operator's takes the theme's
+    // secondary container, the agent's the surface variant, and both carry the theme's own ink.
+    val surface = if (mine) {
+        MaterialTheme.colorScheme.secondaryContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant
+    }
+    val ink = if (mine) {
+        MaterialTheme.colorScheme.onSecondaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onTap)
-            .padding(vertical = 2.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+            // **The side decides the edge it hugs.** A right-aligned operator row and a
+            // left-aligned agent row is the one convention every chat shares, and it says who is
+            // speaking before a single word is read.
+            .wrapContentWidth(if (mine) Alignment.End else Alignment.Start)
+            .widthIn(max = 340.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(surface)
+            .animateContentSize()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Row(modifier = Modifier.fillMaxWidth()) {
+        if (mine) {
             Text(
-                bubble.caption,
-                style = MaterialTheme.typography.labelMedium,
-                color = if (bubble.failed) {
-                    MaterialTheme.colorScheme.error
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                modifier = Modifier.width(80.dp),
+                message.body,
+                style = MaterialTheme.typography.bodyMedium,
+                color = ink,
+                textDecoration = if (message.forgotten) TextDecoration.LineThrough else null,
             )
-            // **The agent's own words are markdown; everything else is a line.** A result is one
-            // sentence about what a tool did, and rendering it as prose would invite a person to
-            // read structure into it that is not there.
-            if (bubble.prose) {
-                MarkdownBody(
-                    text = shown + continuing,
-                    modifier = Modifier.weight(1f),
-                )
-            } else {
-                Text(
-                    shown + continuing,
-                    style = MaterialTheme.typography.bodyMedium,
-                    // **Struck through, not hidden.** A row the agent forgot is still read here:
-                    // that is what makes the forgetting auditable rather than something the app
-                    // asks you to trust.
-                    textDecoration = if (bubble.forgotten) TextDecoration.LineThrough else null,
-                    color = when {
-                        bubble.failed -> MaterialTheme.colorScheme.error
-                        bubble.forgotten -> MaterialTheme.colorScheme.onSurfaceVariant
-                        else -> MaterialTheme.colorScheme.onSurface
-                    },
-                    modifier = Modifier.weight(1f),
+            return@Column
+        }
+        val page = message.pages.getOrNull(at) ?: message.pages.firstOrNull() ?: return@Column
+        Row(verticalAlignment = Alignment.Top) {
+            Text(
+                page.caption,
+                style = MaterialTheme.typography.labelMedium,
+                color = if (page.failed) MaterialTheme.colorScheme.error else ink,
+                modifier = Modifier.weight(1f),
+            )
+            // **The fullscreen icon is in the message's TOP-RIGHT corner**, which is where the
+            // operator asked for it and where it stays put: the pager sits here too, and a control
+            // anchored to the top cannot move when the page below it changes height.
+            IconButton(
+                onClick = { onFullscreen(at) },
+                modifier = Modifier.size(28.dp),
+            ) {
+                Icon(
+                    Icons.Filled.Search,
+                    contentDescription = "Read this message fullscreen",
+                    tint = ink,
+                    modifier = Modifier.size(16.dp),
                 )
             }
         }
+        PageBody(page = page, cap = cap, ink = ink, expanded = false)
+        if (message.pages.size > 1) {
+            // **The pager, at the top of the message's furniture** - above the footer and below the
+            // body, so it never moves with the body's height.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(
+                    onClick = { onTurn(-1) },
+                    enabled = at > 0,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    modifier = Modifier.height(28.dp),
+                ) { Text("‹", style = MaterialTheme.typography.labelLarge) }
+                Text(
+                    "${at + 1}/${message.pages.size}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = ink,
+                )
+                TextButton(
+                    onClick = { onTurn(1) },
+                    enabled = at < message.pages.size - 1,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    modifier = Modifier.height(28.dp),
+                ) { Text("›", style = MaterialTheme.typography.labelLarge) }
+            }
+        }
         Text(
-            footer(bubble),
+            footer(message, page),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.outline,
-            modifier = Modifier.padding(start = 80.dp),
         )
-        if (expanded && bubble.detail.isNotBlank()) {
-            Text(
-                bubble.detail,
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 80.dp),
-            )
-        }
     }
 }
 
 /**
- * What a bubble's footer says: **date · time · id · thinking · output.**
+ * One page's text, **cut at the cap and told so.**
  *
- * The report asked for "time, date and id of the message", and the date is not decoration: a
- * conversation that crosses midnight has two rows reading `23:59` and `00:01`, and a footer
- * without the date cannot tell them apart. It is drawn first because that is the order a person
- * reads a moment in — day, then clock — and the id comes after because it is a handle rather than
- * a time.
+ * The sentence is the point: a message that simply stopped would be indistinguishable from one that
+ * finished, so the last visible line says how many lines are hidden and that expanding shows them.
+ * The count is the **active page's**, because that page is the message's height - swapping pages
+ * changes both, which is correct, since the sentence is a statement about what is on screen.
+ */
+@Composable
+private fun PageBody(page: AgentChat.Page, cap: Int, ink: Color, expanded: Boolean) {
+    val lines = page.detail.ifBlank { page.body }.lines()
+    val cut = cap > 0 && !expanded && lines.size > cap
+    val shown = if (cut) lines.take(cap).joinToString("\n") else lines.joinToString("\n")
+    val continuing = if (cut) "\n… ${lines.size - cap} more lines — expand to read" else ""
+    if (page.prose) {
+        MarkdownBody(text = shown + continuing, modifier = Modifier.fillMaxWidth())
+    } else {
+        Text(
+            shown + continuing,
+            style = MaterialTheme.typography.bodyMedium,
+            fontFamily = if (expanded) FontFamily.Monospace else null,
+            // **Struck through, not hidden.** A page the agent forgot is still read here: that is
+            // what makes the forgetting auditable rather than something the app asks you to trust.
+            textDecoration = if (page.forgotten) TextDecoration.LineThrough else null,
+            color = when {
+                page.failed -> MaterialTheme.colorScheme.error
+                page.forgotten -> ink
+                else -> MaterialTheme.colorScheme.onSurface
+            },
+        )
+    }
+}
+
+/**
+ * What a message's footer says: **id · time · thinking · output.**
+ *
+ * **The id first, because it is the handle.** A person reads this footer to find the row in
+ * `session.log`, and a handle after a date and a time is one you have to hunt for. Report: "make id
+ * first in the row".
+ *
+ * **The time, and no date.** The date is the conversation's; a list where every row repeats the same
+ * date is a column of noise, and the day is already on the screen above the list. Report: "on
+ * message footer, I dont need full datetime, only hour:minute".
  *
  * A part that is not known is left out rather than filled with a zero: a zero is a measurement and
- * "not recorded" is not the same fact. The id is always known and the time is known for every row
- * that was written, so in practice the absent parts are the date on an old row and the two token
- * counts, which only a streamed turn can report.
+ * "not recorded" is not the same fact.
  */
-private fun footer(bubble: AgentChat.Bubble): String {
-    // **The id first, because it is the handle.** A person reads this footer to find the row in
-    // `session.log` - that is what the id is for - and a handle after a date and a time is one you
-    // have to hunt for. Report: "make id first in the row".
+private fun footer(message: AgentChat.Message, page: AgentChat.Page): String {
     val parts = mutableListOf<String>()
-    if (bubble.id > 0) parts.add("#${bubble.id}")
-    // **The time, and no date.** The date is the conversation's; a list where every row repeats the
-    // same date is a column of noise, and the day is already on the screen above the list. Report:
-    // "on message footer, I dont need full datetime, only hour:minute".
-    val clock = LogFormat.time(bubble.stamp)
+    if (page.id > 0) parts.add("#${page.id}")
+    val clock = LogFormat.time(page.stamp)
     if (clock.isNotBlank()) parts.add(clock)
-    if (bubble.thinking > 0) parts.add("thinking ${ContextBudget.short(bubble.thinking)}")
-    if (bubble.output > 0) parts.add("output ${ContextBudget.short(bubble.output)}")
+    if (message.thinking > 0) parts.add("thinking ${ContextBudget.short(message.thinking)}")
+    if (message.output > 0) parts.add("output ${ContextBudget.short(message.output)}")
     return parts.joinToString(" · ")
 }
