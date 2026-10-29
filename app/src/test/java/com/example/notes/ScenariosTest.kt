@@ -6,8 +6,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -44,7 +42,9 @@ import java.io.File
  * job is to say yes or no as fast as it can.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34])
+// **A real phone window.** Without a size qualifier the calendar dialog lays out at
+// Robolectric's tiny default and Material's date grid composes no day cells at all.
+@Config(sdk = [34], qualifiers = "w411dp-h891dp")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ScenariosTest {
 
@@ -813,7 +813,7 @@ class ScenariosTest {
                 compose.waitForIdle()
                 // **Named as a selectable, because a bare "26" is not unique in the calendar** - the
                 // year-navigation row can carry the same digits, and the day cell is the selectable one.
-                compose.onNode(hasText("26") and hasClickAction()).performClick()
+                compose.onNodeWithText("26").performClick()
                 compose.onNodeWithText("Show").performClick()
                 compose.waitForIdle()
             }

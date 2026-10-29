@@ -6,10 +6,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onRoot
-import androidx.compose.ui.test.printToString
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -34,7 +31,10 @@ import java.io.File
  * picture to notice.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34])
+// **A real phone window, as the other screen tests use.** Without a size qualifier the
+// dialog lays out at Robolectric's tiny default and Material's date grid composes no day
+// cells at all - so a test could open the calendar, find `Show`, and find no days.
+@Config(sdk = [34], qualifiers = "w411dp-h891dp")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class StatsScreenTest {
 
@@ -292,15 +292,8 @@ class StatsScreenTest {
         // precise drag that a Robolectric tap cannot make.
         compose.onAllNodesWithText("28 Oct 2026")[0].performClick()
         compose.waitForIdle()
-        // TEMPORARY DIAGNOSTIC
-        println("DIAG show=" + compose.onAllNodesWithText("Show").fetchSemanticsNodes().size)
-        println("DIAG 28oct=" + compose.onAllNodesWithText("28 Oct 2026").fetchSemanticsNodes().size)
-        println(
-            "DIAG 26=" + compose.onAllNodesWithText("26").fetchSemanticsNodes().size +
-                " unmerged=" + compose.onAllNodesWithText("26", useUnmergedTree = true)
-                    .fetchSemanticsNodes().size,
-        )
-        println("DIAG TREE\n" + compose.onRoot(useUnmergedTree = true).printToString(maxDepth = 4))
+        // **The day cell, in the calendar's own grid.** `26` is the day before the fixture's 28th.
+        compose.onNodeWithText("26").performClick()
         compose.onNodeWithText("Show").performClick()
         compose.waitForIdle()
 
