@@ -8,6 +8,8 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.printToString
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -290,8 +292,10 @@ class StatsScreenTest {
         // precise drag that a Robolectric tap cannot make.
         compose.onAllNodesWithText("28 Oct 2026")[0].performClick()
         compose.waitForIdle()
-        // **Named as a selectable, because a bare "26" is not unique in the calendar** - the
-        // year-navigation row can carry the same digits, and the day cell is the selectable one.
+        // TEMPORARY DIAGNOSTIC
+        println("=== TREE AFTER DATE TAP ===")
+        println(compose.onRoot().printToString(maxDepth = 200))
+        println("=== END TREE ===")
         compose.onNode(hasText("26") and hasClickAction()).performClick()
         compose.onNodeWithText("Show").performClick()
         compose.waitForIdle()
