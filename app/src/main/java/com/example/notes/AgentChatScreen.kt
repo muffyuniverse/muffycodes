@@ -131,6 +131,40 @@ fun AgentChatScreen(
      */
     var showing by remember(generation) { mutableStateOf<Map<Int, Int>>(emptyMap()) }
 
+    /**
+     * **Which messages the person has turned back in**, and so which must not be dragged forward.
+     *
+     * A message follows its newest page until somebody pages back through it. After that it is
+     * theirs: a new page arriving must not pull the ground out from under the page they are reading.
+     * A tap on `›` that returns to the last page releases it again, so following resumes without
+     * needing a third gesture.
+     */
+    var held by remember(generation) { mutableStateOf<Set<Int>>(emptySet()) }
+
+    /**
+     * **Every message sits on its last page, and follows it as pages arrive.**
+     *
+     * Two rules, and they are one: on opening, everything is on its last page, and while the agent
+     * works, the message being written advances on its own - so a person can watch it work without
+     * turning pages by hand. A message they have turned back in stops following (§[held]), and the
+     * `›` that brings it to the end starts it following again.
+     */
+    LaunchedEffect(box?.messages?.map { it.id to it.pages.size }, generation) {
+        val messages = box?.messages ?: return@LaunchedEffect
+        val next = mutableMapOf<Int, Int>()
+        for (message in messages) {
+            val last = (message.pages.size - 1).coerceAtLeast(0)
+            // Held messages keep the page the person chose, clamped to what still exists: a page
+            // cannot be removed from under them, but the message may have grown since.
+            next[message.id] = if (message.id in held) {
+                (showing[message.id] ?: last).coerceIn(0, last)
+            } else {
+                last
+            }
+        }
+        if (next != showing) showing = next
+    }
+
     // A new message is the thing being waited for, so the list follows it to the bottom.
     LaunchedEffect(box?.messages?.size, generation) {
         val last = (box?.messages?.size ?: 0) - 1
@@ -264,9 +298,16 @@ fun AgentChatScreen(
                                 onTurn = { delta ->
                                     val pages = message.pages.size
                                     if (pages > 1) {
-                                        val now = showing[message.id] ?: 0
+                                        val now = showing[message.id] ?: (pages - 1)
                                         val next = (now + delta).coerceIn(0, pages - 1)
                                         showing = showing + (message.id to next)
+                                        // **Leaving the last page holds the message; coming back to
+                                        // it releases it.** That is what makes "follow the newest
+                                        // page" and "read the one I chose" one rule rather than two:
+                                        // the person's own act decides which, and there is no
+                                        // separate switch to find.
+                                        held = if (next == pages - 1) held - message.id
+                                        else held + message.id
                                         Trace.tap("message page", "#${message.id} ${next + 1}/$pages")
                                     }
                                 },

@@ -181,7 +181,25 @@ gets slower the longer it runs, and "scroll to the bottom" has to measure the wh
 
 ---
 
-## 9. What this changes in the code
+## 9. Which page a message is showing
+
+**Every message opens on its last page**, and **a message follows its newest page as pages arrive.**
+
+- **On opening the chat**, every message is on its last page. A person arrives at the end of the
+  conversation, which is what "pinned to the bottom" means one level down — the bottom of the list
+  *and* the bottom of each message.
+- **While the agent works**, the message being written advances on its own. A person can watch it
+  work without turning pages by hand: each new call-and-result arrives as a new last page and the
+  message shows it.
+- **A message the person turned back in stops following.** A new page must not pull the ground out
+  from under the page they are reading. The `›` that brings it to the end releases it, so following
+  resumes without a third gesture or a separate switch — the person's own act decides which of the
+  two behaviours they are getting.
+
+That last rule is the whole design: **follow the newest page** and **read the page I chose** are not
+two modes to choose between, they are the same rule seen from either end of the pager.
+
+## 10. What this changes in the code
 
 | Where | Now | Needed |
 |---|---|---|
@@ -193,7 +211,7 @@ gets slower the longer it runs, and "scroll to the bottom" has to measure the wh
 | The pager | — | anchored to the message's **top**, so a resizing box never moves it |
 | The operator's message | a bubble with a caption and a footer | a plain row |
 
-## 10. What this does **not** change
+## 11. What this does **not** change
 
 - **The record.** `session.log` is unchanged. This is entirely how it is drawn — the evidence already
   has the turn boundaries and the ids the footer shows.
@@ -203,7 +221,7 @@ gets slower the longer it runs, and "scroll to the bottom" has to measure the wh
 - **The session-length trim**, which is a different setting (report 10) — though it now has the right
   unit to delete by, because a message is a turn.
 
-## 11. Order of work
+## 12. Order of work
 
 1. ~~**Regroup.**~~ — **done** (`6b377af`, `b4dfede`, `07067e4`). A message is a **burst**, not a
    turn: `AgentLog.TURN` is written before every request, so a call-then-speak reply is two turns and

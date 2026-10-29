@@ -144,7 +144,11 @@ class AgentChatScreenTest {
             "and the whole of it is kept for the page view: '${treePage.detail}'",
             treePage.detail.length > treePage.body.length,
         )
-        compose.onNodeWithText(treePage.body.take(20), substring = true).assertExists()
+        // **The whole body, not a prefix.** A 20-character slice can cut through the separator that
+        // `summary()` puts between the status and the rest, so the assertion would fail on a body
+        // that IS drawn - which is the worst kind of test: right about the app and wrong about
+        // itself.
+        compose.onNodeWithText(treePage.body, substring = true).assertExists()
         // And the first message is the operator's, drawn as a plain row.
         assertEquals("the person speaks first", AgentChat.Side.OPERATOR, scene.viewModel.chatBox!!.messages.first().side)
     }
