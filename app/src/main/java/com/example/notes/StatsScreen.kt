@@ -84,22 +84,28 @@ fun StatsScreen(
      * control - and each needed a rule for where a column started and stopped. Two pickers remove
      * the question: the person states the interval, which is the thing they actually know.
      *
-     * The default is the current day, midnight to now, because that is the interval a person
-     * opening a cost screen most often wants and it is bounded.
+     * The default is **clock "1 day"**, autoselected: today from midnight, ending at the moment the
+     * screen opened. See the preset rows below.
      */
-    // **The picks, and the interval that was actually generated from them.** Two pairs rather than
-    // one, because there is a Generate button: what the pickers say and what the figures describe
-    // are allowed to differ, and that difference is the whole point of the button - you can set up
-    // an interval without the table moving under your hands on every stepper press.
-    // **A rolling day, ending at the moment the screen was opened.** The operator's revision: *"every
-    // new opening of the screen shows current day interval (24 hours, minute in minute, for example,
-    // from 28 oct 2026 9:16 to 29 oct 2026 9:16, where to is the moment stat menu was open."*
-    //
     // **`now` is read ONCE, here.** It is a default parameter - `System.currentTimeMillis()` - so it
     // is a *new value on every recomposition*, and keying anything on it would reset the interval
     // every time the screen redrew. `remember(Unit)` freezes the opening instant for the life of this
     // screen instance; leaving and re-entering composes a new one, which is "every new opening".
     val openedAt = remember { now }
+
+    // **The history itself, opened once and closed on the way out.** A `History` holds a database
+    // handle rather than a list of rows, because the pickers move: a total per draw from a list
+    // would have to re-scan every row, and a total per draw from SQL is one indexed range query.
+    var history by remember(accountDir) { mutableStateOf<RequestDb.History?>(null) }
+    var loaded by remember(accountDir) { mutableStateOf(readRows == null) }
+    LaunchedEffect(accountDir, readRows) {
+        if (readRows != null) {
+            readRows { found ->
+                history = found
+                loaded = true
+            }
+        }
+    }
 
     /**
      * **Which preset is chosen, and from which row.**
@@ -108,13 +114,6 @@ fun StatsScreen(
      * At most one of the two is non-null at a time, which is what "only one selectable across both
      * rows" means in the type rather than in a rule somebody has to remember.
      */
-    // **The history itself, opened once and closed on the way out.** A `History` holds a database
-    // handle rather than a list of rows, because the pickers move: a total per draw from a list
-    // would have to re-scan every row, and a total per draw from SQL is one indexed range query.
-    var history by remember(accountDir) { mutableStateOf<RequestDb.History?>(null) }
-    var loaded by remember(accountDir) { mutableStateOf(readRows == null) }
-    LaunchedEffect(accountDir, readRows) {
-
     var clockPick by remember { mutableStateOf<RequestStats.Preset?>(null) }
     var rollingPick by remember { mutableStateOf<RequestStats.Preset?>(null) }
 
@@ -207,23 +206,6 @@ fun StatsScreen(
         )
     }
 
-    // **Read when the screen opens, not while it is open.** The log is appended to on every
-    // response, including the keepalives sent while nobody is looking, so a table that watched the
-    // files would be re-reading them while the agent wrote to them — and would move under the
-    // reader's eyes. What the report asked for was a table counted on opening, which is also the
-    // only version whose numbers are stable enough to compare.
-    //
-    // **On the worker, never in composition.** This was a `remember { read(accountDir) }`, which
-    // parses the whole log on the main thread before the first frame: fine for a few hundred rows,
-    // a frozen window for a year of them. [readRows] hands the work to the view model's worker and
-    // posts the result back; when it is null the caller has given us rows already (tests).
-        if (readRows != null) {
-            readRows { found ->
-                history = found
-                loaded = true
-            }
-        }
-    }
     // **The screen reads the history and never closes it.** Whoever opens a handle closes it, and
     // this screen does not open one - [readRows] does. An earlier version closed it in a
     // `DisposableEffect`, which was wrong twice over:
