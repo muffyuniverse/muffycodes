@@ -109,10 +109,17 @@ class Scenario(
         if (signIn) signedIn()
     }
 
-    /** Signs the test account in, and waits until the app knows it. */
+    /**
+     * Signs the test account in, and waits until the app knows it.
+     *
+     * **Waiting on the LOGIN, not on "an account exists".** The provisional account means there is
+     * always one, so `account != null` was true before the sign-in had done anything - the wait
+     * returned at once, and every scenario carried on with `~local` as its workspace. The failure
+     * surfaced as a GitHub request going to the internet, which is a long way from the cause.
+     */
     fun signedIn(): Scenario {
         viewModel.signInAsTestAccount()
-        await("the test account to be signed in") { viewModel.account != null }
+        await("the test account to be signed in") { viewModel.activeLogin == login }
         return this
     }
 

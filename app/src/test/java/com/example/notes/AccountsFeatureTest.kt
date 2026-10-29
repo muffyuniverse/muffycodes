@@ -2,6 +2,7 @@ package com.example.notes
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -43,21 +44,34 @@ class AccountsFeatureTest : FeatureTest() {
 
             assertEquals("the key was refused", false, answered)
             assertEquals("and it said so", "Bad credentials", sawMessage)
-            assertNull("no account was kept", phone.viewModel.account)
-            assertEquals("nobody is signed in", null, phone.viewModel.activeLogin)
+            // **The provisional account, not an absence.** A refused key leaves the app where it
+            // started: working as ~local, with its own real folder. The claim is that the REFUSED
+            // login was not kept - not that there is no account at all.
+            assertNotEquals("the refused login was not kept", "a-key-github-does-not-like", phone.viewModel.activeLogin)
+            assertTrue("still working locally", phone.viewModel.isProvisionalAccount)
         } finally {
             phone.close()
         }
     }
 
     @Test
-    fun `with nobody signed in there is nothing to show and nothing to make`() {
-        assertNull("no account", scene.viewModel.account)
-        assertNull("no workspace", scene.viewModel.workspace)
-        // Nothing of the person's. The app's own folder is shown now, and only after an account
-        // exists - which is what this assertion is actually about: a signed-out app lists nothing.
-        assertTrue("nothing of the person's is listed", scene.names().all { Workspace.isSystemLocked(it) || it == Workspace.SYSTEM_PROJECT })
-        assertFalse("and nothing can be made", scene.viewModel.signedIn)
+    fun `with nobody signed in the app works as the provisional account`() {
+        // **This test used to assert the opposite**, and the reversal is the whole feature: before
+        // a sign-in the app now has a real workspace - `~local` - so local projects, the system
+        // project and the request history all work with no account at all.
+        //
+        // What is still true is the thing that mattered: nothing of a *GitHub account's* is here,
+        // and nothing reaches the network.
+        assertTrue("there is an account", scene.viewModel.account != null)
+        assertTrue("and it is the provisional one", scene.viewModel.isProvisionalAccount)
+        assertTrue("with a real workspace", scene.viewModel.workspace != null)
+        assertFalse("but nobody is signed in to GitHub", scene.viewModel.signedIn)
+        assertNull("so there is no GitHub to talk to", scene.viewModel.github)
+        // Nothing of the person's yet: the system project is all a fresh provisional account has.
+        assertTrue(
+            "nothing of the person's is listed",
+            scene.names().all { Workspace.isSystemLocked(it) || it == Workspace.SYSTEM_PROJECT },
+        )
     }
 
     @Test
@@ -124,7 +138,9 @@ class AccountsFeatureTest : FeatureTest() {
 
         scene.viewModel.removeAccount(scene.login, deleteCopies = false)
 
-        assertNull("nobody is signed in", scene.viewModel.activeLogin)
+        // **The provisional account, not nothing.** Removing the last real account leaves `~local`
+        // rather than an absence, so the screen always has a workspace to be in.
+        assertTrue("back to working locally", scene.viewModel.isProvisionalAccount)
         assertFalse("the account is no longer known", scene.viewModel.known(scene.login))
         assertFalse(
             "and it is not something to switch to",
