@@ -415,7 +415,6 @@ class Workspace(val accountDir: File) {
     }
 
     /**
-     * True when [file] is one of the app's own flags    /**
      * True when [file] is one of the app's own flags, which are shown and never written by hand.
      *
      * **Report 28's other half.** `.muffy/` holds `agents.json`, `locked.json` and `pins.json` — the
