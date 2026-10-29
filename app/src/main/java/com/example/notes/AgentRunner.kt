@@ -281,6 +281,7 @@ class AgentRunner(
         val limits = ContextBudget.Limits.of(
             triggerAsked = settings.triggerTokens.toLong(),
             hardAsked = settings.hardTokens.toLong(),
+            targetAsked = settings.targetTokens.toLong(),
             ceiling = ContextBudget.ceiling(active.provider, active.contextLength, active.maxOutput),
         )
         val doorFor = door(active)

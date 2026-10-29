@@ -186,10 +186,35 @@ class SettingsStore(context: Context, name: String = "settings") {
     var hardTokens: Int by mutableStateOf(prefs.getInt(KEY_HARD, 0))
         private set
 
+    /**
+     * Where both compactions aim, in tokens - **one target for the two hands.**
+     *
+     * The operator's correction, 2026-10-29: "both forget and trim compactions should have same
+     * target but different triggers (so that forget triggers much earlier)". Two destinations would
+     * let the app trim to a size the agent was never asked to reach, or ask the agent to reach a
+     * size the app had already given up on; one destination means whichever hand acts, the context
+     * lands in the same place.
+     *
+     * Zero means "half of the clear-up point", which is derived rather than typed - so a person who
+     * sets only the triggers still gets an ask that buys headroom instead of one that lands exactly
+     * on the number that asked for it.
+     */
+    var targetTokens: Int by mutableStateOf(prefs.getInt(KEY_TARGET, 0))
+        private set
+
+    /** Sets the compaction target. Zero follows the clear-up point. */
+    fun keepTarget(tokens: Int) {
+        val clean = tokens.coerceIn(0, MAX_TOKENS)
+        Trace.tap("compaction target", if (clean == 0) "half the clear-up point" else "${ContextBudget.short(clean.toLong())}")
+        targetTokens = clean
+        prefs.edit().putInt(KEY_TARGET, clean).apply()
+        Trace.said(if (clean == 0) "the target follows the clear-up point" else "compact to ${ContextBudget.short(clean.toLong())}")
+    }
+
     /** Sets the clear-up trigger. Zero leaves it to the pin. */
     fun keepTrigger(tokens: Int) {
         val clean = tokens.coerceIn(0, MAX_TOKENS)
-        Trace.tap("clear up", if (clean == 0) "when the pin is full" else "${ContextBudget.short(clean.toLong())}")
+        Trace.tap("forget compaction", if (clean == 0) "when the pin is full" else "${ContextBudget.short(clean.toLong())}")
         triggerTokens = clean
         prefs.edit().putInt(KEY_TRIGGER, clean).apply()
         Trace.said(if (clean == 0) "the trigger follows the pin" else "clear up at ${ContextBudget.short(clean.toLong())}")
@@ -198,7 +223,7 @@ class SettingsStore(context: Context, name: String = "settings") {
     /** Sets the hard limit. Zero is "never trim", which is the default. */
     fun keepHard(tokens: Int) {
         val clean = tokens.coerceIn(0, MAX_TOKENS)
-        Trace.tap("trim context", if (clean == 0) "never" else "${ContextBudget.short(clean.toLong())}")
+        Trace.tap("trim compaction", if (clean == 0) "never" else "${ContextBudget.short(clean.toLong())}")
         hardTokens = clean
         prefs.edit().putInt(KEY_HARD, clean).apply()
         Trace.said(if (clean == 0) "the app never trims the context" else "the app trims at ${ContextBudget.short(clean.toLong())}")
@@ -598,6 +623,7 @@ class SettingsStore(context: Context, name: String = "settings") {
         keepRequests(0)
         keepTrigger(0)
         keepHard(0)
+        keepTarget(0)
         keepWarm(true)
         keepPoll(0)
         keepWarmFor(DEFAULT_WARM_MINUTES)
@@ -647,6 +673,7 @@ class SettingsStore(context: Context, name: String = "settings") {
     /** The two context limits, in tokens, as the operator typed them. */
     const val KEY_TRIGGER = "agent_trigger_tokens"
     const val KEY_HARD = "agent_hard_tokens"
+    const val KEY_TARGET = "agent_target_tokens"
 
     /** How long one answer may take, in minutes, and how much one result may carry. */
     /**

@@ -26,9 +26,45 @@ Two hands, and the split is the whole design:
 | **The app** | measures the context every turn, and **asks** when it is over the trigger | deletes a row the agent chose |
 | **The agent** | decides which rows do not serve the task, and names them | measures, or decides when to be asked |
 
-The app's own trim is the third hand, and it is a last resort rather than a compaction: it runs only
-against the **hard** limit, one burst at a time, and it is the only place a row leaves the record for
-good. Compaction never deletes anything — `forget` flips a row's `ctx` to `out` and the row stays.
+The app's own trim is the third hand: **forget compaction** (the agent names rows) and **trim
+compaction** (the app drops the oldest whole bursts) are two hands doing one job. Compaction never
+deletes anything — `forget` flips a row's `ctx` to `out` and the row stays. Only the trim removes
+rows, and only when the record's own storage limit asks it to.
+
+### One target, two triggers
+
+The operator's correction, 2026-10-29:
+
+> both forget and trim compactions should have same target but different triggers (so that forget
+> triggers much earlier)
+
+Three numbers, and they are not three independent settings:
+
+| Number | Meaning |
+|---|---|
+| **Compaction target** | where the context should **end up** — shared by both hands |
+| **Forget compaction at** | when the agent is asked to reach it |
+| **Trim compaction at** | when the app reaches it itself |
+
+Two destinations would let the app trim to a size the agent was never asked to reach, or ask the
+agent to reach a size the app had already given up on. One destination means **whichever hand acts,
+the context lands in the same place**.
+
+**The only ordering required is that the target sits below each trigger that is on.** A target at or
+above a trigger means the act that fires there removes nothing — the context is already under the
+number it is being asked to reach.
+
+**A trim below the forget point is a mode, not a mistake.** The operator: "trim compaction actually
+can be set below forget and then it is only the app that handles the compaction (a feature, not a
+bug) because forget is just never triggered." Somebody who would rather the app do the cutting than
+have the agent choose says so by putting the trim first; the agent is simply never asked, and the two
+hands never compete. The screen says this out loud when the numbers are in that order, because a
+legitimate choice that looks like a mistake should be named either way.
+
+**A target of zero is half the forget point**, derived rather than typed. A default that landed *on*
+the trigger would ask the agent to cut to exactly the number that asked it, so the next row to arrive
+would cross the trigger again and the ask would repeat. Half is the floor that makes one clear-up buy
+real quiet.
 
 ## 2. The measurement is cached, and it is read every turn
 
@@ -118,7 +154,22 @@ Forget only when you are asked to, and name every row in one call.
 the way it already has `backgroundMs` — read per call, because the setting can change while an agent is
 idle and the number that applies is the one in force when the call arrives.
 
-## 6. What this does not change
+## 6. The trim reaches the target in one pass
+
+`trimContext` used to take a `budget` and consult it only to check it was not zero — then drop
+exactly **one** burst. A context a hundred thousand tokens over its limit came down one conversation
+per request, while the app kept asking itself to trim.
+
+It now walks whole bursts from the newest backwards via `keepNewest` and stops where the next one
+would not fit, so it converges in a single act by construction. **Not a loop**: a loop that re-trimmed
+until the size fitted would empty the context against a limit below what the instructions alone cost,
+and could never converge.
+
+**Whole bursts, newest kept.** A conversation is never cut in half, and the thing that just happened
+is never deleted — a size limit does not get to remove the task being worked on, which is the same
+rule `forgetProblem` enforces for the agent.
+
+## 7. What this does not change
 
 - **`forget` still cannot carry text.** It names ids, so compaction cannot alter what the record says.
 - **The three refusals stay**: an unknown id, the newest task, and half a pair.
@@ -126,7 +177,7 @@ idle and the number that applies is the one in force when the call arrives.
 - **`ctx = out` stays the only trace of a compaction**, so the audit remains a column rather than a
   claim.
 
-## 7. Order
+## 8. Order
 
 1. `AgentTools.triggerTokens` and the refusal in `forget` — the rule.
 2. The clear-up line's wording: the three numbers, and "in one call".

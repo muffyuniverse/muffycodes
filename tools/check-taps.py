@@ -115,7 +115,10 @@ VOCABULARY = {
     "session log",
     # the two system settings this app needs, both asked for from settings
     "battery", "notifications",
-    "clear up", "trim context",
+    # the two compactions, named for the hand that does them: the agent forgetting rows, and the app
+    # trimming the oldest ones. They share a target and have separate triggers, so they are two
+    # numbers to set rather than one.
+    "forget compaction", "trim compaction", "compaction target",
 }
 
 # Names built from a value, so they cannot be a literal in the list.

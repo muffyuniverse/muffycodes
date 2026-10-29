@@ -159,16 +159,65 @@ class ContextBudgetTest {
     // ---- the hard limit is the reserved one --------------------------------
 
     @Test
-    fun `a hard limit under the trigger is raised to it`() {
-        // v1: "hard limit is reserved option and much higher than trigger". Below the trigger it is
-        // not the last resort, it is the normal path — the app would trim before the agent was ever
-        // asked, which is the contradiction the section is about.
-        val limits = ContextBudget.Limits.of(triggerAsked = 50_000, hardAsked = 10_000, ceiling = 917_504)
+    fun `a trim below the forget point is a mode, not a mistake`() {
+        // **The operator's correction, 2026-10-29**: "trim compaction actually can be set below
+        // forget and then it is only the app that handles the compaction (a feature, not a bug)
+        // because forget is just never triggered."
+        //
+        // This used to be repaired - a hard limit under the trigger was raised to it - because the
+        // design at the time treated the app's trim as a last resort that must never fire first.
+        // With one shared target there is no contradiction to repair: a person who would rather the
+        // app do the cutting than have the agent choose says so by putting the trim first, and the
+        // agent is simply never asked. The number is honoured as typed.
+        val limits = ContextBudget.Limits.of(
+            triggerAsked = 50_000,
+            hardAsked = 10_000,
+            targetAsked = 4_000,
+            ceiling = 917_504,
+        )
 
-        assertEquals("the agent is asked first", 50_000L, limits.triggerAt)
-        assertEquals("and the app's trim waits for it", 50_000L, limits.hardAt)
-        assertEquals("with what was typed still on record", 10_000L, limits.hard.asked)
-        assertTrue("which the row can say it raised", limits.hardAt > limits.hard.inForce)
+        assertEquals("the agent's point is where it was put", 50_000L, limits.triggerAt)
+        assertEquals("and the trim fires before it, as asked", 10_000L, limits.hardAt)
+        assertEquals("with nothing rewritten", 10_000L, limits.hard.asked)
+        assertEquals("and both aim at the one target", 4_000L, limits.targetAt)
+    }
+
+    @Test
+    fun `the target must be below both points that fire, or the ask would remove nothing`() {
+        // **The only ordering the three numbers need.** A target at or above a trigger means the
+        // act that fires there removes nothing: the context is already under the number it is being
+        // asked to reach. So the target sits strictly below each trigger that is on.
+        val target = runCatching {
+            ContextBudget.Limits.of(triggerAsked = 10_000, hardAsked = 0, targetAsked = 10_000, ceiling = 917_504)
+        }
+        assertTrue("a target at the forget point is refused", target.isFailure)
+
+        val aboveTrim = runCatching {
+            ContextBudget.Limits.of(triggerAsked = 50_000, hardAsked = 20_000, targetAsked = 20_000, ceiling = 917_504)
+        }
+        assertTrue("and a target at the trim point is refused too", aboveTrim.isFailure)
+
+        // Below both, and it is accepted - which is the normal shape: forget early, trim later,
+        // both aiming at the same smaller number.
+        val fine = ContextBudget.Limits.of(
+            triggerAsked = 50_000,
+            hardAsked = 90_000,
+            targetAsked = 24_000,
+            ceiling = 917_504,
+        )
+        assertEquals("forget fires first", 50_000L, fine.triggerAt)
+        assertEquals("the trim waits", 90_000L, fine.hardAt)
+        assertEquals("and both aim at the same target", 24_000L, fine.targetAt)
+    }
+
+    @Test
+    fun `a target of zero is half the forget point, so the ask buys headroom`() {
+        // A default that landed ON the trigger would ask the agent to cut to exactly the number
+        // that asked it - so the next row to arrive would cross the trigger again and the ask would
+        // repeat. Half is the floor that makes one clear-up buy real quiet.
+        val limits = ContextBudget.Limits.of(triggerAsked = 50_000, hardAsked = 0, ceiling = 917_504)
+        assertEquals("half of where the ask fires", 25_000L, limits.targetAt)
+        assertTrue("which is below it, so the rule holds", limits.targetAt < limits.triggerAt)
     }
 
     @Test

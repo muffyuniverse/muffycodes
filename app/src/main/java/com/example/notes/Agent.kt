@@ -792,17 +792,27 @@ class Agent(
         // the warning whenever the app's own limit happened to be configured at all.
         var trimmed = false
 
-        // **One messagebox per request, and never in a loop.** The record's trim removes the oldest
-        // conversation and says how many rows went; the next request measures again. A loop that
-        // re-trimmed until the size fitted would empty the context against a limit below what the
-        // instructions alone cost, and could never converge — an impossible limit is honoured once
-        // per request rather than fought.
+        // **One pass, aimed at the same target the agent is told to reach.** The trim used to drop a
+        // single conversation per request whatever number it was given, so a context far over its
+        // limit took one request per conversation to come down. Both hands now aim at
+        // `limits.targetAt`: whichever of them acts, the context lands in the same place, and the
+        // operator's two numbers describe one destination rather than two.
+        //
+        // **Still not a loop.** `trimContext` walks whole bursts from the newest backwards and stops
+        // where the next one would not fit, so it converges in one pass by construction. A loop
+        // that re-trimmed until the size fitted would empty the context against a limit below what
+        // the instructions alone cost, and could never converge - an impossible limit is honoured
+        // once rather than fought.
         val hard = limits.hardAt
         if (hard > 0 && size > hard) {
-            val dropped = log.trimContext(hard)
+            val dropped = log.trimContext(limits.targetAt)
             if (dropped > 0) {
                 trimmed = true
-                Trace.note("agent-trim", "$project · $dropped rows, over ${ContextBudget.short(hard)}")
+                Trace.note(
+                    "agent-trim",
+                    "$project · $dropped rows, over ${ContextBudget.short(hard)}, " +
+                        "to ${ContextBudget.short(limits.targetAt)}",
+                )
                 // Read back from the file: what is sent has to be what was left, or the trim is a
                 // note about the app's intentions rather than a change to the request.
                 rows = log.contextRows()
@@ -835,7 +845,7 @@ class Agent(
                 "agent-clear-up",
                 "$project · ${ContextBudget.short(size)} over ${ContextBudget.short(trigger)}",
             )
-            clearUpLine(size, trigger, limits.trigger.ceiling, opening.biggest)
+            clearUpLine(size, trigger, limits.targetAt, limits.trigger.ceiling, opening.biggest)
         } else {
             null
         }
@@ -883,7 +893,13 @@ class Agent(
      * app's, not the agent's, so the row that says it is a trace note and not a record row: the
      * model reads this, the evidence does not pretend the agent wrote it.
      */
-    private fun clearUpLine(size: Long, trigger: Long, ceiling: Long, biggest: List<RowCost>): String =
+    private fun clearUpLine(
+        size: Long,
+        trigger: Long,
+        target: Long,
+        ceiling: Long,
+        biggest: List<RowCost>,
+    ): String =
         buildString {
             // **Three numbers, and each says which it is.** A model told only "you are over your
             // limit" cannot judge how much to remove: it does not know how far over, and it does not
@@ -927,7 +943,12 @@ class Agent(
             // **And the stopping rule is stated with it**, because the agent has to know the ask is
             // not a per-request nag: one `forget` that takes the context under this point is the
             // whole job, and the app goes quiet - one call, one measurement, no second cache miss.
-            append("Get it to ${ContextBudget.short(trigger)} tokens or less in this one `forget` - ")
+            // **The target, which is now its own number rather than the trigger.** The ask fires at
+            // the trigger and aims lower, so one clear-up buys headroom: a target equal to the
+            // trigger would land the context exactly on the point that asked for it, and the next
+            // row to arrive would cross it again. The operator's correction: "both forget and trim
+            // compactions should have same target but different triggers".
+            append("Get it to ${ContextBudget.short(target)} tokens or less in this one `forget` - ")
             append("then the app stops asking. Cut further if rows do not serve the current task; ")
             append("anything unrelated to what you are doing now can go.")
             if (biggest.isNotEmpty()) {

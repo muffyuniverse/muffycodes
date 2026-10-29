@@ -180,18 +180,48 @@ object ContextBudget {
      * deciding. A quarter is §2.2's own share, and it is derived from the pin rather than typed,
      * so a small pin gets a small trigger without anybody having to remember to change it.
      */
-    data class Limits(val trigger: Limit, val hard: Limit) {
+    /**
+     * The three numbers: where both hands aim, and where each of them fires.
+     *
+     * **One target, two triggers** — the operator's correction, 2026-10-29: "both forget and trim
+     * compactions should have same target but different triggers (so that forget triggers much
+     * earlier)". Two independent numbers would let the app trim to a size the agent was never asked
+     * to reach, or ask the agent to reach a size the app had already given up on.
+     *
+     * **The target is below both triggers, and that is the only ordering required.** A target at or
+     * above a trigger would mean the act that fires there removes nothing: the context is already
+     * under the number it is being asked to reach. So the target sits strictly below each trigger
+     * that is on, and one clear-up buys real headroom rather than landing exactly on the point that
+     * asked for it.
+     *
+     * **A trim below the clear-up point is a mode, not a mistake.** The operator: "trim compaction
+     * actually can be set below forget and then it is only the app that handles the compaction (a
+     * feature, not a bug) because forget is just never triggered." A person who would rather the app
+     * do the cutting than have the agent choose gets exactly that by putting the trim first — the
+     * agent is never asked, so it never acts, and the two hands never compete. What is still
+     * refused is a trim so low that it fires without the agent ever being able to reach the target
+     * first... which is that same mode, so nothing is refused for it. The ordering rule is only
+     * about the target.
+     */
+    data class Limits(val trigger: Limit, val hard: Limit, val target: Limit) {
 
         init {
-            // **The hard limit is a reserved option, "much higher than trigger but below max
-            // context length for the selected model"** — the operator's words, and both halves are
-            // enforceable here. Above the endpoint's own window it is not a limit at all (the
-            // request is refused before anything is trimmed), so it is clamped by the same ceiling
-            // the trigger is. Below the trigger it is not reserved, it is the normal path, and the
-            // agent never gets the turn the design promises it — so it is not offered there: the
-            // numbers are ordered, and a hard limit under the trigger is raised to it.
-            require(hardAt == 0L || hardAt >= triggerAt) {
-                "the hard limit is a last resort below the trigger, so it cannot be smaller"
+            // **The target must be reachable, so it is below each trigger that is on.** A trigger
+            // of zero is "the app has no opinion" and is resolved from the ceiling, so it is
+            // compared as the resolved number rather than as the zero.
+            // **A trigger of zero is resolved from the ceiling, not "off"**, so it is never an
+            // escape from this rule: `triggerAt` is a quarter of the ceiling whenever nothing was
+            // typed. The check therefore has no exemption - only a pin with no window at all gives
+            // a zero, and there is no target to reach against no window.
+            if (triggerAt > 0L) {
+                require(targetAt < triggerAt) {
+                    "the clear-up target (${targetAt}) must be below the point that asks for it " +
+                        "(${triggerAt}), or the ask would have nothing left to remove"
+                }
+            }
+            require(hardAt == 0L || targetAt < hardAt) {
+                "the clear-up target (${targetAt}) must be below the trim point ($hardAt), or the " +
+                    "trim would fire on a context that already fits"
             }
         }
 
@@ -206,7 +236,27 @@ object ContextBudget {
          * the larger of the two, because a last resort that fires before the agent is asked is not
          * a last resort.
          */
-        val hardAt: Long get() = if (hard.inForce == 0L) 0L else maxOf(hard.inForce, triggerAt)
+        val hardAt: Long get() = if (hard.inForce == 0L) 0L else hard.inForce
+
+        /**
+         * Where both hands aim.
+         *
+         * **A target of zero means "half of where the clear-up is asked for"**, and it is derived
+         * from [triggerAt] rather than from the ceiling for one reason: the whole value of a
+         * separate target is the headroom between the two, and a default that landed on the trigger
+         * would ask the agent to cut to exactly the number that asked it - so the next row to arrive
+         * would cross the trigger again and the ask would repeat. Half is a floor nobody has to
+         * tune: an ask at 49k aims at 24k, and one forget buys 25k of quiet.
+         */
+        val targetAt: Long
+            get() {
+                if (target.inForce > 0L) return target.inForce
+                val at = triggerAt
+                // A trigger of zero is a ceiling of zero - a pin with no window at all - and there
+                // is no target to derive. Zero then means "nothing to reach", which is the same
+                // "the app has no opinion" the trigger uses.
+                return if (at <= 0L) 0L else (at / 2).coerceAtLeast(1L)
+            }
 
         companion object {
             /**
@@ -218,8 +268,16 @@ object ContextBudget {
              * clear up at all. What is repaired is the effective number; what was typed stays in
              * [Limit.asked], which is what makes the screen able to say so.
              */
-            fun of(triggerAsked: Long, hardAsked: Long, ceiling: Long): Limits =
-                Limits(Limit(triggerAsked, ceiling), Limit(hardAsked, ceiling))
+            fun of(
+                triggerAsked: Long,
+                hardAsked: Long,
+                ceiling: Long,
+                targetAsked: Long = 0L,
+            ): Limits = Limits(
+                Limit(triggerAsked, ceiling),
+                Limit(hardAsked, ceiling),
+                Limit(targetAsked, ceiling),
+            )
         }
     }
 

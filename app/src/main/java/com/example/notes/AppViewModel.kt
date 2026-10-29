@@ -2677,6 +2677,7 @@ class AppViewModel @JvmOverloads constructor(
         val limits = ContextBudget.Limits.of(
             triggerAsked = settings.triggerTokens.toLong(),
             hardAsked = settings.hardTokens.toLong(),
+            targetAsked = settings.targetTokens.toLong(),
             ceiling = ContextBudget.ceiling(model.provider, model.contextLength, model.maxOutput),
         )
         // One result may not be bigger than the model's input window: bigger than that cannot be
@@ -2714,6 +2715,7 @@ class AppViewModel @JvmOverloads constructor(
                         ContextBudget.Limits.of(
                             triggerAsked = settings.triggerTokens.toLong(),
                             hardAsked = settings.hardTokens.toLong(),
+                            targetAsked = settings.targetTokens.toLong(),
                             ceiling = ContextBudget.ceiling(
                                 pin = modelConfig.active.provider,
                                 contextLength = modelInfo?.contextLength,

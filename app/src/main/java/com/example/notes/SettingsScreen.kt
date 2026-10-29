@@ -292,14 +292,31 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            // **Three numbers: one destination, two triggers.** The operator's correction
+            // (2026-10-29): "both forget and trim compactions should have same target but different
+            // triggers (so that forget triggers much earlier)". The target is where the context
+            // should END UP; the two triggers are where each hand starts working. One destination
+            // means whichever acts, the context lands in the same place.
+            //
+            // **Forget first, trim second, and the target above them** - the order the numbers
+            // must satisfy, so a person reading the screen sees the rule rather than discovering it
+            // in an error. A trim set BELOW the forget point is a mode rather than a mistake: the
+            // agent is never asked, so the app does all the compacting, which is what somebody who
+            // would rather the app decide is choosing.
             LengthField(
-                label = "Clear up at",
+                label = "Compaction target",
+                value = settings.targetTokens,
+                placeholder = "half the clear-up point",
+                onValueChange = { settings.keepTarget(it) },
+            )
+            LengthField(
+                label = "Forget compaction at",
                 value = settings.triggerTokens,
                 placeholder = "a quarter",
                 onValueChange = { settings.keepTrigger(it) },
             )
             LengthField(
-                label = "Trim it myself at",
+                label = "Trim compaction at",
                 value = settings.hardTokens,
                 placeholder = "never",
                 onValueChange = { settings.keepHard(it) },
@@ -312,18 +329,35 @@ fun SettingsScreen(
             val limit = ContextBudget.Limits.of(
                 triggerAsked = settings.triggerTokens.toLong(),
                 hardAsked = settings.hardTokens.toLong(),
+                targetAsked = settings.targetTokens.toLong(),
                 ceiling = ContextBudget.ceiling(
                     pin = viewModel.modelConfig.active.provider,
                     contextLength = catalogue?.contextLength,
                     maxOutput = catalogue?.maxOutput,
                 ),
             )
+            // **What the three numbers resolve to**, in the order the two hands act. The arrow is
+            // the target rather than decoration: it is where the context ends up whichever hand
+            // takes it there.
             Text(
-                "Clear up at ${ContextBudget.short(limit.triggerAt)} · " +
-                    "trim at ${ContextBudget.short(limit.hardAt)}",
+                "forget at ${ContextBudget.short(limit.triggerAt)} · " +
+                    "trim at ${ContextBudget.short(limit.hardAt)} · " +
+                    "both to ${ContextBudget.short(limit.targetAt)}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary,
             )
+            // **Said out loud when the trim comes first**, because it is a legitimate choice that
+            // looks like a mistake: with the trim below the forget point the agent is never asked,
+            // so the app does all the compacting. Somebody who meant it should be told it is
+            // working as intended; somebody who did not should see it immediately.
+            if (limit.hardAt > 0 && limit.hardAt <= limit.triggerAt) {
+                Text(
+                    "The app trims before the agent is ever asked, so the agent never compacts. " +
+                        "That is what these numbers say; raise the trim to let the agent go first.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
 
             // ---- what has actually happened to this context ----
             //

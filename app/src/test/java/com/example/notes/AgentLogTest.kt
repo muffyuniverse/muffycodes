@@ -717,9 +717,9 @@ class AgentLogTest {
             log.note("agent", "work $i")
         }
         val before = log.rows().maxOf { it.id }
-        // One messagebox removed per request, so four conversations take four trims — which is the
-        // rule being relied on here, not a detail of it.
-        repeat(3) { log.trimContext(budget = 1) }
+        // One pass, aimed at a budget nothing fits under, so every conversation but the newest
+        // goes — which is the rule being relied on here, not a detail of it.
+        log.trimContext(target = 1)
         assertTrue(
             "only the newest task is left: ${log.contextRows().map { it.body }}",
             log.contextRows().none { it.body == "task 1" || it.body == "task 2" || it.body == "task 3" },
@@ -837,21 +837,30 @@ class AgentLogTest {
     }
 
     @Test
-    fun `the autotrim removes one messagebox at a time`() {
-        // The operator's own words: "yes, autotrim is one messagebox at a time". Dropping as much
-        // as would fit would take conversations the agent might still be working from, all at
-        // once, and give him no chance to clear it himself first.
+    fun `the autotrim reaches its target in one pass, dropping whole conversations`() {
+        // **One pass, aimed at the target** - the operator's correction of 2026-10-29. The trim used
+        // to drop exactly one conversation per request whatever number it was given, so a context
+        // far over its limit took one request per conversation to come down. It now walks whole
+        // bursts from the newest backwards and stops where the next would not fit, which converges
+        // in a single act by construction.
+        //
+        // The earlier rule ("one messagebox at a time") was right for a design where the app's trim
+        // was competing with the agent's clear-up; with one shared target there is nothing to
+        // compete over, and stopping short would only mean trimming again on the next request.
         for (i in 1..4) {
             log.told("task $i")
             log.note("agent", "work on $i")
         }
 
-        val dropped = log.trimContext(budget = 1)
+        // A budget that one conversation cannot fit under, so the pass takes more than one: two
+        // rows of about three tokens each are dropped, and the walk stops when the next would not
+        // fit. The newest burst is always kept, whatever the budget.
+        val dropped = log.trimContext(target = 1)
 
-        assertEquals("one conversation's rows", 2, dropped)
+        assertTrue("more than one conversation went: $dropped", dropped > 2)
         assertEquals(
-            "and the oldest is the one that went",
-            listOf("task 2", "task 3", "task 4"),
+            "and the newest is what survived, because a size limit does not get to delete the task",
+            listOf("task 4"),
             log.contextRows().filter { it.kind == AgentLog.TOLD }.map { it.body },
         )
         assertTrue(
@@ -874,7 +883,7 @@ class AgentLogTest {
         log.told("the only task")
         log.note("agent", "working")
 
-        val dropped = log.trimContext(budget = 1)
+        val dropped = log.trimContext(target = 1)
 
         assertEquals("nothing is dropped", 0, dropped)
         assertEquals("and the task is still there", 2, log.contextRows().size)
@@ -918,7 +927,7 @@ class AgentLogTest {
             log.bookkeeping(AgentLog.NOTE, "ping", "kept warm")
         }
         log.bookkeeping(AgentLog.NOTE, "retry", "reconnected after 3 tries")
-        log.trimContext(budget = 1)
+        log.trimContext(target = 1)
 
         assertTrue(
             "nothing here is his: ${log.rows().filter { it.ctx == AgentLog.OUT }.map { it.body }}",

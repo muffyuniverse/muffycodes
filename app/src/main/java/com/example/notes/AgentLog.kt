@@ -500,31 +500,41 @@ class AgentLog private constructor(
      * [Agent.messages] renders, and it never enters `context.log`: the rows that leave are removed
      * from that file, and the marker is not one of them.
      */
-    fun trimContext(budget: Long): Int {
+    fun trimContext(target: Long): Int {
         synchronized(guard) {
             val all = rows()
             val inContext = all.filter { it.ctx == IN }
-            if (inContext.isEmpty() || budget <= 0L) return 0
-            // **One messagebox at a time** — the operator's own words for the autotrim: "yes,
-            // autotrim is one messagebox at a time". Dropping as many bursts as half the limit
-            // would allow removes a conversation the agent might still be working from, all at
-            // once, and gives him no chance to have cleared it himself; one burst per request
-            // keeps this the app's last resort rather than a compaction of its own.
-            val oldest = bursts(inContext).firstOrNull() ?: return 0
+            if (inContext.isEmpty() || target <= 0L) return 0
+            // **In one pass, to the target.** This used to drop exactly one burst per request,
+            // whatever the number passed in - the parameter was named `budget` and consulted only
+            // to check it was not zero, so a context a hundred thousand tokens over its limit came
+            // down one conversation per request while the app kept asking itself to trim.
+            //
+            // The operator's correction (2026-10-29): the app's trim should aim at the **same
+            // target** the agent's `forget` aims at, and reach it in one pass. Both hands now aim at
+            // one number, so whichever acts, the context lands in the same place.
+            //
+            // **Whole bursts, newest kept.** `keepNewest` walks from the newest backwards and stops
+            // when the next burst would not fit, so a conversation is never cut in half and the
+            // thing that just happened is never deleted - a size limit does not get to remove the
+            // task being worked on, which is the same rule `forgetProblem` enforces for the agent.
+            val (keptRows, dropped) = keepNewest(inContext, budget = target) { it.size }
+            if (dropped == 0) return 0
             // Nothing to drop, or nothing that may be: a context that is one conversation is a
             // conversation, and cutting it would leave a task with no task.
-            if (oldest.size >= inContext.size) return 0
+            if (keptRows.size >= inContext.size) return 0
             // **What this trim did, not a running total.** Markers are the app's own rows and stay
             // in the record, so a total maintained by reading the previous marker home would count
             // those rows again on every trim. Each row reports its own act; the total is the sum,
             // computed wherever it is wanted.
-            val said = "${oldest.size} rows: the context was over its limit"
+            val said = "$dropped rows: the context was over its limit"
             val marker = LogFormat.recordRow(System.currentTimeMillis(), nextId(), ContextBudget.tokens(said), NOTE, APP, 0, "trimmed", said)
             // **Taken out, not taken away.** The rows the app trims stay in the record, marked
             // `app` rather than `out` — the app's doing, not the agent's judgement — so a trim can
             // never be read as something the model decided. And the marker is `app` too, so it does
             // not count against the limit it is reporting on.
-            val ids = oldest.map { it.id }.toSet()
+            val keptIds = keptRows.map { it.id }.toSet()
+            val ids = inContext.filter { it.id !in keptIds }.map { it.id }.toSet()
             // **Every row, not just the context's.** The file is the record: rewriting it from the
             // `in` rows alone would delete everything the agent forgot and everything the app had
             // already taken out — the audit and the evidence, in one silent step.
@@ -534,7 +544,7 @@ class AgentLog private constructor(
             } catch (t: Throwable) {
                 return 0
             }
-            return oldest.size
+            return dropped
         }
     }
 
