@@ -57,8 +57,83 @@ class AccountStore(private val filesDir: File) {
 
     val accountsDir: File get() = File(filesDir, ACCOUNTS)
 
+    /**
+     * **The account that exists before anybody signs in, and again whenever the last one is
+     * removed.**
+     *
+     * Its folder is a real account folder in every respect - projects, git repositories, the
+     * system project, the request history - so every part of the app that asks "is there a
+     * workspace" answers yes and nothing had to learn about a second kind of place to keep files.
+     * That is the whole point of it being an account rather than a special case.
+     *
+     * **The name contains `~`, which a GitHub login cannot.** So it can never collide with a real
+     * account, and a folder called `~local` in a log or a path is unmistakably not somebody's.
+     */
+    val provisional: Account = Account(
+        login = PROVISIONAL,
+        commitName = "",
+        commitEmail = "",
+    )
+
+    /** True for the provisional account's name. */
+    fun isProvisional(login: String?): Boolean = login == PROVISIONAL
+
     /** The folder of [login]. */
     fun dirOf(login: String): File = File(accountsDir, login)
+
+    /**
+     * Makes sure the provisional account exists on disk, and answers its folder.
+     *
+     * Called when the app starts and after the last account is removed. **It writes nothing if the
+     * folder is already there**, because that folder may hold months of a person's work - this is
+     * the one account whose contents are never disposable.
+     */
+    fun ensureProvisional(): Account {
+        val dir = dirOf(PROVISIONAL)
+        if (!detailsOf(PROVISIONAL).isFile) {
+            dir.mkdirs()
+            save(provisional)
+        }
+        return provisional
+    }
+
+    /**
+     * Hands everything in the provisional account to [login], **by renaming its folder.**
+     *
+     * **A rename, not a copy.** The two folders are both under `accountsDir`, so this is one
+     * atomic step: either the projects are the new account's or they are still the provisional
+     * account's, and there is no moment at which both hold them or neither does. A copy would
+     * leave two workspaces claiming the same projects if it failed halfway, and nothing on screen
+     * would say which one was real.
+     *
+     * **Refuses when [login] already has a folder.** Merging two workspaces is not a rename - it
+     * needs a rule for two projects of the same name, and two git repositories that disagree about
+     * their history. Refusing and leaving the provisional account untouched is the only answer that
+     * cannot lose work; the caller decides what to tell the person.
+     *
+     * Answers true when the provisional content is now the account's.
+     */
+    fun adoptProvisional(login: String): Boolean {
+        val from = dirOf(PROVISIONAL)
+        val to = dirOf(login)
+        // **Nothing to hand over**: no provisional folder, or one that never got anything in it.
+        // The second case still removes it, so a sign-in does not leave an empty `~local` behind.
+        val hasContent = from.isDirectory &&
+            (from.listFiles() ?: emptyArray()).any { it.name != STATE }
+        if (!hasContent) {
+            from.deleteRecursively()
+            return false
+        }
+        if (to.exists()) return false
+        to.parentFile?.mkdirs()
+        return try {
+            from.renameTo(to)
+        } catch (t: Throwable) {
+            // A rename that throws leaves the provisional folder where it was, which is the safe
+            // half of the failure: the person's projects are still reachable.
+            false
+        }
+    }
 
     /** Every account with an `account.json` on disk. */
     fun accounts(): List<Account> =
@@ -145,6 +220,13 @@ class AccountStore(private val filesDir: File) {
 
     private companion object {
         const val ACCOUNTS = "accounts"
+        /**
+         * The provisional account's name.
+         *
+         * **`~` because a GitHub login cannot contain one**, so this is provably not a real
+         * account and can never be shadowed by somebody who registers the name.
+         */
+        const val PROVISIONAL = "~local"
         /** Every file the app keeps for an account, in one hidden folder. */
         const val STATE = ".muffy"
         const val DETAILS = "account.json"

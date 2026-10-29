@@ -164,15 +164,18 @@ fun SettingsScreen(
             // halved at least" - and the second report is the useful one: the gap that was left
             // was between the three *lines*, not between the block and what followed.
             Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                Text("Signed in as", style = MaterialTheme.typography.labelMedium)
+                // **One line, and "Working as" rather than "Signed in as".** The provisional
+                // account is not signed in to anything - it is a real workspace that happens to
+                // live only on this phone - so a label claiming a sign-in would be false in exactly
+                // the state a new person sees first. "Working as" is true of both.
+                //
+                // **The login on the same line as the label**, because two lines for one fact was
+                // the report: "just make Working as <account> a single line". The email went with
+                // it - it is derived from the login, so it answered a question nobody asked and
+                // cost a row.
                 Text(
-                    text = account?.login ?: "Nobody yet",
+                    text = "Working as " + (account?.login ?: "~local"),
                     style = MaterialTheme.typography.titleMedium,
-                )
-                Text(
-                    text = account?.commitEmail ?: "Sign in to create projects",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 // Add, Switch, Remove — and nothing that reads back at you. The commit
                 // name and email are no longer something to type: they come from the
@@ -187,7 +190,11 @@ fun SettingsScreen(
                         vertical = 4.dp,
                     )
                     TextButton(onClick = onSignIn, contentPadding = tight) { Text("Add") }
-                    if (account != null) {
+                    // **Neither button belongs to the provisional account.** There is nothing to
+                    // switch to before a real account exists, and "Remove" on the workspace that
+                    // exists so there is always one would be a button whose only effect is to
+                    // remake what it just deleted. Add is the one act that means something there.
+                    if (account != null && !viewModel.isProvisionalAccount) {
                         TextButton(
                             onClick = { showingSwitch = true },
                             contentPadding = tight,

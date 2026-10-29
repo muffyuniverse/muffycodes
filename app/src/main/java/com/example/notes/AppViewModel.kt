@@ -100,8 +100,16 @@ class AppViewModel @JvmOverloads constructor(
 
     // ---- who and where -----------------------------------------------------
 
-    /** The login of the active account, or null when nobody is signed in. */
-    var activeLogin: String? by mutableStateOf(credentials.activeLogin)
+    /**
+     * The login of the active account.
+     *
+     * **Never null, because the provisional account always exists.** Before anybody signs in this
+     * is `~local`, whose folder is a real workspace - so a local project, the system project and the
+     * request history all work with no account, and every caller that asks "is there a workspace"
+     * answers yes. When the last account is removed it becomes `~local` again rather than nothing,
+     * which is why the screen can never be left pointing at an account that is gone.
+     */
+    var activeLogin: String? by mutableStateOf(credentials.activeLogin ?: accounts.ensureProvisional().login)
         private set
 
     /** The path from the account's root, as names. Empty means the root. */
@@ -396,6 +404,9 @@ class AppViewModel @JvmOverloads constructor(
 
     val account: Account? get() = accounts.account(activeLogin)
 
+    /** True while the workspace is the provisional one - the state before any sign-in. */
+    val isProvisionalAccount: Boolean get() = accounts.isProvisional(activeLogin)
+
     /**
      * The GitHub the active account talks to.
      *
@@ -423,7 +434,18 @@ class AppViewModel @JvmOverloads constructor(
     /** The active account's tree, or null when nobody is signed in. */
     val workspace: Workspace? get() = activeLogin?.let { Workspace(accounts.dirOf(it)) }
 
-    private val author: GitAuthor get() = account?.author() ?: DEFAULT_AUTHOR
+    /**
+     * Who commits, when nobody has signed in.
+     *
+     * **Not a `@users.noreply.github.com` address.** The provisional account's login is `~local`,
+     * and the derived address would be `~local@users.noreply.github.com` - a shape that claims to
+     * belong to a GitHub account that cannot exist. A commit made on this phone before signing in
+     * should say so, and it keeps saying so after the projects are adopted, because that is when it
+     * was made.
+     */
+    private val author: GitAuthor
+        get() = if (accounts.isProvisional(activeLogin)) PROVISIONAL_AUTHOR
+        else account?.author() ?: DEFAULT_AUTHOR
 
     private val git: ProjectGit?
         get() = workspace?.let { ws ->
@@ -448,6 +470,25 @@ class AppViewModel @JvmOverloads constructor(
         Trace.build = buildName
         Trace.note("app-opened", versionLine)
         refresh()
+        // **The introduction, once.** The report that asked for it: *"remove this sign in to begin
+        // text box. Instead I want on first open to move operator to readme.md file from system
+        // project in view mode so that the operator can read how to use the app and what is possible
+        // here"*.
+        //
+        // **After `refresh()`, because the system folder is made there** - opening the file first
+        // would find nothing to open. And in the editor's VIEW mode rather than a bespoke reader,
+        // because the README is an ordinary markdown file in an ordinary project and the screen that
+        // reads one already exists.
+        if (!settings.readmeShown) {
+            workspace?.let { ws ->
+                val readme = File(ws.projectDir(Workspace.SYSTEM_PROJECT), Workspace.README)
+                if (readme.isFile) {
+                    settings.markReadmeShown()
+                    editingPath = ws.relative(readme)
+                    editorSession++
+                }
+            }
+        }
     }
 
     /**
@@ -1923,7 +1964,10 @@ class AppViewModel @JvmOverloads constructor(
             val made = ProjectGit(
                 ws,
                 { null },
-                { accounts.account(activeLogin ?: "")?.author() ?: DEFAULT_AUTHOR },
+                {
+                    if (accounts.isProvisional(activeLogin)) PROVISIONAL_AUTHOR
+                    else accounts.account(activeLogin ?: "")?.author() ?: DEFAULT_AUTHOR
+                },
                 { settings.historyLength },
             ).init(clean)
             main.post {
@@ -2822,6 +2866,16 @@ class AppViewModel @JvmOverloads constructor(
 
     /** Signs an account in, or adds it when it is new, and makes it active. */
     fun signIn(login: String, token: String, commitName: String, commitEmail: String) {
+        // **Adopt BEFORE saving, and the order is load-bearing.** `accounts.save` creates the
+        // account's folder, and `adoptProvisional` refuses when that folder already exists - so
+        // saving first would leave the provisional content behind for ever, on the one occasion
+        // the person most expects it to come with them.
+        //
+        // **What moves is the whole workspace**, by one rename: the local projects made before
+        // signing in become this account's projects, and their git repositories, the system
+        // project and the request history go with them because they were all inside the same
+        // folder. Nothing is copied, so a failure leaves everything on the provisional side.
+        val adopted = accounts.adoptProvisional(login)
         credentials.setToken(login, token)
         accounts.save(
             Account(
@@ -2833,6 +2887,12 @@ class AppViewModel @JvmOverloads constructor(
         credentials.activeLogin = login
         activeLogin = login
         path = emptyList()
+        if (adopted) {
+            // Said once, because a person who had projects before signing in should be told they
+            // came along rather than discovering it - and if they did NOT come along (an account
+            // of that name already had a folder) this is the only signal that something was left.
+            Trace.note("adopted-provisional", login)
+        }
         refresh()
     }
 
@@ -2860,8 +2920,14 @@ class AppViewModel @JvmOverloads constructor(
         // at an account that is no longer here.
         // The disk is what says which accounts this phone has; the keys only say
         // which of them can still open GitHub.
-        val next = accounts.accounts().map { it.login }.firstOrNull { it != login }
-            ?: credentials.logins().firstOrNull { accounts.exists(it) }
+        // **The provisional account is the floor.** Removing the last real account leaves `~local`,
+        // which is a workspace rather than an absence - so the browser still lists local projects
+        // and the system project still has its README. It is made here rather than assumed, because
+        // this is the moment it can have been adopted away by a sign-in and not yet remade.
+        val next = accounts.accounts().map { it.login }
+            .firstOrNull { it != login && !accounts.isProvisional(it) }
+            ?: credentials.logins().firstOrNull { accounts.exists(it) && it != login }
+            ?: accounts.ensureProvisional().login
         credentials.activeLogin = next
         activeLogin = next
         path = emptyList()
@@ -3190,6 +3256,16 @@ class AppViewModel @JvmOverloads constructor(
         const val TEST_ACCOUNT = "test-account"
 
         val DEFAULT_AUTHOR = GitAuthor("Muffy World", "muffyworld365@gmail.com")
+
+        /**
+         * Who commits while the provisional account is active.
+         *
+         * **A local address, because there is no GitHub account behind it.** `.local` is reserved
+         * for exactly this - an identity that names no remote - and it cannot be confused with a
+         * real address by anyone reading a commit log or a `git blame` after the projects are
+         * adopted into a signed-in account.
+         */
+        val PROVISIONAL_AUTHOR = GitAuthor("Muffy Codes", "local@muffy.local")
         private const val SEARCH_LIMIT = 4000
 
         /** How many commits back the "what used to be here" list looks. */

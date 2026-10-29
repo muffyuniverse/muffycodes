@@ -88,11 +88,32 @@ class Workspace(val accountDir: File) {
      */
     private fun ensureSystemFolder() {
         try {
-            File(accountDir, SYSTEM_PROJECT).mkdirs()
+            val dir = File(accountDir, SYSTEM_PROJECT)
+            dir.mkdirs()
+            ensureReadme(dir)
         } catch (t: Throwable) {
             // A folder that cannot be made is a phone problem, and every write that needs it will
             // say so on its own. Nothing to report from here.
         }
+    }
+
+    /**
+     * Puts the app's own README in the system project, **once**.
+     *
+     * **Once, and never again**, because this file is meant to be read and can be edited: the
+     * report that asked for it was *"on first open move operator to readme.md file from system
+     * project in view mode so that the operator can read how to use the app"*. Overwriting it on
+     * every refresh would silently undo a person's notes and make the one document that explains
+     * the app the one document they cannot change.
+     *
+     * It is written by the app rather than bundled in `assets/` so it lives where the person can
+     * find it - the same folder the agent's prompt is kept in - and so a project made before
+     * signing in keeps its README when it is adopted.
+     */
+    private fun ensureReadme(dir: File) {
+        val readme = File(dir, README)
+        if (readme.isFile) return
+        readme.writeText(README_TEXT)
     }
 
     /**
@@ -888,6 +909,9 @@ class Workspace(val accountDir: File) {
          */
         const val SYSTEM_PROJECT = "system"
 
+        /** The app's own introduction, in the system project. */
+        const val README = "README.md"
+
         /** True for [name] when it is the system project's — **whatever its case.** */
         fun isSystem(name: String): Boolean = name.equals(SYSTEM_PROJECT, ignoreCase = true)
 
@@ -982,3 +1006,61 @@ class Workspace(val accountDir: File) {
             if ('.' in name.removePrefix(".")) name else "$name.$DEFAULT_EXTENSION"
     }
 }
+
+/**
+ * What the app says about itself, in the system project's README.
+ *
+ * **Written for a person who has just installed it**, not for a developer: the first screen used to
+ * say "Sign in to begin", which answered a question the person had not asked and hid the fact that
+ * the app works before anybody signs in. This says what the app does, what needs an account and
+ * what does not, and where the things it makes are kept.
+ *
+ * **Plain markdown, and deliberately short.** It is read on a phone, in the app's own viewer, so a
+ * long document is a document nobody finishes. It can be edited - the app writes it once.
+ */
+internal val README_TEXT = """
+    # Muffy Codes
+
+    This app keeps projects on your phone, versions every change, and puts an agent beside
+    the files that can read them, edit them and answer questions about them.
+
+    ## It works before you sign in
+
+    Everything here runs without an account. You are working as **~local**: a real
+    workspace that lives only on this phone.
+
+    - **Projects** you make locally, with their versions, need no account at all.
+    - **An account is for GitHub**, and only for GitHub: pulling a repository, pushing to one,
+      and having your work somewhere other than this phone.
+
+    When you sign in for the first time, whatever you made as **~local** comes with you. It is
+    moved, not copied, so there is never a second copy to wonder about.
+
+    ## The three things here
+
+    **Projects.** Each one is a folder with its own version history. Long-press a row to choose
+    several; the menu that appears can move, copy or delete them together.
+
+    **Versions.** Every save is a version. The history of a file shows what changed and lets you
+    read any earlier one; nothing you save is lost by saving again.
+
+    **The agent.** Beside the files, it can read them and write them. It asks before doing
+    anything that cannot be undone.
+
+    ## What things cost
+
+    Settings has a **cost table** - the statistics button on the projects screen. It reads the
+    request history this app has kept and answers what the model cost over any interval you
+    pick, with the period before it beside it so the figures mean something.
+
+    ## Where your things are kept
+
+    Everything is inside this app's own storage, in one folder per account:
+
+    - `system/` - this file, and the agent's instructions. You can edit both.
+    - `requests/` - the record of what was asked of the model and what it cost.
+    - each project's own folder, with its versions inside it.
+
+    Removing an account can keep the files and remove only the account. Nothing is deleted that
+    you did not ask to delete.
+""".trimIndent()

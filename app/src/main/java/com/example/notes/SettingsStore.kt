@@ -35,6 +35,26 @@ class SettingsStore(context: Context, name: String = "settings") {
         private set
 
     /**
+     * Whether the README has been opened by itself, once, on the app's first screen.
+     *
+     * **Once for the life of the install**, not once per launch: the report was *"on first open move
+     * operator to readme.md file from system project in view mode"*, and a screen that reopened it
+     * every time would be a screen that will not stay where a person puts it.
+     *
+     * **Remembered here rather than inferred from "is there anything in the workspace"**, because a
+     * person who deletes everything and starts again should not be shown the introduction a second
+     * time - they have read it.
+     */
+    var readmeShown: Boolean by mutableStateOf(prefs.getBoolean(KEY_README_SHOWN, false))
+        private set
+
+    /** Records that the introduction has been shown, so it is not shown again. */
+    fun markReadmeShown() {
+        prefs.edit().putBoolean(KEY_README_SHOWN, true).apply()
+        readmeShown = true
+    }
+
+    /**
      * How many changes — local commits — are kept on this phone. 0 keeps all.
      *
      * Applies to the phone's own change history and to each project's individual
@@ -546,6 +566,9 @@ class SettingsStore(context: Context, name: String = "settings") {
         const val KEY_DARK = "use_dark"
         const val KEY_LIVE = "live_trace"
         const val KEY_HISTORY = "history_length"
+
+        /** Whether the system project's README has been shown by itself. */
+        const val KEY_README_SHOWN = "readme_shown"
 
         /** Days of request log kept. 0 (the default) keeps every response ever written. */
         const val KEY_REQUEST_DAYS = "request_days"
