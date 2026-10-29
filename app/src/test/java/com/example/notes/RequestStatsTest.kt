@@ -386,17 +386,24 @@ class RequestStatsTest {
         // **The Generate button's entire behaviour.** Pulled out of the screen because the
         // alternative is driving Material's calendar to learn whether a button is enabled, which
         // tests the harness rather than the decision.
-        val generated = RequestStats.Interval(1_000L, 2_000L)
+        // **Minute-aligned instants, because `interval` snaps to whole minutes.** A fixture of
+        // 1_000L and 2_000L both floor to the same minute, so the interval is 0-60_000 whatever the
+        // picks are - and a test written on those numbers would be asserting about the snap rather
+        // than about the decision.
+        val min = 60_000L
+        val generated = RequestStats.Interval(10 * min, 20 * min)
 
-        assertEquals("unchanged", false, RequestStats.pending(1_000L, 2_000L, generated))
-        assertEquals("the start moved", true, RequestStats.pending(900L, 2_000L, generated))
-        assertEquals("the end moved", true, RequestStats.pending(1_000L, 2_100L, generated))
-        // **Swapping the ends is a different interval**, and must count as pending - a comparison
-        // done end-by-end would catch only half of it.
-        assertEquals("swapped", true, RequestStats.pending(2_000L, 1_000L, generated))
+        assertEquals("unchanged", false, RequestStats.pending(10 * min, 20 * min, generated))
+        assertEquals("the start moved", true, RequestStats.pending(9 * min, 20 * min, generated))
+        assertEquals("the end moved", true, RequestStats.pending(10 * min, 21 * min, generated))
+        // **Swapping the ends is NOT pending**, because `interval` sorts them: an interval named
+        // backwards is the same span of time, and this screen has always treated it that way. Worth
+        // pinning precisely because the naive guess is the opposite - a check done end-by-end would
+        // call this a change and offer to regenerate identical figures.
+        assertEquals("swapped is the same interval", false, RequestStats.pending(20 * min, 10 * min, generated))
         // **Returning to the generated interval clears it**, because the question is what the table
         // is showing, not whether anything was ever touched.
-        assertEquals("moved and moved back", false, RequestStats.pending(1_000L, 2_000L, generated))
+        assertEquals("moved and moved back", false, RequestStats.pending(10 * min, 20 * min, generated))
     }
 
     @Test
