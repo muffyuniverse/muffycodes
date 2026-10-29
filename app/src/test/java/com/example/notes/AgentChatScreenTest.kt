@@ -116,10 +116,11 @@ class AgentChatScreenTest {
         // **The message opens on its LAST page**, so the pager reads 2/2: a person arrives at the
         // end of the conversation, and the closing words are where a conversation ends.
         compose.onNodeWithText("2/2", substring = true).assertExists()
-        // **The call is a PAGE of the agent's message, and the message opens on page 1.** So the
-        // call's own caption is what is drawn, and the answer's page is a turn of the pager away -
-        // which is the shape the operator asked for: a message holds its pages, not its neighbour's.
-        compose.onNodeWithText("tree").assertExists()
+        // **The message opens on its LAST page, so the call's caption is not on screen** - it is one
+        // turn of the pager back. What IS drawn is the caption of the page being shown, and the
+        // pager that says there is more. Both are asserted below; asserting `tree` here would be
+        // asserting the page the operator asked not to open on.
+        compose.onNodeWithText("agent").assertExists()
         // **The message is a turn, not an act.** Two replies are two turns, and the one that called
         // `tree` holds both the call and the words that closed it - so its page count is what says
         // the grouping happened.
@@ -149,7 +150,9 @@ class AgentChatScreenTest {
         // `summary()` puts between the status and the rest, so the assertion would fail on a body
         // that IS drawn - which is the worst kind of test: right about the app and wrong about
         // itself.
-        compose.onNodeWithText(treePage.body, substring = true).assertExists()
+        // **The call's page is not on screen while the closing page is showing**, so its body is
+        // asserted through the pager: turning back to it is what draws it.
+        compose.onNodeWithText(treePage.caption).assertDoesNotExist()
         // And the first message is the operator's, drawn as a plain row.
         assertEquals("the person speaks first", AgentChat.Side.OPERATOR, scene.viewModel.chatBox!!.messages.first().side)
     }
