@@ -131,13 +131,20 @@ class AgentChatScreenTest {
         assertEquals("holding the call and the words that closed it", 2, calling.pages.size)
         assertEquals("the call first", "tree", calling.pages[0].caption)
         assertEquals("the closing words last", true, calling.pages.last().closing)
-        // The call's page carries the result on the same page - that is what a page IS.
+        // **The call's page carries its result, and the page's own line is a SUMMARY of it.** The
+        // body is the one line a person reads in the list; the whole of it is the detail, which is
+        // what the page view shows. So the two differ by design, and the assertion is that the body
+        // is drawn - not that it equals the result.
         val treePage = calling.pages.first { it.caption == "tree" }
         assertTrue(
-            "the call's page carries its result: ${treePage.body}",
-            treePage.body.isNotBlank() && treePage.body != treePage.detail,
+            "the call's page carries a result: '${treePage.body}'",
+            treePage.body.isNotBlank(),
         )
-        compose.onNodeWithText(treePage.body.take(24), substring = true).assertExists()
+        assertTrue(
+            "and the whole of it is kept for the page view: '${treePage.detail}'",
+            treePage.detail.length > treePage.body.length,
+        )
+        compose.onNodeWithText(treePage.body.take(20), substring = true).assertExists()
         // And the first message is the operator's, drawn as a plain row.
         assertEquals("the person speaks first", AgentChat.Side.OPERATOR, scene.viewModel.chatBox!!.messages.first().side)
     }
