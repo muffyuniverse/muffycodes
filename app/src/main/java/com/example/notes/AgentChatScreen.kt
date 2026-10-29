@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -489,12 +490,16 @@ private fun MessageRow(
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         if (mine) {
-            Text(
-                message.body,
-                style = MaterialTheme.typography.bodyMedium,
-                color = ink,
-                textDecoration = if (message.forgotten) TextDecoration.LineThrough else null,
-            )
+            // **Selectable**, so a person can copy what they asked - or copy their own words out to
+            // ask something similar again. The operator asked for the app's text to be copyable.
+            SelectionContainer {
+                Text(
+                    message.body,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = ink,
+                    textDecoration = if (message.forgotten) TextDecoration.LineThrough else null,
+                )
+            }
             return@Column
         }
         val page = message.pages.getOrNull(at) ?: message.pages.firstOrNull() ?: return@Column
@@ -520,7 +525,14 @@ private fun MessageRow(
                 )
             }
         }
-        PageBody(page = page, cap = cap, ink = ink, expanded = false)
+        // **The page is selectable, and so is the header.** A result is the thing a person copies
+        // out of a chat - a path, a line of a file, an error - which is why this is here rather
+        // than only on the operator's own words.
+        SelectionContainer {
+            Column {
+                PageBody(page = page, cap = cap, ink = ink, expanded = false)
+            }
+        }
         if (message.pages.size > 1) {
             // **The pager, at the top of the message's furniture** - above the footer and below the
             // body, so it never moves with the body's height.

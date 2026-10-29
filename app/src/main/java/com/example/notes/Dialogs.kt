@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -896,6 +897,10 @@ fun ReportBody(
     // visible in the report scenario's own picture, and unreadable in the one window where a person
     // is trying to describe a problem. A dialog that clips its own instructions is worse than a
     // shorter one: it looks complete.
+    // **Selectable, because this is the window a person copies out of.** It lists the failures and
+    // the taps that never answered, in the app's own words - and the next thing they do with that
+    // text is paste it into a message about the problem.
+    SelectionContainer {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -963,6 +968,7 @@ fun ReportBody(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(top = 12.dp),
         )
+    }
     }
 }
 

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
@@ -301,6 +302,11 @@ fun StatsScreen(
             )
         },
     ) { padding ->
+        // **Selectable, because figures are what a person quotes.** The screen reports what an
+        // account spent; the reason somebody opens it is usually to tell someone else, and retyping
+        // a number from a screen is how it gets typed wrong. Around the list rather than per item:
+        // the rows are few and all of them are composed, so a selection can span the table.
+        SelectionContainer {
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 12.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
@@ -649,6 +655,7 @@ fun StatsScreen(
                     )
                 }
             }
+        }
         }
     }
 }

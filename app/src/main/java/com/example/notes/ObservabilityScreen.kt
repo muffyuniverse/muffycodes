@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -155,22 +156,29 @@ fun ObservabilityScreen(
             } else {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
                     items(report.lines) { line ->
-                        // Monospace, because the columns line up: time, how long the
-                        // answer took, and what the event was. A proportional font
-                        // turns a table into a paragraph.
-                        Text(
-                            text = line,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontFamily = FontFamily.Monospace,
-                            color = if (line.contains(" FAIL ")) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 3.dp),
-                        )
+                        // **Selectable, one line at a time.** The operator asked for the app's text
+                        // to be copyable, and this screen is the one a person copies FROM: a failure
+                        // is a line they want to send somewhere. It is per item rather than around
+                        // the list because a `LazyColumn` composes only what is on screen, so a
+                        // selection spanning rows that are not composed cannot exist.
+                        SelectionContainer {
+                            // Monospace, because the columns line up: time, how long the
+                            // answer took, and what the event was. A proportional font
+                            // turns a table into a paragraph.
+                            Text(
+                                text = line,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = if (line.contains(" FAIL ")) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 3.dp),
+                            )
+                        }
                     }
                 }
             }

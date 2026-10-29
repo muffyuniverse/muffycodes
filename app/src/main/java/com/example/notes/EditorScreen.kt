@@ -14,6 +14,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -387,20 +388,25 @@ fun EditorScreen(
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState())
                         .padding(16.dp)
-                    if (isMarkdown(file)) {
-                        // The document's own folder, so a picture written beside the
-                        // note is the picture that appears.
-                        MarkdownBody(
-                            text = text,
-                            modifier = scrolling,
-                            baseDir = file.parentFile,
-                        )
-                    } else {
-                        Text(
-                            text = text,
-                            style = MaterialTheme.typography.bodyLarge,
-                            modifier = scrolling,
-                        )
+                    // **View mode is where a person copies from**, so it is selectable. Edit mode is
+                    // not: a selection there fights the text field's own cursor, and the field
+                    // already supports selecting and copying.
+                    SelectionContainer {
+                        if (isMarkdown(file)) {
+                            // The document's own folder, so a picture written beside the
+                            // note is the picture that appears.
+                            MarkdownBody(
+                                text = text,
+                                modifier = scrolling,
+                                baseDir = file.parentFile,
+                            )
+                        } else {
+                            Text(
+                                text = text,
+                                style = MaterialTheme.typography.bodyLarge,
+                                modifier = scrolling,
+                            )
+                        }
                     }
                 }
             }

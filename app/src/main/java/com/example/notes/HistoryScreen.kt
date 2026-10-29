@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -246,6 +247,10 @@ fun HistoryScreen(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
             ) { page ->
                 val version = versions.getOrNull(page)
+                // **Selectable, because a version is the thing a person copies.** Going back to an
+                // old version to read what it said is how the history is used, and the next thing
+                // they do is paste it somewhere.
+                SelectionContainer {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -276,6 +281,7 @@ fun HistoryScreen(
                             style = MaterialTheme.typography.bodyLarge,
                         )
                     }
+                }
                 }
             }
 
