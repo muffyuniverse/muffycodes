@@ -161,8 +161,10 @@ class RequestStatsTest {
 
         // **Both picks on the same minute is an empty interval, not a negative one.**
         val empty = RequestStats.interval(at(19, 30), at(19, 30))
+        // **An empty interval, not a negative one.** Two picks on the same minute is the natural
+        // way to ask for nothing, and the answer must be zero rather than a backwards span.
         assertEquals("no minutes", 0L, empty.minutes)
-        assertEquals("and no last millisecond before the first", -1L, empty.lastMs)
+        assertEquals("and it does not run backwards", empty.fromMs, empty.toMs)
     }
 
     @Test

@@ -37,8 +37,6 @@ object RequestStats {
         /** How many whole minutes it covers. An empty interval is zero, never negative. */
         val minutes: Long get() = if (toMs <= fromMs) 0 else (toMs - fromMs) / 60_000L
 
-        /** The last millisecond inside the interval, for comparing against a row. */
-        val lastMs: Long get() = toMs - 1
     }
 
     /**
