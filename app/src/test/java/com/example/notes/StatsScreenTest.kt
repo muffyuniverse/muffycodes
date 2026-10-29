@@ -31,10 +31,7 @@ import java.io.File
  * picture to notice.
  */
 @RunWith(RobolectricTestRunner::class)
-// **A real phone window, as the other screen tests use.** Without a size qualifier the
-// dialog lays out at Robolectric's tiny default and Material's date grid composes no day
-// cells at all - so a test could open the calendar, find `Show`, and find no days.
-@Config(sdk = [34], qualifiers = "w411dp-h891dp")
+@Config(sdk = [34])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class StatsScreenTest {
 
@@ -284,16 +281,13 @@ class StatsScreenTest {
         compose.onNodeWithText("Generated").assertExists()
         compose.onNodeWithText("Generate").assertDoesNotExist()
 
-        // Open the **date** picker for the start and commit a different day: the picks now differ
-        // from what was generated, so the button offers to act.
-        //
-        // The date rather than the dial, because a date is one tap away from the current one - the
-        // calendar opens on it and the day beside it is always present - while the dial needs a
-        // precise drag that a Robolectric tap cannot make.
-        compose.onAllNodesWithText("28 Oct 2026")[0].performClick()
+        // **The dial, not the calendar.** Material's date grid composes no day cells at
+        // Robolectric's default window size - opening the calendar finds `Show` and not one day of
+        // the month - and giving this class a phone-sized window would change the layout every other
+        // assertion here is about. The dial's hour stepper is a plain button and works at any size.
+        compose.onNodeWithText("00:00", substring = true).performClick()
         compose.waitForIdle()
-        // **The day cell, in the calendar's own grid.** `26` is the day before the fixture's 28th.
-        compose.onNodeWithText("26").performClick()
+        compose.onAllNodesWithText("+")[0].performClick()
         compose.onNodeWithText("Show").performClick()
         compose.waitForIdle()
 

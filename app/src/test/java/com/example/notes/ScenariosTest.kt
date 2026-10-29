@@ -42,9 +42,7 @@ import java.io.File
  * job is to say yes or no as fast as it can.
  */
 @RunWith(RobolectricTestRunner::class)
-// **A real phone window.** Without a size qualifier the calendar dialog lays out at
-// Robolectric's tiny default and Material's date grid composes no day cells at all.
-@Config(sdk = [34], qualifiers = "w411dp-h891dp")
+@Config(sdk = [34])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ScenariosTest {
 
@@ -804,16 +802,14 @@ class ScenariosTest {
             screen = { stats(account, now) },
         ) {
             before()
-            then("the start's **date** is opened and a different day committed with `Show`.") {
-                // The date rather than the dial: a day is one tap away from the current one, while
-                // the dial needs a precise drag that a Robolectric tap cannot make.
-                // **The first of the two**, because the default interval is today at both ends - so
-                // both buttons read the same date and only the From one is wanted.
-                compose.onAllNodesWithText("28 Oct 2026")[0].performClick()
+            then("`From` is opened, its hour moved on, and the pick committed with `Show`.") {
+                // **The DIAL, not the calendar.** Material's date grid composes no day cells at
+                // Robolectric's default window, and a class-level size qualifier changes every other
+                // scenario's screenshot. The dial works at any size: its hour stepper is a plain
+                // button and one tap moves the interval.
+                compose.onNodeWithText("00:00", substring = true).performClick()
                 compose.waitForIdle()
-                // **Named as a selectable, because a bare "26" is not unique in the calendar** - the
-                // year-navigation row can carry the same digits, and the day cell is the selectable one.
-                compose.onNodeWithText("26").performClick()
+                compose.onAllNodesWithText("+")[0].performClick()
                 compose.onNodeWithText("Show").performClick()
                 compose.waitForIdle()
             }
