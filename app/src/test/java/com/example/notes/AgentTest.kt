@@ -2605,9 +2605,13 @@ class AgentTest {
 
         // **A trigger above what the context now costs**, so the assertion is about the rule and
         // not about arithmetic: the same content, a limit it fits under, and no warning.
+        // **Room for the turn that is about to be measured**, not just the size as it stands. `now`
+        // is read before this new burst writes its own operator message, so a trigger of `now + 1`
+        // would be crossed by that message alone and the test would be asserting arithmetic rather
+        // than the rule. A thousand tokens of headroom is more than a line of operator text costs.
         val now = agent.size()
         val lenient = ContextBudget.Limits.of(
-            triggerAsked = now + 1,
+            triggerAsked = now + 1_000,
             hardAsked = 0,
             ceiling = 1_000_000,
         )
