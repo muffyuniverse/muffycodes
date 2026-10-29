@@ -66,6 +66,8 @@ class AccountsFeatureTest : FeatureTest() {
         assertTrue("and it is the provisional one", scene.viewModel.isProvisionalAccount)
         assertTrue("with a real workspace", scene.viewModel.workspace != null)
         assertFalse("but nobody is signed in to GitHub", scene.viewModel.signedIn)
+        // **No GitHub, deliberately.** Answering with an `HttpGitHub` would give every caller
+        // something that looks usable and sends unauthenticated requests to the internet.
         assertNull("so there is no GitHub to talk to", scene.viewModel.github)
         // Nothing of the person's yet: the system project is all a fresh provisional account has.
         assertTrue(

@@ -84,7 +84,11 @@ class RetentionFeatureTest : FeatureTest() {
 
     @Test
     fun `shortening the history does not touch a single file`() {
-        scene.project("Shopping")
+        // **A LOCAL project, because retention has nothing to do with GitHub.** This test needs a
+        // repository to shorten, not an account to push to - and since the provisional account has
+        // no GitHub behind it, asking for a GitHub project here was asking the wrong question. A
+        // local project is the same repository with the same history.
+        scene.localProject("Shopping")
         scene.open("Shopping")
         repeat(5) { scene.file("file_$it.txt", "round $it") }
         val file = scene.file("milk.txt", "two litres")

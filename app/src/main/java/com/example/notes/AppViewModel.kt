@@ -415,6 +415,11 @@ class AppViewModel @JvmOverloads constructor(
      * an account can be walked through without a key ever existing.
      */
     fun githubFor(login: String?): GitHub? {
+        // **The provisional account has no GitHub.** Its folder is a real workspace, but there is no
+        // account behind it, so answering with an `HttpGitHub` would give every caller something
+        // that looks usable and sends unauthenticated requests to the internet. `null` is the honest
+        // answer, and it is the one the screens already handle.
+        if (accounts.isProvisional(login)) return null
         val stored = accounts.account(login) ?: return null
         // A test account is a folder pretending to be GitHub. A build that may not
         // keep one refuses to act as one even if a stored account claims to be —

@@ -294,6 +294,21 @@ class Scenario(
      * Makes a project the way the screen does: a repository on the pretend
      * GitHub, then the folder and the clone. Waits until the folder is open.
      */
+    /**
+     * Makes a **local** project: a repository on this phone with no remote.
+     *
+     * The one a person can make without signing in, and the one most tests of version history want -
+     * they are about commits, not about GitHub.
+     */
+    fun localProject(name: String): Scenario {
+        viewModel.createLocalProject(name)
+        await("local project \"$name\" to exist") {
+            viewModel.projectNames.any { it.equals(name, ignoreCase = true) }
+        }
+        await("the making of $name to finish", 60_000) { !viewModel.busy }
+        return this
+    }
+
     fun project(name: String, licence: String = "mit"): Scenario {
         viewModel.createProject(name, licence)
         await("project \"$name\" to exist") {
