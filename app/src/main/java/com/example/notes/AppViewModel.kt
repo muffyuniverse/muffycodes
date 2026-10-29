@@ -475,20 +475,37 @@ class AppViewModel @JvmOverloads constructor(
         // project in view mode so that the operator can read how to use the app and what is possible
         // here"*.
         //
-        // **After `refresh()`, because the system folder is made there** - opening the file first
-        // would find nothing to open. And in the editor's VIEW mode rather than a bespoke reader,
-        // because the README is an ordinary markdown file in an ordinary project and the screen that
-        // reads one already exists.
-        if (!settings.readmeShown) {
-            workspace?.let { ws ->
-                val readme = File(ws.projectDir(Workspace.SYSTEM_PROJECT), Workspace.README)
-                if (readme.isFile) {
-                    settings.markReadmeShown()
-                    editingPath = ws.relative(readme)
-                    editorSession++
-                }
-            }
-        }
+        // **The introduction is opened by `openFirstRunReadme` and not here.** A property declared
+        // below this block is not initialised yet when `init` runs, and `editorSession` is one of
+        // them - writing to it from here is a compile error, which is the compiler saying the same
+        // thing. The call is posted instead, so it happens once everything above and below has been
+        // built.
+        main.post { openFirstRunReadme() }
+    }
+
+    /**
+     * Opens the system project's README, **once for the life of the install**.
+     *
+     * The report that asked for it: *"remove this sign in to begin text box. Instead I want on
+     * first open to move operator to readme.md file from system project in view mode so that the
+     * operator can read how to use the app and what is possible here"*.
+     *
+     * **VIEW mode, not the editor's default for a new file**, because the point is to read it. The
+     * editor already opens in view; this only chooses the file.
+     *
+     * **`refresh()` has already run**, so the system folder and its README exist by the time this
+     * is posted. If they somehow do not, nothing is marked as shown and the next launch tries
+     * again - the failure is "the introduction is late", never "the introduction is skipped".
+     */
+    private fun openFirstRunReadme() {
+        if (settings.readmeShown) return
+        val ws = workspace ?: return
+        val readme = File(ws.projectDir(Workspace.SYSTEM_PROJECT), Workspace.README)
+        if (!readme.isFile) return
+        settings.markReadmeShown()
+        Trace.note("first-run-readme", Workspace.SYSTEM_PROJECT)
+        editingPath = ws.relative(readme)
+        editorSession++
     }
 
     /**
