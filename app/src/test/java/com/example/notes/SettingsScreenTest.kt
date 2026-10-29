@@ -311,6 +311,28 @@ class SettingsScreenTest {
     }
 
     @Test
+    fun `the key row stops saying there is no key the moment one is kept`() {
+        // **The report was exact: "after setting the key, 'no openrouter key on this account yet'
+        // in agent block is still displayed".** The row read the key's state through a plain
+        // property, which gives Compose no reason to re-run it when a dialog writes a key - so the
+        // sentence stayed on screen after the key had been kept, which looks exactly like a key that
+        // did not take.
+        //
+        // **The screen is the claim, not the model.** Asserting `modelKeyState` changed would pass
+        // even if the row never redrew, which is the bug.
+        scene.viewModel.signIn("someone", "a-key", "Someone", "someone@example.com")
+        settings()
+        compose.onNodeWithText("No OpenRouter key yet", substring = true).assertExists()
+
+        // The key is written the way the dialog writes it, and the row must notice.
+        scene.viewModel.saveModelKey("sk-or-v1-a-key-that-reads-back")
+        compose.waitForIdle()
+
+        compose.onNodeWithText("No OpenRouter key yet", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("An OpenRouter key is kept", substring = true).assertExists()
+    }
+
+    @Test
     fun `a dev build names itself in the trace, so a report cannot be mistaken for a release`() {
         // **The build column is how a report is placed in time.** A dev build carries the live
         // trace, can make a test account, and is where a bug is actually found - so a log reading

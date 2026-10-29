@@ -438,7 +438,7 @@ class AgentLogTest {
         }
         val before = log.rows().size
 
-        val dropped = log.trimSession(limit = 1)
+        val dropped = log.trimSession(limitTokens = 1)
 
         val rows = AgentLog.open(project).rows()
         assertTrue("something went", dropped > 0)
@@ -465,7 +465,7 @@ class AgentLogTest {
             log.note("agent", "done")
         }
 
-        val dropped = log.trimSession(limit = 1_500)
+        val dropped = log.trimSession(limitTokens = 1_500)
 
         assertTrue("a limit of 1.5 KB keeps about 750 bytes, not 750 rows", dropped > 0)
         assertTrue(
@@ -482,7 +482,7 @@ class AgentLogTest {
         log.note("agent", "done")
         val before = sessionLines()
 
-        val dropped = log.trimSession(limit = 100)
+        val dropped = log.trimSession(limitTokens = 100)
 
         assertEquals("nothing dropped", 0, dropped)
         assertEquals("and the file is untouched", before, sessionLines())
@@ -497,7 +497,7 @@ class AgentLogTest {
         repeat(50) { n -> log.told("task $n " + "x".repeat(200)) }
         val before = sessionLines()
 
-        val dropped = log.trimSession(limit = 0)
+        val dropped = log.trimSession(limitTokens = 0)
 
         assertEquals("nothing dropped", 0, dropped)
         assertEquals("and every row is still there", before, sessionLines())
@@ -508,7 +508,7 @@ class AgentLogTest {
         log.told("a task")
         val before = sessionLines()
 
-        val dropped = log.trimSession(limit = AgentLog.SESSION_LIMIT)
+        val dropped = log.trimSession(limitTokens = AgentLog.SESSION_LIMIT)
 
         assertEquals("nothing dropped", 0, dropped)
         assertEquals("and the file is untouched", before, sessionLines())
@@ -614,7 +614,7 @@ class AgentLogTest {
         val before = log.rows().maxOf { it.id }
 
         // A limit small enough that the trim really drops rows.
-        val dropped = log.trimSession(limit = 400)
+        val dropped = log.trimSession(limitTokens = 400)
         assertTrue("the trim happened: dropped $dropped", dropped > 0)
         val after = log.rows()
         assertTrue("and it took the oldest", after.none { it.body == "task 1" })
