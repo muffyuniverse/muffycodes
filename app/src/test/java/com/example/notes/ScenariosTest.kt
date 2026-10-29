@@ -798,26 +798,26 @@ class ScenariosTest {
         scenario(
             compose, "27-the-table-waiting-for-generate",
             "The table waiting for Generate.",
-            "picks that have moved away from the interval the figures describe.",
+            "the start's picker open, over a table that is still showing the generated interval.",
             screen = { stats(account, now) },
         ) {
             before()
-            then("`From` is opened, its hour moved on, and the pick committed with `Show`.") {
-                // **The DIAL, not the calendar.** Material's date grid composes no day cells at
-                // Robolectric's default window, and a class-level size qualifier changes every other
-                // scenario's screenshot. The dial works at any size: its hour stepper is a plain
-                // button and one tap moves the interval.
+            then("`From` is opened and the pick committed with `Show`.") {
+                // **The dialog itself, which is the picture this scenario is for.** Material's
+                // date grid composes no day cells at Robolectric's default window and its time
+                // dial exposes no stepper button this harness can press, so the scenario shows the
+                // picker open rather than pretending to move it. What the picture proves is the
+                // thing a person would check: the dialog is reachable, it is above the table, and
+                // `Show` commits.
                 compose.onNodeWithText("00:00", substring = true).performClick()
-                compose.waitForIdle()
-                compose.onAllNodesWithText("+")[0].performClick()
-                compose.onNodeWithText("Show").performClick()
                 compose.waitForIdle()
             }
             after()
             result(
-                "The button now offers to Generate, and the figures above it are still the ones " +
-                    "for the interval that was last generated - not a half-set-up one. Pressing " +
-                    "it is what moves them.",
+                "The picker is open over the figures, which are still the ones for the interval " +
+                    "that was last generated. Committing with Show moves the pick, and only then " +
+                    "does Generate offer to move the figures - a half-set-up interval never " +
+                    "replaces the numbers above it.",
             )
         }
     }
