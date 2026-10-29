@@ -960,15 +960,18 @@ class Agent(
             // integer below it, so `targetAt` is zero - and "get it to off tokens" would be a
             // sentence about nothing. The ask is then simply "cut what does not serve the task",
             // which is the honest instruction when the app cannot name a size.
+            // **The two branches do not repeat each other.** The first names the size to reach and
+            // then says how far past it to go; the second has no size to name, so "cut what does not
+            // serve the task" *is* its instruction and the "further" clause would be the same
+            // sentence twice.
             if (target > 0L) {
                 append("Get it to ${ContextBudget.short(target)} tokens or less in this one ")
-                append("`forget` - then the app stops asking. ")
+                append("`forget` - then the app stops asking. Cut further if rows do not serve the ")
+                append("current task; anything unrelated to what you are doing now can go.")
             } else {
                 append("Cut what does not serve the current task in this one `forget` - then the ")
-                append("app stops asking. ")
+                append("app stops asking. Anything unrelated to what you are doing now can go.")
             }
-            append("Cut further if rows do not serve the current task; ")
-            append("anything unrelated to what you are doing now can go.")
             if (biggest.isNotEmpty()) {
                 // **The index, because the file cannot be read in one go.** A `read` of a large
                 // context stops at the tool's own limit, so a model deciding what to remove either

@@ -119,6 +119,11 @@ independent of it.
 
 ## 2. Reports from this trace, and their state
 
+> **This table is out of date.** It was written before the work landed and still says "open" about
+> items that are closed. The current state of every report is in
+> `AUDIT-2026-10-29-consolidated.md` §3; this section is kept only for the reasoning it records
+> about what each report *meant*.
+
 | # | Report | State |
 |---|---|---|
 | 1 | Make all text selectable, to copy to the clipboard | **open** |
