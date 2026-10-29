@@ -113,8 +113,9 @@ class AgentChatScreenTest {
             "and it holds the words: ${withWords.pages.last().body}",
             withWords.pages.last().body.contains("There is one file."),
         )
-        // The pager says there is more than one page, which is how a person knows to turn.
-        compose.onNodeWithText("1/2", substring = true).assertExists()
+        // **The message opens on its LAST page**, so the pager reads 2/2: a person arrives at the
+        // end of the conversation, and the closing words are where a conversation ends.
+        compose.onNodeWithText("2/2", substring = true).assertExists()
         // **The call is a PAGE of the agent's message, and the message opens on page 1.** So the
         // call's own caption is what is drawn, and the answer's page is a turn of the pager away -
         // which is the shape the operator asked for: a message holds its pages, not its neighbour's.
@@ -296,12 +297,13 @@ class AgentChatScreenTest {
         val pages = agent.flatMap { it.pages }
         assertTrue("every page has an id: ${pages.map { it.id }}", pages.all { it.id > 0 })
         assertTrue("and a time: ${pages.map { it.stamp }}", pages.all { it.stamp.isNotBlank() })
-        // **The footer is on the screen, not only in the model.** The first page's id is drawn.
-        compose.onNodeWithText("#${pages.first().id}", substring = true).assertExists()
+        // **The footer is on the screen, not only in the model.** The message opens on its LAST
+        // page, so that is the page whose id is drawn - and it is the closing words' row.
+        compose.onNodeWithText("#${pages.last().id}", substring = true).assertExists()
         // And it is the id of the row the person can find, not a position in the list.
-        assertEquals("the first page is the call the agent made", AgentLog.CALL, AgentLog.open(
+        assertEquals("and the last page is what the agent said", AgentLog.NOTE, AgentLog.open(
             File(scene.viewModel.workspace!!.accountDir, "groceries"),
-        ).rows().first { it.id == pages.first().id }.kind)
+        ).rows().first { it.id == pages.last().id }.kind)
     }
 
     @Test
