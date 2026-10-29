@@ -72,8 +72,22 @@ class AgentChatTest {
             )
         )
 
-        assertEquals("the newest one is the one on the screen", "second", box?.told)
-        assertEquals("and it has its own turns", 1, box?.turns?.size)
+        // **Both exchanges are in the list, and that is the change.** The box used to draw one
+        // conversation and make a person move to the one before; it is a list now, and the operator
+        // asked for it "from the beginning of the session log and to the last message". So `told`
+        // is the FIRST thing said - the list starts there - and the messages run to the end.
+        assertEquals("the list starts at the first thing said", "first", box?.told)
+        val messages = box!!.messages
+        assertEquals(
+            "every exchange is drawn: operator, agent, operator, agent",
+            listOf(
+                AgentChat.Side.OPERATOR, AgentChat.Side.AGENT,
+                AgentChat.Side.OPERATOR, AgentChat.Side.AGENT,
+            ),
+            messages.map { it.side },
+        )
+        assertEquals("the first thing said", "first", messages[0].body)
+        assertEquals("and the last", "second", messages[2].body)
     }
 
     @Test
@@ -260,7 +274,13 @@ class AgentChatTest {
 
         val box = AgentChat.box(rows)
 
-        assertEquals("the new conversation is the one on screen", "what about now", box?.told)
+        // The list starts at the first thing said; the second exchange is in it, after the first.
+        assertEquals("the list starts at the first thing said", "look", box?.told)
+        assertEquals(
+            "and the later question is in it too",
+            listOf("look", "what about now"),
+            box!!.messages.filter { it.side == AgentChat.Side.OPERATOR }.map { it.body },
+        )
         assertEquals("and it has no idle line of its own yet", null, box?.idle)
     }
 

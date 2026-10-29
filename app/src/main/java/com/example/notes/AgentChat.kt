@@ -215,11 +215,16 @@ object AgentChat {
      */
     fun conversation(rows: List<AgentLog.Row>): List<AgentLog.Row>? {
         val bursts = AgentLog.bursts(rows)
-        val start = bursts.indexOfLast { burst -> burst.any { it.kind == AgentLog.TOLD } }
+        val start = bursts.indexOfFirst { burst -> burst.any { it.kind == AgentLog.TOLD } }
         if (start < 0) return null
-        // Everything from that operator message to the end of the record: the conversation, the
-        // checks that followed it, and the checks still to come. A later operator message starts a
-        // burst of its own and is simply not included.
+        // **From the first operator message to the end of the record.** This used to drop everything
+        // before the *last* one, because the box drew one exchange at a time and a navigator moved
+        // between them. The box is a list now, and the operator asked for it "from the beginning of
+        // the session log and to the last message" - so every exchange is in it, and a person
+        // scrolls rather than pressing a button to find the one before.
+        //
+        // The trim still removes whole bursts from the front, so the first message here is wherever
+        // the record now begins rather than where the session did.
         return bursts.drop(start).flatten()
     }
 
