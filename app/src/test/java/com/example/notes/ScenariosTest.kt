@@ -446,6 +446,8 @@ class ScenariosTest {
         scene.saveAsVersion("one litre")
         scene.saveAsVersion("two litres")
         scene.closeEditor()
+        // How many reads had landed before the screen mounted, so the wait can be for the next one.
+        val readsBefore = viewModel.historyLoaded
 
         scenario(
             compose, "12-the-history-with-select",
@@ -455,6 +457,12 @@ class ScenariosTest {
             afterScreen = {
                 Screen { HistoryScreen(viewModel = viewModel, title = "milk.txt", onBack = {}) }
             },
+            // **A second screen that reads git to draw itself has a spinner as its first frame.**
+            // Without this the picture was the words "Reading the history..." under a caption about
+            // Select - the same mistake 09 already documents and this one repeated. The count is
+            // taken before the `then` block, which asks the view model for the list synchronously:
+            // only `requestVersions`, the screen's own call, bumps the counter.
+            ready = { scene.loaded(readsBefore + 1) },
         ) {
             before()
             then("The history is opened and the older version is stepped back to.") {
