@@ -119,7 +119,39 @@ class Background(
      * each other's result.
      */
     fun resultFile(project: File, call: Call): File =
-        File(File(File(project, AgentTools.RESULTS_DIR), "background_results"), "${call.tool}-${call.id}.txt")
+        File(
+            File(File(project, AgentTools.RESULTS_DIR), "background_results"),
+            "${call.tool}-${short(call.id)}.txt",
+        )
+
+    /**
+     * A call's id, shortened to **eight characters of base64url** — the operator's naming.
+     *
+     * The ids are the provider's, and a provider's tool-call id is not meant to be read:
+     * `read-chatcmpl-tool-a57ffbe6ee6c60ac.txt` is thirty-nine characters of which eight carry
+     * information. Reported: "why background results filenames are so insane? make them shorter,
+     * they should be named by hash 64base 8 numbers".
+     *
+     * **A digest rather than a slice of the id.** The first eight characters of `chatcmpl-tool-…`
+     * are `chatcmpl`, so slicing would name every file the same. SHA-256 of the whole id, base64url,
+     * eight characters: 48 bits, which is 2.8×10¹⁴ — two calls colliding in one project is not a
+     * thing that happens, and `-` and `_` are used rather than `+` and `/` because a filename with a
+     * slash in it is a directory.
+     *
+     * **The tool's name stays in front**, because a person reading a folder listing should be able
+     * to see what kind of result they are looking at without opening it.
+     */
+    internal fun short(id: String): String {
+        if (id.isEmpty()) return "0"
+        // **An id that is already a name is left alone.** The app's own call ids are `c1`, `c2` — a
+        // handful of characters a person can match against the row above — and hashing those would
+        // make every filename unreadable for no gain. What is shortened is the *provider's* id,
+        // which is long and carries no information a person can use.
+        if (id.length <= 12) return id
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(id.toByteArray(Charsets.UTF_8))
+        return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(digest).take(8)
+    }
 
     /**
      * Writes [body] so a reader sees either all of it or none of it.

@@ -90,7 +90,7 @@ class RequestStatsTest {
         assertEquals("and each is exact", "97.05%", StatsFormat.share(0.9705))
         assertEquals("the low end keeps its zeros", "0.05%", StatsFormat.share(0.0005))
         assertEquals("a share of nothing", "0.00%", StatsFormat.share(0.0))
-        assertEquals("a full share", "100.000%", StatsFormat.share(1.0))
+        assertEquals("a full share", "100.00%", StatsFormat.share(1.0))
         // **No share is not a share of zero.** A bucket with no input tokens has nothing to divide,
         // and printing "0.000%" would claim the cache missed when nothing was asked.
         assertEquals("absent, not zero", StatsFormat.NONE, StatsFormat.share(null))
