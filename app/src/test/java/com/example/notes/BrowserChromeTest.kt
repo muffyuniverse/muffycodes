@@ -24,6 +24,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 import java.io.File
 
 /**
@@ -40,6 +41,12 @@ import java.io.File
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w411dp-h891dp")
+// **Native graphics, and it is what makes a dialog testable at all.** `AlertDialog` composes into a
+// window of its own; under the default legacy graphics that window never draws, so every semantics
+// read waits for an idle that never arrives. `ScenariosTest` has always had this annotation, which is
+// why its thirteen window scenarios pass while this class's first one hung - the difference was never
+// the text field, the `Surface`, or the clock, all of which were tried and none of which mattered.
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
 class BrowserChromeTest {
 
     @get:Rule
