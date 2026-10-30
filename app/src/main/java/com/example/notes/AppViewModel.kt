@@ -2638,6 +2638,22 @@ class AppViewModel @JvmOverloads constructor(
      * here would be an estimate dressed as a measurement; the real totals arrive once, at the end.
      */
     var chatLive: String by mutableStateOf("")
+
+    /**
+     * **The words the agent is writing, as it writes them.**
+     *
+     * Separate from [chatLive], which is the one-line description for the corner. This is the reply
+     * itself, and the operator's report is the reason it exists: "it shouldnt be in the top bar at
+     * all, agent's messages should be in their own bubble, not inside the top bar of the screen".
+     *
+     * The app already had the text - `Streamed.said` - and threw it away except for its length, so a
+     * person watched a counter climb in the title bar and then saw the whole reply appear at once.
+     * The words belong where the finished ones go.
+     *
+     * **Cleared when the turn ends**, because the finished reply arrives as a row and drawing both
+     * would say it twice.
+     */
+    var chatWriting: String by mutableStateOf("")
         private set
 
     /**
@@ -2663,6 +2679,7 @@ class AppViewModel @JvmOverloads constructor(
         chatBox = null
         chatWorking = false
         chatLive = ""
+        chatWriting = ""
     }
 
     /**
@@ -2732,6 +2749,7 @@ class AppViewModel @JvmOverloads constructor(
             // turn is over the record holds the answer itself, and a live line left behind would be
             // a description of something that already finished.
             chatLive = ""
+        chatWriting = ""
             message = end.plainly()
             applyEnd(project, end, System.currentTimeMillis())
             refresh()
@@ -3159,7 +3177,13 @@ class AppViewModel @JvmOverloads constructor(
             // the door is built, so a turn run for the background draws nothing and costs nothing;
             // and it is handed the stream itself rather than a number, so the count it shows is
             // always the one that just arrived.
-            door.listener = { stream, elapsed -> chatLive = stream.shape(elapsed) }
+            door.listener = { stream, elapsed ->
+                chatLive = stream.shape(elapsed)
+                // **The words, not just their length.** `said` is what has arrived; the corner keeps
+                // the shape. A `StringBuilder` is read here rather than in the composable so the
+                // screen only ever sees an immutable value.
+                chatWriting = stream.said.toString()
+            }
         }
     })(model)
 

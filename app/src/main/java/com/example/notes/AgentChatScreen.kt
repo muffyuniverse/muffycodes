@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -248,25 +250,19 @@ fun AgentChatScreen(
                     )
                 } },
                 actions = {
-                    if (viewModel.chatWorking) {
-                        // **Elapsed and produced, and never a percentage.** There is no denominator:
-                        // nobody knows how long an answer will be until it has finished, so a bar
-                        // would imply a proportion the app cannot know. What it can say is how long
-                        // this has been going on and how much has arrived, and both are measured.
-                        //
-                        // **It is a description, not a progress bar**, and it is written in the
-                        // same place the word "working" used to be - one line, in the corner, where
-                        // a person glancing at the phone finds it and a person reading the answer
-                        // is not distracted by it.
-                        Text(
-                            viewModel.chatLive.ifBlank { "working" },
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier
-                                .padding(end = 8.dp)
-                                .testTag("chat-live"),
-                        )
-                    }
+                    // **Nothing about the reply in the top bar.** The operator's report: "it
+                    // shouldnt be in the top bar at all, agent's messages should be in their own
+                    // bubble, not inside the top bar of the screen".
+                    //
+                    // A line was drawn here - elapsed seconds, characters, calls, tokens - and it
+                    // grew as the reply did, taking width from the title. Worse, it was the *only*
+                    // sign of what the agent was saying: a person watched a counter climb in the
+                    // corner and then the whole reply appeared at once, which reads as the app
+                    // squeezing a message into the title bar. The words are a bubble now, where the
+                    // finished ones go, and the bar says nothing while it works.
+                    //
+                    // The measurements are not lost - `chatLive` is still written, and the trace
+                    // carries them. They are simply not the top bar's business.
                     // **Reset clears the working context and keeps the evidence.** No dialog:
                     // nothing is lost — the session log is the record of what happened — and the
                     // one thing a person needs to know afterwards is said in the sentence under
@@ -395,6 +391,22 @@ fun AgentChatScreen(
                                 },
                             )
                         }
+                        // **The reply being written, as a bubble where it will end up.**
+                        // The operator's report: "agent's messages should be in their own bubble,
+                        // not inside the top bar of the screen". A finished reply is a row in the
+                        // record and arrives here as a message; while it is being written there is
+                        // no row yet, so it is drawn from `chatWriting` and disappears the instant
+                        // the row arrives - which is why it is the same bubble shape rather than
+                        // something special.
+                        //
+                        // **No pager, no caption, no footer**, because none of those exist until the
+                        // turn ends: a page count for a reply that is still growing would change
+                        // under the person's eyes.
+                        if (viewModel.chatWorking && viewModel.chatWriting.isNotBlank()) {
+                            item(key = "writing") {
+                                WritingBubble(viewModel.chatWriting)
+                            }
+                        }
                         if (box.idle != null) {
                             item {
                                 Text(
@@ -469,10 +481,32 @@ fun AgentChatScreen(
         var at by remember(open.message.id) { mutableStateOf(open.at.coerceIn(0, (pages.size - 1).coerceAtLeast(0))) }
         val shown = pages.getOrNull(at)
         Surface(modifier = Modifier.fillMaxSize()) {
-            Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    // **Below the status bar, not behind it.** The operator's report: "on message
+                    // fullscreen view top bar buttons are too high, they are partly covered by
+                    // system bar. move them a little down".
+                    //
+                    // This screen draws its own row instead of a `TopAppBar`, and a bare
+                    // `padding(16.dp)` counts from the window edge - which on a device with a
+                    // status bar or a camera cutout is *under* them. The Scaffold on the screen
+                    // behind it handles this; this overlay covers that Scaffold, so it has to ask
+                    // for the same inset itself.
+                    .windowInsetsPadding(WindowInsets.statusBars)
+                    .padding(16.dp),
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    // **A page's caption is a tool name, and this is not a tool.** The operator's
+                    // report: "and what is this 'create' text at fullscreen view?" - "create" is
+                    // the agent's `create` tool, which is what the page IS, and beside a Close
+                    // button on a full-screen view it reads as a verb the person could press.
+                    //
+                    // The caption stays, because knowing which call produced the text is the point
+                    // of the page. It is no longer alone: the row now says whose page it is, so
+                    // "create" cannot be mistaken for an action.
                     Text(
-                        shown?.caption ?: "message",
+                        "Agent · " + (shown?.caption ?: "message"),
                         style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier.weight(1f),
                     )
@@ -537,6 +571,38 @@ fun AgentChatScreen(
  */
 /** What the fullscreen view is showing: one message, at one of its pages. */
 private data class Fullscreen(val message: AgentChat.Message, val at: Int)
+
+/**
+ * **The agent's reply while it is still being written.**
+ *
+ * The same surface, ink and shape as a finished agent message, because it becomes one - a person
+ * should not see the text jump from one style to another at the moment the turn ends. What it does
+ * not have is any of the furniture that needs a finished row: no caption (there is no tool name
+ * yet), no pager (a page count for a growing reply would change under your eyes), no footer (no id,
+ * no cost).
+ *
+ * **A caret at the end**, because the difference between "still writing" and "stopped mid-sentence"
+ * is the only thing the shape alone cannot say.
+ */
+@Composable
+private fun WritingBubble(text: String) {
+    val ink = MaterialTheme.colorScheme.onSurfaceVariant
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .wrapContentWidth(Alignment.Start)
+            .widthIn(max = 340.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = ink,
+        )
+    }
+}
 
 /**
  * One arrow of the pager: an icon in a button a finger can actually hit.
