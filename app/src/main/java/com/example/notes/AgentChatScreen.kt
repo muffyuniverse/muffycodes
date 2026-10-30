@@ -616,7 +616,20 @@ private fun MessageRow(
             .widthIn(max = 340.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(surface)
-            .animateContentSize()
+            // **The height animation belongs to the agent's bubble, not the person's.**
+            //
+            // A person's message never changes height: it is one `Text`, it has no pages, and it
+            // does not grow while the agent works. The animation was therefore doing nothing
+            // visible - but it is a layout modifier that re-lays out on every pass, and the
+            // operator's report is "text selection is broken for user messages". That modifier is
+            // the one structural difference between their bubble and the agent's, which selects
+            // fine.
+            //
+            // **Said plainly: I could not reproduce this in the test suite.** Text selection is a
+            // platform long-press gesture and Robolectric does not perform it, so this is a change
+            // to the one difference I can see rather than a verified fix. If selection is still
+            // broken on the next build, the cause is elsewhere and I will need the trace.
+            .then(if (mine) Modifier else Modifier.animateContentSize())
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
