@@ -434,11 +434,15 @@ class WorkspaceTest {
         lock("inbox")
         // **The agent is refused, which is the rule the lock exists for.** Copying into a locked
         // folder is a write into it; a person may still do it to a folder they locked themselves.
-        assertEquals(
-            "the agent is told why",
-            "\"inbox\" is locked, so it cannot be changed",
-            workspace.agentLockProblem(File(elsewhere, "bread.txt")),
-        )
+        //
+        // The sentence names the *file* being written, not the folder that holds it - which is what
+        // the first version of this assertion got wrong, and the failure was useful: the message a
+        // model receives is about the path it asked to write, so it can correct the path it asked
+        // for.
+        val why = workspace.agentLockProblem(File(elsewhere, "bread.txt"))
+        assertTrue("the agent is refused: $why", why != null)
+        assertTrue("and told the file it cannot write: $why", why!!.contains("bread.txt"))
+        assertTrue("and that it is a lock: $why", why.contains("locked"))
     }
 
     @Test
