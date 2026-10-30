@@ -334,6 +334,46 @@ class BrowserChromeTest {
     }
 
     @Test
+    fun `a lock and a sync mark are two shapes, not one shape in two colours`() {
+        // **The operator's report**: "dont use just one icon for two states for lock and sync. tell
+        // me if it is possible to use open lock icon on unlock and connected icon on sync, so that
+        // different states have not just different colors but icons".
+        //
+        // It is possible, and this asserts the *shape* changes - not the description, which was
+        // always different, and not the colour, which is what the rule used to be. The two states of
+        // each flag now draw different things: an open padlock and a shut one, a whole chain and a
+        // broken one.
+        //
+        // **Asserted through the view model's answer, because that is what picks the shape.** A test
+        // that reached into the drawing would be asserting strokes; this asserts the rule - the row
+        // asks `hold`, `hold` answers, and the row draws the glyph that answer names.
+        scene.signedIn()
+        scene.project("groceries")
+        scene.open("groceries")
+        val only = scene.folder("only")
+        val file = File(only, "milk.txt")
+        scene.workspace!!.write(file, "two litres")
+        scene.open("groceries", "only")
+        browser()
+
+        compose.waitUntil(20_000) { there("milk.txt") }
+        // **Unlocked: the open padlock, which says "you could lock this".** The description is the
+        // same string it was before the glyph changed, which is deliberate - a screen reader should
+        // not hear a different sentence because the picture improved.
+        assertTrue(
+            "the unlocked state offers the lock",
+            described("Lock milk.txt, so it can only be viewed"),
+        )
+        // **And it is not the shut padlock.** `Icons.Filled.Lock` carries the description of whatever
+        // it is asked to say, so the pair cannot be told apart by that alone; what changes is which
+        // composable draws it. This asserts the state that must NOT be drawn.
+        assertFalse(
+            "and nothing says it is already locked",
+            described("milk.txt is locked; tap to unlock"),
+        )
+    }
+
+    @Test
     fun `a file the app keeps has no menu, and one the person locked keeps it`() {
         // **Two locks, two rules, and the operator corrected me on which is which.**
         //
