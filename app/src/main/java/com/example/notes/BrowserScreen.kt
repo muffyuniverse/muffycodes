@@ -515,6 +515,20 @@ fun SlimRow(
     onSync: () -> Unit,
     /** Offered only where a screen can open the window: the browser, which is the project. */
     onSeeChanges: (() -> Unit)? = null,
+    /**
+     * Whether this project has a remote to sync with.
+     *
+     * **A local project has none, so the row offers nothing to send it to.** The operator's report
+     * from the live log: "local projects shoudnt show sync row - hide it for them". The strip was
+     * drawing a Sync button for every project because it had no idea which kind it was looking at -
+     * so a local project showed a button whose only possible answer was "there is nowhere to send
+     * this", and a person pressing it learned nothing.
+     *
+     * The count and "up to date" still show: what changed is a fact about the project whether or not
+     * it has somewhere to go, and hiding it would take away the one thing on the strip that is true
+     * for both kinds.
+     */
+    hasRemote: Boolean = true,
 ) {
     Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
         Row(
@@ -549,24 +563,34 @@ fun SlimRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Spacer(Modifier.width(8.dp))
-            if (busy) {
-                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-            } else if (changes > 0) {
-                // **A button that would do nothing says so.** Sync with nothing changed is a
-                // request with no answer, and a person pressing it cannot tell "already up to
-                // date" from "it did not work".
-                //
-                // **And no number on it.** The count was on the button for a while, and it
-                // read as a second, competing number beside the one in the row. Reported from
-                // the live log: "and why sync button itself started to show a number? remove
-                // it". The row already says how many; the button says what pressing it does.
-                Button(
-                    onClick = onSync,
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
-                ) { Text("Sync") }
-            } else {
-                TextButton(onClick = onSync, enabled = false) { Text("Sync") }
+            // **Nothing at all when there is nowhere to sync to**, rather than a disabled button:
+            // a greyed Sync reads as "not now", and the truth is "never, this project is local".
+            // The ⋮ menu already offers "Put on GitHub…" for exactly this state, so the act a
+            // person would want is one tap away and does not need a second control here.
+            //
+            // The count and "up to date" still show. What changed is a fact about the project
+            // whether or not it has somewhere to go, and it is the one thing on the strip that is
+            // true of both kinds.
+            if (hasRemote) {
+                Spacer(Modifier.width(8.dp))
+                if (busy) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                } else if (changes > 0) {
+                    // **A button that would do nothing says so.** Sync with nothing changed is a
+                    // request with no answer, and a person pressing it cannot tell "already up to
+                    // date" from "it did not work".
+                    //
+                    // **And no number on it.** The count was on the button for a while, and it
+                    // read as a second, competing number beside the one in the row. Reported from
+                    // the live log: "and why sync button itself started to show a number? remove
+                    // it". The row already says how many; the button says what pressing it does.
+                    Button(
+                        onClick = onSync,
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+                    ) { Text("Sync") }
+                } else {
+                    TextButton(onClick = onSync, enabled = false) { Text("Sync") }
+                }
             }
         }
     }
@@ -1075,6 +1099,7 @@ fun ProjectSlimRow(viewModel: AppViewModel, onSync: (String) -> Unit) {
         busy = viewModel.busy,
         onSync = { onSync(project) },
         onSeeChanges = { viewModel.openChanges(project) },
+        hasRemote = !viewModel.isLocalProject(project),
     )
     HorizontalDivider()
 }

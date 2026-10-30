@@ -171,6 +171,32 @@ class BrowserChromeTest {
     }
 
     @Test
+    fun `a local project has no sync button, because there is nowhere to send it`() {
+        // **The operator's report, from the live log**: "local projects shoudnt show sync row - hide
+        // it for them". They were looking at a local project's strip, which drew Sync because the
+        // row had no idea which kind of project it was over - so the only possible answer to the
+        // press was "there is nowhere to send this".
+        //
+        // **A local project still shows its count**, and that is the half worth keeping: what
+        // changed is a fact about the project whether or not it has a remote, and hiding it would
+        // take away the one thing on the strip that is true of both kinds.
+        scene.signedIn()
+        scene.localProject("Shopping")
+        val made = scene.made("Shopping")
+        scene.worktreeFile("milk.txt", "two litres")
+        scene.viewModel.refreshChanges()
+        scene.await("the change to be counted", 20_000) {
+            scene.viewModel.changesOf(made) > 0
+        }
+        scene.open(made)
+        browser()
+
+        compose.waitUntil(20_000) { there("See 1 change") }
+        assertTrue("the count is still there", there("See 1 change"))
+        assertFalse("and there is no Sync to press", there("Sync"))
+    }
+
+    @Test
     fun `sync cannot be pressed when nothing has changed`() {
         scene.signedIn()
         scene.project("groceries")
