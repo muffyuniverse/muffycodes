@@ -44,6 +44,66 @@ interface Door {
  */
 class Refused(val code: Int, message: String) : IllegalStateException(message)
 
+/**
+ * Why a request failed, **and therefore which hand fixes it.**
+ *
+ * The operator's rule, stated while fallback was being built: "openrouter specific errors (like not
+ * enough balance or access denied) dont trigger fallback (they should trigger reconnection)".
+ *
+ * That is the whole distinction, and it is a distinction about *whose* problem it is:
+ *
+ * - **[Account]** — an empty balance, a refused key, a model this key may not use. Another endpoint
+ *   cannot fix any of these, because the account is the thing that is wrong. Trying the next one
+ *   would spend a request to learn the same fact, and would report the second endpoint's answer
+ *   instead of the real cause. These reconnect: the app retries the same endpoint on its ladder
+ *   until the window closes, because the ordinary cause is a transient refusal or a key that was
+ *   briefly unreadable, and either can clear.
+ *
+ * - **[Endpoint]** — a timeout, a 5xx, a rate limit, a provider that dropped the connection. The
+ *   account is fine and this particular endpoint is not, so another one may well answer. These fall
+ *   back.
+ *
+ * - **[Nothing]** — a failure that says nothing about either, such as a socket that would not open
+ *   because the phone has no network. Falling back would be several endpoints all failing for the
+ *   same reason; it reconnects, which is what "the network came back" means.
+ *
+ * **403 is in [Account] deliberately**, and it is the one worth arguing about: OpenRouter returns it
+ * for a key without access to a model as well as for a moderation refusal, and both are facts about
+ * the account rather than about the endpoint. A person who sees "access denied" on endpoint one will
+ * see it on endpoint two, because the gate is in front of all of them.
+ */
+enum class Failure(val because: String) {
+    ACCOUNT("the account"),
+    ENDPOINT("the endpoint"),
+    NOTHING("nothing in particular"),
+}
+
+/**
+ * Which of those a throwable is.
+ *
+ * A `Refused` carries the provider's code, which is the only reliable signal: the message is prose
+ * and prose changes. Anything else is a transport failure unless it says otherwise.
+ */
+fun classify(t: Throwable): Failure {
+    val code = (t as? Refused)?.code ?: (t.cause as? Refused)?.code
+    if (code != null) return when (code) {
+        // **The account.** 401 no key, 402 no money, 403 not allowed, 404 the model is not one this
+        // key can see. All four follow the key, not the endpoint.
+        401, 402, 403, 404 -> Failure.ACCOUNT
+        // **The endpoint.** 408 the provider timed out, 429 the provider is rate limiting us, 5xx it
+        // broke. Another endpoint is a different machine with its own queue and its own health.
+        408, 429, in 500..599 -> Failure.ENDPOINT
+        // A 400 is a request the app built wrongly, and every endpoint will say so. Falling back
+        // would multiply the same complaint by the number of endpoints allowed.
+        else -> Failure.NOTHING
+    }
+    // **A stall or an ack timeout is the endpoint's**, and it is the case the operator asked about
+    // by name: nothing came back before the clock ran out, which is a fact about this provider
+    // right now. It is also the commonest reason to want a second one.
+    if (t is Idle || t is Unacknowledged) return Failure.ENDPOINT
+    return Failure.NOTHING
+}
+
 /** One thing said in a burst. */
 data class Msg(
     val role: String,
@@ -205,6 +265,18 @@ class OpenRouterDoor(
     private val key: () -> String?,
     private val model: String,
     private val provider: String,
+    /**
+     * The endpoints to try, **in the person's order**, when the pinned one cannot answer.
+     *
+     * Empty by default, which means "the pinned endpoint only" - the behaviour every existing
+     * caller and test already has. The wiring passes the model's own list, and [provider] is where
+     * the walk starts: the person's selection is the first attempt, never a separate thing from the
+     * order they arranged.
+     *
+     * **Only [Failure.ENDPOINT] failures move on.** See [classify]: an empty balance is not fixed by
+     * a different endpoint, and the operator said so explicitly.
+     */
+    private val fallbacks: List<String> = emptyList(),
     private val effort: String,
     private val timeoutMs: Int = 120_000,
     /**
@@ -264,10 +336,40 @@ class OpenRouterDoor(
      * returns is the same shape a non-streamed one would have been — the difference is that it was
      * assembled instead of parsed, and that the listener saw it happen.
      */
-    override fun turn(request: Request): Result<Reply> =
-        // **Outside the try**, because the failure path writes a row too and needs the start time.
-        // Declared inside, it was out of scope exactly where a stall is recorded.
-        turnFrom(request, System.currentTimeMillis())
+    override fun turn(request: Request): Result<Reply> {
+        // **One endpoint, then the next, but only for a failure the next one could fix.**
+        //
+        // The order is the person's: `fallbacks` is the model's own list in the order they arranged
+        // it, and the selected provider is where it starts. A list that does not contain the
+        // selected provider - a config edited by hand - still tries the selected one first, because
+        // the pin is a choice and the order is a preference.
+        //
+        // **Nothing is retried here.** Reconnection is the session's ladder, which knows how long an
+        // outage has gone on; this only decides whether a *different machine* is worth asking. An
+        // account failure returns immediately with the provider's own words, so the person reads
+        // "insufficient balance" rather than the last endpoint's unrelated complaint.
+        val tried = LinkedHashSet<String>()
+        tried.add(request.provider)
+        tried.addAll(fallbacks)
+        var last: Throwable? = null
+        for (endpoint in tried) {
+            // **Outside the try**, because the failure path writes a row too and needs the start
+            // time. Declared inside, it was out of scope exactly where a stall is recorded.
+            val began = System.currentTimeMillis()
+            val attempt = if (endpoint == request.provider) request
+            else request.copy(provider = endpoint)
+            val outcome = turnFrom(attempt, began)
+            val problem = outcome.exceptionOrNull() ?: return outcome
+            last = problem
+            if (classify(problem) != Failure.ENDPOINT) return outcome
+            // Said on the trace, because "it worked" and "it worked on the third endpoint" are the
+            // same picture on the screen and different histories for the bill.
+            Trace.note("agent-fallback", "$model · $endpoint failed, trying the next")
+        }
+        return Result.failure(
+            last ?: IllegalStateException("The model could not be asked"),
+        )
+    }
 
     private fun turnFrom(request: Request, began: Long): Result<Reply> = try {
         val stream = Streamed()

@@ -3040,6 +3040,11 @@ class AppViewModel @JvmOverloads constructor(
             keyState = { activeLogin?.let { credentials.modelKeyState(it) } ?: KeyState.NONE },
             model = active.model,
             provider = active.provider,
+            // **The model's own endpoints, in the order the person arranged them.** This is the
+            // fallback list and nothing else uses it: `provider` above is still the pin, so the
+            // first attempt is always the endpoint they selected. A failure the account owns -
+            // an empty balance, a refused key - never walks this list; see `classify`.
+            fallbacks = modelConfig.providersOf(active.model),
             effort = active.effort,
             // **The person's numbers, not the app's.** A slow network is a fact only they know, and
             // a timeout that is too short turns a long turn into a ladder of retries that never let

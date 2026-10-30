@@ -210,12 +210,13 @@ class SettingsScreenTest {
         // is the thing that must not drift out of step with it.
         settings()
 
-        compose.onNodeWithText("AGENT").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Everything between this rule", substring = true)
-            .performScrollTo()
-            .assertIsDisplayed()
+        // **"CHAT AGENT", not "AGENT"**, and the sentence under it is gone: the operator removed the
+        // "one model, one key..." row because it described the block's scope to somebody looking at
+        // the block, and the two heavier rules already say where it begins and ends. So what is
+        // left to pin is the title and the first thing the block does not own.
+        compose.onNodeWithText("CHAT AGENT").performScrollTo().assertIsDisplayed()
         // The first thing the block does not own. It is on the same screen and after the block's
-        // closing rule, which is what the sentence above promises.
+        // closing rule, which is what the rules promise.
         compose.onNodeWithText("Reminders").performScrollTo().assertIsDisplayed()
     }
 
@@ -257,7 +258,10 @@ class SettingsScreenTest {
         // them: "back to defaults should be the last element on the settings list".
         settings()
 
-        compose.onNodeWithText("Agent chat").performScrollTo().assertIsDisplayed()
+        // **"CHAT", not "Agent chat"**, so the pair of names reads as two things rather than one
+        // and a part of it: the operator asked for "Agent" to become "Chat agent" and "Agent chat"
+        // to become "Chat".
+        compose.onNodeWithText("CHAT").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("A message may be this many lines", substring = true)
             .performScrollTo()
             .assertIsDisplayed()
