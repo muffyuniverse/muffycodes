@@ -170,15 +170,25 @@ Nothing was left as a silent gap.
 - `docs/agent-context-and-loop.md` — rewritten for the one-record model.
 - The tap vocabulary and the test map, extended with the new element and the four new controls.
 
-### What is open, and needs the operator
+### What was open when this was written — and what became of each
+
+**Nothing here is an outstanding report.** This audit was written while the feature was being built;
+each question below has since been answered by the operator or by the code, and the answer is
+recorded so a reader does not file it again.
 
 - **The `gap` threshold.** Three poll intervals (twelve minutes). Shorter and every late wake is a
   row; longer and a real Doze window is missed. It is one constant (`AgentSession.GAP_MS`).
+  **Settled: the constant stands, and the gap writes its own row** rather than being folded into the
+  ping that followed it.
 - **`BY_THE_PHONE` is gone.** If a "the phone stopped this" *state* is wanted after all, it needs a
   rule for what happens when the session comes back — and that rule has to be compatible with
   "never stop until the operator removes it". The audit's answer was the row, not the state.
+  **Settled: the row, not the state** — `StopReason` carries `BY_OPERATOR` alone.
 - **The search scans up to 2,000 files and 2 MB per file.** A project big enough to pass that is a
   project where the agent should narrow the path instead. Both are constants in `AgentTools`.
+  **Settled: the constants stand**, and the refusal names the limit so the agent narrows the path.
 - **`ask` and `conclude` write a `CALL` row** as well as the `ASK`/`CONCLUDE` row. It is not drawn
   and not sent; it is there so the record says the tool was called. If the record should say it
   once, the `CALL` row is the one to drop.
+  **SUPERSEDED: both tools are gone.** A turn now ends when the model speaks and calls nothing
+  (`wordsWithoutCalls`), so there is no `ASK`/`CONCLUDE` row to duplicate.

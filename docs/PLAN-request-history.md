@@ -1,5 +1,10 @@
 # The request history, and who owns which number
 
+> **COMPLETE — this is history, not a work list.** Everything specified here is in the app; the
+> reasoning is kept because it is not recoverable from the code. The current state of every report
+> is in `AUDIT-2026-10-29-consolidated.md` §3. See `docs/README.md` for which document is true.
+
+
 Status: **agreed 2026-10-28**, partly built — see §7. This file records what was accepted and nothing else. Where a
 proposal was dropped, it says so and why — a plan that silently keeps a rejected idea is how a
 defect gets built twice.

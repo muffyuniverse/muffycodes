@@ -214,9 +214,14 @@ ask for, and neither is a bug:
 5. ~~The chat rebuild~~ — done (`f8068bc` through `8f4772d`). `PLAN-chat.md` has every step marked.
 6. ~~Diff mode~~ — done (`4e297b2`), ahead of streaming because the report that asked for it was
    still open and the editor is not waiting on the transport.
-7. **Streaming** — `PLAN-streaming.md`, and the only item left. Parts 1-2 are done (`fea602d`: the
-   pure `Streamed` parser, three recorded fixtures, `StreamTest`); what remains is wiring it behind
-   `Door.exchange`, the three timeouts, the live footer numbers, and `exclude: false`.
+7. ~~**Streaming**~~ — done, and `PLAN-streaming.md` is now history. All four parts landed: the
+   parser (`fea602d`), the wiring behind `Door.exchange`, the three timeouts, the live footer
+   numbers, and `exclude: false` (`Door.kt:365` — reasoning is streamed, shown apart from what the
+   model said, and never sent back as its own words).
+
+**Nothing in this plan is left.** Every item above is struck through with its commit, and the two
+audits of 2026-10-29 (`AUDIT-2026-10-29-consolidated.md` for the reports, `AUDIT-2026-10-29.md` for
+the record) agree. A plan that still reads as a work list is how a finished thing gets rebuilt.
 
 **Why streaming is last:** it is the only thing left, and everything it feeds is a number the footer
 already leaves out when it is unknown. A zero would be a lie; a missing part is the truth.

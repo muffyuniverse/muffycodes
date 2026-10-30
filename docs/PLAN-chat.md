@@ -1,5 +1,10 @@
 # The chat: bubbles, pages, and what a footer says
 
+> **COMPLETE — this is history, not a work list.** Everything specified here is in the app; the
+> reasoning is kept because it is not recoverable from the code. The current state of every report
+> is in `AUDIT-2026-10-29-consolidated.md` §3. See `docs/README.md` for which document is true.
+
+
 Report 36, with the operator's answers of 2026-10-27 folded in. This is the specification for the
 chat rebuild, and the reason each decision is what it is.
 

@@ -1,5 +1,10 @@
 # The chat: what the operator specified, in full
 
+> **COMPLETE — this is history, not a work list.** Everything specified here is in the app; the
+> reasoning is kept because it is not recoverable from the code. The current state of every report
+> is in `AUDIT-2026-10-29-consolidated.md` §3. See `docs/README.md` for which document is true.
+
+
 Written 2026-10-29 from the operator's own words, in two corrections. This is the authority for the
 chat rebuild; `PLAN-chat.md` (report 36) is the round it corrects, and `PLAN-trace-2026-10-29.md` §1
 is where it sits in the queue.

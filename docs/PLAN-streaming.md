@@ -1,5 +1,10 @@
 # Streaming, and what the footers say while it happens
 
+> **COMPLETE — this is history, not a work list.** Everything specified here is in the app; the
+> reasoning is kept because it is not recoverable from the code. The current state of every report
+> is in `AUDIT-2026-10-29-consolidated.md` §3. See `docs/README.md` for which document is true.
+
+
 Two things that belong together, because the second is what makes the first worth having: streaming
 gives you a **signal**, and the footer is where a person **sees** it.
 

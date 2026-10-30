@@ -1,9 +1,14 @@
 # What the trace asks for, and what to do about it
 
 Written from `Download/MuffyCodes log/trace.log (2).txt` (dev-3a70b7d, 13:17–16:26) plus the
-operator's corrections of 2026-10-29. Every item is either **done** (with the commit), **open**, or
-**blocked** on a decision. Nothing is listed as done on the strength of "the code exists" — the
-evidence column says how it was checked.
+operator's corrections of 2026-10-29.
+
+> **COMPLETE — every item in this plan is built, and this is history, not a work list.** It was
+> written before the work landed, so it reads in the future tense about things that are now in the
+> app. §3's four items were all decided and built the same day: defaults → `6ebc015`, session length
+> → `0b1bb93`, the local↔synced cycle → `5e4745c`, text selection → `f5156a5`. The state of every
+> report is in `AUDIT-2026-10-29-consolidated.md` §3, which is the only file that claims to know.
+> Read this one for *what each report meant*, which is not recoverable from a status column.
 
 ---
 
@@ -158,16 +163,26 @@ state column and is the reason the item was filed at all.
 
 ---
 
-## 3. The four open items that need a decision before code
+## 3. The four items that needed a decision before code — all four decided and built
 
-### 3.1 Where do defaults live? (report 25)
+**Kept as written, because the decisions are the content.** Each heading below is the question that
+was open at the time; each answer is in the heading's note, so a reader cannot mistake this for a
+list of outstanding work.
+
+### 3.1 Where do defaults live? (report 25) — **BUILT** `6ebc015`
+
+**Answer: a single set of `DEFAULT_*` constants, used by the read site and by `reset()`.** There is
+one statement of each number, which is what the question was actually about.
 
 Asked in the report itself. Today every setting's default is a Kotlin literal at its read site
 (`SettingsStore`), so "reset to defaults" would have to re-state each one — a second copy that can
 drift. The honest answer is a single `Defaults` object that both the read site and the reset use, so
 there is one statement of each number. **Recommendation: do that, then the button is four lines.**
 
-### 3.2 Session length in tokens (report 10)
+### 3.2 Session length in tokens (report 10) — **BUILT** `0b1bb93`, `fef513e`
+
+**Answer: the bubble unit is the burst, and the size is a memo keyed by the file's length and
+mtime** — so the trim deletes whole bursts and no rescan is needed.
 
 The field is easy; the behaviour is not. Deleting "the oldest bubble" needs the bubble unit, which
 is §1. Doing this before the regrouping would delete per-call rows while the person thinks in turns.
@@ -177,7 +192,10 @@ The KV cache for sizes (report 11) is a real design: a running total per file, a
 append and every deletion, so the size column is O(1) instead of a rescan. Worth doing, but it is
 only a performance fix — the screen is correct without it.
 
-### 3.3 The local↔synced cycle (report 19)
+### 3.3 The local↔synced cycle (report 19) — **BUILT** `5e4745c`
+
+**Answer: the second arrow exists** — "Put on GitHub…" and "Keep local only…", each naming the
+direction that applies, and the sharp edge (the remote still holds a copy) is said out loud.
 
 "Synced already gives the ability to keep the project as local in delete, right?" — **it does not**,
 and that is the gap. Today `delete` offers to keep the *files*; it does not offer to keep the
@@ -191,7 +209,10 @@ The second arrow does not exist. It means: create the repository, push, set the 
 being a project that has a remote* — while keeping every commit. That is a git operation with a
 sharp edge (the remote still holds a copy), so it should say so.
 
-### 3.4 Text selection (report 1)
+### 3.4 Text selection (report 1) — **BUILT** `f5156a5`
+
+**Answer: `SelectionContainer` over the text-heavy screens**, with the file list's long-press
+multi-select left alone because the two gestures conflict.
 
 The simplest of the four and the most often asked. `SelectionContainer` over the text-heavy screens
 (stats, history, trace, dialogs, chat) — leaving the file list's long-press multi-select alone,
