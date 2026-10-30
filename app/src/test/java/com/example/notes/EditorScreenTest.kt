@@ -4,6 +4,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -213,6 +214,18 @@ class EditorScreenTest {
         compose.onNodeWithContentDescription("Report a problem").assertIsDisplayed()
         // And Save is on the row under it, beside the modes rather than on a line of its own.
         compose.onNodeWithText("Save").assertIsDisplayed()
+        // **Wider than it is tall, which is the one thing to assert about a word.** When the modes
+        // and Save first shared a row, a `weight(1f)` spacer sat between them and reserved every
+        // remaining pixel, so Save was laid out thirty wide and rendered as "S a v e" - one letter
+        // per line. `assertIsDisplayed` passes on that: the node is on screen and its text is
+        // correct. So does every assertion about enabled state. The only thing wrong was the shape,
+        // so the shape is what is pinned here; it is the picture that found it, and this is the line
+        // that stops it coming back without costing another CI run to notice.
+        val save = compose.onNodeWithText("Save").getUnclippedBoundsInRoot()
+        assertTrue(
+            "Save is a word, not a column of letters: ${save.width} wide by ${save.height} tall",
+            save.width > save.height,
+        )
     }
 
     @Test

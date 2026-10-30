@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -292,13 +294,22 @@ fun EditorScreen(
                     .padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                // An image or an unreadable file has no modes; Save is then the only thing on the
+                // row and belongs at its end, where it is on every other file.
+                if (kind != EntryKind.TEXT) Spacer(Modifier.weight(1f))
                 if (kind == EntryKind.TEXT) {
                     // **Three modes, named, and one of them is selected.** A single chip that said
                     // "Edit" or "View" was a switch: it told a person what pressing it would do, not
                     // where they were, and there was nowhere to put a third thing. Report 29 asked
                     // for separate buttons, and a segmented control is that with the "exactly one of
                     // these" rule carried in its shape.
-                    SingleChoiceSegmentedButtonRow {
+                    // **`weight(1f)` on the group, not a spacer beside it.** A weighted child is
+                    // measured *after* the ones without weight, so Save is laid out at the width its
+                    // own text needs and the modes take what is left. The first attempt put a
+                    // `weight(1f)` spacer between them instead, which reserved every remaining pixel
+                    // and left Save thirty wide - the three-mode row rendered as "S a v e" stacked
+                    // one letter per line. The picture is what caught it; no test would have.
+                    SingleChoiceSegmentedButtonRow(modifier = Modifier.weight(1f)) {
                         ModeSegment("View", Mode.VIEW, selected = mode) {
                             // **Leaving Edit does not throw anything away.** What was typed is still
                             // in the field and Save is still there; the mode says what the screen is
@@ -321,10 +332,9 @@ fun EditorScreen(
                     }
                 }
 
-                // A spacer, so Save sits at the far end rather than against Diff: the modes are a
-                // state and Save is an act, and a finger reaching for the one should not land on
-                // the other.
-                Box(modifier = Modifier.weight(1f))
+                // A fixed gap rather than a spacer: the weight above is already the flexible one,
+                // and two flexible children would each take half of what Save does not need.
+                Spacer(Modifier.width(8.dp))
 
                 Button(
                     onClick = {
