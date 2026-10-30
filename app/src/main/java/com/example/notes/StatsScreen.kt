@@ -159,24 +159,29 @@ fun StatsScreen(
     }
 
     /**
-     * Applies a preset **from the device's clock, now**, and regenerates.
+     * Sets the interval a preset names, **and leaves the figures alone until Generate is pressed.**
      *
-     * The operator's correction: *"preset the moment it is chosen should take current time from
-     * device and recalculate"* - a chip reads the clock when it is tapped, not when the screen
-     * opened. A screen left open for an hour and then asked for "1 hour" would otherwise answer
-     * about the hour before it was opened.
+     * The operator's report: *"actually I want for presets not to be generated automatically - I want
+     * every interval to be generated via 'generate' button"*.
      *
-     * **Tapping a preset is itself a request for figures**, which is why it does not wait for the
-     * Generate button - that button exists only for the case a preset cannot cover, an interval set
-     * by hand.
+     * That reverses what this did before, and the reason is worth keeping: a preset used to be a
+     * request for figures, so tapping one redrew the table immediately. The problem is the table is
+     * the expensive half - it reads the whole log - and a person comparing three intervals paid for
+     * three reads to look at two of them. It also made the interval on screen and the interval in the
+     * table able to disagree for as long as the read took, with nothing saying which was stale.
+     *
+     * Now the picks describe what will be asked for and the table describes what was. The Generate
+     * button already knew how to say the difference - it goes from "Generate" to "Generate (changed)"
+     * when `pending` is true - so the two halves are one rule instead of two.
+     *
+     * **The clock is still read at the tap**, which was the earlier correction and still holds: a
+     * screen left open for an hour and then asked for "1 hour" must offer the last hour, not the hour
+     * before it was opened. Only the *figures* wait.
      *
      * **Setting one row clears the other in the same assignment**, so there is no state in which two
      * chips are lit and therefore no rule for what two lit chips would mean.
      */
     fun applyPreset(preset: RequestStats.Preset, clock: Boolean) {
-        // **The clock at the moment of the tap**, which is the operator's rule: a screen left open
-        // for an hour then asked for "1 hour" must answer about the last hour, not the hour before
-        // it was opened.
         val at = clockNow()
         val span = if (clock) preset.clockAt(at, oldest = history?.oldest)
         else preset.intervalAt(at, oldest = history?.oldest)
@@ -184,7 +189,8 @@ fun StatsScreen(
         else { rollingPick = preset; clockPick = null }
         from = span.fromMs
         to = span.toMs
-        generated = span
+        // **`generated` is deliberately not touched.** That is the whole change: it is the record of
+        // what the table is showing, and moving the picks is a question, not an answer.
     }
 
     /** Which end's **date** is being picked: null when neither, `true` for From, `false` for To. */
@@ -357,6 +363,39 @@ fun StatsScreen(
                         selected = rollingPick,
                         onPick = { applyPreset(it, clock = false) },
                     )
+                    // **Generate, because the table is a query and not a live view.** The figures
+                    // are computed on press rather than on every stepper tick: a minute stepper can
+                    // move sixty times on the way to a time, and re-reading the history on each of
+                    // those is work nobody asked for and numbers that move under a thumb. It also
+                    // makes the interval you are reading unambiguous while you set up the next one.
+                    //
+                    // **Enabled only when the picks have actually changed**, so the button says
+                    // whether pressing it would do anything. A permanently-enabled Generate is a
+                    // control whose effect a person has to guess at.
+                    Button(
+                        onClick = {
+                            Trace.tap("stats generate", StatsFormat.instantMinute(to))
+                            generated = RequestStats.interval(from, to)
+                        },
+                        enabled = pending,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    ) {
+                        Text(if (pending) "Generate" else "Generated")
+                    }
+
+                    // **And what was generated, under the button that generated it.** The
+                    // operator's report: "text lines on 'before', 'after' and interval duration draw
+                    // under generate button, just above the table with metrics - update them on
+                    // every generate".
+                    //
+                    // Above the button they described the *picks* - the interval you were setting up
+                    // - while the table below them held the last one generated. Two intervals on
+                    // screen, one of them labelled, and the label on the wrong one. Under the button
+                    // they read as its output, which is what they are: every one of them is computed
+                    // from `span`, and `span` is `generated`.
+                    //
+                    // **The `Text` below is unchanged otherwise** - same three facts, same rules
+                    // about which empty screen is which.
                     Text(
                         // **What the interval is, and whether the log reaches it.** Two facts,
                         // because they answer different questions: "what am I looking at" and "is
@@ -398,25 +437,7 @@ fun StatsScreen(
                             modifier = Modifier.padding(bottom = 6.dp),
                         )
                     }
-                    // **Generate, because the table is a query and not a live view.** The figures
-                    // are computed on press rather than on every stepper tick: a minute stepper can
-                    // move sixty times on the way to a time, and re-reading the history on each of
-                    // those is work nobody asked for and numbers that move under a thumb. It also
-                    // makes the interval you are reading unambiguous while you set up the next one.
-                    //
-                    // **Enabled only when the picks have actually changed**, so the button says
-                    // whether pressing it would do anything. A permanently-enabled Generate is a
-                    // control whose effect a person has to guess at.
-                    Button(
-                        onClick = {
-                            Trace.tap("stats generate", StatsFormat.instantMinute(to))
-                            generated = RequestStats.interval(from, to)
-                        },
-                        enabled = pending,
-                        modifier = Modifier.padding(bottom = 8.dp),
-                    ) {
-                        Text(if (pending) "Generate" else "Generated")
-                    }
+
                 }
             }
 

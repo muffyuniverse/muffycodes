@@ -178,10 +178,17 @@ class StatsScreenTest {
     }
 
     @Test
-    fun `choosing a preset regenerates without pressing Generate`() {
+    fun `choosing a preset moves the interval and waits for Generate`() {
         draw()
-        // **A preset IS a request for figures.** Unlike moving a picker, tapping one is explicit, so
-        // it sets both ends and the generated interval at once.
+        // **A preset sets the interval; it does not read the log.** The operator's report:
+        // "actually I want for presets not to be generated automatically - I want every interval to
+        // be generated via 'generate' button".
+        //
+        // This reverses what the screen used to do, and the test that asserted the old rule is the
+        // one this replaces. The table is the expensive half - it reads the whole log - and a person
+        // comparing three intervals paid for three reads to look at two of them. It also let the
+        // interval on screen and the interval in the table disagree for as long as the read took,
+        // with nothing saying which was stale.
         //
         // **Scrolled into view first.** The row scrolls sideways and "1 week" sits past the right
         // edge on this width, so a tap without scrolling fails with "Failed to inject touch input" -
@@ -190,9 +197,28 @@ class StatsScreenTest {
         compose.waitForIdle()
         // **One week on the clock starts on the Monday of the current week**, which for 28 Oct 2026
         // - a Wednesday - is the 26th. It used to start at today's midnight, the same as "1 day".
+        // The picker moved, which is the half that happens on the tap.
         compose.onNodeWithText("26 Oct 2026").assertExists()
-        // And it regenerated, so the button has nothing left to do.
-        compose.onNodeWithText("Generated").assertExists()
+        // **And the button says there is work to do.** "Generate" rather than "Generated" is the
+        // whole point: the picks have moved and the table has not followed them.
+        compose.onNodeWithText("Generate").assertExists()
+    }
+
+    @Test
+    fun `the interval lines sit under the button and describe what was generated`() {
+        draw()
+        // The operator's other half: "text lines on 'before', 'after' and interval duration draw
+        // under generate button, just above the table with metrics - update them on every generate".
+        //
+        // Above the button they described the *picks* while the table below held the last interval
+        // generated - two intervals on screen, one labelled, and the label on the wrong one.
+        val button = compose.onNodeWithText("Generated").fetchSemanticsNode()
+        val duration = compose.onNodeWithText("14 hours 30 minutes", substring = true)
+            .fetchSemanticsNode()
+        assertTrue(
+            "the duration line is below the Generate button",
+            duration.positionInRoot.y > button.positionInRoot.y,
+        )
     }
 
     @Test
