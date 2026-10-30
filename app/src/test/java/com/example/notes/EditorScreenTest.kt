@@ -221,11 +221,11 @@ class EditorScreenTest {
         // correct. So does every assertion about enabled state. The only thing wrong was the shape,
         // so the shape is what is pinned here; it is the picture that found it, and this is the line
         // that stops it coming back without costing another CI run to notice.
+        // **`DpRect` has edges, not a size**, so the size is the difference between them.
         val save = compose.onNodeWithText("Save").getUnclippedBoundsInRoot()
-        assertTrue(
-            "Save is a word, not a column of letters: ${save.width} wide by ${save.height} tall",
-            save.width > save.height,
-        )
+        val wide = save.right - save.left
+        val tall = save.bottom - save.top
+        assertTrue("Save is a word, not a column of letters: $wide wide by $tall tall", wide > tall)
     }
 
     @Test
