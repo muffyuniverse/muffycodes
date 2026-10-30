@@ -319,13 +319,22 @@ class WorkspaceTest {
     }
 
     @Test
-    fun `a locked file is not written by the funnel`() {
+    fun `a locked file is refused to the agent and not to the person`() {
+        // **The funnel is the person's door.** The agent asks `mayWrite` - which is
+        // `agentLockProblem` - before it ever calls this, so a person's lock is enforced there and
+        // not here. The old version of this test asserted `write` refused, which is what made the
+        // person unable to edit a file they had locked themselves.
         val file = File(workspace.accountDir, "milk.txt")
         workspace.write(file, "two litres")
         lock("milk.txt")
 
-        assertFalse("the write is refused", workspace.write(file, "three litres"))
-        assertEquals("and the text did not change", "two litres", file.readText())
+        assertEquals(
+            "the agent is told why",
+            "\"milk.txt\" is locked, so it cannot be changed",
+            workspace.agentLockProblem(file),
+        )
+        assertTrue("the person may still write it", workspace.write(file, "three litres"))
+        assertEquals("and the text changed", "three litres", file.readText())
     }
 
     @Test
@@ -423,11 +432,13 @@ class WorkspaceTest {
         val bread = File(folder, "bread.txt")
         workspace.write(bread, "one loaf")
         lock("inbox")
-        assertTrue(
-            "but copying into a locked folder is refused",
-            workspace.copy(bread, elsewhere).isFailure,
+        // **The agent is refused, which is the rule the lock exists for.** Copying into a locked
+        // folder is a write into it; a person may still do it to a folder they locked themselves.
+        assertEquals(
+            "the agent is told why",
+            "\"inbox\" is locked, so it cannot be changed",
+            workspace.agentLockProblem(File(elsewhere, "bread.txt")),
         )
-        assertFalse("and nothing of it arrived", File(elsewhere, "bread.txt").exists())
     }
 
     @Test

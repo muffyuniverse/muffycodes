@@ -201,39 +201,40 @@ class SelectionFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `a locked file cannot be written or renamed, even from the model`() {
-        // The screen greys Save out, and that is not enough: a lock honoured only by
-        // the screen is a lock the next screen will not honour.
+    fun `a file the person locked is still theirs to write and rename`() {
+        // **The operator's rule, and it reverses this test**: "user locks restrict agents (not users
+        // themselves!)". A lock is an instruction to the agent. The person who set it can still
+        // write, rename and delete their own file - anything else is the app taking away the lever
+        // its own operator pulled.
+        //
+        // What the lock still does is stop the **agent**, which is asserted where that is enforced:
+        // `WorkspaceTest`, on `agentLockProblem`.
         val file = scene.file("milk.txt", "two litres")
         scene.viewModel.toggleLocked(file)
         scene.viewModel.openEditor(file)
 
         scene.viewModel.saveEditor("two litres and a lemon")
-        // The refusal is silent on purpose: the row and the editor both show a lock,
-        // and a message per attempt would be the app saying the same thing over the
-        // screen that already says it. What matters is that nothing was written.
-        assertEquals("the text did not change", "two litres", file.readText())
+        // **`await`, not `waitForIdle`.** The save writes on the app's worker, so idling the
+        // compose clock does not wait for it - the same trap that made an earlier version of this
+        // assertion read a file the worker had not touched yet.
+        scene.await("the person's own save to land", 20_000) {
+            file.readText() == "two litres and a lemon"
+        }
 
-        assertTrue("no rename happened", scene.viewModel.renameTo(file, "groceries") == null)
-        assertTrue("the file kept its name", file.isFile)
+        val renamed = scene.viewModel.renameTo(file, "groceries")
+        assertTrue("and the rename is not refused", renamed != null)
         scene.viewModel.closeEditor()
     }
 
     @Test
-    fun `a locked file cannot be deleted`() {
-        // A lock that stopped writing but allowed deleting would be a lock on the
-        // small act and not the large one: the file would go, and its versions with
-        // it would be all that was left.
+    fun `a file the person locked can still be deleted by the person`() {
+        // The other half of the same rule. A lock is not a vault: the person who set it may take
+        // the file away, because it is still their file.
         val file = scene.file("milk.txt", "two litres")
         scene.viewModel.toggleLocked(file)
 
-        assertFalse("the model refuses it", scene.viewModel.delete(file))
-
-        assertTrue("and the file is still there", file.isFile)
-        assertTrue(
-            "and it said why: ${scene.viewModel.message}",
-            scene.viewModel.message?.contains("locked") == true,
-        )
+        assertTrue("the person's own delete is not refused", scene.viewModel.delete(file))
+        assertFalse("and the file is gone", file.exists())
     }
 
     @Test
@@ -250,23 +251,20 @@ class SelectionFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `one locked file stops the delete of several`() {
-        // Deleting the rest and leaving one behind reads as a delete that worked,
-        // and the person finds out later which half of it happened.
+    fun `a lock does not stop the person deleting several at once`() {
+        // **The same rule at the bulk act.** One locked file used to stop the whole selection, which
+        // is right when the lock binds the person and wrong when it binds only the agent. Deleting
+        // is the person's own act, so all of them go.
         val milk = scene.file("milk.txt", "two litres")
         val bread = scene.file("bread.txt", "a loaf")
         scene.viewModel.toggleLocked(bread)
         scene.viewModel.toggleSelected(milk)
         scene.viewModel.toggleSelected(bread)
 
-        assertFalse("nothing is deleted", scene.viewModel.deleteSelected())
+        assertTrue("the selection deletes", scene.viewModel.deleteSelected())
 
-        assertTrue("not even the unlocked one", milk.isFile)
-        assertTrue("and the locked one is where it was", bread.isFile)
-        assertTrue(
-            "and it said which: ${scene.viewModel.message}",
-            scene.viewModel.message?.contains("bread.txt") == true,
-        )
+        assertFalse("both are gone", milk.exists())
+        assertFalse("including the locked one", bread.exists())
     }
 
     @Test
