@@ -235,10 +235,11 @@ object ContextBudget {
         /**
          * The hard limit in force, or zero for "never".
          *
-         * **Raised to the trigger, not stored that way.** What was typed stays in
-         * [Limit.asked] — the number a person sees beside the field — while the number enforced is
-         * the larger of the two, because a last resort that fires before the agent is asked is not
-         * a last resort.
+         * **Not raised to the trigger, and the comment here used to say it was.** A trim typed
+         * below the clear-up point is a real choice: the app does the cutting and the agent is
+         * never asked, which the settings screen says out loud rather than silently overriding.
+         * `the trim may fire before the ask, and then the agent is never asked` pins that, so a
+         * comment promising a raise described code that does not exist - and the code was right.
          */
         val hardAt: Long get() = if (hard.inForce == 0L) 0L else hard.inForce
 
@@ -254,18 +255,35 @@ object ContextBudget {
          */
         val targetAt: Long
             get() {
-                if (target.inForce > 0L) return target.inForce
-                val at = triggerAt
-                // **Half, and strictly below the trigger.** `at / 2` alone gives 0 for a trigger of
-                // 1 - which is not "no target", it is "a target of nothing" - so the floor is
-                // applied to the answer rather than to the share, and only where the trigger is
-                // big enough to have a smaller positive number under it.
+                // **Below whichever point fires first, which is not always the trigger.**
                 //
-                // A trigger of 1 therefore has no derivable target: there is no positive integer
+                // This derived from the trigger alone, and the crash that caused is worth writing
+                // down: with the trim set to 5 and nothing else typed, the trigger resolved to
+                // 24,000 and the target to 12,000 - so the target sat above the point the trim
+                // fires at, `require` below threw `IllegalArgumentException` **from inside a
+                // composable**, and the app died. It died again on every relaunch, because 5 was
+                // already saved: the settings screen built the same numbers and threw in the same
+                // place. One typed digit was an app that would not open.
+                //
+                // A trim below the trigger is legitimate (see [hardAt]), so the trigger is not the
+                // only ceiling on where the target may be. It must be under **both** points that
+                // fire, and when there is only one, that one.
+                val at = minOf(triggerAt, hardAt.takeIf { it > 0L } ?: Long.MAX_VALUE)
+                // **Half, and strictly below it.** `at / 2` alone gives 0 for a point of 1 - which
+                // is not "no target", it is "a target of nothing" - so the floor is applied to the
+                // answer rather than to the share, and only where the point is big enough to have a
+                // smaller positive number under it.
+                //
+                // A point of 1 therefore has no derivable target: there is no positive integer
                 // below 1. That is a test-sized number rather than a real one, and the ordering
                 // rule below skips the check when there is nothing to reach, which is the honest
                 // answer - the app cannot ask for a size below the smallest size there is.
-                return if (at <= 1L) 0L else at / 2
+                val derived = if (at <= 1L) 0L else at / 2
+                // **A typed target is repaired, not obeyed into a crash.** It is a number a person
+                // can get wrong - and the same repair rule already governs the two limits, where
+                // what was typed stays in `asked` and what is enforced is made to work.
+                if (target.inForce > 0L) return if (target.inForce < at) target.inForce else derived
+                return derived
             }
 
         companion object {

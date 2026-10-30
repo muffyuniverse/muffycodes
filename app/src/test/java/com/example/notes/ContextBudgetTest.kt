@@ -325,4 +325,120 @@ class ContextBudgetTest {
         assertEquals("off", ContextBudget.short(0))
         assertEquals("999", ContextBudget.short(999))
     }
+    @Test
+    fun `a trim typed below the target does not throw, because typing is one digit at a time`() {
+        // **The crash**: "app is crushing after I tried to set trim compaction field in settings".
+        //
+        // The trace shows `trim-compaction 5` and then four relaunches in a row, each dying at the
+        // settings screen - because 5 was already saved, so the screen rebuilt the same numbers and
+        // threw in the same place. **One typed digit was an app that would not open.**
+        //
+        // The arithmetic: nothing else typed means the trigger resolves to a quarter of the ceiling
+        // (24k) and the target to half of that (12k), so a trim of 5 put the target above the point
+        // the trim fires at. `require(targetAt < hardAt)` threw `IllegalArgumentException` **from
+        // inside a composable**, which is not a caught error, it is a dead app.
+        //
+        // **Every keystroke is its own state**, which is why this is not an edge case: typing 50000
+        // passes through 5, 50, 500 and 5000, and the first of those was fatal. So the table below
+        // is not four variations, it is what one person doing one thing produced.
+        for (typed in listOf(5, 50, 500, 5_000, 50_000)) {
+            val limits = ContextBudget.Limits.of(
+                triggerAsked = 0,
+                hardAsked = typed.toLong(),
+                ceiling = ContextBudget.UNKNOWN_CEILING,
+            )
+            assertTrue(
+                "typing $typed must not throw, and must aim below where it trims",
+                limits.targetAt < limits.hardAt,
+            )
+        }
+    }
+
+    @Test
+    fun `the derived target is below the trim when the trim is the earlier of the two`() {
+        // The same bug asked as a question about the number rather than about the crash: **the
+        // target must sit below whichever point fires first**, and that is not always the trigger.
+        //
+        // A trim below the clear-up point is a real choice - the app cuts and the agent is never
+        // asked - so the trigger cannot be the only ceiling on where the target may be.
+        val limits = ContextBudget.Limits.of(
+            triggerAsked = 0,
+            hardAsked = 5_000,
+            ceiling = ContextBudget.UNKNOWN_CEILING,
+        )
+        assertEquals("the trim is where it was typed", 5_000L, limits.hardAt)
+        assertEquals("so the target is half of the trim, not half of the trigger", 2_500L, limits.targetAt)
+    }
+
+    @Test
+    fun `a typed target above the trim is repaired rather than obeyed`() {
+        // **The second way into the same crash**, and it needs no unusual number: the target is a
+        // field a person can type into, and a target above the trim is exactly what a person typing
+        // three numbers in a hurry will produce.
+        //
+        // Repaired rather than refused, which is the rule the two limits already follow: what was
+        // typed stays in `asked` where the screen can show it, and what is enforced is made to work.
+        val limits = ContextBudget.Limits.of(
+            triggerAsked = 50_000,
+            hardAsked = 10_000,
+            targetAsked = 40_000,
+            ceiling = 917_504,
+        )
+        assertEquals("the typed number is kept for the field", 40_000L, limits.target.asked)
+        assertTrue("and the number in force is below the trim", limits.targetAt < limits.hardAt)
+    }
+
+    @Test
+    fun `no three numbers a person can type will throw`() {
+        // **The crash was reachable by typing, so the fix is only done when typing cannot reach it.**
+        //
+        // The settings screen builds `Limits` on **every keystroke**, inside a composable. Anything
+        // that throws there does not show an error, it kills the app - and because the numbers are
+        // saved, it kills the app again on the next launch. That is what happened: one digit, four
+        // relaunches.
+        //
+        // So this is not a test of one case. It walks every combination of the three fields across
+        // the range a person plausibly types - including the intermediate values of typing a large
+        // number one digit at a time - and requires that constructing the limits either succeeds
+        // with a coherent answer or fails as an ordinary refusal. Nothing may throw.
+        val interesting = listOf(
+            0, 1, 2, 5, 50, 500, 5_000, 12_000, 24_000, 50_000, 96_000, 200_000,
+        )
+        for (trigger in interesting) {
+            for (hard in interesting) {
+                for (target in interesting) {
+                    val limits = runCatching {
+                        ContextBudget.Limits.of(
+                            triggerAsked = trigger.toLong(),
+                            hardAsked = hard.toLong(),
+                            targetAsked = target.toLong(),
+                            ceiling = ContextBudget.UNKNOWN_CEILING,
+                        )
+                    }.getOrElse { error ->
+                        throw AssertionError(
+                            "trigger=$trigger hard=$hard target=$target threw " +
+                                "${error::class.simpleName}: ${error.message}",
+                        )
+                    }
+                    // And the answer is coherent, not merely non-throwing: a target that is on or
+                    // above a point that fires would ask for a size the context already has.
+                    if (limits.targetAt > 0L && limits.triggerAt > 0L) {
+                        assertTrue(
+                            "trigger=$trigger hard=$hard target=$target: " +
+                                "target ${limits.targetAt} must be below trigger ${limits.triggerAt}",
+                            limits.targetAt < limits.triggerAt,
+                        )
+                    }
+                    if (limits.targetAt > 0L && limits.hardAt > 0L) {
+                        assertTrue(
+                            "trigger=$trigger hard=$hard target=$target: " +
+                                "target ${limits.targetAt} must be below trim ${limits.hardAt}",
+                            limits.targetAt < limits.hardAt,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
 }
