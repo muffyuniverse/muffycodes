@@ -86,3 +86,4 @@ ContextBudgetTest  app/src/main/java/com/example/notes/ContextBudget.kt
 AgentRunnerTest  app/src/main/java/com/example/notes/AgentRunner.kt app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentSessions.kt app/src/main/java/com/example/notes/Background.kt
 AgentServiceTest  app/src/main/java/com/example/notes/AgentService.kt app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentWiring.kt
 NoticesTest  app/src/main/java/com/example/notes/Notices.kt
+SaidTest  app/src/main/java/com/example/notes/Said.kt app/src/main/java/com/example/notes/MainActivity.kt

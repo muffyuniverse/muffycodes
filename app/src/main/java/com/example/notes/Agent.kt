@@ -340,13 +340,23 @@ class Agent(
 
     companion object {
         /**
-         * The most requests one turn may make.
+         * The most requests one turn may make — **and it is a backstop, not a budget.**
          *
-         * A backstop, not a policy: the loop's own guard is [AgentTools.IDLE_CALLS] calls that
-         * change nothing. This exists so that a provider answering with one harmless call for
-         * ever cannot hold the worker, and it is high enough that real work never reaches it.
+         * It used to be 40, and the operator reached it: "it made 40 requests without ending the
+         * turn - what is this restriction? I dont need it, agent must be able to do as many requests
+         * as needed." They are right that a turn's length is the work's business. Forty is a small
+         * number for a real refactor: reading ten files, editing each, checking the result is forty
+         * calls before anything goes wrong, and the turn was cut in the middle of coherent work with
+         * a sentence about requests rather than about a mistake.
+         *
+         * **The guard that actually protects the turn is [AgentTools.IDLE_CALLS]**, which counts
+         * calls that changed nothing and asked nothing — a model going in circles. This number is
+         * only here so that a provider answering with endless *useful-looking* calls cannot hold the
+         * worker for ever, so it is set where it can only ever mean that: a turn that has made five
+         * hundred requests and not concluded has a problem that a request count cannot describe, and
+         * the operator should see the log rather than a budget.
          */
-        const val MAX_REQUESTS = 40
+        const val MAX_REQUESTS = 500
 
         /** Why a turn was cut short by the person stopping the agent. */
         const val BY_OPERATOR = "the agent was stopped"
@@ -617,7 +627,14 @@ class Agent(
             val id = log.call(call.tool, call.args)
             log.got(call.tool, "${AgentLog.FAILURE} interrupted: $why", answers = id)
         }
-        log.note("stopped", why)
+        // **The app's line, not the conversation's.** Reported: "OpenRouter answered 403 # error
+        // messages should be only for session log, why are they shown as if they are 'in context'?
+        // it is wasteful". A turn cut short by an outage is the app explaining itself to the person;
+        // the model cannot act on "OpenRouter answered 403", and the row was counting against the
+        // context budget while telling it nothing. The interrupted results above stay in context,
+        // because a call with no answer is an illegal conversation and those *are* the model's
+        // business.
+        log.appNote("stopped", why)
         // A person speaking is not a session stopping; a person stopping is.
         return if (why == BY_OPERATOR) {
             End.Stopped(why, reason = AgentSession.StopReason.BY_OPERATOR)
@@ -665,7 +682,8 @@ class Agent(
     }
 
     private fun overBudget(): End {
-        val said = "it made $maxRequests requests without ending the turn"
+        val said = "it made $maxRequests requests without ending the turn — that is a runaway, " +
+            "not a long job: nothing in the log explains it"
         log.appNote("stopped", said)
         return End.Stopped(said, reason = AgentSession.StopReason.LOOP)
     }

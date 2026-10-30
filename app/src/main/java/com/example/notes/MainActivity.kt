@@ -192,7 +192,16 @@ private fun AppRoot(viewModel: AppViewModel) {
             .filterNotNull()
             .collect { text ->
                 viewModel.message = null
-                snackbar.showSnackbar(text)
+                // **Only a sentence that explains something unexpected covers the screen.**
+                // The operator's report: "can you remove any in-screen popup notifications that
+                // dont bring value and just restate what happened before … notifications should
+                // explain why something that user expected to happen didn't happen".
+                //
+                // The message is still written to the trace by `AppViewModel.message`'s setter, so
+                // nothing is lost: a confirmation moves from a strip nobody reads to the log that
+                // records what happened. [Said] is where the rule lives, because it is a decision
+                // about the app's own words rather than a condition in an effect.
+                if (Said.worthShowing(text)) snackbar.showSnackbar(text)
             }
     }
 

@@ -1137,7 +1137,18 @@ class AgentTools(
                     return refusal("There is no line $from: the file has ${lines.size} lines")
                 }
                 val put = replacementText(args, deadline).getOrElse { return refusal(it.message ?: "that replacement cannot be read") }
-                (lines.take(from - 1) + put.split("\n") + lines.drop(to)).joinToString("\n")
+                // **An empty replacement here means the lines are gone, not that one blank line
+                // stands in their place.** These are whole lines, so "replace them with nothing" is
+                // "there are none of them" — a person who selects three lines and deletes them
+                // expects three fewer lines, not three empty ones. `grep` is the different act: it
+                // replaces text *inside* lines, so an empty replacement there leaves the line with
+                // its match removed, which is also what a person means.
+                //
+                // Without this, a model had no way to delete a line at all: `put.split("\n")` on an
+                // empty string is one empty element, so the line became blank and the file grew a
+                // line nobody asked for.
+                val replacement = if (put.isEmpty()) emptyList() else put.split("\n")
+                (lines.take(from - 1) + replacement + lines.drop(to)).joinToString("\n")
             }
             else -> {
                 // **`at` is a place between lines, which a range cannot say.** `from:11,to:10` would
@@ -1153,7 +1164,10 @@ class AgentTools(
                     )
                 }
                 val put = replacementText(args, deadline).getOrElse { return refusal(it.message ?: "that replacement cannot be read") }
-                (lines.take(at) + put.split("\n") + lines.drop(at)).joinToString("\n")
+                // **An empty insert adds nothing**, which is the same rule as above read the other
+                // way: nothing between two lines leaves the two lines as they were.
+                val inserted = if (put.isEmpty()) emptyList() else put.split("\n")
+                (lines.take(at) + inserted + lines.drop(at)).joinToString("\n")
             }
         }
         if (text == before) return success("${rel(file)} already said that, so nothing changed")

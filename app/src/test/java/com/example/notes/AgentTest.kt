@@ -1858,16 +1858,38 @@ class AgentTest {
     }
 
     @Test
-    fun `a copy that also asks for a new name is refused, because it is two acts`() {
+    fun `a copy may be given a new name, because that is one intention`() {
+        // **This test used to assert the refusal, and the refusal was the bug.** Reported: "move
+        // with copy: true and a new name is refused — 'A copy keeps its name' — so a copy-and-rename
+        // costs two calls." The reasoning was that the pair can fail after the copy exists and then
+        // the answer describes half of each; the answer to that is to check the destination *before*
+        // writing, which `Workspace.copy` now does, not to forbid the act.
         val dir = ws.repoOf("shopping")
         ws.write(File(dir, "milk.txt"), "two litres")
         ws.createFolder(dir, "drafts")
 
         val body = tool("move", """{"path":"milk.txt","into":"drafts","copy":true,"name":"dairy.txt"}""")
 
+        assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
+        assertEquals("the copy is under the new name", "two litres", File(dir, "drafts/dairy.txt").readText())
+        assertEquals("the original is untouched", "two litres", File(dir, "milk.txt").readText())
+        assertFalse("and no second copy was left behind", File(dir, "drafts/milk.txt").exists())
+    }
+
+    @Test
+    fun `a copy whose new name is taken is refused before anything is written`() {
+        // **The hazard the old refusal was guarding against, answered properly.** A refusal after the
+        // copy exists would leave the person with a copy they did not ask for; this checks the name
+        // while there is still nothing to undo.
+        val dir = ws.repoOf("shopping")
+        ws.write(File(dir, "milk.txt"), "two litres")
+        ws.write(File(dir, "dairy.txt"), "the taken name")
+
+        val body = tool("move", """{"path":"milk.txt","into":"drafts","copy":true,"name":"dairy.txt"}""")
+
         assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
-        assertFalse("nothing was copied", File(dir, "drafts/milk.txt").exists())
-        assertFalse("and nothing was renamed", File(dir, "drafts/dairy.txt").exists())
+        assertEquals("the taken file is untouched", "the taken name", File(dir, "dairy.txt").readText())
+        assertFalse("and nothing was copied", File(dir, "drafts/dairy.txt").exists())
     }
 
     // ---- background: a result that lands in a file ---------------------------
