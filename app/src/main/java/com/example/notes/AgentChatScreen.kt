@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -42,6 +44,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -51,6 +54,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
@@ -296,6 +300,24 @@ fun AgentChatScreen(
             )
         },
     ) { padding ->
+        // **The keyboard is a size change, and the list has to follow it.** The operator's report:
+        // "when keyboard pops up it covers messages, I want the screen to move down so that messages
+        // are above the keyboard. and when keyboard is down, screen should readjust back".
+        //
+        // `imePadding` shrinks the column so the composer is never behind the keyboard - that part
+        // already worked. What it does not do is move the *view*: the list keeps the scroll offset
+        // it had, the last message slides below the new bottom edge, and the person is left looking
+        // at the middle of the conversation they were at the end of.
+        //
+        // So the height of the keyboard is watched, and when it changes the list goes back to the
+        // last message. Reading the inset rather than "is the keyboard open" also covers the height
+        // changing while it is open - a suggestion strip appearing, a different keyboard - which is
+        // the same complaint one step later.
+        val keyboard = WindowInsets.ime.getBottom(LocalDensity.current)
+        LaunchedEffect(keyboard) {
+            val last = (box?.messages?.size ?: 0) - 1
+            if (last >= 0) list.animateScrollToItem(last)
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -387,7 +409,20 @@ fun AgentChatScreen(
                 }
             }
 
-            HorizontalDivider()
+            // **No divider, and no box around the field.** The operator's report: "I want write to
+            // the agent box be the color of the background - no visible edges".
+            //
+            // There were three edges doing the same job: a `HorizontalDivider` above the field, the
+            // field's own filled container, and its indicator line. Three lines saying "the
+            // conversation ends here" on a screen where the conversation ending is already obvious
+            // from the messages stopping. They now go, and the field is the page's own background -
+            // so the composer reads as the place you keep writing rather than as a panel bolted to
+            // the bottom of a transcript.
+            //
+            // **The cursor and the placeholder are the affordance.** That is the whole visible
+            // difference between an empty field and a label, and it is how every chat app the person
+            // has used already behaves.
+            //
             // **Enter sends, and there is no Send button** - the operator's correction: "input box
             // should not have send button, it should send the message on enter".
             //
@@ -406,9 +441,17 @@ fun AgentChatScreen(
                 onValueChange = { draft = it },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                    .padding(horizontal = 4.dp),
                 placeholder = { Text("Write to the agent") },
                 maxLines = 4,
+                // **The page's colour, and no indicator.** `containerColor` alone leaves the
+                // Material underline, which is the edge the report is about.
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                ),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { send() }),
             )

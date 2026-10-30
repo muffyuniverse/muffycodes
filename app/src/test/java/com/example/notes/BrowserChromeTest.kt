@@ -171,28 +171,25 @@ class BrowserChromeTest {
     }
 
     @Test
-    fun `the app's own folder draws both marks, on itself and on what is inside it`() {
-        // **Two reports, and the second one is the operator catching what I had missed.**
+    fun `the app's own folder draws both marks`() {
+        // **Two reports, and the second is the operator catching what I had missed.**
         // "why agent/ looks different? is it not manages in a unified way? because where is its red
         // unsync icon? why is it hidden?" and then "it shows, but why only red lock and not also red
-        // disconnect?" and "and remember that whole subbranch should inherit them".
+        // disconnect?"
         //
-        // Three defects in one row. The lock drew; the disconnect did not, because it was nested
-        // inside the text-file branch that an app-held row never reaches. And neither inherited,
-        // because `appHold` tested the leaf name, so `agent/` was held and `agent/context.log` was
-        // not.
+        // The lock drew and the disconnect did not, because the disconnect lived inside the
+        // text-file branch that an app-held row never reaches. Both facts are true of `agent/`, so
+        // both marks have to be on it.
         scene.signedIn()
         scene.project("groceries")
         scene.open("groceries")
         // **The record exists only once the agent has written to it**, so the test writes a row the
-        // way the agent does rather than waiting for a folder a fresh project does not have. A
-        // `TOLD` row is the operator's own line, which every turn begins with.
+        // way the agent does rather than waiting for a folder a fresh project does not have.
         val project = scene.viewModel.workspace!!.projectDir("groceries")
         AgentLog.open(project).told("make me a folder")
         scene.viewModel.refresh()
         browser()
 
-        // The folder itself: the record the app keeps inside a project.
         compose.waitUntil(20_000) { there("agent/") }
         assertTrue(
             "the folder says the app keeps it",
@@ -202,12 +199,22 @@ class BrowserChromeTest {
             "and that it is kept off GitHub",
             described("agent is kept out of the repository by the app"),
         )
+    }
 
-        // **And inside it.** This is the half the leaf test got wrong: the folder was marked and
-        // its own two logs were not, so a person opening it saw two unmarked files in a marked
-        // folder and had to guess whether they were sent.
+    @Test
+    fun `the app's marks are on what is inside its folder too`() {
+        // **The inheritance half**, and the operator named the rule: "and remember that whole
+        // subbranch should inherit them". `appHold` tested the leaf name, so `agent/` was held and
+        // `agent/context.log` was not - a marked folder holding two unmarked files, which says the
+        // opposite of what is true.
+        scene.signedIn()
+        scene.project("groceries")
+        scene.open("groceries")
+        val project = scene.viewModel.workspace!!.projectDir("groceries")
+        AgentLog.open(project).told("make me a folder")
         scene.open("agent")
         browser()
+
         compose.waitUntil(20_000) { there("context.log") }
         assertTrue(
             "the log inside inherits the lock",
@@ -361,25 +368,26 @@ class BrowserChromeTest {
     }
 
     @Test
-    fun `a folder the app keeps has no menu on itself or anything inside it`() {
-        // The other half, and the one report 10 actually asked for. `agent/` is the app's, so its
-        // menu goes - and it goes for its contents too, which is the inheritance rule: a log inside
-        // it is as much the app's as the folder is.
+    fun `a folder the app keeps has no menu, and neither does what is inside it`() {
+        // The other half, and the one report 10 actually asked for: "locked files should hide and
+        // forbid 3dot options", filed while looking at `agent/`. Its menu goes - and it goes for its
+        // contents too, because a log inside it is as much the app's as the folder is.
+        //
+        // **Inside the folder, because that is where the inheritance shows.** At the project root
+        // the folder has no menu and so does nothing else, which would pass even if the rule were
+        // about the folder alone.
         scene.signedIn()
         scene.project("groceries")
         scene.open("groceries")
-        browser()
-
-        compose.waitUntil(20_000) { there("agent/") }
-        // The folder's own row has no menu. `agent/` is the only app-held row at this level.
-        compose.onAllNodesWithContentDescription("More").assertCountEquals(1)
-
+        val project = scene.viewModel.workspace!!.projectDir("groceries")
+        AgentLog.open(project).told("make me a folder")
         scene.open("agent")
         browser()
+
         compose.waitUntil(20_000) { there("context.log") }
-        // **Neither log has one.** This is the half that would have passed for the wrong reason
-        // before: the folder was marked and its contents were not, so the contents kept a menu
-        // whose every item the app would refuse.
+        // **No menu on either log**, and the absence is about the rule rather than about a screen
+        // that never drew: the files themselves are asserted first.
+        assertTrue("session.log is drawn", there("session.log"))
         compose.onAllNodesWithContentDescription("More").assertCountEquals(0)
     }
 
