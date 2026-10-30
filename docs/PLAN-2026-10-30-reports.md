@@ -12,21 +12,21 @@ commit `1191509`). The rest are below.
 
 | # | Report (10:17–11:02) | State in the code | What it needs |
 |---|---|---|---|
-| **1** | "maximum displayed message height somehow ended up in session log block but it needs a new separate agent chat block" | **Open.** The line cap is in the *Session log* block. My last commit moved it under a "Messages" heading — but the operator wants a proper **agent chat** block, not a stray heading. | A block titled for the chat, carrying the line cap |
-| **2** | "make milk a plain white theme, brownie should be brown theme from chocolate, chocolate should be near black" | **Open.** `MILK` is pale green `#CFE3D6`; `BROWNIE` is **purple** `#8B5FA8`; `CHOCOLATE` is `#5A3A24`. | Milk → white; Brownie → the brown Chocolate has now; Chocolate → near black |
-| **3** | "back to defaults should be the last element on the settings list" | **Open.** It sits before "Running" and "Background". | Move to the end |
-| **4** | "unsync row button hasn't been changed to a disconnect icon from its current cross, as I asked. and grey, black and red colours… still unimplemented" | **Partly.** The icon is still `Icons.Filled.Clear` (a cross). The three tints *are* coded (`APP_HOLD` red / `onSurface` black / `outline` grey) — so either a state never occurs, or the colour is invisible in practice. | A drawn "disconnected" glyph, and a check that all three tints actually render |
-| **5** | "bug report icon still isn't added to agent chat as I instructed in an older report from yesterday!" | **Open and confirmed.** `ReportButton` is in `BrowserScreen` only; `AgentChatScreen` has none. | Add it, in the same place as the browser's |
-| **6** | "app errors like no openrouter key etc — all should go into session log only, they should not reach the context" | **Open.** The `blip`/failure rows are written as `NOTE` rows, which are in the conversation and printed as pages. | Errors visible in the log, absent from what the model is sent |
-| **7** | "when folder is locked or unsynced then all of its content also gets icons with the same state" | **Open.** Lock/unsync are per-entry; a folder's rows do not inherit. | Inherit down the tree, red for app-set |
-| **8** | "locked files should hide and forbid 3-dot options" | **Open.** The menu is drawn for a locked row. | Hide it |
-| **9** | "make it so that logs don't have history and aren't saved to git" | **Half.** `agent/`, `.muffy/`, `requests/` are in `APP_IGNORES`, so they are not committed. **History is the open half** — a log written into a project that saves versions would still be versioned. | Confirm no log path can be versioned |
+| **1** | "maximum displayed message height … needs a new separate agent chat block" | **DONE** `a829c57` — "Agent chat" block with its own rule | — |
+| **2** | "milk a plain white theme, brownie brown, chocolate near black" | **DONE** `c8aaf44` — all five primaries ≥60 apart | — |
+| **3** | "back to defaults should be the last element" | **DONE** `c8aaf44` | — |
+| **4** | "unsync … disconnect icon … grey, black and red colours" | **DONE** `8f4871e` — drawn broken-link glyph, three tints passed in | — |
+| **5** | "bug report icon still isn't added to agent chat" | **DONE** `a829c57` | — |
+| **6** | "app errors … should go into session log only, not the context" | **DONE** `8f4871e` — `AgentLog.appNote`, born `app` | — |
+| **7** | "locked/unsynced folder → all its content gets the same state" | **DONE** `8f4871e` — `hold()` and `unsync()` inherit | — |
+| **8** | "locked files should hide and forbid 3dot options" | **DONE** `8f4871e` | — |
+| **9** | "logs don't have history and aren't saved to git" | **DONE** `477b89c` — the exclusion was already right; the **History button** on a log was the lie, and it is gone | — |
 | **10** | "still tells 'no openrouter key on this account yet' in agent block after setting the key" | **DONE** `063c5cd`. Not a stale read: `CredentialStore.opened`'s unrecognised-failure branch kept the bytes and answered `NONE`, so a stored key was reported as never typed. New `KeyState.UNREADABLE`. | — |
 | **11** | "OpenRouter answered 400: The `reasoning_content` in the thinking mode must be passed back to the API" | **DONE** `063c5cd`. Four changes: `Streamed` was not reading `reasoning_content` at all, `Reply` carried only the count, no row stored the text, and `messages()` never sent it. All four now do. | — |
-| **12** | "arrows to page through the message should be at the top of the message bubble" | **Open.** They are at the bottom. | Move up |
-| **13** | "strange white space above write input box… last message should snap to the input box, no gaps" | **Open.** | Remove the gap; pin to the box |
-| **14** | "input box should not have send button, it should send on enter. and when the keyboard pops up, screen should move down to keep messages in view" | **Open.** There is a `Send` button; no IME action; no keyboard inset handling. | Enter sends; `imePadding` |
-| **15** | "remove the `per M in` / `per M out` cost rows, provider already lists the prices, better show in agent block in settings the charge rates for selected endpoint: input, output, cache" | **Open.** Both rows are in `StatsScreen` (lines ~597, ~606). All three prices are *already fetched* (`ModelCatalogue.priceIn/priceOut/priceCache`). | Delete the two rows; show the three rates in the agent block |
+| **12** | "arrows … should be at the top of the bubble" | **DONE** `a829c57` | — |
+| **13** | "white space above write input box … last message should snap, no gaps" | **DONE** `a829c57` | — |
+| **14** | "no send button, send on enter, keyboard keeps messages in view" | **DONE** `a829c57` — `imePadding` was already there | — |
+| **15** | "remove the `per M in` / `per M out` cost rows … show the endpoint's rates in the agent block" | **DONE** `a829c57` — rows gone, rates in the agent block, plus "not read yet" and a way to fetch | — |
 
 ---
 
