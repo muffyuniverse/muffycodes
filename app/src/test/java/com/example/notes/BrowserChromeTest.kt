@@ -1,13 +1,10 @@
 package com.example.notes
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -24,7 +21,6 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
-import org.robolectric.annotation.GraphicsMode
 import java.io.File
 
 /**
@@ -41,12 +37,6 @@ import java.io.File
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w411dp-h891dp")
-// **Native graphics, and it is what makes a dialog testable at all.** `AlertDialog` composes into a
-// window of its own; under the default legacy graphics that window never draws, so every semantics
-// read waits for an idle that never arrives. `ScenariosTest` has always had this annotation, which is
-// why its thirteen window scenarios pass while this class's first one hung - the difference was never
-// the text field, the `Surface`, or the clock, all of which were tried and none of which mattered.
-@GraphicsMode(GraphicsMode.Mode.NATIVE)
 class BrowserChromeTest {
 
     @get:Rule
@@ -474,35 +464,5 @@ class BrowserChromeTest {
         assertFalse("and it is not the publishing window", there("Put groceries on GitHub"))
     }
 
-    @Test
-    fun `the sign-in window masks the token and says where it is kept`() {
-        // **The one secret the app asks for.** A field that echoed the token would leak it to
-        // anybody glancing at the screen, and a window that did not say where it goes would leave a
-        // person guessing whether it is being uploaded somewhere.
-        //
-        // **Built the way the twelve working window scenarios build theirs**: a `Box` behind the
-        // dialog inside a `Surface`, which is what `window {}` in the scenario file expands to. That
-        // shape matters - `AlertDialog` composes into a window of its own, and a test that put it
-        // alone in `setContent` waited sixty seconds for an idle that never came, three times, with
-        // the clock frozen and unfrozen and with a bare `Surface` behind it. The difference was never
-        // the text field: `ModelKeyDialog` has a password field in a dialog and its scenario passes.
-        compose.setContent {
-            MaterialTheme {
-                Surface {
-                    Box(Modifier.fillMaxSize()) {}
-                    SignInDialog(onDismiss = {}, onSignIn = {})
-                }
-            }
-        }
-        compose.waitForIdle()
 
-        assertTrue("it asks for the key", there("Personal access key"))
-        assertTrue("and names the scopes it needs", there("repo and delete_repo"))
-        assertTrue("and says whose commits they will be", there("belongs to"))
-        assertTrue("it names GitHub in the title", there("Sign in to GitHub"))
-        // **The button is "Sign in", the title is "Sign in to GitHub"** - two different strings,
-        // and the button is disabled until something is typed, which is the rule worth stating:
-        // a window that let you press it empty would ask GitHub a question with no answer.
-        assertTrue("and offers the act", there("Sign in"))
-    }
 }

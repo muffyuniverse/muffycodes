@@ -173,6 +173,15 @@ class ScenariosTest {
      * own scrim.
      */
     @Composable
+    /**
+     * Whether the window on the screen says [text], in part.
+     *
+     * The same question `BrowserChromeTest` asks, and here for the one window that cannot be asked
+     * there: see the note on the sign-in scenario.
+     */
+    private fun there(text: String): Boolean =
+        compose.onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty()
+
     private fun window(content: @Composable () -> Unit) = Screen {
         // A box with nothing in it, so the capture has a background to draw the window over.
         androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {}
@@ -1172,6 +1181,24 @@ class ScenariosTest {
             // scenario uses.
         ) {
             before()
+            // **The assertions live here because here is where the window renders.** A standalone
+            // test of this dialog in `BrowserChromeTest` hung on every reading of the semantics
+            // tree - five theories were tried (the clock, a `Surface`, a `Box`, `GraphicsMode`, the
+            // `waitForIdle` after `setContent`) and none was the cause. The scenario file composes
+            // the identical dialog and reads it without trouble, so the words are checked where the
+            // reading works rather than where it does not.
+            //
+            // **Not a weaker test for being in a scenario file**: `there()` fails the test, and the
+            // suite is run by CI, so a sentence that went missing would fail a build exactly as it
+            // would from the other file.
+            assertTrue("it asks for the key", there("Personal access key"))
+            assertTrue("and names the scopes it needs", there("repo and delete_repo"))
+            assertTrue("and says whose commits they will be", there("belongs to"))
+            assertTrue("it names GitHub in the title", there("Sign in to GitHub"))
+            // **The button is "Sign in", the title is "Sign in to GitHub"** - two different strings,
+            // and the button is disabled until something is typed, which is the rule worth stating:
+            // a window that let you press it empty would ask GitHub a question with no answer.
+            assertTrue("and offers the act", there("Sign in"))
             then("Nothing is typed: the field is empty and the button says what it will do.") {}
             after()
             result(
