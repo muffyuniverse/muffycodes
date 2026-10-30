@@ -66,16 +66,35 @@ object HistoryPrune {
             update.setForceUpdate(true)
             update.update()
 
-            // The old objects are unreachable now; collecting them is what makes
-            // the pruning worth doing on a phone with little room.
-            try {
-                Git(repo).gc().call()
-            } catch (e: Exception) {
-                // Collecting is housekeeping: a failure must not undo the prune.
-            }
+            // **Collecting is the expensive half, and it does not belong in the change that
+            // caused it.** `gc` walks every object in the repository; running it after every
+            // single commit made each save wait for a full collection, which on a phone with a
+            // long history is seconds rather than milliseconds — and the version was already
+            // written and the ref already moved, so the work a person was waiting for had
+            // finished before the housekeeping began.
+            //
+            // The objects it would collect are unreachable the moment the ref moves, so leaving
+            // them is a few kilobytes on disk and no incorrectness at all. [collect] does it on
+            // demand, where somebody can be told how long it takes.
             return newestFirst.size - keep
         } finally {
             inserter.close()
         }
+    }
+
+    /**
+     * Collects the objects a prune left behind — **on demand, never as part of a save.**
+     *
+     * `gc` is proportional to the whole repository rather than to what changed, so running it inside
+     * the commit made every save wait for a full walk. The unreachable objects it would remove are
+     * cheap to keep and harmless to keep, so the collection is a separate act that a person (or a
+     * maintenance pass) asks for, and its cost is visible where it is paid.
+     */
+    fun collect(repo: Repository): Boolean = try {
+        Git(repo).gc().call()
+        true
+    } catch (e: Exception) {
+        // Housekeeping: a repository that could not be collected is still a working repository.
+        false
     }
 }

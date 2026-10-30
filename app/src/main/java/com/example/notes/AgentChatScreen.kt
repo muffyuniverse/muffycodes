@@ -50,6 +50,7 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -194,13 +195,42 @@ fun AgentChatScreen(
     // `scrollToItem` on the first pass puts it there before it is drawn; every later message still
     // animates, because *that* motion is information: something arrived below where you are looking.
     var firstPass by remember { mutableStateOf(true) }
+    /**
+     * **Whether the person is looking at the end of the conversation**, which is a position rather
+     * than a preference.
+     *
+     * The operator's rule: "screen should be at the bottom of the message list on chat menu opening.
+     * and it should scroll down when I start writing when at the bottom. but when I am not at the
+     * bottom (for example when I scrolled up to see an earlier message) screen shouldn't move. the
+     * difference is positional."
+     *
+     * So there is no "follow" switch and no timer: the list follows what arrives **when it was
+     * already at the end**, and leaves the view alone when it was not. A person reading an earlier
+     * message has said where they want to be, and an app that drags them away from it is an app
+     * that loses their place on every reply.
+     *
+     * The last visible index is compared with the last index rather than with a pixel offset: a
+     * page's height varies, so "within a screenful of the end" is a claim about rows, not distances.
+     */
+    val atBottom by remember {
+        derivedStateOf {
+            val info = list.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()
+            last == null || (last.index >= info.totalItemsCount - 1)
+        }
+    }
     LaunchedEffect(box?.messages?.size, generation) {
         val last = (box?.messages?.size ?: 0) - 1
         if (last < 0) return@LaunchedEffect
         if (firstPass) {
+            // **The opening jump is a jump.** On entry the list must already be at the end, not
+            // visibly slide there.
             firstPass = false
             list.scrollToItem(last)
-        } else {
+        } else if (atBottom) {
+            // **Smooth, because the motion is information** - something arrived below where you
+            // were looking - and because the operator asked for it: "scrolling to fit the keyboard
+            // below the last message looks too snappy, can you make it smooth and without lag?"
             list.animateScrollToItem(last)
         }
     }
@@ -508,25 +538,42 @@ fun AgentChatScreen(
                     // The caption stays, because knowing which call produced the text is the point
                     // of the page. It is no longer alone: the row now says whose page it is, so
                     // "create" cannot be mistaken for an action.
+                    // **"Agent · agent" was the page saying its own name twice.** Reported: "why in
+                    // fullscreen at the top left corner agent is repeated 2 times: 'agent agent'?"
+                    // The caption of an ordinary reply is literally `agent`, so the prefix and the
+                    // caption were the same word. The prefix is only worth drawing when it adds
+                    // something: a page whose caption is the tool that made it reads "Agent · read",
+                    // which says who and what; a page whose caption is already "agent" says it once.
+                    val caption = shown?.caption ?: "message"
                     Text(
-                        "Agent · " + (shown?.caption ?: "message"),
+                        if (caption.equals("agent", ignoreCase = true)) "Agent" else "Agent · $caption",
                         style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier.weight(1f),
                     )
                     if (pages.size > 1) {
-                        TextButton(
-                            onClick = { if (at > 0) at-- },
+                        // **The same arrows as the bubble's, because this is the screen where they
+                        // are hardest to hit.** Reported: "in full screen mode paging arrows are
+                        // still tiny". The bubble's pager was given real chevrons with a 48dp touch
+                        // target and this one kept `Text("‹")` — a guillemet in the body font, which
+                        // is punctuation at whatever size the font decides, not a control.
+                        PagerArrow(
+                            pointingLeft = true,
                             enabled = at > 0,
-                        ) { Text("‹") }
+                            description = "Previous page",
+                            onClick = { if (at > 0) at-- },
+                        )
                         Text(
                             "${at + 1}/${pages.size}",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 2.dp),
                         )
-                        TextButton(
-                            onClick = { if (at < pages.size - 1) at++ },
+                        PagerArrow(
+                            pointingLeft = false,
                             enabled = at < pages.size - 1,
-                        ) { Text("›") }
+                            description = "Next page",
+                            onClick = { if (at < pages.size - 1) at++ },
+                        )
                     }
                     TextButton(onClick = {
                         page = null
@@ -816,7 +863,13 @@ private fun MessageRow(
         // than only on the operator's own words.
         SelectionContainer {
             Column {
-                PageBody(page = page, cap = cap, ink = ink, expanded = false)
+                PageBody(
+                    page = page,
+                    cap = cap,
+                    ink = ink,
+                    expanded = false,
+                    onExpand = { onFullscreen(at) },
+                )
             }
         }
         Text(
@@ -836,16 +889,39 @@ private fun MessageRow(
  * changes both, which is correct, since the sentence is a statement about what is on screen.
  */
 @Composable
-private fun PageBody(page: AgentChat.Page, cap: Int, ink: Color, expanded: Boolean) {
+private fun PageBody(
+    page: AgentChat.Page,
+    cap: Int,
+    ink: Color,
+    expanded: Boolean,
+    /**
+     * Opens this message fullscreen, or null where there is nowhere to expand to.
+     *
+     * **The sentence used to be a claim the person could not act on.** Reported: "expand to read -
+     * I want this phrase at the bottom of messages to be clickable (and of selectable color) so that
+     * it also expands the message into fullscreen (same as the icon of magnifying glass in the top
+     * right corner)". It said "expand to read" and tapping it did nothing, which is worse than not
+     * saying it: the words promised a control and the screen had none.
+     *
+     * Null rather than an empty lambda, because in fullscreen the page is already whole — there the
+     * sentence cannot appear at all (`cap = 0`), and a caller that passed a lambda anyway would be
+     * offering to open what is already open.
+     */
+    onExpand: (() -> Unit)? = null,
+) {
     val lines = page.detail.ifBlank { page.body }.lines()
     val cut = cap > 0 && !expanded && lines.size > cap
     val shown = if (cut) lines.take(cap).joinToString("\n") else lines.joinToString("\n")
-    val continuing = if (cut) "\n… ${lines.size - cap} more lines — expand to read" else ""
+    val hidden = if (cut) lines.size - cap else 0
+    // **The sentence is drawn by the caller when it is a control.** A cut page in the list gets a
+    // tappable line instead of a trailing phrase inside the selectable text, so the offer to expand
+    // is one target rather than a run of characters a long press can select.
+    val body = if (cut && onExpand == null) shown + "\n… $hidden more lines — expand to read" else shown
     if (page.prose) {
-        MarkdownBody(text = shown + continuing, modifier = Modifier.fillMaxWidth())
+        MarkdownBody(text = body, modifier = Modifier.fillMaxWidth())
     } else {
         Text(
-            shown + continuing,
+            body,
             style = MaterialTheme.typography.bodyMedium,
             fontFamily = if (expanded) FontFamily.Monospace else null,
             // **Struck through, not hidden.** A page the agent forgot is still read here: that is
@@ -857,6 +933,21 @@ private fun PageBody(page: AgentChat.Page, cap: Int, ink: Color, expanded: Boole
                 else -> MaterialTheme.colorScheme.onSurface
             },
         )
+    }
+    if (cut && onExpand != null) {
+        // **A real control, in the accent colour.** It is the same act as the magnifier in the top
+        // right corner, so it is the same colour as the things a person can press, and it is big
+        // enough to hit without aiming.
+        TextButton(
+            onClick = onExpand,
+            contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp),
+        ) {
+            Text(
+                "… $hidden more lines — expand to read",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
     }
 }
 
