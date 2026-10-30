@@ -117,6 +117,55 @@ class ModelSectionTest {
     }
 
     @Test
+    fun `moving a provider changes the fallback order, and the file is the record of it`() {
+        // **Report 25**: "I want ability to rearrange provider endpoints on the provider selection
+        // card ... so that their order is the fallback order". The order is now load-bearing - the
+        // door walks it when an endpoint fails - so a move has to be a change to the *file*, not a
+        // rearrangement of a list the screen keeps.
+        //
+        // Driven through the view model, for the reason the neighbouring test gives: this harness
+        // reports a dialog's content as not displayed, so an assertion made by tapping inside one
+        // measures the harness rather than the app.
+        val model = ModelConfigFile.DEFAULT_MODEL
+        scene.viewModel.addProvider(model, "deepinfra/fp8")
+        scene.viewModel.addProvider(model, "cloudflare")
+        val before = scene.viewModel.modelConfig.providersOf(model)
+        assertTrue("the fixture has at least three endpoints: $before", before.size >= 3)
+
+        // Move the second endpoint to the front.
+        scene.viewModel.moveProvider(model, 1, 0)
+
+        val after = scene.viewModel.modelConfig.providersOf(model)
+        assertEquals("the moved endpoint is first", before[1], after[0])
+        assertEquals("and nothing was lost", before.size, after.size)
+        assertEquals("and the rest kept their order", before[0], after[1])
+
+        val onDisk = ModelConfigFile.load(scene.workspace!!.accountDir).getOrThrow()
+        assertEquals("the file holds the new order", after, onDisk.providersOf(model))
+    }
+
+    @Test
+    fun `a move that would go past either end does nothing`() {
+        // **A drag that ends where it started is something a finger does constantly**, and so is a
+        // press on an arrow at the top of the list. Neither is an error, and neither may reorder
+        // anything: an out-of-range move that wrapped would send the first endpoint to the bottom on
+        // a mis-tap, which is the one way this could lose the person's arrangement.
+        val model = ModelConfigFile.DEFAULT_MODEL
+        val before = scene.viewModel.modelConfig.providersOf(model)
+        assertTrue("the fixture has more than one", before.size > 1)
+
+        scene.viewModel.moveProvider(model, 0, -1)
+        scene.viewModel.moveProvider(model, before.lastIndex, before.size)
+        scene.viewModel.moveProvider(model, 0, 0)
+
+        assertEquals(
+            "the order is untouched",
+            before,
+            scene.viewModel.modelConfig.providersOf(model),
+        )
+    }
+
+    @Test
     fun `changing provider carries that provider's reply reserve, not the old one`() {
         // **The 96k bug with the sign flipped.** The window and the reply reserve are facts about a
         // *pin*, not about the model: `deepinfra/fp8` keeps 131,072 of a 1,048,576 window and

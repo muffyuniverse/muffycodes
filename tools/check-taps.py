@@ -76,6 +76,10 @@ VOCABULARY = {
     "theme", "dark", "light", "history limit", "reset settings",
     # the model's three rows: choosing one, and editing what a model may be asked through
     "model", "provider", "effort", "add model", "remove model", "add provider", "remove provider",
+    # **Reordering the endpoints, which is the fallback order.** A move rather than an edit, so it
+    # gets its own name: a log that said "provider" for both a selection and a drag could not answer
+    # "which endpoint did the agent try first".
+    "reorder provider",
     # the agent's model: the three lists, the two ways to change the list of models, and the
     # catalogue the numbers come from. A list opened and closed is not here — it changed nothing.
     "reset model config", "set model key", "save key",

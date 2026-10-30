@@ -863,6 +863,33 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /**
+     * Moves one endpoint up or down in a model's list, **which is the fallback order.**
+     *
+     * The operator asked for this directly: "I want ability to rearrange provider endpoints on the
+     * provider selection card (by holding and then moving them), so that their order is the fallback
+     * order."
+     *
+     * **[from] and [to] are positions in the model's own list**, not names, because the act is a
+     * move rather than an edit: the caller knows where the row was dragged from and where it landed.
+     * A move that would leave the list unchanged is a no-op rather than an error - a drag that ends
+     * where it started is something a finger does constantly.
+     */
+    fun moveProvider(model: String, from: Int, to: Int) {
+        val choice = modelConfig.models.firstOrNull { it.id == model } ?: return
+        val list = choice.providers
+        if (from !in list.indices || to !in list.indices || from == to) return
+        val moved = list.toMutableList().apply { add(to, removeAt(from)) }
+        Trace.tap("reorder provider", "${list[from]} to ${to + 1}")
+        val next = modelConfig.models.map {
+            if (it.id == model) it.copy(providers = moved) else it
+        }
+        writeModelConfig(
+            modelConfig.copy(models = next),
+            "Moved ${list[from]} to position ${to + 1} for $model",
+        )
+    }
+
+    /**
      * Takes a provider out of a model's list.
      *
      * **The one in use is refused**, because removing it would leave the agent pinned to an endpoint

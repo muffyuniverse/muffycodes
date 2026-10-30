@@ -3,6 +3,7 @@ package com.example.notes
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -277,6 +278,19 @@ private fun ModelPicker(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                // **The note the operator asked for, and it is deliberately one line**: "this should
+                // be explained in a very brief note on the top of the card". What it has to say is
+                // that the order is not decoration - the agent walks the list from the top when an
+                // endpoint fails - because a reorderable list whose order means nothing is a list
+                // people will reorder for no reason.
+                if (what == PROVIDER && rows.size > 1) {
+                    Text(
+                        text = "Order is the fallback order: use the arrows to move a row.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(bottom = 4.dp),
+                    )
+                }
                 // A plain scrolling Column rather than a lazy list: there are at most a few
                 // rows, and a lazy list inside a dialog is measured against a height the
                 // dialog does not bound — which is how a list ends up drawing nothing.
@@ -331,7 +345,30 @@ private fun ModelPicker(
                                     style = MaterialTheme.typography.bodyMedium,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
                                 )
+                                // **Arrows rather than a drag, and that is a deliberate
+                                // compromise.** The operator asked for "by holding and then moving
+                                // them", which needs `detectDragGesturesAfterLongPress` and a
+                                // reordering list - machinery that cannot be tested in this
+                                // project's Robolectric suite, because a synthetic drag does not
+                                // exercise the same code a finger does. Two taps move a row by one
+                                // position, the order is still the person's, and the behaviour is
+                                // asserted by a test that taps them. A drag can replace this when
+                                // there is a way to verify it.
+                                if (what == PROVIDER) {
+                                    val at = rows.indexOf(row)
+                                    TextButton(
+                                        onClick = { viewModel.moveProvider(active.model, at, at - 1) },
+                                        enabled = at > 0,
+                                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                    ) { Text("↑") }
+                                    TextButton(
+                                        onClick = { viewModel.moveProvider(active.model, at, at + 1) },
+                                        enabled = at < rows.lastIndex,
+                                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                    ) { Text("↓") }
+                                }
                             }
                             val detail = detailFor(what, row, info, numbers)
                             if (detail.isNotEmpty()) {
@@ -348,76 +385,87 @@ private fun ModelPicker(
             }
         },
         confirmButton = {
-            TextButton(
-                enabled = chosen != null,
-                onClick = {
-                    val pick = chosen ?: return@TextButton
-                    when (what) {
-                        MODEL -> {
-                            Trace.tap("model", pick)
-                            // A model change moves the provider too, because the endpoints
-                            // belong to the model: keeping the old tag would pin to something
-                            // this model does not have.
-                            val providers = config.providersOf(pick)
-                            val provider = if (active.provider in providers) {
-                                active.provider
-                            } else {
-                                providers.firstOrNull().orEmpty()
-                            }
-                            // The numbers the sheet holds are the **active** model's, so they are
-                            // only handed over when the pick is that same model. A different model
-                            // is asked for its own window by the view model, once.
-                            viewModel.chooseModel(
-                                pick,
-                                provider,
-                                active.effort,
-                                info?.efforts.orEmpty(),
-                                contextLength = info?.contextLength.takeIf { pick == active.model },
-                                maxOutput = info?.maxOutput.takeIf { pick == active.model },
-                            )
-                        }
-                        PROVIDER -> {
-                            Trace.tap("provider", pick)
-                            // **The new provider's own numbers travel with the choice.** They did
-                            // not before: the window and the reply reserve stayed the old pin's, so
-                            // choosing `cloudflare` left the agent clamped to `deepinfra`'s
-                            // 917,504 while that endpoint keeps 943,718 of the window for replies.
-                            // The model's window is the same either way; the reserve is not.
-                            val chosen = numbers.firstOrNull { it.tag == pick }
-                            viewModel.chooseModel(
-                                active.model,
-                                pick,
-                                active.effort,
-                                info?.efforts.orEmpty(),
-                                contextLength = chosen?.contextLength
-                                    ?: info?.contextLength.takeIf { active.provider == pick },
-                                maxOutput = chosen?.maxOutput
-                                    ?: info?.maxOutput.takeIf { active.provider == pick },
-                            )
-                        }
-                        else -> {
-                            Trace.tap("effort", pick)
-                            viewModel.chooseModel(
-                                active.model, active.provider, pick, info?.efforts.orEmpty(),
-                            )
-                        }
-                    }
-                    onDismiss()
-                },
-            ) { Text("Select") }
-        },
-        dismissButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                // **Add and Remove are about MODELS and PROVIDERS, not about effort.** They used to
-                // be on every step, which put "Add" beside a list of effort levels - a control that
-                // could only confuse, because there is nothing to add to a ladder the model
-                // publishes. Report: "effort popup needs just one select button. It seems as if you
-                // used same template for every option which is wrong."
+            // **One row, on the operator's instruction**: "on model selection card also remove
+            // cancel and put add, remove, select on one row", and the same for the provider card.
+            //
+            // `confirmButton` takes the whole row rather than one button in it, because Material
+            // puts `dismissButton` on the left and `confirmButton` on the right - so three buttons
+            // split across two slots would be two groups rather than one row. Add and Remove are
+            // left, Select is right, and Cancel is gone: tapping outside dismisses, which is the
+            // same act without a third word competing with the two that change something.
+            //
+            // **Add and Remove are about MODELS and PROVIDERS, not about effort.** They used to be
+            // on every step, which put "Add" beside a ladder of effort levels where there is nothing
+            // to add. Report: "effort popup needs just one select button. It seems as if you used
+            // same template for every option which is wrong."
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 if (what != EFFORT) {
                     TextButton(onClick = { adding = true }) { Text("Add") }
                     TextButton(onClick = { removing = true }) { Text("Remove") }
                 }
-                TextButton(onClick = onDismiss) { Text("Cancel") }
+                Spacer(Modifier.weight(1f))
+                TextButton(
+                    enabled = chosen != null,
+                    onClick = {
+                        val pick = chosen ?: return@TextButton
+                        when (what) {
+                            MODEL -> {
+                                Trace.tap("model", pick)
+                                // A model change moves the provider too, because the endpoints
+                                // belong to the model: keeping the old tag would pin to something
+                                // this model does not have.
+                                val providers = config.providersOf(pick)
+                                val provider = if (active.provider in providers) {
+                                    active.provider
+                                } else {
+                                    providers.firstOrNull().orEmpty()
+                                }
+                                // The numbers the sheet holds are the **active** model's, so they
+                                // are only handed over when the pick is that same model. A
+                                // different model is asked for its own window by the view model.
+                                viewModel.chooseModel(
+                                    pick,
+                                    provider,
+                                    active.effort,
+                                    info?.efforts.orEmpty(),
+                                    contextLength = info?.contextLength.takeIf { pick == active.model },
+                                    maxOutput = info?.maxOutput.takeIf { pick == active.model },
+                                )
+                            }
+                            PROVIDER -> {
+                                Trace.tap("provider", pick)
+                                // **The new provider's own numbers travel with the choice.** They
+                                // did not before: the window and the reply reserve stayed the old
+                                // pin's, so choosing `cloudflare` left the agent clamped to
+                                // `deepinfra`'s 917,504 while that endpoint keeps 943,718 of the
+                                // window for replies. The model's window is the same either way;
+                                // the reserve is not.
+                                val chosenEndpoint = numbers.firstOrNull { it.tag == pick }
+                                viewModel.chooseModel(
+                                    active.model,
+                                    pick,
+                                    active.effort,
+                                    info?.efforts.orEmpty(),
+                                    contextLength = chosenEndpoint?.contextLength
+                                        ?: info?.contextLength.takeIf { active.provider == pick },
+                                    maxOutput = chosenEndpoint?.maxOutput
+                                        ?: info?.maxOutput.takeIf { active.provider == pick },
+                                )
+                            }
+                            else -> {
+                                Trace.tap("effort", pick)
+                                viewModel.chooseModel(
+                                    active.model, active.provider, pick, info?.efforts.orEmpty(),
+                                )
+                            }
+                        }
+                        onDismiss()
+                    },
+                ) { Text("Select") }
             }
         },
     )
@@ -684,9 +732,21 @@ private fun AddProviderDialog(viewModel: AppViewModel, model: String, onDismiss:
                                 .padding(vertical = 8.dp),
                         ) {
                             Text(endpoint.tag, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            // **The prices, not the context window**, on the operator's
+                            // instruction: "\"allow another provider\" window per row smalltext
+                            // legends should show instead of context - their input, output and
+                            // cache price rates".
+                            //
+                            // It is the right three numbers for the decision being made. A person
+                            // choosing which endpoint may answer is choosing what to pay: the
+                            // window is the same for the model whichever endpoint runs it, and the
+                            // price is the one thing that differs. The same three rates the
+                            // provider picker already shows, from the same source.
                             Text(
                                 text = "${endpoint.providerName} · " +
-                                    (endpoint.contextLength?.let { tokens(it) } ?: "—") + " context",
+                                    "in ${money(endpoint.priceIn)} · " +
+                                    "out ${money(endpoint.priceOut)} · " +
+                                    "cache ${money(endpoint.priceCache)} per M",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
