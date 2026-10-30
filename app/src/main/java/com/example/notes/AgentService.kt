@@ -53,10 +53,14 @@ class AgentService : Service() {
         // that the thing which owns it is the thing which stops: a WebView holds a Looper thread
         // and a Chromium process, and a service that forgot to release it would leave both behind
         // for as long as the process lived.
-        browser = com.example.notes.browser.WebViewBrowser(application)
+        //
+        // A local first, then the field: the field is nullable because it is released on stop, and
+        // passing it here would hand the wiring a `WebViewBrowser?` where a `Browser` is wanted.
+        val engine = com.example.notes.browser.WebViewBrowser(application)
+        browser = engine
         runner = AgentWiring.runnerFor(
             app = application,
-            browser = browser,
+            browser = engine,
             // **The session, not its sentence.** The notification carries the project's own
             // buttons — Stop this session has to know which one — so narrowing it to a string here
             // would be narrowing it to the one thing the buttons do not need.
