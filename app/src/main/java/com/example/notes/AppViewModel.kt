@@ -1928,13 +1928,24 @@ class AppViewModel @JvmOverloads constructor(
                     emptyList()
                 }
             }
-            val synced = repo?.let { GitService.lastSynced(it) }
             main.post {
                 diffChoices = choices
-                // **The default is HEAD against the last sync**, and a person who wants two other
-                // commits picks them. `from` is the older one because a diff reads forwards.
-                diffFrom = synced
-                diffTo = choices.firstOrNull()?.id
+                // **The default is the newest version against the one before it.** The operator's
+                // report: "diff isnt getting selected even when there is history to compare, fix
+                // it. and set it so that by default it shows newest version vs previous one".
+                //
+                // It used to be newest against the *last synced* commit, and that is a different
+                // question with a hole in it: a file that has never been pushed has no synced
+                // version, so `diffFrom` was null and the screen said "there is no version of this
+                // file at one of those commits" about a file with a dozen commits behind it. The
+                // person saw an empty diff and a file with history, which is exactly what the
+                // report describes.
+                //
+                // Newest-vs-previous always has both ends whenever there are two commits, which is
+                // the condition for the mode to mean anything at all. `from` is the older one
+                // because a diff reads forwards.
+                diffTo = choices.getOrNull(0)?.id
+                diffFrom = choices.getOrNull(1)?.id
             }
         }
     }

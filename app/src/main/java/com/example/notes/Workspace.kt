@@ -810,7 +810,15 @@ class Workspace(val accountDir: File) {
         // how a person works on a draft of something they froze, and the original is
         // untouched either way. The destination is checked instead, because writing *into*
         // a locked folder is a change to it.
-        coreProblem(file)?.let { return Result.failure(IllegalArgumentException(it)) }
+        //
+        // **And neither does "the app owns this".** The operator's rule: "only reading and cloning
+        // out of the locked subbranches should be allowed" - so copying `agent/context.log` out to
+        // look at it is exactly the act that must keep working. `coreProblem` was asked here and it
+        // answers "that is the agent's record", which is true and is an answer to a *different*
+        // question. A file that is not there is still refused, because there is nothing to copy.
+        if (!file.exists()) {
+            return Result.failure(IllegalArgumentException("That is no longer there"))
+        }
         lockProblem(into)?.let { return Result.failure(IllegalArgumentException(it)) }
         if (!into.isDirectory) {
             return Result.failure(IllegalArgumentException("That is not a folder"))

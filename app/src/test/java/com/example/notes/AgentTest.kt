@@ -469,10 +469,14 @@ class AgentTest {
         val agent = agent(door)
         agent.burst("look at everything")
         // The file the wake names really exists, so the read in the wake's turn is a read.
-        ws.write(
-            File(ws.projectDir("shopping"), "agent/background_results/tree-c9.txt"),
-            "0\n3 files: milk.txt, bread.txt, eggs.txt",
-        )
+        //
+        // **Written the way the app writes it, not through `Workspace.write`.** `agent/` is the
+        // app's own folder and now holds its whole branch - so `write` refuses it, correctly. The
+        // app itself goes round that with `Beside.write`, and a fixture that went through the
+        // person's door was testing a write that can never happen.
+        val result = File(ws.projectDir("shopping"), "agent/background_results/tree-c9.txt")
+        result.parentFile?.mkdirs()
+        Beside.write(result, "0\n3 files: milk.txt, bread.txt, eggs.txt")
         val talked = door.asked.size
 
         val end = agent.wake(
