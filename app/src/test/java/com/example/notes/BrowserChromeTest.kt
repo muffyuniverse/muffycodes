@@ -171,6 +171,49 @@ class BrowserChromeTest {
     }
 
     @Test
+    fun `the app's own folder draws both marks, on itself and on what is inside it`() {
+        // **Two reports, and the second one is the operator catching what I had missed.**
+        // "why agent/ looks different? is it not manages in a unified way? because where is its red
+        // unsync icon? why is it hidden?" and then "it shows, but why only red lock and not also red
+        // disconnect?" and "and remember that whole subbranch should inherit them".
+        //
+        // Three defects in one row. The lock drew; the disconnect did not, because it was nested
+        // inside the text-file branch that an app-held row never reaches. And neither inherited,
+        // because `appHold` tested the leaf name, so `agent/` was held and `agent/context.log` was
+        // not.
+        scene.signedIn()
+        scene.project("groceries")
+        scene.open("groceries")
+        browser()
+
+        // The folder itself: the record the app keeps inside a project.
+        compose.waitUntil(20_000) { there("agent/") }
+        assertTrue(
+            "the folder says the app keeps it",
+            described("agent is kept by the app"),
+        )
+        assertTrue(
+            "and that it is kept off GitHub",
+            described("agent is kept out of the repository by the app"),
+        )
+
+        // **And inside it.** This is the half the leaf test got wrong: the folder was marked and
+        // its own two logs were not, so a person opening it saw two unmarked files in a marked
+        // folder and had to guess whether they were sent.
+        scene.open("agent")
+        browser()
+        compose.waitUntil(20_000) { there("context.log") }
+        assertTrue(
+            "the log inside inherits the lock",
+            described("context.log is kept by the app"),
+        )
+        assertTrue(
+            "and the disconnect too",
+            described("context.log is kept out of the repository by the app"),
+        )
+    }
+
+    @Test
     fun `a local project has no sync strip at all`() {
         // **The operator's report, from the live log**: "local projects shoudnt show sync row - hide
         // it for them". My first attempt hid only the Sync *button* and kept the rest of the row,

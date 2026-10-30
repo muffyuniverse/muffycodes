@@ -1139,6 +1139,15 @@ class AppViewModel @JvmOverloads constructor(
      */
     fun importFiles(uris: List<android.net.Uri>): Boolean {
         val dir = currentDir ?: return false
+        // **A file cannot be put into a folder that refuses files.** `createFile` and
+        // `createFolder` both ask `lockProblem(dir)`; importing did not, so the one way to add a
+        // file to an app-locked folder was the phone's own picker - the door nobody thinks of as a
+        // door. The operator's rule: adding to a locked branch is not allowed, and it has to hold
+        // for every way of adding.
+        workspace?.lockProblem(dir)?.let {
+            message = it
+            return false
+        }
         // The copy happens on the worker, not in the picker's answer.
         //
         // This used to run on the main thread, and a screenshot, a video or an
@@ -1162,6 +1171,11 @@ class AppViewModel @JvmOverloads constructor(
     /** Brings a whole folder in, keeping its shape. */
     fun importFolder(tree: android.net.Uri): Boolean {
         val dir = currentDir ?: return false
+        // The same door as [importFiles], and a folder is the larger thing to add.
+        workspace?.lockProblem(dir)?.let {
+            message = it
+            return false
+        }
         busy = true
         onWorker {
             val result = Imports.folderInto(getApplication(), tree, dir)

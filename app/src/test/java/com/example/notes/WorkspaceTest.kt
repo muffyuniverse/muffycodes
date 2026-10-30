@@ -502,6 +502,97 @@ class WorkspaceTest {
     }
 
     @Test
+    fun `the app's own folder holds everything inside it, not only itself`() {
+        // **The operator, looking at the record's folder**: "why agent/ looks different? is it not
+        // manages in a unified way? because where is its red unsync icon?" and then the correction
+        // that named the real rule: "and remember that whole subbranch should inherit them".
+        //
+        // `appHold` tested `file.name` - the *leaf* - so `agent/` was held and `agent/context.log`
+        // was not. The folder drew both red marks and its own two logs drew nothing at all, which is
+        // the same inheritance bug the person's lock had in report 9, reappearing in the app's rule.
+        val dir = project()
+        val record = File(dir, "agent").apply { mkdirs() }
+        val log = File(record, "context.log").apply { writeText("   1     9 agent  hi\n") }
+
+        assertEquals(
+            "the folder itself is the app's",
+            Workspace.Hold.APP,
+            workspace.hold(record, emptySet()),
+        )
+        assertEquals(
+            "and so is the file inside it",
+            Workspace.Hold.APP,
+            workspace.hold(log, emptySet()),
+        )
+        // **The second mark has to inherit too, and it is the one that was missing entirely.**
+        // The operator: "it shows, but why only red lock and not also red disconnect?" - the
+        // disconnect was nested inside the text-file branch, which an app-held row never reaches.
+        assertEquals(
+            "and it is kept off GitHub as well as out of reach",
+            Workspace.Unsync.APP,
+            workspace.unsync(log),
+        )
+
+        // **A file beside it is nobody's.** The rule is about being *inside* the folder, so a
+        // sibling that merely shares a prefix - `agent-notes.txt` - must not be caught by it.
+        val beside = File(dir, "agent-notes.txt").apply { writeText("mine") }
+        assertEquals("a name that only starts the same", Workspace.Hold.NONE, workspace.hold(beside, emptySet()))
+    }
+
+    @Test
+    fun `nothing can be added to, renamed in, or removed from a locked branch`() {
+        // **The operator's rule, in their words**: "check that it should be impossible to add
+        // (upload, move, clone, create etc) remove rename etc elements of a locked folder
+        // subbranch" - and "only reading and cloning out of the locked subbranches should be
+        // allowed".
+        //
+        // Written as a matrix because the risk is a path that forgets to ask, not a path that asks
+        // wrongly. Each line below is a different door into the same folder, and the test names the
+        // door in the failure so a regression says *which* one opened.
+        val dir = project()
+        val record = File(dir, "agent").apply { mkdirs() }
+        val log = File(record, "context.log").apply { writeText("   1     9 agent  hi\n") }
+        val beside = File(dir, "milk.txt").apply { writeText("two litres") }
+
+        // --- adding ---
+        assertTrue(
+            "create a file in it",
+            workspace.createFile(record, "new.txt").isFailure,
+        )
+        assertTrue(
+            "create a folder in it",
+            workspace.createFolder(record, "new").isFailure,
+        )
+        assertTrue(
+            "move something into it",
+            workspace.move(beside, record).isFailure,
+        )
+
+        // --- renaming and removing what is already inside ---
+        assertTrue("rename a file in it", workspace.rename(log, "other.log").isFailure)
+        assertTrue("rename the folder itself", workspace.rename(record, "record").isFailure)
+        assertTrue("delete a file in it", workspace.delete(log).isFailure)
+        assertTrue("delete the folder itself", workspace.delete(record).isFailure)
+
+        // --- and writing over what is there ---
+        assertFalse("write a file in it", workspace.write(log, "changed"))
+
+        // **Reading and copying out are allowed**, and that is the other half of the rule: a lock
+        // says "do not change this", not "do not look". The operator's word was "only reading and
+        // cloning out of the locked subbranches should be allowed".
+        assertTrue("the file is still readable", log.canRead())
+        assertEquals("and unchanged", "   1     9 agent  hi\n", log.readText())
+        assertTrue("copying out of it works", workspace.copy(log, dir).isSuccess)
+
+        // **Nothing above touched the disk.** A refusal that has already written half a file is
+        // the failure this list exists to rule out.
+        assertTrue("the folder is still there", record.isDirectory)
+        assertTrue("and so is the file", log.isFile)
+        assertFalse("and nothing was created inside", File(record, "new.txt").exists())
+        assertFalse("nor the folder", File(record, "new").exists())
+    }
+
+    @Test
     fun `a secret is held by the app, and is never written`() {
         val dir = project()
         // **A name the app recognises without reading the file.** It cannot judge content - see

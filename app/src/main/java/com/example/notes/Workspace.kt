@@ -465,9 +465,21 @@ class Workspace(val accountDir: File) {
      * reason be a rule about names while the person's is a stored list, without either pretending to
      * be the other.
      */
-    fun appHold(file: File): Hold =
-        if (isAppFlag(file) || isSystemLocked(file.name) || looksSecret(file.name)) Hold.APP
-        else Hold.NONE
+    fun appHold(file: File): Hold {
+        if (isAppFlag(file) || looksSecret(file.name)) return Hold.APP
+        // **The whole branch inherits, not just the folder.** The operator, looking at `agent/`:
+        // "and remember that whole subbranch should inherit them".
+        //
+        // This tested `file.name` - the *leaf* - so `agent/` was held and `agent/context.log` was
+        // not. The folder drew a red lock and its own two logs drew nothing, which is the same
+        // inheritance bug the person's lock had (report 9) reappearing in the app's own rule.
+        //
+        // Every segment is asked, not just the last: a file three folders deep inside `agent/` is
+        // inside it as surely as one at the top. `isAppFlag` is separate and stays about the leaf,
+        // because `.muffy/`'s own files are the flags and there is nothing beneath them.
+        val names = relative(file) ?: return Hold.NONE
+        return if (names.any { isSystemLocked(it) }) Hold.APP else Hold.NONE
+    }
 
     /**
      * True when [file] is one of the app's own flags, which are shown and never written by hand.

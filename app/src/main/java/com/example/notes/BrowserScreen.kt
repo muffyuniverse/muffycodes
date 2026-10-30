@@ -850,6 +850,23 @@ private fun EntryRow(
                 tint = APP_HOLD,
                 modifier = Modifier.padding(horizontal = 12.dp).size(20.dp),
             )
+            // **The second mark, and it was missing.** The operator, looking at `agent/`:
+            // "it shows, but why only red lock and not also red disconnect?"
+            //
+            // The disconnect mark lived *inside* the text-file branch below, so the one row where
+            // both states are set by the app - `agent/` and the two logs in it - drew the lock and
+            // then left the row. Two facts, one of them invisible: the app keeps the file from being
+            // edited *and* keeps it off GitHub, and the person could see only the first.
+            //
+            // It is a sibling of the lock rather than part of it because they answer different
+            // questions, and a row can have one without the other.
+            if (unsync == Workspace.Unsync.APP) {
+                UnsyncGlyph(
+                    tint = APP_HOLD,
+                    description = "${entry.name} is kept out of the repository by the app",
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                )
+            }
         } else if (!choosing && !system && entry.kind == EntryKind.TEXT) {
             // The lock sits to the left of the menu, and only where it can mean
             // something: a file this app would otherwise let you write.
@@ -883,52 +900,44 @@ private fun EntryRow(
             // a mark rather than a control. A file the app keeps out of the repository is one the
             // person cannot choose to send, and a tap that silently does nothing is the defect this
             // rule exists to remove.
-            if (unsync == Workspace.Unsync.APP) {
-                // **The app's own mark: red, and not a button.** The operator's rule for both flags
-                // is "if they are set by app they are red", and what the app sets cannot be lifted -
-                // a tap that silently does nothing is the defect the rule exists to remove.
+            // **`APP` cannot reach here.** A row the app holds takes the branch above, which draws
+            // both marks and returns; the only states left for a text file are "the person set it"
+            // and "nobody did", and both of those are the toggle below.
+            IconButton(onClick = { actions.onIgnore(entry) }) {
+                // **A broken link, not a cross.** Asked for twice: "unsync row button hasnt been
+                // changed to a disconnect icon from its current cross, as I asked". The cross read
+                // as "close" or "remove", which is a different act from "this is not being sent",
+                // and beside a padlock it was a second ambiguous mark.
                 UnsyncGlyph(
-                    tint = APP_HOLD,
-                    description = "${entry.name} is kept out of the repository by the app",
-                    modifier = Modifier.padding(horizontal = 12.dp),
+                    // **Grey unset, black set by the person.** The app's red is drawn above, with
+                    // its lock: a row the app holds never reaches here.
+                    tint = if (unsync == Workspace.Unsync.USER) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.outline
+                    },
+                    description = if (unsync == Workspace.Unsync.USER) {
+                        "${entry.name} is not sent to GitHub"
+                    } else {
+                        "Stop sending ${entry.name} to GitHub"
+                    },
                 )
-            } else {
-                IconButton(onClick = { actions.onIgnore(entry) }) {
-                    // **A broken link, not a cross.** Asked for twice: "unsync row button hasnt been
-                    // changed to a disconnect icon from its current cross, as I asked". The cross
-                    // read as "close" or "remove", which is a different act from "this is not being
-                    // sent", and beside a padlock it was a second ambiguous mark.
-                    UnsyncGlyph(
-                        // **Grey unset, black set by the person, red set by the app.** The three
-                        // states the operator named, and they were already here for the lock: a
-                        // mark that is off and one that is on have to be told apart at a glance
-                        // down a list.
-                        tint = if (unsync == Workspace.Unsync.USER) {
-                            MaterialTheme.colorScheme.onSurface
-                        } else {
-                            MaterialTheme.colorScheme.outline
-                        },
-                        description = if (unsync == Workspace.Unsync.USER) {
-                            "${entry.name} is not sent to GitHub"
-                        } else {
-                            "Stop sending ${entry.name} to GitHub"
-                        },
-                    )
-                }
             }
         }
-        // **No menu on a file the app keeps.** Every item in it would be refused by `coreProblem`
-        // — rename, move, delete and ignore all answer "that is one of the app's own files" — and a
-        // menu whose every item refuses is worse than no menu: it teaches that the app's refusals are
-        // arbitrary. Report 28's word for it was "noninteractive", and this is where that lands.
-        // **`hold`, not two flags** - and the comment above was right while the code was not. It
-        // said the menu is hidden on a file the app holds *for the same reason* it is hidden on one
-        // the person locked, and then tested only for the app's own hold, so a locked file still
-        // offered a menu whose every item refused. The operator's report: "locked files should hide
-        // and forbid 3dot options".
+        // **No menu on a file the app keeps, and the menu stays on one the person locked.**
+        // The operator's ruling, twice: "3dots are hidden only on system locked branches", and
+        // earlier "system locks restrict both users and agents, and user locks restrict agents (not
+        // users themselves!)".
         //
-        // Now the condition is the claim: any hold at all, whoever set it.
-        if (!choosing && !system && hold == Workspace.Hold.NONE) Box {
+        // This gated on `hold == NONE`, so a folder the person had locked hid the menu from the
+        // person who locked it - the app taking away a lever from its own operator. Report 10 asked
+        // for the menu to go and it was filed while looking at `agent/`, which is an *app* lock, so
+        // it never meant the person's.
+        //
+        // Every item in the menu still works on a person-locked row, because `Workspace` asks
+        // `isLocked` (the app's locks) and `isAgentLocked` (both) as different questions - so the
+        // menu is not a lie there, and hiding it was.
+        if (!choosing && !system && hold != Workspace.Hold.APP) Box {
             IconButton(onClick = { menu = true }) {
                 Icon(Icons.Filled.MoreVert, contentDescription = "More")
             }
@@ -945,36 +954,24 @@ private fun EntryRow(
                         actions.onTogglePin(entry)
                     },
                 )
-                // **Not offered on a locked file.** Rename would be refused, so the item
-                // could only disappoint — the same rule Delete already followed. The model
-                // refuses it either way; hiding it is not the refusal.
-                if (hold != Workspace.Hold.USER) {
-                    DropdownMenuItem(
-                        text = { Text("Rename…") },
-                        onClick = {
-                            menu = false
-                            actions.onRename(entry)
-                        },
-                    )
-                }
-                // **Not offered on a locked file, for the same reason as Rename.** Moving is a
-                // change to the file, so `Workspace.move` refuses it — and the trace shows what an
-                // unguarded item costs: tapping Move… on a locked `.gitignore` opened the
-                // destination window, and only the confirm refused. A window that exists to be
-                // refused is worse than an item that is not there.
-                if (hold != Workspace.Hold.USER) {
-                    DropdownMenuItem(
-                        text = { Text("Move…") },
-                        onClick = {
-                            menu = false
-                            actions.onMove(entry)
-                        },
-                    )
-                }
-                // **Copy stays on a locked file, and that is what a lock means.** It
-                // says "do not change this"; reading it and making another copy
-                // elsewhere changes nothing here, so refusing it would stretch the lock
-                // over an act it was never about.
+                // **Offered on a person-locked file, because it works.** The person may rename what
+                // they locked - their lock is an instruction to the agent, not a cage for them.
+                DropdownMenuItem(
+                    text = { Text("Rename…") },
+                    onClick = {
+                        menu = false
+                        actions.onRename(entry)
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("Move…") },
+                    onClick = {
+                        menu = false
+                        actions.onMove(entry)
+                    },
+                )
+                // **Copy is offered everywhere it is offered at all**, and it is the one act a lock
+                // was never about: reading a file and making another copy changes nothing here.
                 DropdownMenuItem(
                     text = { Text("Copy…") },
                     onClick = {
@@ -982,15 +979,13 @@ private fun EntryRow(
                         actions.onCopy(entry)
                     },
                 )
-                if (hold != Workspace.Hold.USER) {
-                    DropdownMenuItem(
-                        text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
-                        onClick = {
-                            menu = false
-                            actions.onDelete(entry)
-                        },
-                    )
-                }
+                DropdownMenuItem(
+                    text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                    onClick = {
+                        menu = false
+                        actions.onDelete(entry)
+                    },
+                )
             }
         }
     }
