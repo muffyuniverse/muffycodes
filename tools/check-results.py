@@ -52,8 +52,14 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--results",
-        default="app/build/test-results/testDebugUnitTest",
-        help="Where JUnit writes its XML.",
+        default="",
+        help="Where JUnit writes its XML. Empty means every module's, which is what the "
+        "workflow wants now that there is more than one module.",
+    )
+    parser.add_argument(
+        "--results-root",
+        default=".",
+        help="Where to look for <module>/build/test-results when --results is empty.",
     )
     parser.add_argument(
         "--expect",
@@ -62,8 +68,20 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    folder = Path(args.results)
-    files = sorted(folder.glob("TEST-*.xml")) if folder.is_dir() else []
+    # **Every module, unless a caller names one.** The app was the only module
+    # for as long as this script existed, so its path was the default; `:browser`
+    # is the second, and a default that named only the app would report "no
+    # results" for a run that tested the new module and never looked at it.
+    if args.results:
+        folders = [Path(args.results)]
+    else:
+        root = Path(args.results_root)
+        folders = sorted(
+            folder
+            for folder in root.glob("*/build/test-results/testDebugUnitTest")
+            if folder.is_dir()
+        )
+    files = sorted(file for folder in folders for file in folder.glob("TEST-*.xml"))
 
     ran: dict[str, int] = {}
     enabled = 0
@@ -86,7 +104,12 @@ def main() -> int:
     problems: list[str] = []
 
     if not files:
-        problems.append(f"no JUnit results at all under {folder}")
+        # **Said as a path that was looked for, not as a module count.** "no module"
+        # would read as a build fault when the truth is that no build ran.
+        where = args.results or ", ".join(str(f) for f in folders)
+        if not where:
+            where = f"{args.results_root}/*/build/test-results/testDebugUnitTest"
+        problems.append(f"no JUnit results at all under {where}")
 
     if enabled == 0 and files:
         problems.append(f"{len(files)} result files but zero test cases")

@@ -389,12 +389,17 @@ jobs:
           # run either way: they are tests, and a broken flow must fail the
           # request that broke it. The flag decides only whether the pictures
           # that make the report get written.
+          # **Every module's tests, not just the app's.** `testDebugUnitTest`
+          # names one module's task; `:browser` has its own, and a run that
+          # quietly skipped it would be green with the new module untested. Naming
+          # both is deliberate rather than `test`, because `test` also builds the
+          # release variant of every module.
           if [ "$EVENT_NAME" != "pull_request" ]; then
             ./gradlew --parallel --no-daemon --configuration-cache \
-                --profile testDebugUnitTest -Pmuffy.shots
+                --profile :app:testDebugUnitTest :browser:testDebugUnitTest -Pmuffy.shots
           else
             ./gradlew --parallel --no-daemon --configuration-cache \
-                --profile testDebugUnitTest
+                --profile :app:testDebugUnitTest :browser:testDebugUnitTest
           fi
 
       # The other half of the asking.
@@ -426,7 +431,7 @@ jobs:
           python3 - <<'PY'
           import glob, xml.etree.ElementTree as ET
           shown = 0
-          for f in sorted(glob.glob("app/build/test-results/**/TEST-*.xml", recursive=True)):
+          for f in sorted(glob.glob("*/build/test-results/**/TEST-*.xml", recursive=True)):
               try:
                   root = ET.parse(f).getroot()
               except Exception:

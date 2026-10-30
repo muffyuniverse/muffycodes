@@ -341,4 +341,11 @@ dependencies {
 
     // JGit: a pure-Java git implementation, so no native code is needed on Android.
     implementation("org.eclipse.jgit:org.eclipse.jgit:6.10.1.202505221210-r")
+
+    // **The browser, as its own module.** It wraps the WebView the phone already
+    // has, so this adds no bytes to the APK and no engine to keep current - the
+    // Play Store updates Chromium independently of this app. The module boundary
+    // is what makes the engine a decision rather than a fact: nothing in the app
+    // imports `android.webkit` directly.
+    implementation(project(":browser"))
 }

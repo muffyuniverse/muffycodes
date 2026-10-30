@@ -49,7 +49,13 @@ def read_map(path: Path) -> tuple[list[tuple[str, list[str], int]], set[str]]:
         stripped = line.strip()
         directive = ALWAYS_FULL.match(stripped)
         if directive:
-            always.add(Path(directive.group(1)).name)
+            # **The module matters here too.** `always-full` names a path, and the
+            # comparison below is by `module/file.kt` - so a bare name would never
+            # match and a deliberate exemption would read as a gap.
+            full = directive.group(1)
+            parts = Path(full).parts
+            module = parts[parts.index("src") - 1] if "src" in parts else "."
+            always.add(f"{module}/{Path(full).name}")
             continue
         if not stripped or stripped.startswith("#"):
             continue
@@ -64,8 +70,18 @@ def read_map(path: Path) -> tuple[list[tuple[str, list[str], int]], set[str]]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--map", default="tools/test-map.txt")
-    parser.add_argument("--sources", default="app/src/main/java/com/example/notes")
-    parser.add_argument("--tests", default="app/src/test/java/com/example/notes")
+    # **Comma separated, and every module must be named.** A source in a module
+    # nobody listed would be invisible to this check, and invisible is the one
+    # failure mode it exists to prevent: the table would look complete while a
+    # whole module sat outside it.
+    parser.add_argument(
+        "--sources",
+        default="app/src/main/java/com/example/notes,browser/src/main/java/com/example/notes/browser",
+    )
+    parser.add_argument(
+        "--tests",
+        default="app/src/test/java/com/example/notes,browser/src/test/java/com/example/notes/browser",
+    )
     args = parser.parse_args()
 
     map_path = Path(args.map)
@@ -74,7 +90,8 @@ def main() -> int:
     # The universe of test classes, taken from the files themselves rather than
     # from prose, because prose is what drifts.
     tests = {}
-    for file in sorted(Path(args.tests).glob("*.kt")):
+    test_files = sorted(f for root in args.tests.split(",") for f in Path(root.strip()).glob("*.kt"))
+    for file in test_files:
         stem = file.stem
         if stem in HARNESS:
             continue
@@ -85,7 +102,31 @@ def main() -> int:
             # and if it is, that line is a mistake.
             HARNESS.add(stem)
 
-    sources = {file.name for file in Path(args.sources).glob("*.kt")}
+    # **Keyed by module-relative path, not by bare file name.** Two modules can
+    # both hold a `Browser.kt` one day, and a check that keyed on the name would
+    # then treat them as one file - which is the same silent-completeness bug as
+    # a table that omits a module.
+    def module_of(root: str) -> str:
+        """The module a source root belongs to: the first path part before `src/`."""
+        parts = Path(root).parts
+        if "src" in parts:
+            index = parts.index("src")
+            if index > 0:
+                return parts[index - 1]
+        return "."
+
+    def files_in(roots: str) -> dict[str, str]:
+        found: dict[str, str] = {}
+        for root in roots.split(","):
+            root = root.strip()
+            if not root:
+                continue
+            module = module_of(root)
+            for file in sorted(Path(root).glob("*.kt")):
+                found[f"{module}/{file.name}"] = str(file)
+        return found
+
+    sources = files_in(args.sources)
 
     named_tests: set[str] = set()
     named_sources: set[str] = set()
@@ -105,10 +146,15 @@ def main() -> int:
 
         for source in files:
             name = Path(source).name
-            named_sources.add(name)
-            if name not in sources:
+            # **The map names a path, so the module comes from the path.** The
+            # lookup is by `module/file.kt`, which is what lets two modules hold a
+            # file of the same name without the check confusing them.
+            module = module_of(source)
+            key = f"{module}/{name}"
+            named_sources.add(key)
+            if key not in sources:
                 problems.append(
-                    f"{map_path}:{number}: names {name}, which is not in {args.sources}. "
+                    f"{map_path}:{number}: names {source}, which does not exist. "
                     f"A stale source name is a line that can never match."
                 )
 
@@ -122,7 +168,7 @@ def main() -> int:
     # Sources that are deliberately not mapped. Each one here means "a change to
     # this file runs the whole suite", which is safe and slow — so the list stays
     # short and each entry is a reason, not a habit.
-    for name in sorted(sources - named_sources - always):
+    for name in sorted(set(sources) - named_sources - always):
         problems.append(
             f"{name} is on no map line, so every run that touches it falls back to the "
             f"whole suite (safe, slow). Map it, or add `# always-full` for it."
@@ -130,7 +176,7 @@ def main() -> int:
 
     print(f"  {len(rows)} map lines · {len(tests)} test classes · {len(sources)} source files")
     print(
-        f"  mapped: {len(named_tests)} tests · {len(named_sources & sources)} sources · "
+        f"  mapped: {len(named_tests)} tests · {len(named_sources & set(sources))} sources · "
         f"always-full: {len(always)}"
     )
 

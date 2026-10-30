@@ -113,14 +113,19 @@ while IFS= read -r file; do
     [ -n "$file" ] || continue
     # A change outside the tested sources affects nothing here: notes, scripts
     # and workflows are not part of the app.
+    #
+    # **Every module, not only the app.** `:browser` holds code the app links
+    # into, so a change there is a change to the app — and a `case` that named
+    # only `app/` would have classified it as "not part of the app" and run
+    # nothing. The pattern is `<module>/src/...` for any module.
     case "$file" in
-        app/src/main/*|app/src/test/*) ;;
+        */src/main/*|*/src/test/*) ;;
         *) continue ;;
     esac
 
     # A test that changed runs, obviously, and does not drag in the rest.
     case "$file" in
-        app/src/test/*/*Test.kt|app/src/test/*/*/*Test.kt|app/src/test/java/*/*/*/*Test.kt)
+        */src/test/*/*Test.kt|*/src/test/*/*/*Test.kt|*/src/test/java/*/*/*/*Test.kt)
             # A test that was deleted has nothing left to run, and asking
             # Gradle for a class that no longer exists fails the whole run.
             [ -f "$file" ] || continue
