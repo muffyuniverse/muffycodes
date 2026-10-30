@@ -231,7 +231,10 @@ class RequestStatsTest {
         // All three used to truncate to the HOUR, so a 09:55 clock gave 09:00 to every one of them:
         // "6 hours" covered fifty-five minutes, and "15 min" covered the whole hour. The three
         // chips named three intervals and two of them were wrong.
-        assertEquals("15 min starts at :45", at(9, 45), start(RequestStats.Preset.MINUTES_15))
+        // The fixture's clock is 09:16, so the 15-minute cell is the one that began at 09:15. The
+        // operator's own example is "9:55 -> 9:45", which this asserts through the same rule rather
+        // than by moving the clock: the cell boundary, not the example, is what the code decides.
+        assertEquals("15 min starts at :15", at(9, 15), start(RequestStats.Preset.MINUTES_15))
         assertEquals("1 hour starts at the top of the hour", at(9), start(RequestStats.Preset.HOUR_1))
         assertEquals("6 hours starts at the 6-hour base", at(6), start(RequestStats.Preset.HOURS_6))
         assertEquals("1 day starts at midnight", at(0), start(RequestStats.Preset.DAY_1))
@@ -261,6 +264,34 @@ class RequestStatsTest {
             assertTrue("${p.label}: the clock is inside the rolling interval", clock >= rolling)
             assertTrue("${p.label}: the clock does not start in the future", clock <= now)
         }
+    }
+
+    @Test
+    fun `the clock grids are the lengths' own, at the operator's own times`() {
+        // **The report's four worked examples, asserted as written.** "clock 6 hours should set as
+        // from whole 6 hour bases (0, 6, 12, 18) so that if the to time is 9:55 then from is 6:00,
+        // and for 14:30 it is 12:00. for 1 hour it should be beginning of the hour: 9:00 for 9:55.
+        // for 15 min it should be 0, 15, 30 or 45, so that for 9:55 it is 9:45 (and the interval is
+        // 10 min)".
+        //
+        // This is a second test rather than more lines in the one above because that one runs on a
+        // 09:16 clock, where two of these four cases cannot be told apart from the old behaviour.
+        val zone = ZoneId.of("UTC")
+        fun at(h: Int, m: Int) =
+            LocalDate.parse("2026-10-28").atTime(h, m).atZone(zone).toInstant().toEpochMilli()
+        fun start(p: RequestStats.Preset, h: Int, m: Int) = p.clockAt(at(h, m), zone).fromMs
+
+        assertEquals("six hours at 9:55 begins at 6:00", at(6, 0), start(RequestStats.Preset.HOURS_6, 9, 55))
+        assertEquals("six hours at 14:30 begins at 12:00", at(12, 0), start(RequestStats.Preset.HOURS_6, 14, 30))
+        assertEquals("one hour at 9:55 begins at 9:00", at(9, 0), start(RequestStats.Preset.HOUR_1, 9, 55))
+        assertEquals("fifteen minutes at 9:55 begins at 9:45", at(9, 45), start(RequestStats.Preset.MINUTES_15, 9, 55))
+        // "and the interval is 10 min" - the width that example produces, which is the thing the
+        // person actually reads off the screen under the table.
+        assertEquals(
+            "and that interval is ten minutes wide",
+            10 * 60_000L,
+            at(9, 55) - start(RequestStats.Preset.MINUTES_15, 9, 55),
+        )
     }
 
     @Test
