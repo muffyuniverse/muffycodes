@@ -895,11 +895,32 @@ jobs:
           # Waiting costs nothing that was not already being paid, because
           # delivery cannot begin until the suite is done. An unreadable answer is
           # now a failure rather than a shrug.
+          # **A failed read is reported as a failed read.** Without this, `set -e` (the runner's
+          # default shell) ends the step on a non-zero command and the log shows "Process completed
+          # with exit code 1" and nothing else - which is indistinguishable from a red suite and
+          # sends the reader looking for a failing test that does not exist.
+          trap 'code=$?; if [ "$code" -ne 0 ]; then echo "::error::The suite verdict could not be read, exit $code. The APK is not handed on."; fi' EXIT
+
           deadline=$((SECONDS + 1800))
           while :; do
-            rows="$(gh api "repos/$REPOSITORY/actions/runs/$RUN_ID/jobs" --paginate \
-              --jq '.jobs[] | select(.name | startswith("Test"))
-                    | "\(.status)\t\(.conclusion // "-")\t\(.name)"' 2>/dev/null)"
+            # **A transient read failure is not a verdict.** GitHub answers 502 under load -
+            # observed for most of an hour on 2026-10-30 - and this step exits non-zero when the
+            # call fails, which killed a build whose suite had already gone green in both shards.
+            # The `2>/dev/null` hid the reason and no `::error::` was printed, so the log said only
+            # "Process completed with exit code 1" and looked like a real failure.
+            #
+            # Retried, and then treated as "keep waiting" rather than as an answer. The deadline
+            # below is what stops a permanently unreadable API, and it fails closed - so a run that
+            # cannot see the suite still cannot hand on an APK. What changes is that a blip costs
+            # ten seconds instead of the whole build.
+            rows=""
+            for attempt in 1 2 3; do
+              rows="$(gh api "repos/$REPOSITORY/actions/runs/$RUN_ID/jobs" --paginate \
+                --jq '.jobs[] | select(.name | startswith("Test"))
+                      | "\(.status)\t\(.conclusion // "-")\t\(.name)"' 2>/dev/null)" && break
+              echo "The suite's state could not be read (attempt $attempt); retrying."
+              sleep 5
+            done
             if [ -z "$rows" ]; then
               echo "::error::Could not read the suite's state, so the APK is not handed on."
               exit 1
