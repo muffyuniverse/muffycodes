@@ -1,8 +1,7 @@
 package com.example.notes
 
+import com.example.notes.browser.Addresses
 import com.example.notes.browser.Browser
-import com.example.notes.browser.Deadline
-import com.example.notes.browser.Page
 import com.example.notes.browser.Wait
 import org.json.JSONArray
 import org.json.JSONObject
@@ -50,7 +49,7 @@ class AgentTools(
      */
     private val triggerTokens: () -> Long = { 0L },
     /**
-     * The browser, or [com.example.notes.browser.NoBrowser] when the agent may not browse.
+     * The browser, or `Browser.NONE` when the agent may not browse.
      *
      * **Injected rather than made here**, for the same reason [bg] is: a test must be able to say
      * what a page answered without a phone, a network, or a WebView. The app passes the real one;
@@ -1519,7 +1518,7 @@ class AgentTools(
         if (url.isEmpty()) return refusal("Say which page to read: {\"url\":\"https://example.com\"}")
         // **The refusal happens before anything is loaded**, and it is the same check the browser
         // makes. Both ask, because either one alone is a place a future caller can forget.
-        com.example.notes.browser.Addresses.problem(url, privateAllowed())?.let { return refusal(it) }
+        Addresses.problem(url, privateAllowed())?.let { return refusal(it) }
         val wait = when (args.optString("wait").trim().lowercase()) {
             "" -> Wait.DONE
             "dom" -> Wait.DOM
@@ -1532,7 +1531,7 @@ class AgentTools(
             )
         }
         val eval = args.optString("eval").trim().ifEmpty { null }
-        val page = browser.text(url, wait, eval, Deadline(browseMs()))
+        val page = browser.text(url, wait, eval, com.example.notes.browser.Deadline(browseMs()))
             .getOrElse { return refusal(it.message ?: "That page could not be read.") }
         val from = args.optInt("from", 1).coerceAtLeast(1)
         val to = if (args.has("to")) args.optInt("to", 0) else 0
@@ -1561,10 +1560,10 @@ class AgentTools(
     private fun shot(args: JSONObject, deadline: Deadline): String {
         val url = args.optString("url").trim()
         if (url.isEmpty()) return refusal("Say which page to photograph: {\"url\":\"https://example.com\"}")
-        com.example.notes.browser.Addresses.problem(url, privateAllowed())?.let { return refusal(it) }
+        Addresses.problem(url, privateAllowed())?.let { return refusal(it) }
         val full = args.optBoolean("full", false)
         val eval = args.optString("eval").trim().ifEmpty { null }
-        val bytes = browser.shot(url, full, eval, Deadline(browseMs()))
+        val bytes = browser.shot(url, full, eval, com.example.notes.browser.Deadline(browseMs()))
             .getOrElse { return refusal(it.message ?: "That page could not be photographed.") }
         val name = "shot-" + System.currentTimeMillis() + ".png"
         val file = File(File(File(projectDir, RESULTS_DIR), "browser"), name)

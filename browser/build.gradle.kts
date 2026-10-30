@@ -38,6 +38,10 @@ android {
 
 dependencies {
     testImplementation("junit:junit:4.13.2")
+    // android.jar's `org.json` is a stub that throws at runtime, and `unquote` uses
+    // `JSONTokener`. The JVM tests need a real implementation on the classpath -
+    // the same reason the app's own tests have this line.
+    testImplementation("org.json:json:20231013")
     testImplementation("org.robolectric:robolectric:4.17")
     testImplementation("androidx.test.ext:junit:1.2.1")
 }
