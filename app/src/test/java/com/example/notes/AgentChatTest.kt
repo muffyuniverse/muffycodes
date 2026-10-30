@@ -405,7 +405,6 @@ class AgentChatTest {
     }
 
     @Test
-    @Test
     fun `a wrapped line costs as many rows as it fills, because height is rows`() {
         // **The operator's question**: "limit on displayed lines doesnt account for long lines that
         // are wrapping. Do we need to live with it or is it a simple fix to count a line that wraps
