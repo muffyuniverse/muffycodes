@@ -183,22 +183,34 @@ class ContextBudgetTest {
     }
 
     @Test
-    fun `the target must be below both points that fire, or the ask would remove nothing`() {
-        // **The only ordering the three numbers need.** A target at or above a trigger means the
-        // act that fires there removes nothing: the context is already under the number it is being
-        // asked to reach. So the target sits strictly below each trigger that is on.
-        val target = runCatching {
-            ContextBudget.Limits.of(triggerAsked = 10_000, hardAsked = 0, targetAsked = 10_000, ceiling = 917_504)
-        }
-        assertTrue("a target at the forget point is refused", target.isFailure)
+    fun `the target is repaired to below both points that fire, rather than refused`() {
+        // **The only ordering the three numbers need.** A target at or above a point that fires
+        // means the act there removes nothing: the context is already under the number it is being
+        // asked to reach. So the target sits strictly below each point that fires.
+        //
+        // **It used to be refused, and refusing was the crash.** These numbers are typed into
+        // fields, and the settings screen builds `Limits` on every keystroke inside a composable -
+        // so a `require` here does not show an error, it kills the app, and a saved number kills it
+        // again on the next launch. The rule is now the one the two limits already follow: what was
+        // typed stays in `asked` for the field to show, and what is enforced is made to work.
+        //
+        // The invariant is asserted on the *result* instead of on the input, which is the same
+        // claim with the throw moved out of the way.
+        val atForget = ContextBudget.Limits.of(
+            triggerAsked = 10_000, hardAsked = 0, targetAsked = 10_000, ceiling = 917_504,
+        )
+        assertEquals("the number typed is kept for the field", 10_000L, atForget.target.asked)
+        assertTrue("and the one enforced is below the forget point", atForget.targetAt < atForget.triggerAt)
 
-        val aboveTrim = runCatching {
-            ContextBudget.Limits.of(triggerAsked = 50_000, hardAsked = 20_000, targetAsked = 20_000, ceiling = 917_504)
-        }
-        assertTrue("and a target at the trim point is refused too", aboveTrim.isFailure)
+        val atTrim = ContextBudget.Limits.of(
+            triggerAsked = 50_000, hardAsked = 20_000, targetAsked = 20_000, ceiling = 917_504,
+        )
+        assertEquals("the same for a target at the trim point", 20_000L, atTrim.target.asked)
+        assertTrue("which is repaired below the trim", atTrim.targetAt < atTrim.hardAt)
 
-        // Below both, and it is accepted - which is the normal shape: forget early, trim later,
-        // both aiming at the same smaller number.
+        // Below both, and it is kept as typed - which is the normal shape: forget early, trim
+        // later, both aiming at the same smaller number. A repair that moved a valid number would
+        // be a worse bug than the one it replaced.
         val fine = ContextBudget.Limits.of(
             triggerAsked = 50_000,
             hardAsked = 90_000,
