@@ -80,11 +80,19 @@ class AgentToolsTest {
         // is gone, replaced by the app's own keepalive poll. A tool the model can call to do nothing
         // is a turn spent on nothing, and it would show in the conversation as work.
         assertFalse("wait is not a tool", specs.any { it.name == "wait" })
+        // **The list is the whole surface, and it is asserted in order on purpose.** A tool that
+        // appears here without a decision is a capability the operator never granted, which is why
+        // this is an exact list rather than a "contains" check.
+        //
+        // `browse` and `shot` joined it when the browser module did. They are the app's first tools
+        // that reach outside the phone, and both refuse private addresses unless the operator has
+        // said otherwise — so the capability is granted deliberately rather than by the list
+        // growing.
         assertEquals(
-            "and the eleven that are",
+            "and the thirteen that are",
             listOf(
                 "tree", "read", "edit", "forget", "create", "delete",
-                "move", "history", "restore", "background", "reason",
+                "move", "history", "restore", "background", "reason", "browse", "shot",
             ),
             specs.map { it.name },
         )
