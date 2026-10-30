@@ -707,6 +707,9 @@ private fun EntryList(viewModel: AppViewModel, actions: BrowserActions) {
     // the file on every draw did not: the lock was written, the answer changed, and Compose had
     // nothing observable to recompose for.
     val lockedPaths = viewModel.lockedPaths
+    // **The unsync set is read here for the same reason.** Both marks are answers about state the
+    // view model holds; reading one from state and the other from the file was the whole bug.
+    val unsyncedPaths = viewModel.unsyncedPaths
     if (entries.isEmpty()) {
         EmptyState(
             title = if (viewModel.isSearching) "Nothing matches" else "Nothing here yet",
@@ -746,7 +749,11 @@ private fun EntryList(viewModel: AppViewModel, actions: BrowserActions) {
                 // twenty lock icons would read as twenty things the person did - `hold` keeps that
                 // rule because it asks about this path only.
                 hold = ws?.hold(entry.file, lockedPaths) ?: Workspace.Hold.NONE,
-                unsync = ws?.unsync(entry.file) ?: Workspace.Unsync.NONE,
+                // **From state, like the lock beside it.** `ws.unsync(file)` re-read the flags
+                // file on every call, which Compose cannot see - so a tap that changed the file
+                // changed nothing the row was watching and the icon waited for some other redraw.
+                // Reported twice: "sync connect icon doesnt update visually after tapping on it".
+                unsync = ws?.unsync(entry.file, unsyncedPaths) ?: Workspace.Unsync.NONE,
                 selected = viewModel.isSelected(entry.file),
                 choosing = viewModel.selected.isNotEmpty(),
                 // A hidden folder and the record's `agent/` are the app's
@@ -867,7 +874,20 @@ private fun EntryRow(
                     modifier = Modifier.padding(horizontal = 12.dp),
                 )
             }
-        } else if (!choosing && !system && entry.kind == EntryKind.TEXT) {
+        } else if (!choosing && !system && entry.kind != EntryKind.UNKNOWN) {
+            // **A folder carries the marks too, and it is the row where they matter most.**
+            // Reported: "why folders made by agents dont have lock and sync icons?" and, earlier,
+            // "why logs dont inherit red lock and unsync icons?".
+            //
+            // This gate was `entry.kind == EntryKind.TEXT`, so the two marks existed only on text
+            // files — while `Workspace.hold` and `Workspace.unsync` have always understood a folder
+            // path and everything beneath it. The state was being computed for folders and then not
+            // drawn, so a person who locked `drafts/` saw the lock on no row at all and could not
+            // tell whether the lock had taken.
+            //
+            // **`UNKNOWN` stays out**, because a binary the app cannot open has no lock to offer in
+            // a menu that would not let you edit it anyway.
+            //
             // The lock sits to the left of the menu, and only where it can mean
             // something: a file this app would otherwise let you write.
             IconButton(onClick = { actions.onToggleLock(entry) }) {

@@ -381,10 +381,25 @@ class Workspace(val accountDir: File) {
      * **APP wins**, because the app's rule cannot be lifted: reporting USER on a secret would offer
      * a toggle whose other position is still refused.
      */
-    fun unsync(file: File): Unsync {
+    fun unsync(file: File): Unsync = unsync(file, unsynced())
+
+    /**
+     * The same answer, from a set the caller already holds — **which is what makes it redraw.**
+     *
+     * The no-argument form re-reads `.muffy/unsynced.json` on every call. That is fine for a tool
+     * asking once and wrong for a row drawn by Compose: the read is invisible to the runtime, so a
+     * tap that changed the file changed no state the row was watching, and the icon stayed as it was
+     * until something else happened to redraw the list. Reported twice, in two builds: "sync connect
+     * icon doesnt update visually after tapping on it", and then "sync icon still lags to change
+     * after tapping".
+     *
+     * **The lock had this exact bug and was fixed the same way**, and its comment is the one that
+     * explains why: "asking `.muffy/locked.json` on every call meant Compose had no reason to redraw
+     * the row when the lock changed". The fix was applied to one of the two marks and not the other.
+     */
+    fun unsync(file: File, kept: Set<String>): Unsync {
         if (appHold(file) == Hold.APP) return Unsync.APP
         val path = relative(file)?.let(::pathString) ?: return Unsync.NONE
-        val kept = unsynced()
         if (path in kept) return Unsync.USER
         // **The same inheritance as the lock, and for the same reason.** Keeping a folder off GitHub
         // keeps everything in it off GitHub - that is what `unsyncPaths` builds for the push - so a

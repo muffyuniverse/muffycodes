@@ -2655,6 +2655,7 @@ class AppViewModel @JvmOverloads constructor(
     /** Measures the open conversation's context, so the label can show it. */
     fun measureChatContext() {
         val project = chatProject ?: return
+        val ws = workspace ?: return
         val size = try {
             AgentLog.open(ws.projectDir(project)).contextTokens()
         } catch (t: Throwable) {
