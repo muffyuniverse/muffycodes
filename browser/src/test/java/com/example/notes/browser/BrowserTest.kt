@@ -134,20 +134,21 @@ class BrowserTest {
     // ---- the script that does the reading ----------------------------------
 
     @Test
-    fun `the extraction script is in the APK`() {
+    fun `the extraction script is where the browser looks for it`() {
         // **A packaging fault that would otherwise look like a page problem.** Without the asset
         // every page would answer "it had no readable text", which is a wrong answer about the web
-        // rather than a right answer about the build. This asserts the file is where the code looks
-        // for it, which is the only part of the script a JVM test can check — the script itself
-        // needs a real DOM.
-        val loaded = try {
-            javaClass.classLoader!!.getResourceAsStream("assets/extract.js")
-                ?.bufferedReader()?.use { it.readText() }
-        } catch (t: Throwable) {
-            null
-        }
-        assertNotNull("extract.js is packaged with the module", loaded)
-        assertTrue("and it is the extractor, not a placeholder", loaded!!.contains("document.body"))
+        // rather than a right answer about the build.
+        //
+        // Asserted against the source tree rather than through a class loader, because a unit test
+        // runs from the module's build folder and the asset is only merged into the APK by a later
+        // task. The path is the contract: `WebViewBrowser` opens `assets/extract.js` from the
+        // module's own assets, so the file must exist at `src/main/assets/extract.js`. If somebody
+        // moves it, this fails and says so, which is the part a test can honestly check — the
+        // script's own behaviour needs a real DOM.
+        val script = java.io.File("src/main/assets/extract.js")
+        assertTrue("extract.js is in the module's assets: ${script.absolutePath}", script.isFile)
+        val loaded = script.readText()
+        assertTrue("and it is the extractor, not a placeholder", loaded.contains("document.body"))
         assertTrue("it answers text", loaded.contains("return kept.join"))
     }
 }

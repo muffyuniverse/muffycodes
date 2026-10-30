@@ -18,14 +18,20 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    // **`includeAndroidResources` is not available here**, and the build said so
+    // before anything else could: it is an `android.testOptions.unitTests` option
+    // of the *application* plugin, and this module uses the library plugin. The
+    // tests below do not need it — they read `extract.js` from the module's own
+    // resources through the class loader rather than through a merged asset path,
+    // which is what that flag would have provided.
     testOptions {
         unitTests {
             // Robolectric's `ShadowWebView` is a fake that records `loadUrl` and
             // does not execute JavaScript. It is enough to test *this module's
-            // rules* - which URLs are refused, what a timeout says, how a page
-            // becomes text - and it is not enough to test a page. The honest
-            // split is written down in `BrowserTest`, where the limit matters.
-            includeAndroidResources = true
+            // rules* - which URLs are refused, how a JSON result becomes text -
+            // and it is not enough to test a page. The honest split is written
+            // down in `BrowserTest`, where the limit matters.
+            isReturnDefaultValues = true
         }
     }
 }
