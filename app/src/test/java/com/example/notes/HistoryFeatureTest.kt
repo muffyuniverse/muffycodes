@@ -570,6 +570,48 @@ class HistoryFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `a deleted file is offered once, as the newest version it ever had`() {
+        // **The operator's question, answered by a test.** "does 'restore deleted' show all the files
+        // deleted from the selected folder? like all that existed in previous commits but not in the
+        // latest (no duplicates - restore target is the latest variant of the deleted file/folder),
+        // right? or is it too complicated?"
+        //
+        // Yes, and this is the part that is not obvious: a file that was deleted and re-created and
+        // deleted again appears in many commits, and the list must name it once — the version to
+        // bring back is the one it last was, not the one from three commits ago.
+        start()
+        scene.folder("letters")
+        scene.openIn("letters")
+        val letter = scene.file("milk.txt", "the first draft")
+        scene.await("the first draft to be recorded", 20_000) {
+            scene.trackedFiles().contains("letters/milk.txt")
+        }
+        // **Written again through the editor**, so the history holds two versions with different
+        // contents and "newest" is a real choice rather than the only one there is.
+        scene.viewModel.openEditor(letter)
+        scene.viewModel.saveEditor("the second draft")
+        scene.await("the second draft to be recorded", 20_000) {
+            scene.viewModel.textOf(letter) == "the second draft"
+        }
+        scene.viewModel.closeEditor()
+        scene.viewModel.delete(letter)
+        scene.await("the deletion to be recorded", 20_000) { !letter.exists() }
+
+        val gone = scene.viewModel.deletedIn(scene.viewModel.currentDir!!)
+
+        assertEquals(
+            "named once, however many versions the history holds",
+            1,
+            gone.count { it.name == "milk.txt" },
+        )
+        assertTrue(
+            "and put back as it last was, not as it first was",
+            scene.viewModel.restoreDeleted(scene.viewModel.currentDir!!, gone.first { it.name == "milk.txt" }),
+        )
+        assertEquals("the last thing it said", "the second draft", letter.readText())
+    }
+
+    @Test
     fun `a deleted picture comes back as the same bytes, not as text`() {
         start()
         // A version is not always text. Writing a UTF-8 reading of a picture back

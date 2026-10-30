@@ -843,6 +843,31 @@ object AgentChat {
 
     private fun failed(body: String): Boolean = body.trimStart().startsWith(AgentLog.FAILURE)
 
+    /**
+     * **How many rows a page takes on screen**, not how many lines it contains.
+     *
+     * The operator's question: "limit on displayed lines doesnt account for long lines that are
+     * wrapping. Do we need to live with it or is it a simple fix to count a line that wraps into 3
+     * lines as 3 lines?"
+     *
+     * It is a simple fix, and it is this function. The cap exists to bound the height of a bubble,
+     * and height is rows — a paragraph of three long lines is three times the height of three short
+     * ones and was counted the same, so a capped bubble could be three times the height the person
+     * asked for.
+     *
+     * **A row is measured in characters, not pixels.** The screen does not know the font's advance
+     * width here and a layout pass would be needed to ask; [CHARS_PER_ROW] is a deliberate estimate
+     * of how many monospace-ish characters fit in a bubble on a phone. It errs **low**, so a page is
+     * cut slightly sooner than it strictly must be — a cap that lets a bubble run past its height is
+     * the failure the cap exists to prevent, while one that cuts a row early shows the "expand to
+     * read" line one row sooner.
+     */
+    fun rowsOf(text: String, charsPerRow: Int = CHARS_PER_ROW): Int =
+        text.lines().sumOf { line -> ((line.length + charsPerRow - 1) / charsPerRow).coerceAtLeast(1) }
+
+    /** Roughly how many characters fit in one row of a bubble at this app's type scale. */
+    const val CHARS_PER_ROW = 44
+
     private fun oneLine(text: String, max: Int): String {
         val flat = text.trim().lines().joinToString(" ") { it.trim() }.trim()
         return if (flat.length <= max) flat else flat.take(max - 1) + "…"

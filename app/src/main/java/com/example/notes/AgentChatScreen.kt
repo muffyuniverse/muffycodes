@@ -1012,13 +1012,39 @@ private fun PageBody(
     onExpand: (() -> Unit)? = null,
 ) {
     val lines = page.detail.ifBlank { page.body }.lines()
-    val cut = cap > 0 && !expanded && lines.size > cap
-    val shown = if (cut) lines.take(cap).joinToString("\n") else lines.joinToString("\n")
-    val hidden = if (cut) lines.size - cap else 0
+    // **Rows, not lines.** The operator's question: "limit on displayed lines doesnt account for
+    // long lines that are wrapping. Do we need to live with it or is it a simple fix to count a line
+    // that wraps into 3 lines as 3 lines?" It is a simple fix, and `AgentChat.rowsOf` is it: the cap
+    // bounds the bubble's HEIGHT, and a paragraph of three long lines was counted as three when it
+    // fills nine rows.
+    //
+    // The cut is taken at the last whole line that fits inside the row budget, so a line is never
+    // shown half-drawn - a page that stopped mid-sentence would read as a truncated result rather
+    // than as a bubble asking to be expanded.
+    val rows = AgentChat.rowsOf(page.detail.ifBlank { page.body })
+    val cut = cap > 0 && !expanded && rows > cap
+    val kept = if (cut) {
+        var used = 0
+        val take = lines.takeWhile { line ->
+            val cost = ((line.length + AgentChat.CHARS_PER_ROW - 1) / AgentChat.CHARS_PER_ROW)
+                .coerceAtLeast(1)
+            val fits = used + cost <= cap
+            if (fits) used += cost
+            fits
+        }
+        // **At least one line, however small the cap.** A cap of one row on a paragraph of
+        // two-hundred-character lines would otherwise show nothing at all, and an empty bubble with
+        // "expand to read" under it says the message was blank.
+        take.ifEmpty { lines.take(1) }
+    } else {
+        lines
+    }
+    val shown = kept.joinToString("\n")
+    val hidden = if (cut) rows - AgentChat.rowsOf(shown) else 0
     // **The sentence is drawn by the caller when it is a control.** A cut page in the list gets a
     // tappable line instead of a trailing phrase inside the selectable text, so the offer to expand
     // is one target rather than a run of characters a long press can select.
-    val body = if (cut && onExpand == null) shown + "\n… $hidden more lines — expand to read" else shown
+    val body = if (cut && onExpand == null) shown + "\n… $hidden more rows — expand to read" else shown
     if (page.prose) {
         MarkdownBody(text = body, modifier = Modifier.fillMaxWidth())
     } else {
@@ -1045,7 +1071,7 @@ private fun PageBody(
             contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp),
         ) {
             Text(
-                "… $hidden more lines — expand to read",
+                "… $hidden more rows — expand to read",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
             )

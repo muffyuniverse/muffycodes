@@ -411,7 +411,7 @@ class AgentChatScreenTest {
         assertEquals(
             "exactly one page is cut, so the count is per page",
             1,
-            compose.onAllNodesWithText("more lines", substring = true).fetchSemanticsNodes().size,
+            compose.onAllNodesWithText("more rows", substring = true).fetchSemanticsNodes().size,
         )
         // ...and the words are all still there, because the cap is a drawing rule rather than a
         // truncation: the record holds what the agent said and the page view shows all of it.

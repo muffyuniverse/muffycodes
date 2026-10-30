@@ -405,6 +405,43 @@ class AgentChatTest {
     }
 
     @Test
+    @Test
+    fun `a wrapped line costs as many rows as it fills, because height is rows`() {
+        // **The operator's question**: "limit on displayed lines doesnt account for long lines that
+        // are wrapping. Do we need to live with it or is it a simple fix to count a line that wraps
+        // into 3 lines as 3 lines?"
+        //
+        // The cap bounds a bubble's HEIGHT, and height is rows. Counting source lines let a page of
+        // three long paragraphs fill nine rows while the cap said three - so the one bubble the
+        // person had capped was three times the height they asked for.
+        val perRow = AgentChat.CHARS_PER_ROW
+
+        assertEquals("a short line is one row", 1, AgentChat.rowsOf("milk"))
+        assertEquals("an empty line is still a row", 1, AgentChat.rowsOf(""))
+        assertEquals(
+            "a line of exactly one row's worth is one row",
+            1,
+            AgentChat.rowsOf("x".repeat(perRow)),
+        )
+        assertEquals(
+            "one character past it wraps, and costs two",
+            2,
+            AgentChat.rowsOf("x".repeat(perRow + 1)),
+        )
+        // **The case in the report.** Three lines, each three rows' worth, is nine rows - not three.
+        assertEquals(
+            "three long lines are nine rows",
+            9,
+            AgentChat.rowsOf(List(3) { "x".repeat(perRow * 3) }.joinToString("\n")),
+        )
+        assertEquals(
+            "and the rows add up across lines",
+            1 + 2 + 1,
+            AgentChat.rowsOf("short\n" + "x".repeat(perRow + 1) + "\nshort"),
+        )
+    }
+
+    @Test
     fun `an accounting row names its own row, not the newest one`() {
         // **The falsifier for joining by position.** A usage row belongs to the row its `answers`
         // column names. If the reader took "the last agent bubble" instead, a log whose rows were
