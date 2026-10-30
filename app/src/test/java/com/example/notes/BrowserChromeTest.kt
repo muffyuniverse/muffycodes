@@ -183,12 +183,15 @@ class BrowserChromeTest {
         scene.signedIn()
         scene.localProject("Shopping")
         val made = scene.made("Shopping")
+        // **Open first, then write.** `worktreeFile` resolves the project from the current path, so
+        // a write before the open is a write outside any project - which is what the first version
+        // of this test did, and the exception it raised was the fixture telling me so.
+        scene.open(made)
         scene.worktreeFile("milk.txt", "two litres")
         scene.viewModel.refreshChanges()
         scene.await("the change to be counted", 20_000) {
             scene.viewModel.changesOf(made) > 0
         }
-        scene.open(made)
         browser()
 
         compose.waitUntil(20_000) { there("See 1 change") }
