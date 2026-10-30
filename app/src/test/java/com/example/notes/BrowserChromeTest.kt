@@ -481,8 +481,14 @@ class BrowserChromeTest {
         // cursor back, and teardown waits for idle - which is the same hang one layer down. Each
         // test gets its own rule instance, so nothing later inherits the frozen clock.
         compose.mainClock.autoAdvance = false
+        // **A `Surface` behind it, like every scenario that photographs a window.** `AlertDialog`
+        // draws into a window of its own over the content behind it, and with nothing behind it the
+        // dialog is the only thing composing - which under Robolectric is the state that never
+        // settles. This is the shape the twelve working window scenarios use.
         compose.setContent {
-            MaterialTheme { SignInDialog(onDismiss = {}, onSignIn = {}) }
+            MaterialTheme {
+                Surface { SignInDialog(onDismiss = {}, onSignIn = {}) }
+            }
         }
         compose.mainClock.advanceTimeBy(500)
 
