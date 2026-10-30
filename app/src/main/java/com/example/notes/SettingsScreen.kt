@@ -461,36 +461,24 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            // **Three fields, because the wait for the model has three different ends.** Each
-            // sentence sits under the number it describes, so the row and its consequence are read
-            // together rather than as a list of numbers followed by a list of remarks.
+            // **Two fields, not three, because two clocks became one.** The operator merged the
+            // connection wait and the stalling wait: "lets merge connection and stalling timeouts
+            // into a single response timeout that tracks time between request and first response
+            // packet" - and, asked what then bounds a model that dies mid-answer, "one number that
+            // also restarts per packet".
             //
-            // The connection wait is before anything at all has come back: an upstream that is
-            // queueing sends nothing, so it is generous - and because no answer has been produced
-            // yet, retrying is free. The stalling wait is a gap *inside* an answer, where a model
-            // thinking hard is quiet and a dead connection is quieter; one number could not be both.
+            // So this is an idle timeout in the strict sense, and the sentence under it says the one
+            // thing a person needs to know about that: it restarts on every packet, so a slow answer
+            // is safe and a dead one is not.
             LengthField(
-                label = "Connection timeout (seconds)",
-                value = settings.ackSeconds,
-                placeholder = "${SettingsStore.DEFAULT_ACK_SECONDS}",
-                onValueChange = { settings.keepAck(it) },
+                label = "Response timeout (seconds)",
+                value = settings.responseSeconds,
+                placeholder = "${SettingsStore.DEFAULT_RESPONSE_SECONDS}",
+                onValueChange = { settings.keepResponse(it) },
             )
             Text(
-                text = "Now: past ${settings.ackSeconds} s nothing has come back, so the request " +
-                    "is dropped and tried on another provider. Nothing was generated, so the retry " +
-                    "costs nothing.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            LengthField(
-                label = "Stalling timeout (seconds)",
-                value = settings.gapSeconds,
-                placeholder = "${SettingsStore.DEFAULT_GAP_SECONDS}",
-                onValueChange = { settings.keepGap(it) },
-            )
-            Text(
-                text = "Now: an answer that goes quiet for ${settings.gapSeconds} s is treated as " +
-                    "a dropped connection, and what had arrived is kept.",
+                text = "Now: ${settings.responseSeconds} s of silence ends the request - before the " +
+                    "first packet or between any two. A steady answer is never cut off.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary,
             )
@@ -505,10 +493,14 @@ fun SettingsScreen(
                 placeholder = "${SettingsStore.DEFAULT_RECONNECT_SECONDS}",
                 onValueChange = { settings.keepReconnect(it) },
             )
+            // **Said to the point, on the operator's instruction**: "in reconnect 'now' description
+            // write that it is about handling error responses - make this description to the point".
+            // The old sentence explained what an idle agent is, which is a different subject; this
+            // one says what the number is for.
             Text(
-                text = "Now: retried for ${settings.reconnectSeconds / 60} min, then the agent " +
-                    "stops and says it needs help. An agent waiting for your answer is not " +
-                    "failing - it is idle, and is kept warm instead.",
+                text = "Now: error responses are retried for ${settings.reconnectSeconds / 60} min " +
+                    "before the agent stops and asks for help. An account-level error such as an " +
+                    "empty balance is retried here, not on another provider.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary,
             )

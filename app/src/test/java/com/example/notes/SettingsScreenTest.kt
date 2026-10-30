@@ -261,7 +261,10 @@ class SettingsScreenTest {
         // **"CHAT", not "Agent chat"**, so the pair of names reads as two things rather than one
         // and a part of it: the operator asked for "Agent" to become "Chat agent" and "Agent chat"
         // to become "Chat".
-        compose.onNodeWithText("CHAT").performScrollTo().assertIsDisplayed()
+        // **Title case, like every other section heading on the screen** - "Context", "Keepalive",
+        // "Session log", "Reminders". Only the block *label* is upper case ("CHAT AGENT"), because
+        // it names a bounded region rather than a section.
+        compose.onNodeWithText("Chat").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("A message may be this many lines", substring = true)
             .performScrollTo()
             .assertIsDisplayed()

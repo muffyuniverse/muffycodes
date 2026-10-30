@@ -160,15 +160,14 @@ class StreamTest {
         assertEquals("and the same tools", turn.getJSONArray("tools").length(), ping.getJSONArray("tools").length())
     }
 
-    // ---- the two clocks ------------------------------------------------------
+    // ---- the one clock, and the two names it still has ----------------------
 
-    private fun door(ackSeconds: Int = 90, gapSeconds: Int = 120) = OpenRouterDoor(
+    private fun door(responseSeconds: Int = 120) = OpenRouterDoor(
         key = { "sk-or-v1-the-persons-key" },
         model = "deepseek/deepseek-v4.1-flash-1017",
         provider = "decart/fp4",
         effort = "high",
-        ackMs = ackSeconds * 1000,
-        gapMs = gapSeconds * 1000,
+        responseMs = responseSeconds * 1000,
     )
 
     @Test
@@ -177,9 +176,9 @@ class StreamTest {
         // provider never took the request: no tokens were generated and repeating it is free. That
         // is what lets this clock be generous - it is not paying for anything while it waits.
         val silent = Streamed()
-        val stall = door(ackSeconds = 90, gapSeconds = 120).stall(silent)
+        val stall = door(responseSeconds = 90).stall(silent)
 
-        assertTrue("it is the ack clock that ran out", stall is Unacknowledged)
+        assertTrue("it is the unacknowledged case", stall is Unacknowledged)
         assertEquals("and it says how long it waited", 90_000L, (stall as Unacknowledged).waitedMs)
         assertEquals("and that nothing had arrived", 0, stall.stream.said.length)
     }
@@ -193,9 +192,11 @@ class StreamTest {
         begun.line(""": OPENROUTER PROCESSING""")
         begun.line("""data: {"choices":[{"index":0,"delta":{"content":"There is "}}]}""")
 
-        val stall = door(ackSeconds = 90, gapSeconds = 120).stall(begun)
+        // **Two names, one number.** The cases still differ - the sentence a person reads and
+        // whether the tokens were billed - even though the merge gave them a single wait.
+        val stall = door(responseSeconds = 120).stall(begun)
 
-        assertTrue("it is the idle clock that ran out", stall is Idle)
+        assertTrue("it is the idle case", stall is Idle)
         assertEquals("and it says how long the gap was", 120_000L, (stall as Idle).waitedMs)
         assertEquals("and what had already arrived", "There is ", stall.stream.said.toString())
     }

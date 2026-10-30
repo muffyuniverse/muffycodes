@@ -402,61 +402,58 @@ class SettingsStore(context: Context, name: String = "settings") {
      * same time. Reported as "connection timeout (ignored)": that is exactly what an unsettable
      * number feels like from the outside.
      *
-     * The ping now reads [ackSeconds], so one number covers "the provider never took it" whichever
-     * way the request was sent. See [ackSeconds] and [gapSeconds] for the two silences that remain.
+     * The ping reads [responseSeconds] now, so one number covers "the provider never took it"
+     * whichever way the request was sent.
      */
     /**
-     * **How long before the first thing arrives** counts as "the provider never took it".
+     * **One number, and it means "nothing has arrived for this long".**
      *
-     * Deliberately generous, and it must be. An upstream that is queueing holds the connection open
-     * and sends nothing at all, and OpenRouter buffers the first delta — so a tight number here
+     * The operator merged the two clocks: "lets merge connection and stalling timeouts into a single
+     * response timeout that tracks time between request and first response packet" - and, when asked
+     * what bounds a model that dies mid-answer, "one number that also restarts per packet".
+     *
+     * So this is an **idle** timeout in the strict sense: it restarts on every packet. The first
+     * packet is bounded by it, and so is every gap after that, which means a model thinking hard
+     * about its next sentence is safe as long as it is working, and a connection that died
+     * mid-sentence is caught by the same number.
+     *
+     * **Deliberately generous, and it must be.** An upstream that is queueing holds the connection
+     * open and sends nothing at all, and OpenRouter buffers the first delta - so a tight number here
      * would kill working requests at the busiest moment. The cost of waiting too long is a slow
      * failure; the cost of not waiting long enough is refusing an answer that was about to begin.
      *
-     * Nothing has been generated when this expires, so the retry is free — which is why this clock
-     * can be long without being expensive.
+     * **The two old numbers are migrated, not dropped.** A person who had set the connection wait to
+     * 5 minutes and the gap to 30 seconds gets the larger of the two, because either one alone would
+     * be a number that stops something their own setting allowed: taking the gap would kill the
+     * first packet early, and taking the ack would cut a slow stream that used to be fine.
      */
-    var ackSeconds: Int by mutableStateOf(
-        prefs.getInt(KEY_ACK, DEFAULT_ACK_SECONDS)
+    var responseSeconds: Int by mutableStateOf(
+        prefs.getInt(KEY_RESPONSE, migratedResponseSeconds())
     )
         private set
-
-    /** Sets the ack wait, clamped. */
-    fun keepAck(seconds: Int) {
-        val clean = seconds.coerceIn(MIN_ACK_SECONDS, MAX_ACK_SECONDS)
-        Trace.tap("ack timeout", "$clean s")
-        ackSeconds = clean
-        prefs.edit().putInt(KEY_ACK, clean).apply()
-        Trace.said("the app waits $clean seconds for an answer to begin")
-    }
-
-    /** The ack wait in milliseconds. */
-    val ackMs: Int get() = ackSeconds * 1000
 
     /**
-     * **How long a gap between chunks is allowed** before the answer is treated as cut off.
+     * The number a phone that had the two old settings should start with.
      *
-     * The other half of the split, and the reason a long answer is possible at all: a model thinking
-     * hard about its next sentence goes quiet, and one number covering the whole exchange would have
-     * killed exactly the answers worth waiting for. Only the *gap* is bounded here, so nineteen
-     * minutes of steady work trips nothing while a connection that died mid-sentence is caught.
+     * **The larger of the two, and the literals are the old defaults on purpose.** They are not
+     * `DEFAULT_*` constants any more because those constants describe a setting that no longer
+     * exists; what this needs is the number a phone without them would have had, which is history
+     * rather than configuration. Taking the smaller would narrow a setting the person had widened.
      */
-    var gapSeconds: Int by mutableStateOf(
-        prefs.getInt(KEY_GAP, DEFAULT_GAP_SECONDS)
-    )
-        private set
+    private fun migratedResponseSeconds(): Int =
+        maxOf(prefs.getInt(KEY_ACK, 90), prefs.getInt(KEY_GAP, 120))
 
-    /** Sets the gap allowed between chunks, clamped. */
-    fun keepGap(seconds: Int) {
-        val clean = seconds.coerceIn(MIN_GAP_SECONDS, MAX_GAP_SECONDS)
-        Trace.tap("idle timeout", "$clean s")
-        gapSeconds = clean
-        prefs.edit().putInt(KEY_GAP, clean).apply()
-        Trace.said("the app waits $clean seconds between pieces of an answer")
+    /** Sets the response wait, clamped. */
+    fun keepResponse(seconds: Int) {
+        val clean = seconds.coerceIn(MIN_RESPONSE_SECONDS, MAX_RESPONSE_SECONDS)
+        Trace.tap("response timeout", "$clean s")
+        responseSeconds = clean
+        prefs.edit().putInt(KEY_RESPONSE, clean).apply()
+        Trace.said("the app waits $clean seconds for an answer to continue")
     }
 
-    /** The gap in milliseconds. */
-    val gapMs: Int get() = gapSeconds * 1000
+    /** The response wait in milliseconds. */
+    val responseMs: Int get() = responseSeconds * 1000
 
     /**
      * The most one tool result may carry, in characters.
@@ -606,8 +603,7 @@ class SettingsStore(context: Context, name: String = "settings") {
         keepForeground(DEFAULT_FOREGROUND_SECONDS)
         keepBackground(DEFAULT_BACKGROUND_SECONDS)
         keepReconnect(DEFAULT_RECONNECT_SECONDS)
-        keepAck(DEFAULT_ACK_SECONDS)
-        keepGap(DEFAULT_GAP_SECONDS)
+        keepResponse(DEFAULT_RESPONSE_SECONDS)
         keepMaxResult(DEFAULT_MAX_RESULT)
         keepBubbleLines(DEFAULT_BUBBLE_LINES)
         keepSession(DEFAULT_SESSION_TOKENS)
@@ -675,18 +671,27 @@ class SettingsStore(context: Context, name: String = "settings") {
     const val DEFAULT_BUBBLE_LINES = 0
     const val MAX_BUBBLE_LINES = 200
 
+    /**
+     * **The two old keys are still read**, by the migration in [responseSeconds], and never written
+     * again. They stay here so a phone that had them set keeps its number: a setting that silently
+     * reverted to a default on upgrade is the app changing a person's mind for them.
+     */
     const val KEY_ACK = "agent_ack_seconds"
     const val KEY_GAP = "agent_gap_seconds"
+    const val KEY_RESPONSE = "agent_response_seconds"
 
-    /** Long enough for a queue and a buffered first delta; see [ackSeconds]. */
-    const val DEFAULT_ACK_SECONDS = 90
-    const val MIN_ACK_SECONDS = 30
-    const val MAX_ACK_SECONDS = 600
+    /** Long enough for a queue and a buffered first delta; see [responseSeconds]. */
+    /**
+     * **The default is the old gap, not the old ack**, and the reason is what the number now does:
+     * it also bounds the gaps *inside* an answer, so a ninety-second default would cut a model that
+     * paused for a minute and a half mid-sentence - which the old split allowed. Two minutes keeps
+     * every answer the old settings allowed and still catches a dead connection quickly.
+     */
+    const val DEFAULT_RESPONSE_SECONDS = 120
+    const val MIN_RESPONSE_SECONDS = 30
+    const val MAX_RESPONSE_SECONDS = 1_800
 
     /** A model thinking is quiet, so this is the number that must not be tight. */
-    const val DEFAULT_GAP_SECONDS = 120
-    const val MIN_GAP_SECONDS = 30
-    const val MAX_GAP_SECONDS = 1_800
 
     /** How long a failing connection is retried. A new key: it is a new number, not a renamed one. */
     const val KEY_RECONNECT = "agent_reconnect_seconds"

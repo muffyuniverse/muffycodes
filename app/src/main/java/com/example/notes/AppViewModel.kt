@@ -3052,9 +3052,8 @@ class AppViewModel @JvmOverloads constructor(
             // and reads no answer; a turn has the ack and the gap, which are the two silences
             // streaming made different.
             // One number for "nothing has come back yet", on both transports. See AgentWiring.
-            timeoutMs = settings.ackMs,
-            ackMs = settings.ackMs,
-            gapMs = settings.gapMs,
+            timeoutMs = settings.responseMs,
+            responseMs = settings.responseMs,
             // **Every response is written down, whether or not anybody is watching.** The log is
             // not the footer: the footer stops when the screen does, and the requests that matter
             // most are the ones made while the phone is in a pocket. `ws` is the account whose

@@ -280,21 +280,17 @@ class OpenRouterDoor(
     private val effort: String,
     private val timeoutMs: Int = 120_000,
     /**
-     * How long after sending, until **anything at all** comes back.
+     * How long after sending, until **anything at all** comes back, and how long a gap inside an
+     * answer may last.
      *
-     * Not tight, and it must not be: an upstream that is queueing holds the connection open and
-     * sends nothing, and OpenRouter buffers the first delta. A stream that fails here produced
-     * nothing, which is what makes retrying it free.
+     * **One number, on the operator's instruction**: "lets merge connection and stalling timeouts
+     * into a single response timeout that tracks time between request and first response packet" -
+     * and, asked what bounds a mid-answer death, "one number that also restarts per packet". So it
+     * is an idle timeout in the strict sense: the first packet is bounded by it, and every gap after
+     * that is bounded by it too, which is what makes a model that is thinking safe and a connection
+     * that died caught.
      */
-    private val ackMs: Int = 90_000,
-    /**
-     * The gap allowed **between** chunks, once the answer has begun.
-     *
-     * A model thinking about a long answer is quiet for a while and must not be killed; a
-     * connection that has died is quiet for ever. This is the number that tells them apart, and it
-     * is why the two waits are separate settings rather than one.
-     */
-    private val gapMs: Int = 120_000,
+    private val responseMs: Int = 120_000,
     /**
      * What the store can say about the key, for the sentence when there is no token.
      *
@@ -563,7 +559,7 @@ class OpenRouterDoor(
                 // **The ack's number for the first read.** It is replaced by the idle one as soon
                 // as the stream has said anything, because from then on the question is a
                 // different one.
-                readTimeout = ackMs
+                readTimeout = responseMs
                 doOutput = true
                 headers(token).forEach { (name, value) -> setRequestProperty(name, value) }
             }
@@ -573,7 +569,7 @@ class OpenRouterDoor(
                 val said = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
                 throw Refused(code, "OpenRouter answered $code${why(said)}")
             }
-            connection.readTimeout = gapMs
+            connection.readTimeout = responseMs
             connection.inputStream.bufferedReader().use { reader ->
                 while (true) {
                     val line = try {
@@ -607,9 +603,9 @@ class OpenRouterDoor(
      */
     internal fun stall(stream: Streamed): java.io.IOException =
         if (stream.acknowledged) {
-            Idle(gapMs.toLong(), stream)
+            Idle(responseMs.toLong(), stream)
         } else {
-            Unacknowledged(ackMs.toLong(), stream)
+            Unacknowledged(responseMs.toLong(), stream)
         }
 
     /**

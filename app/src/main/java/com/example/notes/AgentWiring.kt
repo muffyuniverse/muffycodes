@@ -33,9 +33,8 @@ object AgentWiring {
                 // **The same connection timeout as a streamed turn**, because it answers the
                 // same question: nothing has come back yet. It used to have a number of its own
                 // that no screen could set, which made it in force and invisible at once.
-                timeoutMs = settings.ackMs,
-                ackMs = settings.ackMs,
-                gapMs = settings.gapMs,
+                timeoutMs = settings.responseMs,
+                responseMs = settings.responseMs,
                 // **The service's door writes the log too.** The runner built here is the one that
                 // runs with the app in the background, so a door without this would log only the
                 // turns somebody was watching - which is the minority of the requests and none of

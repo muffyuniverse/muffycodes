@@ -96,10 +96,14 @@ VOCABULARY = {
     # the agent itself, how often it reminds, and the numbers it runs with
     "start agent", "stop agent", "stop all agents", "reset agent", "remind me",
     "answer timeout", "result length",
-    # **The two clocks streaming made out of one answer timeout.** Named apart because they bound
-    # different silences - nothing came back at all, versus it went quiet halfway through - and a
-    # log that called both "answer timeout" could not answer which one tripped.
-    "ack timeout", "idle timeout",
+    # **The one clock, after the two were merged again.** They were split when streaming landed -
+    # nothing came back at all, versus it went quiet halfway through - and the operator merged them
+    # back: "lets merge connection and stalling timeouts into a single response timeout". The number
+    # is an idle timeout now, restarting on every packet, so one name covers both silences.
+    #
+    # The two old names stay in the vocabulary because a log written by an older build still holds
+    # them, and a vocabulary that rejected its own history could not read the file it exists for.
+    "response timeout", "ack timeout", "idle timeout",
     # **how long a failing connection is retried before somebody is told.** Its own name rather than
     # folded into "answer timeout": they bound different things, and a log that could not tell them
     # apart would not answer "did it give up, or was it still trying".

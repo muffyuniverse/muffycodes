@@ -726,22 +726,45 @@ class AgentRunnerTest {
     }
 
     @Test
+    fun `a phone that had the two old timeouts keeps the wider one`() {
+        // **The migration, and why it takes the larger.** The connection wait and the stalling wait
+        // were merged into one response timeout. A phone that had them set has two numbers and needs
+        // one, and either choice alone would narrow something the person had widened: taking the ack
+        // would kill a first packet the old gap allowed, and taking the gap would cut a slow stream
+        // the old ack allowed. The larger of the two is the only answer that takes nothing away.
+        // The old keys are written into the same preferences file the store reads, then the store is
+        // built: that is exactly the order a phone upgrades in.
+        val name = "migration-probe-${System.nanoTime()}"
+        app.getSharedPreferences(name, android.content.Context.MODE_PRIVATE).edit()
+            .putInt(SettingsStore.KEY_ACK, 300)
+            .putInt(SettingsStore.KEY_GAP, 45)
+            .apply()
+
+        assertEquals(
+            "the wider of the two becomes the one number",
+            300,
+            SettingsStore(app, name).responseSeconds,
+        )
+    }
+
+    @Test
     fun `the timeout and the result length are the person's numbers, clamped to what works`() {
         // Both were constants before the audit: two minutes for an answer and twenty thousand
         // characters for a result. The brief asked for them as fields, and the clamps are the part
         // that matters — a wait of zero retries for ever, and a result of zero is a hang.
         //
-        // **The answer timeout is gone; the connection timeout took its job.** It bounded the same
-        // silence ("nothing has come back yet") on the one transport that is not streamed, and it had
-        // no field - so it was in force and invisible. The ping reads `ackSeconds` now, and the clamps
-        // asserted here are that number's.
-        assertEquals("ninety seconds by default", 90, settings.ackSeconds)
+        // **One number for the model's silence now.** The connection wait and the stalling wait were
+        // merged on the operator's instruction, and the merged number is an idle timeout: it bounds
+        // the first packet and every gap after it. The default is the old *gap* rather than the old
+        // ack, because ninety seconds would cut a model that paused mid-sentence - a thing the split
+        // allowed and the merge must not take away.
+        assertEquals("two minutes by default", 120, settings.responseSeconds)
         assertEquals("six thousand tokens by default", 6_000, settings.maxResult)
 
-        settings.keepAck(0)
-        assertEquals("under half a minute cannot finish", 30, settings.ackSeconds)
-        settings.keepAck(60_000)
-        assertEquals("ten minutes is where it stops waiting for a first byte", 600, settings.ackSeconds)
+        settings.keepResponse(0)
+        assertEquals("under half a minute cannot finish", 30, settings.responseSeconds)
+        settings.keepResponse(60_000)
+        assertEquals("half an hour is where it stops waiting", 1_800, settings.responseSeconds)
 
         settings.keepMaxResult(0)
         assertEquals("a result of nothing is a hang", 1_000, settings.maxResult)
