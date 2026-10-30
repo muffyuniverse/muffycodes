@@ -331,7 +331,7 @@ class AgentTools(
                     "the path or tell the person where it is. `full` takes the whole document " +
                     "rather than the visible part. Use `browse` when you want to read a page; use " +
                     "this when the picture itself is the answer.",
-                "{\"url\":\"https://example.com\",\"full\":false}",
+                "{\"url\":\"https://example.com\",\"full\":false,\"eval\":\"a JS expression\"}",
             ),
         )
 
