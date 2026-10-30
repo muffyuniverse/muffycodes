@@ -156,7 +156,7 @@ class Streamed {
 
     private fun take(fragment: JSONObject) {
         val index = fragment.optInt("index", -1)
-        val id = fragment.text("id")
+        val id = fragment.text("id").orEmpty()
         val existing = when {
             id.isNotEmpty() -> calls.firstOrNull { it.id == id }
             index >= 0 -> calls.getOrNull(index)

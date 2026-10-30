@@ -26,6 +26,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -480,6 +482,40 @@ private data class Fullscreen(val message: AgentChat.Message, val at: Int)
  * page, and a footer saying which row it was and what the turn cost.
  */
 @Composable
+/**
+ * One arrow of the pager: an icon in a button a finger can actually hit.
+ *
+ * **40dp rather than the 28x24 the guillemets got.** The Material minimum for a touch target is 48dp,
+ * and the row is already tight against a caption and a fullscreen icon - so 40dp is the compromise:
+ * visibly bigger than it was, and the icon inside it is 24dp rather than a font's idea of a guillemet.
+ * `IconButton`'s own minimum interaction size is kept, so the *touch* area is the full 48 even though
+ * the drawn box is 40.
+ *
+ * [description] is what a screen reader says, and it is why these are icons rather than text: "‹" is
+ * announced as "single left-pointing angle quotation mark", which is a fact about typography rather
+ * than about the message behind the button.
+ */
+@Composable
+private fun PagerArrow(
+    pointingLeft: Boolean,
+    enabled: Boolean,
+    description: String,
+    onClick: () -> Unit,
+) {
+    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(40.dp)) {
+        Icon(
+            imageVector = if (pointingLeft) {
+                Icons.AutoMirrored.Filled.KeyboardArrowLeft
+            } else {
+                Icons.AutoMirrored.Filled.KeyboardArrowRight
+            },
+            contentDescription = description,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(28.dp),
+        )
+    }
+}
+
 private fun MessageRow(
     message: AgentChat.Message,
     at: Int,
@@ -543,23 +579,39 @@ private fun MessageRow(
             // the thing you were aiming at. At the top they do not move at all, which is the same
             // reason the fullscreen icon is up here.
             if (message.pages.size > 1) {
-                TextButton(
-                    onClick = { onTurn(-1) },
+                // **Real chevrons, and bigger.** The operator's request: "select < and > arrows from
+                // proper icons and make them a little bigger so that they are easy to press".
+                //
+                // They were `Text("‹")` - a typographic single guillemet in the body font. Two
+                // things were wrong with that. It is *punctuation*, so it sat on the baseline at
+                // whatever size the font decided and did not look like a control; and at 28x24 with
+                // 6dp of padding the actual tappable area was well under the 48dp a finger needs.
+                //
+                // `KeyboardArrowLeft`/`Right` are in material-icons-core, which this app already
+                // carries - the *extended* set is the one it does not, and that is why the other
+                // glyphs here are drawn. These two are not: they are in the set we have.
+                //
+                // **`AutoMirrored`**, because a pager is directional: in a right-to-left language the
+                // "next" arrow has to point the other way, and the mirrored variant is what does
+                // that. The app already uses it for the up-arrow.
+                PagerArrow(
+                    pointingLeft = true,
                     enabled = at > 0,
-                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-                    modifier = Modifier.size(width = 28.dp, height = 24.dp),
-                ) { Text("‹", style = MaterialTheme.typography.labelLarge) }
+                    description = "Previous page",
+                    onClick = { onTurn(-1) },
+                )
                 Text(
                     "${at + 1}/${message.pages.size}",
                     style = MaterialTheme.typography.labelSmall,
                     color = ink,
+                    modifier = Modifier.padding(horizontal = 2.dp),
                 )
-                TextButton(
-                    onClick = { onTurn(1) },
+                PagerArrow(
+                    pointingLeft = false,
                     enabled = at < message.pages.size - 1,
-                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-                    modifier = Modifier.size(width = 28.dp, height = 24.dp),
-                ) { Text("›", style = MaterialTheme.typography.labelLarge) }
+                    description = "Next page",
+                    onClick = { onTurn(1) },
+                )
             }
             // **The fullscreen icon is in the message's TOP-RIGHT corner**, which is where the
             // operator asked for it and where it stays put: the pager sits here too, and a control
