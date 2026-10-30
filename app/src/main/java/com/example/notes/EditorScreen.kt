@@ -271,12 +271,25 @@ fun EditorScreen(
                 // report icon". It used to be a word on the row below, which cost the row a third
                 // of its width for a button pressed far less often than the modes.
                 actions = {
-                    HistoryButton {
-                        // The name is committed first: a version list is a list of this
-                        // file's versions, and the file may just have been given another
-                        // name.
-                        commitName()
-                        onOpenHistory()
+                    // **No History on a file git does not keep.** The operator's report: "maybe logs
+                    // are not versioned but editor still shows history button when you open them and
+                    // that is confusing". The exclusion was working - `agent/`, `.muffy/` and
+                    // `requests/` are in the project's `.git/info/exclude`, so no log has ever been
+                    // committed - and the *button* was the lie: pressing it on a log opens a screen
+                    // that can only say it has no versions, which reads as a broken feature rather
+                    // than as a file that is deliberately not versioned.
+                    //
+                    // The rule is the file's own, not the folder's: a record or a request log has no
+                    // history to offer, so the act is not offered. Everything else in the project
+                    // keeps it, including files the person has not saved yet.
+                    if (!record) {
+                        HistoryButton {
+                            // The name is committed first: a version list is a list of this
+                            // file's versions, and the file may just have been given another
+                            // name.
+                            commitName()
+                            onOpenHistory()
+                        }
                     }
                     ReportButton(onReport)
                 },

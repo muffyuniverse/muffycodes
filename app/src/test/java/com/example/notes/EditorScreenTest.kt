@@ -229,6 +229,31 @@ class EditorScreenTest {
     }
 
     @Test
+    fun `a log file offers no history, because it has none`() {
+        // **The operator's report, and the exclusion was never the problem.** "maybe logs are not
+        // versioned but editor still shows history button when you open them and that is confusing".
+        // `agent/`, `.muffy/` and `requests/` are in the project's `.git/info/exclude`, so no log has
+        // ever been committed — the *button* was the lie. Pressing it on a record opened a screen
+        // that could only say the file has no versions, which reads as a broken feature rather than
+        // as a file deliberately kept out of the repository.
+        //
+        // A record is already read-only here, so the editor knew; the action bar simply ignored it.
+        val log = File(scene.workspace!!.projectDir("groceries"), "${AgentLog.DIR}/${AgentLog.SESSION}")
+        log.parentFile?.mkdirs()
+        log.writeText("14:02:11.410    1   12 NOTE  agent  something happened\n")
+
+        editorFor(log)
+
+        // It opens - it is text, and a person debugging their phone should be able to read it.
+        compose.onNodeWithText("something happened", substring = true).assertIsDisplayed()
+        // And it offers no history, because there is none to offer.
+        compose.onNodeWithContentDescription("This file's history").assertDoesNotExist()
+        // The report button is still there: a report about the record is exactly the report somebody
+        // would file.
+        compose.onNodeWithContentDescription("Report a problem").assertIsDisplayed()
+    }
+
+    @Test
     fun `a locked file opens in view and offers no way to write it`() {
         // Locked means "can only be viewed". **Edit** is what would otherwise put the text field
         // back, so Edit is what has to refuse - and View is where the file already is, so it is
