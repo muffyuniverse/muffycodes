@@ -1841,6 +1841,20 @@ class AppViewModel @JvmOverloads constructor(
     fun closeEditor() {
         Trace.tap("close editor")
         editingPath = null
+        // **The editor's own report does not follow you out.** The operator's report: "why do I get
+        // renamed and saved notifications after exiting editor? I did those actions already inside
+        // the editor and dont need reminders".
+        //
+        // "Saved milk.txt" and "Renamed milk.txt to groceries.txt" are answers to a tap that happened
+        // *in the editor*, drawn as the editor's state line. Leaving the editor left them set, so the
+        // browser showed a sentence about an act the person had already watched happen - and on the
+        // browser's own line, where the next message (a sync result, a lock) will overwrite it, it
+        // reads as though something just happened now.
+        //
+        // **Cleared, not remembered.** The history holds what was done, and a message that outlives
+        // its screen is a reminder about nothing. Anything the *browser* has to say sets it again
+        // after this, which is why clearing here cannot swallow a real answer.
+        message = null
     }
 
     /**
