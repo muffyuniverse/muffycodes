@@ -254,22 +254,45 @@ class EditorScreenTest {
     }
 
     @Test
-    fun `a locked file opens in view and offers no way to write it`() {
-        // Locked means "can only be viewed". **Edit** is what would otherwise put the text field
-        // back, so Edit is what has to refuse - and View is where the file already is, so it is
-        // selected rather than greyed.
+    fun `a file the person locked is still theirs to edit`() {
+        // **The operator's rule, and it reverses what this test used to assert**: "system locks
+        // restrict both users and agents, and user locks restrict agents (not users themselves!)".
+        //
+        // So a lock the person set is an instruction to the agent. It does not take the file away
+        // from the person who set it - that would be the app confiscating the operator's own lever.
+        // The old version asserted View-only with "Locked, so it cannot be edited", which was true
+        // of the one-answer model and is false now.
         val file = scene.file("milk.txt", "two litres")
         scene.viewModel.toggleLocked(file)
 
         editorFor(file)
 
         compose.onNodeWithText("two litres").assertIsDisplayed()
-        compose.onNodeWithContentDescription("Locked, so it cannot be edited")
-            .assertIsDisplayed()
+        // Edit is reachable, because the person may change their own file.
+        compose.onNodeWithText("Edit").assertIsEnabled()
+        compose.onNodeWithText("Edit").performClick()
+        compose.onNodeWithText("three litres").assertIsDisplayed()
+        compose.onNodeWithText("Save").performClick()
+        compose.waitUntil(10_000) { file.readText() == "three litres" }
+        assertEquals("and saving it works", "three litres", file.readText())
+    }
+
+    @Test
+    fun `a file the app holds opens in view and cannot be written at all`() {
+        // **The other half, and the one that is still absolute.** A file the *app* holds - a flag, a
+        // record - is a fact about the file rather than a preference, so it binds everybody: the
+        // person cannot write it either, and no tap lifts it.
+        val file = File(scene.workspace!!.projectDir("groceries"), "${AgentLog.DIR}/${AgentLog.SESSION}")
+        file.parentFile?.mkdirs()
+        file.writeText("14:02:11.410    1   12 NOTE  agent  something happened\n")
+
+        editorFor(file)
+
+        // The record is readable and not writable, which is the rule that makes it evidence.
+        compose.onNodeWithText("something happened", substring = true).assertIsDisplayed()
         compose.onNodeWithText("Save").assertIsNotEnabled()
-        // Edit cannot put it back into editing; View is where it is and Diff is still open,
-        // because reading a file's history is not writing it.
         compose.onNodeWithText("Edit").assertIsNotEnabled()
+        // Diff is still open, because reading a history is not writing.
         compose.onNodeWithText("Diff").assertIsEnabled()
     }
 
@@ -365,12 +388,16 @@ class EditorScreenTest {
     }
 
     @Test
-    fun `a locked file cannot reach Edit, and Diff still opens`() {
+    fun `a record cannot reach Edit, and Diff still opens`() {
         // **Falsification of the obvious guard**: that a read-only file blocks the whole row. The
-        // lock is about writing, and reading a file's history is not writing it, so Diff has to stay
-        // open - a rule that greyed the row out would take away something the lock never forbade.
-        val file = scene.file("milk.txt", "two litres")
-        scene.viewModel.toggleLocked(file)
+        // record is about writing, and reading a file's history is not writing it, so Diff has to
+        // stay open - a rule that greyed the row out would take away something the record never
+        // forbade.
+        //
+        // A *record*, not a user-locked file: the person may still edit what they locked themselves.
+        val file = File(scene.workspace!!.projectDir("groceries"), "${AgentLog.DIR}/${AgentLog.CONTEXT}")
+        file.parentFile?.mkdirs()
+        file.writeText("14:02:11.410    1   12 NOTE  agent  something happened\n")
         editorFor(file)
 
         compose.onNodeWithText("Edit").assertIsNotEnabled()

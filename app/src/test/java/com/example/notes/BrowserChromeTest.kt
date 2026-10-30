@@ -3,6 +3,7 @@ package com.example.notes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -236,7 +237,7 @@ class BrowserChromeTest {
     }
 
     @Test
-    fun `a locked file's menu offers copy and not rename`() {
+    fun `a locked file has no menu at all`() {
         // Given a locked file
         scene.signedIn()
         scene.project("groceries")
@@ -265,16 +266,19 @@ class BrowserChromeTest {
         )
         browser()
 
-        // When its menu is opened
+        // **No three-dot button on the row at all**, which is the operator's report: "locked files
+        // should hide and forbid 3dot options". This used to assert something weaker - that the menu
+        // opened but offered Copy and not Rename - which was the compromise before the rule was
+        // stated plainly. A menu whose items are chosen to avoid the refusals is still a menu that
+        // suggests the app might act on a file it has been told not to touch.
         compose.waitUntil(20_000) { there("milk.txt") }
-        // The only row, so "the first More" is the right one — see above.
-        compose.onAllNodesWithContentDescription("More")[0].performClick()
-        compose.waitForIdle()
-
-        // Then copy is there — it changes nothing — and rename, which could only be
-        // refused, is not
-        assertTrue("copy is offered on a locked file", there("Copy…"))
-        assertFalse("rename is not, because it would be refused", there("Rename…"))
+        // The row is there and readable, so the absence below is about the menu rather than about a
+        // screen that never drew.
+        assertTrue("the row is drawn", there("milk.txt"))
+        // **One row, so one menu, and it is not there.** The folder holds exactly one file - the
+        // fixture is built that way, which is why `[0]` was safe in the version of this test that
+        // tapped a menu. With one row there is no ambiguity about whose menu an absent one is.
+        compose.onAllNodesWithContentDescription("More").assertCountEquals(0)
     }
 
     @Test
