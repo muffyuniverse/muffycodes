@@ -41,7 +41,7 @@ class BrowseToolsTest {
     fun setUp() {
         ws = Workspace(temp.root)
         ws.projectDir("shopping").mkdirs()
-        git = ProjectGit(ws, "shopping")
+        git = ProjectGit(ws, { null }, { GitAuthor("Muffy", "muffy@example.com") })
         log = AgentLog.open(ws.projectDir("shopping"))
     }
 
@@ -73,8 +73,7 @@ class BrowseToolsTest {
         privateAllowed = privateAllowed,
     )
 
-    private fun call(tool: String, args: String) =
-        AgentTools.Call(id = "1", tool = tool, args = args)
+    private fun call(tool: String, args: String) = Call(id = "1", tool = tool, args = args)
 
     // ---- what a page may be -------------------------------------------------
 
