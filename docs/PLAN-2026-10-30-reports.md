@@ -1,10 +1,20 @@
-# The 17 reports from build 191
+# The reports from build 191, and the settings-menu batch after them
 
-Written 2026-10-30 from `trace.log (3).txt` (build 191, 09:44–11:02). Every report checked against the
-code, not against a plan. **Nothing here is built yet** — this is the plan and the questions.
+Written 2026-10-30 from `trace.log (3).txt` (build 191). Every report checked against the code, not
+against a plan.
 
-Two reports from that trace are already in (`09:47` the editor selector, `09:58` the clock presets,
-commit `1191509`). The rest are below.
+**All of them are now built.** The first seventeen (09:44–11:02) landed across `063c5cd`, `c8aaf44`,
+`a829c57`, `477b89c`, `8f4871e` and their neighbours. The settings-menu batch (14:00–14:52) landed
+across `c3c5d86`, `9ea26b5`, `5cedd64`, `373d699` and `32d4fcf`.
+
+One report was **struck down by the operator** after it was made - 14:21 asked to merge the agent and
+agent-chat blocks, and 14:48 reversed it: "earlier I said to merge agent and agent chat. strike that
+down. just rename agent into Chat agent, and Agent chat into Chat." The reversal is what was built.
+And 14:32 ("check that timeouts really trigger endpoint fallback") was superseded by 14:37 (merge the
+two timeouts), so the check became a question about the merged number instead.
+
+Two reports from the first trace were already in before this batch (`09:47` the editor selector,
+`09:58` the clock presets, commit `1191509`). The rest are below.
 
 ---
 
@@ -63,6 +73,35 @@ record *is*, and both want a test that fails when the other half creeps back.
 lock from "this file cannot be written" into "this subtree is read-only", and it splits the state in two:
 a user's lock stops the agent and not the person, a system lock stops both. #7 and #8 are the visible
 half of it; the write path is the half that decides whether it is true.
+
+---
+
+## 3b. The settings-menu batch (14:00–14:52)
+
+| # | Report | What it needed | Commit |
+|---|---|---|---|
+| 18 | "provider popup selection window should have just add, remove and select buttons on one row" | Whole row in `confirmButton`, Cancel gone | `32d4fcf` |
+| 19 | "'allow another provider' per-row smalltext should show input, output and cache price rates" | Prices replace the context window | `32d4fcf` |
+| 20 | "light themes white backgrounds, dark black; chocolate white-on-black; caramel reddish orange; gold deep yellow; current chocolate to brownie" | All five rebuilt | `373d699` |
+| 21 | "settings context block: remove what has happened to the context element and its fields" | Fate block and helper deleted | `c3c5d86` |
+| 22 | "on token calculation explanation just write that 'token counts are approximate'" | One sentence | `c3c5d86` |
+| 23 | "on model selection card also remove cancel and put add, remove, select on one row" | Same as 18 | `32d4fcf` |
+| 24 | "'one model, one key...' row in agent block is to be removed" | Deleted | `c3c5d86` |
+| 25 | "rearrange provider endpoints by holding and moving, so order is the fallback order" | Arrows + real fallback; **drag deferred, see below** | `32d4fcf`, `9ea26b5` |
+| 26 | "check that connection and stalling timeouts really trigger endpoint fallback" | Superseded by 27; fallback built in `9ea26b5` | — |
+| 27 | "merge connection and stalling timeouts into one response timeout" | One idle number, migrating the wider old value | `5cedd64` |
+| 28 | "reconnect 'now' description should say it is about handling error responses" | Rewritten | `5cedd64` |
+| 29 | "session log description unreadable - make it precise... and make sure it really does function that way" | Description rewritten; `trimSession` read and confirmed, tests already pinned it | `c3c5d86` |
+| 30 | "rename agent into Chat agent, and Agent chat into Chat" (after striking 14:21) | Renamed | `c3c5d86` |
+| 31 | "add short description to 'working as' block" | One line added | `c3c5d86` |
+
+**Report 25 is half-built and I want that recorded.** The operator asked to rearrange endpoints "by
+holding and then moving them". The order now decides the fallback, and it can be changed - but with
+up/down arrows rather than a long-press drag. The reason is that a synthetic drag in this project's
+Robolectric suite does not exercise the code a finger does, so a drag would be behaviour with no test
+behind it, on the one control that decides which endpoint spends the person's money. The note on the
+card says "use the arrows to move a row" rather than promising a hold. A drag can replace the arrows
+when there is a way to verify it.
 
 ---
 
