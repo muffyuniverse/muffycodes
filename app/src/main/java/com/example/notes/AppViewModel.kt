@@ -1059,6 +1059,21 @@ class AppViewModel @JvmOverloads constructor(
     fun open(target: List<String>) {
         path = target
         query = ""
+        // **Leaving a folder ends the choosing.** The operator's report: "on exiting the screen where
+        // multiselection was active it should cancel and close - otherwise it shows on different
+        // screens".
+        //
+        // A selection is a set of *paths*, and `refresh` prunes only the ones that no longer exist
+        // anywhere - so a person who selected two files and then walked into another folder kept
+        // both selected, invisible, and a bulk action would act on files they could not see. The
+        // strip stayed at the top of a screen where nothing was ticked, which is the "shows on
+        // different screens" half.
+        //
+        // **Cleared on every open, including a move between two folders that both hold some of the
+        // selected files.** "The selection survives if it is still valid" sounds helpful and is the
+        // rule that made this confusing: the same gesture means different things depending on what
+        // happens to be on disk. Choosing is a mode for the folder you are in.
+        selected = emptySet()
         refresh()
     }
 
@@ -1073,12 +1088,16 @@ class AppViewModel @JvmOverloads constructor(
         open(path + name)
     }
 
-    /** Goes up one level. Returns false when already at the root. */
+    /**
+     * Goes up one level. Returns false when already at the root.
+     *
+     * **Through [open], so going up ends a choosing the same way going down does.** This set the
+     * path itself, which meant the one navigation a person uses most was the one that kept a
+     * selection alive - and the selection was then of files in a folder they had just left.
+     */
     fun up(): Boolean {
         if (path.isEmpty()) return false
-        path = path.dropLast(1)
-        query = ""
-        refresh()
+        open(path.dropLast(1))
         return true
     }
 
