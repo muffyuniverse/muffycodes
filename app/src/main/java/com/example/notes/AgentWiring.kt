@@ -56,6 +56,8 @@ object AgentWiring {
         },
         notify: (AgentSession) -> Unit = {},
         changed: (List<AgentSession>) -> Unit = {},
+        /** What the agent is doing, page by page, while it works. See `Agent.onPage`. */
+        onPage: (String, Agent.Live) -> Unit = { _, _ -> },
     ): AgentRunner? {
         val login = credentials.activeLogin ?: return null
         val accounts = AccountStore(rootDir)
@@ -78,6 +80,7 @@ object AgentWiring {
             door = door,
             notify = notify,
             changed = changed,
+            onPage = onPage,
         )
     }
 

@@ -325,6 +325,18 @@ class OpenRouterDoor(
     var listener: ((Streamed, Long) -> Unit)? = null
 
     /**
+     * **Called once per finished reply**, with the words it produced.
+     *
+     * Separate from [listener] because the two have different clocks, and the operator named both:
+     * "only footer token numbers should be updated on every chunk" and "one full reply seems like
+     * the best point to update dispayed text".
+     *
+     * A reply is the unit the record uses - it becomes a page - so this is the boundary at which
+     * the screen and the record agree about what has been said.
+     */
+    var onReply: ((String) -> Unit)? = null
+
+    /**
      * The turn, **read as it arrives.**
      *
      * The request asks for `stream: true` and the body is a sequence of events rather than one
@@ -380,6 +392,13 @@ class OpenRouterDoor(
                 finish = stream.finish.ifBlank { null },
             ),
         )
+        // **The words, published once for this reply.** A per-chunk write made the bubble
+        // rearrange under the person's eyes - and because `Streamed` is created per request, a
+        // burst of call-speak-call-speak also emptied it at every request boundary.
+        //
+        // Published here because this is the one place that knows a reply finished *and* still
+        // holds the stream it came from.
+        onReply?.invoke(stream.said.toString())
         Result.success(reply)
     } catch (e: Exception) {
         // **A stall is billed, and a refusal is not.** This distinction is the whole reason a

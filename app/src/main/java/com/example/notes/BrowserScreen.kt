@@ -871,23 +871,28 @@ private fun EntryRow(
             // The lock sits to the left of the menu, and only where it can mean
             // something: a file this app would otherwise let you write.
             IconButton(onClick = { actions.onToggleLock(entry) }) {
-                // One glyph, two states, told apart by colour and by what a screen
-                // reader says. The open padlock lives in the extended icon set, and
-                // one icon is not worth a whole dependency.
-                Icon(
-                    Icons.Filled.Lock,
-                    contentDescription = if (hold == Workspace.Hold.USER) {
-                        "${entry.name} is locked; tap to unlock"
-                    } else {
-                        "Lock ${entry.name}, so it can only be viewed"
-                    },
-                    // **Grey unset, black set.** The operator's rule, and the reason it is not a
-                    // tint: a lock that is off and a lock that is on have to be told apart at a
-                    // glance down a list, and two shades of the same colour are not a glance.
-                    // `onSurface` is the ink this theme already uses for text that is simply set.
-                    tint = if (hold == Workspace.Hold.USER) MaterialTheme.colorScheme.onSurface
-                    else MaterialTheme.colorScheme.outline,
-                )
+                // **Two shapes, not one shape in two colours.** The operator's report: "dont use
+                // just one icon for two states for lock and sync ... so that different states have
+                // not just different colors but icons".
+                //
+                // Colour alone was the rule here for a while, on the reasoning that grey-off and
+                // black-on are a glance. They are not: they fail in sunlight, they fail for a person
+                // who cannot tell the hues apart, and on a row that also carries a sync mark they
+                // read as two shades of the same statement. A shackle that is lifted is not a shade
+                // of a shackle that is shut.
+                //
+                // The tint stays, because it carries the third state the shape cannot: red is the
+                // app's own lock, which cannot be lifted.
+                val set = hold == Workspace.Hold.USER
+                val tint = if (set) MaterialTheme.colorScheme.onSurface
+                else MaterialTheme.colorScheme.outline
+                val said = if (set) "${entry.name} is locked; tap to unlock"
+                else "Lock ${entry.name}, so it can only be viewed"
+                if (set) {
+                    Icon(Icons.Filled.Lock, contentDescription = said, tint = tint)
+                } else {
+                    OpenLockGlyph(tint = tint, description = said)
+                }
             }
             // **Ignoring has its own button, beside the lock, because it is that kind of act.**
             // Report 26: it lived in the three-dot menu, which is where the app puts things a person
@@ -908,20 +913,21 @@ private fun EntryRow(
                 // changed to a disconnect icon from its current cross, as I asked". The cross read
                 // as "close" or "remove", which is a different act from "this is not being sent",
                 // and beside a padlock it was a second ambiguous mark.
-                UnsyncGlyph(
-                    // **Grey unset, black set by the person.** The app's red is drawn above, with
-                    // its lock: a row the app holds never reaches here.
-                    tint = if (unsync == Workspace.Unsync.USER) {
-                        MaterialTheme.colorScheme.onSurface
-                    } else {
-                        MaterialTheme.colorScheme.outline
-                    },
-                    description = if (unsync == Workspace.Unsync.USER) {
-                        "${entry.name} is not sent to GitHub"
-                    } else {
-                        "Stop sending ${entry.name} to GitHub"
-                    },
-                )
+                // **A whole chain when it is being sent, a broken one when it is not.** Same rule
+                // as the padlock above, and the operator asked for both in one report.
+                //
+                // The unset state is the *normal* one - most files are sent - so it gets the
+                // ordinary mark, and the broken chain is the exception a person is looking for.
+                val stopped = unsync == Workspace.Unsync.USER
+                val tint = if (stopped) MaterialTheme.colorScheme.onSurface
+                else MaterialTheme.colorScheme.outline
+                val said = if (stopped) "${entry.name} is not sent to GitHub"
+                else "Stop sending ${entry.name} to GitHub"
+                if (stopped) {
+                    UnsyncGlyph(tint = tint, description = said)
+                } else {
+                    LinkedGlyph(tint = tint, description = said)
+                }
             }
         }
         // **No menu on a file the app keeps, and the menu stays on one the person locked.**

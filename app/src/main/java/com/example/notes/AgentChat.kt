@@ -823,6 +823,16 @@ object AgentChat {
     )
 
     /** The first line is `0` or `1`; the rest is the one sentence worth showing beside it. */
+    /**
+     * A tool result reduced to one line.
+     *
+     * **Public because the live bubble needs the same reduction as the finished one.** A page drawn
+     * while a tool is running and the same page drawn after the burst ends must not look different,
+     * and two summary functions would drift. The `0`/`1` status leads, the rest follows after a
+     * middle dot - see the page's own caption for why.
+     */
+    fun summaryOf(body: String): String = summary(body)
+
     private fun summary(body: String): String {
         val lines = body.trim().lines().filter { it.isNotBlank() }
         val status = lines.firstOrNull()?.trim().orEmpty()

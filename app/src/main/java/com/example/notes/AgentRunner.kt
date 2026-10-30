@@ -35,6 +35,14 @@ class AgentRunner(
     /** Called with a project's fresh rows after a check, when somebody is reading them. */
     private val polled: (String, List<AgentLog.Row>) -> Unit = { _, _ -> },
     /**
+     * **What the agent is doing, page by page, while it works.**
+     *
+     * The operator's design: a page is a command and its result, so it can be published when the
+     * model asks and filled in when the tool returns. Passed through to `Agent` unchanged - the
+     * runner is not a place that should know what a page looks like.
+     */
+    private val onPage: (String, Agent.Live) -> Unit = { _, _ -> },
+    /**
      * Where a `background` call's work runs — **one thread per call, made when it is asked for.**
      *
      * The previous design kept a fixed pool here and held the test suite open for eighteen minutes
@@ -312,6 +320,7 @@ class AgentRunner(
                     // a second reading of the settings.
                     triggerTokens = { limits.triggerAt },
                     sessionTokens = settings.sessionLimit,
+                    onPage = { live -> onPage(project, live) },
                 )
                 if (waking == null) {
                     agent.warm() to log.rows()

@@ -2,6 +2,7 @@ package com.example.notes
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.size
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
@@ -860,6 +861,79 @@ fun ReportButton(onReport: () -> Unit) {
                 drawLine(ink, Offset(w * 0.72f, y), Offset(w * 0.92f, y - h * 0.06f), stroke)
             }
         }
+    }
+}
+
+/**
+ * **The other half of each pair: a whole chain, and an open padlock.**
+ *
+ * The operator's report: "dont use just one icon for two states for lock and sync. tell me if it is
+ * possible to use open lock icon on unlock and connected icon on sync, so that different states have
+ * not just different colors but icons".
+ *
+ * It is possible, and this is it. Until now both flags used one glyph each and told the states apart
+ * by colour alone - grey off, black on, red when the app set it. Colour alone is a weak signal: it
+ * fails in bright sun, it fails for a person who cannot distinguish the hues, and it fails for the
+ * one state that matters most, because "the app is holding this" and "nobody is" differ only in
+ * saturation at a glance down a list.
+ *
+ * **Drawn, not imported**, for the same reason as [UnsyncGlyph]: `LockOpen` and `Link` live in
+ * material-icons-extended, and this app does not carry that whole set for two glyphs. Three strokes
+ * each, and they read at 20dp.
+ */
+@Composable
+fun LinkedGlyph(tint: Color, description: String, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier.size(20.dp).semantics { contentDescription = description }) {
+        val w = size.width
+        val h = size.height
+        val stroke = w * 0.10f
+        // **The same two halves as the broken link, joined.** That is the point: the pair differs by
+        // the break and nothing else, so a person comparing two rows sees one difference rather than
+        // two different drawings. The middle bar closes the gap the broken one cuts through.
+        drawLine(tint, Offset(w * 0.06f, h * 0.32f), Offset(w * 0.30f, h * 0.32f), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(w * 0.06f, h * 0.32f), Offset(w * 0.06f, h * 0.68f), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(w * 0.06f, h * 0.68f), Offset(w * 0.30f, h * 0.68f), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(w * 0.70f, h * 0.32f), Offset(w * 0.94f, h * 0.32f), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(w * 0.94f, h * 0.32f), Offset(w * 0.94f, h * 0.68f), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(w * 0.94f, h * 0.68f), Offset(w * 0.70f, h * 0.68f), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(w * 0.30f, h * 0.50f), Offset(w * 0.70f, h * 0.50f), stroke, StrokeCap.Round)
+    }
+}
+
+/**
+ * **An open padlock: the shackle lifted clear of the body.**
+ *
+ * The closed padlock is `Icons.Filled.Lock`; this is its other position, drawn here so the pair is
+ * the same family and the same weight. The shackle is one side only - that is what "open" looks like
+ * on every padlock anyone has seen - and the body is the same rounded rectangle as the icon's.
+ */
+@Composable
+fun OpenLockGlyph(tint: Color, description: String, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier.size(20.dp).semantics { contentDescription = description }) {
+        val w = size.width
+        val h = size.height
+        val stroke = w * 0.10f
+        // The body: a squat rounded rectangle in the lower half.
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(w * 0.20f, h * 0.46f),
+            size = Size(w * 0.60f, h * 0.44f),
+            cornerRadius = CornerRadius(w * 0.08f),
+            style = Stroke(width = stroke),
+        )
+        // **The shackle, lifted and hinged on one side only.** The right leg stops short of the
+        // body, which is the whole difference between this and a closed lock.
+        drawLine(tint, Offset(w * 0.50f, h * 0.46f), Offset(w * 0.50f, h * 0.24f), stroke, StrokeCap.Round)
+        drawArc(
+            color = tint,
+            startAngle = 180f,
+            sweepAngle = 180f,
+            useCenter = false,
+            topLeft = Offset(w * 0.30f, h * 0.08f),
+            size = Size(w * 0.40f, h * 0.32f),
+            style = Stroke(width = stroke, cap = StrokeCap.Round),
+        )
+        drawLine(tint, Offset(w * 0.70f, h * 0.24f), Offset(w * 0.70f, h * 0.36f), stroke, StrokeCap.Round)
     }
 }
 

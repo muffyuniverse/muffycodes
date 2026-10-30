@@ -402,9 +402,12 @@ fun AgentChatScreen(
                         // **No pager, no caption, no footer**, because none of those exist until the
                         // turn ends: a page count for a reply that is still growing would change
                         // under the person's eyes.
-                        if (viewModel.chatWorking && viewModel.chatWriting.isNotBlank()) {
+                        if (viewModel.chatWorking) {
                             item(key = "writing") {
-                                WritingBubble(viewModel.chatWriting)
+                                WritingBubble(
+                                    words = viewModel.chatWriting,
+                                    pages = viewModel.chatPages.values.sortedBy { it.id },
+                                )
                             }
                         }
                         if (box.idle != null) {
@@ -585,7 +588,7 @@ private data class Fullscreen(val message: AgentChat.Message, val at: Int)
  * is the only thing the shape alone cannot say.
  */
 @Composable
-private fun WritingBubble(text: String) {
+private fun WritingBubble(words: String, pages: List<Agent.Live>) {
     val ink = MaterialTheme.colorScheme.onSurfaceVariant
     Column(
         modifier = Modifier
@@ -595,12 +598,44 @@ private fun WritingBubble(text: String) {
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodyMedium,
-            color = ink,
-        )
+        // **The calls, in the order they were made, each filling in its own result.** The operator's
+        // design: a page is a command *and* its result, so the command is drawn as soon as the model
+        // asks and the answer replaces "working" when the tool returns. Without the first half a
+        // twenty-second `create` showed nothing at all until it finished.
+        for (live in pages) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    live.tool,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (live.failed) MaterialTheme.colorScheme.error else ink,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    "#${live.id}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+            }
+            Text(
+                // **The answer when there is one, and "working" when there is not.** A page that
+                // showed nothing while a tool ran would be indistinguishable from a page with an
+                // empty answer.
+                text = live.answer?.let { AgentChat.summaryOf(it) } ?: "working…",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (live.failed) MaterialTheme.colorScheme.error else ink,
+            )
+        }
+        // **The words, once per reply.** Blank until the first reply finishes, which is why this
+        // only draws when there is something to say.
+        if (words.isNotBlank()) {
+            Text(
+                text = words,
+                style = MaterialTheme.typography.bodyMedium,
+                color = ink,
+            )
+        }
     }
 }
 

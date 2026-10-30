@@ -130,10 +130,40 @@ class Agent(
      * background limit. Zero means "the app has no opinion", which refuses nothing.
      */
     private val triggerTokens: () -> Long = { 0L },
+    /**
+     * **What the agent is doing right now, one page at a time.**
+     *
+     * The operator's design: a page is a command *and its result*, so a page can be published the
+     * moment the call is made and filled in the moment the result arrives - which is the difference
+     * between a screen that says "working" and one that says "running `create`".
+     *
+     * Called twice per call: with `answer = null` when the model asks, and again with the body when
+     * the tool returns. The screen keys them by id, so the second call replaces the first.
+     *
+     * **A callback rather than a log read**, because the rows are written either way and re-reading
+     * the file mid-turn would race the writer. This is the only place that has both the call and its
+     * answer in hand.
+     */
+    private val onPage: (Live) -> Unit = {},
 ) {
 
     private val tools = AgentTools(
         ws, project, git, log, maxResult, bg, backgroundMs, triggerTokens,
+    )
+
+    /**
+     * One page of the message being written: a call, and its result when there is one.
+     *
+     * [answer] is null while the tool is running, which is a real state and not a placeholder - it is
+     * the difference between "asked for this" and "this is what it said", and a screen that could not
+     * say the first would show nothing at all for a slow tool.
+     */
+    data class Live(
+        val id: Int,
+        val tool: String,
+        val asked: String,
+        val answer: String? = null,
+        val failed: Boolean = false,
     )
 
     /** How a turn ended. */
@@ -644,10 +674,22 @@ class Agent(
         for (call in calls) {
             val id = log.call(call.tool, call.args)
             Trace.note("agent", "$project call ${call.tool} #$id")
+            // **Published before the tool runs**, so a slow call is visible while it is slow.
+            onPage(Live(id = id, tool = call.tool, asked = call.args))
             val body = answer(call)
             // **The id the result is for.** Written by the caller that just took it, so the record
             // says which call this answers rather than leaving a reader to infer it from position.
             log.got(call.tool, body, answers = id)
+            // **And again with the answer**, which is the same page filled in rather than a new one.
+            onPage(
+                Live(
+                    id = id,
+                    tool = call.tool,
+                    asked = call.args,
+                    answer = body,
+                    failed = body.startsWith(AgentLog.FAILURE),
+                ),
+            )
             if (call.tool in AgentTools.WRITING && !body.startsWith(AgentLog.FAILURE)) changed = true
         }
         // A call that wrote nothing and left the project as it was is a call that did nothing —

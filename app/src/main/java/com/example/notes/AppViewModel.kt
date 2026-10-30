@@ -2640,6 +2640,27 @@ class AppViewModel @JvmOverloads constructor(
     var chatLive: String by mutableStateOf("")
 
     /**
+     * **The numbers the footer shows while a reply is arriving.**
+     *
+     * The operator's rule: "only footer token numbers should be updated on every chunk". So this is
+     * per chunk and [chatWriting] is per reply - two different questions, two different clocks.
+     *
+     * A token count is a *liveness* signal: it answers "is this still working, or has it died", and
+     * that question needs an answer every second. The words are not - a reply half-drawn is a
+     * paragraph rearranging itself under somebody's eyes.
+     */
+    var chatSpent: AgentChat.Spend? by mutableStateOf(null)
+
+    /**
+     * **The pages of the message being written, by the row id they will have.**
+     *
+     * Keyed by id because a page is published twice - asked, then answered - and the second has to
+     * replace the first rather than appear beside it. The id is the `CALL` row's number, which is
+     * also what the finished page carries, so nothing has to be matched up later.
+     */
+    var chatPages: Map<Int, Agent.Live> by mutableStateOf(emptyMap())
+
+    /**
      * **The words the agent is writing, as it writes them.**
      *
      * Separate from [chatLive], which is the one-line description for the corner. This is the reply
@@ -2680,6 +2701,8 @@ class AppViewModel @JvmOverloads constructor(
         chatWorking = false
         chatLive = ""
         chatWriting = ""
+        chatSpent = null
+        chatPages = emptyMap()
     }
 
     /**
@@ -2750,6 +2773,8 @@ class AppViewModel @JvmOverloads constructor(
             // a description of something that already finished.
             chatLive = ""
         chatWriting = ""
+        chatSpent = null
+        chatPages = emptyMap()
             message = end.plainly()
             applyEnd(project, end, System.currentTimeMillis())
             refresh()
@@ -3091,6 +3116,15 @@ class AppViewModel @JvmOverloads constructor(
             settings = settings,
             door = { active -> doorFor(active) },
             notify = { session -> agentNotifier?.invoke(session) },
+            // **A page, as it happens.** A call is published when the model asks and filled in
+            // when the tool returns, so the bubble shows the work rather than only its result.
+            onPage = { project, live ->
+                main.post {
+                    if (project == chatProject) {
+                        chatPages = chatPages + (live.id to live)
+                    }
+                }
+            },
             changed = { sessions ->
                 main.post {
                     agentSessions = sessions
@@ -3177,13 +3211,26 @@ class AppViewModel @JvmOverloads constructor(
             // the door is built, so a turn run for the background draws nothing and costs nothing;
             // and it is handed the stream itself rather than a number, so the count it shows is
             // always the one that just arrived.
+            // **Two clocks, and the operator named both.**
+            //
+            // The footer's numbers update on every chunk: "only footer token numbers should be
+            // updated on every chunk". A token count is a liveness signal - it answers "is this
+            // still working, or has it died" - and that question needs an answer every second.
+            //
+            // The words update once per reply: "one full reply seems like the best point to update
+            // dispayed text". A reply half-drawn is a paragraph rearranging itself under somebody's
+            // eyes, and because `Streamed` is created per *request*, a per-chunk write also emptied
+            // the bubble at every request boundary in a burst.
             door.listener = { stream, elapsed ->
                 chatLive = stream.shape(elapsed)
-                // **The words, not just their length.** `said` is what has arrived; the corner keeps
-                // the shape. A `StringBuilder` is read here rather than in the composable so the
-                // screen only ever sees an immutable value.
-                chatWriting = stream.said.toString()
+                chatSpent = AgentChat.Spend(
+                    output = stream.said.length.toLong(),
+                    thinking = stream.thinking.length.toLong(),
+                )
             }
+            // **Appended, not replaced.** A burst is one message made of several replies, so the
+            // bubble shows the message being built rather than the last thing said.
+            door.onReply = { words -> chatWriting = chatWriting + words }
         }
     })(model)
 
