@@ -1164,12 +1164,12 @@ class ScenariosTest {
             screen = {
                 window { SignInDialog(onDismiss = {}, onSignIn = {}) }
             },
-            // **The clock is frozen for this one, and only this one.** The window holds a text
-            // field, whose cursor blinks on a clock that never settles - so taking the picture, which
-            // reads the semantics tree and therefore waits for idle, hung until the sixty-second
-            // timeout reported "infinite composition loop". None of the other windows has a field,
-            // and the animations that *should* finish are what make their pictures correct.
-            frozenClock = true,
+            // **No frozen clock, and it was tried.** The window holds a text field, and the first
+            // theory was that its caret never lets the clock settle - but `ModelKeyDialog` has a
+            // password field in a dialog too and its scenario has always passed, so the field was
+            // never the cause. What hung was a `setContent` that put the dialog alone in a bare
+            // `Surface`; `window {}` puts a `Box` behind it, which is the shape every working window
+            // scenario uses.
         ) {
             before()
             then("Nothing is typed: the field is empty and the button says what it will do.") {}

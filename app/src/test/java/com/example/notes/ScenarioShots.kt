@@ -65,16 +65,6 @@ class ScenarioShots(
      * the shared path.
      */
     private val ready: () -> Boolean = { true },
-    /**
-     * Whether the window holds a text field, whose cursor never lets the clock settle.
-     *
-     * **A field is the one thing that makes `waitForIdle` hang for ever.** Its caret blinks on the
-     * composition's own clock, so every reading of the semantics tree - which is what taking a
-     * picture does - waits for an animation that has no end. Freezing the clock is the documented
-     * answer, and it is opt-in rather than shared because the animations that *should* finish (a
-     * dialog opening, a list scrolling) are what make the other pictures correct.
-     */
-    private val frozenClock: Boolean = false,
 ) {
 
     private var happened: String? = null
@@ -92,13 +82,7 @@ class ScenarioShots(
         get() = System.getProperty("roborazzi.test.record") == "true"
 
     /** The screen before anything is done. */
-    fun before() {
-        if (frozenClock) {
-            compose.mainClock.autoAdvance = false
-            compose.mainClock.advanceTimeBy(500)
-        }
-        capture("before.png")
-    }
+    fun before() = capture("before.png")
 
     /**
      * Does something, and records it in the words a person would use.
@@ -140,11 +124,12 @@ class ScenarioShots(
      * already drawn therefore pays nothing here, which is twenty-three of the twenty-four.
      */
     fun after() {
-        // **`waitForIdle` only when a screen is actually swapped, and this was a real hang.** A
-        // window holding a text field keeps a blinking cursor on a Compose clock that never
-        // settles, so an unconditional idle wait timed out after sixty seconds and reported
-        // "infinite composition loop" - a false alarm about the wrong thing. A scenario that stays
-        // on the screen it opened has nothing to settle, so it is not asked to.
+        // **`waitForIdle` only when a screen is actually swapped.** An unconditional one was tried
+        // and is not needed: a scenario that stays on the screen it opened has nothing to settle.
+        // (It was also briefly blamed for a hang that turned out to be a dialog composed without a
+        // `Box` behind it - the field's caret was never the cause, as `ModelKeyDialog`'s passing
+        // scenario proves.) Kept narrow because the animations that *should* finish are what make
+        // the swapped-screen pictures correct.
         val swaps = switchToAfter !== NO_SWITCH
         if (swaps) {
             switchToAfter()
@@ -251,8 +236,6 @@ fun scenario(
      * composition idle wait returns before that post lands. See [ScenarioShots.ready].
      */
     ready: () -> Boolean = { true },
-    /** See [ScenarioShots.frozenClock]: a window with a text field needs it. */
-    frozenClock: Boolean = false,
     body: ScenarioShots.() -> Unit,
 ): String {
     // One `setContent` for the whole scenario, because a Compose test rule allows
@@ -267,7 +250,6 @@ fun scenario(
         compose, folder, title, about,
         switchToAfter = { showingAfter.value = true },
         ready = ready,
-        frozenClock = frozenClock,
     )
     shots.body()
     return shots.write()

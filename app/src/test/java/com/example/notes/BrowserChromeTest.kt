@@ -1,10 +1,13 @@
 package com.example.notes
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -469,28 +472,22 @@ class BrowserChromeTest {
         // **The one secret the app asks for.** A field that echoed the token would leak it to
         // anybody glancing at the screen, and a window that did not say where it goes would leave a
         // person guessing whether it is being uploaded somewhere.
-        // **The clock is frozen for the duration, and the reason is the window itself.** A text
-        // field's cursor blinks on a Compose clock that never settles, and every reading of the
-        // semantics tree calls `waitForIdle` internally - so `there()` below, and the rule's own
-        // teardown, both waited for an animation that never finishes. The failure was
-        // `AppNotIdleException: Compose did not get idle after 131589 attempts`, which reads as an
-        // infinite composition loop and is nothing of the kind.
         //
-        // Frozen, then advanced once so the window is laid out. **Not restored afterwards**, and
-        // that is deliberate: restoring it before the rule's own teardown puts the never-settling
-        // cursor back, and teardown waits for idle - which is the same hang one layer down. Each
-        // test gets its own rule instance, so nothing later inherits the frozen clock.
-        compose.mainClock.autoAdvance = false
-        // **A `Surface` behind it, like every scenario that photographs a window.** `AlertDialog`
-        // draws into a window of its own over the content behind it, and with nothing behind it the
-        // dialog is the only thing composing - which under Robolectric is the state that never
-        // settles. This is the shape the twelve working window scenarios use.
+        // **Built the way the twelve working window scenarios build theirs**: a `Box` behind the
+        // dialog inside a `Surface`, which is what `window {}` in the scenario file expands to. That
+        // shape matters - `AlertDialog` composes into a window of its own, and a test that put it
+        // alone in `setContent` waited sixty seconds for an idle that never came, three times, with
+        // the clock frozen and unfrozen and with a bare `Surface` behind it. The difference was never
+        // the text field: `ModelKeyDialog` has a password field in a dialog and its scenario passes.
         compose.setContent {
             MaterialTheme {
-                Surface { SignInDialog(onDismiss = {}, onSignIn = {}) }
+                Surface {
+                    Box(Modifier.fillMaxSize()) {}
+                    SignInDialog(onDismiss = {}, onSignIn = {})
+                }
             }
         }
-        compose.mainClock.advanceTimeBy(500)
+        compose.waitForIdle()
 
         assertTrue("it asks for the key", there("Personal access key"))
         assertTrue("and names the scopes it needs", there("repo and delete_repo"))
