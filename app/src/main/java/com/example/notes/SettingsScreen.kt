@@ -716,15 +716,22 @@ fun SettingsScreen(
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
-            // ---- how tall a message is drawn ----
+            // ---- the agent chat, as a block of its own ----
             //
-            // **This is not a session limit, which is why it is not in that block.** The operator
-            // asked for one field there - "for session just one field: max length (in tokens with
-            // default 10000000). this mb and lines limits are to be removed" - and the line cap
-            // survived only because it bounds something else: how much of one message is drawn on a
-            // screen, not how much of the record is kept. Leaving it under "Session log" made a
-            // reading preference look like a limit on the evidence.
-            Text("Messages", style = MaterialTheme.typography.titleMedium)
+            // **It has a heading and a rule of its own, on the operator's instruction**: "maximum
+            // displayed message height somehow ended up in session log block but it need a new
+            // separate agent chat block". It began in the session block, which is about how much of
+            // the record is *kept* - and this bounds something else entirely: how much of one
+            // message is *drawn*. Two different questions in one block made a reading preference
+            // look like a limit on the evidence.
+            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+            Text("Agent chat", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "How the conversation is drawn. Nothing here changes what is kept or what the " +
+                    "agent is sent.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             // **In lines, because that is what a person reads in.** A cap expressed as a fraction of
             // the window would be a statement about the phone; a cap in lines is a statement about
             // the message. Zero means no cap, which is the honest default on a screen that scrolls.
@@ -809,47 +816,6 @@ fun SettingsScreen(
 
             // ---- back to what the app shipped with ----
             //
-            // **At the bottom, and last, because it is the one button here that undoes the others.**
-            // It used to live in the agent block, where it read as "reset the agent" and left every
-            // other setting alone. Report: "remove reset button from agent block and add reset
-            // settings to the bottom of settings menu (it should return settings to defaults)".
-            //
-            // **Asked before it happens**, because it is a single press that discards a screen of
-            // choices and there is no undo for a preference.
-            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-            Text("Back to defaults", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "Every setting on this screen returns to what the app shipped with. Files, " +
-                    "projects and the record are not touched.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            var confirmingReset by remember { mutableStateOf(false) }
-            TextButton(onClick = { confirmingReset = true }) {
-                Text("Reset settings", color = MaterialTheme.colorScheme.error)
-            }
-            if (confirmingReset) {
-                AlertDialog(
-                    onDismissRequest = { confirmingReset = false },
-                    title = { Text("Reset every setting?") },
-                    text = {
-                        Text(
-                            "The themes, the limits, the timeouts and the agent's settings all go " +
-                                "back to what the app shipped with. Nothing you have written is " +
-                                "touched.",
-                        )
-                    },
-                    confirmButton = {
-                        TextButton(onClick = {
-                            confirmingReset = false
-                            settings.reset()
-                        }) { Text("Reset") }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { confirmingReset = false }) { Text("Cancel") }
-                    },
-                )
-            }
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
             // ---- every one on this phone, and one switch ----
@@ -928,6 +894,48 @@ fun SettingsScreen(
                 if (!noticesNow) {
                     TextButton(onClick = onAskNotices) { Text("Allow") }
                 }
+            }
+
+            // **The last thing on the screen, the operator's own correction**: "back to defaults
+            // should be the last element on the settings list". It was above Running and Background,
+            // which are things a person uses - so the one control that undoes every choice sat in
+            // the middle of the choices rather than after them.
+            //
+            // **Asked before it happens**, because it is a single press that discards a screen of
+            // preferences and there is no undo for one.
+            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+            Text("Back to defaults", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Every setting on this screen returns to what the app shipped with. Files, " +
+                    "projects and the record are not touched.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            var confirmingReset by remember { mutableStateOf(false) }
+            TextButton(onClick = { confirmingReset = true }) {
+                Text("Reset settings", color = MaterialTheme.colorScheme.error)
+            }
+            if (confirmingReset) {
+                AlertDialog(
+                    onDismissRequest = { confirmingReset = false },
+                    title = { Text("Reset every setting?") },
+                    text = {
+                        Text(
+                            "The themes, the limits, the timeouts and the agent's settings all go " +
+                                "back to what the app shipped with. Nothing you have written is " +
+                                "touched.",
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            confirmingReset = false
+                            settings.reset()
+                        }) { Text("Reset") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { confirmingReset = false }) { Text("Cancel") }
+                    },
+                )
             }
         }
     }

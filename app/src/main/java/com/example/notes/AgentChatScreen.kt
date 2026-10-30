@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -28,7 +27,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Button
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -88,6 +89,14 @@ import androidx.compose.ui.unit.dp
 fun AgentChatScreen(
     viewModel: AppViewModel,
     onBack: () -> Unit,
+    /**
+     * The report window.
+     *
+     * **Defaulted to nothing so the screen still works where there is no reporter** - the tests and
+     * the scenarios build it directly, and neither has a dialog to open. The app passes the same
+     * `openReport` the browser does, so a report from either screen reaches the same place.
+     */
+    onReport: () -> Unit = {},
 ) {
     val project = viewModel.chatProject ?: return
     val session = viewModel.sessionOf(project)
@@ -249,6 +258,12 @@ fun AgentChatScreen(
                     ) {
                         Text(if (session?.running == true) "Stop the agent" else "Start the agent")
                     }
+                    // **The report button, which this screen never had.** The operator asked for it
+                    // twice - "bug report icon still isnt added to agent chat as I instructed in an
+                    // older report from yesterday" - and it is the screen where a report is most
+                    // likely: a wrong answer, a loop, a refusal. Same drawn glyph as the browser's,
+                    // in the same corner, so the act looks the same wherever it is offered.
+                    ReportButton(onReport = onReport)
                 },
             )
         },
@@ -267,9 +282,16 @@ fun AgentChatScreen(
             // answer they were reading, which is the opposite of what a transcript should ask of
             // them.
 
-            // **At most three quarters of the window, and scrolls beyond that.** The conversation is
-            // not the whole screen: the line a person speaks in stays visible and reachable, which
-            // is also what keeps it above the keyboard.
+            // **The conversation fills everything above the composer**, which is the operator's
+            // correction: "there is strange white space above write input box and it partially
+            // covers messages making the lower ones hard to read. remove it, last message should
+            // snap to the user input message box, no gaps".
+            //
+            // It used to be capped at three quarters of the window with the intent that the
+            // composer stay reachable. That is what `weight(1f)` already guarantees - the composer is
+            // a sibling that is measured first - so the cap only reserved a band of empty screen
+            // between the last message and the box, and on a short conversation the band was most of
+            // the screen.
             BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 if (box == null) {
                     Text(
@@ -283,9 +305,10 @@ fun AgentChatScreen(
                     LazyColumn(
                         state = list,
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = maxHeight * 0.75f),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                            .fillMaxSize(),
+                        // **Bottom padding only, so the last message sits on the divider.** The
+                        // vertical padding is what made the gap look like part of the message.
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         // **Every message, oldest first, alternating by side.** That is the whole
@@ -333,31 +356,30 @@ fun AgentChatScreen(
             }
 
             HorizontalDivider()
-            Row(
+            // **Enter sends, and there is no Send button** - the operator's correction: "input box
+            // should not have send button, it should send the message on enter".
+            //
+            // The button was a second way to do the same thing, and on a phone it cost a third of
+            // the row's width - which is the width the message being written needs. A keyboard
+            // already has a return key, and on a multi-line field it says what it will do.
+            val send = {
+                val said = draft
+                if (said.isNotBlank()) {
+                    draft = ""
+                    viewModel.sendChat(said)
+                }
+            }
+            TextField(
+                value = draft,
+                onValueChange = { draft = it },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 8.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.Bottom,
-            ) {
-                TextField(
-                    value = draft,
-                    onValueChange = { draft = it },
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("Write to the agent") },
-                    maxLines = 4,
-                )
-                Spacer(Modifier.width(8.dp))
-                Button(
-                    onClick = {
-                        val said = draft
-                        draft = ""
-                        viewModel.sendChat(said)
-                    },
-                    enabled = draft.isNotBlank() && !viewModel.chatWorking,
-                ) {
-                    Text("Send")
-                }
-            }
+                placeholder = { Text("Write to the agent") },
+                maxLines = 4,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { send() }),
+            )
         }
     }
 
@@ -503,13 +525,38 @@ private fun MessageRow(
             return@Column
         }
         val page = message.pages.getOrNull(at) ?: message.pages.firstOrNull() ?: return@Column
-        Row(verticalAlignment = Alignment.Top) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 page.caption,
                 style = MaterialTheme.typography.labelMedium,
                 color = if (page.failed) MaterialTheme.colorScheme.error else ink,
                 modifier = Modifier.weight(1f),
             )
+            // **The pager, at the top of the bubble** - the operator's own correction: "arrows to
+            // page through the message should be at the top of the message bubble". It sat below the
+            // body, so its position depended on how tall the page happened to be: on a long result
+            // the arrows were a screenful away from the caption they belong with, and paging moved
+            // the thing you were aiming at. At the top they do not move at all, which is the same
+            // reason the fullscreen icon is up here.
+            if (message.pages.size > 1) {
+                TextButton(
+                    onClick = { onTurn(-1) },
+                    enabled = at > 0,
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                    modifier = Modifier.size(width = 28.dp, height = 24.dp),
+                ) { Text("‹", style = MaterialTheme.typography.labelLarge) }
+                Text(
+                    "${at + 1}/${message.pages.size}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = ink,
+                )
+                TextButton(
+                    onClick = { onTurn(1) },
+                    enabled = at < message.pages.size - 1,
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                    modifier = Modifier.size(width = 28.dp, height = 24.dp),
+                ) { Text("›", style = MaterialTheme.typography.labelLarge) }
+            }
             // **The fullscreen icon is in the message's TOP-RIGHT corner**, which is where the
             // operator asked for it and where it stays put: the pager sits here too, and a control
             // anchored to the top cannot move when the page below it changes height.
@@ -531,29 +578,6 @@ private fun MessageRow(
         SelectionContainer {
             Column {
                 PageBody(page = page, cap = cap, ink = ink, expanded = false)
-            }
-        }
-        if (message.pages.size > 1) {
-            // **The pager, at the top of the message's furniture** - above the footer and below the
-            // body, so it never moves with the body's height.
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(
-                    onClick = { onTurn(-1) },
-                    enabled = at > 0,
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                    modifier = Modifier.height(28.dp),
-                ) { Text("‹", style = MaterialTheme.typography.labelLarge) }
-                Text(
-                    "${at + 1}/${message.pages.size}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = ink,
-                )
-                TextButton(
-                    onClick = { onTurn(1) },
-                    enabled = at < message.pages.size - 1,
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                    modifier = Modifier.height(28.dp),
-                ) { Text("›", style = MaterialTheme.typography.labelLarge) }
             }
         }
         Text(

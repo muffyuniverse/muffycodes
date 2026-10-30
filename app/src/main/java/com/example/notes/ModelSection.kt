@@ -122,6 +122,31 @@ fun ModelSection(viewModel: AppViewModel) {
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+    // ---- what this endpoint charges ----
+    //
+    // **Moved here from the statistics table, on the operator's instruction**: "remove this cost
+    // rows, provider already lists the prices, better show in agent block in settings what are the
+    // charge rates for selected endpoint: input, output, cache". The statistics screen's two rows
+    // were derived from what had been spent, which folds the cache saving into a rate and so is not
+    // the price of anything; these are the endpoint's own published numbers, in the block where the
+    // endpoint is chosen, so a person can compare before spending rather than after.
+    Text(
+        text = when {
+            // **Not fetched yet is said, not hidden.** The catalogue is read when the screen opens
+            // and when the model changes, so this state is momentary - but a row that simply did
+            // not appear would look like a model with no prices, which is a different fact.
+            endpoint == null && viewModel.catalogueReading -> "Rates: reading…"
+            endpoint == null -> "Rates: not read yet · tap the provider above to try again"
+            else -> "Rates per M: in ${money(endpoint.priceIn)} · out ${money(endpoint.priceOut)}" +
+                " · cache ${money(endpoint.priceCache)}"
+        },
+        style = MaterialTheme.typography.bodySmall,
+        color = if (endpoint == null) {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        } else {
+            MaterialTheme.colorScheme.primary
+        },
+    )
     viewModel.catalogueProblem?.let {
         Text(
             text = it,

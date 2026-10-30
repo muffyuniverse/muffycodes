@@ -189,17 +189,10 @@ object RequestStats {
         /** What one request cost, averaged over the responses that reported a cost. */
         val perRequest: Double? get() = if (costReported == 0) null else cost / costReported
 
-        /**
-         * The price of a million prompt tokens, as this span actually paid it.
-         *
-         * **Not the same as the endpoint's advertised rate**, and that is the useful part: it is
-         * what the cache saved folded in. A span with a warm cache pays less per million than one
-         * that built it from cold, and this is the number that shows that.
-         */
-        val perMillionInput: Double? get() = if (promptTokens == 0L) null else cost / promptTokens * 1_000_000
-
-        /** The same for output, which is priced several times higher than input on most models. */
-        val perMillionOutput: Double? get() = if (completionTokens == 0L) null else cost / completionTokens * 1_000_000
+        // **`perMillionInput`/`perMillionOutput` are gone with the rows that showed them.** They
+        // were "what this interval paid per million tokens", which folds the cache saving into a
+        // rate and so is not the endpoint's price - and the endpoint's price is the number a person
+        // can act on. The screen shows that one now, in the block where the endpoint is chosen.
     }
 
     /**

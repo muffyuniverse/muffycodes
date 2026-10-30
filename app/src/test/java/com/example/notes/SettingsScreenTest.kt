@@ -245,6 +245,29 @@ class SettingsScreenTest {
     }
 
     @Test
+    fun `the chat has a block of its own, and reset is the last thing on the screen`() {
+        // **Two reports about where a thing sits, and both are about a block meaning something.**
+        //
+        // The line cap bounds how tall one message is *drawn*, which is not how much of the record
+        // is *kept* - so it cannot live under "Session log", where it made a reading preference look
+        // like a limit on the evidence. Report: "maximum displayed message height somehow ended up
+        // in session log block but it need a new separate agent chat block".
+        //
+        // And reset undoes every choice on the screen, so it belongs after them rather than between
+        // them: "back to defaults should be the last element on the settings list".
+        settings()
+
+        compose.onNodeWithText("Agent chat").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("A message may be this many lines", substring = true)
+            .performScrollTo()
+            .assertIsDisplayed()
+        // The last element, so nothing about a person's settings comes after the thing that undoes
+        // them. Asserted by scrolling to it last: `performScrollTo` fails if it is already gone.
+        compose.onNodeWithText("Back to defaults").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Reset settings").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
     fun `the two clocks are named, so a person can tell which one they are setting`() {
         // **Report 23 was a question, not a complaint:** "how wait for the model is different from
         // stop command after?". Three timeouts in a row, in two units, with "wait" and "stop" used

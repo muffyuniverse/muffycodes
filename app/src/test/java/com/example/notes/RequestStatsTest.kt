@@ -60,9 +60,11 @@ class RequestStatsTest {
         assertNull("no cache share", empty.cachedShare)
         assertNull("no thinking share", empty.thinkingShare)
         assertNull("no cost per request", empty.perRequest)
-        assertNull("no rate per million", empty.perMillionInput)
-        assertNull("no output rate", empty.perMillionOutput)
         assertEquals("and the screen says so", StatsFormat.NONE, StatsFormat.perRequest(empty.perRequest))
+        // **The two "per M" rates used to be asserted here, and the rows they fed are gone** - the
+        // operator asked for the endpoint's advertised rates in the agent block instead, because a
+        // rate derived from what was spent folds the cache saving in and answers a question nobody
+        // asks. The getters went with the rows rather than lingering as dead arithmetic.
     }
 
     @Test

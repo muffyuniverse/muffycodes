@@ -8,6 +8,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextInput
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -64,9 +65,16 @@ class AgentChatScreenTest {
         scene.await("the conversation to be read") { scene.viewModel.chatGeneration > 0 }
     }
 
+    /**
+     * Says [text] the way a person does: type, then Enter.
+     *
+     * **There is no Send button any more** - "input box should not have send button, it should send
+     * the message on enter" - so the act is the keyboard's. `performImeAction` is what presses the
+     * keyboard's own key, which is the same path the field's `onSend` handler takes.
+     */
     private fun say(text: String) {
         compose.onNode(hasSetTextAction()).performTextInput(text)
-        compose.onNodeWithText("Send").performClick()
+        compose.onNode(hasSetTextAction()).performImeAction()
     }
 
     /**
@@ -423,10 +431,10 @@ class AgentChatScreenTest {
 
     @Test
     fun `a long conversation leaves the line to speak in on the screen`() {
-        // **The box stops at three quarters of the window and scrolls.** The alternative — a
-        // conversation that grows the column — pushes the composer off the bottom, and the one control
-        // a person needs is the one that disappears first. Forty calls is what an afternoon of work
-        // looks like, and the Send button is still there.
+        // **The conversation fills the space above the composer and scrolls inside it.** The
+        // alternative — a conversation that grows the column — pushes the composer off the bottom,
+        // and the one control a person needs is the one that disappears first. Forty calls is what an
+        // afternoon of work looks like, and the line to speak in is still there.
         val calls = (1..40).map { call("tree", """{"path":"$it"}""") }
         chat(ScriptedDoor(Reply("", calls), Reply("Done.")))
 
@@ -434,7 +442,8 @@ class AgentChatScreenTest {
 
         // One request carries the forty calls, the next is the agent's words: two turns.
         awaitTurns(2)
-        compose.onNodeWithText("Send").assertIsDisplayed()
+        // The field, not a button: there is no Send to look for.
+        compose.onNode(hasSetTextAction()).assertIsDisplayed()
         // And every call is drawn, because the list is the conversation rather than one turn of
         // it - forty calls is forty bubbles, and the answer after them is still reachable.
         assertEquals(

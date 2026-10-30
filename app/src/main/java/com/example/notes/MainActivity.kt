@@ -448,6 +448,9 @@ private fun AppRoot(viewModel: AppViewModel) {
         chatProject != null -> AgentChatScreen(
             viewModel = viewModel,
             onBack = { viewModel.closeChat() },
+            // The same act the browser offers, reaching the same window: a report is a report
+            // wherever it is noticed, and the chat is where a wrong answer is noticed.
+            onReport = openReport,
         )
 
         else -> androidx.compose.foundation.layout.Box {

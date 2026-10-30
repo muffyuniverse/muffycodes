@@ -593,24 +593,14 @@ fun StatsScreen(
                                     .takeIf { showPrevious },
                             ),
                         )
-                        CompareRow(
-                            "per M in",
-                            previous = StatsFormat.perMillion(p.perMillionInput).takeIf { showPrevious },
-                            current = StatsFormat.perMillion(t.perMillionInput),
-                            change = StatsFormat.change(
-                                RequestStats.change(p.perMillionInput, t.perMillionInput)
-                                    .takeIf { showPrevious },
-                            ),
-                        )
-                        CompareRow(
-                            "per M out",
-                            previous = StatsFormat.perMillion(p.perMillionOutput).takeIf { showPrevious },
-                            current = StatsFormat.perMillion(t.perMillionOutput),
-                            change = StatsFormat.change(
-                                RequestStats.change(p.perMillionOutput, t.perMillionOutput)
-                                    .takeIf { showPrevious },
-                            ),
-                        )
+                        // **The two "per M" rows are gone, on the operator's instruction.** They
+                        // were derived from what was charged, so they answered "what did this
+                        // interval cost per million tokens" - a number nobody acts on, and a
+                        // restatement of the rates the provider already lists. The rates that
+                        // matter are the *current* endpoint's, and they belong in the agent block
+                        // where the endpoint is chosen. Report: "remove this cost rows, provider
+                        // already lists the prices, better show in agent block in settings what are
+                        // the charge rates for selected endpoint: input, output, cache".
                         HorizontalDivider(modifier = Modifier.padding(vertical = 6.dp))
                     }
                 }
