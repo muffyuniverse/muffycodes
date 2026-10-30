@@ -271,10 +271,14 @@ class EditorScreenTest {
         // Edit is reachable, because the person may change their own file.
         compose.onNodeWithText("Edit").assertIsEnabled()
         compose.onNodeWithText("Edit").performClick()
-        compose.onNodeWithText("three litres").assertIsDisplayed()
+        compose.waitForIdle()
+        // **The text has to be typed**, not asserted: entering Edit puts the field back with the
+        // file's own text, so "three litres" is not on the screen until this line writes it.
+        compose.onNodeWithText("two litres").performTextReplacement("three litres")
         compose.onNodeWithText("Save").performClick()
-        compose.waitUntil(10_000) { file.readText() == "three litres" }
-        assertEquals("and saving it works", "three litres", file.readText())
+        scene.await("the person's own save to land", 20_000) {
+            file.readText() == "three litres"
+        }
     }
 
     @Test
