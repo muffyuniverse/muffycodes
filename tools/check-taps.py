@@ -127,6 +127,10 @@ VOCABULARY = {
     # trimming the oldest ones. They share a target and have separate triggers, so they are two
     # numbers to set rather than one.
     "forget compaction", "trim compaction", "compaction target",
+    # the browser: whether the agent may reach this phone and the private network, and how long one
+    # page may take. Two acts because they answer two questions - *where* may it read, and *how long*
+    # may it spend - and the first is a capability rather than a limit.
+    "browse private", "browse timeout",
 }
 
 # Names built from a value, so they cannot be a literal in the list.

@@ -145,10 +145,24 @@ class Agent(
      * answer in hand.
      */
     private val onPage: (Live) -> Unit = {},
+    /**
+     * The browser, or `Browser.NONE` when this agent may not browse.
+     *
+     * **Passed in rather than made here**, like the door and the clock: the engine needs a
+     * `Context` and a `Looper` thread, and an `Agent` that could build one would be an `Agent` that
+     * cannot be constructed in a test. The default refuses, so an agent built without a decision
+     * cannot reach the web.
+     */
+    private val browser: com.example.notes.browser.Browser = com.example.notes.browser.Browser.NONE,
+    /** Whether the agent may reach this phone and the private network. Off unless asked. */
+    private val privateAllowed: () -> Boolean = { false },
+    /** How long a page may take, in milliseconds; zero is the browser's own bound. */
+    private val browseMs: () -> Long = { 0L },
 ) {
 
     private val tools = AgentTools(
         ws, project, git, log, maxResult, bg, backgroundMs, triggerTokens,
+        browser = browser, browseMs = browseMs, privateAllowed = privateAllowed,
     )
 
     /**

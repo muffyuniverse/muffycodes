@@ -246,6 +246,50 @@ class SettingsStore(context: Context, name: String = "settings") {
     var keepAlive: Boolean by mutableStateOf(prefs.getBoolean(KEY_KEEPALIVE, true))
         private set
 
+    /**
+     * Whether the agent may browse this phone and the private network.
+     *
+     * **Off unless the operator says otherwise.** The public internet is the default because that is
+     * what "read a web page" means; loopback and the private ranges are a capability on top of it,
+     * and a capability that appears without being granted is the one kind of default this app does
+     * not allow.
+     */
+    var browsePrivate: Boolean by mutableStateOf(prefs.getBoolean(KEY_BROWSE_PRIVATE, false))
+        private set
+
+    /** Turns the private-network permission on or off. */
+    fun keepBrowsePrivate(on: Boolean) {
+        Trace.tap("browse private", if (on) "on" else "off")
+        browsePrivate = on
+        prefs.edit().putBoolean(KEY_BROWSE_PRIVATE, on).apply()
+        Trace.said(
+            if (on) {
+                "the agent may read this phone and the private network"
+            } else {
+                "the agent may read the public web only"
+            },
+        )
+    }
+
+    /**
+     * How long one page may take, in milliseconds; zero is the browser's own bound.
+     *
+     * Read per call like the other limits, so a number changed while an agent is idle applies to the
+     * next page it reads rather than to the runner built before it.
+     */
+    val browseMs: Long get() = prefs.getInt(KEY_BROWSE_SECONDS, DEFAULT_BROWSE_SECONDS) * 1_000L
+
+    /** Sets the page limit, in seconds, clamped to something a phone can survive. */
+    fun keepBrowseSeconds(seconds: Int) {
+        val clean = seconds.coerceIn(MIN_BROWSE_SECONDS, MAX_BROWSE_SECONDS)
+        Trace.tap("browse timeout", "$clean")
+        prefs.edit().putInt(KEY_BROWSE_SECONDS, clean).apply()
+        Trace.said("a page may take $clean seconds")
+    }
+
+    /** What [keepBrowseSeconds] last set, in seconds, for the field to show. */
+    val browseSeconds: Int get() = prefs.getInt(KEY_BROWSE_SECONDS, DEFAULT_BROWSE_SECONDS)
+
     /** Turns the keepalive on or off. */
     fun keepWarm(on: Boolean) {
         Trace.tap("keepalive", if (on) "on" else "off")
@@ -687,6 +731,11 @@ class SettingsStore(context: Context, name: String = "settings") {
      * paused for a minute and a half mid-sentence - which the old split allowed. Two minutes keeps
      * every answer the old settings allowed and still catches a dead connection quickly.
      */
+    /** A page: long enough for a slow site, short enough that a turn is not lost to one. */
+    const val DEFAULT_BROWSE_SECONDS = 30
+    const val MIN_BROWSE_SECONDS = 5
+    const val MAX_BROWSE_SECONDS = 180
+
     const val DEFAULT_RESPONSE_SECONDS = 120
     const val MIN_RESPONSE_SECONDS = 30
     const val MAX_RESPONSE_SECONDS = 1_800
@@ -699,6 +748,17 @@ class SettingsStore(context: Context, name: String = "settings") {
     /** Whether a waiting conversation is kept warm, how often, and for how long. */
     const val KEY_KEEPALIVE = "agent_keepalive"
     const val KEY_WARM_MINUTES = "agent_warm_minutes"
+
+    /**
+     * **Whether the agent may reach this phone and the private network**, and how long a page may
+     * take.
+     *
+     * Off by default, and the default is the point: a browsable address is a capability, and a page
+     * that could steer the agent at `192.168.1.1` has reached the operator's router without either
+     * of them asking. A home server or a NAS is a real use, and it is one a person should choose.
+     */
+    const val KEY_BROWSE_PRIVATE = "agent_browse_private"
+    const val KEY_BROWSE_SECONDS = "agent_browse_seconds"
 
     /** How often a waiting agent is warmed, and how long a command may run before it is stopped. */
     const val KEY_POLL = "agent_poll_seconds"

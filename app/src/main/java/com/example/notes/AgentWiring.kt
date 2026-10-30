@@ -58,6 +58,17 @@ object AgentWiring {
         changed: (List<AgentSession>) -> Unit = {},
         /** What the agent is doing, page by page, while it works. See `Agent.onPage`. */
         onPage: (String, Agent.Live) -> Unit = { _, _ -> },
+        /**
+         * The browser the agent may use.
+         *
+         * **Made once and shared, not per runner.** A WebView owns a `Looper` thread and a Chromium
+         * process for its whole life, so building one per turn would be a thread and an engine per
+         * request. It is also why this is a parameter rather than made inside: the caller decides
+         * whether an engine exists at all, and a test passes a fake.
+         *
+         * Defaults to `Browser.NONE`, so a wiring built without a decision cannot browse.
+         */
+        browser: com.example.notes.browser.Browser = com.example.notes.browser.Browser.NONE,
     ): AgentRunner? {
         val login = credentials.activeLogin ?: return null
         val accounts = AccountStore(rootDir)
@@ -81,6 +92,7 @@ object AgentWiring {
             notify = notify,
             changed = changed,
             onPage = onPage,
+            browser = browser,
         )
     }
 

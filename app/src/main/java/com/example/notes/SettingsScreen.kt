@@ -550,6 +550,58 @@ fun SettingsScreen(
             // came back to ask again; the name described the model's act and hid the person's bill.
             // Reported from the live log: "what is agent pace description? I totally dont understand
             // what those words mean".
+            // ---- the browser, which is a capability rather than a bound ----
+            //
+            // **Its own section, because the switch is not a limit.** Everything above says how much
+            // or how long; this says *where the agent may go*, and the default is the public
+            // internet. A page that could steer the agent at `192.168.1.1` has reached the router
+            // without either of them asking, so the private ranges are granted by a person rather
+            // than assumed by the app.
+            //
+            // **The agent browses with the phone's own Chromium**, which costs nothing to ship and
+            // is updated by the Play Store independently. There is no switch for that: a phone
+            // without a WebView gets a sentence saying so, and one with it can read the web.
+            Text("The web", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "The agent can read a web page and photograph it, using the browser this phone " +
+                    "already has. Its answers are saved under agent/browser/.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { settings.keepBrowsePrivate(!settings.browsePrivate) },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Let it read this phone's network", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "Off, it may read the public web and nothing else. On, it may also read " +
+                            "this phone (127.0.0.1) and addresses on your home network — a NAS, a " +
+                            "router, a server. Turn it on only if you want that.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = settings.browsePrivate,
+                    onCheckedChange = { settings.keepBrowsePrivate(it) },
+                )
+            }
+            LengthField(
+                label = "A page may take (seconds)",
+                value = settings.browseSeconds,
+                placeholder = "${SettingsStore.DEFAULT_BROWSE_SECONDS}",
+                onValueChange = { settings.keepBrowseSeconds(it) },
+            )
+            Text(
+                text = "Now: ${settings.browseSeconds} s per page. Past that the page is reported " +
+                    "as too slow rather than left hanging.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+
             Text("Keepalive", style = MaterialTheme.typography.titleMedium)
             Row(
                 // **The whole row is the switch.** The words are the explanation and the switch is

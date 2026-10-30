@@ -43,6 +43,14 @@ class AgentRunner(
      */
     private val onPage: (String, Agent.Live) -> Unit = { _, _ -> },
     /**
+     * The browser the agent may use, or `Browser.NONE`.
+     *
+     * Built once by the wiring and shared, because a WebView is expensive and must live on one
+     * `Looper` thread for its whole life — a browser per turn would be a new thread and a new
+     * Chromium per request.
+     */
+    private val browser: com.example.notes.browser.Browser = com.example.notes.browser.Browser.NONE,
+    /**
      * Where a `background` call's work runs — **one thread per call, made when it is asked for.**
      *
      * The previous design kept a fixed pool here and held the test suite open for eighteen minutes
@@ -321,6 +329,11 @@ class AgentRunner(
                     triggerTokens = { limits.triggerAt },
                     sessionTokens = settings.sessionLimit,
                     onPage = { live -> onPage(project, live) },
+                    browser = browser,
+                    // **Read from the settings at the moment of the call**, like the other limits:
+                    // a switch flipped while the agent is idle applies to the next page it reads.
+                    privateAllowed = { settings.browsePrivate },
+                    browseMs = { settings.browseMs },
                 )
                 if (waking == null) {
                     agent.warm() to log.rows()

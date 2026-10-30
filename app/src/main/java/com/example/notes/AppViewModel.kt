@@ -2913,6 +2913,31 @@ class AppViewModel @JvmOverloads constructor(
      */
     private var runner: AgentRunner? = null
 
+    /**
+     * The engine the agent browses with, made on first use and shared by every runner this view
+     * model builds.
+     *
+     * **One per view model, not one per runner.** A turn can be rebuilt many times — a model change,
+     * a sign-out, a settings change — and a new WebView for each would be a new Looper thread and a
+     * new Chromium for each. It is released in `onCleared` with the rest of the view model's work.
+     */
+    private var browser: com.example.notes.browser.WebViewBrowser? = null
+
+    /**
+     * Lets go of what outlives a screen: the runner's thread, and the engine's Chromium process.
+     *
+     * **The browser would otherwise outlive the view model.** A `WebView` keeps a `Looper` thread
+     * and a browser process alive for as long as anything holds it, and a view model that is
+     * cleared when the person leaves the app has no further use for either.
+     */
+    override fun onCleared() {
+        runner?.close()
+        runner = null
+        browser?.close()
+        browser = null
+        super.onCleared()
+    }
+
     /** How often a session that needs a person reminds them, from Settings. */
     val reminderMs: Long get() = settings.remindMinutes * 60_000L
 
@@ -3115,6 +3140,14 @@ class AppViewModel @JvmOverloads constructor(
             credentials = credentials,
             settings = settings,
             door = { active -> doorFor(active) },
+            // **The same engine the service uses, or a second one.** The view model runs turns while
+            // the app is on screen; the service runs them while it is not. Two runners are possible
+            // at once, so this is its own instance rather than a shared one — a WebView is bound to
+            // one Looper thread for life, and sharing it across two would put every call on whichever
+            // thread made it first.
+            browser = browser ?: com.example.notes.browser.WebViewBrowser(getApplication()).also {
+                browser = it
+            },
             notify = { session -> agentNotifier?.invoke(session) },
             // **A page, as it happens.** A call is published when the model asks and filled in
             // when the tool returns, so the bubble shows the work rather than only its result.

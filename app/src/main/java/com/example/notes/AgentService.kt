@@ -37,6 +37,9 @@ class AgentService : Service() {
     private var runner: AgentRunner? = null
     private lateinit var clock: ScheduledExecutorService
 
+    /** The engine the agent browses with, made on first start and released on stop. */
+    private var browser: com.example.notes.browser.WebViewBrowser? = null
+
     /** The last runtime state in the notification: how many, and how many need a person. */
     @Volatile
     private var strip: String = ""
@@ -46,8 +49,14 @@ class AgentService : Service() {
         alive = true
         channel()
         clock = Executors.newSingleThreadScheduledExecutor()
+        // **One browser for the life of the service**, made here rather than inside the wiring so
+        // that the thing which owns it is the thing which stops: a WebView holds a Looper thread
+        // and a Chromium process, and a service that forgot to release it would leave both behind
+        // for as long as the process lived.
+        browser = com.example.notes.browser.WebViewBrowser(application)
         runner = AgentWiring.runnerFor(
             app = application,
+            browser = browser,
             // **The session, not its sentence.** The notification carries the project's own
             // buttons — Stop this session has to know which one — so narrowing it to a string here
             // would be narrowing it to the one thing the buttons do not need.
@@ -124,6 +133,11 @@ class AgentService : Service() {
         clock.shutdownNow()
         runner?.close()
         runner = null
+        // **The engine is released with the service.** A WebView that is not destroyed keeps its
+        // Chromium process and its thread alive for as long as this process lives, which after the
+        // agent has stopped is a cost with nothing to show for it.
+        browser?.close()
+        browser = null
         super.onDestroy()
     }
 
