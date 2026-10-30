@@ -660,15 +660,23 @@ private fun SingleChoiceSegmentedButtonRowScope.ModeSegment(
 /**
  * **Diff: two commits, and the file between them.**
  *
- * The default pair is `HEAD` and the last synced commit, because the question a person opening a
- * diff on this screen is asking is "what am I about to send" — not "what has ever changed in this
- * file". Both ends are replaceable from the file's own history, so comparing two older versions is
- * the same act with two other ids.
+ * **The default pair is the newest version and the one before it.** It used to be `HEAD` against the
+ * last synced commit, on the reasoning that a person opening a diff here wants to know "what am I
+ * about to send" - and that is a real question with a hole in it: a file that has never been pushed
+ * has no synced version, so the older end was null and the screen said "there is no version of this
+ * file at one of those commits" about a file with a dozen commits behind it.
  *
- * **Nothing is invented when an end is missing.** A file that was never pushed has no synced
- * version, and a file added since the last sync has no version at the older end; both are said
- * plainly, because a diff against nothing drawn as a normal diff would show every line as an
- * addition and look like a real comparison.
+ * The operator's report: *"diff isnt getting selected even when there is history to compare, fix it.
+ * and set it so that by default it shows newest version vs previous one"*. Newest-against-previous
+ * always has both ends whenever there are two commits, which is exactly when the mode means anything.
+ *
+ * Both ends are replaceable from the file's own history, so comparing two older versions - or two
+ * versions that straddle the last sync - is the same act with two other ids.
+ *
+ * **Nothing is invented when an end is missing.** A file with one commit has no previous version, and
+ * a file added since the last sync has no version at the older end; both are said plainly, because a
+ * diff against nothing drawn as a normal diff would show every line as an addition and look like a
+ * real comparison.
  */
 @Composable
 private fun DiffMode(viewModel: AppViewModel, path: String) {

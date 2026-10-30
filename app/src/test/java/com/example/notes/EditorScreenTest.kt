@@ -659,4 +659,34 @@ class EditorScreenTest {
             0xAE.toByte(), 0x42, 0x60, 0x82.toByte(),
         )
     }
+    @Test
+    fun `the diff opens on the newest version against the one before it`() {
+        // **The operator's report**: "diff isnt getting selected even when there is history to
+        // compare, fix it. and set it so that by default it shows newest version vs previous one".
+        //
+        // The default used to be `HEAD` against the last *synced* commit. A file that had never been
+        // pushed has no synced version, so the older end was null and the screen said "there is no
+        // version of this file at one of those commits" about a file with history behind it - which
+        // is exactly "isn't getting selected even when there is history".
+        //
+        // **Two versions, and no remote at all**, which is the case that was broken: a local project
+        // never pushes, so `lastSynced` is null for ever and every diff of it was empty.
+        scene.localProject("Shopping")
+        val made = scene.made("Shopping")
+        scene.open(made)
+        val file = scene.file("milk.txt", "two litres")
+        scene.viewModel.openEditor(file)
+        scene.saveAsVersion("three litres")
+
+        scene.viewModel.openDiff("milk.txt")
+        scene.await("the diff to choose its two ends", 20_000) {
+            scene.viewModel.diffFrom != null && scene.viewModel.diffTo != null
+        }
+
+        val choices = scene.viewModel.diffChoices
+        assertTrue("the file has a history to compare: ${choices.size}", choices.size >= 2)
+        assertEquals("the newer end is the newest version", choices[0].id, scene.viewModel.diffTo)
+        assertEquals("and the older is the one before it", choices[1].id, scene.viewModel.diffFrom)
+    }
+
 }
