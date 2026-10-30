@@ -721,6 +721,101 @@ class AgentTest {
         assertTrue("while an account with none is told so: $missingWords", "No OpenRouter key" in missingWords)
     }
 
+    @Test
+    fun `a key that is stored and will not open is not reported as no key at all`() {
+        // **The operator saw this sentence twice**, the second time after it had been marked fixed:
+        // "still tells 'no openrouter key on this account yet' in agent block after setting the key".
+        //
+        // The cause was not a stale read. `CredentialStore.opened` has a branch for a failure it does
+        // not recognise, which keeps the bytes on purpose - "an unrecognised failure is not proof the
+        // key is gone" - and then answered `KeyState.NONE`. So a key that was stored, and might well
+        // open on the next read, was reported as a key that had never been typed. The screen was
+        // telling the truth about its input and the input was wrong.
+        //
+        // Two states, two sentences, because a person can act on only one of them: "no key yet" means
+        // type it in, and "stored and unreadable" means it is already there and something is wrong.
+        val unreadable = OpenRouterDoor(
+            key = { null },
+            model = "deepseek/deepseek-v4.1-flash-1017",
+            provider = "decart/fp4",
+            effort = "high",
+            keyState = { KeyState.UNREADABLE },
+        )
+        val request = Request(
+            model = "deepseek/deepseek-v4.1-flash-1017",
+            provider = "decart/fp4",
+            effort = "high",
+            system = "",
+            messages = emptyList(),
+            tools = emptyList(),
+        )
+        val words = unreadable.turn(request).exceptionOrNull()?.message.orEmpty()
+        assertFalse("it does not say the key was never set: $words", "No OpenRouter key" in words)
+        assertTrue("it says a key is stored: $words", "stored" in words)
+        assertTrue("and what to do about it: $words", "again" in words)
+    }
+
+    @Test
+    fun `the reasoning goes back on the assistant turn, and never as words`() {
+        // **The 400 in the operator's trace**: "The `reasoning_content` in the thinking mode must be
+        // passed back to the API". The app used to keep the reasoning out of the conversation on
+        // purpose - it was counted in the footer and then dropped - so a thinking-mode model refused
+        // the turn *after* the one that had worked.
+        //
+        // Two things are asserted, and the second matters as much as the first: it goes back in
+        // `reasoning_content`, and it does **not** go into `content`. The provider wants the thought
+        // inside the assistant turn as a separate field; folding it into the prose would put words in
+        // the model's mouth that it never said, and it would be re-read as something it wrote.
+        val door = OpenRouterDoor(
+            key = { "unused-by-this-test" },
+            model = "deepseek/deepseek-v4.1-flash-1017",
+            provider = "deepinfra/fp8/flex",
+            effort = "high",
+        )
+        val request = Request(
+            model = "deepseek/deepseek-v4.1-flash-1017",
+            provider = "deepinfra/fp8/flex",
+            effort = "high",
+            system = "",
+            messages = listOf(
+                Msg.user("what is in milk.txt"),
+                Msg.assistant("two litres", thinking = "I should read the file first."),
+            ),
+            tools = emptyList(),
+        )
+        val sent = door.body(request).getJSONArray("messages").getJSONObject(1)
+        assertEquals("the turn is still the assistant's", "assistant", sent.getString("role"))
+        assertEquals(
+            "the reasoning is a field of its own",
+            "I should read the file first.",
+            sent.getString("reasoning_content"),
+        )
+        assertEquals("and the words are only the words", "two litres", sent.getString("content"))
+    }
+
+    @Test
+    fun `a turn with no reasoning is not given a reasoning field`() {
+        // **An empty string is not the same as absent.** A model that never reasons must not be
+        // handed a field it never produced - and a provider distinguishes "this turn had none" from
+        // "you forgot to send it", which is the difference between a working request and a 400.
+        val door = OpenRouterDoor(
+            key = { "unused-by-this-test" },
+            model = "deepseek/deepseek-v4.1-flash-1017",
+            provider = "deepinfra/fp8/flex",
+            effort = "high",
+        )
+        val request = Request(
+            model = "deepseek/deepseek-v4.1-flash-1017",
+            provider = "deepinfra/fp8/flex",
+            effort = "high",
+            system = "",
+            messages = listOf(Msg.user("hello"), Msg.assistant("hi")),
+            tools = emptyList(),
+        )
+        val sent = door.body(request).getJSONArray("messages").getJSONObject(1)
+        assertFalse("no reasoning field at all", sent.has("reasoning_content"))
+    }
+
     // ---- what goes on the wire ------------------------------------------------
 
     @Test

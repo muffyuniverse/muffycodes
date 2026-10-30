@@ -626,6 +626,32 @@ class AgentLog private constructor(
     fun note(name: String, detail: String): Int = record(NOTE, name, detail)
 
     /**
+     * What the model thought before a reply, **stored so it can be sent back with it.**
+     *
+     * A thinking-mode provider refuses the next request unless the reasoning comes back inside the
+     * assistant turn it belonged to: `400 The reasoning_content in the thinking mode must be passed
+     * back to the API`. So it is a row, written after the reply and before the next request.
+     *
+     * **Born `app`, and that is the whole reason it is not just another note.** `contextRows()`
+     * keeps only `in`, so a reasoning row never reaches the model as prose it wrote — it is replayed
+     * by [Agent.messages] as the `reasoning_content` field of the turn it came from, which is what
+     * the provider asked for. A note in `in` would also have been drawn as a page in the chat, and
+     * the thinking is already in the footer where it belongs.
+     *
+     * **The row is written only when there is something to write.** An empty reasoning string is not
+     * the same as a missing one: a model that never reasons must not be handed a field it never
+     * produced, and a row saying "it thought nothing" would be a claim about the provider.
+     */
+    fun thinking(of: Int, text: String): Int = record(
+        NOTE,
+        "thinking",
+        // The id of the reply it belongs to, so the replay can attach it to the right turn. `of` is
+        // the `agent` note's id, which is the row the reply was written as.
+        "reply=$of ${text.replace('\n', ' ')}",
+        ctx = APP,
+    )
+
+    /**
      * Records what a request was charged for, **against the row it was charged for.**
      *
      * Written after the reply, because the numbers arrive with the end of the stream and the row

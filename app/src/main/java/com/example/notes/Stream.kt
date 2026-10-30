@@ -95,9 +95,16 @@ class Streamed {
             }
             val delta = choice.optJSONObject("delta") ?: continue
             delta.optString("content").takeIf { it.isNotEmpty() }?.let { said.append(it) }
-            // **Reasoning arrives under two names**, because the field was renamed upstream and both
-            // are still in use. Reading only one is how a diligent model looks dead.
+            // **Reasoning arrives under three names**, because the field was renamed upstream and
+            // the providers have not agreed. Reading only one is how a diligent model looks dead.
+            //
+            // `reasoning_content` is DeepSeek's, and it is the one the API demands back: a
+            // thinking-mode model refuses the next request with `400 The reasoning_content in the
+            // thinking mode must be passed back to the API`. The app used to read the other two and
+            // throw the thought away after counting it, so the *next* turn failed on a conversation
+            // it had built correctly.
             delta.optString("reasoning").takeIf { it.isNotEmpty() }?.let { thinking.append(it) }
+            delta.optString("reasoning_content").takeIf { it.isNotEmpty() }?.let { thinking.append(it) }
             delta.optJSONArray("reasoning_details")?.let { details ->
                 for (j in 0 until details.length()) {
                     val one = details.optJSONObject(j) ?: continue

@@ -50,14 +50,16 @@ data class Msg(
     val text: String,
     val callId: String = "",
     val calls: List<Call> = emptyList(),
+    /** The reasoning that came with this assistant turn, sent back because the provider requires it. */
+    val thinking: String = "",
 ) {
     companion object {
         /** The operator's words. */
         fun user(text: String) = Msg("user", text)
 
         /** The agent's own words, with the calls it made in the same reply. */
-        fun assistant(text: String, calls: List<Call> = emptyList()) =
-            Msg("assistant", text, calls = calls)
+        fun assistant(text: String, calls: List<Call> = emptyList(), thinking: String = "") =
+            Msg("assistant", text, calls = calls, thinking = thinking)
 
         /** The answer to one call, matched by the id the model chose. */
         fun tool(callId: String, text: String) = Msg("tool", text, callId = callId)
@@ -84,6 +86,20 @@ data class Reply(
     val text: String,
     val calls: List<Call> = emptyList(),
     val usage: JSONObject? = null,
+    /**
+     * What the model thought before it answered, when the provider sent it.
+     *
+     * **This is sent back, and the operator reversed the rule that said otherwise.** The rule was
+     * "nothing the model thought is ever sent back to it as something it said", which is tidy and
+     * wrong: a thinking-mode model refuses the next request with `400 The reasoning_content in the
+     * thinking mode must be passed back to the API`. The provider's contract is that the reasoning
+     * is part of the assistant turn, so it is stored and replayed with it.
+     *
+     * It is kept **apart** from [text] rather than folded into it, because the two are different
+     * things in every place that reads them: the bubble shows what was said, the footer counts what
+     * was thought, and the request puts each in its own field.
+     */
+    val thinking: String = "",
 ) {
     /** Tokens the model wrote, when the provider said. */
     val outputTokens: Int?
@@ -168,16 +184,22 @@ class ScriptedDoor(vararg script: Reply) : Door {
  * `supports_tool_choice: {auto: true, function: false}`, so the forced form would be refused by
  * at least one of them — and this app must behave the same whichever one is active.
  *
- * **Reasoning is no longer excluded, and streaming is why.** It used to be: the tokens were
- * generated, billed, and then thrown away unseen, which is the worst of both. With a streamed
- * answer they are not thrown away — they arrive *first*, while the model is thinking and before it
- * has written anything, which makes "diligent" observable. A connection that has died is silent; a
- * model working hard is not. That is exactly the distinction the idle timeout has to make, so
- * excluding reasoning would leave the app blind to the one signal that answers it.
+ * **Reasoning is not excluded, and it is sent back.** It used to be excluded outright: the tokens
+ * were generated, billed, and then thrown away unseen, which is the worst of both. Streaming fixed
+ * the first half — reasoning arrives *first*, while the model is thinking and before it has written
+ * anything, which makes "diligent" observable: a connection that has died is silent, a model working
+ * hard is not. That is the distinction the idle timeout has to make.
  *
- * It also reaches the footer, so a person watching a long turn sees progress rather than a still
- * screen — and it is not in the conversation: [Streamed.thinking] is kept apart from
- * [Streamed.said], so nothing the model thought is ever sent back to it as something it said.
+ * **The second half is a reversal, and the operator made it.** This class used to say, in as many
+ * words, that nothing the model thought is ever sent back to it as something it said — the reasoning
+ * went to the footer and no further. That is tidy and it is wrong: a thinking-mode model answers the
+ * *next* request with `400 The reasoning_content in the thinking mode must be passed back to the
+ * API`. The provider's contract is that the reasoning is part of the assistant turn, so it is stored
+ * with the turn and replayed with it.
+ *
+ * **Kept apart from [Streamed.said] still**, and that part survives: the two are different things
+ * everywhere they are read. The bubble shows what was said, the footer counts what was thought, and
+ * the request puts each in its own field — the model never reads its own reasoning as prose it wrote.
  */
 class OpenRouterDoor(
     private val key: () -> String?,
@@ -338,6 +360,11 @@ class OpenRouterDoor(
             KeyState.LOCKED ->
                 "This phone is locked, so the OpenRouter key cannot be read. It is kept: " +
                     "unlock the phone and the agent will use it."
+            // **A key that is stored and would not open is not a key that was never set.** Saying
+            // "no key yet" sent a person to type one they already had - reported twice.
+            KeyState.UNREADABLE ->
+                "An OpenRouter key is stored for this account, and this phone could not read it. " +
+                    "Type it again to replace it."
             else -> "No OpenRouter key on this account yet"
         },
     )
@@ -566,6 +593,17 @@ class OpenRouterDoor(
         array.put(JSONObject().put("role", "system").put("content", request.system))
         for (message in request.messages) {
             val one = JSONObject().put("role", message.role)
+            // **The reasoning goes back with the turn it came from.** A thinking-mode model refuses
+            // the next request without it: "400 The reasoning_content in the thinking mode must be
+            // passed back to the API". Written before the branches below because every assistant
+            // turn may carry it, with or without calls.
+            //
+            // Only when there is some. An empty string is not the same as absent: the provider
+            // distinguishes "this turn had no reasoning" from "you forgot to send it", and a model
+            // that never reasons should not be handed a field it never produced.
+            if (message.role == "assistant" && message.thinking.isNotEmpty()) {
+                one.put("reasoning_content", message.thinking)
+            }
             when {
                 message.role == "assistant" && message.calls.isNotEmpty() -> {
                     one.put(

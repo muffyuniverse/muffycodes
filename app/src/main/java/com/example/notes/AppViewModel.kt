@@ -956,7 +956,9 @@ class AppViewModel @JvmOverloads constructor(
                 null
             }
 
-            KeyState.NONE -> {
+            // The same refusal as NONE, because the write did not produce a readable key either
+            // way - but reached through the unrecognised branch, which keeps the bytes.
+            KeyState.UNREADABLE, KeyState.NONE -> {
                 Trace.note("key-not-kept", "saved, and it could not be read back")
                 Trace.said("The key was stored and could not be read back, so it will not work.")
                 "The key was stored, and this phone could not read it back, so nothing here can " +

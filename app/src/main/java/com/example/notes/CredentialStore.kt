@@ -71,6 +71,22 @@ enum class KeyState {
 
     /** Stored, but the phone must be unlocked before it can be read. */
     LOCKED,
+
+    /**
+     * Stored, and the app could not read it for a reason it does not recognise.
+     *
+     * **This is its own answer, and reporting it as [NONE] was a lie the screen repeated.** The
+     * unrecognised branch keeps the bytes on purpose — "an unrecognised failure is not proof the key
+     * is gone" — and then answered `NONE`, which the agent block renders as *"No OpenRouter key on
+     * this account yet"*. So a key that was stored, and may well work on the next read, was reported
+     * as a key that had never been set. Reported twice, the second time after it had been "fixed":
+     * *"still tells 'no openrouter key on this account yet' in agent block after setting the key"*.
+     *
+     * The two are different sentences because they are different situations, and a person can act on
+     * only one of them: `NONE` means "type it in", this means "it is here and something is wrong with
+     * reading it".
+     */
+    UNREADABLE,
 }
 
 /**
@@ -211,7 +227,10 @@ class CredentialStore(context: Context) : Credentials {
             } else {
                 // Kept as well: an unrecognised failure is not proof the key is gone, and a person
                 // who types it again overwrites the bytes anyway.
-                Opened(null, KeyState.NONE)
+                //
+                // **And it says so**, rather than answering `NONE`. The bytes are still there, so
+                // "no key yet" is false, and it was the sentence the operator saw twice.
+                Opened(null, KeyState.UNREADABLE)
             }
         }
     }

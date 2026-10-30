@@ -813,6 +813,13 @@ fun KeyRow(viewModel: AppViewModel, onSetKey: () -> Unit) {
                     KeyState.NONE ->
                         "No OpenRouter key yet, so the model list cannot be read and the agent " +
                             "cannot talk."
+                    // **The sentence that was missing.** This row said "no key yet" about a key that
+                    // was stored and unreadable for an unrecognised reason, which is what the
+                    // operator saw after setting it - twice, the second time after it had been
+                    // marked fixed.
+                    KeyState.UNREADABLE ->
+                        "A key is stored for this account and this phone could not read it. Set it " +
+                            "again to replace it."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = if (hasKey) {

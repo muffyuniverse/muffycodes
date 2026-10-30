@@ -513,6 +513,12 @@ class Agent(
                 if (reply.outputTokens != null || reply.thinkingTokens != null) {
                     log.usage(said, reply.outputTokens, reply.thinkingTokens)
                 }
+                // **The reasoning is stored with the reply, because the next request has to carry
+                // it.** A thinking-mode provider answers `400 The reasoning_content in the thinking
+                // mode must be passed back to the API` if it is dropped. Written here rather than
+                // in the door so it lands beside the words it belongs to and only for a reply that
+                // had words - a reply of calls alone is replayed from its calls.
+                if (reply.thinking.isNotBlank()) log.thinking(said, reply.thinking)
             }
 
             // **Words and no calls is the ending**, and it is the only one. There used to be a
@@ -1034,13 +1040,23 @@ class Agent(
      *   reasoning and the calls were one reply on the wire, so they are put back as one.
      * - **A `GOT` answers the oldest call still waiting**, matched by the id the call's own row
      *   gave it. That is what makes a rebuilt conversation legal even after a seal.
-     * - **`ASK` is the agent's own words.** It is the seam: without it the operator's "yes"
-     *   answers nothing, because the question would have been dropped at the burst boundary.
+     * - **The reasoning rides with the turn it came from**, in its own field. It is not prose the
+     *   model wrote — the provider wants it in `reasoning_content` — so it is accumulated beside
+     *   [text] and never appended to it.
      */
     fun messages(rows: List<AgentLog.Row>): List<Msg> {
         val out = mutableListOf<Msg>()
         val text = StringBuilder()
+        val thought = StringBuilder()
         val calls = mutableListOf<Call>()
+        /**
+         * Which reply the reasoning being accumulated belongs to.
+         *
+         * A reasoning row names the `agent` note it was written with, and only that note's turn may
+         * take it. Matching on "the newest assistant turn" would attach a thought to the wrong reply
+         * the first time two replies were adjacent in the record.
+         */
+        var replyId = 0
         /**
          * The call ids still waiting for a result.
          *
@@ -1052,7 +1068,9 @@ class Agent(
 
         fun flush() {
             if (text.isEmpty() && calls.isEmpty()) return
-            out.add(Msg.assistant(text.toString().trim(), calls.toList()))
+            out.add(Msg.assistant(text.toString().trim(), calls.toList(), thought.toString().trim()))
+            thought.clear()
+            replyId = 0
             awaiting.clear()
             awaiting.addAll(calls.map { it.id })
             text.clear()
@@ -1098,11 +1116,29 @@ class Agent(
                 // carry mid-array — and it is at the end of the array, where changing it costs one
                 // message rather than the whole prompt.
                 AgentLog.NOTE -> when (row.name) {
+                    // **The reasoning, attached to the turn it belongs to.** It is `app` in the
+                    // context file, so it is never in `rows` here as prose; this branch exists for
+                    // the replay, and it reads the id out of the detail written by
+                    // `AgentLog.thinking`. Attached to the paragraph being accumulated for that
+                    // reply rather than flushed as a message of its own: the provider wants it
+                    // inside the assistant turn, not beside it.
+                    "thinking" -> {
+                        val forReply = row.body.substringAfter("reply=", "").substringBefore(' ').toIntOrNull()
+                        if (forReply != null && forReply == replyId) {
+                            thought.append(row.body.substringAfter(' ', ""))
+                        }
+                    }
                     "woke" -> {
                         flush()
                         out.add(Msg.user(row.body))
                     }
-                    "agent", "reason" -> text.append(row.body).append("\n")
+                    "agent", "reason" -> {
+                        text.append(row.body).append("\n")
+                        // The `agent` note is the reply's own row, so its id is what a reasoning row
+                        // names. `reason` is the same paragraph continued and must not take the id
+                        // back: a thought written after it still belongs to the same reply.
+                        if (row.name == "agent") replyId = row.id
+                    }
                     else -> Unit
                 }
             }
