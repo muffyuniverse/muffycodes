@@ -182,6 +182,7 @@ class ScenariosTest {
      * over an empty surface, which is what it looks like over any of them - the window carries its
      * own scrim.
      */
+    @Composable
     private fun window(content: @Composable () -> Unit) = Screen {
         // A box with nothing in it, so the capture has a background to draw the window over.
         androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {}
