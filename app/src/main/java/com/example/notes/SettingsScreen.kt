@@ -177,6 +177,18 @@ fun SettingsScreen(
                     text = "Working as " + (account?.login ?: "~local"),
                     style = MaterialTheme.typography.titleMedium,
                 )
+                // **What the block decides, in one line**, on the operator's instruction: "add short
+                // description to 'working as' block: that it defines system settings and available
+                // projects in the workspace".
+                //
+                // This is the one control on the screen whose effect is not local: changing the
+                // account changes which projects exist at all, and which of the app's own settings
+                // are in force. Nothing else on the page does that, and nothing said so.
+                Text(
+                    "The account decides the system settings and which projects the workspace has.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 // Add, Switch, Remove — and nothing that reads back at you. The commit
                 // name and email are no longer something to type: they come from the
                 // account GitHub already knows, so the only reason to change them would
@@ -252,19 +264,21 @@ fun SettingsScreen(
                 modifier = Modifier.padding(top = 4.dp),
                 color = MaterialTheme.colorScheme.outline,
             )
+            // **"Chat agent", on the operator's instruction**: "just rename agent into Chat agent,
+            // and Agent chat into Chat". The pair of names is the point: the block is the machine
+            // that talks, and the block further down is how its conversation is drawn. Called
+            // "AGENT" and "Agent chat", the second read as a part of the first.
             Text(
-                "AGENT",
+                "CHAT AGENT",
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.primary,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
             )
-            Text(
-                "One model, one key, and what it is allowed to use. Everything between this rule and " +
-                    "the one below it is about the agent on this phone.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            // **No sentence under the heading, on the operator's instruction**: "'one model, one
+            // key...' row in agent block is to be removed". It described the block's scope to
+            // somebody who can see the block, and the two heavier rules above and below already say
+            // where it begins and ends. The word is the label; the rules are the extent.
 
             // **First, because nothing below works without it.** The key was at the bottom of the
             // model rows, so the screen asked a person to choose a model and a provider before
@@ -285,10 +299,13 @@ fun SettingsScreen(
             // conversation on its own loses the thing the person was working on, and the agent is
             // the one supposed to be choosing what to forget.
             Text("Context", style = MaterialTheme.typography.titleMedium)
+            // **One line, on the operator's instruction**: "on token calculation explanation just
+            // write that 'token counts are approximate' - no need for lengthy paragraphs". The
+            // paragraph explained the app's own arithmetic to a person who wanted to set a limit;
+            // the one thing that changes how they read every number below is that the numbers are
+            // estimates, and that is now the whole sentence.
             Text(
-                "In tokens, counted at about three and a half bytes each — the phone has no tokenizer, so " +
-                    "these are the app's own numbers rather than a bill. A pin smaller than your " +
-                    "number lowers it rather than changing it: the number you typed stays.",
+                "Token counts are approximate.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -359,40 +376,13 @@ fun SettingsScreen(
                 )
             }
 
-            // ---- what has actually happened to this context ----
+            // **The fate lines are gone, on the operator's instruction**: "settings context
+            // block: remove what has happened to the context element and its fields - not needed".
             //
-            // **Four fields, because two different hands do two different things.** Report: "context
-            // block. clarify, 4 fields: compacted at, compacted to, trimmed at, trimmed to.
-            // compaction is by agent removing context records, trimming is by the app by removing
-            // oldest records."
-            //
-            // The distinction is the whole point: a context that shrank because the agent chose what
-            // to forget is a working agent, and one that shrank because the app hit its own limit is
-            // the app stepping in. One number for both would hide the second, which is the one a
-            // person needs to notice.
-            val fate = viewModel.contextFate
-            Text(
-                "What has happened to the context",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 10.dp),
-            )
-            FateLine(
-                "Compacted by the agent",
-                at = fate.compactedAt,
-                to = fate.compactedTo,
-                atTokens = fate.compactedAtTokens,
-                toTokens = fate.compactedToTokens,
-                none = "The agent has not cleared anything up yet.",
-            )
-            FateLine(
-                "Trimmed by the app",
-                at = fate.trimmedAt,
-                to = fate.trimmedTo,
-                atTokens = fate.trimmedAtTokens,
-                toTokens = fate.trimmedToTokens,
-                none = "The app has not had to trim this context.",
-            )
+            // They answered a question the limits above do not raise: a person setting a limit
+            // wants to know where it is, not the history of the last time it fired. What a
+            // compaction did is in the record, with a timestamp, which is where a person checking
+            // it will look anyway - the screen was offering a summary of a file they can read.
             RowDivider()
 
             // ---- the two clocks: work on this phone, and the wait for the model ----
@@ -628,12 +618,16 @@ fun SettingsScreen(
             // block means session log, then call it so". It does, and `agent/session.log` is the
             // file's own name, so the label and the file now agree.
             Text("Session log", style = MaterialTheme.typography.titleMedium)
+            // **Precise, on the operator's instruction**: "session log description is unreadable -
+            // make it precise: defines max session log size in tokens, removes oldest messages
+            // until session is under limit".
+            //
+            // The paragraph it replaces explained the *unit* and the difference from clearing up,
+            // which is background rather than the thing the field does. What a person needs before
+            // typing a number is the rule: what it bounds, and what it deletes.
             Text(
-                "agent/session.log is the evidence: every event, in order. It is measured in the " +
-                    "tokens the model was sent, so the limit and the cost are one number. Empty " +
-                    "keeps all of it; given a number, the oldest turns go once it passes and a row " +
-                    "says how many. What goes there is gone - clearing up only takes a row out of " +
-                    "the conversation and leaves it in the file.",
+                "The most the session log may hold, in tokens. Over the limit, the oldest messages " +
+                    "are deleted until it is under it. Blank keeps everything.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -725,7 +719,7 @@ fun SettingsScreen(
             // message is *drawn*. Two different questions in one block made a reading preference
             // look like a limit on the evidence.
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-            Text("Agent chat", style = MaterialTheme.typography.titleMedium)
+            Text("Chat", style = MaterialTheme.typography.titleMedium)
             Text(
                 "How the conversation is drawn. Nothing here changes what is kept or what the " +
                     "agent is sent.",
@@ -995,59 +989,6 @@ private fun SwitchAccountDialog(
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
-    )
-}
-
-/**
- * One of the two fates: **how much there was, and how much is left.**
- *
- * `at` and `to` are row counts, because that is what the record's markers report and what a person
- * can check against the file. Null means the act has never happened, which is said in a sentence
- * rather than shown as two dashes - a dash reads as "a number I do not have", and this is "a thing
- * that has not happened".
- */
-@Composable
-private fun FateLine(
-    label: String,
-    at: Int?,
-    to: Int?,
-    atTokens: Long?,
-    toTokens: Long?,
-    none: String,
-) {
-    if (at == null || to == null) {
-        Text(
-            text = "$label: $none",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        return
-    }
-    // **Tokens first, because that is the unit the limits above are in.** The reader has just been
-    // told "forget at 49k · trim at 98k · both to 24k"; a sentence that answered only in rows made
-    // them convert between two units with nothing offering the conversion. The row count stays in
-    // parentheses because it is the one figure they can check by counting lines in the file - so
-    // each number does the job the other cannot.
-    //
-    // **"at" and "to", in that order, because that is how a person says it**: there were 49k tokens,
-    // and afterwards there were 24k. The parenthetical says what it took, which is the difference
-    // between the two and the only arithmetic the reader would otherwise do.
-    val taken = if (atTokens != null && toTokens != null) {
-        (atTokens - toTokens).coerceAtLeast(0)
-    } else {
-        null
-    }
-    val text = if (atTokens != null && toTokens != null) {
-        "$label: at ${ContextBudget.short(atTokens)} tokens ($at rows), " +
-            "to ${ContextBudget.short(toTokens)} ($to taken out, " +
-            "${taken?.let { ContextBudget.short(it) }} tokens)"
-    } else {
-        "$label: at $at rows, to ${(at - to).coerceAtLeast(0)} ($to taken out)"
-    }
-    Text(
-        text = text,
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
 
