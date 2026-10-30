@@ -783,7 +783,12 @@ class AgentTest {
             ),
             tools = emptyList(),
         )
-        val sent = door.body(request).getJSONArray("messages").getJSONObject(1)
+        // **Index 2, not 1: the array begins with the system message.** Reading index 1 found the
+        // user's turn, so the first assertion failed on the role and the rest never ran - a test that
+        // was checking the wrong object would have passed the moment the fields happened to match.
+        val all = door.body(request).getJSONArray("messages")
+        assertEquals("system, the question, the answer", 3, all.length())
+        val sent = all.getJSONObject(2)
         assertEquals("the turn is still the assistant's", "assistant", sent.getString("role"))
         assertEquals(
             "the reasoning is a field of its own",
@@ -812,7 +817,8 @@ class AgentTest {
             messages = listOf(Msg.user("hello"), Msg.assistant("hi")),
             tools = emptyList(),
         )
-        val sent = door.body(request).getJSONArray("messages").getJSONObject(1)
+        val sent = door.body(request).getJSONArray("messages").getJSONObject(2)
+        assertEquals("the assistant turn", "assistant", sent.getString("role"))
         assertFalse("no reasoning field at all", sent.has("reasoning_content"))
     }
 
