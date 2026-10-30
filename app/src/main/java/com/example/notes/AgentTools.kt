@@ -1425,7 +1425,8 @@ class AgentTools(
         val revision = args.optString("revision").trim()
         mayWrite(file)?.let { return refusal(it) }
         if (revision.length < 7) return refusal("Give the version id that history showed you")
-        if (ws.isLocked(file)) return refusal("${rel(file)} is locked, so it is read-only")
+        // The lock is `mayWrite`'s now, so the second check that used to be here is gone - it was
+        // asking the same question with a weaker answer (`isLocked` misses a person's lock).
         val restored = git.restore(project, rel(file), revision, deadline)
         return restored.fold(
             onSuccess = { commit("Restored ${file.name}", "put ${rel(file)} back") },
@@ -1615,6 +1616,13 @@ class AgentTools(
         if (path == AgentPrompt.PROJECT_FILE) {
             return "$path is the person's instructions to you. You may read it and not change it"
         }
+        // **The lock, asked here so no tool can forget it.** Each tool used to check it separately,
+        // which meant a tool added later could simply not, and one of them (`restore`) checked it
+        // twice and another not at all. The operator's rule decides *whose* lock counts: "system
+        // locks restrict both users and agents, and user locks restrict agents (not users
+        // themselves!)" - so the agent asks [Workspace.isAgentLocked], which covers both kinds,
+        // while a person's own acts ask `isLocked`, which is the app's locks alone.
+        ws.agentLockProblem(file)?.let { return it }
         if (insideWorktreeOrAgent(file)) return null
         // **Why, and not "outside this project".** That sentence was given for a path that is
         // inside the project, so a model read it as "my path is wrong" and tried another spelling

@@ -326,8 +326,19 @@ class Workspace(val accountDir: File) {
      */
     fun hold(file: File, locked: Set<String>): Hold {
         if (appHold(file) == Hold.APP) return Hold.APP
-        val path = relative(file) ?: return Hold.NONE
-        return if (pathString(path) in locked) Hold.USER else Hold.NONE
+        val path = relative(file)?.let(::pathString) ?: return Hold.NONE
+        // **A lock covers what is inside it, and the row has to say so.** The operator's report:
+        // "when folder is locked or unsynced then all of its content also get icons with the same
+        // state (red locked parent means red locked children etc)". [isLocked] already enforced
+        // this - a child of a locked folder could not be written - and the *icon* said it could,
+        // because this asked `isLockedHere`'s question ("did I lock this one?") rather than "is
+        // this held?".
+        //
+        // The two questions are still different and both are asked: `isLockedHere` decides whether
+        // the button is a toggle (a child of a locked folder has nothing of its own to lift), and
+        // this decides what colour the icon is.
+        if (path in locked) return Hold.USER
+        return if (locked.any { it.isNotEmpty() && path.startsWith("$it/") }) Hold.USER else Hold.NONE
     }
 
     /**
@@ -372,8 +383,15 @@ class Workspace(val accountDir: File) {
      */
     fun unsync(file: File): Unsync {
         if (appHold(file) == Hold.APP) return Unsync.APP
-        val path = relative(file) ?: return Unsync.NONE
-        return if (pathString(path) in unsynced()) Unsync.USER else Unsync.NONE
+        val path = relative(file)?.let(::pathString) ?: return Unsync.NONE
+        val kept = unsynced()
+        if (path in kept) return Unsync.USER
+        // **The same inheritance as the lock, and for the same reason.** Keeping a folder off GitHub
+        // keeps everything in it off GitHub - that is what `unsyncPaths` builds for the push - so a
+        // child row that showed no mark was describing a file that would not be sent as one that
+        // would. Operator: "when folder is locked or unsynced then all of its content also get icons
+        // with the same state".
+        return if (kept.any { it.isNotEmpty() && path.startsWith("$it/") }) Unsync.USER else Unsync.NONE
     }
 
     /**
@@ -566,6 +584,10 @@ class Workspace(val accountDir: File) {
      * not the person, not the agent's tools, and not a caller who thought of a reason.
      */
     fun write(file: File, text: String): Boolean {
+        // **`isLocked`, which is the app's locks alone.** A person's own lock is an instruction to
+        // the agent, so it must not stop the person - and this funnel is shared by both, which is
+        // why the distinction lives in [isLocked] rather than in a parameter here. The agent's
+        // refusal is [isAgentLocked], asked by its tools before they call this.
         if (isLocked(file)) return false
         if (isRecord(file)) return false
         // **The app's own flags are shown and not writable**, which is report 28's "visible but
@@ -937,6 +959,30 @@ class Workspace(val accountDir: File) {
      */
     fun isLocked(file: File): Boolean {
         val path = relative(file)?.let(::pathString) ?: return false
+        // **Two rules, and they are not the same rule.**
+        //
+        // A lock the *app* set is a fact about the file - a flag, a record, something that holds a
+        // credential - so it binds everybody: the person cannot write it either. A lock the
+        // *person* set is an instruction to the agent: "do not touch this", and it must not stop the
+        // person themselves, or the app has taken a lever away from its own operator.
+        //
+        // The operator's ruling: "system locks restrict both users and agents, and user locks
+        // restrict agents (not users themselves!)". `isLocked` answers the first question ("may
+        // anybody write this?"), [isAgentLocked] the second ("may the agent?").
+        if (appHold(file) == Hold.APP) return true
+        return false
+    }
+
+    /**
+     * True when the **agent** may not write [file] — either kind of lock.
+     *
+     * The person's own lock lives here and only here. Everything the agent does asks this; everything
+     * a person does asks [isLocked], which is the app's locks alone. Confusing the two is how a
+     * person ends up unable to unlock a file they locked.
+     */
+    fun isAgentLocked(file: File): Boolean {
+        if (isLocked(file)) return true
+        val path = relative(file)?.let(::pathString) ?: return false
         val locked = locked()
         if (locked.isEmpty()) return false
         if (path in locked) return true
@@ -958,6 +1004,10 @@ class Workspace(val accountDir: File) {
     /** Why [file] cannot be written because of a lock, or null when it can. */
     fun lockProblem(file: File): String? =
         if (isLocked(file)) "\"${file.name}\" is locked, so it cannot be changed" else null
+
+    /** Why the **agent** may not write [file], or null when it may. */
+    fun agentLockProblem(file: File): String? =
+        if (isAgentLocked(file)) "\"${file.name}\" is locked, so it cannot be changed" else null
 
 
     /**

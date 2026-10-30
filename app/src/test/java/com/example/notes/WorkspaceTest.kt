@@ -338,15 +338,21 @@ class WorkspaceTest {
         workspace.write(inside, "two litres")
         lock("drafts")
 
-        assertTrue("the file inside is locked", workspace.isLocked(inside))
-        assertFalse("so it is not written", workspace.write(inside, "three litres"))
-        assertEquals("and keeps its text", "two litres", inside.readText())
-        assertTrue("nor deleted", workspace.delete(inside).isFailure)
-        assertTrue("and it is still there", inside.isFile)
-        assertFalse(
-            "nothing new can be made inside it either",
-            workspace.createFile(folder, "butter").isSuccess,
+        // **A person's lock binds the agent, not the person** - the operator's rule: "system locks
+        // restrict both users and agents, and user locks restrict agents (not users themselves!)".
+        // So `isAgentLocked` is true (the agent may not touch it) and `isLocked` is false (the person
+        // may, which is how they can still edit and unlock what they locked).
+        assertTrue("the file inside is held against the agent", workspace.isAgentLocked(inside))
+        assertFalse("but not against the person who set the lock", workspace.isLocked(inside))
+        // The agent's funnel refuses, and that is the rule that matters here.
+        assertEquals(
+            "the agent is told why",
+            "\"milk.txt\" is locked, so it cannot be changed",
+            workspace.agentLockProblem(inside),
         )
+        // The person can still write it, because a lock they set is an instruction to the agent.
+        assertTrue("the person may still write it", workspace.write(inside, "three litres"))
+        assertEquals("and the text changed", "three litres", inside.readText())
     }
 
     @Test
@@ -359,9 +365,39 @@ class WorkspaceTest {
         workspace.write(neighbour, "b")
         lock("milk.txt")
 
-        assertTrue("the file is locked", workspace.isLocked(file))
-        assertFalse("the one with the longer name is not", workspace.isLocked(neighbour))
+        // **The agent's question**, because the separator rule is about what a lock covers for the
+        // agent - a person's own lock never stops the person.
+        assertTrue("the file is held against the agent", workspace.isAgentLocked(file))
+        assertFalse("the one with the longer name is not", workspace.isAgentLocked(neighbour))
         assertTrue("and it can still be written", workspace.write(neighbour, "c"))
+    }
+
+    @Test
+    fun `a user lock binds the agent and a system lock binds everybody`() {
+        // **The operator's rule, in their words**: "system locks restrict both users and agents, and
+        // user locks restrict agents (not users themselves!)".
+        //
+        // Before this there was one answer to "is it locked", so a person who locked a file to keep
+        // the *agent* off it also lost their own ability to edit it - and, worse, to unlock it
+        // through any path that consulted the same check. Two questions, two answers: `isLocked` is
+        // "may anybody write this" (the app's own locks), `isAgentLocked` is "may the agent" (either
+        // kind).
+        val mine = File(workspace.accountDir, "milk.txt")
+        workspace.write(mine, "two litres")
+        lock("milk.txt")
+
+        assertTrue("the agent is held off a file the person locked", workspace.isAgentLocked(mine))
+        assertFalse("and the person is not", workspace.isLocked(mine))
+        assertTrue("so the person can still write it", workspace.write(mine, "three litres"))
+
+        // A file the app holds is a different matter: the app's own rule cannot be lifted by
+        // anybody, because the file is one the app reads back.
+        val flag = File(File(workspace.accountDir, ".muffy"), "locked.json")
+        flag.parentFile?.mkdirs()
+        flag.writeText("[]")
+        assertTrue("the app's own file is held against the person", workspace.isLocked(flag))
+        assertTrue("and against the agent", workspace.isAgentLocked(flag))
+        assertFalse("so nobody writes it", workspace.write(flag, "[]"))
     }
 
     @Test
@@ -404,8 +440,14 @@ class WorkspaceTest {
 
         val other = Workspace(workspace.accountDir)
 
-        assertTrue("the lock is read from disk", other.isLocked(file))
-        assertFalse("and it refuses a write too", other.write(file, "three litres"))
+        assertTrue("the lock is read from disk", other.isAgentLocked(file))
+        // The agent's refusal, which is the one a person's lock produces. `write` is the shared
+        // funnel and a person may still write their own locked file.
+        assertEquals(
+            "and the agent is told why",
+            "\"milk.txt\" is locked, so it cannot be changed",
+            other.agentLockProblem(file),
+        )
     }
 
     // ---- one answer for "who is holding this" --------------------------------

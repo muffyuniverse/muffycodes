@@ -195,7 +195,12 @@ class CopyFeatureTest : FeatureTest() {
         // Given a locked file
         val original = aFile("milk.txt", "two litres")
         scene.viewModel.toggleLocked(original)
-        assertTrue("it really is locked", scene.viewModel.isLocked(original))
+        // **The row's hold.** A person's lock does not stop the person, so `isLocked` is false
+        // for it by design - what this test needs is that the lock is *there*.
+        assertTrue(
+            "it really is locked",
+            scene.viewModel.hold(original) == Workspace.Hold.USER,
+        )
         val into = aFolder("drafts")
 
         // When it is copied

@@ -884,27 +884,35 @@ private fun EntryRow(
             // person cannot choose to send, and a tap that silently does nothing is the defect this
             // rule exists to remove.
             if (unsync == Workspace.Unsync.APP) {
-                Icon(
-                    Icons.Filled.Clear,
-                    contentDescription = "${entry.name} is kept out of the repository by the app",
+                // **The app's own mark: red, and not a button.** The operator's rule for both flags
+                // is "if they are set by app they are red", and what the app sets cannot be lifted -
+                // a tap that silently does nothing is the defect the rule exists to remove.
+                UnsyncGlyph(
                     tint = APP_HOLD,
-                    modifier = Modifier.padding(horizontal = 12.dp).size(20.dp),
+                    description = "${entry.name} is kept out of the repository by the app",
+                    modifier = Modifier.padding(horizontal = 12.dp),
                 )
             } else {
                 IconButton(onClick = { actions.onIgnore(entry) }) {
-                    Icon(
-                        // **The eye-with-a-slash is not in the imported set**, and one glyph is not
-                        // worth a dependency — the same decision the open padlock got. `Clear` reads
-                        // as "take this out", which is what ignoring does: out of what GitHub is
-                        // told.
-                        Icons.Filled.Clear,
-                        contentDescription = if (unsync == Workspace.Unsync.USER) {
+                    // **A broken link, not a cross.** Asked for twice: "unsync row button hasnt been
+                    // changed to a disconnect icon from its current cross, as I asked". The cross
+                    // read as "close" or "remove", which is a different act from "this is not being
+                    // sent", and beside a padlock it was a second ambiguous mark.
+                    UnsyncGlyph(
+                        // **Grey unset, black set by the person, red set by the app.** The three
+                        // states the operator named, and they were already here for the lock: a
+                        // mark that is off and one that is on have to be told apart at a glance
+                        // down a list.
+                        tint = if (unsync == Workspace.Unsync.USER) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.outline
+                        },
+                        description = if (unsync == Workspace.Unsync.USER) {
                             "${entry.name} is not sent to GitHub"
                         } else {
                             "Stop sending ${entry.name} to GitHub"
                         },
-                        tint = if (unsync == Workspace.Unsync.USER) MaterialTheme.colorScheme.onSurface
-                        else MaterialTheme.colorScheme.outline,
                     )
                 }
             }
@@ -913,9 +921,14 @@ private fun EntryRow(
         // — rename, move, delete and ignore all answer "that is one of the app's own files" — and a
         // menu whose every item refuses is worse than no menu: it teaches that the app's refusals are
         // arbitrary. Report 28's word for it was "noninteractive", and this is where that lands.
-        // **`hold`, not two flags.** The menu is hidden on a file the app holds for the same reason
-        // it is hidden on one the person locked: every item in it would be refused.
-        if (!choosing && !system && hold != Workspace.Hold.APP) Box {
+        // **`hold`, not two flags** - and the comment above was right while the code was not. It
+        // said the menu is hidden on a file the app holds *for the same reason* it is hidden on one
+        // the person locked, and then tested only for the app's own hold, so a locked file still
+        // offered a menu whose every item refused. The operator's report: "locked files should hide
+        // and forbid 3dot options".
+        //
+        // Now the condition is the claim: any hold at all, whoever set it.
+        if (!choosing && !system && hold == Workspace.Hold.NONE) Box {
             IconButton(onClick = { menu = true }) {
                 Icon(Icons.Filled.MoreVert, contentDescription = "More")
             }

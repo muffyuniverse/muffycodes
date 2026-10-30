@@ -397,7 +397,7 @@ class Agent(
                 // **The first failure of an outage is written down, and the rest are one outage.**
                 // Same rule as [blip]'s, for the same reason: a key that was refused eight times is
                 // one thing a person has to fix, and the runner's `retry` row carries the count.
-                if (stopping && !retrying) log.note("stopped", said)
+                if (stopping && !retrying) log.appNote("stopped", said)
                 Warm.Failed(said, stopping = stopping)
             },
         )
@@ -609,20 +609,20 @@ class Agent(
         // The first failure of an outage is written down; the retries are one outage, not eight
         // events. What the person wants to know when it comes back is how many tries it took, and
         // that row is the runner's — it is the one holding the ladder.
-        if (!retrying) log.note("stopped", said)
+        if (!retrying) log.appNote("stopped", said)
         return End.Stopped(said, retryable = true)
     }
 
     private fun tooIdle(): End {
         val said = "it made ${AgentTools.IDLE_CALLS} calls in a row that changed nothing " +
             "and asked nothing"
-        log.note("stopped", said)
+        log.appNote("stopped", said)
         return End.Stopped(said, reason = AgentSession.StopReason.LOOP)
     }
 
     private fun overBudget(): End {
         val said = "it made $maxRequests requests without ending the turn"
-        log.note("stopped", said)
+        log.appNote("stopped", said)
         return End.Stopped(said, reason = AgentSession.StopReason.LOOP)
     }
 

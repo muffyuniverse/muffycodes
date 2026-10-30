@@ -279,13 +279,13 @@ class SelectionFeatureTest : FeatureTest() {
 
         scene.viewModel.toggleLocked(file)
 
-        assertTrue("locked", scene.viewModel.isLocked(file))
+        assertTrue("locked", scene.viewModel.hold(file) == Workspace.Hold.USER)
         assertEquals("the file is untouched", "two litres", file.readText())
         assertEquals("and nothing was committed", before, scene.headId())
 
         // It survives the app looking at the tree again, which is what a fresh
         // screen does.
         scene.viewModel.refresh()
-        assertTrue("still locked", scene.viewModel.isLocked(file))
+        assertTrue("still locked", scene.viewModel.hold(file) == Workspace.Hold.USER)
     }
 }

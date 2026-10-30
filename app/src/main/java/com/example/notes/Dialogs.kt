@@ -864,6 +864,40 @@ fun ReportButton(onReport: () -> Unit) {
 }
 
 /**
+ * Not sent: two halves of a link with the middle missing, drawn rather than imported.
+ *
+ * **The operator asked for this twice and the cross stayed.** "unsync row button hasnt been changed
+ * to a disconnect icon from its current cross, as I asked" - and the cross was `Icons.Filled.Clear`,
+ * which reads as "take this out" or "close", not as "this is not being sent". A cross beside a lock
+ * is also a cross that could be either act.
+ *
+ * Two open ends with a gap between them is the shape everybody already knows for a broken link, and
+ * it is three strokes, so it needs no dependency. `Icons.Filled.LinkOff` lives in
+ * material-icons-extended, which this app does not carry for one glyph.
+ *
+ * [tint] is passed in rather than read from the theme, because this glyph is drawn in three states
+ * and the state is the caller's to decide: grey unset, black set by the person, red set by the app.
+ */
+@Composable
+fun UnsyncGlyph(tint: Color, description: String, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier.size(20.dp).semantics { contentDescription = description }) {
+        val w = size.width
+        val h = size.height
+        val stroke = w * 0.10f
+        // The two halves, each a bracket opening towards the other, with a gap in the middle.
+        drawLine(tint, Offset(w * 0.06f, h * 0.32f), Offset(w * 0.30f, h * 0.32f), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(w * 0.06f, h * 0.32f), Offset(w * 0.06f, h * 0.68f), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(w * 0.06f, h * 0.68f), Offset(w * 0.30f, h * 0.68f), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(w * 0.70f, h * 0.32f), Offset(w * 0.94f, h * 0.32f), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(w * 0.94f, h * 0.32f), Offset(w * 0.94f, h * 0.68f), stroke, StrokeCap.Round)
+        drawLine(tint, Offset(w * 0.94f, h * 0.68f), Offset(w * 0.70f, h * 0.68f), stroke, StrokeCap.Round)
+        // The break: a diagonal through the gap, which is the part that says *broken* rather than
+        // merely "two things".
+        drawLine(tint, Offset(w * 0.38f, h * 0.78f), Offset(w * 0.62f, h * 0.22f), stroke, StrokeCap.Round)
+    }
+}
+
+/**
  * A file's versions: a clock with an arrow going back, drawn rather than imported.
  *
  * `Icons.Filled.History` is in material-icons-extended, which this app does not carry — the whole

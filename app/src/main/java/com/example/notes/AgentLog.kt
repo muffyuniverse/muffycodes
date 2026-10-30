@@ -626,6 +626,22 @@ class AgentLog private constructor(
     fun note(name: String, detail: String): Int = record(NOTE, name, detail)
 
     /**
+     * A note the **app** wrote, which is in the record and not in the context.
+     *
+     * The operator's rule: "app errors like no openrouter key etc - all should go into session log
+     * only, they should not reach the context". It is a real distinction and it was not being made:
+     * every failure the app wrote - a refusal, a stop, a loop guard - was an ordinary note, born
+     * `in`, so it counted against the context budget and could be handed to the model as something
+     * that had happened in the conversation.
+     *
+     * **The model is told what it needs to act on, and that is a different set.** A tool refusal is
+     * the agent's business and stays a normal note; an outage, a missing key or a loop guard is the
+     * app's report to the person, and the model reading "OpenRouter answered 400" tells it nothing
+     * it can use - it cannot fix a key.
+     */
+    fun appNote(name: String, detail: String): Int = record(NOTE, name, detail, ctx = APP)
+
+    /**
      * What the model thought before a reply, **stored so it can be sent back with it.**
      *
      * A thinking-mode provider refuses the next request unless the reasoning comes back inside the

@@ -1430,6 +1430,16 @@ class AppViewModel @JvmOverloads constructor(
     fun isLocked(file: File): Boolean = workspace?.isLocked(file) ?: false
 
     /**
+     * Who holds [file], for the row that draws it.
+     *
+     * **The row's question, and not the same as [isLocked].** A person's lock is an instruction to
+     * the agent, so it does not stop the person - but the row must still show it, or the list would
+     * look like the lock had not taken. `isLocked` is "may anybody write this"; this is "what does
+     * the mark say", and the two differ exactly by the person's own locks.
+     */
+    fun hold(file: File): Workspace.Hold = workspace?.hold(file, lockedPaths) ?: Workspace.Hold.NONE
+
+    /**
      * True for the agent's record, which the app keeps and does not let a person save over.
      *
      * Asked here for the same reason [isLocked] is: the greyed Save and the funnel that refuses the

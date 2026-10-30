@@ -256,7 +256,13 @@ class BrowserChromeTest {
         // **The premise, asserted.** Without this the test can only say "the menu offered
         // Rename", which is true both when the menu is wrong and when the file was never
         // locked — and those want different fixes.
-        assertTrue("the file really is locked before the menu is opened", scene.viewModel.isLocked(file))
+        // **The row's hold, not `isLocked`.** A person's lock is an instruction to the agent, so
+        // `isLocked` answers false for it - but the *row* still shows it as locked, which is what
+        // this test needs to be true before it opens the menu.
+        assertTrue(
+            "the file really is locked before the menu is opened",
+            scene.viewModel.hold(file) == Workspace.Hold.USER,
+        )
         browser()
 
         // When its menu is opened
@@ -305,7 +311,7 @@ class BrowserChromeTest {
             .performClick()
         compose.waitForIdle()
 
-        assertTrue("and it is locked", scene.viewModel.isLocked(file))
+        assertTrue("and it is locked", scene.viewModel.hold(file) == Workspace.Hold.USER)
         assertTrue(
             "the row says so without leaving the screen",
             described("milk.txt is locked; tap to unlock"),
