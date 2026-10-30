@@ -394,41 +394,17 @@ class SettingsStore(context: Context, name: String = "settings") {
     val reconnectMs: Long get() = reconnectSeconds * 1000L
 
     /**
-     * How long the app waits for the model's answer, **in seconds**.
+     * **The answer wait is gone, and where it went matters.**
      *
-     * **This is what turns "the provider is not answering" into a blip.** The door's read timeout
-     * ends the attempt, the ladder retries it at one, two, four seconds, and the session reconnects
-     * instead of hanging. Too short retries a long turn for ever; too long holds the session's one
-     * worker for half an hour on a provider that is simply down.
+     * It bounded the same thing the connection wait bounds - nothing has come back yet - on the one
+     * transport that is not streamed: the keepalive ping. So it was a second number for one silence,
+     * with no field on any screen and a sentence instead, which made it in force and invisible at the
+     * same time. Reported as "connection timeout (ignored)": that is exactly what an unsettable
+     * number feels like from the outside.
      *
-     * **Seconds, like every other limit on this screen.** It was minutes, and it sat eight lines from
-     * two limits in seconds with nothing saying the scales differed — so "4" and "180" read as the
-     * same kind of number. Reported as: "how wait for the model is different from stop command
-     * after?". One unit is part of that answer.
-     *
-     * **Two numbers now, because streaming made the silence two different things.** A streamed
-     * answer says so as it arrives, so "nothing has come back at all" and "it went quiet halfway
-     * through" stopped being the same wait: the first means nothing was produced and the attempt is
-     * free to repeat, the second means an answer was being written and the connection died. They
-     * want different limits and they deserve different sentences.
-     *
-     * See [ackSeconds] and [gapSeconds]; this one is kept for the ping, which is not streamed and
-     * still has exactly one wait.
+     * The ping now reads [ackSeconds], so one number covers "the provider never took it" whichever
+     * way the request was sent. See [ackSeconds] and [gapSeconds] for the two silences that remain.
      */
-    var timeoutSeconds: Int by mutableStateOf(
-        prefs.getInt(KEY_TIMEOUT, DEFAULT_TIMEOUT_SECONDS)
-    )
-        private set
-
-    /** Sets the answer timeout, clamped to a wait a person would recognise. */
-    fun keepTimeout(seconds: Int) {
-        val clean = seconds.coerceIn(MIN_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS)
-        Trace.tap("answer timeout", "$clean s")
-        timeoutSeconds = clean
-        prefs.edit().putInt(KEY_TIMEOUT, clean).apply()
-        Trace.said("the app waits $clean seconds for an answer")
-    }
-
     /**
      * **How long before the first thing arrives** counts as "the provider never took it".
      *
@@ -630,7 +606,6 @@ class SettingsStore(context: Context, name: String = "settings") {
         keepForeground(DEFAULT_FOREGROUND_SECONDS)
         keepBackground(DEFAULT_BACKGROUND_SECONDS)
         keepReconnect(DEFAULT_RECONNECT_SECONDS)
-        keepTimeout(DEFAULT_TIMEOUT_SECONDS)
         keepAck(DEFAULT_ACK_SECONDS)
         keepGap(DEFAULT_GAP_SECONDS)
         keepMaxResult(DEFAULT_MAX_RESULT)
@@ -688,7 +663,6 @@ class SettingsStore(context: Context, name: String = "settings") {
      * no code path knows a previous release existed. It is one key that was renamed because the
      * thing it stores changed meaning.
      */
-    const val KEY_TIMEOUT = "agent_timeout_seconds"
 
     /**
      * The two clocks streaming made out of one.
@@ -749,7 +723,6 @@ class SettingsStore(context: Context, name: String = "settings") {
     const val MAX_TOKENS = 1_048_576
 
     /** Four minutes: the brief's own number, and long enough for a turn that does real work. */
-    const val DEFAULT_TIMEOUT_SECONDS = 240
 
     /** Ten minutes of trying, which is what the operator asked for. */
     const val DEFAULT_RECONNECT_SECONDS = 600
@@ -804,8 +777,6 @@ class SettingsStore(context: Context, name: String = "settings") {
     /** An hour: past this the app is retrying something that will not heal while the phone sleeps. */
     const val MAX_RECONNECT_SECONDS = 3_600
 
-    const val MIN_TIMEOUT_SECONDS = 60
-    const val MAX_TIMEOUT_SECONDS = 1_800
 
     /**
      * Six thousand tokens is about twenty thousand characters — a long source file, which is what a

@@ -215,18 +215,25 @@ class RequestStatsTest {
     fun `a clock preset snaps its start to the grid`() {
         // **The operator's distinction**: clock starts at zero minutes, zero hour, zero day of the
         // month, zero month of the year - whichever boundary the length reaches. The end is still
-        // the opening moment, so a clock interval is always at least as wide as the rolling one.
+        // the opening moment, so a clock interval is the current cell: the part of its own length
+        // which the calendar has delivered so far, and therefore inside the rolling interval.
         val zone = ZoneId.of("UTC")
         val now = LocalDate.parse("2026-10-28").atTime(9, 16).atZone(zone).toInstant().toEpochMilli()
         fun start(p: RequestStats.Preset) = p.clockAt(now, zone).fromMs
         fun at(h: Int, m: Int = 0, day: Int = 28, month: Int = 10, year: Int = 2026) =
             LocalDate.of(year, month, day).atTime(h, m).atZone(zone).toInstant().toEpochMilli()
 
-        // **Under an hour, the grid is the hour** - which is why 15 min and 6 hours both start at
-        // 09:00: their length does not reach a coarser boundary, so the hour is where they begin.
-        assertEquals("15 min starts at the hour", at(9), start(RequestStats.Preset.MINUTES_15))
-        assertEquals("1 hour too", at(9), start(RequestStats.Preset.HOUR_1))
-        assertEquals("6 hours too", at(9), start(RequestStats.Preset.HOURS_6))
+        // **The grid is the preset's own length**, and the operator's report is what pinned it:
+        // "clock 6 hours should set as from whole 6 hour bases (0, 6, 12, 18) so that if the to
+        // time is 9:55 then from is 6:00 ... for 1 hour it should be beginning of the hour ... for
+        // 15 min it should be 0, 15, 30 or 45".
+        //
+        // All three used to truncate to the HOUR, so a 09:55 clock gave 09:00 to every one of them:
+        // "6 hours" covered fifty-five minutes, and "15 min" covered the whole hour. The three
+        // chips named three intervals and two of them were wrong.
+        assertEquals("15 min starts at :45", at(9, 45), start(RequestStats.Preset.MINUTES_15))
+        assertEquals("1 hour starts at the top of the hour", at(9), start(RequestStats.Preset.HOUR_1))
+        assertEquals("6 hours starts at the 6-hour base", at(6), start(RequestStats.Preset.HOURS_6))
         assertEquals("1 day starts at midnight", at(0), start(RequestStats.Preset.DAY_1))
         // **A week starts on a Monday, not at today's midnight.** Truncating to DAYS gave "1 week"
         // exactly the same interval as "1 day", so the chip named a week and covered a few hours.
@@ -240,24 +247,19 @@ class RequestStatsTest {
         // clock reaches further back exactly when the cell has already been running longer than the
         // length names.
         //
-        // At 09:16 the hour is 16 minutes old, so only "15 min" is on the clock side: its clock
-        // interval is 09:00-09:16, sixteen minutes - *wider* than the fifteen it names, because it
-        // takes the whole of the hour so far. Every other preset names more time than the cell has
-        // run, so its clock interval is the narrower one. "1 day" on this screen means *today from
-        // midnight*, which at 09:16 is nine hours, not twenty-four.
+        // **Every clock interval sits inside the rolling one, and none reaches into the future.**
+        // The grid is the preset's own length - so the clock start is that length floored to the
+        // calendar, which is always at or after `now - length`. "1 day" on this screen means *today
+        // from midnight*, which at 09:16 is nine hours, not twenty-four.
         //
-        // Two earlier versions of this test were wrong here. The first asserted "clock is never
-        // narrower" for every preset, which is false for six of the eight. The second moved the
-        // split to a day boundary, which is false for "15 min". The cell's age is the actual rule.
+        // This replaced a two-branch comparison that asked whether "the cell is older than the
+        // length", which was true for the coarse-grid durations and is now true for none of them.
+        // Containment is the rule that survived the fix, so it is the rule asserted.
         for (p in RequestStats.Preset.entries.filter { it != RequestStats.Preset.TOTAL }) {
             val clock = p.clockAt(now, zone).fromMs
             val rolling = p.intervalAt(now, zone).fromMs
-            val cellOlderThanLength = (now - clock) > (now - rolling)
-            if (cellOlderThanLength) {
-                assertTrue("${p.label}: the cell is older, so the clock is wider", clock < rolling)
-            } else {
-                assertTrue("${p.label}: the clock is the narrower one", clock >= rolling)
-            }
+            assertTrue("${p.label}: the clock is inside the rolling interval", clock >= rolling)
+            assertTrue("${p.label}: the clock does not start in the future", clock <= now)
         }
     }
 

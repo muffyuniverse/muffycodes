@@ -267,8 +267,9 @@ object RequestStats {
          * zero day of the month, zero month of the year, as far as the length reaches.
          *
          * This is the *clock* family. "1 day" becomes midnight today; "1 year" becomes 1 January.
-         * The end is still [now], which is why a clock interval is always at least as wide as the
-         * rolling one with the same name.
+         * The end is still [now], so a clock interval is the current cell of its own length and
+         * **always sits inside the rolling one with the same name** - it is the part of that length
+         * which the calendar has actually delivered so far. "6 hours" at 09:55 is 06:00-09:55.
          */
         fun clockAt(
             now: Long,
@@ -277,11 +278,24 @@ object RequestStats {
         ): Interval {
             if (this == TOTAL) return intervalAt(now, zone, oldest)
             val at = java.time.Instant.ofEpochMilli(now).atZone(zone)
-            val start = when (back) {
-                // **Under an hour, the grid is the hour.** A fifteen-minute clock interval is the
-                // fifteen minutes beginning at the hour's start, which is what "15 min" means when
-                // the alternative - snapping to a 15-minute grid - would be a second convention.
-                is Back.Duration -> at.truncatedTo(java.time.temporal.ChronoUnit.HOURS)
+            val start = when (val b = back) {
+                // **The grid is the preset's own length**, counted from the day's start: "15 min"
+                // begins at :00, :15, :30 or :45; "1 hour" at the top of the hour; "6 hours" at
+                // 00, 06, 12 or 18.
+                //
+                // Every duration used to truncate to the HOUR, on the reasoning that a length which
+                // "does not reach a coarser boundary" begins at the hour. That is wrong in both
+                // directions: 15 minutes has a finer grid of its own, and six hours divides the day
+                // evenly so it has a coarser one. At 09:55 it gave 09:00 to all three chips, so
+                // "6 hours" covered fifty-five minutes and "15 min" covered the whole hour. The
+                // operator's report, with the two worked examples that pin the rule.
+                is Back.Duration -> {
+                    val dayStart = at.truncatedTo(java.time.temporal.ChronoUnit.DAYS)
+                    val into = at.toInstant().toEpochMilli() - dayStart.toInstant().toEpochMilli()
+                    java.time.Instant
+                        .ofEpochMilli(dayStart.toInstant().toEpochMilli() + (into / b.ms) * b.ms)
+                        .atZone(zone)
+                }
                 // **A week is not a day.** Truncating to DAYS gave "1 week" the same start as
                 // "1 day" - today's midnight - so the chip named a week and covered a few hours.
                 // The clock family's rule is "the start of the current calendar period", so a week

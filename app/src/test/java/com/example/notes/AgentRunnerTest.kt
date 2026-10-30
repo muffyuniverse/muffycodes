@@ -729,17 +729,19 @@ class AgentRunnerTest {
     fun `the timeout and the result length are the person's numbers, clamped to what works`() {
         // Both were constants before the audit: two minutes for an answer and twenty thousand
         // characters for a result. The brief asked for them as fields, and the clamps are the part
-        // that matters — a timeout of zero retries for ever, and a result of zero is a hang.
-        // **In seconds, like every other limit on the screen.** It was minutes and sat beside two
-        // limits in seconds, which is what "how wait for the model is different from stop command
-        // after?" was really asking about - so the default is 240, not 4.
-        assertEquals("four minutes by default", 240, settings.timeoutSeconds)
+        // that matters — a wait of zero retries for ever, and a result of zero is a hang.
+        //
+        // **The answer timeout is gone; the connection timeout took its job.** It bounded the same
+        // silence ("nothing has come back yet") on the one transport that is not streamed, and it had
+        // no field - so it was in force and invisible. The ping reads `ackSeconds` now, and the clamps
+        // asserted here are that number's.
+        assertEquals("ninety seconds by default", 90, settings.ackSeconds)
         assertEquals("six thousand tokens by default", 6_000, settings.maxResult)
 
-        settings.keepTimeout(0)
-        assertEquals("under a minute cannot finish", 60, settings.timeoutSeconds)
-        settings.keepTimeout(60_000)
-        assertEquals("half an hour is where it stops holding the worker", 1_800, settings.timeoutSeconds)
+        settings.keepAck(0)
+        assertEquals("under half a minute cannot finish", 30, settings.ackSeconds)
+        settings.keepAck(60_000)
+        assertEquals("ten minutes is where it stops waiting for a first byte", 600, settings.ackSeconds)
 
         settings.keepMaxResult(0)
         assertEquals("a result of nothing is a hang", 1_000, settings.maxResult)

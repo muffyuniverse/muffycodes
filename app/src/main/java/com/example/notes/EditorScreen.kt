@@ -48,6 +48,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalFocusManager
@@ -65,17 +66,21 @@ import kotlinx.coroutines.withContext
  * The editor: the file's name in the top row, and its text below.
  *
  * ```text
- * [<-]  milk.txt                          <- the top row, and nothing else
+ * [<-]  milk.txt                        [history] [report]   <- the file, and its acts
  *
- * [ View | Edit | Diff ]                  <- the mode, on its own line
- * History                          Save   <- the acts, on the next
+ * [ View | Edit | Diff ]                            Save    <- what it is, and commit
  * ```
  *
- * **Three rows, because the file, its state and its acts are three different things.**
- * The top row belongs to the file; the mode is what the screen *is*; History and Save are
- * what can be done with it. Four buttons wedged beside the name left the name — the one
- * thing the screen is about — a few characters wide, and putting the three modes on the
- * same line as the two acts pushed Save past the right edge of a phone.
+ * **The top row belongs to the file; the row under it belongs to the act.** The name is the one
+ * thing the screen is about, so nothing presses on it: the two icons at the right are the acts that
+ * need no word, and the modes and Save share the line below.
+ *
+ * This was three rows. The modes were alone on one and History and Save on the next, because three
+ * modes plus two acts did not fit across a phone. The operator's correction is what untied it:
+ * "remove the in the cell checkmark symbol on selection (color is a good enough marker), also remove
+ * the black outline. then put it on the same row with save button. and put history button on the top
+ * bar right corner to the left of bug report icon". Dropping the tick from each cell and the outline
+ * from the group is what freed the width; moving History up is what freed the rest.
  *
  * **Nothing here scrolls.** A scrolling row makes an overflow look like an absence: the
  * button is there, a person simply cannot see it, and a primary button they have to hunt
@@ -259,26 +264,35 @@ fun EditorScreen(
                         )
                     }
                 },
-                actions = { ReportButton(onReport) },
+                // **History is an act, and its place is the top bar** - the operator's own
+                // correction: "put history button on the top bar right corner to the left of bug
+                // report icon". It used to be a word on the row below, which cost the row a third
+                // of its width for a button pressed far less often than the modes.
+                actions = {
+                    HistoryButton {
+                        // The name is committed first: a version list is a list of this
+                        // file's versions, and the file may just have been given another
+                        // name.
+                        commitName()
+                        onOpenHistory()
+                    }
+                    ReportButton(onReport)
+                },
             )
         },
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            // **Two rows, because three modes and two acts do not fit on one line on a phone.**
-            // This started as a single scrolling row; the third mode pushed Save past the right
-            // edge, and moving the modes before History only moved the problem to History. The
-            // layout the file's own header documents is the right one: the modes are a *state* and
-            // belong on their own line, and History and Save are *acts* and share the next.
-            //
-            // Nothing here scrolls now, so nothing can be hidden. That was the real fault in the
-            // one-row version: a scrolling row makes an overflow look like an absence.
-            if (kind == EntryKind.TEXT) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 8.dp, end = 8.dp, top = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+            // **One row: the modes on the left, Save on the right.** It was two - modes alone,
+            // then History and Save - because three modes and two acts did not fit on a phone. Moving
+            // History to the top bar is what bought the row back, which is the operator's point:
+            // "put it on the same row with save button".
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (kind == EntryKind.TEXT) {
                     // **Three modes, named, and one of them is selected.** A single chip that said
                     // "Edit" or "View" was a switch: it told a person what pressing it would do, not
                     // where they were, and there was nowhere to put a third thing. Report 29 asked
@@ -306,24 +320,10 @@ fun EditorScreen(
                         }
                     }
                 }
-            }
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 8.dp, end = 8.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TextButton(onClick = {
-                    // The name is committed first: a version list is a list of this
-                    // file's versions, and the file may just have been given another
-                    // name.
-                    commitName()
-                    onOpenHistory()
-                }) { Text("History") }
-
-                // A spacer, so Save is at the far end rather than beside History: the two acts are
-                // not a group, and Save is the one a person reaches for.
+                // A spacer, so Save sits at the far end rather than against Diff: the modes are a
+                // state and Save is an act, and a finger reaching for the one should not land on
+                // the other.
                 Box(modifier = Modifier.weight(1f))
 
                 Button(
@@ -620,6 +620,17 @@ private fun SingleChoiceSegmentedButtonRowScope.ModeSegment(
         enabled = enabled,
         onClick = { onClick(mode) },
         shape = SegmentedButtonDefaults.itemShape(index = mode.ordinal, count = Mode.entries.size),
+        // **No tick in the cell and no outline round it**, the operator's own words: "remove the in
+        // the cell checkmark symbol on selection (color is a good enough marker), also remove the
+        // black outline". Material draws both by default - `SegmentedButtonDefaults.Icon` is a
+        // checkmark on the active cell, and the group is bordered - and at three words wide the
+        // tick took the room the label needed.
+        //
+        // The colour is what is left, and it is enough: the selected cell is filled with the
+        // primary container and the others are transparent, which reads at a glance and survives a
+        // theme change because both come from the theme.
+        icon = {},
+        border = BorderStroke(0.dp, Color.Transparent),
     ) { Text(label) }
 }
 

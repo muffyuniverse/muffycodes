@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -858,6 +859,64 @@ fun ReportButton(onReport: () -> Unit) {
                 drawLine(ink, Offset(w * 0.28f, y), Offset(w * 0.08f, y - h * 0.06f), stroke)
                 drawLine(ink, Offset(w * 0.72f, y), Offset(w * 0.92f, y - h * 0.06f), stroke)
             }
+        }
+    }
+}
+
+/**
+ * A file's versions: a clock with an arrow going back, drawn rather than imported.
+ *
+ * `Icons.Filled.History` is in material-icons-extended, which this app does not carry — the whole
+ * set ships in the APK, and one glyph is not worth that. The operator asked for the history button
+ * to move to the top bar beside the report button, which is an icon's place; a word there would
+ * have pushed the name out of the title.
+ *
+ * **A circle, two hands and an arrow**, because that is what "what this used to say" looks like:
+ * the clock is the time it has been through, and the arrow is which way the list goes.
+ */
+@Composable
+fun HistoryButton(onClick: () -> Unit) {
+    val ink = MaterialTheme.colorScheme.onSurfaceVariant
+    IconButton(onClick = onClick) {
+        Canvas(
+            modifier = Modifier
+                .size(22.dp)
+                // On the drawing, because that is what a screen reader announces for the button.
+                .semantics { contentDescription = "This file's history" },
+        ) {
+            val w = size.width
+            val h = size.height
+            val stroke = w * 0.085f
+            // The face, open at the upper left so the arrow has somewhere to come from.
+            drawArc(
+                color = ink,
+                startAngle = 45f,
+                sweepAngle = 315f,
+                useCenter = false,
+                topLeft = Offset(w * 0.10f, h * 0.10f),
+                size = Size(w * 0.80f, h * 0.80f),
+                style = Stroke(width = stroke, cap = StrokeCap.Round),
+            )
+            // Going back: an arrowhead at the open end, pointing anticlockwise.
+            drawLine(
+                ink,
+                Offset(w * 0.10f, h * 0.10f),
+                Offset(w * 0.10f, h * 0.36f),
+                stroke,
+                StrokeCap.Round,
+            )
+            drawLine(
+                ink,
+                Offset(w * 0.10f, h * 0.10f),
+                Offset(w * 0.34f, h * 0.13f),
+                stroke,
+                StrokeCap.Round,
+            )
+            // The hands, both from the centre: one up, one to the right.
+            val cx = w * 0.5f
+            val cy = h * 0.5f
+            drawLine(ink, Offset(cx, cy), Offset(cx, cy - h * 0.22f), stroke, StrokeCap.Round)
+            drawLine(ink, Offset(cx, cy), Offset(cx + w * 0.18f, cy), stroke, StrokeCap.Round)
         }
     }
 }

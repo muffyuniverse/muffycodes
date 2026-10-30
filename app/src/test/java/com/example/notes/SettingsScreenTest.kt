@@ -186,10 +186,13 @@ class SettingsScreenTest {
         // **The words say what the numbers bound, which is the whole of report 23.** "Stop a
         // command after" described a stop that no longer happens - a command past this now carries
         // on in the background - and neither label said which machine was being timed.
-        compose.onNodeWithText("A command may hold the conversation for", substring = true)
+        // **The operator named them, and the names are the report**: "fields: foreground command
+        // timout, background command timeout". A sentence in a label says what the number bounds but
+        // cannot be scanned for, which is what a settings screen is for.
+        compose.onNodeWithText("Foreground command timeout", substring = true)
             .performScrollTo()
             .assertIsDisplayed()
-        compose.onNodeWithText("Stop a background command after", substring = true)
+        compose.onNodeWithText("Background command timeout", substring = true)
             .performScrollTo()
             .assertIsDisplayed()
     }
@@ -248,18 +251,20 @@ class SettingsScreenTest {
         // for both, could not answer it. Two named groups and one unit can.
         settings()
 
-        compose.onNodeWithText("While the app works on this phone").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("While it talks to the model").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Command execution timeouts").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Model response timeouts").performScrollTo().assertIsDisplayed()
         // And the model waits are in seconds, like their neighbours rather than minutes apart from
         // them. **Two of them now**: streaming split one silence into "nothing came back at all"
         // and "it went quiet halfway through", which want opposite answers and so cannot share a
         // number.
-        compose.onNodeWithText("Wait for an answer to begin (seconds)", substring = true)
-            .performScrollTo()
-            .assertIsDisplayed()
-        compose.onNodeWithText("Wait between pieces of an answer (seconds)", substring = true)
-            .performScrollTo()
-            .assertIsDisplayed()
+        // **Three, by the names the operator gave them**: "connection timeout, stalling timeout,
+        // reconnect timeout". Nothing named "wait" survives, because "wait" was the word that made
+        // "how wait for the model is different from stop command after?" impossible to answer.
+        for (name in listOf("Connection timeout", "Stalling timeout", "Reconnect timeout")) {
+            compose.onNodeWithText("$name (seconds)", substring = true)
+                .performScrollTo()
+                .assertIsDisplayed()
+        }
         // **And the sentence that apologised for the old limit is gone.** It said a dropped request
         // and a model thinking hard look the same from here, which was true of a non-streamed
         // request. It is not true now, and leaving it would be the screen explaining a limitation

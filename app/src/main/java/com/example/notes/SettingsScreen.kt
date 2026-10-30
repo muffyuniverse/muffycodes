@@ -408,24 +408,25 @@ fun SettingsScreen(
             // **Everything is seconds now.** The model wait was in minutes and the command limits in
             // seconds, eight lines apart, with nothing saying they were different scales - so "4" and
             // "180" looked like the same kind of number.
-            Text("While the app works on this phone", style = MaterialTheme.typography.titleMedium)
+            // **Named for what it bounds, in the operator's words.** Report: "rename while this app
+            // works on this phone into command execution timeouts. fields: foreground command
+            // timout, background command timeout". The old heading described the phone rather than
+            // the thing being limited, which is why it needed a paragraph to say what it meant.
+            Text("Command execution timeouts", style = MaterialTheme.typography.titleMedium)
             Text(
-                "These bound work the app does itself: reading files, walking folders, talking to " +
-                    "git. The model is not involved - it is waiting for the app. All in seconds; " +
-                    "blank means no limit.",
+                "How long work on this phone may take. Blank means no limit.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             LengthField(
-                label = "A command may hold the conversation for (seconds, blank = no limit)",
+                label = "Foreground command timeout (seconds)",
                 value = settings.foregroundSeconds,
                 placeholder = "no limit",
                 onValueChange = { settings.keepForeground(it) },
             )
             Text(
                 text = if (settings.foregroundSeconds <= 0) {
-                    "Now: a command runs until it finishes, and the turn waits for it. A number " +
-                        "here is a choice about how long a turn may sit still."
+                    "Now: the turn waits for every command to finish."
                 } else {
                     // **This sentence used to say "nothing half-written is kept", and it stopped
                     // being true the moment a slow command was handed to the background.** The
@@ -433,30 +434,27 @@ fun SettingsScreen(
                     // result that tells that this command takes longer than the timeout allows and
                     // will be returned on one of the next turns". A setting screen that describes the
                     // old behaviour is worse than one that describes none.
-                    "Now: past ${settings.foregroundSeconds} s the command stops holding the turn and " +
-                        "carries on in the background. The agent is told the path its result will be " +
-                        "written to, and the result arrives with the next batch."
+                    "Now: past ${settings.foregroundSeconds} s it carries on in the background and " +
+                        "its result arrives with a later turn."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             LengthField(
-                label = "Stop a background command after (seconds, blank = never)",
+                label = "Background command timeout (seconds)",
                 value = settings.backgroundSeconds,
                 placeholder = "never",
                 onValueChange = { settings.keepBackground(it) },
             )
             Text(
                 text = if (settings.backgroundSeconds <= 0) {
-                    "Now: a background command runs until it finishes. Its result is a file, so " +
-                        "nothing is waiting on it."
+                    "Now: a background command runs until it finishes."
                 } else {
                     // **This one really does stop**, and the difference from the row above is the
                     // whole reason both exist: a command that already left the conversation has
                     // nowhere further to be handed to, so past this it dies and says why.
-                    "Now: past ${settings.backgroundSeconds} s a background command is stopped for " +
-                        "good - it has already left the conversation, so there is nowhere to hand it " +
-                        "to. The file it was writing says it stopped."
+                    "Now: past ${settings.backgroundSeconds} s it is stopped for good, and the file " +
+                        "it was writing says so."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -464,39 +462,55 @@ fun SettingsScreen(
             RowDivider()
 
             // ---- the other clock: the wait for the model ----
-            Text("While it talks to the model", style = MaterialTheme.typography.titleMedium)
+            // **Named for the thing that is slow, not for what the app is doing meanwhile.** Report:
+            // "while it talks to the model rename to model response timeouts", and then the three
+            // fields by name: "connection timeout, stalling timeout, reconnect timeout".
+            Text("Model response timeouts", style = MaterialTheme.typography.titleMedium)
             Text(
-                "The answer arrives as it is written, so there are two silences rather than one. " +
-                    "Nothing on this phone is running while it waits - the app is sitting still, " +
-                    "and the model is the one working. In seconds; blank means the default.",
+                "How long the app waits for the model. Blank means the default.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            // **Two fields, because they bound two different silences.** The first is before
-            // anything at all has come back: an upstream that is queueing sends nothing, so this
-            // one is generous - and because no answer has been produced yet, retrying is free. The
-            // second is a gap *inside* an answer, where a model thinking hard is quiet and a dead
-            // connection is quieter; a single number would have to be long enough for the first and
-            // short enough for the second, which is no number at all.
+            // **Three fields, because the wait for the model has three different ends.** Each
+            // sentence sits under the number it describes, so the row and its consequence are read
+            // together rather than as a list of numbers followed by a list of remarks.
+            //
+            // The connection wait is before anything at all has come back: an upstream that is
+            // queueing sends nothing, so it is generous - and because no answer has been produced
+            // yet, retrying is free. The stalling wait is a gap *inside* an answer, where a model
+            // thinking hard is quiet and a dead connection is quieter; one number could not be both.
             LengthField(
-                label = "Wait for an answer to begin (seconds)",
+                label = "Connection timeout (seconds)",
                 value = settings.ackSeconds,
                 placeholder = "${SettingsStore.DEFAULT_ACK_SECONDS}",
                 onValueChange = { settings.keepAck(it) },
             )
+            Text(
+                text = "Now: past ${settings.ackSeconds} s nothing has come back, so the request " +
+                    "is dropped and tried on another provider. Nothing was generated, so the retry " +
+                    "costs nothing.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
             LengthField(
-                label = "Wait between pieces of an answer (seconds)",
+                label = "Stalling timeout (seconds)",
                 value = settings.gapSeconds,
                 placeholder = "${SettingsStore.DEFAULT_GAP_SECONDS}",
                 onValueChange = { settings.keepGap(it) },
             )
-            // **The other half of the same question**, and it is a different number: the one above
-            // bounds a single request, and this bounds how long a *failure* is retried before the
+            Text(
+                text = "Now: an answer that goes quiet for ${settings.gapSeconds} s is treated as " +
+                    "a dropped connection, and what had arrived is kept.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            // **The other half of the same question**, and it is a different number: the two above
+            // bound a single request, and this bounds how long a *failure* is retried before the
             // agent stops and asks for help. A dropped request is not a stopped agent — the ladder
             // at one, two and four seconds exists so a tunnel does not end a session — so the
             // window is how long that is allowed to go on.
             LengthField(
-                label = "Keep trying a failing connection for (seconds)",
+                label = "Reconnect timeout (seconds)",
                 value = settings.reconnectSeconds,
                 placeholder = "${SettingsStore.DEFAULT_RECONNECT_SECONDS}",
                 onValueChange = { settings.keepReconnect(it) },
@@ -505,14 +519,6 @@ fun SettingsScreen(
                 text = "Now: retried for ${settings.reconnectSeconds / 60} min, then the agent " +
                     "stops and says it needs help. An agent waiting for your answer is not " +
                     "failing - it is idle, and is kept warm instead.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
-            Text(
-                text = "Now: past ${settings.timeoutSeconds} s the request is dropped and tried " +
-                    "again on another provider. An answer longer than this is never cut: a result " +
-                    "too big for the conversation is written whole to a file, and its path is the " +
-                    "answer.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary,
             )
@@ -637,15 +643,6 @@ fun SettingsScreen(
                 placeholder = "everything",
                 onValueChange = { settings.keepSession(it) },
             )
-            // **In lines, because that is what a person reads in.** A cap expressed as a fraction of
-            // the window would be a statement about the phone; a cap in lines is a statement about
-            // the message. Zero means no cap, which is the honest default on a screen that scrolls.
-            LengthField(
-                label = "A message may be this many lines (blank = no limit)",
-                value = settings.bubbleLines,
-                placeholder = "no limit",
-                onValueChange = { settings.keepBubbleLines(it) },
-            )
             // **The block ends here.** Reminders, the trace and the theme are the app's, not the
             // agent's: a reminder fires whether or not a model is configured, and the trace is the
             // app's own record. The heavier rule is the only thing on the screen that says so.
@@ -718,6 +715,25 @@ fun SettingsScreen(
             }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+            // ---- how tall a message is drawn ----
+            //
+            // **This is not a session limit, which is why it is not in that block.** The operator
+            // asked for one field there - "for session just one field: max length (in tokens with
+            // default 10000000). this mb and lines limits are to be removed" - and the line cap
+            // survived only because it bounds something else: how much of one message is drawn on a
+            // screen, not how much of the record is kept. Leaving it under "Session log" made a
+            // reading preference look like a limit on the evidence.
+            Text("Messages", style = MaterialTheme.typography.titleMedium)
+            // **In lines, because that is what a person reads in.** A cap expressed as a fraction of
+            // the window would be a statement about the phone; a cap in lines is a statement about
+            // the message. Zero means no cap, which is the honest default on a screen that scrolls.
+            LengthField(
+                label = "A message may be this many lines (blank = no limit)",
+                value = settings.bubbleLines,
+                placeholder = "no limit",
+                onValueChange = { settings.keepBubbleLines(it) },
+            )
 
             // ---- the appearance (§10) ----
             Row(

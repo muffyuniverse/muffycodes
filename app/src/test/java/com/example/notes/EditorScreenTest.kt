@@ -203,10 +203,15 @@ class EditorScreenTest {
 
         compose.onNodeWithContentDescription("More").assertDoesNotExist()
         compose.onNodeWithText("Delete").assertDoesNotExist()
-        // The four things that are still there, in the order the row gives them.
+        // **Back, the name, and the two acts that need no word** - history and report, as icons.
+        // History used to be a word on the row below; the operator moved it up: "put history button
+        // on the top bar right corner to the left of bug report icon", which is also what let the
+        // modes and Save share a single line.
         compose.onNodeWithContentDescription("Back without saving").assertIsDisplayed()
         compose.onNodeWithText("milk.txt").assertIsDisplayed()
-        compose.onNodeWithText("History").assertIsDisplayed()
+        compose.onNodeWithContentDescription("This file's history").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Report a problem").assertIsDisplayed()
+        // And Save is on the row under it, beside the modes rather than on a line of its own.
         compose.onNodeWithText("Save").assertIsDisplayed()
     }
 

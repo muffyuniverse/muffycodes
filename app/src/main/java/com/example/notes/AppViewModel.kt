@@ -3034,7 +3034,8 @@ class AppViewModel @JvmOverloads constructor(
             // it finish. Three of them now: the ping still has one wait, because it is not streamed
             // and reads no answer; a turn has the ack and the gap, which are the two silences
             // streaming made different.
-            timeoutMs = settings.timeoutSeconds * 1000,
+            // One number for "nothing has come back yet", on both transports. See AgentWiring.
+            timeoutMs = settings.ackMs,
             ackMs = settings.ackMs,
             gapMs = settings.gapMs,
             // **Every response is written down, whether or not anybody is watching.** The log is
