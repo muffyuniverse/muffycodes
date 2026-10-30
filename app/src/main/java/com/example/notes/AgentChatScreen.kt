@@ -442,6 +442,7 @@ fun AgentChatScreen(
                                 WritingBubble(
                                     words = viewModel.chatWriting,
                                     pages = viewModel.chatPages.values.sortedBy { it.id },
+                                    spend = viewModel.chatSpent,
                                 )
                             }
                         }
@@ -640,7 +641,7 @@ private data class Fullscreen(val message: AgentChat.Message, val at: Int)
  * is the only thing the shape alone cannot say.
  */
 @Composable
-private fun WritingBubble(words: String, pages: List<Agent.Live>) {
+private fun WritingBubble(words: String, pages: List<Agent.Live>, spend: AgentChat.Spend?) {
     val ink = MaterialTheme.colorScheme.onSurfaceVariant
     Column(
         modifier = Modifier
@@ -686,6 +687,26 @@ private fun WritingBubble(words: String, pages: List<Agent.Live>) {
                 text = words,
                 style = MaterialTheme.typography.bodyMedium,
                 color = ink,
+            )
+        }
+        // **What has arrived so far, so the bubble moves while the burst runs.** The operator's
+        // report: "thinking and output are not shown untill the burst is done - which defies their
+        // purpose of indicating that agent is working".
+        //
+        // The numbers were already being updated per chunk (`chatSpent`, from the door's listener,
+        // which is exactly the liveness signal the operator asked to be per-chunk). They were drawn
+        // in the footer of a *finished* message, so while a burst ran there was nothing on screen
+        // counting. The words stay per-reply, as the operator ruled; this line is the one that
+        // moves every second, and it is what says the turn is alive.
+        if (spend != null && (spend.output > 0 || spend.thinking > 0)) {
+            Text(
+                buildString {
+                    append("working")
+                    if (spend.thinking > 0) append(" · thinking ${spend.thinking}")
+                    if (spend.output > 0) append(" · writing ${spend.output}")
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
             )
         }
     }

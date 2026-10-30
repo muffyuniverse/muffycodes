@@ -520,6 +520,16 @@ class Agent(
         if (operator != null) {
             log.beginSession()
             log.told(operator)
+            // **The person's own words reach the screen before anything else happens.** Reported:
+            // "and why user message isnt shown untill agent responds?" — because `progress` was only
+            // ever called after a reply, so the row the person had just caused sat in the record
+            // unread until the model answered. On a slow turn that is a minute of a chat that looks
+            // as though it did not hear them.
+            //
+            // **Once, here, and not per reply**, because this is the only moment the row is new and
+            // the turn has not started: everything after it is the agent's own work, which the
+            // per-reply report already covers.
+            progress()
             Trace.note("agent", "$project: ${operator.take(80)}")
         }
 
