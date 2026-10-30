@@ -161,7 +161,17 @@ class AgentSessionFeatureTest : FeatureTest() {
             // **Read from the store, not the screen.** A poll's outcome is written by a worker, so
             // the view model's list is one write behind the poll `tick` just watched finish.
             val session = scene.viewModel.readSession(project) ?: return
-            if (session.state == AgentSession.State.STOPPED) return
+            if (session.state == AgentSession.State.STOPPED) {
+                // **And then read it into the screen's list before returning.** This is the same
+                // one-write-behind problem the comment above describes, and returning here left the
+                // caller holding the list from *before* the poll that stopped the session - so a
+                // strip computed straight afterwards could say "1 session" about a session the
+                // store already had as stopped. It is a race rather than a wrong answer, which is
+                // why it only appeared once the timing shifted; the fix is to end on a tick, like
+                // every other assertion in this class does.
+                shown(project)
+                return
+            }
             val due = session.nextPollAt
             val at = if (session.retryFrom > 0) {
                 maxOf(due, session.retryFrom + scene.settings.reconnectMs + 1_000)

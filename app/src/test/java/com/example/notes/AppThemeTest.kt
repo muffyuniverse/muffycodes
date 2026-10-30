@@ -44,6 +44,63 @@ class AppThemeTest {
     }
 
     @Test
+    fun `every page is white or black, and the colour is in the elements`() {
+        // **The operator's rule for all five themes**: "light themes should have white screen
+        // backgrounds, dark themes should have black screen backgrounds. Difference should be in
+        // coloring of nonbackground elements."
+        //
+        // It is a rule about *where* a theme's colour lives. A cream page with a brown accent and a
+        // white page with the same accent are the same palette applied two ways, and the first one
+        // makes every theme look like a tint over the whole screen - which is what the operator saw
+        // and objected to. Exact values, not "bright enough": near-white is the thing being ruled
+        // out, and a threshold would let #FDFBFA pass.
+        AppTheme.entries.forEach { theme ->
+            val light = theme.lightScheme()
+            val dark = theme.darkScheme()
+            assertEquals(
+                "${theme.name}: a light page is white",
+                androidx.compose.ui.graphics.Color(0xFFFFFFFF),
+                light.background,
+            )
+            assertEquals(
+                "${theme.name}: a dark page is black",
+                androidx.compose.ui.graphics.Color(0xFF000000),
+                dark.background,
+            )
+        }
+    }
+
+    @Test
+    fun `chocolate is monochrome, which is what tells it apart from brownie`() {
+        // **The operator's instruction, both halves**: "Make chocolate theme show white elements on
+        // black in dark mode" and "Current chocolate theme move to brownie". So Chocolate is a
+        // *value* rather than a hue - black on white by day, white on black after dark - and Brownie
+        // is the brown one that took over the palette Chocolate used to have.
+        //
+        // The check is that no channel disagrees with any other in either scheme: a single warm
+        // channel left in would be a hue, and a hue is what this theme must not have.
+        listOf("light" to AppTheme.CHOCOLATE.lightScheme(), "dark" to AppTheme.CHOCOLATE.darkScheme())
+            .forEach { (which, scheme) ->
+                listOf(
+                    "primary" to scheme.primary,
+                    "secondary" to scheme.secondary,
+                    "tertiary" to scheme.tertiary,
+                    "onBackground" to scheme.onBackground,
+                    "onSurface" to scheme.onSurface,
+                ).forEach { (name, colour) ->
+                    val r = (colour.red * 255).toInt()
+                    val g = (colour.green * 255).toInt()
+                    val b = (colour.blue * 255).toInt()
+                    assertTrue(
+                        "chocolate's $which $name is $r,$g,$b - a monochrome theme has equal " +
+                            "channels, and any difference is a hue",
+                        kotlin.math.abs(r - g) <= 1 && kotlin.math.abs(g - b) <= 1,
+                    )
+                }
+            }
+    }
+
+    @Test
     fun `no two themes are the same palette`() {
         // Given every theme's light palette
         val primaries = AppTheme.entries.map { it.lightScheme().primary }

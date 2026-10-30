@@ -275,22 +275,24 @@ class SettingsScreenTest {
     }
 
     @Test
-    fun `the two clocks are named, so a person can tell which one they are setting`() {
+    fun `the clocks are named, so a person can tell which one they are setting`() {
         // **Report 23 was a question, not a complaint:** "how wait for the model is different from
-        // stop command after?". Three timeouts in a row, in two units, with "wait" and "stop" used
-        // for both, could not answer it. Two named groups and one unit can.
+        // stop command after?". Timeouts in a row, in two units, with "wait" and "stop" used for
+        // both, could not answer it. Two named groups and one unit can.
         settings()
 
         compose.onNodeWithText("Command execution timeouts").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Model response timeouts").performScrollTo().assertIsDisplayed()
         // And the model waits are in seconds, like their neighbours rather than minutes apart from
-        // them. **Two of them now**: streaming split one silence into "nothing came back at all"
-        // and "it went quiet halfway through", which want opposite answers and so cannot share a
-        // number.
-        // **Three, by the names the operator gave them**: "connection timeout, stalling timeout,
-        // reconnect timeout". Nothing named "wait" survives, because "wait" was the word that made
-        // "how wait for the model is different from stop command after?" impossible to answer.
-        for (name in listOf("Connection timeout", "Stalling timeout", "Reconnect timeout")) {
+        // them.
+        //
+        // **Two, not three, and not the four this test has asserted at various points.** The
+        // connection and stalling waits were split when streaming landed and merged again on the
+        // operator's instruction - "lets merge connection and stalling timeouts into a single
+        // response timeout" - because one idle number bounds both silences. What survives is the
+        // distinction that matters to a person: the request's own silence, and how long a *failure*
+        // is retried before the agent asks for help.
+        for (name in listOf("Response timeout", "Reconnect timeout")) {
             compose.onNodeWithText("$name (seconds)", substring = true)
                 .performScrollTo()
                 .assertIsDisplayed()
