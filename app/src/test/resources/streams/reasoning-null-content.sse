@@ -1,0 +1,9 @@
+: ping
+data: {"id": "gen-2", "object": "chat.completion.chunk", "model": "x", "choices": [{"index": 0, "delta": {"role": "assistant", "content": null, "reasoning_content": "Let me think "}}]}
+data: {"id": "gen-2", "object": "chat.completion.chunk", "model": "x", "choices": [{"index": 0, "delta": {"content": null, "reasoning_content": "about this."}}]}
+data: {"id": "gen-2", "object": "chat.completion.chunk", "model": "x", "choices": [{"index": 0, "delta": {"content": "Two "}}]}
+data: {"id": "gen-2", "object": "chat.completion.chunk", "model": "x", "choices": [{"index": 0, "delta": {"content": null, "reasoning": null}}]}
+data: {"id": "gen-2", "object": "chat.completion.chunk", "model": "x", "choices": [{"index": 0, "delta": {"content": "files."}}]}
+data: {"id": "gen-2", "object": "chat.completion.chunk", "model": "x", "choices": [{"index": 0, "delta": {}, "finish_reason": null}]}
+data: {"id": "gen-2", "object": "chat.completion.chunk", "model": "x", "choices": [{"index": 0, "delta": {}}], "usage": {"prompt_tokens": 9, "completion_tokens": 5, "total_tokens": 14}}
+data: [DONE]

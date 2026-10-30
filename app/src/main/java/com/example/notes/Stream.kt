@@ -90,11 +90,9 @@ class Streamed {
         val choices = root.optJSONArray("choices") ?: return
         for (i in 0 until choices.length()) {
             val choice = choices.optJSONObject(i) ?: continue
-            choice.optString("finish_reason").takeIf { it.isNotEmpty() && it != "null" }?.let {
-                finish = it
-            }
+            choice.text("finish_reason")?.let { finish = it }
             val delta = choice.optJSONObject("delta") ?: continue
-            delta.optString("content").takeIf { it.isNotEmpty() }?.let { said.append(it) }
+            delta.text("content")?.let { said.append(it) }
             // **Reasoning arrives under three names**, because the field was renamed upstream and
             // the providers have not agreed. Reading only one is how a diligent model looks dead.
             //
@@ -103,12 +101,12 @@ class Streamed {
             // thinking mode must be passed back to the API`. The app used to read the other two and
             // throw the thought away after counting it, so the *next* turn failed on a conversation
             // it had built correctly.
-            delta.optString("reasoning").takeIf { it.isNotEmpty() }?.let { thinking.append(it) }
-            delta.optString("reasoning_content").takeIf { it.isNotEmpty() }?.let { thinking.append(it) }
+            delta.text("reasoning")?.let { thinking.append(it) }
+            delta.text("reasoning_content")?.let { thinking.append(it) }
             delta.optJSONArray("reasoning_details")?.let { details ->
                 for (j in 0 until details.length()) {
                     val one = details.optJSONObject(j) ?: continue
-                    one.optString("text").takeIf { it.isNotEmpty() }?.let { thinking.append(it) }
+                    one.text("text")?.let { thinking.append(it) }
                 }
             }
             delta.optJSONArray("tool_calls")?.let { fragments ->
@@ -134,17 +132,39 @@ class Streamed {
      * one. That is the bug this comment exists to prevent — the earlier version keyed by a sorted
      * index and silently dropped any index that was not contiguous.
      */
+    /**
+     * A text field of [this], or **null when it is absent, empty, or the JSON null.**
+     *
+     * **`optString` is the trap this exists for.** It answers the four-character string `"null"` for
+     * a JSON null rather than an empty string or a null reference, so `takeIf { it.isNotEmpty() }`
+     * passes and the app appends the word "null" to the message. That is exactly what a person saw:
+     * the operator's report, "nullnullnullnullnullnullnullnullnullnullnullnullnullnullnullnullnullnull -
+     * what is the reason for such rows inside session and context logs?" and "why first agent page is
+     * a page of nullnull… for every message".
+     *
+     * One `null` per frame, because a thinking-mode provider sends `"content": null` on every
+     * reasoning delta - so a page of them is one reply's worth of frames, each contributing the word.
+     *
+     * **And the same trap silently broke tool calls**: `arguments` is null on the first fragment of a
+     * streamed call, so `args` became `"null"` and the model was handed `"null"` to parse as JSON.
+     *
+     * `Door.kt` already guards the non-streamed path with `isNull("content")`; this is the same rule
+     * in one place for the streaming path, so the next field added here inherits it.
+     */
+    private fun JSONObject.text(name: String): String? =
+        if (isNull(name)) null else optString(name).takeIf { it.isNotEmpty() }
+
     private fun take(fragment: JSONObject) {
         val index = fragment.optInt("index", -1)
-        val id = fragment.optString("id")
+        val id = fragment.text("id")
         val existing = when {
             id.isNotEmpty() -> calls.firstOrNull { it.id == id }
             index >= 0 -> calls.getOrNull(index)
             else -> null
         }
         val function = fragment.optJSONObject("function")
-        val name = function?.optString("name").orEmpty()
-        val args = function?.optString("arguments").orEmpty()
+        val name = function?.text("name").orEmpty()
+        val args = function?.text("arguments").orEmpty()
         if (existing == null) {
             calls.add(
                 Call(

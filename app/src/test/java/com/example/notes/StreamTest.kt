@@ -63,6 +63,27 @@ class StreamTest {
     }
 
     @Test
+    fun `a JSON null is absent, not the word null`() {
+        // **The operator's report**: "nullnullnullnullnullnullnullnullnullnullnullnullnullnullnullnullnullnull
+        // - what is the reason for such rows inside session and context logs?" and "why first agent page
+        // is a page of nullnull… for every message".
+        //
+        // The cause is `optString`, which answers the four-character string "null" for a JSON null
+        // instead of an empty string. A thinking-mode provider sends `"content": null` on every
+        // reasoning delta, so each frame contributed the word once - a whole page of them is one
+        // reply's worth of frames.
+        //
+        // This recording is shaped the way the provider actually sends it, and it asserts the two
+        // things that were wrong: the answer is not polluted, and the thinking is still kept.
+        val stream = recorded("reasoning-null-content.sse")
+
+        assertEquals("the answer is only what was said", "Two files.", stream.said.toString())
+        assertEquals("and the thinking is still read", "Let me think about this.", stream.thinking.toString())
+        assertFalse("no word was invented", stream.said.contains("null"))
+        assertFalse("in the thinking either", stream.thinking.contains("null"))
+    }
+
+    @Test
     fun `an answer is assembled from pieces that split mid-word`() {
         val stream = recorded("answer.sse")
 
