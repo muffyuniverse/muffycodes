@@ -212,7 +212,10 @@ class BrowserChromeTest {
         scene.open("groceries")
         val project = scene.viewModel.workspace!!.projectDir("groceries")
         AgentLog.open(project).told("make me a folder")
-        scene.open("agent")
+        // **`openIn`, because `open` takes a path from the account root.** Spelling "agent" alone
+        // opened a folder that does not exist, so the screen was never the record's and the wait
+        // timed out - the failure was the fixture, not the marks.
+        scene.openIn("agent")
         browser()
 
         compose.waitUntil(20_000) { there("context.log") }
@@ -381,7 +384,10 @@ class BrowserChromeTest {
         scene.open("groceries")
         val project = scene.viewModel.workspace!!.projectDir("groceries")
         AgentLog.open(project).told("make me a folder")
-        scene.open("agent")
+        // **`openIn`, because `open` takes a path from the account root.** Spelling "agent" alone
+        // opened a folder that does not exist, so the screen was never the record's and the wait
+        // timed out - the failure was the fixture, not the marks.
+        scene.openIn("agent")
         browser()
 
         compose.waitUntil(20_000) { there("context.log") }
