@@ -345,6 +345,12 @@ class ScenariosTest {
             then("A file is written inside the repository and the project is synced.") {
                 scene.worktreeFile("milk.txt", "two litres")
                 scene.sync("groceries")
+                // **Read again once the sync is done, or the picture is the screen from before it.**
+                // The browser holds the list it was given; a file appearing in the folder does not
+                // reach it until something asks. Both pictures were byte-identical until this line,
+                // and the caption claimed a sync - which is the exact defect the identical-pictures
+                // check in `ScenarioShots` now catches.
+                scene.viewModel.refresh()
             }
             after()
             result(
@@ -394,7 +400,11 @@ class ScenariosTest {
     @Test
     fun `the editor's row`() {
         scene.signedIn()
-        scene.open()
+        // **Into the project that holds the note**, not the account root. `before()` photographs
+        // whatever is on screen, and with only `scene.open()` it photographed the list of projects -
+        // a picture of "your projects" under the caption "a note open", which is the one thing a
+        // before-picture must not be.
+        scene.open("groceries")
         val file = scene.file("milk.txt", "two litres")
 
         scenario(

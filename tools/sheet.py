@@ -172,7 +172,14 @@ GLYPHS = {
 }
 
 
-def draw_text(rows, x, y, text, scale=2, colour=(0, 0, 0)):
+def draw_text(rows, x, y, text, scale=2, colour=(0, 0, 0), limit=None):
+    """Draw [text] at [x], stopping before [limit] so a long label cannot run into the next cell."""
+    if limit is not None:
+        # 6 pixels a character at this scale, and one character of clearance so two labels cannot
+        # touch even when the first is exactly as wide as its cell.
+        room = max(0, (limit - x) // (6 * scale) - 1)
+        if len(text) > room:
+            text = text[:room]
     for ch in text.upper():
         glyph = GLYPHS.get(ch, GLYPHS[" "])
         for gy, line in enumerate(glyph):
@@ -218,7 +225,7 @@ def main(argv):
         col, row = i % cols, i // cols
         x0 = pad + col * (cell_w + pad)
         y0 = pad + row * (cell_h + label_h + pad)
-        draw_text(sheet, x0, y0 + 4, label)
+        draw_text(sheet, x0, y0 + 4, label, limit=x0 + cell_w)
         for y in range(h):
             line = sheet[y0 + label_h + y]
             src = rows[y]

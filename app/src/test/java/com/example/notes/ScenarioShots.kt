@@ -181,6 +181,26 @@ class ScenarioShots(
         if (!recording) return folder
         val dir = File("build/outputs/scenarios/$folder")
         dir.mkdirs()
+        // **Two identical pictures are a claim that nothing happened, and it has to be meant.**
+        // A before and an after that are byte-identical say one of two things: the act did nothing
+        // (true for "nothing is pressed: there is nothing to press for"), or the scenario is
+        // photographing a screen its act never reached - which happened to `11-the-editor`, whose
+        // before-picture was the list of projects under the caption "a note open". The sentence
+        // written with `then(...)` is what tells the two apart, so the check reads it: a scenario
+        // that says it did nothing may photograph the same screen twice, and one that claims an act
+        // may not.
+        val before = File(dir, "before.png")
+        val after = File(dir, "after.png")
+        if (before.isFile && after.isFile && happened != null) {
+            val claimsNothing = happened!!.startsWith("Nothing", ignoreCase = true)
+            if (!claimsNothing && before.readBytes().contentEquals(after.readBytes())) {
+                throw AssertionError(
+                    "$folder: the two pictures are identical, but the scenario says " +
+                        "\"$happened\". Either the act reached nothing, or the second picture " +
+                        "was taken of the wrong screen.",
+                )
+            }
+        }
         val page = buildString {
             appendLine("# ${title.trimEnd('.')}")
             appendLine()
