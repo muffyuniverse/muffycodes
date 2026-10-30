@@ -163,7 +163,9 @@ class ScenarioShots(
             compose.waitForIdle()
         }
         capture("after.png")
-        if (frozenClock) compose.mainClock.autoAdvance = true
+        // **Not unfrozen here either.** Restoring it would put the never-settling cursor back before
+        // the rule's own teardown, which waits for idle - the same hang one layer down. Each scenario
+        // is its own test instance with its own rule, so nothing later inherits it.
     }
 
     /** What came of it, in one sentence. */

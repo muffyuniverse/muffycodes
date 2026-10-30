@@ -476,25 +476,23 @@ class BrowserChromeTest {
         // `AppNotIdleException: Compose did not get idle after 131589 attempts`, which reads as an
         // infinite composition loop and is nothing of the kind.
         //
-        // Frozen, then advanced once so the window is laid out; restored in `finally` because the
-        // clock belongs to the rule and every later test in this class would inherit it.
+        // Frozen, then advanced once so the window is laid out. **Not restored afterwards**, and
+        // that is deliberate: restoring it before the rule's own teardown puts the never-settling
+        // cursor back, and teardown waits for idle - which is the same hang one layer down. Each
+        // test gets its own rule instance, so nothing later inherits the frozen clock.
         compose.mainClock.autoAdvance = false
-        try {
-            compose.setContent {
-                MaterialTheme { SignInDialog(onDismiss = {}, onSignIn = {}) }
-            }
-            compose.mainClock.advanceTimeBy(500)
-
-            assertTrue("it asks for the key", there("Personal access key"))
-            assertTrue("and names the scopes it needs", there("repo and delete_repo"))
-            assertTrue("and says whose commits they will be", there("belongs to"))
-            assertTrue("it names GitHub in the title", there("Sign in to GitHub"))
-            // **The button is "Sign in", the title is "Sign in to GitHub"** - two different strings,
-            // and the button is disabled until something is typed, which is the rule worth stating:
-            // a window that let you press it empty would ask GitHub a question with no answer.
-            assertTrue("and offers the act", there("Sign in"))
-        } finally {
-            compose.mainClock.autoAdvance = true
+        compose.setContent {
+            MaterialTheme { SignInDialog(onDismiss = {}, onSignIn = {}) }
         }
+        compose.mainClock.advanceTimeBy(500)
+
+        assertTrue("it asks for the key", there("Personal access key"))
+        assertTrue("and names the scopes it needs", there("repo and delete_repo"))
+        assertTrue("and says whose commits they will be", there("belongs to"))
+        assertTrue("it names GitHub in the title", there("Sign in to GitHub"))
+        // **The button is "Sign in", the title is "Sign in to GitHub"** - two different strings,
+        // and the button is disabled until something is typed, which is the rule worth stating:
+        // a window that let you press it empty would ask GitHub a question with no answer.
+        assertTrue("and offers the act", there("Sign in"))
     }
 }
