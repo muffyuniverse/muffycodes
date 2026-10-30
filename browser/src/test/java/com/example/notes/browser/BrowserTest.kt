@@ -123,9 +123,13 @@ class BrowserTest {
         // `evaluateJavascript` answers the JSON encoding of the result, so a string arrives quoted
         // and a null arrives as the four-letter word. Both are unquoted in one place so no caller
         // has to know — the same trap the app's streaming parser hit with `optString`.
-        assertEquals("plain", WebViewBrowser.unquote("\"plain\""))
-        assertEquals("with a quote in it", WebViewBrowser.unquote("\"with a \\\"quote\\\" in it\""))
-        assertEquals("with a newline", WebViewBrowser.unquote("\"one\\ntwo\""))
+        assertEquals("a plain string", "plain", WebViewBrowser.unquote("\"plain\""))
+        assertEquals(
+            "escaped quotes come back as quotes",
+            "with a \"quote\" in it",
+            WebViewBrowser.unquote("\"with a \\\"quote\\\" in it\""),
+        )
+        assertEquals("an escaped newline is a newline", "one\ntwo", WebViewBrowser.unquote("\"one\\ntwo\""))
         assertEquals("a bare number is left alone", "42", WebViewBrowser.unquote("42"))
         assertNull("null is nothing, not the word", WebViewBrowser.unquote("null"))
         assertNull("and neither is an absent answer", WebViewBrowser.unquote(null))
