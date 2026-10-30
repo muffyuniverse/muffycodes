@@ -156,24 +156,29 @@ enum class AppTheme(
         // Dark chocolate is the very dark one, and the palette's job is to be told apart at a
         // glance - a near-black page with a warm brown accent does that, where two browns did not.
         CHOCOLATE -> lightColorScheme(
-            primary = Color(0xFF3A2A20),
+            // **Near black, not dark brown.** The first attempt used `#3A2A20`, which is thirty
+            // apart from Brownie's `#493227` - and the theme test says two primaries that close are
+            // "two shades of one colour", which is exactly what the operator complained about the
+            // first time. Dark chocolate is the very dark one, so the primary is almost black with a
+            // warm cast, and the page stays a warm off-white so the two are not confused either.
+            primary = Color(0xFF1A1512),
             onPrimary = Color(0xFFFFFFFF),
             primaryContainer = Color(0xFFE8E0DB),
-            onPrimaryContainer = Color(0xFF1C1410),
-            secondary = Color(0xFF4A3B31),
+            onPrimaryContainer = Color(0xFF141010),
+            secondary = Color(0xFF3A322C),
             onSecondary = Color(0xFFFFFFFF),
             secondaryContainer = Color(0xFFEDE7E2),
-            onSecondaryContainer = Color(0xFF1C1410),
-            tertiary = Color(0xFF5C4436),
+            onSecondaryContainer = Color(0xFF141010),
+            tertiary = Color(0xFF4A3C33),
             onTertiary = Color(0xFFFFFFFF),
             tertiaryContainer = Color(0xFFF0EAE6),
-            onTertiaryContainer = Color(0xFF1C1410),
+            onTertiaryContainer = Color(0xFF141010),
             background = Color(0xFFF7F4F1),
-            onBackground = Color(0xFF17110D),
+            onBackground = Color(0xFF121010),
             surface = Color(0xFFF7F4F1),
-            onSurface = Color(0xFF17110D),
+            onSurface = Color(0xFF121010),
             surfaceVariant = Color(0xFFE4DCD6),
-            onSurfaceVariant = Color(0xFF453830),
+            onSurfaceVariant = Color(0xFF3C332D),
             outline = Color(0xFF7D6B60),
             error = Color(0xFFB3261E),
             onError = Color(0xFFFFFFFF),
