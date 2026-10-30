@@ -192,11 +192,15 @@ class BrowserChromeTest {
         scene.await("the change to be counted", 20_000) {
             scene.viewModel.changesOf(made) > 0
         }
+        // **The premise, asserted before the claim.** Without it, "no Sync" is true both when the
+        // strip is correctly gone and when the browser never opened the project at all - and those
+        // are different bugs. This is the same shape the locked-file test uses for its own premise.
+        assertTrue(
+            "the browser is inside the local project before anything is asserted about its strip",
+            scene.viewModel.inWorktree && scene.viewModel.currentProject == made,
+        )
         browser()
-
-        // The screen really is the project's, so the absences below are about the strip rather than
-        // about a browser that never opened.
-        compose.waitUntil(20_000) { there("milk.txt") }
+        compose.waitForIdle()
         assertFalse("no Sync", there("Sync"))
         assertFalse("no count either", there("See 1 change"))
         // **"up to date" is the claim that was actually false**, so it is the one worth asserting
