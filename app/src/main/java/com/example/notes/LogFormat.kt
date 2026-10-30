@@ -65,6 +65,25 @@ object LogFormat {
     fun time(stamp: String): String = if (stamp.contains('T')) stamp.substringAfter('T') else stamp
 
     /**
+     * The same time **as a person reads it**: `hh:mm`, with no seconds and no milliseconds.
+     *
+     * The operator's report: "and I need it to show only hh:mm as time - not freaking milliseconds".
+     * The footer was drawing [time] straight, which is `17:02:42.130` - three digits of precision
+     * nobody reads, on a line that already carries an id, a context state and two token counts.
+     *
+     * **A separate function rather than a change to [time].** That one is the *parser's* accessor:
+     * the tests use it to prove a stamp round-trips, and the file's own column width depends on the
+     * full form. Shortening it would have made the parser's answer disagree with the file it parsed,
+     * which is the kind of "fix" that breaks a log written by an older build.
+     */
+    fun clock(stamp: String): String {
+        val full = time(stamp)
+        // `hh:mm` when it is a time at all. A stamp from an older build is already bare, and one
+        // that is not a time keeps whatever it says rather than being cut to nothing.
+        return if (full.length >= 5 && full[2] == ':') full.substring(0, 5) else full
+    }
+
+    /**
      * One row of the trace, in the fixed columns: `time build state id kind name  detail`.
      *
      * **The build and the state are columns, not words in the detail.** A report from a phone is

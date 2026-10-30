@@ -470,19 +470,6 @@ fun AgentChatScreen(
 private data class Fullscreen(val message: AgentChat.Message, val at: Int)
 
 /**
- * **One message.** Two sides, drawn differently, because they are different things.
- *
- * The operator's is a **plain row**: their words, right-aligned on a tinted surface, with no pages,
- * no caption and no footer. It has no tool calls and no turns, so every piece of the agent's
- * furniture would be a frame around one sentence. Report: "user messages are less complicated -
- * they dont have multiple toolcalls and turns, - they are just a plain message row".
- *
- * The agent's is a **container of pages** on a surface of its own colour: the call and its result
- * for the page being shown, a pager when there is more than one, the closing words as the last
- * page, and a footer saying which row it was and what the turn cost.
- */
-@Composable
-/**
  * One arrow of the pager: an icon in a button a finger can actually hit.
  *
  * **40dp rather than the 28x24 the guillemets got.** The Material minimum for a touch target is 48dp,
@@ -516,6 +503,19 @@ private fun PagerArrow(
     }
 }
 
+/**
+ * **One message.** Two sides, drawn differently, because they are different things.
+ *
+ * The operator's is a **plain row**: their words, right-aligned on a tinted surface, with no pages,
+ * no caption and no footer. It has no tool calls and no turns, so every piece of the agent's
+ * furniture would be a frame around one sentence. Report: "user messages are less complicated -
+ * they dont have multiple toolcalls and turns, - they are just a plain message row".
+ *
+ * The agent's is a **container of pages** on a surface of its own colour: the call and its result
+ * for the page being shown, a pager when there is more than one, the closing words as the last
+ * page, and a footer saying which row it was and what the turn cost.
+ */
+@Composable
 private fun MessageRow(
     message: AgentChat.Message,
     at: Int,
@@ -706,7 +706,7 @@ private fun footer(message: AgentChat.Message, page: AgentChat.Page): String {
     // A page with no id is a row the app has not written yet, so it has no context state to report -
     // and saying "forgotten" about a row that does not exist would be a claim about nothing.
     if (page.id > 0) parts.add(if (page.forgotten) "forgotten" else "in context")
-    val clock = LogFormat.time(page.stamp)
+    val clock = LogFormat.clock(page.stamp)
     if (clock.isNotBlank()) parts.add(clock)
     if (message.thinking > 0) parts.add("thinking ${ContextBudget.short(message.thinking)}")
     if (message.output > 0) parts.add("output ${ContextBudget.short(message.output)}")
