@@ -171,21 +171,21 @@ class BrowserChromeTest {
     }
 
     @Test
-    fun `a local project has no sync button, because there is nowhere to send it`() {
+    fun `a local project has no sync strip at all`() {
         // **The operator's report, from the live log**: "local projects shoudnt show sync row - hide
-        // it for them". They were looking at a local project's strip, which drew Sync because the
-        // row had no idea which kind of project it was over - so the only possible answer to the
-        // press was "there is nowhere to send this".
+        // it for them". My first attempt hid only the Sync *button* and kept the rest of the row,
+        // and the operator corrected me: "it doesnt, that is why I asked to hide the strip and not
+        // just the button".
         //
-        // **A local project still shows its count**, and that is the half worth keeping: what
-        // changed is a fact about the project whether or not it has a remote, and hiding it would
-        // take away the one thing on the strip that is true of both kinds.
+        // They were right, and the reason is in `unsentPaths`: it returns empty when the repository
+        // has no `origin`. So on a local project the count is always zero and the strip says **"up
+        // to date" for ever** - a claim about a GitHub repository that does not exist. Every part of
+        // that row is a statement about a remote, so a project without one gets no row.
         scene.signedIn()
         scene.localProject("Shopping")
         val made = scene.made("Shopping")
         // **Open first, then write.** `worktreeFile` resolves the project from the current path, so
-        // a write before the open is a write outside any project - which is what the first version
-        // of this test did, and the exception it raised was the fixture telling me so.
+        // a write before the open is a write outside any project.
         scene.open(made)
         scene.worktreeFile("milk.txt", "two litres")
         scene.viewModel.refreshChanges()
@@ -194,9 +194,14 @@ class BrowserChromeTest {
         }
         browser()
 
-        compose.waitUntil(20_000) { there("See 1 change") }
-        assertTrue("the count is still there", there("See 1 change"))
-        assertFalse("and there is no Sync to press", there("Sync"))
+        // The screen really is the project's, so the absences below are about the strip rather than
+        // about a browser that never opened.
+        compose.waitUntil(20_000) { there("milk.txt") }
+        assertFalse("no Sync", there("Sync"))
+        assertFalse("no count either", there("See 1 change"))
+        // **"up to date" is the claim that was actually false**, so it is the one worth asserting
+        // against by name: a local project has no remote to be up to date *with*.
+        assertFalse("and no claim to be up to date with", there("up to date"))
     }
 
     @Test
