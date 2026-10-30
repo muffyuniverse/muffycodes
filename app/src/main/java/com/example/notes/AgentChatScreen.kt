@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -32,6 +33,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -43,6 +45,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -54,7 +57,9 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -140,6 +145,8 @@ fun AgentChatScreen(
      * "scroll to the bottom" has to measure all of it first.
      */
     val list = rememberLazyListState()
+    /** For the scroll back to the bottom, which is a coroutine like every other animation here. */
+    val scope = rememberCoroutineScope()
 
     /**
      * **The page each message is showing**, by message id.
@@ -458,6 +465,36 @@ fun AgentChatScreen(
                         }
                     }
                 }
+                // **A way back to the bottom, and only when you are not there.** The operator's
+                // report: "we need down arrow at the bottom right corner of the screen to move to
+                // the bottom of the chat (and it should be visible only if user is not at the
+                // bottom)".
+                //
+                // **Only when you are not at the bottom**, because a control that is always there
+                // is a control that is never the answer to anything: at the end of the conversation
+                // there is nowhere for it to go. It is drawn over the list rather than beside it so
+                // it costs no width, and it is a filled circle so it reads as a button over text.
+                if (!atBottom && (box?.messages?.isNotEmpty() == true)) {
+                    FilledIconButton(
+                        onClick = {
+                            // **Animated, like a new message arriving.** The person is being taken
+                            // somewhere, and the motion says how far - a jump would leave them
+                            // wondering whether they had missed something in between.
+                            scope.launch {
+                                list.animateScrollToItem((box?.messages?.size ?: 1) - 1)
+                            }
+                            Trace.tap("chat to bottom", project)
+                        },
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 16.dp, bottom = 16.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.KeyboardArrowDown,
+                            contentDescription = "Go to the newest message",
+                        )
+                    }
+                }
             }
 
             // **No divider, and no box around the field.** The operator's report: "I want write to
@@ -731,18 +768,41 @@ private fun PagerArrow(
     enabled: Boolean,
     description: String,
     onClick: () -> Unit,
+    /**
+     * Draws `»` rather than `›`, for the jump to the end.
+     *
+     * **The same glyph twice, side by side, is a control that has to be read.** The operator asked
+     * for a ">> button" by name, and the doubled chevron is what says "further, faster" without a
+     * label — so this is the one place a second icon is worth carrying.
+     */
+    double: Boolean = false,
 ) {
     IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(40.dp)) {
-        Icon(
-            imageVector = if (pointingLeft) {
-                Icons.AutoMirrored.Filled.KeyboardArrowLeft
-            } else {
-                Icons.AutoMirrored.Filled.KeyboardArrowRight
-            },
-            contentDescription = description,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(28.dp),
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = if (pointingLeft) {
+                    Icons.AutoMirrored.Filled.KeyboardArrowLeft
+                } else {
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight
+                },
+                contentDescription = description,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(28.dp),
+            )
+            if (double) {
+                // **The second chevron is decoration, not a second control.** The whole 40dp button
+                // is the target, and two icons inside one button is how `>>` is drawn without
+                // making the row wider or the touch area smaller.
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .size(20.dp)
+                        .offset(x = (-8).dp),
+                )
+            }
+        }
     }
 }
 
@@ -868,6 +928,22 @@ private fun MessageRow(
                     description = "Next page",
                     onClick = { onTurn(1) },
                 )
+                // **A jump to the last page.** The operator's report: "we need >> button to fast
+                // move to the last page". A message with forty pages is one a person reads from the
+                // start and then wants the end of, and pressing `>` thirty-nine times is a control
+                // that has failed to notice what it is for.
+                //
+                // Only when there is somewhere to jump: with two pages `>>` and `>` do the same
+                // thing, and a row with two arrows that behave alike is a row that has to be read.
+                if (message.pages.size > 2 && at < message.pages.size - 1) {
+                    PagerArrow(
+                        pointingLeft = false,
+                        enabled = true,
+                        description = "Jump to the last page",
+                        onClick = { onTurn(message.pages.size - 1 - at) },
+                        double = true,
+                    )
+                }
             }
             // **The fullscreen icon is in the message's TOP-RIGHT corner**, which is where the
             // operator asked for it and where it stays put: the pager sits here too, and a control

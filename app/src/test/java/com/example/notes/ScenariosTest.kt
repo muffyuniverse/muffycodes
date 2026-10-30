@@ -838,11 +838,15 @@ class ScenariosTest {
                 // thing a person would check: the dialog is reachable, it is above the table, and
                 // `Show` commits.
                 //
-                // **Scrolled to first, because the screen grew above it.** The interval caption is
-                // three lines now (span, before, now) rather than one, so the picker's own row sits
-                // below the fold at Robolectric's window height and the tap landed on nothing -
-                // "Failed to inject touch input", which is what an off-screen click looks like.
-                compose.onNodeWithText("From", substring = true).performScrollTo()
+                // **The time button, found by what it shows, because the screen grew above it.**
+                // The interval caption is three lines now (span, before, now) rather than one, so
+                // the picker's row sits below the fold at Robolectric's window height and the tap
+                // landed on nothing - "Failed to inject touch input", which is what an off-screen
+                // click looks like. `performScrollTo` cannot help here:
+                // the label and the button are inside one item of a `LazyColumn`, so the scrollable
+                // ancestor is the list rather than anything the node itself can reach. Asking for
+                // the *time* text — `00:00`, the button's own content — finds the control directly,
+                // and Compose scrolls a lazy item into view before pressing it.
                 compose.onNodeWithText("00:00", substring = true).performClick()
                 compose.waitForIdle()
             }

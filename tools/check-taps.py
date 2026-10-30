@@ -131,6 +131,9 @@ VOCABULARY = {
     # page may take. Two acts because they answer two questions - *where* may it read, and *how long*
     # may it spend - and the first is a capability rather than a limit.
     "browse private", "browse timeout",
+    # the two ways back through a long conversation: the pager's own arrows, and the jump to the end
+    # that only appears when the person has scrolled away from it
+    "chat to bottom",
 }
 
 # Names built from a value, so they cannot be a literal in the list.
