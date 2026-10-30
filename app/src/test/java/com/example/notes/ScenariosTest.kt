@@ -14,6 +14,7 @@ import androidx.compose.ui.test.performScrollTo
 import org.robolectric.RuntimeEnvironment
 import androidx.test.espresso.IdlingPolicies
 import java.util.concurrent.TimeUnit
+import org.junit.Assert.assertTrue
 import org.junit.BeforeClass
 import org.junit.Rule
 import org.junit.Test
