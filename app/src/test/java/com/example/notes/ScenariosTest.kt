@@ -166,15 +166,6 @@ class ScenariosTest {
     }
 
     /**
-     * A dialog, painted on its own.
-     *
-     * **A window is a screen too**, and a report that only ever shows the screens behind them cannot
-     * show what a person is actually looking at when the app asks a question. Each dialog is drawn
-     * over an empty surface, which is what it looks like over any of them - the window carries its
-     * own scrim.
-     */
-    @Composable
-    /**
      * Whether the window on the screen says [text], in part.
      *
      * The same question `BrowserChromeTest` asks, and here for the one window that cannot be asked
@@ -183,6 +174,14 @@ class ScenariosTest {
     private fun there(text: String): Boolean =
         compose.onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty()
 
+    /**
+     * A dialog, painted on its own.
+     *
+     * **A window is a screen too**, and a report that only ever shows the screens behind them cannot
+     * show what a person is actually looking at when the app asks a question. Each dialog is drawn
+     * over an empty surface, which is what it looks like over any of them - the window carries its
+     * own scrim.
+     */
     private fun window(content: @Composable () -> Unit) = Screen {
         // A box with nothing in it, so the capture has a background to draw the window over.
         androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {}
