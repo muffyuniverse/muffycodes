@@ -178,9 +178,25 @@ fun AgentChatScreen(
     }
 
     // A new message is the thing being waited for, so the list follows it to the bottom.
+    //
+    // **The first jump is a jump, not a scroll.** The operator's report: "when I enter the chat
+    // screen I should see the bottom (on entering the chat my view already should be positioned
+    // there, not scrolled before my eyes)". `animateScrollToItem` on entry animated the whole
+    // conversation past the person - a long chat visibly slid from the top to the bottom, which
+    // reads as the app doing something to the screen rather than as arriving at the end of it.
+    //
+    // `scrollToItem` on the first pass puts it there before it is drawn; every later message still
+    // animates, because *that* motion is information: something arrived below where you are looking.
+    var firstPass by remember { mutableStateOf(true) }
     LaunchedEffect(box?.messages?.size, generation) {
         val last = (box?.messages?.size ?: 0) - 1
-        if (last >= 0) list.animateScrollToItem(last)
+        if (last < 0) return@LaunchedEffect
+        if (firstPass) {
+            firstPass = false
+            list.scrollToItem(last)
+        } else {
+            list.animateScrollToItem(last)
+        }
     }
 
     Scaffold(
@@ -208,7 +224,17 @@ fun AgentChatScreen(
                         // **The state, in the words the notification uses.** One vocabulary for
                         // the box, the strip and the tray, so "why is it not answering" has one
                         // answer wherever a person looks.
-                        text = session?.label(System.currentTimeMillis()) ?: "off",
+                        //
+                        // **"idle · waiting", not "off", when there is no session yet.** The
+                        // operator's report: "agent is 'off' but it responds when user sends it a
+                        // message. Make it so that a new message from user turns the agent 'on'".
+                        // Sending always did turn it on - `sendChat` resumes a stopped session and
+                        // `speak` starts a fresh one - so the behaviour was right and the *word*
+                        // was the lie: "off" reads as a switch that will not work, and then it
+                        // works, and the person has learned not to trust the header.
+                        //
+                        // A project with no session is waiting for one, which is what it says now.
+                        text = session?.label(System.currentTimeMillis()) ?: "idle · waiting",
                         style = MaterialTheme.typography.labelSmall,
                         color = if (session?.needsYou == true) {
                             MaterialTheme.colorScheme.error

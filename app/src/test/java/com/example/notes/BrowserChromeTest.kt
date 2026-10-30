@@ -184,6 +184,12 @@ class BrowserChromeTest {
         scene.signedIn()
         scene.project("groceries")
         scene.open("groceries")
+        // **The record exists only once the agent has written to it**, so the test writes a row the
+        // way the agent does rather than waiting for a folder a fresh project does not have. A
+        // `TOLD` row is the operator's own line, which every turn begins with.
+        val project = scene.viewModel.workspace!!.projectDir("groceries")
+        AgentLog.open(project).told("make me a folder")
+        scene.viewModel.refresh()
         browser()
 
         // The folder itself: the record the app keeps inside a project.
@@ -318,47 +324,62 @@ class BrowserChromeTest {
     }
 
     @Test
-    fun `a locked file has no menu at all`() {
-        // Given a locked file
+    fun `a file the app keeps has no menu, and one the person locked keeps it`() {
+        // **Two locks, two rules, and the operator corrected me on which is which.**
+        //
+        // Report 10 asked for the menu to go: "locked files should hide and forbid 3dot options",
+        // filed while looking at `agent/` - an *app* lock. I read it as all locks and gated the menu
+        // on `hold == NONE`, which took the menu away from a person who had locked their own file.
+        // The correction: "3dots are hidden only on system locked branches".
+        //
+        // That is the same ruling this codebase already carries everywhere else: "system locks
+        // restrict both users and agents, and user locks restrict agents (not users themselves!)".
+        // The menu was the one place that had it backwards.
         scene.signedIn()
         scene.project("groceries")
-        // **A folder of its own, with one file in it.** The worktree already holds the
-        // clone's README and LICENSE, and `onAllNodesWithContentDescription("More")[0]`
-        // is the *first row's* menu — which was the unlocked README, so the test was
-        // reading a menu for a file it had not locked and concluding the lock leaked.
         scene.open("groceries")
         val only = scene.folder("only")
-        // Written through the model, because `worktreeFile` puts a file at the root of the
-        // worktree and the folder that is open is one level below it.
         val file = File(only, "milk.txt")
         scene.workspace!!.write(file, "two litres")
         scene.open("groceries", "only")
         scene.viewModel.toggleLocked(file)
         scene.viewModel.refresh()
-        // **The premise, asserted.** Without this the test can only say "the menu offered
-        // Rename", which is true both when the menu is wrong and when the file was never
-        // locked — and those want different fixes.
-        // **The row's hold, not `isLocked`.** A person's lock is an instruction to the agent, so
-        // `isLocked` answers false for it - but the *row* still shows it as locked, which is what
-        // this test needs to be true before it opens the menu.
+        // **The premise, asserted.** Without it the test can only say "the menu is there", which is
+        // true both when the rule is right and when the file was never locked.
         assertTrue(
-            "the file really is locked before the menu is opened",
+            "the file really is locked by the person before the menu is looked for",
             scene.viewModel.hold(file) == Workspace.Hold.USER,
         )
         browser()
 
-        // **No three-dot button on the row at all**, which is the operator's report: "locked files
-        // should hide and forbid 3dot options". This used to assert something weaker - that the menu
-        // opened but offered Copy and not Rename - which was the compromise before the rule was
-        // stated plainly. A menu whose items are chosen to avoid the refusals is still a menu that
-        // suggests the app might act on a file it has been told not to touch.
         compose.waitUntil(20_000) { there("milk.txt") }
-        // The row is there and readable, so the absence below is about the menu rather than about a
-        // screen that never drew.
         assertTrue("the row is drawn", there("milk.txt"))
-        // **One row, so one menu, and it is not there.** The folder holds exactly one file - the
-        // fixture is built that way, which is why `[0]` was safe in the version of this test that
-        // tapped a menu. With one row there is no ambiguity about whose menu an absent one is.
+        // **The menu is there, and it works.** Rename, Move and Delete all succeed on a person's
+        // own lock - `Workspace` asks `isLocked` (the app's locks) for the person's acts - so
+        // hiding the menu was hiding working controls.
+        compose.onAllNodesWithContentDescription("More").assertCountEquals(1)
+    }
+
+    @Test
+    fun `a folder the app keeps has no menu on itself or anything inside it`() {
+        // The other half, and the one report 10 actually asked for. `agent/` is the app's, so its
+        // menu goes - and it goes for its contents too, which is the inheritance rule: a log inside
+        // it is as much the app's as the folder is.
+        scene.signedIn()
+        scene.project("groceries")
+        scene.open("groceries")
+        browser()
+
+        compose.waitUntil(20_000) { there("agent/") }
+        // The folder's own row has no menu. `agent/` is the only app-held row at this level.
+        compose.onAllNodesWithContentDescription("More").assertCountEquals(1)
+
+        scene.open("agent")
+        browser()
+        compose.waitUntil(20_000) { there("context.log") }
+        // **Neither log has one.** This is the half that would have passed for the wrong reason
+        // before: the folder was marked and its contents were not, so the contents kept a menu
+        // whose every item the app would refuse.
         compose.onAllNodesWithContentDescription("More").assertCountEquals(0)
     }
 
