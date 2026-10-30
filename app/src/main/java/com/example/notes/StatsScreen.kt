@@ -1,11 +1,14 @@
 package com.example.notes
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -396,28 +399,57 @@ fun StatsScreen(
                     //
                     // **The `Text` below is unchanged otherwise** - same three facts, same rules
                     // about which empty screen is which.
-                    Text(
-                        // **What the interval is, and whether the log reaches it.** Two facts,
-                        // because they answer different questions: "what am I looking at" and "is
-                        // an empty table because nothing happened, or because nothing was recorded
-                        // yet". The second is the one that saves a person from thinking the screen
-                        // is broken.
-                        StatsFormat.span(span.minutes) + " · " + when {
-                            // **Not "no log yet" while the read is still running.** Those are two
-                            // different facts and only one of them is about the log.
+                    // **Three lines, one per question.** The operator's report: "this line is
+                    // wrong when clock time is selected. and there should be 3 lines: interval span,
+                    // before (from and to time and date), now (from and to time and date)."
+                    //
+                    // The old line concatenated a length with a fact about the log, so "20 hours 15
+                    // minutes · the log starts 30 Oct 2026, 03:00" was read as one claim and was
+                    // wrong whenever the clock picker was used: the length belonged to the span and
+                    // the date belonged to the log, and neither said which interval the table was
+                    // about. Three lines, each with one subject.
+                    //
+                    // **Both ends of both windows, in the dotted format the operator named.** A
+                    // length alone does not locate an interval, and a window described only by its
+                    // start leaves the reader doing arithmetic to find where it stopped.
+                    Column(modifier = Modifier.padding(top = 2.dp, bottom = 0.dp)) {
+                        Text(
+                            StatsFormat.span(span.minutes),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (showPrevious) {
+                            Text(
+                                "before: " + StatsFormat.dotted(previousSpan.fromMs) +
+                                    " — " + StatsFormat.dotted(previousSpan.toMs),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Text(
+                            "now: " + StatsFormat.dotted(span.fromMs) +
+                                " — " + StatsFormat.dotted(span.toMs),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        // **The log's reach, only when it is a problem.** "from the log" beside two
+                        // real windows says nothing; "the log starts …" is the one that stops a
+                        // person thinking an empty table means nothing happened.
+                        val reach = when {
                             !loaded -> "reading"
-                            // **Two different empty screens, told apart.** "Nothing was asked"
-                            // and "nothing was recorded yet" look identical in a table of zeroes,
-                            // and only the second means the screen is not showing you history.
                             !anyAtAll -> "no log yet"
-                            covered -> "from the log"
+                            covered -> null
                             oldest == null -> "no log yet"
-                            else -> "the log starts " + StatsFormat.instant(oldest)
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 2.dp, bottom = 0.dp),
-                    )
+                            else -> "the log starts " + StatsFormat.dotted(oldest)
+                        }
+                        if (reach != null) {
+                            Text(
+                                reach,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                     if (showPrevious) {
                         // **The previous window, named in full.** Its rule is unusual enough that a
                         // person who knows this code asked about it: it is the same LENGTH, ending
@@ -548,12 +580,20 @@ fun StatsScreen(
                             ),
                         )
                         CompareRow(
-                            "input",
-                            previous = StatsFormat.tokens(p.promptTokens).takeIf { showPrevious },
-                            current = StatsFormat.tokens(t.promptTokens),
+                            // **"input", with "new" beneath it, so the three numbers add up on
+                            // screen.** The operator's report: "for input subline 'new' so that
+                            // new+cached=input". Cached is a part of input, and a table that shows
+                            // input, then a cached row, then nothing saying which contains which
+                            // makes a reader add two numbers that must not be added.
+                            "input\n  · new",
+                            previous = StatsFormat.tokens(p.promptTokens - p.cachedTokens)
+                                .takeIf { showPrevious },
+                            current = StatsFormat.tokens(t.promptTokens - t.cachedTokens),
                             change = StatsFormat.change(
-                                RequestStats.change(p.promptTokens.toDouble(), t.promptTokens.toDouble())
-                                    .takeIf { showPrevious },
+                                RequestStats.change(
+                                    (p.promptTokens - p.cachedTokens).toDouble(),
+                                    (t.promptTokens - t.cachedTokens).toDouble(),
+                                ).takeIf { showPrevious },
                             ),
                         )
                         // **The shares carry no change column**, deliberately. A cache share moving
@@ -572,7 +612,11 @@ fun StatsScreen(
                             muted = true,
                         )
                         CompareRow(
-                            "output",
+                            // **"output", with "writing" beneath it.** The operator asked for the
+                            // word, and it is the right one: what is counted here is what the model
+                            // wrote, which is what a person pays for and what the bubble shows.
+                            // "thinking" is counted separately and is not output.
+                            "output\n  · writing",
                             previous = StatsFormat.tokens(p.completionTokens).takeIf { showPrevious },
                             current = StatsFormat.tokens(t.completionTokens),
                             change = StatsFormat.change(
@@ -606,7 +650,11 @@ fun StatsScreen(
                             ),
                         )
                         CompareRow(
-                            "per request",
+                            // **A subline under cost, not a row of its own.** The operator's report:
+                            // "per request should be subline under cost". It is the cost divided by
+                            // the count above it, so it belongs beside cost rather than in the list
+                            // of measured things.
+                            "  · per request",
                             previous = StatsFormat.perRequest(p.perRequest).takeIf { showPrevious },
                             current = StatsFormat.perRequest(t.perRequest),
                             change = StatsFormat.change(
@@ -651,20 +699,12 @@ fun StatsScreen(
                         }
                     }
                 }
-                item {
-                    Text(
-                        // The one thing a reader has to know to read the shares correctly, said
-                        // once rather than in every row.
-                        "Cached is part of input, not a column beside it. A dash is a number that " +
-                            "does not exist — an interval with no requests has no average, and that " +
-                            "is not the same as zero. A stopped answer was billed but never " +
-                            "reported its totals, so its cost cannot be shown. An interval that " +
-                            "reaches into a compacted hour counts that hour whole.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 12.dp),
-                    )
-                }
+                // **The explanatory paragraph is gone, on the operator's instruction**: "remove
+                // this, table is self explanatory". It was four facts about how to read the table,
+                // and each is now said by the table itself: "new" beneath "input" makes the
+                // containment visible, a dash is a dash, and the stopped answers have their own
+                // titled block. A note that explains what the numbers already show is a note that
+                // has to be kept true.
             }
         }
         }
@@ -809,7 +849,10 @@ private fun TimeDialog(
  */
 @Composable
 private fun ColumnHeading(showPrevious: Boolean, previousSpan: RequestStats.Interval) {
-    Row(modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         // The name column, empty here so the headings line up with the figures below.
         Spacer(modifier = Modifier.weight(1f))
         if (showPrevious) {
@@ -818,6 +861,9 @@ private fun ColumnHeading(showPrevious: Boolean, previousSpan: RequestStats.Inte
                 // and the honest answer is unusual enough to be worth stating: it is the same
                 // length, ending where this one starts. Not the whole of yesterday - comparing
                 // twelve hours against twenty-four would report a 46% drop caused by nothing.
+                //
+                // **The dates for both windows are on the lines above the table**, so this heading
+                // does not have to carry them and stays one word wide.
                 "before",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -825,7 +871,9 @@ private fun ColumnHeading(showPrevious: Boolean, previousSpan: RequestStats.Inte
                 maxLines = 1,
                 modifier = Modifier.width(PREVIOUS_WIDTH),
             )
+            Rule()
         }
+        Rule()
         Text(
             "now",
             style = MaterialTheme.typography.labelSmall,
@@ -834,6 +882,7 @@ private fun ColumnHeading(showPrevious: Boolean, previousSpan: RequestStats.Inte
             maxLines = 1,
             modifier = Modifier.width(CURRENT_WIDTH),
         )
+        Rule()
         Text(
             "",
             style = MaterialTheme.typography.labelSmall,
@@ -856,16 +905,29 @@ private fun CompareRow(
     change: String,
     muted: Boolean = false,
 ) {
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
-        Text(
-            name,
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (muted) MaterialTheme.colorScheme.onSurfaceVariant
-            else MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            modifier = Modifier.weight(1f),
-        )
+    // **A row is as tall as its name.** A metric with a subline (`input` over `· new`) is two
+    // lines, and `maxLines = 1` cut the second one off — the subline existed in the source and
+    // never reached the screen.
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            for (line in name.split("\n")) {
+                Text(
+                    line,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (muted) MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                )
+            }
+        }
+        // **Vertical rules between the columns.** The operator's report: "add vertical lines between
+        // table columns". Three columns of figures with nothing between them read as one run of
+        // numbers, and the eye needs a line to follow when a row is long.
         if (previous != null) {
+            Rule()
             Text(
                 previous,
                 style = MaterialTheme.typography.bodyMedium,
@@ -875,6 +937,7 @@ private fun CompareRow(
                 modifier = Modifier.width(PREVIOUS_WIDTH),
             )
         }
+        Rule()
         Text(
             current,
             style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
@@ -884,6 +947,7 @@ private fun CompareRow(
             maxLines = 1,
             modifier = Modifier.width(CURRENT_WIDTH),
         )
+        Rule()
         Text(
             change,
             style = MaterialTheme.typography.bodyMedium,
@@ -893,6 +957,24 @@ private fun CompareRow(
             modifier = Modifier.width(CHANGE_WIDTH),
         )
     }
+}
+
+/**
+ * A hairline between two columns — **and the spacing that belongs with it.**
+ *
+ * The operator asked for two things that are one: "add vertical lines between table columns" and
+ * "reduce space between metrics and before columns". A rule with a wide gap on either side is a rule
+ * that does not separate anything, so the padding is the rule's, not the row's.
+ */
+@Composable
+private fun Rule() {
+    Box(
+        modifier = Modifier
+            .padding(horizontal = 3.dp)
+            .width(1.dp)
+            .height(14.dp)
+            .background(MaterialTheme.colorScheme.outlineVariant),
+    )
 }
 
 /**

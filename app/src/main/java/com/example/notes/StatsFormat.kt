@@ -76,7 +76,7 @@ object StatsFormat {
      * share of 0%, and the screen prints a dash for it.
      */
     fun share(value: Double?): String =
-        if (value == null) NONE else String.format(Locale.UK, "%.3f%%", value * 100)
+        if (value == null) NONE else String.format(Locale.UK, "%.2f%%", value * 100)
 
     /**
      * A cost, in dollars, to **five decimals**.
@@ -150,6 +150,22 @@ object StatsFormat {
     fun instantMinute(ms: Long, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String =
         java.time.Instant.ofEpochMilli(ms).atZone(zone)
             .format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm"))
+
+    /**
+     * A dotted date and a time: `30.10.2026, 03:00`.
+     *
+     * **Its own format because the operator named it.** "format for time and date is '30.10.2026,
+     * 03:00'". The other instants on this screen say `30 Oct 2026` because that reads well in a
+     * sentence; the two lines that bracket an interval are a pair of values a person compares
+     * against a clock, and day-first dots are what a numeric date is read as.
+     *
+     * **Day before month, unambiguously.** `03.10` and `10.03` are different days and one of them
+     * means October in one country and March in another; the year in full is what makes the order
+     * readable rather than guessed.
+     */
+    fun dotted(ms: Long, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String =
+        java.time.Instant.ofEpochMilli(ms).atZone(zone)
+            .format(java.time.format.DateTimeFormatter.ofPattern("dd.MM.yyyy, HH:mm"))
 
     /**
      * An interval's length: `123 days 15 hours 51 minutes`, `14 hours 31 minutes`, `15 minutes`.

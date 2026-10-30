@@ -270,7 +270,12 @@ fun AgentChatScreen(
                         // works, and the person has learned not to trust the header.
                         //
                         // A project with no session is waiting for one, which is what it says now.
-                        text = session?.label(System.currentTimeMillis()) ?: "idle · waiting",
+                        // **The context, laconic.** The operator's report: "for agent status just
+                        // write waiting/working/stopped + current context (just '131k' for example
+                        // - laconic)". The figure is measured by the log and carried here by the
+                        // view model, so the words and the number come from one place.
+                        text = session?.label(System.currentTimeMillis(), viewModel.chatContextTokens)
+                            ?: "idle · waiting",
                         style = MaterialTheme.typography.labelSmall,
                         color = if (session?.needsYou == true) {
                             MaterialTheme.colorScheme.error

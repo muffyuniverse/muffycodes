@@ -499,7 +499,29 @@ data class AgentSession(
      * `idle · waiting` · `idle · finished` · `idle · reconnecting (4 s)` · `asked · 12 min` ·
      * `stopped · the phone stopped the app`.
      */
-    fun label(at: Long = 0): String = when (state) {
+    /**
+     * The state as a few words, and **the context beside it when there is a number to give.**
+     *
+     * The operator's report: "for agent status just write waiting/working/stopped + current context
+     * (just '131k' for example - laconic)". The words were already there; the number was not, and it
+     * is the one figure that explains why the agent is doing what it is doing — a session at 131k is
+     * one compaction away from a clear-up, and a session at 4k is not.
+     *
+     * **Passed in rather than read here**, because this is a data class with no file behind it: the
+     * log measures its own context, and a session that opened the file to answer a label would be
+     * reading the record from the state machine. Zero means "not measured", which prints nothing
+     * rather than printing a confident `0`.
+     */
+    fun label(at: Long = 0, contextTokens: Long = 0): String {
+        val words = words(at)
+        // **Zero means not measured, and prints nothing.** `ContextBudget.short` answers "off" for
+        // zero because that is right for a limit; it is wrong for a size, where zero would be a
+        // confident claim that the context is empty.
+        return if (contextTokens <= 0L) words else "$words · ${ContextBudget.short(contextTokens)}"
+    }
+
+    /** The state and its reason, without the measurement. */
+    private fun words(at: Long): String = when (state) {
         State.IDLE -> "idle · " + when (sub) {
             Sub.WAITING -> "waiting"
             Sub.FINISHED -> "finished"

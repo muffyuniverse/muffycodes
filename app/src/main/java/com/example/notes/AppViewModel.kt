@@ -2640,6 +2640,30 @@ class AppViewModel @JvmOverloads constructor(
     var chatLive: String by mutableStateOf("")
 
     /**
+     * **How big the conversation is, in tokens** — the number beside the agent's state.
+     *
+     * The operator's report: "for agent status just write waiting/working/stopped + current context
+     * (just '131k' for example - laconic)". Measured from the record rather than from the last
+     * request, because the question the figure answers is "how close is this to a clear-up", and
+     * that is a fact about what the next request would carry.
+     *
+     * Zero means not measured yet, and the label prints nothing rather than a confident `0`.
+     */
+    var chatContextTokens: Long by mutableStateOf(0L)
+        private set
+
+    /** Measures the open conversation's context, so the label can show it. */
+    fun measureChatContext() {
+        val project = chatProject ?: return
+        val size = try {
+            AgentLog.open(ws.projectDir(project)).contextTokens()
+        } catch (t: Throwable) {
+            return
+        }
+        if (size != chatContextTokens) chatContextTokens = size
+    }
+
+    /**
      * **The numbers the footer shows while a reply is arriving.**
      *
      * The operator's rule: "only footer token numbers should be updated on every chunk". So this is
@@ -2691,6 +2715,7 @@ class AppViewModel @JvmOverloads constructor(
         Trace.tap("chat", project)
         chatProject = project
         chatBox = null
+        measureChatContext()
         readChat(follow = true)
     }
 
@@ -2703,6 +2728,7 @@ class AppViewModel @JvmOverloads constructor(
         chatWriting = ""
         chatSpent = null
         chatPages = emptyMap()
+        chatContextTokens = 0L
     }
 
     /**
@@ -2722,7 +2748,17 @@ class AppViewModel @JvmOverloads constructor(
             } catch (t: Throwable) {
                 emptyList()
             }
-            main.post { applyChat(rows, follow) }
+            // **The size is measured with the rows**, off the main thread and from the same file,
+            // so the number beside the state cannot disagree with the conversation below it.
+            val size = try {
+                AgentLog.open(dir).contextTokens()
+            } catch (t: Throwable) {
+                0L
+            }
+            main.post {
+                applyChat(rows, follow)
+                if (size != chatContextTokens) chatContextTokens = size
+            }
         }
     }
 
