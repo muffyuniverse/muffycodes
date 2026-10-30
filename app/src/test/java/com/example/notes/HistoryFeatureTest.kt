@@ -588,10 +588,16 @@ class HistoryFeatureTest : FeatureTest() {
         }
         // **Written again through the editor**, so the history holds two versions with different
         // contents and "newest" is a real choice rather than the only one there is.
+        //
+        // **Waited for in the HISTORY, not in memory.** The first version of this test waited for
+        // `textOf(letter)` to say the new text, which is a fact about the file on disk — the commit
+        // that carries it lands a moment later. So `deletedIn` read a history that still held only
+        // the first draft, and the restore correctly brought back the wrong-but-newest-it-knew
+        // version. The bug was in the wait, and the assertion found it.
         scene.viewModel.openEditor(letter)
         scene.viewModel.saveEditor("the second draft")
-        scene.await("the second draft to be recorded", 20_000) {
-            scene.viewModel.textOf(letter) == "the second draft"
+        scene.await("both drafts to be in the history", 20_000) {
+            scene.versionsOf(letter).any { (_, text) -> text == "the second draft" }
         }
         scene.viewModel.closeEditor()
         scene.viewModel.delete(letter)
