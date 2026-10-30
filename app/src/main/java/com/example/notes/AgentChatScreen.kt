@@ -13,7 +13,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -292,7 +292,11 @@ fun AgentChatScreen(
             // a sibling that is measured first - so the cap only reserved a band of empty screen
             // between the last message and the box, and on a short conversation the band was most of
             // the screen.
-            BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            // **A plain `Box`, not `BoxWithConstraints`.** The constraints were read when this
+            // block was capped at three quarters of the window; `weight(1f)` does the whole job now,
+            // so the scope is unused - and lint is right that a subcomposition nobody reads is a
+            // cost paid for nothing.
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 if (box == null) {
                     Text(
                         "Nothing said yet. Write a request below and the agent will work " +
