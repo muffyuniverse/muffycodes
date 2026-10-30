@@ -804,7 +804,20 @@ class Workspace(val accountDir: File) {
      * A folder cannot be copied into itself: the copy would contain the folder it was
      * made from, forever.
      */
-    fun copy(file: File, into: File, deadline: Deadline = Deadline.none()): Result<File> {
+    fun copy(file: File, into: File, deadline: Deadline = Deadline.none()): Result<File> =
+        copy(file, into, deadline, name = "")
+
+    /**
+     * A copy, optionally under a different name — **because a copy that must keep its name costs two
+     * calls for one intention.**
+     *
+     * The old rule refused `copy` beside a `name` outright, on the reasoning that a copy-and-rename
+     * can fail after the copy exists and then the answer has to describe half of each. That is a real
+     * hazard, and the answer is not to forbid the act: it is to check the destination **before**
+     * anything is written, which is what every other act here already does. A name that is taken is
+     * refused while nothing exists, and the copy is one step.
+     */
+    fun copy(file: File, into: File, deadline: Deadline = Deadline.none(), name: String): Result<File> {
         // **A copy is a read of the source, so a lock does not stop it.** That is the whole
         // distinguishing line between a lock and a permission: copying a locked file is
         // how a person works on a draft of something they froze, and the original is
@@ -836,10 +849,19 @@ class Workspace(val accountDir: File) {
                 IllegalArgumentException("A folder cannot be copied inside itself")
             )
         }
-        val target = File(into, file.name)
+        // **The name is checked before the copy, not after it.** This is what makes copy-and-rename
+        // one honest step: everything that could refuse is asked while there is still nothing to undo.
+        val wanted = name.trim().ifEmpty { file.name }
+        if (wanted.contains("/") || wanted.contains("\\") || wanted == "." || wanted == "..") {
+            return Result.failure(IllegalArgumentException("\"$wanted\" is not a file name"))
+        }
+        if (isHidden(wanted)) {
+            return Result.failure(IllegalArgumentException("That name belongs to the app"))
+        }
+        val target = File(into, wanted)
         if (target.exists()) {
             return Result.failure(
-                IllegalArgumentException("There is already a \"${file.name}\" there"),
+                IllegalArgumentException("There is already a \"$wanted\" there"),
             )
         }
         return try {

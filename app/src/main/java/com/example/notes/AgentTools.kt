@@ -241,11 +241,14 @@ class AgentTools(
             ),
             spec(
                 "edit",
-                "Change part of a file. `grep` selects what is replaced: every match of the " +
-                    "pattern, the same one `read` takes, and `from`/`to` narrows it to those lines. " +
-                    "`from`/`to` alone replaces that whole block of lines; `at` inserts after that " +
-                    "line (0 puts it at the top); `text` writes the whole file. `replace` may be a " +
-                    "`read` call, which copies that call's answer out of another file without it " +
+                "Change part of a file. Say **where** with `grep`, `from`/`to` or `at`, and " +
+                    "**what** with `replace`: the two are one call, not two. `grep` replaces every " +
+                    "match, the same pattern `read` takes, narrowed to `from`/`to` when those are " +
+                    "given. `from`/`to` without `grep` replaces that block of lines; `at` inserts " +
+                    "after that line, 0 putting it at the top. `replace` is required with those and " +
+                    "is the text to put there — `\"replace\": \"\"` deletes the lines on purpose. " +
+                    "`text` writes the whole file and needs no other selector. `replace` may also be " +
+                    "a `read` call, which copies that call's answer out of another file without it " +
                     "passing through this conversation.",
                 // **Every argument the tool reads is in the example, and that is load-bearing.**
                 // `spec()` derives the schema from this sample, so a key left out of it is an
@@ -276,7 +279,8 @@ class AgentTools(
             spec(
                 "move",
                 "Move a file into a folder, or rename it inside its own folder. With `copy` the " +
-                    "original stays where it is. A name that is already taken is refused.",
+                    "original stays where it is, and `name` renames the copy in the same call. A " +
+                    "name that is already taken is refused, and nothing is written.",
                 "{\"path\":\"the file\",\"into\":\"the folder\",\"name\":\"the new name\"," +
                     "\"copy\":true}",
             ),
@@ -908,8 +912,16 @@ class AgentTools(
         // **A file is shown as it is.** There is no second view of any file here: `grep` is how a
         // model finds the row it wants, in the columns the file actually has, and a projection would
         // make what it reads differ from what a person sees when they open the file themselves.
+        // **A file that cannot be read is not an empty file.** Both used to answer `0` with no body,
+        // and the difference matters to the model: "nothing here" invites it to write something,
+        // while "this could not be read" tells it the phone refused and the file is not its to fix.
+        // Reported: "Empty vs. unreadable is indistinguishable: both give 0 with no body."
         val text = if (revision.isEmpty()) {
-            readText(file, deadline)
+            readWhole(file, deadline, "read").getOrElse {
+                return Result.failure(
+                    IllegalArgumentException(it.message ?: "${rel(file)} could not be read"),
+                )
+            }
         } else {
             val bytes = git.bytesAt(project, rel(file), revision)
                 ?: return Result.failure(
@@ -1041,7 +1053,11 @@ class AgentTools(
                     "`from`/`to`, and nothing else pairs: a call that means two edits cannot be checked",
             )
         }
-        val before = readText(file, deadline, "edit")
+        // **The write path asks, and a failure is a refusal.** `edit` computes the whole new file
+        // from what it just read, so an unreadable file that answered `""` would be rewritten as one
+        // empty line — which is exactly the data loss that was reported.
+        val before = readWhole(file, deadline, "edit")
+            .getOrElse { return refusal(it.message ?: "${rel(file)} could not be read, so nothing was changed") }
         val lines = before.split("\n")
         val text = when {
             hasText -> args.optString("text")
@@ -1168,6 +1184,25 @@ class AgentTools(
      * hundred kilobytes is exactly the case a tool must not refuse for being large.
      */
     private fun replacementText(args: JSONObject, deadline: Deadline): Result<String> {
+        // **A missing `replace` is not an empty one, and the difference was data loss.**
+        //
+        // `optString` answers `""` for a key that is not there, so `from`/`to` or `at` with no
+        // `replace` — which is what a model writes when it reads "`from`/`to` alone replaces that
+        // block of lines" and does not see that it must still say what with — deleted the block and
+        // reported success. Reported as "the file then reads back as a single blank line — the
+        // original contents are gone", and it is the whole file when the range was the whole file.
+        //
+        // Deleting is a real edit and it stays possible: `"replace": ""` says so. A key that is
+        // absent is a model that has not said what it wants yet, and the refusal tells it the two
+        // ways to mean nothing on purpose.
+        if (!args.has("replace")) {
+            return Result.failure(
+                IllegalArgumentException(
+                    "This edit says where but not what: give `replace` with the text to put " +
+                        "there, or \"replace\": \"\" to remove those lines on purpose",
+                ),
+            )
+        }
         val call = args.optJSONObject("replace") ?: return Result.success(args.optString("replace"))
         val tool = call.optString("tool").trim()
         if (tool != "read") {
@@ -1377,16 +1412,13 @@ class AgentTools(
         // is asked in one place per act rather than in a second tool that would drift from this one.
         // A copy may read a locked source, because it does not touch it.
         val copy = args.optBoolean("copy", false)
-        if (copy && name.isNotEmpty()) {
-            // **Two calls, not one with two meanings.** Copying and renaming in one act can fail
-            // after the copy exists, and then the answer has to describe half of each. The model
-            // can copy, then move the copy — and each answer it gets is about one thing.
-            return refusal(
-                "A copy keeps its name. Copy it, then move the copy to the name you want",
-            )
-        }
+        // **A copy may be given a name, and refusing it cost two calls for one intention.**
+        // Reported: "move with copy: true and a new name is refused — 'A copy keeps its name' — so a
+        // copy-and-rename costs two calls." The objection was that the pair can fail after the copy
+        // exists; the answer to that is to check the destination before writing anything, which
+        // `Workspace.copy` now does, rather than to forbid the act.
         val done = if (copy) {
-            ws.copy(file, into, deadline)
+            ws.copy(file, into, deadline, name)
         } else if (name.isEmpty()) {
             ws.move(file, into)
         } else {
@@ -1651,7 +1683,22 @@ class AgentTools(
      * A file that cannot be read is the empty string, which is what `Workspace.read` has always
      * answered — the checks above have already refused the cases that deserve a sentence.
      */
-    private fun readText(file: File, deadline: Deadline, tool: String = "read"): String {
+    private fun readText(file: File, deadline: Deadline, tool: String = "read"): String =
+        readWhole(file, deadline, tool).getOrElse { "" }
+
+    /**
+     * A file's text, or why it could not be read — **because those are not the same answer.**
+     *
+     * The old shape answered `""` for every failure, and an empty string is a real file: one empty
+     * line. `edit` reads the file to compute what changes, so a failed read meant it computed the
+     * new contents of a file it believed was empty, wrote that over the original, and answered "0 …
+     * changed". That is how a grep-and-replace emptied a file — the read failed and nothing said so.
+     *
+     * **The callers that show text keep the empty answer** ([readText]), because a file that will not
+     * open has nothing to show and `read` already refuses a non-text file before it gets here. The
+     * caller that *writes* has to know, and now it can.
+     */
+    private fun readWhole(file: File, deadline: Deadline, tool: String): Result<String> {
         val out = StringBuilder()
         try {
             InputStreamReader(file.inputStream(), Charsets.UTF_8).use { reader ->
@@ -1666,9 +1713,14 @@ class AgentTools(
         } catch (e: StoppedException) {
             throw e
         } catch (e: Throwable) {
-            return ""
+            return Result.failure(
+                IllegalArgumentException(
+                    "${rel(file)} could not be read (${e.message ?: "the phone refused it"}), " +
+                        "so nothing was changed",
+                ),
+            )
         }
-        return out.toString()
+        return Result.success(out.toString())
     }
 
     // ---- where the agent may stand ------------------------------------------

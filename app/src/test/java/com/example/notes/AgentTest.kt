@@ -1917,6 +1917,94 @@ class AgentTest {
         assertTrue("it asks for the command: $body", body.contains("which command"))
     }
 
+    // ---- edit: a change that reports success must leave the file changed ------
+
+    @Test
+    fun `a grep edit changes the match and leaves every other line exactly as it was`() {
+        // **Reported as data loss, and it must never be.** "The call answers 0 … changed, but the
+        // file then reads back as a single blank line — the original contents are gone. It happened
+        // every time, in two different folders."
+        //
+        // The file is written from `lines.mapIndexed` joined by newlines, so the failure this guards
+        // is not a partial write — it is an edit whose `before` came back empty. `readText` answers
+        // `""` for a file it cannot read, and an empty `before` is a file of one empty line, so a
+        // replacement would write that single line over a file full of text and report success.
+        ws.write(File(ws.repoOf("shopping"), "shapes.txt"), "circle red\nbox blue\nstar gold")
+        val body = tools().run(
+            Call("e1", "edit", """{"path":"shapes.txt","grep":"blue","replace":"green"}"""),
+        )
+
+        assertTrue("it worked: $body", body.startsWith(AgentLog.SUCCESS))
+        assertEquals(
+            "the one match changed and the rest is untouched",
+            "circle red\nbox green\nstar gold",
+            File(ws.repoOf("shopping"), "shapes.txt").readText(),
+        )
+    }
+
+    @Test
+    fun `an edit that says where but not what refuses, instead of deleting the lines`() {
+        // **This is the data loss, and it is one missing key.** `replacementText` read `replace`
+        // with `optString`, which answers `""` for a key that is not there — so `from`/`to` with no
+        // `replace`, which is exactly what the description invites ("`from`/`to` alone replaces that
+        // whole block of lines"), replaced the block with nothing and answered "0 … changed".
+        //
+        // Reported as: "The call answers 0 … changed, but the file then reads back as a single blank
+        // line — the original contents are gone. It happened every time." It did: `from`/`to` with
+        // no `replace` is a whole-file edit when the range is the whole file, and the model had no
+        // reason to look again because the answer said it worked.
+        val shapes = File(ws.repoOf("shopping"), "shapes.txt")
+        ws.write(shapes, "circle red\nbox blue\nstar gold")
+        val body = tools().run(
+            Call("e2", "edit", """{"path":"shapes.txt","from":1,"to":3}"""),
+        )
+
+        assertTrue("it is refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("and it says what is missing: $body", body.contains("replace"))
+        assertEquals(
+            "and every line is still there",
+            "circle red\nbox blue\nstar gold",
+            shapes.readText(),
+        )
+    }
+
+    @Test
+    fun `a file the agent created has a version, so the edit it just made can be undone`() {
+        // **The second half of the data-loss report, and the half that made it unrecoverable.**
+        // "history says 'has no versions yet' for those files, so there's no way to restore them."
+        //
+        // A file that was never committed has no version to go back to, so the first edit is the
+        // moment a mistake stops being undoable. `create` commits, so the file has a version from the
+        // moment it exists — this test is what says the commit reaches the file rather than only the
+        // folder it is in.
+        val body = tool("create", """{"path":"notes/plan.md","text":"first line"}""")
+        assertTrue("created: $body", body.startsWith(AgentLog.SUCCESS))
+
+        val history = tool("history", """{"path":"notes/plan.md"}""")
+
+        assertTrue("it has a version: $history", history.startsWith(AgentLog.SUCCESS))
+        assertFalse(
+            "and is not reported as having none: $history",
+            history.contains("has no versions yet"),
+        )
+        assertTrue("the version shows the line it held: $history", history.contains("first line"))
+    }
+
+    @Test
+    fun `deleting a block is still possible, and has to be said out loud`() {
+        // **The refusal above must not take a real edit away.** Removing lines is an edit a model
+        // needs, so an empty `replace` still means it — the difference is between a key that is
+        // absent and a key that says nothing, and only the second is a decision.
+        val shapes = File(ws.repoOf("shopping"), "shapes.txt")
+        ws.write(shapes, "circle red\nbox blue\nstar gold")
+        val body = tools().run(
+            Call("e3", "edit", """{"path":"shapes.txt","from":2,"to":2,"replace":""}"""),
+        )
+
+        assertTrue("it worked: $body", body.startsWith(AgentLog.SUCCESS))
+        assertEquals("the middle line is gone", "circle red\nstar gold", shapes.readText())
+    }
+
     // ---- the agent's own compaction: forget, by id ---------------------------
 
     private fun tools() = AgentTools(ws, "shopping", git, log)
