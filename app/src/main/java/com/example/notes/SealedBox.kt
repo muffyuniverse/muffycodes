@@ -98,11 +98,20 @@ object SealedBox {
         return try {
             val key = Keys.sharedSecret(ephemeralPublic, recipientSecretKey)
             val nonce = nonce(ephemeralPublic, recipientPublicKey)
-            SecretBox(key).open(nonce, box)
-                .map { Result.success(it) }
-                ?: Result.failure(IllegalStateException("The box did not open"))
+            // **`orElse(null)` and then a branch**, rather than `Optional.map` into a `Result`: mapping
+            // gives `Optional<Result<ByteArray>>`, and unwrapping that with `?:` produces
+            // `Result<Result<ByteArray>>` — which the compiler reports as a type mismatch three lines
+            // further down rather than at the mistake.
+            val plain = SecretBox(key).open(nonce, box).orElse(null)
+            if (plain == null) {
+                Result.failure(IllegalStateException("The box did not open"))
+            } else {
+                Result.success(plain)
+            }
         } catch (e: Throwable) {
-            Result.failure(IllegalStateException(Secrets.scrub(e.message ?: "The box did not open")))
+            Result.failure(
+                IllegalStateException(Secrets.scrub(e.message ?: "The box did not open")),
+            )
         }
     }
 

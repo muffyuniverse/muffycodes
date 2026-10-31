@@ -358,7 +358,14 @@ dependencies {
     // page-aligned, and Android 15+ (this app is targetSdk 37) requires 16 KB alignment, so the
     // library would not load on a modern phone. Measured by reading the ELF program headers of the
     // published AAR, not assumed.
-    implementation("com.codahale:xsalsa20poly1305:0.11.0")
+    // **The exclusion is load-bearing.** `xsalsa20poly1305` declares a dependency on
+    // `bcprov-jdk15on:1.60`, which would sit beside `bcprov-jdk18on` and make the release build fail
+    // with a hundred duplicate classes — the two artifacts contain the same packages under different
+    // names. `jdk18on` is the same provider built for Java 8 and later, and is a superset, so the old
+    // one is dropped rather than the new one.
+    implementation("com.codahale:xsalsa20poly1305:0.11.0") {
+        exclude(group = "org.bouncycastle", module = "bcprov-jdk15on")
+    }
     implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
 
     // **The browser, as its own module.** It wraps the WebView the phone already
