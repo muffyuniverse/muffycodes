@@ -873,7 +873,8 @@ class AgentSessionFeatureTest : FeatureTest() {
                             it.relativeTo(back).path + (if (it.isDirectory) "/" else "")
                         }
                     }
-                },
+                } + " movedAway=" + away.isDirectory +
+                " originalInode=" + (away.listFiles()?.size ?: -1),
         ) {
             scene.viewModel.sessionOf("groceries") == null
         }
