@@ -556,6 +556,24 @@ class AppViewModel @JvmOverloads constructor(
     val currentProject: String? get() = workspace?.projectAt(path)
 
     /**
+     * What the open project **is**, for the one-word caption in the bar — or null at the account root.
+     *
+     * **Read from the metadata on every ask rather than held in state.** It is one small file in a
+     * folder the screen is already showing, the read is a few hundred bytes, and a copy held in a
+     * field would be a second answer to "what type is this project" that a change could leave stale —
+     * the same mistake the lock's redraw was, one screen over.
+     *
+     * **Null at the root, and null for a folder that is not a project.** The caption is about a
+     * project; a folder inside one is the project's, and the bar still names the project's type
+     * because that is what the folder belongs to. Only the account root has no type to show.
+     */
+    val typeOfProject: AppType? get() {
+        val project = currentProject ?: return null
+        val ws = workspace ?: return null
+        return ProjectMeta.read(ws.projectDir(project)).type
+    }
+
+    /**
      * True when the account's own screen is showing: **the list of projects**.
      *
      * There is no `projects/` folder to walk into any more — the account root *is* the list, which
@@ -2574,6 +2592,54 @@ class AppViewModel @JvmOverloads constructor(
         }
     }
 
+    /**
+     * Changes what the open project **is**, copying the new type's preset in.
+     *
+     * ## Why this is an act and not a setting
+     *
+     * The type decides what the app offers the project — a release lane, a signing key, the workflow
+     * it starts with, and what the agent is told. So changing it is not a label: the new preset is
+     * copied in, and **the old one is left exactly where it is**. A project that changes type is a
+     * project somebody has already worked in, and an app that tidied up after the change would be
+     * deleting work it was not asked to delete.
+     *
+     * ## Why it is committed and not sent
+     *
+     * The copy is a change like any other: it belongs in the project's own history, and it goes to
+     * GitHub when the person syncs. Creating a project sends its preset because the repository was
+     * being made at that moment; changing a type is an edit to something that already exists, and the
+     * app does not push edits.
+     */
+    fun changeProjectType(project: String, type: AppType) {
+        val ws = workspace ?: return
+        val g = git ?: return
+        val dir = ws.projectDir(project)
+        if (!dir.isDirectory) {
+            message = "There is no project called \"$project\""
+            return
+        }
+        Trace.tap("project type", "${type.id} for $project")
+        busy = true
+        onWorker {
+            val copied = Presets.copy(ws.accountDir, dir, type)
+            if (copied.written.isNotEmpty()) {
+                g.commitOutcome(project, "Change the project type to ${type.label}")
+            }
+            // **The preset a person had is theirs, and the new one may not replace it.** Saying so
+            // is the difference between "it did not work" and "it kept the file you wrote".
+            Trace.note(
+                "project-type",
+                "$project · ${type.id} · wrote ${copied.written.size}, kept ${copied.kept.size}",
+            )
+            main.post {
+                busy = false
+                message = copied.said()
+                refresh()
+                refreshChanges()
+            }
+        }
+    }
+
     /** Renames a project and its repository together (§3). */
     fun renameProject(project: String, newName: String) {
         val ws = workspace ?: return
@@ -2839,6 +2905,17 @@ class AppViewModel @JvmOverloads constructor(
                 { accounts.account(login)?.author() ?: DEFAULT_AUTHOR },
                 { settings.historyLength },
             ).cloneInto(repo.name, repo.cloneUrl)
+            // **An imported project is asked, not assumed.** It arrives with no metadata, and no
+            // metadata means "nobody has said" — which is true, and is the answer that makes the
+            // caption in its bar a question. Writing `ANDROID` here would be the app deciding what a
+            // repository is from the fact that it exists, and a web project imported tomorrow would
+            // be told to build with Gradle.
+            //
+            // **The prompt is not copied either.** The person pulled in a project that already works;
+            // adding a workflow to it would be a file in their next push that they never wrote.
+            if (result.success) {
+                ProjectMeta.write(ws.projectDir(repo.name), ProjectMeta(AppType.LATER))
+            }
             main.post {
                 busy = false
                 message = result.message

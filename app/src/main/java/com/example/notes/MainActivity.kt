@@ -109,6 +109,8 @@ private sealed interface Pending {
     data class RestoreDeleted(val folder: File) : Pending
     data class DeleteEntry(val entry: Entry) : Pending
     data class ReplaceProject(val project: String) : Pending
+    /** What the project is: the one-word caption in the bar, tapped. */
+    data class ChangeType(val project: String) : Pending
 }
 
 /**
@@ -483,6 +485,15 @@ private fun AppRoot(viewModel: AppViewModel) {
                 // **The same function the agent's `downloads` tool calls**, so a person's export and
                 // the agent's are the same bytes from the same place.
                 onRowExport = { project -> tap("export", project); viewModel.exportArtifact(project) },
+                // **The caption in the bar is the control**, so this is the act it starts. Recorded
+                // as its own tap name, because "changed what this project is" is not "made a
+                // project" and a log that conflated them could not answer when it changed.
+                onChangeType = {
+                    viewModel.currentProject?.let {
+                        tap("project type", it)
+                        pending = Pending.ChangeType(it)
+                    }
+                },
                 onCreateFile = { tap("new file"); viewModel.currentDir?.let { pending = Pending.NewFile(it) } },
                 onCreateFolder = { tap("new folder"); viewModel.currentDir?.let { pending = Pending.NewFolder(it) } },
                 onUploadFiles = { pickingFiles = tap("upload files"); pickFiles.launch(arrayOf("*/*")) },
@@ -678,6 +689,16 @@ private fun Dialogs(
                       Trace.tap("confirm rename project", pending.project)
                       viewModel.renameProject(pending.project, name)
                   },
+        )
+
+        is Pending.ChangeType -> ChangeTypeDialog(
+            project = pending.project,
+            current = viewModel.typeOfProject,
+            onDismiss = dismiss,
+            onPick = { type ->
+                dismiss()
+                viewModel.changeProjectType(pending.project, type)
+            },
         )
 
         is Pending.PublishProject -> PublishProjectUI(

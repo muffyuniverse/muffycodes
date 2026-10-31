@@ -344,6 +344,79 @@ class ProjectsFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `the bar names what the project is, and a folder inside one is still that project`() {
+        // **The one word is the whole point**: it used to say "project", which is a fact nobody
+        // needs. What a person does not know is what the app thinks this project is, and that
+        // decides what they are offered here.
+        scene.viewModel.createLocalProject("scratch", AppType.ANDROID)
+        scene.await("the local project", 30_000) {
+            scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
+        }
+        scene.open("scratch")
+
+        assertEquals("the type is what the bar says", AppType.ANDROID, scene.viewModel.typeOfProject)
+
+        // A folder inside the project is the project's, so the bar still answers for it.
+        assertTrue("the folder was made", scene.viewModel.createFolder("src"))
+        scene.await("the folder to be on disk", 20_000) {
+            File(scene.workspace!!.projectDir("scratch"), "src").isDirectory
+        }
+        scene.open("scratch", "src")
+        assertEquals(
+            "a folder inside a project still names the project's type",
+            AppType.ANDROID,
+            scene.viewModel.typeOfProject,
+        )
+
+        // And at the account root there is no project to describe.
+        while (scene.viewModel.canGoUp) scene.viewModel.up()
+        assertNull("the root has no type", scene.viewModel.typeOfProject)
+    }
+
+    @Test
+    fun `changing the type copies the new preset and keeps the old one`() {
+        // **The act the caption starts.** It was unreachable before this: `ProjectMeta.write` had
+        // one caller, in the create path, so "a type change keeps the old pair" was a tested
+        // function nobody could run.
+        scene.viewModel.createLocalProject("scratch", AppType.ANDROID)
+        scene.await("the local project", 30_000) {
+            scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
+        }
+
+        scene.viewModel.changeProjectType("scratch", AppType.WEB)
+        scene.await("the type to change", 30_000) { !scene.viewModel.busy }
+
+        val dir = scene.workspace!!.projectDir("scratch")
+        assertTrue("the web workflow arrived", File(dir, ".github/workflows/web.yml").isFile)
+        assertTrue(
+            "and the android one is still there, untouched",
+            File(dir, ".github/workflows/android.yml").isFile,
+        )
+        assertEquals("the record says what it is now", AppType.WEB, ProjectMeta.read(dir).type)
+        assertEquals("and the bar agrees", AppType.WEB, scene.viewModel.typeOfProject)
+    }
+
+    @Test
+    fun `changing the type is recorded in the project's own history`() {
+        // The app's rule: every act leaves a mark. The copy is an edit to a project that already
+        // exists, so it belongs in that project's history — and it is **not** pushed, because the
+        // person pushes.
+        scene.viewModel.createLocalProject("scratch", AppType.ANDROID)
+        scene.await("the local project", 30_000) {
+            scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
+        }
+        val before = scene.repo("scratch").log(null).size
+
+        scene.viewModel.changeProjectType("scratch", AppType.WEB)
+        scene.await("the type to change", 30_000) { !scene.viewModel.busy }
+
+        assertTrue(
+            "the change is a version of the project: ${scene.repo("scratch").log(null).size}",
+            scene.repo("scratch").log(null).size > before,
+        )
+    }
+
+    @Test
     fun `a project made as a web app gets a web workflow, not an android one`() {
         // The picker is only worth having if the answer reaches the copy. This is that link.
         scene.viewModel.createLocalProject("site", AppType.WEB)

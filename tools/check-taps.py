@@ -88,6 +88,10 @@ VOCABULARY = {
     "model", "provider", "effort", "add model", "remove model", "read catalogue",
     # making a project, which is a different act from adding one that is already on GitHub
     "new project", "local project", "confirm add project",
+    # **What a project is.** Its own name rather than "new project", because the two are different
+    # questions: one makes a project and the other changes what an existing one is, and a log that
+    # called both "project" could not answer "when did this project stop being an Android app".
+    "project type",
     # replacing a copy that is already here
     "replace", "confirm replace",
     # the agent's conversation: one project's, and the turns inside it

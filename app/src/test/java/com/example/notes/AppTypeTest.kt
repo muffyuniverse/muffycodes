@@ -21,12 +21,39 @@ class AppTypeTest {
         .apply { mkdirs() }
 
     @Test
-    fun `a project with no metadata is an Android app, because every project before this was one`() {
-        // **The default is the migration.** Defaulting to NONE would quietly take the release path
-        // away from every project that already exists.
+    fun `a project with no metadata is undecided, which is a question rather than an answer`() {
+        // **It used to answer `ANDROID`, on the reasoning that every project before the field existed
+        // was one.** That was right about the past and wrong as a default: it told the agent to build
+        // with Gradle in repositories that have no Gradle in them, and it made "nobody has chosen" and
+        // "somebody chose Android" the same stored value.
         val dir = temp()
-        assertEquals(AppType.ANDROID, ProjectMeta.read(dir).type)
+        val type = ProjectMeta.read(dir).type
+        assertEquals(AppType.LATER, type)
+        assertTrue("and it says so, so the bar is shown", type.undecided)
         dir.deleteRecursively()
+    }
+
+    @Test
+    fun `custom is an answer, and is not asked about again`() {
+        // The difference the two new types exist for. A bar that kept asking a person who said "I
+        // will write this myself" would be the app refusing to hear the answer.
+        assertFalse("custom is decided", AppType.CUSTOM.undecided)
+        assertTrue("later is not", AppType.LATER.undecided)
+        assertTrue("and neither has a preset", AppType.CUSTOM.bare && AppType.LATER.bare)
+        assertFalse("while a real type does", AppType.ANDROID.bare)
+    }
+
+    @Test
+    fun `decide later has a prompt and no workflow, and custom has neither`() {
+        // **Later is a prompt because an empty brief makes the agent guess**, and a brief that knows
+        // it does not know is the one thing that stops the guessing. Custom is empty on purpose: the
+        // person said they would write it.
+        assertNull("no workflow for an unanswered question", WorkflowTemplates.forType(AppType.LATER))
+        assertNull("and none for a person writing it themselves", WorkflowTemplates.forType(AppType.CUSTOM))
+        val later = WorkflowTemplates.promptFor(AppType.LATER).orEmpty()
+        assertTrue("the agent is told what the choices are", later.contains("Android app"))
+        assertTrue("and that it should look before asking", later.contains("Read the project first"))
+        assertNull("while custom gets no text at all", WorkflowTemplates.promptFor(AppType.CUSTOM))
     }
 
     @Test
@@ -72,14 +99,16 @@ class AppTypeTest {
         assertTrue(AppType.ANDROID.signed)
         assertFalse(AppType.WEB.signed)
         assertFalse(AppType.PLAIN.signed)
-        assertFalse(AppType.NONE.signed)
+        assertFalse(AppType.CUSTOM.signed)
+        assertFalse(AppType.LATER.signed)
     }
 
     @Test
-    fun `each type that can build has a template, and just files has none`() {
-        // A folder of notes has no build, so a workflow for it would be a file that fails on every
-        // push. That is worse than no file.
-        assertNull(WorkflowTemplates.forType(AppType.NONE))
+    fun `each type that can build has a template, and the bare ones have none`() {
+        // A workflow written for a project whose type is unknown would be a guess, and a wrong one
+        // fails on every push and looks like the project is broken. Worse than no file.
+        assertNull(WorkflowTemplates.forType(AppType.CUSTOM))
+        assertNull(WorkflowTemplates.forType(AppType.LATER))
         for (type in listOf(AppType.ANDROID, AppType.WEB, AppType.PLAIN)) {
             val name = WorkflowTemplates.forType(type)
             assertTrue("$type has a template", name != null && name in WorkflowTemplates.ALL)
@@ -224,17 +253,17 @@ class AppTypeTest {
     }
 
     @Test
-    fun `just files gets no workflow, and says so rather than failing`() {
+    fun `custom gets no workflow, and says so rather than failing`() {
         val ws = account()
         val project = File(ws.accountDir, "notes").apply { mkdirs() }
 
-        val copied = Presets.copy(ws.accountDir, project, AppType.NONE)
+        val copied = Presets.copy(ws.accountDir, project, AppType.CUSTOM)
 
         assertFalse(
-            "no workflow was invented for a folder of notes",
+            "no workflow was invented for a project whose type is unknown",
             File(project, ".github").exists(),
         )
-        assertEquals("and the type is still recorded", AppType.NONE, ProjectMeta.read(project).type)
+        assertEquals("and the type is still recorded", AppType.CUSTOM, ProjectMeta.read(project).type)
         ws.accountDir.deleteRecursively()
     }
 

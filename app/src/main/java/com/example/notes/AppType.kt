@@ -57,24 +57,50 @@ enum class AppType(
         blurb = "Builds and tests. Nothing to sign, and no release to publish.",
         signed = false,
     ),
-    NONE(
-        id = "none",
-        label = "Just files",
-        blurb = "No build and no workflow. For notes, documents, or a folder you keep by hand.",
+    CUSTOM(
+        id = "custom",
+        label = "Custom",
+        blurb = "No preset at all. You write this project's instructions and its workflow yourself.",
+        signed = false,
+    ),
+    LATER(
+        id = "later",
+        label = "Decide later",
+        blurb = "The agent is told what the choices are and can help you pick when you know.",
         signed = false,
     ),
     ;
 
+    /**
+     * True while the question **"what is this project?"** has not been answered.
+     *
+     * [LATER] is the only one. It is what a project gets when nobody has chosen, including every
+     * project made before the field existed — and it is what the slim bar inside a project is shown
+     * for. [CUSTOM] is not undecided: it is a person saying "I will write this myself", which is an
+     * answer, and a bar asking them again would be the app refusing to hear it.
+     */
+    val undecided: Boolean get() = this == LATER
+
+    /** True when this type has no preset to copy — the person supplies everything. */
+    val bare: Boolean get() = this == CUSTOM || this == LATER
+
     companion object {
         /**
-         * The type a project with no recorded answer gets.
+         * The type a project with no recorded answer gets: **[LATER], which is a question.**
          *
-         * **`ANDROID`, because every project made before this field existed was one.** The app has
-         * only ever built Android apps, so a project with no answer is an Android app that has not
-         * been asked about yet — and defaulting to [NONE] would quietly take the release path away
-         * from every existing project, which is the worse mistake.
+         * **It used to be `ANDROID`, on the reasoning that every project made before the field existed
+         * was one.** That was right about the past and wrong as a default: it told the agent to build
+         * with Gradle in repositories that have no Gradle in them, and it made "nobody has chosen" and
+         * "somebody chose Android" the same stored value — so the app could not offer the choice
+         * without guessing which of the two a project was.
+         *
+         * An unanswered question is a better answer than a wrong one, and it is visible: the bar
+         * inside the project says so, and one tap fixes it.
          */
-        val DEFAULT = ANDROID
+        val DEFAULT = LATER
+
+        /** What the picker offers, in the order a person reads it. */
+        val CHOOSABLE: List<AppType> = listOf(ANDROID, WEB, PLAIN, CUSTOM, LATER)
 
         /**
          * The type [id] names, or null when it names none.

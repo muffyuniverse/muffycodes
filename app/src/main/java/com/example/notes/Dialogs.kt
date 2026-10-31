@@ -427,8 +427,8 @@ fun NewProjectDialog(
     onCreate: (name: String, licence: String, type: AppType) -> Unit,
     /** **Local**: no repository on GitHub, no licence to seed, nothing to push to. */
     local: Boolean = false,
-    /** The types the system project has presets for. Empty means the picker is not offered. */
-    types: List<AppType> = AppType.entries.filter { it != AppType.NONE },
+    /** What the picker offers. Empty means the question is not asked. */
+    types: List<AppType> = AppType.CHOOSABLE,
 ) {
     var name by remember { mutableStateOf("") }
     var licence by remember { mutableStateOf("gpl-3.0") }
@@ -464,30 +464,34 @@ fun NewProjectDialog(
                 // afterwards — editable, lockable, and the project's — so this is a question about
                 // where to start, not about what the project is allowed to become.
                 //
-                // It is offered as a row of choices rather than a dropdown because there are three
-                // of them and a dropdown would hide two.
+                // **A column and not a row.** Five labels do not fit across a phone, and a row that
+                // wraps reads as two unrelated groups. One line each, with the chosen one's blurb
+                // underneath, says what the choice changes without a second screen.
+                //
+                // **"Decide later" is the default and is a real answer.** The agent is told what the
+                // choices are and can help; a wrong guess would tell it to build with Gradle in a
+                // repository that has no Gradle in it.
                 if (types.isNotEmpty()) {
                     Text(
                         "What is it?",
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        for (choice in types) {
-                            val chosen = choice == type
-                            Text(
-                                text = choice.label,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (chosen) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurface
-                                },
-                                modifier = Modifier
-                                    .clickable { type = choice }
-                                    .padding(vertical = 6.dp, horizontal = 2.dp),
-                            )
-                        }
+                    for (choice in types) {
+                        val chosen = choice == type
+                        Text(
+                            text = if (chosen) "✓ ${choice.label}" else choice.label,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (chosen) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { type = choice }
+                                .padding(vertical = 4.dp),
+                        )
                     }
                     Text(
                         type.blurb,
@@ -534,6 +538,76 @@ fun NewProjectDialog(
             ) { Text("Create") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/**
+ * **What this project is** — the picker, opened from the caption in the bar.
+ *
+ * ## Why the current one is shown, and shown first
+ *
+ * A picker that does not say what is chosen leaves a person unsure whether the tap worked, and one
+ * that lists the choices in a fixed order makes them hunt for the answer they already gave. The
+ * current type is marked, and it is the first thing read.
+ *
+ * ## Why changing away is not warned about
+ *
+ * It deletes nothing. The new preset is copied in, the old files stay, and the metadata records the
+ * new answer — so the worst outcome is a file a person did not want, which is visible in the folder
+ * and removable. A warning here would be a warning about something reversible, which teaches people
+ * to dismiss warnings.
+ */
+@Composable
+fun ChangeTypeDialog(
+    project: String,
+    current: AppType?,
+    onDismiss: () -> Unit,
+    onPick: (AppType) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("What is $project?") },
+        text = {
+            Column(
+                modifier = Modifier.heightIn(max = 420.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                for (type in AppType.CHOOSABLE) {
+                    val chosen = type == current
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onPick(type) }
+                            .padding(vertical = 8.dp),
+                    ) {
+                        Text(
+                            // **The mark is the answer, not a separate row.** A "current:" line
+                            // above the list would be a second place the same fact is written.
+                            text = if (chosen) "✓ ${type.label}" else type.label,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = if (chosen) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                        )
+                        Text(
+                            type.blurb,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                // **What happens to what is already here.** The one thing a person might fear is
+                // that changing the answer loses their workflow, and saying so costs a line.
+                Text(
+                    "Nothing already in the project is removed. The new preset is added beside it.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 

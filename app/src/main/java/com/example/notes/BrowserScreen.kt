@@ -124,6 +124,8 @@ fun BrowserScreen(
      * account's own list is and not inside a project where the answer would be a subset.
      */
     onOpenStats: () -> Unit = {},
+    /** Opens the picker for the open project's type. One word, in the bar, tap to change. */
+    onChangeType: () -> Unit = {},
 ) {
     val projects = viewModel.atProjects
     val here = viewModel.path
@@ -156,18 +158,40 @@ fun BrowserScreen(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
+                        // **The second line is the type, and it is the control.** It used to say
+                        // "project", which is a fact nobody needs: a person who is inside a folder
+                        // and looking at a back arrow already knows they are in a project. What
+                        // they do not know is *what the app thinks this project is* — and that
+                        // decides what they are offered here, so it is the one word worth the line.
+                        //
+                        // **Tap to change it**, because the fact and the act belong together: a
+                        // setting buried in a menu is one a person reads as unchangeable, and this
+                        // is the place they would look for it.
+                        val type = viewModel.typeOfProject
                         val small = when {
                             here.isEmpty() -> "your projects"
-                            here.size == 1 -> "project"
+                            type != null -> type.label
                             else -> here.dropLast(1).joinToString(" › ")
                         }
                         if (small.isNotEmpty()) {
                             Text(
                                 text = small,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                // **A type that is undecided is drawn as a question**, not as an
+                                // answer: the colour is the app's way of saying "this is still
+                                // open" without a second line of words.
+                                color = if (type?.undecided == true) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
+                                modifier = if (type != null) {
+                                    Modifier.clickable(onClick = onChangeType)
+                                } else {
+                                    Modifier
+                                },
                             )
                         }
                     }

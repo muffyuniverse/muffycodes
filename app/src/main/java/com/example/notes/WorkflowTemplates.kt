@@ -67,20 +67,23 @@ object WorkflowTemplates {
         AppType.ANDROID -> androidPrompt()
         AppType.WEB -> webPrompt()
         AppType.PLAIN -> plainPrompt()
-        AppType.NONE -> null
+        AppType.CUSTOM -> null
+        AppType.LATER -> laterPrompt()
     }
 
     /**
      * The template for an [AppType].
      *
-     * **Null for [AppType.NONE]**, which is a folder the person keeps notes in. It has no build, so it
-     * gets no workflow, and a template for it would be a file that fails on every push.
+     * **Null for the two types with no preset.** [AppType.CUSTOM] is a person saying they will write it
+     * themselves, and [AppType.LATER] is the question not yet answered — for both, a workflow written
+     * now would be a guess, and a wrong workflow is worse than none because it fails on every push and
+     * looks like the project is broken.
      */
     fun forType(type: AppType): String? = when (type) {
         AppType.ANDROID -> ANDROID
         AppType.WEB -> WEB
         AppType.PLAIN -> PLAIN
-        AppType.NONE -> null
+        AppType.CUSTOM, AppType.LATER -> null
     }
 
     /**
@@ -196,6 +199,69 @@ object WorkflowTemplates {
 
         **Only `main` publishes.** A pull request builds so somebody can see whether it would work;
         publishing from a branch is how a work in progress becomes the thing people are looking at.
+    """.trimIndent()
+
+    /**
+     * The prompt for a project whose type **nobody has chosen yet.**
+     *
+     * ## Why this is a prompt and not an empty file
+     *
+     * "Decide later" is an answer, and an empty brief would make the agent guess — which is the one
+     * thing this type exists to prevent. So instead of pretending to know what the project is, the
+     * brief **knows that it does not know**, says what the choices are, and tells the agent how to
+     * help the person pick.
+     *
+     * ## Why it is copied once and not refreshed
+     *
+     * The same rule as every other preset: a file in a project belongs to that project. An app that
+     * rewrote it on every refresh would be an app that can undo an edit — and a person who wants the
+     * newest version can copy it from the system project themselves.
+     */
+    private fun laterPrompt(): String = """
+        # What is this project?
+
+        Nobody has said yet, and the app is not going to guess. This brief exists so that you do not
+        guess either: find out what the project is before you decide how to build it, and ask the
+        person when the folder does not tell you.
+
+        ${'$'}common
+
+        ## What the project can be
+
+        The person picks one of these, in the app, and it changes what you are told here and what
+        workflow the project starts with:
+
+        **An Android app.** Built with Gradle, tested with Robolectric, and released as an APK that
+        must be signed. The signing key lives in a GitHub environment called `release`, never in the
+        repository.
+
+        **A web app.** Built with a lockfile and published — usually to GitHub Pages. Nothing is
+        signed; what makes it trusted is the domain.
+
+        **A program or a script.** One build step, whatever the project's own tooling is. Nothing is
+        signed and there is no release.
+
+        **Custom.** The person writes the instructions and the workflow themselves, and you follow
+        them.
+
+        ## How to help them choose
+
+        **Read the project first.** A `build.gradle.kts` with `com.android.application` is an Android
+        app; a `package.json` with a `build` script is probably a web app; a `Makefile` or a
+        `pyproject.toml` with no app manifest is a program. Say what you found and what it suggests.
+
+        **Say what changes, not what the type is called.** A person choosing between "Android" and
+        "program" needs to know that one gets a release job and a signing key and the other does not.
+
+        **Do not ask before you look**, and do not look for long. Two or three files tell you most of
+        it, and a question the folder already answered is a question that costs the person a turn.
+
+        **If it is genuinely ambiguous, say so and offer the two candidates.** "There is a Gradle build
+        and a web folder — is this the app, or the site the app is served with?" is answerable. "What
+        kind of project is this?" is not.
+
+        **Then tell them where to answer.** The app shows a bar inside the project while this is
+        undecided, and it is one tap. You do not need to be the one who changes it.
     """.trimIndent()
 
     private fun plainPrompt(): String = """
