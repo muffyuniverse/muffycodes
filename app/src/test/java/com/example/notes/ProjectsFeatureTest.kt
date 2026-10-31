@@ -374,6 +374,48 @@ class ProjectsFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `a project made with decide later gets the brief that knows it does not know`() {
+        // **The whole reason "later" is a prompt and not an empty file.** An empty brief makes the
+        // agent guess, and a guess in the brief is the most expensive kind of wrong: everything after
+        // it inherits it. This brief says so out loud and tells the agent how to help.
+        scene.viewModel.createLocalProject("scratch", AppType.LATER)
+        scene.await("the local project", 30_000) {
+            scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
+        }
+
+        val dir = scene.workspace!!.projectDir("scratch")
+        assertFalse(
+            "no workflow was invented for an unanswered question",
+            File(dir, ".github").exists(),
+        )
+        val brief = File(dir, AgentPrompt.PROJECT_FILE).readText()
+        assertTrue("it says nobody has chosen", brief.contains("Nobody has said yet"))
+        assertTrue("it names the choices", brief.contains("Android app") && brief.contains("web app"))
+        assertTrue("it says to look before asking", brief.contains("Read the project first"))
+        assertTrue(
+            "and it says where the answer is given",
+            brief.contains("bar inside the project"),
+        )
+        assertEquals("and the type is recorded", AppType.LATER, ProjectMeta.read(dir).type)
+    }
+
+    @Test
+    fun `a project made custom gets no preset at all, and is not asked again`() {
+        // Custom is an ANSWER: the person said they will write it. A brief written for them would be
+        // the app talking over them, and a bar asking again would be the app not listening.
+        scene.viewModel.createLocalProject("scratch", AppType.CUSTOM)
+        scene.await("the local project", 30_000) {
+            scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
+        }
+
+        val dir = scene.workspace!!.projectDir("scratch")
+        assertFalse("no workflow", File(dir, ".github").exists())
+        assertFalse("and no brief either", File(dir, AgentPrompt.PROJECT_FILE).exists())
+        assertEquals("the type is recorded", AppType.CUSTOM, ProjectMeta.read(dir).type)
+        assertFalse("and the bar stops asking", ProjectMeta.read(dir).type.undecided)
+    }
+
+    @Test
     fun `changing the type copies the new preset and keeps the old one`() {
         // **The act the caption starts.** It was unreachable before this: `ProjectMeta.write` had
         // one caller, in the create path, so "a type change keeps the old pair" was a tested
