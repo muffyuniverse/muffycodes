@@ -1,16 +1,11 @@
 package com.example.notes
 
-import androidx.test.core.app.ApplicationProvider
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
-import org.junit.Before
 import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
 import java.io.File
 
 /**
@@ -20,20 +15,7 @@ import java.io.File
  * signing key to whatever repository the person had just synced would be the app widening its own
  * blast radius without being asked, and the key is the most consequential secret it can hold.
  */
-@RunWith(RobolectricTestRunner::class)
-class SigningFeatureTest {
-
-    private lateinit var scene: Scenario
-
-    @Before
-    fun setUp() {
-        scene = Scenario()
-    }
-
-    @After
-    fun tearDown() {
-        scene.root.deleteRecursively()
-    }
+class SigningFeatureTest : FeatureTest() {
 
     /** A key in the project's own folder, shaped like the one a person would have. */
     private fun putKey(project: String) {
