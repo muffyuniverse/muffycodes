@@ -84,10 +84,26 @@ class AgentTools(
      */
     private val github: () -> GitHub? = { null },
     private val githubToken: () -> String? = { null },
+    /**
+     * Whether starting a workflow also records it as approved.
+     *
+     * Read per call like the other settings. **Off is the default**, so the checkmark in the workflow
+     * list keeps meaning "a person read these bytes" — see [SettingsStore.recordAgentWorkflowApprovals].
+     */
+    private val recordAgentWorkflowApprovals: () -> Boolean = { false },
 ) {
 
     /** The project's own folder: what the agent stands in. */
     val projectDir: File get() = ws.projectDir(project)
+
+    /**
+     * Which workflows the agent may start.
+     *
+     * **Built from the account's state folder, not the project's**, because an approval is a fact
+     * about this phone's trust in a file rather than something to commit and push. A workflow approved
+     * here must not arrive pre-approved on somebody else's phone.
+     */
+    private val workflows: Workflows get() = Workflows(File(ws.accountDir, Workspace.STATE_DIR))
 
     /**
      * The part of it that lives on GitHub — **which is the project's folder itself.**
@@ -101,6 +117,16 @@ class AgentTools(
     companion object {
         /** The default result limit in tokens, for a caller that has no setting of its own. */
         const val MAX_RESULT = SettingsStore.DEFAULT_MAX_RESULT
+
+        /**
+         * The branch an agent's push goes to — **a constant, never an argument.**
+         *
+         * The operator's decision: *"person pushes to main, while agent pushes to dev."* `main` is
+         * where a release is published, and an agent that could name it could publish one. So there is
+         * no `push(branch)` tool: there is `push()`, and it goes here. A refspec built from a tool
+         * argument is one typo — or one injected instruction — away from a release.
+         */
+        const val AGENT_BRANCH = "development"
 
         /** The tools that change a file. */
         val WRITING = setOf("edit", "create", "delete", "move", "restore")
@@ -189,7 +215,7 @@ class AgentTools(
             "reason" to setOf("text"),
             "browse" to setOf("url", "wait", "eval", "from", "to"),
             "shot" to setOf("url", "full", "eval"),
-            "ci" to setOf("workflow", "branch", "limit"),
+            "ci" to setOf("workflow", "branch", "limit", "event"),
             "runs" to setOf("run", "job", "grep", "from", "to"),
         )
 
@@ -360,8 +386,17 @@ class AgentTools(
                     "`build-and-release.yml`, which is the name in the tree. `branch` narrows it to " +
                     "one branch. `limit` is how many runs to show, ten by default. " +
                     "A run that has not finished has no conclusion, and is shown as `running` " +
-                    "rather than as a failure. Use `runs` to read what a run actually said.",
-                "{\"workflow\":\"build-and-release.yml\",\"branch\":\"development\",\"limit\":10}",
+                    "rather than as a failure. Use `runs` to read what a run actually said. " +
+                    "**With `event` set to `workflow_dispatch`, it starts the workflow instead.** " +
+                    "It runs on `development` unless `branch` says otherwise. " +
+                    "**A runner is a sandbox for the machine and not for the repository**: every " +
+                    "workflow in a repository can read every repository secret, so a workflow you " +
+                    "write can read one and hand it back as an artifact. That is why a workflow a " +
+                    "person has read is marked approved and yours is not — but the mark does not " +
+                    "stop the run. **Never put a secret in a workflow you wrote.** If a job needs " +
+                    "one, say so and let the person write that job.",
+                "{\"workflow\":\"build-and-release.yml\",\"branch\":\"development\"," +
+                    "\"limit\":10,\"event\":\"workflow_dispatch\"}",
             ),
             spec(
                 "runs",
@@ -489,7 +524,7 @@ class AgentTools(
             "reason" -> reason(args)
             "browse" -> browse(args, deadline)
             "shot" -> shot(args, deadline)
-            "ci" -> ci(args)
+            "ci" -> ci(args, deadline)
             "runs" -> runs(args, deadline)
             else -> refusal("There is no tool called ${call.tool}")
         }
@@ -1678,7 +1713,11 @@ class AgentTools(
      * dispatches a workflow is a tool that starts a build on somebody's account; a tool that lists
      * runs costs nothing and answers the question the agent actually has while it is working.
      */
-    private fun ci(args: JSONObject): String {
+    private fun ci(args: JSONObject, deadline: Deadline): String {
+        val event = args.optString("event").trim()
+        // **The dispatch branch is entered only by saying `event`**, so a call that only reads never
+        // consults the guard — a read costs nothing and has nothing to protect.
+        if (event.isNotEmpty()) return start(args, event, deadline)
         val there = when (val w = ciWhere()) {
             is Where.Refused -> return refusal(w.said)
             is Where.Found -> w
@@ -1713,6 +1752,88 @@ class AgentTools(
                 } else {
                     ""
                 }),
+        )
+    }
+
+    /**
+     * Starts a workflow.
+     *
+     * **It does not refuse.** The operator's ruling: *"unapproved workflows still can be executed but
+     * without secrets"* — and the first half is buildable while the second is not. GitHub has no
+     * per-workflow secret scoping, so an app cannot withhold a repository secret from one file; a
+     * static scan for `secrets.*` is defeatable, and a checkmark that can be a lie is worse than none
+     * because people trust it.
+     *
+     * So the honest shape is: **run it, and record what was known when it ran.** The trace line names
+     * whether these bytes were approved and which environment they reference, because that is the fact
+     * that decides whether a human stands between the run and a secret — GitHub's own words: *"If the
+     * environment requires approval, a job cannot access environment secrets until one of the required
+     * reviewers approves it."*
+     *
+     * The answer to the model is one line, because it asked to start a build and it started.
+     */
+    private fun start(args: JSONObject, event: String, deadline: Deadline): String {
+        if (event != "workflow_dispatch") {
+            return refusal(
+                "`event` is `workflow_dispatch`, which is the only event that can be started. " +
+                    "A `push` happens when something is pushed, and a `schedule` happens on its own.",
+            )
+        }
+        val workflow = args.optString("workflow").trim()
+        if (workflow.isEmpty()) {
+            return refusal(
+                "Say which workflow to start: {\"event\":\"workflow_dispatch\"," +
+                    "\"workflow\":\"build-and-release.yml\"}. `ci` with no `event` lists runs.",
+            )
+        }
+        val branch = args.optString("branch").trim().ifEmpty { AGENT_BRANCH }
+        val there = when (val w = ciWhere()) {
+            is Where.Refused -> return refusal(w.said)
+            is Where.Found -> w
+        }
+        // **The path, not just the name.** A person types `build.yml`; the file is
+        // `.github/workflows/build.yml`, and that is what has an approval and a reach.
+        val path = if (workflow.startsWith(Workflows.DIR + "/")) {
+            workflow.trim('/')
+        } else {
+            Workflows.DIR + "/" + workflow.trim('/')
+        }
+        val target = File(projectDir, path)
+        if (!target.isFile) {
+            return refusal(
+                "There is no workflow at $path in this project. " +
+                    "The workflows it has are: " +
+                    (workflows.survey(projectDir).map { it.name }.joinToString(", ")
+                        .ifBlank { "none" }) + ".",
+            )
+        }
+        val approval = workflows.approval(projectDir, path)
+        val reach = workflows.reach(target)
+        // **An unapproved file is approved only if the operator said the agent may stop asking.** The
+        // record says which of the two it was, so the checkmark in the list keeps meaning "a person
+        // read this" and never quietly comes to mean "nobody objected".
+        if (!approval.checked && recordAgentWorkflowApprovals()) {
+            workflows.approve(projectDir, path, Workflows.By.AUTO)
+        }
+        deadline.check("ci")
+        val started = there.gh.dispatch(there.token, there.ref, path.substringAfterLast('/'), branch)
+        if (started.error != null) return refusal(ciSaid(started.error, started.status))
+        // **The trace is where the risk is recorded.** A model's answer is read by the model; a trace
+        // line is read by the person when something goes wrong, and it is the only place that can say
+        // "nobody read this file" without turning every dispatch into a conversation.
+        Trace.note(
+            "ci",
+            "$project · started ${path.substringAfterLast('/')} on $branch · " +
+                approval.said() +
+                (if (reach.environments.isEmpty()) {
+                    if (reach.secrets) " · names a secret, no environment" else ""
+                } else {
+                    " · environment: " + reach.environments.joinToString(", ")
+                }),
+        )
+        return success(
+            "Started ${path.substringAfterLast('/')} on $branch. It appears in `ci` within a few " +
+                "seconds; its log is `runs` once a job has begun.",
         )
     }
 

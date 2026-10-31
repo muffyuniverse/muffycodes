@@ -345,6 +345,7 @@ class AgentRunner(
                     browseMs = { settings.browseMs },
                     github = github,
                     githubToken = githubToken,
+                    recordAgentWorkflowApprovals = { settings.recordAgentWorkflowApprovals },
                 )
                 if (waking == null) {
                     agent.warm() to log.rows()

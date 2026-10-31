@@ -222,6 +222,25 @@ interface GitHub {
      * as UTF-8 is how it arrives corrupted.
      */
     fun artifactBytes(token: String, ref: RepoRef, id: Long): GitHubResult<ByteArray>
+
+    /**
+     * Starts a workflow.
+     *
+     * **This is the only call in the app that makes GitHub do work on somebody's account**, and it is
+     * reached through [Workflows] rather than directly: a workflow may only be dispatched when its
+     * bytes are the ones a person approved. The guard lives above this call, in the tool, because the
+     * interface cannot see a project folder and the guard has nothing to check without one.
+     *
+     * [workflow] is the **file name** (`build-and-release.yml`), not the numeric id: an id changes when
+     * a workflow is deleted and made again, and the file name is what a person has in front of them.
+     */
+    fun dispatch(
+        token: String,
+        ref: RepoRef,
+        workflow: String,
+        branch: String,
+        inputs: Map<String, String> = emptyMap(),
+    ): GitHubResult<Unit>
 }
 
 /**
@@ -529,6 +548,69 @@ class HttpGitHub(private val api: String = DEFAULT_API) : GitHub {
         } finally {
             connection?.disconnect()
             redirect?.disconnect()
+        }
+    }
+
+    /**
+     * Starts a workflow.
+     *
+     * **`204 No Content` is the success answer**, which is why this cannot go through [get]: that
+     * function parses a body, and there is none. It also cannot use [raw], which reads bytes; the
+     * answer to a dispatch is the status alone.
+     *
+     * **`inputs` are not secret and must never be.** They are visible in the run, in the UI and in
+     * the API — which is why the vault design says a secret goes to a repository secret, never to a
+     * dispatch input. The doc says so in as many words; this comment exists because the next person
+     * to add a `secret` key here will be adding a leak.
+     */
+    override fun dispatch(
+        token: String,
+        ref: RepoRef,
+        workflow: String,
+        branch: String,
+        inputs: Map<String, String>,
+    ): GitHubResult<Unit> {
+        val body = JSONObject().apply {
+            put("ref", branch)
+            if (inputs.isNotEmpty()) {
+                put("inputs", JSONObject().apply { inputs.forEach { (k, v) -> put(k, v) } })
+            }
+        }
+        var connection: HttpURLConnection? = null
+        return try {
+            connection = (URL(
+                API + "/repos/${ref.owner}/${ref.name}/actions/workflows/" +
+                    urlPart(workflow) + "/dispatches",
+            ).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 20_000
+                readTimeout = 30_000
+                doOutput = true
+                setRequestProperty("Accept", "application/vnd.github+json")
+                setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
+                setRequestProperty("User-Agent", "MuffyCodes")
+                setRequestProperty("Content-Type", "application/json")
+                if (token.isNotBlank() && Secrets.isGitHubHost(API)) {
+                    setRequestProperty("Authorization", "Bearer $token")
+                }
+            }
+            connection.outputStream.use { it.write(body.toString().toByteArray()) }
+            val code = connection.responseCode
+            if (code in 200..299) return GitHubResult(value = Unit)
+            val why = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            val said = try {
+                JSONObject(why).optString("message")
+            } catch (e: Throwable) {
+                ""
+            }
+            GitHubResult(
+                error = Secrets.scrub(said.ifBlank { "GitHub returned error $code" }),
+                status = code,
+            )
+        } catch (e: Throwable) {
+            GitHubResult(error = Secrets.scrub(e.message ?: "The workflow could not be started"))
+        } finally {
+            connection?.disconnect()
         }
     }
 
@@ -930,6 +1012,44 @@ class DiskGitHub(
         } catch (e: Throwable) {
             GitHubResult(error = "The artifact could not be read: ${e.message}")
         }
+    }
+
+    /**
+     * Starts a workflow — **by writing the run a real dispatch would create.**
+     *
+     * A fake that answered "started" and created nothing would make every test of the guard pass
+     * while proving nothing about what a person would see afterwards. So a dispatch here appends a run
+     * directory, and the next `ci` call reads it back, which is exactly the loop a real one has.
+     */
+    override fun dispatch(
+        token: String,
+        ref: RepoRef,
+        workflow: String,
+        branch: String,
+        inputs: Map<String, String>,
+    ): GitHubResult<Unit> {
+        if (token.isBlank()) return GitHubResult(error = "Bad credentials", status = 401)
+        if (!repoDir(ref.name).exists()) {
+            return GitHubResult(error = "There is no repository called \"${ref.name}\"", status = 404)
+        }
+        val ci = File(repoDir(ref.name), "ci")
+        val next = (ci.listFiles().orEmpty().mapNotNull { it.name.toLongOrNull() }.maxOrNull()
+            ?: 0L) + 1
+        val dir = File(ci, next.toString())
+        File(dir, "jobs").mkdirs()
+        File(dir, "run.json").writeText(
+            JSONObject().apply {
+                put("name", workflow)
+                put("status", "in_progress")
+                put("conclusion", JSONObject.NULL)
+                put("branch", branch)
+                put("event", "workflow_dispatch")
+                put("sha", "")
+                put("created_at", "now")
+                put("url", "")
+            }.toString(),
+        )
+        return GitHubResult(value = Unit)
     }
 
     /**

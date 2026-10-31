@@ -602,6 +602,47 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.primary,
             )
 
+            Text("Workflows", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "The agent may write and start GitHub workflows — that is how it runs a program, " +
+                    "because this app has no shell of its own. A runner is a sandbox for the " +
+                    "machine, not for the repository: every workflow in a repository can read every " +
+                    "secret in it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        settings.keepRecordAgentWorkflowApprovals(
+                            !settings.recordAgentWorkflowApprovals,
+                        )
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Mark a workflow the agent starts as read", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        // **The switch does not change what runs.** Saying so is the point: a person
+                        // who reads "approve" here would think they had granted permission, and they
+                        // have not — GitHub has no per-workflow secret scoping, so nothing an app can
+                        // do withholds a secret from one file.
+                        "Off, a workflow the agent writes stays marked unread until you approve " +
+                            "it, so a checkmark always means somebody read those bytes. On, " +
+                            "starting one records it as read for you and the row says " +
+                            "\"auto-approved\" instead. It does not change what the workflow can " +
+                            "reach either way.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(
+                    checked = settings.recordAgentWorkflowApprovals,
+                    onCheckedChange = { settings.keepRecordAgentWorkflowApprovals(it) },
+                )
+            }
+
             Text("Keepalive", style = MaterialTheme.typography.titleMedium)
             Row(
                 // **The whole row is the switch.** The words are the explanation and the switch is
