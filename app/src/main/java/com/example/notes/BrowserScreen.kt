@@ -578,9 +578,6 @@ fun SlimRow(
     }
 }
 
-/** The Projects screen: a row each, with the count and the ⋮ menu. */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
 /**
  * The signing-key row: one sentence and one button, or nothing at all.
  *
@@ -611,6 +608,9 @@ private fun SigningRow(viewModel: AppViewModel, onSend: (String) -> Unit) {
     }
 }
 
+/** The Projects screen: a row each, with the count and the ⋮ menu. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
 private fun ProjectList(
     viewModel: AppViewModel,
     onChat: (String) -> Unit,

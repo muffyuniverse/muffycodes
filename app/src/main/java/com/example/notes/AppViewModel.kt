@@ -2219,6 +2219,42 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /**
+     * Starts a release of [versionName] from `main`.
+     *
+     * **The other lane, and the one the agent cannot reach.** `AgentTools`' `ci` refuses any branch but
+     * `development`; this goes to `main` and is reachable only from a button a person pressed. No
+     * reviewer is involved: the `release` environment may only be used by `main` and `development`, so
+     * an agent that somehow dispatched on `main` would find the signing key unreachable and the release
+     * would fail rather than ship.
+     */
+    fun startRelease(versionName: String, devBuild: Boolean = false) {
+        val login = activeLogin
+        val api = githubFor(login) ?: return
+        val token = login?.let { credentials.token(it) }.orEmpty()
+        if (token.isBlank()) {
+            message = "Sign in to GitHub first"
+            return
+        }
+        val project = path.firstOrNull() ?: return
+        val ref = RepoRef.of(git?.remoteUrl(project).orEmpty())
+        if (ref == null) {
+            message = "$project has no GitHub repository, so there is nothing to release"
+            return
+        }
+        busy = true
+        onWorker {
+            val started = Release.start(api, token, ref, versionName, devBuild)
+            main.post {
+                busy = false
+                message = started.fold(
+                    onSuccess = { it.said() },
+                    onFailure = { it.message ?: "The release could not be started" },
+                )
+            }
+        }
+    }
+
+    /**
      * Replaces a project with what GitHub holds (§5.2). An existing project is
      * asked about first by the screen; this is the act.
      */

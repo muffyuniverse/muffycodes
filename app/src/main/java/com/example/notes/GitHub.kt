@@ -1363,9 +1363,45 @@ class DiskGitHub(
                 put("sha", "")
                 put("created_at", "now")
                 put("url", "")
+                // **The inputs, so a test can prove what was asked for.** A dispatch is a request to
+                // do something expensive, and "it started" without "with what" cannot distinguish a
+                // release of 1.5 from a release of whatever the default was.
+                if (inputs.isNotEmpty()) {
+                    put("inputs", JSONObject().apply { inputs.forEach { (k, v) -> put(k, v) } })
+                }
             }.toString(),
         )
         return GitHubResult(value = Unit)
+    }
+
+    /** One dispatch the fake was asked to make. */
+    data class Dispatched(val workflow: String, val branch: String, val inputs: Map<String, String>)
+
+    /**
+     * Every dispatch the fake has recorded, oldest first.
+     *
+     * A test needs this because a dispatch's whole meaning is *which branch* and *with what*, and a
+     * fake that only answered "done" would let the agent dispatch on main and pass.
+     */
+    fun dispatches(ref: RepoRef): List<Dispatched> {
+        val ci = File(repoDir(ref.name), "ci")
+        return ci.listFiles().orEmpty()
+            .filter { it.isDirectory && it.name.toLongOrNull() != null }
+            .sortedBy { it.name.toLong() }
+            .mapNotNull { dir ->
+                val file = File(dir, "run.json")
+                if (!file.isFile) return@mapNotNull null
+                val json = try {
+                    JSONObject(file.readText())
+                } catch (e: Throwable) {
+                    return@mapNotNull null
+                }
+                val inputs = mutableMapOf<String, String>()
+                json.optJSONObject("inputs")?.let { obj ->
+                    for (key in obj.keys()) inputs[key] = obj.optString(key)
+                }
+                Dispatched(json.optString("name"), json.optString("branch"), inputs)
+            }
     }
 
     // ---- secrets and environments, out of a folder -----------------------
