@@ -235,4 +235,63 @@ class ReleaseKeyTest {
             github.branchesOf(ref, "release"),
         )
     }
+
+    // ---- the reconcile check ---------------------------------------------
+
+    /** Puts a secret in the environment, so the check has something to find. */
+    private fun store(name: String) {
+        github.putEnvironmentSecret(
+            "a-key", ref, ReleaseKey.ENVIRONMENT, name, ByteArray(4), "key-id",
+        )
+    }
+
+    private fun reconcileOf(haveKey: Boolean): ReleaseKey.Reconcile {
+        val file = if (haveKey) properties else File(project, "nothing-here.properties")
+        return key().reconcile(github, "a-key", ref, file)
+    }
+
+    @Test
+    fun `a key on the phone that the environment cannot see is the one state that speaks`() {
+        // **The state this exists for**: the person has the material, CI does not, and their next
+        // release is unsigned. They would otherwise find out from a failed install.
+        store("MUFFY_KEYSTORE_BASE64")
+        store("MUFFY_KEYSTORE_PASSWORD")
+        val said = reconcileOf(haveKey = true).said().orEmpty()
+
+        assertTrue("it says the project cannot sign: $said", said.contains("can't sign releases"))
+        assertTrue("it names how many are missing: $said", said.contains("2 of the four"))
+        assertTrue("and where they go: $said", said.contains("release"))
+    }
+
+    @Test
+    fun `a project with no key is never told it should have one`() {
+        // This app has projects that are a folder of notes. Telling every one of them about a signing
+        // key would be the nagging that makes the one real warning invisible.
+        val result = reconcileOf(haveKey = false)
+
+        assertFalse("it does not need sending", result.needsSending)
+        assertEquals("and says nothing", null, result.said())
+    }
+
+    @Test
+    fun `a project whose key is already there is silent`() {
+        ReleaseKey.Field.entries.forEach { store(it.secretName) }
+        val result = reconcileOf(haveKey = true)
+
+        assertFalse("nothing is missing", result.needsSending)
+        assertEquals("and says nothing", null, result.said())
+    }
+
+    @Test
+    fun `an environment that could not be asked about is silent, because that is not a finding`() {
+        // **"I could not check" is not "you are missing something".** A warning nobody can act on
+        // trains people to ignore the ones they can.
+        // A blank token is the fake's own way of failing, which is the point: a check that cannot run
+        // must not be mistaken for a check that found something.
+        val result = key().reconcile(github, "", ref, properties)
+
+        assertFalse("it does not claim anything is missing", result.needsSending)
+        assertEquals("and says nothing", null, result.said())
+        assertEquals("though it remembers why", "Bad credentials", result.unknown)
+    }
 }

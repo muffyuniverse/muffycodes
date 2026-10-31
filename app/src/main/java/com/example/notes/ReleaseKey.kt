@@ -156,6 +156,97 @@ class ReleaseKey(private val properties: File) {
     }
 
     /**
+     * What a project's signing setup looks like right now — **asked, never acted on.**
+     *
+     * ## Why this exists
+     *
+     * Sending a signing key is not something an app may decide to do. The key is the most consequential
+     * secret this app can hold, and a background reconcile that "helpfully" pushed it to a repository
+     * the person had just added would be the app choosing to widen its own blast radius. So there is no
+     * automatic send anywhere: this answers a question, and a screen puts the answer in front of a
+     * person who can press the thing that sends.
+     *
+     * ## The four states, and why three of them are silent
+     *
+     * - **Ready**: a key on the phone and all four secrets in the environment. Nothing to say.
+     * - **Not set up**: no key on the phone. Nothing to say — this project was never going to sign.
+     * - **Needs sending**: a key on the phone and the environment is missing some of the four. **This
+     *   is the one that speaks**, because the person has the material and CI cannot see it, so their
+     *   next release is unsigned and they would find out from a failed install.
+     * - **Unreachable**: the environment could not be asked about. Silent, because "I could not check"
+     *   is not "you are missing something", and a warning nobody can act on trains people to ignore
+     *   the ones they can.
+     *
+     * A person who never sets a key up is never told they should. That is deliberate: this app has
+     * projects that are a folder of notes, and telling every one of them about a signing key would be
+     * the nagging that makes the one real warning invisible.
+     */
+    data class Reconcile(
+        /** The key is on the phone. */
+        val haveKey: Boolean,
+        /** Which of the four the environment already holds. */
+        val inEnvironment: Set<String>,
+        /** The environment's name. */
+        val environment: String,
+        /** Why the environment could not be asked about, or null when it was. */
+        val unknown: String? = null,
+    ) {
+        /** Every name the build reads, in the order the report lists them. */
+        private val all: List<String> get() = Field.entries.map { it.secretName }
+
+        /** The four the environment is missing. */
+        val missing: List<String> get() = all.filter { it !in inEnvironment }
+
+        /** True when a key exists on the phone and the environment cannot see all of it. */
+        val needsSending: Boolean get() = haveKey && unknown == null && missing.isNotEmpty()
+
+        /**
+         * One line for a screen, or null when there is nothing worth saying.
+         *
+         * **Silence is the common answer**, and that is the design: the warning exists for one state,
+         * and a state that is fine, absent, or unknowable all read as fine.
+         */
+        fun said(): String? {
+            if (!needsSending) return null
+            return "This project can't sign releases yet: ${missing.size} of the four signing " +
+                "secret" + (if (missing.size == 1) " is" else "s are") + " not in the " +
+                "`$environment` environment."
+        }
+    }
+
+    /**
+     * Asks whether a key on the phone is missing from the environment. **Reads only.**
+     *
+     * [keyFile] is where this project's `keystore.properties` would be — the caller decides where to
+     * look, because a project's own folder is the only place the app can be sure a key belongs to it.
+     */
+    fun reconcile(
+        github: GitHub,
+        token: String,
+        ref: RepoRef,
+        keyFile: File,
+        environment: String = ENVIRONMENT,
+    ): Reconcile {
+        if (!keyFile.isFile) {
+            return Reconcile(haveKey = false, inEnvironment = emptySet(), environment = environment)
+        }
+        val names = github.environmentSecretNames(token, ref, environment)
+        if (names.error != null) {
+            return Reconcile(
+                haveKey = true,
+                inEnvironment = emptySet(),
+                environment = environment,
+                unknown = names.error,
+            )
+        }
+        return Reconcile(
+            haveKey = true,
+            inEnvironment = names.value.orEmpty().toSet(),
+            environment = environment,
+        )
+    }
+
+    /**
      * Sends the four values to [environment], sealed for it.
      *
      * **Each value is sealed separately with the environment's own key**, which is what GitHub requires:

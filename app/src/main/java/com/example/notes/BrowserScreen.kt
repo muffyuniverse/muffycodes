@@ -291,6 +291,12 @@ fun BrowserScreen(
             Column(modifier = Modifier.fillMaxSize()) {
                 ProjectSlimRow(viewModel, onRowSync)
 
+                // **One line, and only when a key on the phone is missing from CI.** The person has
+                // the material, the build cannot see it, and their next release would be unsigned —
+                // which they would otherwise discover from a failed install. The row asks; the
+                // press sends. See `AppViewModel.checkSigning`.
+                SigningRow(viewModel, onSend = { project -> viewModel.sendSigningKey(project) })
+
                 // What can be done with what is chosen. It appears only when
                 // something is chosen, because it is a mode: a long press on a row
                 // enters it, and the cross leaves it.
@@ -575,6 +581,36 @@ fun SlimRow(
 /** The Projects screen: a row each, with the count and the ⋮ menu. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
+/**
+ * The signing-key row: one sentence and one button, or nothing at all.
+ *
+ * **It draws from the view model's state rather than holding its own**, for the same reason every
+ * other window in this screen does: the answer arrives on the worker after the screen was built, and
+ * a value Compose cannot see does not redraw.
+ */
+@Composable
+private fun SigningRow(viewModel: AppViewModel, onSend: (String) -> Unit) {
+    val said = viewModel.signingSaid ?: return
+    val project = viewModel.path.firstOrNull() ?: return
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = said,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = { onSend(project) }) { Text("Send") }
+        }
+    }
+}
+
 private fun ProjectList(
     viewModel: AppViewModel,
     onChat: (String) -> Unit,

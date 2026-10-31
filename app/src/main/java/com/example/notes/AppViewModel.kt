@@ -2121,9 +2121,99 @@ class AppViewModel @JvmOverloads constructor(
                 message = result.message
                 refreshChanges()
                 if (result.success) {
+                    // **The first push is when a repository becomes reachable, and so the first moment a
+                    // signing key could be sent to it.** Not on project add: adding a project is a local
+                    // act with no repository behind it, so there is nothing to ask GitHub about. A project
+                    // pulled FROM the person's own GitHub counts as theirs, and this is the check that
+                    // notices its key is not in CI.
+                    //
+                    // It asks; it does not send. See [checkSigning].
+                    checkSigning(project)
                 } else {
                     lastSyncError = result.message
                 }
+            }
+        }
+    }
+
+    // ---- the signing key, asked about and sent by hand -------------------
+
+    /**
+     * What the active project's signing setup looks like, or null when nothing is worth saying.
+     *
+     * **Asked when a project is opened, never acted on.** Sending a signing key is not something an app
+     * may decide to do: the key is the most consequential secret this app holds, and a background
+     * reconcile that pushed it to whatever repository the person had just added would be the app
+     * widening its own blast radius on its own initiative. This only answers.
+     *
+     * It is a `mutableStateOf` because the row it feeds is drawn on the project screen, and a value
+     * that arrives on the worker after the screen was built must be something Compose can see.
+     */
+    var signingSaid by mutableStateOf<String?>(null)
+        private set
+
+    /** The key that a person has to press for. Null when there is nothing to send. */
+    var signingKeyFile by mutableStateOf<File?>(null)
+        private set
+
+    /**
+     * Looks for a signing key in the project and asks GitHub whether CI can see it.
+     *
+     * **Silent unless the one actionable state is true** — see [ReleaseKey.Reconcile], where a project
+     * with no key and a project that is already set up both read as nothing to say.
+     *
+     * [project] is the folder name, and the key is looked for **inside it**: a `keystore.properties`
+     * is a file of the project's, so the only place it can be is the project's own folder, and a key
+     * found anywhere else would be a key the app could not tell apart from another project's.
+     */
+    fun checkSigning(project: String) {
+        val ws = workspace ?: return
+        val login = activeLogin
+        val api = githubFor(login) ?: return
+        val token = login?.let { credentials.token(it) }.orEmpty()
+        if (token.isBlank()) return
+        val remote = git?.remoteUrl(project).orEmpty()
+        val ref = RepoRef.of(remote) ?: return
+        val keyFile = File(ws.projectDir(project), ReleaseKey.FILE)
+        onWorker {
+            val said = ReleaseKey(keyFile).reconcile(api, token, ref, keyFile)
+            main.post {
+                signingSaid = said.said()
+                signingKeyFile = if (said.needsSending) keyFile else null
+            }
+        }
+    }
+
+    /**
+     * Sends the key a person pressed for.
+     *
+     * **The press is the whole permission.** Nothing here checks a setting or a previous confirmation:
+     * the only way to reach it is a row that exists because a key is on the phone and CI cannot see it,
+     * and the sentence beside the button says what it will do.
+     */
+    fun sendSigningKey(project: String) {
+        val ws = workspace ?: return
+        val login = activeLogin
+        val api = githubFor(login) ?: return
+        val token = login?.let { credentials.token(it) }.orEmpty()
+        if (token.isBlank()) {
+            message = "Sign in to GitHub first"
+            return
+        }
+        val ref = RepoRef.of(git?.remoteUrl(project).orEmpty()) ?: return
+        val keyFile = File(ws.projectDir(project), ReleaseKey.FILE)
+        busy = true
+        onWorker {
+            val sent = ReleaseKey(keyFile).send(api, token, ref)
+            main.post {
+                busy = false
+                message = sent.fold(
+                    onSuccess = { it.said() },
+                    onFailure = { it.message ?: "The key could not be sent" },
+                )
+                // **Asked again rather than assumed.** The row disappears because the answer changed,
+                // not because the app decided its own call had worked.
+                checkSigning(project)
             }
         }
     }
