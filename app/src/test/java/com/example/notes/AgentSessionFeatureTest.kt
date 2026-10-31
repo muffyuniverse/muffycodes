@@ -856,10 +856,24 @@ class AgentSessionFeatureTest : FeatureTest() {
         // **The tick answers on the main thread.** It posts the new session list there, so the
         // screen's own state is only true once that post has run — asserting straight after the
         // call was asserting against the list from before it.
+        // **When it fails, say WHO put the folder back.** `folder=true` on its own has now cost two
+        // separate investigations, because a recreated folder looks the same whichever writer made
+        // it. The contents name the writer: `agent/` is the record, `project_prompt.txt` is the prompt
+        // layer, and a result file or `release/` is a tool. Asked inside the message, so a passing run
+        // pays nothing and a failing one pays once.
         scene.await(
             "the tick to drop the session: before=$before, after=$afterTick, " +
                 "folder=${scene.viewModel.workspace!!.projectDir("groceries").isDirectory}, " +
-                "store=${storeFile.isFile}",
+                "store=${storeFile.isFile}, " +
+                "contents=" + scene.viewModel.workspace!!.projectDir("groceries").let { back ->
+                    if (!back.isDirectory) {
+                        "gone"
+                    } else {
+                        back.walkTopDown().drop(1).take(20).joinToString(" ") {
+                            it.relativeTo(back).path + (if (it.isDirectory) "/" else "")
+                        }
+                    }
+                },
         ) {
             scene.viewModel.sessionOf("groceries") == null
         }
