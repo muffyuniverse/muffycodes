@@ -1038,6 +1038,15 @@ class AppViewModel @JvmOverloads constructor(
      */
     fun isLocalProject(project: String): Boolean = git?.isLocal(project) ?: true
 
+    /**
+     * The remote a project pushes to, or null when it has none.
+     *
+     * **The same answer the app acts on**, exposed rather than re-derived: a test that worked out a
+     * project's repository from its folder name would be testing its own arithmetic, and the parse the
+     * phone actually performs (`RepoRef.of`) is the thing worth asking about.
+     */
+    fun remoteUrlOf(project: String): String? = git?.remoteUrl(project)
+
     // ---- moving around ------------------------------------------------------
 
     /** Opens a folder by path from the account root. */

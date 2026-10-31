@@ -49,11 +49,18 @@ class SigningFeatureTest {
         )
     }
 
-    private fun secretNames(project: String): List<String> {
-        val ref = RepoRef.of(scene.git.remoteUrl(project)) ?: error("no remote for $project")
-        return scene.git.environmentSecretNames(scene.login, ref, ReleaseKey.ENVIRONMENT)
+    /**
+     * The repository a project's push reached.
+     *
+     * **The remote's own address, read back from git** — the same `RepoRef.of` the app runs, so a test
+     * that passes here is testing the parse the phone performs rather than a name it invented.
+     */
+    private fun refOf(project: String): RepoRef =
+        RepoRef.of(scene.viewModel.remoteUrlOf(project)) ?: error("no remote for $project")
+
+    private fun secretNames(project: String): List<String> =
+        scene.github.environmentSecretNames(scene.login, refOf(project), ReleaseKey.ENVIRONMENT)
             .value.orEmpty()
-    }
 
     @Test
     fun `a first push asks about the signing key, and sends nothing`() {
@@ -124,10 +131,9 @@ class SigningFeatureTest {
         scene.viewModel.sendSigningKey("groceries")
         scene.await("the send to finish", 60_000) { !scene.viewModel.busy }
 
-        val ref = RepoRef.of(scene.git.remoteUrl("groceries"))!!
         assertEquals(
             listOf("main", "development"),
-            scene.git.branchesOf(ref, ReleaseKey.ENVIRONMENT),
+            scene.github.branchesOf(refOf("groceries"), ReleaseKey.ENVIRONMENT),
         )
     }
 
@@ -145,7 +151,7 @@ class SigningFeatureTest {
         scene.sync("groceries")
 
         // Now the project exists on "GitHub" and has a remote, which is what makes it reachable.
-        val ref = RepoRef.of(scene.git.remoteUrl("groceries"))
+        val ref = RepoRef.of(scene.viewModel.remoteUrlOf("groceries"))
         assertNotNull("the project has a remote, so it is a repository the person owns", ref)
 
         scene.viewModel.checkSigning("groceries")
