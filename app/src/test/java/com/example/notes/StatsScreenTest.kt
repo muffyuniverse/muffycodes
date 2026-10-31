@@ -155,7 +155,9 @@ class StatsScreenTest {
         // **The two ends read DIFFERENT times**, and that is the default working: the interval is
         // today from midnight, so From is 00:00 and To is where the clock stopped.
         compose.onNodeWithText("14:30").assertExists()
-        compose.onNodeWithText("14 hours 30 minutes", substring = true).assertExists()
+        // **The caption that used to be here is gone** — "and on before, now and interval lines, we
+        // dont need them" — so what is asserted is the pickers, which are the thing the person
+        // reads and changes. The duration was a restatement of the interval they had just set.
     }
 
     @Test
@@ -300,15 +302,18 @@ class StatsScreenTest {
     }
 
     @Test
-    fun `the previous column is dropped when the log does not reach it`() {
-        // **A column of dashes beside a real one reads as "traffic collapsed"**, when the truth is
-        // that the history simply begins later. So the column goes entirely rather than filling
-        // with dashes.
+    fun `a change with no baseline behind it is not invented`() {
+        // **The rule the dropped previous column used to carry**, and it did not leave with it: a
+        // change is only shown when there is a period to compare against. One row inside the current
+        // interval and nothing before it is exactly that shape, and the answer must be a blank
+        // change rather than a rise from zero — which would read as a jump that never happened.
         //
-        // One row *inside* the current interval, and nothing before it, is exactly that shape.
+        // **The column is gone; the rule is not.** `showPrevious` still decides whether `change` is
+        // computed at all, and this is what would catch it being dropped with the column.
         draw(withRows = true, rowsBefore = false)
-        compose.onNodeWithText("now").assertExists()
-        compose.onNodeWithText("before").assertDoesNotExist()
+        compose.onNodeWithText("requests").assertExists()
+        // The row is drawn, and no percentage appears anywhere on the table.
+        compose.onAllNodesWithText("%", substring = true).assertCountEquals(0)
     }
 
     @Test
