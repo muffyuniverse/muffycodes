@@ -577,8 +577,12 @@ class AgentChatScreenTest {
         say("Look at everything.")
         awaitTurns(2)
 
+        // **The last bubble's own words, not its caption.** `agent` is the caption of every reply,
+        // so a substring match found three nodes and the assertion could not say which one it meant.
+        // The text of the closing message is the thing that is only at the end.
         val last = scene.viewModel.chatBox!!.bubbles.last()
-        compose.onNodeWithText(last.caption, substring = true).assertIsDisplayed()
+        val words = last.pages.last().body.trim().lines().first()
+        compose.onNodeWithText(words).assertIsDisplayed()
     }
 
     @Test
