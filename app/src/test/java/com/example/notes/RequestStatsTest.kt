@@ -466,28 +466,26 @@ class RequestStatsTest {
 
     @Test
     fun `a change prints with one decimal and an explicit sign`() {
-        // **One decimal, not three.** A change is a comparison of two numbers already rounded on
-        // screen; claiming 18.243% invites arithmetic that cannot be trusted.
-        assertEquals("a rise carries a plus", "+18.2%", StatsFormat.change(0.182))
-        assertEquals("a fall carries its own minus", "-4.0%", StatsFormat.change(-0.04))
-        // **A period that stopped is `<-99%`, not `-100.0%`.** The digits would be right and would
-        // read as a measurement; the cap says what a person needs — it fell by more than the table
-        // can usefully express.
-        assertEquals("it stopped", "<-99%", StatsFormat.change(-1.0))
-        assertEquals("no change", "0.0%", StatsFormat.change(0.0))
+        // **Whole percents.** A change compares two numbers already rounded on screen, so a decimal
+        // claims a precision neither side has. The operator's rule: "no decimals for percents".
+        assertEquals("a rise carries a plus", "+18%", StatsFormat.change(0.182))
+        assertEquals("a fall carries its own minus", "-4%", StatsFormat.change(-0.04))
+        assertEquals("no change", "0%", StatsFormat.change(0.0))
         // **No baseline prints a dash**, the same as every other absent figure.
         assertEquals("absent", StatsFormat.NONE, StatsFormat.change(null))
-        // **Rounded before it is signed**, so a change of -0.04% is `0.0%` and not `-0.0%`.
-        assertEquals("a negligible fall is not a negative zero", "0.0%", StatsFormat.change(-0.0001))
-        // **Past 99% it is a direction, not a ratio.** The operator's rule: "if change is big then
-        // just show >99%". The further past 100 it goes the less the digits mean, because the
-        // previous period held almost nothing — the percentage is then dominated by how small the
-        // denominator is rather than by anything that happened.
+        // **Rounded before it is signed**, so a negligible fall is `0%` and never `-0%`.
+        assertEquals("a negligible fall is not a negative zero", "0%", StatsFormat.change(-0.0001))
+        // **Past 99% is a cap.** "if change is big then just show >99%".
         assertEquals("a big rise", ">99%", StatsFormat.change(1.0))
         assertEquals("and a bigger one says the same", ">99%", StatsFormat.change(12.4))
-        assertEquals("a big fall", "<-99%", StatsFormat.change(-1.0))
+        // **A fall needs no cap, because a fall has a floor and the arithmetic reaches it.** The
+        // operator's question — "is it possible to fall more than -100%?" — is the proof: these are
+        // counts, tokens and money, all non-negative, so "everything went to zero" is the smallest
+        // change there is, and -100% is what that computes to. A cap here would be a second rule for
+        // something the first one already says.
+        assertEquals("it stopped", "-100%", StatsFormat.change(-1.0))
         // **The boundary is exact**, because a change of exactly 99% is a number a person can use.
-        assertEquals("99.0% is still a number", "+99.0%", StatsFormat.change(0.99))
+        assertEquals("99% is still a number", "+99%", StatsFormat.change(0.99))
     }
 
     @Test
