@@ -3032,6 +3032,15 @@ class AppViewModel @JvmOverloads constructor(
     var chatSpent: AgentChat.Spend? by mutableStateOf(null)
 
     /**
+     * What the requests **before this one** in the same burst cost.
+     *
+     * **A field rather than a local, because the listener is rebuilt per request** and a local would
+     * start at zero every time — which is the bug this exists to fix. It is folded in when a reply
+     * arrives ([door.onReply]) and cleared where a burst begins.
+     */
+    private var burstSpent = AgentChat.Spend(0, 0)
+
+    /**
      * **The pages of the message being written, by the row id they will have.**
      *
      * Keyed by id because a page is published twice - asked, then answered - and the second has to
@@ -3083,6 +3092,7 @@ class AppViewModel @JvmOverloads constructor(
         chatLive = ""
         chatWriting = ""
         chatSpent = null
+        burstSpent = AgentChat.Spend(0, 0)
         chatPages = emptyMap()
         chatContextTokens = 0L
     }
@@ -3164,9 +3174,12 @@ class AppViewModel @JvmOverloads constructor(
             // turn is over the record holds the answer itself, and a live line left behind would be
             // a description of something that already finished.
             chatLive = ""
-        chatWriting = ""
-        chatSpent = null
-        chatPages = emptyMap()
+            chatWriting = ""
+            chatSpent = null
+            // **A burst is over, so its total is over.** Left standing, the next message would open
+            // with the previous one's tokens already counted.
+            burstSpent = AgentChat.Spend(0, 0)
+            chatPages = emptyMap()
             message = end.plainly()
             applyEnd(project, end, System.currentTimeMillis())
             refresh()
@@ -3646,16 +3659,30 @@ class AppViewModel @JvmOverloads constructor(
             // dispayed text". A reply half-drawn is a paragraph rearranging itself under somebody's
             // eyes, and because `Streamed` is created per *request*, a per-chunk write also emptied
             // the bubble at every request boundary in a burst.
+            // **The burst's own total, not the request's.** The operator's report: "thinking and
+            // output in the message footer should be cumulative for all tokens spent for this
+            // message burst, currently they are buggy". They were: `Spend` has had a `plus` since it
+            // was written, with a comment saying a burst is a sum, and the live path *replaced* the
+            // figure on every request — so a burst of five calls reported the fifth one's tokens and
+            // the footer reset under the person's eyes at every boundary.
+            //
+            // `burstSpent` is what the requests before this one cost; the listener adds the current
+            // request's running total to it. Both are reset where the burst begins.
             door.listener = { stream, elapsed ->
                 chatLive = stream.shape(elapsed)
-                chatSpent = AgentChat.Spend(
+                chatSpent = burstSpent + AgentChat.Spend(
                     output = stream.said.length.toLong(),
                     thinking = stream.thinking.length.toLong(),
                 )
             }
             // **Appended, not replaced.** A burst is one message made of several replies, so the
             // bubble shows the message being built rather than the last thing said.
-            door.onReply = { words -> chatWriting = chatWriting + words }
+            door.onReply = { words ->
+                chatWriting = chatWriting + words
+                // **The request's cost becomes part of the burst's.** Read from the screen's own
+                // figure, which is `burstSpent` plus this request's total at the moment it closed.
+                burstSpent = chatSpent ?: burstSpent
+            }
         }
     })(model)
 

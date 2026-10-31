@@ -480,6 +480,24 @@ class AgentChatTest {
     }
 
     @Test
+    fun `a burst's figures are the sum of its requests`() {
+        // **The operator's report**: "thinking and output in the message footer should be cumulative
+        // for all tokens spent for this message burst, currently they are buggy".
+        //
+        // `plus` has existed since `Spend` was written, with a comment saying a burst is a sum — and
+        // the live path replaced the figure per request instead of adding to it, so a burst of five
+        // calls reported the fifth one's tokens. This asserts the arithmetic the view model now uses.
+        val first = AgentChat.Spend(120, 400)
+        val second = AgentChat.Spend(80, 600)
+
+        assertEquals("the total", AgentChat.Spend(200, 1000), first + second)
+        assertEquals("and zero is the identity", first, first + AgentChat.Spend(0, 0))
+        // **Three requests, because two is the case that would pass with a `max` as well.**
+        val third = AgentChat.Spend(1, 1)
+        assertEquals("three add up", AgentChat.Spend(201, 1001), first + second + third)
+    }
+
+    @Test
     fun `a usage row is bookkeeping and is not drawn as a bubble`() {
         // Forty of these would be forty bubbles saying nothing a person asked for. The numbers reach
         // the screen through the bubble's footer, which is where the report put them.
