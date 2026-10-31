@@ -1043,7 +1043,7 @@ class ScenariosTest {
             "a name, a licence, and nothing else to decide.",
             screen = {
                 window {
-                    NewProjectDialog(licences = emptyList(), local = true, onDismiss = {}, onCreate = { _, _ -> })
+                    NewProjectDialog(licences = emptyList(), local = true, onDismiss = {}, onCreate = { _, _, _ -> })
                 }
             },
         ) {

@@ -300,6 +300,76 @@ class ProjectsFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `a new local project arrives with its preset copied in`() {
+        // **The act that makes a preset a preset.** Everything in `Presets` was built and tested
+        // against a folder made by hand; this is the test that the app actually calls it, which is
+        // the difference between a feature and a function nobody runs.
+        scene.viewModel.createLocalProject("scratch", AppType.ANDROID)
+        scene.await("the local project", 30_000) {
+            scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
+        }
+
+        val dir = scene.workspace!!.projectDir("scratch")
+        val workflow = File(dir, ".github/workflows/android.yml")
+        assertTrue("the workflow was copied in", workflow.isFile)
+        assertTrue("and it is the Android one", workflow.readText().contains("assembleRelease"))
+        val prompt = File(dir, AgentPrompt.PROJECT_FILE)
+        assertTrue("and so was the prompt", prompt.isFile)
+        assertTrue("which says how to build this kind of project", prompt.readText().contains("Gradle"))
+        assertEquals(
+            "and the type is recorded, so a later change can tell",
+            AppType.ANDROID,
+            ProjectMeta.read(dir).type,
+        )
+        // **The person was told what arrived.** A copy that happened silently is one nobody knows
+        // about, and the first thing they would do is look for the workflow they did not know to
+        // expect.
+        assertTrue(
+            "and the answer says what was added: ${scene.viewModel.message}",
+            scene.viewModel.message.orEmpty().contains("android.yml"),
+        )
+    }
+
+    @Test
+    fun `a project made as a web app gets a web workflow, not an android one`() {
+        // The picker is only worth having if the answer reaches the copy. This is that link.
+        scene.viewModel.createLocalProject("site", AppType.WEB)
+        scene.await("the site", 30_000) {
+            scene.viewModel.projectNames.contains("site") && !scene.viewModel.busy
+        }
+
+        val dir = scene.workspace!!.projectDir("site")
+        assertTrue("the web workflow arrived", File(dir, ".github/workflows/web.yml").isFile)
+        assertFalse(
+            "and nothing invented an android one",
+            File(dir, ".github/workflows/android.yml").exists(),
+        )
+        assertTrue(
+            "and the prompt is the web one",
+            File(dir, AgentPrompt.PROJECT_FILE).readText().contains("npm"),
+        )
+    }
+
+    @Test
+    fun `a project made with no preset still gets its files, and says so`() {
+        // A preset a person deleted must not stop a project being made. The project is the thing;
+        // the preset is what it started from.
+        val dir = scene.workspace!!.projectDir("system")
+        File(dir, Workspace.TYPES).deleteRecursively()
+        scene.viewModel.createLocalProject("scratch", AppType.ANDROID)
+        scene.await("the local project", 30_000) {
+            scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
+        }
+
+        val made = scene.workspace!!.projectDir("scratch")
+        assertTrue("the project is there", File(made, ".git").isDirectory)
+        assertTrue(
+            "and the type is still recorded: ${scene.viewModel.message}",
+            ProjectMeta.read(made).type == AppType.ANDROID,
+        )
+    }
+
+    @Test
     fun `sync on a local project says why it cannot, rather than doing nothing`() {
         // The button is not offered, and the act refuses in words if it is asked anyway — a press
         // that silently does nothing is the failure this app keeps fixing.

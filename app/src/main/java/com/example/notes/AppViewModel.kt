@@ -2398,7 +2398,11 @@ class AppViewModel @JvmOverloads constructor(
      * The name is put through [Workspace.cleanName], unlike a GitHub project's: this one is a folder
      * the person typed, not a repository whose name GitHub already accepted.
      */
-    fun createLocalProject(name: String, onDone: (Boolean) -> Unit = {}) {
+    fun createLocalProject(
+        name: String,
+        type: AppType = AppType.DEFAULT,
+        onDone: (Boolean) -> Unit = {},
+    ) {
         val ws = workspace ?: return
         val clean = Workspace.cleanName(name, "local")
         val problem = ws.nameProblem(clean)
@@ -2434,6 +2438,10 @@ class AppViewModel @JvmOverloads constructor(
                 },
                 { settings.historyLength },
             ).init(clean)
+            // **The preset pair, copied in.** It is a copy and not a link: the project's workflow
+            // and prompt are its own files from this moment, editable and lockable, and a preset
+            // changed in the system project later does not reach back into them.
+            val copied = Presets.copy(ws.accountDir, ws.projectDir(clean), type)
             main.post {
                 busy = false
                 // **The words and the answer first, then the redraw.** `refresh()` is what makes the
@@ -2443,7 +2451,7 @@ class AppViewModel @JvmOverloads constructor(
                 // deleting a project shows the change only after you exit and enter the project
                 // menue again".
                 message = if (made.isSuccess) {
-                    "Made \"$clean\" on this phone. It does not go to GitHub."
+                    "Made \"$clean\" on this phone. It does not go to GitHub. ${copied.said()}"
                 } else {
                     "Made the folder, but its history could not be started"
                 }
@@ -2457,7 +2465,12 @@ class AppViewModel @JvmOverloads constructor(
      * Makes a project: the repository on GitHub first, seeded with its licence,
      * then the folder and the clone (§4.1).
      */
-    fun createProject(name: String, licence: String, onDone: (Boolean) -> Unit = {}) {
+    fun createProject(
+        name: String,
+        licence: String,
+        type: AppType = AppType.DEFAULT,
+        onDone: (Boolean) -> Unit = {},
+    ) {
         val ws = workspace ?: return
         val login = activeLogin
         val api = githubFor(login)
@@ -2508,6 +2521,17 @@ class AppViewModel @JvmOverloads constructor(
                 { accounts.account(login)?.author() ?: DEFAULT_AUTHOR },
                 { settings.historyLength },
             ).cloneInto(clean, url)
+            // **The preset pair, after the clone and not before.** `cloneInto` refuses a folder that
+            // already holds anything, so a workflow written first would have stopped the repository
+            // arriving at all — the same trap `createProjectFolders` had.
+            //
+            // **And only when the clone worked**, because a copy into a folder that is not a project
+            // is a copy nobody asked for.
+            val copied = if (clone.success) {
+                Presets.copy(ws.accountDir, ws.projectDir(clean), type)
+            } else {
+                null
+            }
 
             main.post {
                 busy = false
@@ -2520,6 +2544,9 @@ class AppViewModel @JvmOverloads constructor(
                 // local-project path gives: the screen that waits is the add window, and a list
                 // redrawn after it has closed reaches nobody.
                 onDone(clone.success)
+                if (copied != null && copied.written.isNotEmpty()) {
+                    message = "${clone.message} ${copied.said()}"
+                }
                 refresh()
             }
         }

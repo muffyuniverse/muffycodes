@@ -662,9 +662,9 @@ private fun Dialogs(
             licences = emptyList(),
             local = true,
             onDismiss = dismiss,
-            onCreate = { name, _ ->
+            onCreate = { name, _, type ->
                 tap("local project", name)
-                viewModel.createLocalProject(name)
+                viewModel.createLocalProject(name, type)
             },
         )
 
@@ -954,9 +954,9 @@ private fun NewProjectUI(viewModel: AppViewModel, dismiss: () -> Unit) {
     NewProjectDialog(
         licences = licences,
         onDismiss = dismiss,
-        onCreate = { name, licence ->
+        onCreate = { name, licence, type ->
             tap("new project", name)
-            viewModel.createProject(name, licence)
+            viewModel.createProject(name, licence, type)
         },
     )
 }

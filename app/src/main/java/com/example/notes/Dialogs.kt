@@ -424,13 +424,16 @@ fun KeepLocalDialog(
 fun NewProjectDialog(
     licences: List<Licence>,
     onDismiss: () -> Unit,
-    onCreate: (name: String, licence: String) -> Unit,
+    onCreate: (name: String, licence: String, type: AppType) -> Unit,
     /** **Local**: no repository on GitHub, no licence to seed, nothing to push to. */
     local: Boolean = false,
+    /** The types the system project has presets for. Empty means the picker is not offered. */
+    types: List<AppType> = AppType.entries.filter { it != AppType.NONE },
 ) {
     var name by remember { mutableStateOf("") }
     var licence by remember { mutableStateOf("gpl-3.0") }
     var showLicences by remember { mutableStateOf(false) }
+    var type by remember { mutableStateOf(AppType.DEFAULT) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (local) "New local project" else "New project") },
@@ -450,6 +453,44 @@ fun NewProjectDialog(
                     Text(
                         "This project stays on this phone. Its files keep their versions and the " +
                             "agent can work in it, and nothing is ever sent to GitHub.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                // **The type is what the project is for, and it is asked once.**
+                //
+                // It decides two things at creation and neither is a lock: which workflow is copied
+                // in, and which instructions the agent starts with. Both are ordinary files
+                // afterwards — editable, lockable, and the project's — so this is a question about
+                // where to start, not about what the project is allowed to become.
+                //
+                // It is offered as a row of choices rather than a dropdown because there are three
+                // of them and a dropdown would hide two.
+                if (types.isNotEmpty()) {
+                    Text(
+                        "What is it?",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for (choice in types) {
+                            val chosen = choice == type
+                            Text(
+                                text = choice.label,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (chosen) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                },
+                                modifier = Modifier
+                                    .clickable { type = choice }
+                                    .padding(vertical = 6.dp, horizontal = 2.dp),
+                            )
+                        }
+                    }
+                    Text(
+                        type.blurb,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -487,7 +528,7 @@ fun NewProjectDialog(
             TextButton(
                 enabled = name.isNotBlank(),
                 onClick = {
-                    onCreate(name.trim(), licence)
+                    onCreate(name.trim(), licence, type)
                     onDismiss()
                 },
             ) { Text("Create") }
