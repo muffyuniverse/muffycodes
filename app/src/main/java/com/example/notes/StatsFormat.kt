@@ -75,8 +75,13 @@ object StatsFormat {
      * `null` is not zero: a span with no input tokens has no share, which is a different fact from a
      * share of 0%, and the screen prints a dash for it.
      */
-    fun share(value: Double?): String =
-        if (value == null) NONE else String.format(Locale.UK, "%.2f%%", value * 100)
+    fun share(value: Double?): String = when {
+        value == null -> NONE
+        // **Whole percents, like every other percentage on this screen.** The operator's rule: "no
+        // decimals for percents". A share of 95.62% was precise about a division of two numbers that
+        // are themselves rounded, and the second decimal was the one nobody could act on.
+        else -> String.format(Locale.UK, "%.0f%%", value * 100)
+    }
 
     /**
      * A cost, in dollars, to **five decimals**.

@@ -330,7 +330,12 @@ class StatsScreenTest {
             "the change cells are dashes",
             compose.onAllNodesWithText(StatsFormat.NONE).fetchSemanticsNodes().isNotEmpty(),
         )
-        compose.onAllNodesWithText("%", substring = true).assertCountEquals(0)
+        // **Not "no % on screen"** — the cached and thinking rows carry a *share*, which is a
+        // different number that is always shown. Asking for no percent at all was asking for the
+        // share rows to disappear, which is not what the rule says.
+        //
+        // A change is the only thing that carries a sign, so its absence is what to look for.
+        compose.onAllNodesWithText("+", substring = true).assertCountEquals(0)
     }
 
     @Test
