@@ -652,6 +652,7 @@ jobs:
   # The release, built while the tests are still running. Only ever on main.
   # -------------------------------------------------------------------------
   build-release:
+    environment: release
     name: Build the release
     # Beside the tests, not behind them, because the two ask different
     # questions and neither needs the other's answer to begin: a build asks
