@@ -329,7 +329,7 @@ class ProjectsFeatureTest : FeatureTest() {
         val git = ProjectGit(
             scene.workspace!!,
             { null },
-            { "Test <test@example.com>" },
+            { GitAuthor("Test", "test@example.com") },
             { 50 },
         )
         val changes = git.changes("scratch")
