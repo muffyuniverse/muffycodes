@@ -21,6 +21,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.GraphicsMode
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.io.File
@@ -35,6 +36,13 @@ import java.io.File
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w411dp-h891dp")
+// **Real graphics, because a selection draws handles.** Robolectric's legacy mode stubs `Bitmap`
+// to null, and `SelectionContainer` builds a handle bitmap the moment a long press selects
+// something — so the gesture reached the selection machinery and died inside the framework's own
+// drawing, with `Cannot invoke "android.graphics.Bitmap.setHasAlpha(boolean)" because "bm" is null`.
+// That NPE is not the app's bug; it is the harness saying it cannot draw a handle. NATIVE mode can,
+// and `EditorScreenTest`/`ScenariosTest` already run this way for the same reason.
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
 class AgentChatScreenTest {
 
     @get:Rule
