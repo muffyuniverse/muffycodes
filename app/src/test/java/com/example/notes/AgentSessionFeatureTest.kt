@@ -819,6 +819,10 @@ class AgentSessionFeatureTest : FeatureTest() {
             project.renameTo(away),
         )
         assertFalse("the folder is really gone before the tick", project.isDirectory)
+        assertFalse(
+            "and it is gone by the path the runner asks about, not only by this File object",
+            scene.viewModel.workspace!!.projectDir("groceries").isDirectory,
+        )
         // **What the tick will actually see**, printed before it runs. This test failed on one shard
         // and passed on the other for six runs in a row, which is the shape of a race rather than a
         // rule - so the failure has to say WHICH fact was wrong: the session not in the store, the
