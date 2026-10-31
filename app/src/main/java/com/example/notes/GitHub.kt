@@ -309,6 +309,42 @@ interface GitHub {
         ref: RepoRef,
         environment: String,
     ): GitHubResult<Pair<String, ByteArray>>
+
+    /**
+     * The **names** of a repository's own secrets. Never a value — GitHub does not return one.
+     *
+     * **This is the check that matters most, and it is a check for the wrong thing to exist.** A
+     * repository secret is readable by every workflow in the repository, including one the agent wrote
+     * and started, so a single one at this scope defeats the environment design entirely. The app can
+     * do nothing about it — only the person can move it — so the honest answer is to name it.
+     */
+    fun repoSecretNames(token: String, ref: RepoRef): GitHubResult<List<String>>
+
+    /** The **names** of an environment's secrets. */
+    fun environmentSecretNames(
+        token: String,
+        ref: RepoRef,
+        environment: String,
+    ): GitHubResult<List<String>>
+
+    /**
+     * Restricts an environment to named branches.
+     *
+     * **This is the gate that replaces a reviewer, and it is better than one.** The threat is the agent
+     * publishing a release; the agent pushes and dispatches on `development` only, so an environment that
+     * only `main` and `development` may use is unreachable by anything the agent can do — structurally,
+     * with nothing for a person to approve. A reviewer would ask a human to tap a button for a decision
+     * the branch rule already made.
+     *
+     * Both branches, because `build-release` runs on both: `development` builds an installable APK signed
+     * with the same key, on purpose, so a dev build installs over the release one.
+     */
+    fun restrictEnvironmentTo(
+        token: String,
+        ref: RepoRef,
+        environment: String,
+        branches: List<String>,
+    ): GitHubResult<Unit>
 }
 
 /**
@@ -804,6 +840,94 @@ class HttpGitHub(private val api: String = DEFAULT_API) : GitHub {
             return GitHubResult(error = response.error, status = response.status)
         }
         return GitHubResult(value = Unit)
+    }
+
+    override fun repoSecretNames(token: String, ref: RepoRef): GitHubResult<List<String>> =
+        secretNames(token, "/repos/${ref.owner}/${ref.name}/actions/secrets")
+
+    override fun environmentSecretNames(
+        token: String,
+        ref: RepoRef,
+        environment: String,
+    ): GitHubResult<List<String>> = secretNames(
+        token,
+        "/repos/${ref.owner}/${ref.name}/environments/" + urlPart(environment) + "/secrets",
+    )
+
+    override fun restrictEnvironmentTo(
+        token: String,
+        ref: RepoRef,
+        environment: String,
+        branches: List<String>,
+    ): GitHubResult<Unit> {
+        // **The policy flag first, then the names.** GitHub refuses a branch name on an environment
+        // whose policy is "all branches", and refuses the policy change while custom names exist — so
+        // the order is: turn on custom policies, then add each branch. The update is idempotent, which
+        // is what makes this safe to run on every send.
+        val policy = JSONObject().put(
+            "deployment_branch_policy",
+            JSONObject()
+                .put("protected_branches", false)
+                .put("custom_branch_policies", true),
+        )
+        val set = get("PUT", "/repos/${ref.owner}/${ref.name}/environments/" +
+            urlPart(environment), token, policy)
+        if (set.error != null) {
+            return GitHubResult(error = set.error, status = set.status)
+        }
+        val existing = get(
+            "GET",
+            "/repos/${ref.owner}/${ref.name}/environments/" + urlPart(environment) +
+                "/deployment-branch-policies",
+            token,
+        )
+        if (existing.error != null) {
+            return GitHubResult(error = existing.error, status = existing.status)
+        }
+        val have = mutableSetOf<String>()
+        val array = existing.value?.optJSONArray("branch_policies") ?: JSONArray()
+        for (i in 0 until array.length()) {
+            array.optJSONObject(i)?.optString("name")?.let { have.add(it) }
+        }
+        for (branch in branches) {
+            // **Only what is missing**, because GitHub answers 409 for a name that is already there and
+            // a second send would otherwise look like a failure.
+            if (branch in have) continue
+            val added = get(
+                "POST",
+                "/repos/${ref.owner}/${ref.name}/environments/" + urlPart(environment) +
+                    "/deployment-branch-policies",
+                token,
+                JSONObject().put("name", branch),
+            )
+            if (added.error != null) {
+                return GitHubResult(error = added.error, status = added.status)
+            }
+        }
+        return GitHubResult(value = Unit)
+    }
+
+    /**
+     * The `name` of every entry in a secrets listing.
+     *
+     * **The endpoint returns names and timestamps and nothing else**, which is why this is safe to call
+     * and worth calling: it answers "what exists here" without touching a value.
+     */
+    private fun secretNames(token: String, path: String): GitHubResult<List<String>> {
+        val response = get("GET", path, token)
+        if (response.error != null) {
+            return GitHubResult(error = response.error, status = response.status)
+        }
+        val array = response.value?.optJSONArray("secrets")
+            ?: response.array
+            ?: return GitHubResult(value = emptyList())
+        val names = mutableListOf<String>()
+        for (i in 0 until array.length()) {
+            val obj = array.optJSONObject(i) ?: continue
+            val name = obj.optString("name")
+            if (name.isNotEmpty()) names.add(name)
+        }
+        return GitHubResult(value = names.sorted())
     }
 
     /**
@@ -1349,6 +1473,74 @@ class DiskGitHub(
         } catch (e: Throwable) {
             GitHubResult(error = "The secret could not be stored: ${e.message}")
         }
+    }
+
+    override fun repoSecretNames(token: String, ref: RepoRef): GitHubResult<List<String>> {
+        if (token.isBlank()) return GitHubResult(error = "Bad credentials", status = 401)
+        val dir = File(repoDir(ref.name), "ci-secrets")
+        if (!dir.isDirectory) return GitHubResult(value = emptyList())
+        return GitHubResult(
+            value = dir.listFiles().orEmpty().filter { it.isFile }
+                .map { it.name.removeSuffix(".bin") }.sorted(),
+        )
+    }
+
+    override fun environmentSecretNames(
+        token: String,
+        ref: RepoRef,
+        environment: String,
+    ): GitHubResult<List<String>> {
+        if (token.isBlank()) return GitHubResult(error = "Bad credentials", status = 401)
+        val dir = File(File(environmentsDir(ref), environment), "secrets")
+        if (!dir.isDirectory) return GitHubResult(value = emptyList())
+        return GitHubResult(
+            value = dir.listFiles().orEmpty().filter { it.isFile }
+                .map { it.name.removeSuffix(".bin") }.sorted(),
+        )
+    }
+
+    /** The branches an environment is restricted to, for a test to read back. */
+    fun branchesOf(ref: RepoRef, environment: String): List<String> {
+        val file = File(File(environmentsDir(ref), environment), "branches.json")
+        if (!file.isFile) return emptyList()
+        return try {
+            val array = JSONArray(file.readText())
+            (0 until array.length()).mapNotNull { array.optString(it)?.takeIf(String::isNotEmpty) }
+        } catch (e: Throwable) {
+            emptyList()
+        }
+    }
+
+    override fun restrictEnvironmentTo(
+        token: String,
+        ref: RepoRef,
+        environment: String,
+        branches: List<String>,
+    ): GitHubResult<Unit> {
+        if (token.isBlank()) return GitHubResult(error = "Bad credentials", status = 401)
+        val dir = File(environmentsDir(ref), environment)
+        dir.mkdirs()
+        return try {
+            File(dir, "branches.json").writeText(
+                JSONArray().apply { branches.forEach { put(it) } }.toString(),
+            )
+            GitHubResult(value = Unit)
+        } catch (e: Throwable) {
+            GitHubResult(error = "The branch policy could not be stored: ${e.message}")
+        }
+    }
+
+    /**
+     * Puts a secret at REPOSITORY scope, so a test can create the state the app warns about.
+     *
+     * **Only the fake has this.** Nothing in the app writes a repository secret, which is the point: the
+     * app's whole secret path goes to an environment, and the one thing it does about repository secrets
+     * is report them.
+     */
+    fun putRepoSecret(repo: String, name: String, sealed: ByteArray) {
+        val dir = File(repoDir(repo), "ci-secrets")
+        dir.mkdirs()
+        File(dir, "$name.bin").writeBytes(sealed)
     }
 
     /** The sealed bytes of a secret, for a test that wants to prove what was stored. */

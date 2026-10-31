@@ -250,4 +250,44 @@ class WorkflowsTest {
         assertTrue(Workflows.isWorkflow(".github/workflows/build.yaml"))
         assertFalse("a text file is not a workflow", Workflows.isWorkflow("README.md"))
     }
+
+    // ---- the finding that matters ----------------------------------------
+
+    @Test
+    fun `a secret at repository scope is named, because nothing else can be done about it`() {
+        // **The state this repository was actually in when the design was finished**: four signing
+        // secrets at repository scope, no environment. Every workflow could read them, including one the
+        // agent wrote — so the environment rule was decorative. The app cannot move them, so it says so.
+        val secrets = Workflows.Secrets(
+            atRepository = listOf("MUFFY_KEYSTORE_BASE64", "MUFFY_KEY_PASSWORD"),
+            inEnvironment = emptyList(),
+            environment = "release",
+        )
+
+        val said = secrets.said().orEmpty()
+        assertTrue("it names the count: $said", said.contains("2 secrets"))
+        assertTrue("it names them: $said", said.contains("MUFFY_KEYSTORE_BASE64"))
+        assertTrue("it says where they should go: $said", said.contains("release"))
+        assertFalse("and it is not settled", secrets.settled)
+    }
+
+    @Test
+    fun `a project with nothing in its environment is told so`() {
+        val secrets = Workflows.Secrets(emptyList(), emptyList(), "release")
+        val said = secrets.said().orEmpty()
+        assertTrue("it says nothing is there: $said", said.contains("cannot sign"))
+    }
+
+    @Test
+    fun `a project that is set up right is not nagged about`() {
+        // **Silence is a real answer.** A person who has done this correctly should not be told about it
+        // every time they open a project.
+        val secrets = Workflows.Secrets(
+            atRepository = emptyList(),
+            inEnvironment = listOf("MUFFY_KEYSTORE_BASE64"),
+            environment = "release",
+        )
+        assertTrue("settled", secrets.settled)
+        assertEquals("and says nothing", null, secrets.said())
+    }
 }

@@ -330,4 +330,20 @@ private class RefusingGitHub : GitHub {
         sealed: ByteArray,
         keyId: String,
     ): GitHubResult<Unit> = GitHubResult(error = "Bad credentials", status = 401)
+
+    override fun repoSecretNames(token: String, ref: RepoRef): GitHubResult<List<String>> =
+        GitHubResult(error = "Bad credentials", status = 401)
+
+    override fun environmentSecretNames(
+        token: String,
+        ref: RepoRef,
+        environment: String,
+    ): GitHubResult<List<String>> = GitHubResult(error = "Bad credentials", status = 401)
+
+    override fun restrictEnvironmentTo(
+        token: String,
+        ref: RepoRef,
+        environment: String,
+        branches: List<String>,
+    ): GitHubResult<Unit> = GitHubResult(error = "Bad credentials", status = 401)
 }

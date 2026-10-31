@@ -219,4 +219,20 @@ class ReleaseKeyTest {
         assertFalse("not the alias", said.contains("notes"))
         assertTrue("only names and counts: $said", said.contains("4 secrets"))
     }
+
+    @Test
+    fun `the environment is restricted to the branches that build`() {
+        // **The gate that replaces a reviewer.** The agent only touches `development`, so an environment
+        // restricted to `main` and `development` is unreachable by anything the agent can do — no
+        // approval step, no reviewer, and no way for the agent to publish.
+        //
+        // `development` is in the list because `build-release` runs there too and signs its APK with the
+        // same key on purpose: a dev build installs over the release one.
+        key().send(github, "a-key", ref).getOrThrow()
+
+        assertEquals(
+            listOf("main", "development"),
+            github.branchesOf(ref, "release"),
+        )
+    }
 }

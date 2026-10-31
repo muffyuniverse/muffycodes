@@ -197,6 +197,22 @@ class ReleaseKey(private val properties: File) {
                 IllegalStateException("The environment's key could not be read: ${key.error}"),
             )
         }
+        // **The environment is restricted to the branches that build, before any secret goes in it.**
+        // The threat is the agent publishing a release, and the agent only touches `development` — so an
+        // environment `main` and `development` may use is unreachable by anything the agent can do. That
+        // is a gate with nothing for a person to approve, which is why no reviewer is needed.
+        //
+        // `development` as well as `main`, because `build-release` runs on both and signs both with the
+        // same key on purpose: a dev build installs over the release one.
+        val restricted = github.restrictEnvironmentTo(token, ref, environment, BRANCHES)
+        if (restricted.error != null) {
+            return Result.failure(
+                IllegalStateException(
+                    "The environment could not be restricted to ${BRANCHES.joinToString(", ")}: " +
+                        restricted.error,
+                ),
+            )
+        }
         val (keyId, publicKey) = key.value!!
         val written = mutableListOf<String>()
         val failed = mutableListOf<Pair<String, String>>()
@@ -236,5 +252,14 @@ class ReleaseKey(private val properties: File) {
 
         /** The file the four values come from, at the root of a checkout. */
         const val FILE = "keystore.properties"
+
+        /**
+         * The branches that may use the `release` environment.
+         *
+         * **`main` publishes and `development` builds an installable APK signed with the same key** —
+         * that is deliberate, so a dev build installs over the release one. Both need the key; nothing
+         * else does.
+         */
+        val BRANCHES = listOf("main", "development")
     }
 }
