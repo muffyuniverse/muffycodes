@@ -1,6 +1,7 @@
 package com.example.notes
 
 import org.json.JSONObject
+import File
 
 /**
  * What a project is for, **which is what decides what the app offers it.**
@@ -225,8 +226,8 @@ data class ProjectMeta(
          * metadata is the app's note about it. Unreadable reads as the default, and the next write
          * repairs it.
          */
-        fun read(projectDir: java.io.File): ProjectMeta {
-            val file = java.io.File(java.io.File(projectDir, Workspace.STATE_DIR), FILE)
+        fun read(projectDir: File): ProjectMeta {
+            val file = File(File(projectDir, Workspace.STATE_DIR), FILE)
             if (!file.isFile) return ProjectMeta(AppType.DEFAULT)
             return try {
                 val json = JSONObject(file.readText())
@@ -242,10 +243,10 @@ data class ProjectMeta(
         }
 
         /** Writes the metadata, making `.muffy/` if it is not there. */
-        fun write(projectDir: java.io.File, meta: ProjectMeta): Boolean = try {
-            val dir = java.io.File(projectDir, Workspace.STATE_DIR)
+        fun write(projectDir: File, meta: ProjectMeta): Boolean = try {
+            val dir = File(projectDir, Workspace.STATE_DIR)
             dir.mkdirs()
-            java.io.File(dir, FILE).writeText(meta.toJson())
+            File(dir, FILE).writeText(meta.toJson())
             true
         } catch (e: Throwable) {
             false
