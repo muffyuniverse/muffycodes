@@ -2429,7 +2429,7 @@ class AppViewModel @JvmOverloads constructor(
             }
             // **A repository, with no remote.** The history is what makes it a project rather than
             // a folder: every save is a version, and a version can be gone back to.
-            val made = ProjectGit(
+            val git = ProjectGit(
                 ws,
                 { null },
                 {
@@ -2437,11 +2437,21 @@ class AppViewModel @JvmOverloads constructor(
                     else accounts.account(activeLogin ?: "")?.author() ?: DEFAULT_AUTHOR
                 },
                 { settings.historyLength },
-            ).init(clean)
+            )
+            val made = git.init(clean)
             // **The preset pair, copied in.** It is a copy and not a link: the project's workflow
             // and prompt are its own files from this moment, editable and lockable, and a preset
             // changed in the system project later does not reach back into them.
             val copied = Presets.copy(ws.accountDir, ws.projectDir(clean), type)
+            // **And committed, because a preset that arrives uncommitted is a project that opens with
+            // changes waiting.** The row counts what is not in the history, so a project made a
+            // second ago would show two changed files and a "to send" count — work nobody did, in a
+            // project nobody has touched. It is also the truthful record: these files were added by
+            // the app when the project was made, and a history that starts with them is what a person
+            // reading it would expect to see.
+            if (copied.written.isNotEmpty()) {
+                git.commitOutcome(clean, "Start from the ${type.label} preset")
+            }
             main.post {
                 busy = false
                 // **The words and the answer first, then the redraw.** `refresh()` is what makes the
@@ -2515,12 +2525,13 @@ class AppViewModel @JvmOverloads constructor(
             // here meant every project made on GitHub arrived as an empty folder, an error in the
             // snackbar and no repository, which is to say no history at all. The clone makes the
             // folder; `cloneInto` writes the app's two ignore lines into it afterwards.
-            val clone = ProjectGit(
+            val git = ProjectGit(
                 ws,
                 { credentials.token(login) },
                 { accounts.account(login)?.author() ?: DEFAULT_AUTHOR },
                 { settings.historyLength },
-            ).cloneInto(clean, url)
+            )
+            val clone = git.cloneInto(clean, url)
             // **The preset pair, after the clone and not before.** `cloneInto` refuses a folder that
             // already holds anything, so a workflow written first would have stopped the repository
             // arriving at all — the same trap `createProjectFolders` had.
@@ -2531,6 +2542,12 @@ class AppViewModel @JvmOverloads constructor(
                 Presets.copy(ws.accountDir, ws.projectDir(clean), type)
             } else {
                 null
+            }
+            // **Committed, for the reason the local path gives** — a project that opens with two
+            // changed files and a "to send" count is showing work nobody did. It is also not pushed:
+            // the person pushes, always.
+            if (copied != null && copied.written.isNotEmpty()) {
+                git.commitOutcome(clean, "Start from the ${type.label} preset")
             }
 
             main.post {

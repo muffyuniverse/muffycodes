@@ -321,6 +321,19 @@ class ProjectsFeatureTest : FeatureTest() {
             AppType.ANDROID,
             ProjectMeta.read(dir).type,
         )
+        // **And they are in the history, not waiting to be.** A project made a second ago that opens
+        // with two changed files is showing work nobody did — the row counts what is not committed,
+        // so an uncommitted preset makes a brand-new project look edited. Three tests failed on this
+        // before it was fixed, which is why it is asserted here rather than left to the copy's own
+        // tests: `Presets` cannot know about the history and the view model is where they meet.
+        val git = ProjectGit(
+            scene.workspace!!,
+            { null },
+            { "Test <test@example.com>" },
+            { 50 },
+        )
+        val changes = git.changes("scratch")
+        assertEquals("nothing is waiting: $changes", 0, changes.staged + changes.unstaged + changes.untracked)
         // **The person was told what arrived.** A copy that happened silently is one nobody knows
         // about, and the first thing they would do is look for the workflow they did not know to
         // expect.
