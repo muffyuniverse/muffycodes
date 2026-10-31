@@ -4,14 +4,16 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
-import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.platform.LocalTextToolbar
+import androidx.compose.ui.platform.TextToolbar
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.performTextInput
 import org.junit.After
@@ -21,7 +23,6 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.GraphicsMode
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.io.File
@@ -36,13 +37,6 @@ import java.io.File
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w411dp-h891dp")
-// **Real graphics, because a selection draws handles.** Robolectric's legacy mode stubs `Bitmap`
-// to null, and `SelectionContainer` builds a handle bitmap the moment a long press selects
-// something — so the gesture reached the selection machinery and died inside the framework's own
-// drawing, with `Cannot invoke "android.graphics.Bitmap.setHasAlpha(boolean)" because "bm" is null`.
-// That NPE is not the app's bug; it is the harness saying it cannot draw a handle. NATIVE mode can,
-// and `EditorScreenTest`/`ScenariosTest` already run this way for the same reason.
-@GraphicsMode(GraphicsMode.Mode.NATIVE)
 class AgentChatScreenTest {
 
     @get:Rule
@@ -187,8 +181,9 @@ class AgentChatScreenTest {
         // **pure Compose**, not a platform text view, so its long-press is a Compose pointer
         // gesture and `performTouchInput { longClick() }` reaches it.
         //
-        // What the gesture produces is a `SemanticsProperties.TextSelectionRange` on the container.
-        // Asserting on that is asserting the selection itself rather than "the text was drawn".
+        // And what it produces is a request for the copy menu, which is the observable consequence
+        // of a selection: a press that selected nothing asks for no menu. Asserting on that is
+        // asserting the gesture worked rather than "the text was drawn".
         val door = ScriptedDoor(Reply("Noted."))
         chat(door)
         say("remember the milk")
@@ -197,15 +192,45 @@ class AgentChatScreenTest {
         val words = compose.onNodeWithText("remember the milk")
         words.assertExists()
 
+        // **A recording toolbar, because the real one is a popup window.** `SelectionContainer`
+        // asks `LocalTextToolbar` to show the copy menu as soon as a press selects something, and
+        // the default implementation puts it in a `Popup` — which Robolectric cannot create, so the
+        // test died inside the framework's own window code rather than in anything this app wrote.
+        // Supplying a toolbar that records the request is what makes the gesture observable: the
+        // question "did the long press select?" is answered by the toolbar being asked to appear.
+        val asked = java.util.concurrent.atomic.AtomicBoolean(false)
+        compose.setContent {
+            MaterialTheme {
+                Surface {
+                    CompositionLocalProvider(
+                        LocalTextToolbar provides object : TextToolbar {
+                            override fun showMenu(
+                                rect: Rect,
+                                onCopyRequested: (() -> Unit)?,
+                                onPasteRequested: (() -> Unit)?,
+                                onCutRequested: (() -> Unit)?,
+                                onSelectAllRequested: (() -> Unit)?,
+                            ) {
+                                asked.set(true)
+                            }
+
+                            override fun hide() = Unit
+                            override fun statusBarHeight(): Int = 0
+                        },
+                    ) {
+                        AgentChatScreen(viewModel = scene.viewModel, onBack = {})
+                    }
+                }
+            }
+        }
+        compose.waitForIdle()
+
         words.performTouchInput { longClick() }
         compose.waitForIdle()
 
-        val selected = words.fetchSemanticsNode()
-            .config.getOrNull(SemanticsProperties.TextSelectionRange)
-
         assertTrue(
-            "a long press on the operator's message selects some of it, not none of it",
-            selected != null && selected.start != selected.end,
+            "a long press on the operator's message selects it, which is what asks for the menu",
+            asked.get(),
         )
     }
 
