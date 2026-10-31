@@ -10,6 +10,8 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.performTextInput
 import org.junit.After
@@ -195,7 +197,7 @@ class AgentChatScreenTest {
 
         assertTrue(
             "a long press on the operator's message selects some of it, not none of it",
-            selected != null && !selected.collapsed,
+            selected != null && selected.start != selected.end,
         )
     }
 
