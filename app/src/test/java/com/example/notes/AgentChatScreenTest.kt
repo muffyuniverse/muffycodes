@@ -54,14 +54,25 @@ class AgentChatScreenTest {
 
     private fun call(tool: String, args: String = "{}") = Call("call_$tool", tool, args)
 
-    /** Puts the box on the screen and opens the project's conversation. */
-    private fun chat(door: Door) {
+    /**
+     * Puts the box on the screen and opens the project's conversation.
+     *
+     * [toolbar] replaces `LocalTextToolbar` for tests that need to see a selection: the real one
+     * opens a `Popup`, which is a window Robolectric has none of.
+     */
+    private fun chat(door: Door, toolbar: TextToolbar? = null) {
         scene.project("groceries")
         scene.viewModel.chatDoor = { door }
         compose.setContent {
             MaterialTheme {
                 Surface {
-                    AgentChatScreen(viewModel = scene.viewModel, onBack = {})
+                    if (toolbar == null) {
+                        AgentChatScreen(viewModel = scene.viewModel, onBack = {})
+                    } else {
+                        CompositionLocalProvider(LocalTextToolbar provides toolbar) {
+                            AgentChatScreen(viewModel = scene.viewModel, onBack = {})
+                        }
+                    }
                 }
             }
         }
@@ -185,14 +196,6 @@ class AgentChatScreenTest {
         // And what it produces is a request for the copy menu, which is the observable consequence
         // of a selection: a press that selected nothing asks for no menu. Asserting on that is
         // asserting the gesture worked rather than "the text was drawn".
-        val door = ScriptedDoor(Reply("Noted."))
-        chat(door)
-        say("remember the milk")
-        awaitTurns(1)
-
-        val words = compose.onNodeWithText("remember the milk")
-        words.assertExists()
-
         // **A recording toolbar, because the real one is a popup window.** `SelectionContainer`
         // asks `LocalTextToolbar` to show the copy menu as soon as a press selects something, and
         // the default implementation puts it in a `Popup` — which Robolectric cannot create, so the
@@ -200,40 +203,32 @@ class AgentChatScreenTest {
         // Supplying a toolbar that records the request is what makes the gesture observable: the
         // question "did the long press select?" is answered by the toolbar being asked to appear.
         val asked = java.util.concurrent.atomic.AtomicBoolean(false)
-        compose.setContent {
-            MaterialTheme {
-                Surface {
-                    CompositionLocalProvider(
-                        LocalTextToolbar provides object : TextToolbar {
-                            override fun showMenu(
-                                rect: Rect,
-                                onCopyRequested: (() -> Unit)?,
-                                onPasteRequested: (() -> Unit)?,
-                                onCutRequested: (() -> Unit)?,
-                                onSelectAllRequested: (() -> Unit)?,
-                            ) {
-                                asked.set(true)
-                            }
-
-                            override fun hide() = Unit
-                            // **`status` is read, not just written.** The container asks the
-                            // toolbar whether the menu is showing to decide how to handle the next
-                            // press, so a toolbar that answered nothing would leave the container
-                            // in a state it never left.
-                            override val status: TextToolbarStatus
-                                get() = if (asked.get()) {
-                                    TextToolbarStatus.Shown
-                                } else {
-                                    TextToolbarStatus.Hidden
-                                }
-                        },
-                    ) {
-                        AgentChatScreen(viewModel = scene.viewModel, onBack = {})
-                    }
-                }
+        val toolbar = object : TextToolbar {
+            override fun showMenu(
+                rect: Rect,
+                onCopyRequested: (() -> Unit)?,
+                onPasteRequested: (() -> Unit)?,
+                onCutRequested: (() -> Unit)?,
+                onSelectAllRequested: (() -> Unit)?,
+            ) {
+                asked.set(true)
             }
+
+            override fun hide() = Unit
+            // **`status` is read, not just written.** The container asks the toolbar whether the
+            // menu is showing to decide how to handle the next press, so a toolbar that answered
+            // nothing would leave the container in a state it never left.
+            override val status: TextToolbarStatus
+                get() = if (asked.get()) TextToolbarStatus.Shown else TextToolbarStatus.Hidden
         }
-        compose.waitForIdle()
+
+        val door = ScriptedDoor(Reply("Noted."))
+        chat(door, toolbar)
+        say("remember the milk")
+        awaitTurns(1)
+
+        val words = compose.onNodeWithText("remember the milk")
+        words.assertExists()
 
         words.performTouchInput { longClick() }
         compose.waitForIdle()
