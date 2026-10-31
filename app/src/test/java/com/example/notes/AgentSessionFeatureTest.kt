@@ -839,6 +839,15 @@ class AgentSessionFeatureTest : FeatureTest() {
                 "projectDir=${scene.viewModel.workspace!!.projectDir("groceries")}",
             scene.viewModel.workspace!!.projectDir("groceries").isDirectory,
         )
+        // **Every `AgentSessions` store in the account folder, because the tick's is built by the
+        // wiring and is not necessarily the one this test holds.** The runner binds its store to
+        // `ws.accountDir` at construction, and `runnerFor` builds its own `Workspace` — so "the store
+        // has the session" and "the RUNNER's store has the session" are two different claims.
+        val storeFile = File(scene.viewModel.workspace!!.stateDir, AgentSessions.AGENTS)
+        assertTrue(
+            "the session store is on disk at $storeFile: exists=${storeFile.isFile}",
+            storeFile.isFile,
+        )
         scene.viewModel.tickAgents(due)
         // **The tick answers on the main thread.** It posts the new session list there, so the
         // screen's own state is only true once that post has run — asserting straight after the
