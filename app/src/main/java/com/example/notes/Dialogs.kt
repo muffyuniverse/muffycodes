@@ -523,8 +523,27 @@ fun SignInDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // **Three scopes, named, because a missing one is otherwise a mystery.** A classic
+                // token that lacks `workflow` can push every file except a workflow, and GitHub's
+                // answer is the same "Resource not accessible by personal access token" that a
+                // hundred other things produce. `repo` covers `public_repo`, so one checkbox is
+                // enough for private repositories too.
                 Text(
-                    "The key needs the repo and delete_repo scopes.",
+                    "This is a classic token, with the scopes repo, workflow and delete_repo. " +
+                        "`repo` is what lets the app read and write the repository; `workflow` is " +
+                        "what lets it push a workflow file; `delete_repo` is only used when you " +
+                        "delete a project and choose to remove its repository too.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                // **The one alternative, named so it is not a surprise.** A fine-grained token can do
+                // everything this app does, but the permission names differ and the app cannot read
+                // which of them are missing — so the honest thing is to say the supported path rather
+                // than leave a person to discover it from a 403.
+                Text(
+                    "A fine-grained token can also work, but this app only checks a classic one: " +
+                        "if a call is refused with \"Resource not accessible\", a classic token " +
+                        "with those three scopes is the quickest way past it.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

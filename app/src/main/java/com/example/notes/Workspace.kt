@@ -114,6 +114,43 @@ class Workspace(val accountDir: File) {
         val readme = File(dir, README)
         if (readme.isFile) return
         readme.writeText(README_TEXT)
+        // **The templates are written once, beside the readme, on the same rule.** A file that is
+        // already there is the person's, word for word: they may have adapted a template to their own
+        // project, and rewriting it on every refresh would silently undo that.
+        ensureTemplates(dir)
+    }
+
+    /**
+     * The standard workflows, in the system project, **as text a person can read and change.**
+     *
+     * ## Why they live here rather than in the APK
+     *
+     * A template compiled into the app can only change when the app changes, and a person who wants a
+     * step added has no way to ask for it except by writing the whole workflow themselves. In the
+     * system project it is an ordinary file: the agent can read it, the person can edit it, and every
+     * project copies from the same source.
+     *
+     * ## Why they are templates and not workflows
+     *
+     * **GitHub only dispatches a workflow that is in the repository**, at `.github/workflows/`. A file
+     * in `system/workflows/` is not on GitHub, so a dispatch against it would be a 404. So a project
+     * gets a **copy** in its own `.github/workflows/`, which is the file that actually runs — and the
+     * copy is the project's, so a project that needs a different step can have one without forking the
+     * template for everybody.
+     */
+    private fun ensureTemplates(dir: File) {
+        val folder = File(dir, TEMPLATES)
+        try {
+            folder.mkdirs()
+            for ((name, text) in WorkflowTemplates.ALL) {
+                val file = File(folder, name)
+                // **Never overwritten.** The second run finds the person's file and leaves it.
+                if (!file.isFile) file.writeText(text)
+            }
+        } catch (t: Throwable) {
+            // A folder that cannot be made is a phone problem, and every write that needs it says so
+            // on its own. Nothing to report from here.
+        }
     }
 
     /**
@@ -493,6 +530,9 @@ class Workspace(val accountDir: File) {
         // inside it as surely as one at the top. `isAppFlag` is separate and stays about the leaf,
         // because `.muffy/`'s own files are the flags and there is nothing beneath them.
         val names = relative(file) ?: return Hold.NONE
+        // **The templates are held by path, not by name** — see [isTemplatePath]. A project's own
+        // `.github/workflows/` must stay readable, and it is called `workflows` too.
+        if (isTemplatePath(names.joinToString("/"))) return Hold.APP
         return if (names.any { isSystemLocked(it) }) Hold.APP else Hold.NONE
     }
 
@@ -1241,6 +1281,38 @@ class Workspace(val accountDir: File) {
          * whole account; `agent/` is one project's record.
          */
         fun isSystemLocked(name: String): Boolean = name == STATE_DIR || name == AgentLog.DIR
+
+        /**
+         * The templates folder inside the system project — **read by the agent, written by nobody but
+         * the app.**
+         *
+         * ## Why this is a path and not a name
+         *
+         * Every other system lock is a *name*: `agent/` and `.muffy/` are held wherever they appear,
+         * which is what a project needs. **This one must not be**, because the folder it protects is
+         * called `workflows` — and every project that has CI has a `.github/workflows/` the agent has
+         * to be able to read. A name rule would lock those too, and the failure would be an agent
+         * that cannot read the very file it is asked to dispatch.
+         *
+         * So the rule is the whole path, and it only matches the copy in the system project.
+         */
+        const val TEMPLATES = "workflows"
+
+        /** The template files, which are also the names a project's own workflow may take. */
+        val TEMPLATE_NAMES: List<String> get() = WorkflowTemplates.ALL.keys.toList()
+
+        /**
+         * True when [path] — account-relative, as `Workspace.relative` writes it — is a template.
+         *
+         * The system project's own name is the first segment, so a project that happens to be called
+         * something else cannot match, and a file called `workflows` in a project is never this.
+         */
+        fun isTemplatePath(path: String): Boolean {
+            val parts = path.trim('/').split('/')
+            return parts.size >= 2 &&
+                parts[0].equals(SYSTEM_PROJECT, ignoreCase = true) &&
+                parts[1].equals(TEMPLATES, ignoreCase = true)
+        }
 
         /** A project's ignore file, and the two lines the app keeps in it. */
         const val IGNORE = ".gitignore"
