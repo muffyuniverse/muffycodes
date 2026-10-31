@@ -1,7 +1,7 @@
 package com.example.notes
 
 import org.json.JSONObject
-import File
+import java.io.File
 
 /**
  * What a project is for, **which is what decides what the app offers it.**
