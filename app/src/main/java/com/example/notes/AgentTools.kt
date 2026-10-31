@@ -210,6 +210,7 @@ class AgentTools(
             "shot" to setOf("url", "full", "eval"),
             "ci" to setOf("workflow", "branch", "limit", "event", "inputs"),
             "runs" to setOf("run", "job", "grep", "from", "to"),
+            "artifact" to setOf("run", "name"),
         )
 
         /** The keys [args] carries that [tool] does not take, in the order the model wrote them. */
@@ -405,6 +406,18 @@ class AgentTools(
                     "`from`/`to` are line numbers of the filed log, both included.",
                 "{\"run\":41177826224,\"job\":\"Test (0)\",\"grep\":\"FAILED\",\"from\":1,\"to\":40}",
             ),
+            spec(
+                "artifact",
+                "Fetch one file a run produced — an APK, a bundle of screenshots, a report. **It " +
+                    "is not returned as bytes**: an artifact is a zip, and a zip in this conversation " +
+                    "is binary that costs the whole context to say nothing. It is written into the " +
+                    "project and the answer is its path, its size and the names of the files inside, " +
+                    "so you can `read` what is text and leave what is not. `run` is the id `ci` " +
+                    "gave you. Leave `name` out to be told which artifacts the run has — an " +
+                    "artifact's name belongs to the workflow, so guessing one downloads the wrong " +
+                    "file. Artifacts expire; an expired one is refused with the reason.",
+                "{\"run\":41177826224,\"name\":\"app-release\"}",
+            ),
         )
 
         /**
@@ -521,6 +534,7 @@ class AgentTools(
             "shot" -> shot(args, deadline)
             "ci" -> ci(args, deadline)
             "runs" -> runs(args, deadline)
+            "artifact" -> artifact(args)
             else -> refusal("There is no tool called ${call.tool}")
         }
     } catch (e: StoppedException) {
@@ -1944,6 +1958,107 @@ class AgentTools(
         }
         val rel = file.relativeTo(projectDir).invariantSeparatorsPath
         return success(slice(body, rel, args))
+    }
+
+    /**
+     * Fetches one artifact of a run into the project, and says where it went.
+     *
+     * ## Why this writes a file rather than returning bytes
+     *
+     * An artifact is a **zip** — an APK, a screenshot, a report. Handing a zip to a model as a string
+     * would be handing it binary that no model can read and that would spend the whole context doing
+     * nothing. So the bytes go to disk and the answer is a path, a size and the names inside it. The
+     * model can then `read` what is text and `tree` what is not.
+     *
+     * ## Why the redirect matters, and it is security rather than convenience
+     *
+     * GitHub answers an artifact download with a **302 to `blob.core.windows.net`**, which is Azure
+     * storage and not GitHub. That host rejects a bearer token with a 401 — and, more importantly, a
+     * client that follows the redirect automatically would send `Authorization` to a host that is not
+     * GitHub. `GitHub.artifactBytes` sets `instanceFollowRedirects = false` and makes the second hop
+     * without the header; this tool inherits that and must not grow a download of its own.
+     *
+     * ## Where it goes
+     *
+     * `agent/ci/`, beside the logs, because it is the same category of thing: what CI produced. A
+     * name the artifact already has is used, cleaned, so a model that fetched `app-release` twice
+     * overwrites rather than filling the folder with copies.
+     */
+    private fun artifact(args: JSONObject): String {
+        val id = args.optLong("run", 0L)
+        if (id <= 0L) {
+            return refusal("Say which run: {\"run\": 41177826224}. `ci` lists them with their ids.")
+        }
+        val there = when (val w = ciWhere()) {
+            is Where.Refused -> return refusal(w.said)
+            is Where.Found -> w
+        }
+        val found = there.gh.artifacts(there.token, there.ref, id)
+        if (found.error != null) return refusal(ciSaid(found.error, found.status))
+        val all = found.value.orEmpty()
+        if (all.isEmpty()) {
+            return success("Run $id has no artifacts. A run makes them only if its workflow uploads one.")
+        }
+        val wanted = args.optString("name").trim()
+        // **Naming nothing lists rather than guesses.** An artifact's name is the workflow's, and a
+        // model that assumed one would download the wrong bytes and describe them confidently.
+        if (wanted.isEmpty()) {
+            val rows = all.joinToString("\n") { one ->
+                "- ${one.name} · ${one.bytes} bytes" +
+                    if (one.expired) " · EXPIRED, so it can no longer be downloaded" else ""
+            }
+            return success(
+                "Run $id has ${all.size} artifact" + (if (all.size == 1) "" else "s") + ":\n" +
+                    rows + "\n\nSay {\"run\": $id, \"name\": \"<one of those>\"} to fetch one.",
+            )
+        }
+        val hit = all.filter { it.name == wanted }
+        if (hit.isEmpty()) {
+            return refusal(
+                "Run $id has no artifact called \"$wanted\". It has: " +
+                    all.joinToString(", ") { "\"${it.name}\"" } + ".",
+            )
+        }
+        val one = hit.first()
+        if (one.expired) {
+            return refusal(
+                "The artifact \"$wanted\" of run $id has expired, so GitHub will not serve it. " +
+                    "Artifacts are kept for a while and then removed; a fresh run makes a fresh one.",
+            )
+        }
+        val bytes = there.gh.artifactBytes(there.token, there.ref, one.id)
+        if (bytes.error != null) return refusal(ciSaid(bytes.error, bytes.status))
+        val data = bytes.value ?: return refusal("GitHub returned no bytes for \"$wanted\".")
+        val dir = File(File(File(projectDir, RESULTS_DIR), "ci"), "artifacts")
+        val name = ws.cleanName(one.name).ifEmpty { "artifact-${one.id}" }
+        val file = File(dir, name + ".zip")
+        try {
+            file.parentFile?.mkdirs()
+            file.writeBytes(data)
+        } catch (e: Throwable) {
+            return refusal("The artifact could not be filed: " + Secrets.explain(e, "not written"))
+        }
+        val rel = file.relativeTo(projectDir).invariantSeparatorsPath
+        // **What is inside, when it can be read.** An APK is a zip and so is a bundle of screenshots,
+        // and "which files did this produce" is the question a model asks next. A zip that will not
+        // open is not a failure of the download — the bytes are on disk either way.
+        val inside = try {
+            java.util.zip.ZipFile(file).use { zip ->
+                zip.entries().asSequence().filterNot { it.isDirectory }
+                    .take(40).map { it.name }.toList()
+            }
+        } catch (e: Throwable) {
+            emptyList()
+        }
+        val listing = if (inside.isEmpty()) {
+            ""
+        } else {
+            "\n\nIt holds:\n" + inside.joinToString("\n") { "- $it" } +
+                if (inside.size == 40) "\n- … and possibly more" else ""
+        }
+        return success(
+            "Fetched \"${one.name}\" (${data.size} bytes) from run $id into $rel." + listing,
+        )
     }
 
     /**

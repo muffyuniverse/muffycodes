@@ -384,4 +384,97 @@ class CiToolsTest {
 
         assertTrue("it started: $body", body.startsWith(AgentLog.SUCCESS))
     }
+
+    // ---- artifacts --------------------------------------------------------
+
+    /** A run with one artifact in it, as the fake stores them. */
+    private fun runWithArtifact(name: String, bytes: ByteArray): Long {
+        val id = 41177826224L
+        val dir = File(github.repoDir(repo), "ci/$id")
+        File(dir, "artifacts").mkdirs()
+        File(dir, "run.json").writeText(
+            JSONObject().apply {
+                put("name", "build-and-release.yml")
+                put("status", "completed")
+                put("conclusion", "success")
+                put("branch", "development")
+                put("event", "workflow_dispatch")
+                put("sha", "")
+                put("created_at", "now")
+                put("url", "")
+            }.toString(),
+        )
+        File(File(dir, "artifacts"), name).writeBytes(bytes)
+        return id
+    }
+
+    @Test
+    fun `an artifact is fetched into the project and named, not returned as bytes`() {
+        // **A zip handed to a model as a string is binary no model can read**, spending the whole
+        // context to say nothing. The answer is a path, a size and the names inside it.
+        val id = runWithArtifact("app-release", "not really a zip".toByteArray())
+
+        val body = call("artifact", """{"run":$id,"name":"app-release"}""")
+
+        assertTrue("it says what it fetched: $body", body.contains("app-release"))
+        assertTrue("and where it went: $body", body.contains("agent/ci/artifacts/app-release.zip"))
+        val file = File(ws.projectDir(repo), "agent/ci/artifacts/app-release.zip")
+        assertTrue("the bytes are on disk at $file", file.isFile)
+        assertEquals("not really a zip", file.readText())
+    }
+
+    @Test
+    fun `naming no artifact lists them rather than guessing`() {
+        // An artifact's name belongs to the workflow, and a model that assumed one would download the
+        // wrong bytes and describe them confidently.
+        val id = runWithArtifact("scenarios", "x".toByteArray())
+
+        val body = call("artifact", """{"run":$id}""")
+
+        assertTrue("it lists the real name: $body", body.contains("scenarios"))
+        assertTrue("and says how to fetch one: $body", body.contains("\"name\""))
+        assertFalse(
+            "and nothing was downloaded",
+            File(ws.projectDir(repo), "agent/ci/artifacts").exists(),
+        )
+    }
+
+    @Test
+    fun `a name that is not there is refused with the names that are`() {
+        val id = runWithArtifact("scenarios", "x".toByteArray())
+
+        val body = call("artifact", """{"run":$id,"name":"apk"}""")
+
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("and it says what does exist: $body", body.contains("scenarios"))
+    }
+
+    @Test
+    fun `a run with no artifacts says so rather than failing`() {
+        // A workflow that uploads nothing is ordinary, and "there is nothing here" is an answer.
+        val id = runWithArtifact("unused", "x".toByteArray())
+        File(File(github.repoDir(repo), "ci/$id/artifacts"), "unused").delete()
+        File(File(github.repoDir(repo), "ci/$id/artifacts")).delete()
+
+        val body = call("artifact", """{"run":$id}""")
+
+        assertTrue("it is not a failure: $body", body.startsWith(AgentLog.SUCCESS))
+        assertTrue("and it explains: $body", body.contains("no artifacts"))
+    }
+
+    @Test
+    fun `asking for an artifact with no run is refused before anything is asked`() {
+        val body = call("artifact", """{"name":"app-release"}""")
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("and it says which key is missing: $body", body.contains("run"))
+    }
+
+    @Test
+    fun `the artifact tool takes no keys the other CI tools take`() {
+        // **The unknown-key-as-refusal property is what keeps a tool honest.** `artifact` reads a run
+        // and downloads one thing; a `branch` or an `event` would be a key it silently ignored.
+        val body = call("artifact", """{"run":1,"branch":"main"}""")
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("and it names the key: $body", body.contains("branch"))
+    }
 }
