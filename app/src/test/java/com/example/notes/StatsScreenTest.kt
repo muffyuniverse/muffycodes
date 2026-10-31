@@ -75,7 +75,21 @@ class StatsScreenTest {
      * **`rowsBefore` controls whether the previous period has anything in it**, which is the one
      * thing that decides whether the previous column is drawn at all.
      */
-    private fun draw(withRows: Boolean = false, rowsBefore: Boolean = true) {
+    private fun draw(
+        withRows: Boolean = false,
+        rowsBefore: Boolean = true,
+        /**
+         * Where the log begins, when a test needs it to begin *after* the previous period.
+         *
+         * **The dash case is unreachable without this.** Every other fixture writes a row at `now`,
+         * so `oldest` is always recent and the previous window is always inside the log — which is
+         * why the test below could not ask for a dash by leaving the previous period empty.
+         */
+        oldestAt: Long? = null,
+    ) {
+        if (oldestAt != null) {
+            RequestDb.write(account, oldestAt, stats(cost = 0.001))
+        }
         if (withRows) {
             val hour = 3_600_000L
             if (rowsBefore) {
@@ -302,29 +316,43 @@ class StatsScreenTest {
     }
 
     @Test
-    fun `a change with no baseline behind it is not invented`() {
-        // **The rule the dropped previous column used to carry**, and it did not leave with it: a
-        // change is only shown when there is a period to compare against. One row inside the current
-        // interval and nothing before it is exactly that shape, and the answer must be a blank
-        // change rather than a rise from zero — which would read as a jump that never happened.
+    fun `a change is a dash when the log does not reach the period before`() {
+        // **The other half of the distinction above, and the only case where a dash is honest.**
+        // The log begins *inside* the current interval, so the previous period is partly or wholly
+        // before anything was recorded — and a change computed from that would be a comparison
+        // against a window the app never saw.
         //
-        // **The column is gone; the rule is not.** `showPrevious` still decides whether `change` is
-        // computed at all, and this is what would catch it being dropped with the column.
-        draw(withRows = true, rowsBefore = false)
+        // A dash says "no number here", which is true. `0%` would say "nothing changed", which is a
+        // claim about a period nobody measured.
+        draw(withRows = true, rowsBefore = false, oldestAt = now - 60_000L)
         compose.onNodeWithText("requests").assertExists()
-        // **The change cell is the dash, which is the app's word for "a number that does not
-        // exist".** `StatsFormat.change(null)` answers `NONE` — an em dash — and the alternative,
-        // a rise from zero, would read as a jump that never happened.
-        //
-        // Asking for "no % anywhere" was too broad (a share line carries one) and asking for "no +"
-        // was worse (a date has one). The dash is the exact thing the rule produces — and there is
-        // **more than one**, because every row's change cell answers the same way, so the assertion
-        // is "at least one" rather than "exactly one".
         assertTrue(
             "the change cells are dashes",
             compose.onAllNodesWithText(StatsFormat.NONE).fetchSemanticsNodes().isNotEmpty(),
         )
         compose.onAllNodesWithText("%", substring = true).assertCountEquals(0)
+    }
+
+    @Test
+    fun `a row with nothing behind it shows a change against zero, not a blank`() {
+        // **This test had the rule backwards, and the run proved it.** I wrote it expecting a dash
+        // when the previous period holds no rows, reasoning that a rise from zero "reads as a jump
+        // that never happened".
+        //
+        // The app disagrees, and the app is right: `showPrevious` asks whether the **log reaches**
+        // the previous period, not whether that period has traffic in it. If the log covers the
+        // window and nothing was requested, then nothing *was* requested — that is a measurement, and
+        // the change against it is real. A dash there would be the app claiming it does not know
+        // something it does.
+        //
+        // The dash belongs to the case where the log does not reach back at all, which is a different
+        // test. This one pins the distinction so neither can drift into the other.
+        draw(withRows = true, rowsBefore = false)
+        compose.onNodeWithText("requests").assertExists()
+        assertTrue(
+            "a change is computed, because the window is inside the log",
+            compose.onAllNodesWithText("%", substring = true).fetchSemanticsNodes().isNotEmpty(),
+        )
     }
 
     @Test
