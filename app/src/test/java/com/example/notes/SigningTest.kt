@@ -111,7 +111,7 @@ class SigningTest {
         assertEquals(
             "the workflow names it",
             "release",
-            Workflows.environmentNameOf(workflow),
+            Workflows().environmentNameOf(workflow),
         )
         assertTrue("and the text really says so", workflow.readText().contains("environment: release"))
     }

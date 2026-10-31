@@ -112,12 +112,13 @@ object Signing {
         // named environment is read from the file rather than assumed: a project that says
         // `environment: production` is set up, and moving its secrets to `release` would be moving
         // them somewhere the build is not looking.
-        val named = Workflows.environmentNameOf(workflow)
+        val workflows = Workflows()
+        val named = workflows.environmentNameOf(workflow)
         val target = named ?: environment
         val edited = if (named != null) {
             null
         } else {
-            Workflows.nameEnvironment(workflow, target).getOrElse { return Result.failure(it) }
+            workflows.nameEnvironment(workflow, target).getOrElse { return Result.failure(it) }
         }
 
         // ---- 2 and 3. the environment exists, and only the branches that build may use it ----

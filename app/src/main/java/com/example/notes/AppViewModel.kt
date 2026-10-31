@@ -2228,7 +2228,8 @@ class AppViewModel @JvmOverloads constructor(
         // the step "Build the release", "Sign", or anything else — and `Signing.nameEnvironment` walks
         // to the job from the same evidence, so the two agree by construction rather than by a shared
         // guess.
-        val signing = Workflows.survey(dir, ws.locked())
+        val workflows = Workflows()
+        val signing = workflows.survey(dir, ws.locked())
             .map { File(dir, it.path) }
             .firstOrNull { file ->
                 val text = try {
