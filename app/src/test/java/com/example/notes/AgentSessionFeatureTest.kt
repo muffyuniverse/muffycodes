@@ -849,10 +849,18 @@ class AgentSessionFeatureTest : FeatureTest() {
             storeFile.isFile,
         )
         scene.viewModel.tickAgents(due)
+        // **What the tick left on disk, asked immediately.** The screen's list is a snapshot taken
+        // when the tick was started, so "the screen still shows it" cannot distinguish a tick that
+        // did nothing from one whose removal has not been posted yet. The store can.
+        val afterTick = AgentSessions(scene.viewModel.workspace!!.accountDir).read().map { it.project }
         // **The tick answers on the main thread.** It posts the new session list there, so the
         // screen's own state is only true once that post has run — asserting straight after the
         // call was asserting against the list from before it.
-        scene.await("the tick to drop the session") {
+        scene.await(
+            "the tick to drop the session: before=$before, after=$afterTick, " +
+                "folder=${scene.viewModel.workspace!!.projectDir("groceries").isDirectory}, " +
+                "store=${storeFile.isFile}",
+        ) {
             scene.viewModel.sessionOf("groceries") == null
         }
 
