@@ -342,6 +342,25 @@ dependencies {
     // JGit: a pure-Java git implementation, so no native code is needed on Android.
     implementation("org.eclipse.jgit:org.eclipse.jgit:6.10.1.202505221210-r")
 
+    // **GitHub's secret API needs libsodium's sealed box**, and there is no way around it: the
+    // endpoint takes an `encrypted_value` produced by crypto_box_seal (X25519 + HSalsa20 +
+    // XSalsa20Poly1305), and Android's own crypto has neither XSalsa20 nor Poly1305.
+    //
+    // Two libraries, both pure Java, so neither adds native code to the APK:
+    //
+    //   * `xsalsa20poly1305` is the AEAD and, crucially, `Keys.sharedSecret` — which is
+    //     crypto_box_beforenm exactly: X25519 followed by HSalsa20. Without it the derivation would
+    //     have to be hand-written, and hand-written Salsa20 is not a thing to ship.
+    //   * BouncyCastle supplies the X25519 scalar multiplication underneath and BLAKE2b for the
+    //     nonce. Its `bcprov-jdk18on` is the JVM variant, which is what a Robolectric test runs on.
+    //
+    // **`lazysodium-android` was the obvious choice and is not usable**: its `.so` files are 4 KB
+    // page-aligned, and Android 15+ (this app is targetSdk 37) requires 16 KB alignment, so the
+    // library would not load on a modern phone. Measured by reading the ELF program headers of the
+    // published AAR, not assumed.
+    implementation("com.codahale:xsalsa20poly1305:0.11.0")
+    implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
+
     // **The browser, as its own module.** It wraps the WebView the phone already
     // has, so this adds no bytes to the APK and no engine to keep current - the
     // Play Store updates Chromium independently of this app. The module boundary

@@ -81,6 +81,23 @@ data class CiJob(
     val conclusion: String?,
 )
 
+/**
+ * An environment, as GitHub describes it.
+ *
+ * **This is where a secret can be put so that only some workflows reach it.** GitHub: "Secrets stored
+ * in an environment are only available to workflow jobs that reference the environment. If the
+ * environment requires approval, a job cannot access environment secrets until one of the required
+ * reviewers approves it."
+ */
+data class CiEnvironment(
+    val name: String,
+    /** How many reviewers must approve a job before it may read this environment's secrets. */
+    val reviewers: Int,
+) {
+    /** True when a human stands between a run and this environment's secrets. */
+    val protected: Boolean get() = reviewers > 0
+}
+
 /** One file a run produced. */
 data class CiArtifact(
     val id: Long,
@@ -241,6 +258,57 @@ interface GitHub {
         branch: String,
         inputs: Map<String, String> = emptyMap(),
     ): GitHubResult<Unit>
+
+    // ---- secrets and environments ----------------------------------------
+    //
+    // **Every secret this app writes goes to an ENVIRONMENT, never to the repository.** A repository
+    // secret is readable by every workflow in the repository, so it would defeat the check that refuses
+    // an unlocked workflow naming an environment. An environment secret is reachable only by a job that
+    // names that environment — which is the whole mechanism.
+
+    /** The environments a repository has, with how many reviewers each requires. */
+    fun environments(token: String, ref: RepoRef): GitHubResult<List<CiEnvironment>>
+
+    /**
+     * Creates or updates an environment, **with reviewers when asked for**.
+     *
+     * A reviewer is what makes the environment a gate rather than a label: without one, a workflow that
+     * names it reads its secrets immediately.
+     */
+    fun putEnvironment(
+        token: String,
+        ref: RepoRef,
+        name: String,
+        reviewers: List<String>,
+    ): GitHubResult<CiEnvironment>
+
+    /**
+     * Writes a secret into an environment.
+     *
+     * [sealed] is the value already encrypted with the environment's public key — see [SealedBox].
+     * **The plaintext never reaches this interface**, which is the point: an argument that is a secret
+     * is an argument that can be logged, and this one cannot be.
+     */
+    fun putEnvironmentSecret(
+        token: String,
+        ref: RepoRef,
+        environment: String,
+        name: String,
+        sealed: ByteArray,
+        keyId: String,
+    ): GitHubResult<Unit>
+
+    /**
+     * The public key an environment's secrets must be sealed with.
+     *
+     * **Per environment, not per repository.** GitHub hands out a different key for each, and sealing
+     * with the repository's key produces a value the environment will not decrypt.
+     */
+    fun environmentKey(
+        token: String,
+        ref: RepoRef,
+        environment: String,
+    ): GitHubResult<Pair<String, ByteArray>>
 }
 
 /**
@@ -612,6 +680,130 @@ class HttpGitHub(private val api: String = DEFAULT_API) : GitHub {
         } finally {
             connection?.disconnect()
         }
+    }
+
+    // ---- secrets and environments ----------------------------------------
+
+    override fun environments(token: String, ref: RepoRef): GitHubResult<List<CiEnvironment>> {
+        val response = get("GET", "/repos/${ref.owner}/${ref.name}/environments?per_page=100", token)
+        if (response.error != null) {
+            return GitHubResult(error = response.error, status = response.status)
+        }
+        val array = response.value?.optJSONArray("environments")
+            ?: response.array
+            ?: return GitHubResult(value = emptyList())
+        val out = mutableListOf<CiEnvironment>()
+        for (i in 0 until array.length()) {
+            val obj = array.optJSONObject(i) ?: continue
+            val name = obj.optString("name")
+            if (name.isEmpty()) continue
+            // **The reviewers count is nested, and its absence means unprotected.** GitHub answers
+            // `protection_rules` as an array whose entries have a `type`; only `required_reviewers`
+            // holds a list of people. Counting the rules instead of the reviewers would report an
+            // environment with a branch rule as "protected by a human", which it is not.
+            val rules = obj.optJSONArray("protection_rules")
+            var reviewers = 0
+            if (rules != null) {
+                for (r in 0 until rules.length()) {
+                    val rule = rules.optJSONObject(r) ?: continue
+                    if (rule.optString("type") != "required_reviewers") continue
+                    reviewers += rule.optJSONArray("reviewers")?.length() ?: 0
+                }
+            }
+            out.add(CiEnvironment(name, reviewers))
+        }
+        return GitHubResult(value = out)
+    }
+
+    override fun putEnvironment(
+        token: String,
+        ref: RepoRef,
+        name: String,
+        reviewers: List<String>,
+    ): GitHubResult<CiEnvironment> {
+        val body = JSONObject().apply {
+            if (reviewers.isNotEmpty()) {
+                put(
+                    "reviewers",
+                    JSONArray().apply {
+                        reviewers.forEach { login ->
+                            put(
+                                JSONObject().apply {
+                                    // **A `User`, not a `Team`**, because a login is what the person
+                                    // typed. GitHub rejects a reviewer that is not a real account, so
+                                    // an invented one fails loudly here rather than silently granting
+                                    // access to nobody.
+                                    put("type", "User")
+                                    put("id", 0)
+                                    put("login", login)
+                                },
+                            )
+                        }
+                    },
+                )
+            }
+        }
+        val response = get("PUT", "/repos/${ref.owner}/${ref.name}/environments/" +
+            urlPart(name), token, body)
+        if (response.error != null) {
+            return GitHubResult(error = response.error, status = response.status)
+        }
+        return GitHubResult(value = CiEnvironment(name, reviewers.size))
+    }
+
+    override fun environmentKey(
+        token: String,
+        ref: RepoRef,
+        environment: String,
+    ): GitHubResult<Pair<String, ByteArray>> {
+        val response = get(
+            "GET",
+            "/repos/${ref.owner}/${ref.name}/environments/" + urlPart(environment) +
+                "/secrets/public-key",
+            token,
+        )
+        if (response.error != null) {
+            return GitHubResult(error = response.error, status = response.status)
+        }
+        val obj = response.value
+            ?: return GitHubResult(error = "GitHub did not return a public key")
+        val id = obj.optString("key_id")
+        val key = obj.optString("key")
+        if (id.isEmpty() || key.isEmpty()) {
+            return GitHubResult(error = "GitHub did not return a usable public key")
+        }
+        return try {
+            GitHubResult(value = id to java.util.Base64.getDecoder().decode(key))
+        } catch (e: Throwable) {
+            GitHubResult(error = "GitHub's public key was not base64")
+        }
+    }
+
+    override fun putEnvironmentSecret(
+        token: String,
+        ref: RepoRef,
+        environment: String,
+        name: String,
+        sealed: ByteArray,
+        keyId: String,
+    ): GitHubResult<Unit> {
+        // **The sealed value is base64 in the body, and the plaintext is nowhere.** The encrypted bytes
+        // are the only thing this function has ever been given.
+        val body = JSONObject().apply {
+            put("encrypted_value", java.util.Base64.getEncoder().encodeToString(sealed))
+            put("key_id", keyId)
+        }
+        val response = get(
+            "PUT",
+            "/repos/${ref.owner}/${ref.name}/environments/" + urlPart(environment) +
+                "/secrets/" + urlPart(name),
+            token,
+            body,
+        )
+        if (response.error != null) {
+            return GitHubResult(error = response.error, status = response.status)
+        }
+        return GitHubResult(value = Unit)
     }
 
     /**
@@ -1051,6 +1243,118 @@ class DiskGitHub(
         )
         return GitHubResult(value = Unit)
     }
+
+    // ---- secrets and environments, out of a folder -----------------------
+    //
+    // **A fake that stored nothing would make every test of the secret path pass while the phone
+    // behaved differently**, which is the failure this seam exists to prevent. So an environment is a
+    // folder and a secret is a file holding what was sealed for it:
+    //
+    //     <repo>.git/ci-environments/<env>/env.json
+    //     <repo>.git/ci-environments/<env>/secrets/<name>.bin
+    //
+    // The sealed bytes are stored exactly as given, so a test can seal a value, put it, and read it
+    // back to prove the plaintext never travelled.
+
+    private fun environmentsDir(ref: RepoRef): File =
+        File(repoDir(ref.name), "ci-environments")
+
+    override fun environments(token: String, ref: RepoRef): GitHubResult<List<CiEnvironment>> {
+        val dir = environmentsDir(ref)
+        if (!dir.isDirectory) return GitHubResult(value = emptyList())
+        return GitHubResult(
+            value = dir.listFiles().orEmpty().filter { it.isDirectory }.sortedBy { it.name }.map {
+                val meta = try {
+                    JSONObject(File(it, "env.json").readText())
+                } catch (e: Throwable) {
+                    JSONObject()
+                }
+                CiEnvironment(it.name, meta.optJSONArray("reviewers")?.length() ?: 0)
+            },
+        )
+    }
+
+    override fun putEnvironment(
+        token: String,
+        ref: RepoRef,
+        name: String,
+        reviewers: List<String>,
+    ): GitHubResult<CiEnvironment> {
+        if (token.isBlank()) return GitHubResult(error = "Bad credentials", status = 401)
+        val dir = File(environmentsDir(ref), name)
+        dir.mkdirs()
+        File(dir, "env.json").writeText(
+            JSONObject().apply {
+                put("name", name)
+                put("reviewers", JSONArray().apply { reviewers.forEach { put(it) } })
+            }.toString(),
+        )
+        return GitHubResult(value = CiEnvironment(name, reviewers.size))
+    }
+
+    /**
+     * A **stable** key for an environment, derived from its name.
+     *
+     * **Random per call would make the fake lie.** A test that sealed with one call's key and read the
+     * stored bytes back could never open them, so the only assertion left would be a length — which
+     * proves the value was *sealed* and not that it was sealed *correctly*. Deriving the pair from the
+     * name means a test can ask for the key again and actually open what was stored.
+     */
+    override fun environmentKey(
+        token: String,
+        ref: RepoRef,
+        environment: String,
+    ): GitHubResult<Pair<String, ByteArray>> {
+        if (token.isBlank()) return GitHubResult(error = "Bad credentials", status = 401)
+        return GitHubResult(value = "key-$environment" to fakeKeyPair(environment).second)
+    }
+
+    /** The secret half of [fakeKeyPair], so a test can open what the fake stored. */
+    fun fakeSecretKey(environment: String): ByteArray = fakeKeyPair(environment).first
+
+    /**
+     * A deterministic X25519 pair for [environment].
+     *
+     * A private key is 32 random bytes, so seeding from the name's SHA-256 gives a pair that is stable
+     * across calls and different per environment. **It is a fake and is never a real key**: the seed is
+     * the environment's own name, which anybody can guess.
+     */
+    private fun fakeKeyPair(environment: String): Pair<ByteArray, ByteArray> {
+        val seed = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(environment.toByteArray())
+        val cached = fakeKeys[environment]
+        if (cached != null) return cached
+        // `Keys.generatePublicKey` is a pure function of the private key, so a fixed private key gives a
+        // fixed pair — and caching keeps the derivation off every call.
+        val public = com.codahale.xsalsa20poly1305.Keys.generatePublicKey(seed)
+        return (seed to public).also { fakeKeys[environment] = it }
+    }
+
+    private val fakeKeys = java.util.concurrent.ConcurrentHashMap<String, Pair<ByteArray, ByteArray>>()
+
+    override fun putEnvironmentSecret(
+        token: String,
+        ref: RepoRef,
+        environment: String,
+        name: String,
+        sealed: ByteArray,
+        keyId: String,
+    ): GitHubResult<Unit> {
+        if (token.isBlank()) return GitHubResult(error = "Bad credentials", status = 401)
+        val dir = File(File(environmentsDir(ref), environment), "secrets")
+        dir.mkdirs()
+        return try {
+            File(dir, "$name.bin").writeBytes(sealed)
+            GitHubResult(value = Unit)
+        } catch (e: Throwable) {
+            GitHubResult(error = "The secret could not be stored: ${e.message}")
+        }
+    }
+
+    /** The sealed bytes of a secret, for a test that wants to prove what was stored. */
+    fun sealedSecret(ref: RepoRef, environment: String, name: String): ByteArray? =
+        File(File(File(environmentsDir(ref), environment), "secrets"), "$name.bin")
+            .takeIf { it.isFile }?.readBytes()
 
     /**
      * Makes one repository the way GitHub does when it is asked to initialise:
