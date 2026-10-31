@@ -6,6 +6,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.platform.LocalTextToolbar
 import androidx.compose.ui.platform.TextToolbar
+import androidx.compose.ui.platform.TextToolbarStatus
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -215,7 +216,16 @@ class AgentChatScreenTest {
                             }
 
                             override fun hide() = Unit
-                            override fun statusBarHeight(): Int = 0
+                            // **`status` is read, not just written.** The container asks the
+                            // toolbar whether the menu is showing to decide how to handle the next
+                            // press, so a toolbar that answered nothing would leave the container
+                            // in a state it never left.
+                            override val status: TextToolbarStatus
+                                get() = if (asked.get()) {
+                                    TextToolbarStatus.Shown
+                                } else {
+                                    TextToolbarStatus.Hidden
+                                }
                         },
                     ) {
                         AgentChatScreen(viewModel = scene.viewModel, onBack = {})
