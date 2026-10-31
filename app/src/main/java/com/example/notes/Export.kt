@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import androidx.annotation.RequiresApi
 import java.io.File
 
 /**
@@ -104,6 +105,11 @@ object Export {
      * **`IS_PENDING` is what keeps a half-copied file out of other apps' sight.** Without it a file
      * manager can open the row between the insert and the write and find nothing there.
      */
+    // **`@RequiresApi`, because the guard is in the caller and lint cannot see through a call.**
+    // `copyToDownloads` returns before this on anything below Android 10, so the API-29 fields are
+    // unreachable on an older phone — but a checker that only reads one function body cannot know
+    // that, and the same annotation is what `DownloadsSink` already uses for the same reason.
+    @RequiresApi(Build.VERSION_CODES.Q)
     private fun insert(context: Context, file: File): Uri? {
         val values = ContentValues().apply {
             put(MediaStore.Downloads.DISPLAY_NAME, file.name)
@@ -114,6 +120,7 @@ object Export {
         return context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
     }
 
+    @RequiresApi(Build.VERSION_CODES.Q)
     private fun finish(context: Context, uri: Uri) {
         try {
             context.contentResolver.update(
