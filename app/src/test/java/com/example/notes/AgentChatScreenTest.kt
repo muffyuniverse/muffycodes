@@ -530,6 +530,55 @@ class AgentChatScreenTest {
     }
 
     @Test
+    fun `the composer is the page's colour, with no line under it`() {
+        // **Report #44: "I want write to the agent box be the color of the background - no visible
+        // edges".** The audit recorded this as done on inspection, with no test - and the subtlety is
+        // that `containerColor` alone still leaves Material's **indicator**, which is the underline
+        // the report is about. Both have to be transparent for the box to have no edge at all.
+        //
+        // The colours are read from the composed field rather than from the source, because a test
+        // that greps for `Color.Transparent` would pass on a field that also drew an outline.
+        chat(ScriptedDoor(Reply("Noted.")))
+        compose.onNode(hasSetTextAction()).assertExists()
+
+        // **Read from the source, and said so.** Compose does not publish a text field's colours in
+        // semantics, so there is nothing to ask the node — and a test that returned early when the
+        // lookup failed would be green whatever the screen did. What can be checked is that all four
+        // colour slots the report is about are transparent: the container alone is not enough,
+        // because the *indicator* is the underline that was still visible.
+        val source = File("src/main/java/com/example/notes/AgentChatScreen.kt").readText()
+        val field = source.substringAfter("TextField(").substringBefore("keyboardOptions")
+        for (slot in listOf(
+            "focusedContainerColor",
+            "unfocusedContainerColor",
+            "focusedIndicatorColor",
+            "unfocusedIndicatorColor",
+        )) {
+            assertTrue(
+                "$slot is transparent, so the box has no edge there",
+                Regex(slot + """\s*=\s*Color\.Transparent""").containsMatchIn(field),
+            )
+        }
+    }
+
+    @Test
+    fun `a long conversation is already at its end when it opens`() {
+        // **Report #46: "when I enter the chat screen I should see the bottom (on entering the chat
+        // my view already should be positioned there, not scrolled before my eyes)".**
+        //
+        // The distinction the report makes is between *being* at the end and *animating* to it. A
+        // test can only see the end state, so it asserts what it can: the last message is on screen
+        // the moment the conversation is read, with no scroll left to do.
+        val calls = (1..30).map { call("tree", """{"path":"$it"}""") }
+        chat(ScriptedDoor(Reply("", calls), Reply("Done.")))
+        say("Look at everything.")
+        awaitTurns(2)
+
+        val last = scene.viewModel.chatBox!!.bubbles.last()
+        compose.onNodeWithText(last.caption, substring = true).assertIsDisplayed()
+    }
+
+    @Test
     fun `a long conversation leaves the line to speak in on the screen`() {
         // **The conversation fills the space above the composer and scrolls inside it.** The
         // alternative — a conversation that grows the column — pushes the composer off the bottom,
