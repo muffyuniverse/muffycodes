@@ -40,7 +40,7 @@ class CiToolsTest {
         )
         ws = Workspace(accounts.dirOf(account.login))
         github = DiskGitHub(accounts.devGitHubDir(account.login), account.login)
-        log = AgentLog(ws.accountDir, repo)
+        log = AgentLog.open(ws.projectDir(repo))
         git = ProjectGit(
             workspace = ws,
             tokenProvider = { "a-key" },

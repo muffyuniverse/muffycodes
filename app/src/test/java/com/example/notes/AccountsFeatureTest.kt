@@ -273,4 +273,28 @@ private class RefusingGitHub : GitHub {
     override fun webUrl(cloneUrl: String): String = cloneUrl
 
     override fun owns(remoteUrl: String): Boolean = true
+
+    // **The Actions calls, all refused like the rest.** They exist on the interface because the
+    // agent's `ci` and `runs` tools read them; a fake that left them unimplemented would not compile,
+    // and one that answered "no runs" would be a GitHub that agrees with everything, which is the
+    // exact failure this class was written to end.
+    override fun runs(
+        token: String,
+        ref: RepoRef,
+        workflow: String,
+        branch: String,
+        limit: Int,
+    ): GitHubResult<List<CiRun>> = GitHubResult(error = "Bad credentials", status = 401)
+
+    override fun jobs(token: String, ref: RepoRef, run: Long): GitHubResult<List<CiJob>> =
+        GitHubResult(error = "Bad credentials", status = 401)
+
+    override fun logs(token: String, ref: RepoRef, run: Long): GitHubResult<Map<String, String>> =
+        GitHubResult(error = "Bad credentials", status = 401)
+
+    override fun artifacts(token: String, ref: RepoRef, run: Long): GitHubResult<List<CiArtifact>> =
+        GitHubResult(error = "Bad credentials", status = 401)
+
+    override fun artifactBytes(token: String, ref: RepoRef, id: Long): GitHubResult<ByteArray> =
+        GitHubResult(error = "Bad credentials", status = 401)
 }
