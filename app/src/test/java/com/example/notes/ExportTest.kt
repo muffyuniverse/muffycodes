@@ -6,6 +6,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import java.io.File
 
 /**
@@ -19,6 +22,11 @@ import java.io.File
  * The writing itself is `MediaStore`, which Robolectric does not implement; what can be checked here is
  * the decision that comes before it.
  */
+// **`@Config(sdk = [34])`, because `MediaStore` and `ApplicationProvider` need a real Android
+// environment** — this file is one of the few that needs no scenario, only a phone. `FeatureTest`
+// would bring a whole signed-in account for nothing.
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34], qualifiers = "w411dp-h891dp")
 class ExportTest {
 
     @Test

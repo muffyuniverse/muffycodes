@@ -431,8 +431,11 @@ class CiToolsTest {
 
         val body = call("artifact", """{"run":$id,"name":"app-release"}""")
 
-        assertTrue("it says what it fetched: $body", body.contains("app-release"))
-        assertTrue("and where it went: $body", body.contains("agent/ci/artifacts/app-release.zip"))
+        // **The body is put on one line in the message**, because a multi-line assertion message is
+        // cut at its first newline by the CI log and showed `0` for a body that had far more in it.
+        val said = body.replace("\n", " ⏎ ")
+        assertTrue("it says what it fetched: $said", body.contains("app-release"))
+        assertTrue("and where it went: $said", body.contains("agent/ci/artifacts/app-release.zip"))
         val file = File(ws.projectDir(repo), "agent/ci/artifacts/app-release.zip")
         assertTrue("the bytes are on disk at $file", file.isFile)
         assertEquals("not really a zip", file.readText())

@@ -93,11 +93,14 @@ class AgentToolsTest {
         // read-only**: a tool that starts a run is a different grant, and it waits on the workflow
         // guard (a run the agent dispatches must not be able to reach repository secrets).
         assertEquals(
-            "and the fifteen that are",
+            "and the seventeen that are",
             listOf(
                 "tree", "read", "edit", "forget", "create", "delete",
                 "move", "history", "restore", "background", "reason", "browse", "shot",
                 "ci", "runs",
+                // **The two that move a file rather than words.** `artifact` fetches what a run
+                // produced, and `downloads` is the only way anything leaves the project.
+                "artifact", "downloads",
             ),
             specs.map { it.name },
         )
