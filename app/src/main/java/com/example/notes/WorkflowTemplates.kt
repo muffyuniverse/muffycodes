@@ -93,6 +93,16 @@ object WorkflowTemplates {
     private fun common(): String = """
         ## How work is done here
 
+        This file is yours. It is one of the three things in your context — the system prompt, this,
+        and the log — and it is the only one you can change. The system prompt is locked and says
+        only how the tools behave; everything about *how to work* belongs here, and a project that
+        works differently should change it rather than work around it.
+
+        **Read before you write.** Guess only when reading is impossible, and then say that you are
+        guessing.
+
+        **Change as little as the task needs.** A rename is not a rewrite.
+
         **Test what you changed, and make the test say what broke.** A test's failure message is the
         only thing anyone reads at 2am, so it names the fact that was wrong rather than the line that
         asserted it. "waited 10s for the folder to be dropped: folder=true" sends a reader straight to

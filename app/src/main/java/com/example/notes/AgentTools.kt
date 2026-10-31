@@ -2439,23 +2439,18 @@ class AgentTools(
         if (ws.isRecord(file)) {
             return "$path is the record of what happened. You may read it and not change it"
         }
-        // **The project's instructions are the project's, and may be edited — by anybody.**
+        // **`project_prompt.txt` is an ordinary file, and the lock is the whole rule.**
         //
-        // This used to refuse the agent outright: *"the agent may read the instructions it is given
-        // and may not rewrite them, which is the difference between following a brief and editing
-        // it."* That reasoning still holds, and the operator overruled it on a better one: a preset
-        // is copied into the project as a starting point, so the file is the project's own text and
-        // treating it as sacred would make the preset a lock-in rather than a preset.
+        // It used to be refused here: *"the agent may read the instructions it is given and may not
+        // rewrite them, which is the difference between following a brief and editing it."* Then it
+        // became a trace note plus an allowance, on the reasoning that a preset is copied into the
+        // project and so the file is the project's own.
         //
-        // **What replaces the refusal is visibility, not silence.** Every save is a commit and the
-        // history shows the diff, so the change is recoverable; what was missing is that nobody would
-        // be looking. `edit` and `create` name the file in their answer, and a write to this path is
-        // traced as `agent-brief` so the log says who changed the brief and when. A person who wants
-        // the old behaviour locks the file — the lock is theirs and the agent honours it.
-        if (path == AgentPrompt.PROJECT_FILE) {
-            Trace.note("agent-brief", "$path rewritten by the agent")
-            return null
-        }
+        // Both were machinery this file does not need. The operator's rule is the simpler one: the
+        // project prompt is one of the three things in the agent's context and it is **the person's**
+        // — editable by them, editable by the agent when they have not locked it, and read-only when
+        // they have. A special case here would be a second lock that only this path has, and a lock
+        // that behaves differently from every other lock is one nobody can reason about.
         // **The lock, asked here so no tool can forget it.** Each tool used to check it separately,
         // which meant a tool added later could simply not, and one of them (`restore`) checked it
         // twice and another not at all. The operator's rule decides *whose* lock counts: "system

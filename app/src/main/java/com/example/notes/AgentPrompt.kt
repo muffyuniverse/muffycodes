@@ -34,12 +34,31 @@ object AgentPrompt {
     const val PRESET_FILE = PROJECT_FILE
 
     /**
-     * ① — the instructions.
+     * ① — **the tools and the shape of the environment. Nothing else.**
      *
-     * Written for a model that has no other idea what this thing is. The rules it states are the
-     * ones the loop also *enforces*, and that duplication is deliberate: a rule only in the
-     * prompt is a rule a model can talk itself out of, and a rule only in the code is a rule the
-     * model will trip over without being told.
+     * ## Why this is deliberately short
+     *
+     * There are exactly three things in the agent's context: this, the project prompt, and the log.
+     * This one is **locked** — a person cannot change it and neither can an agent — so everything in
+     * it is text that no project can opt out of paying for, on every turn, forever.
+     *
+     * That makes brevity a rule rather than a preference. Anything that is advice about how to work
+     * belongs in the project prompt, where a project can change it and a preset can state it for the
+     * kind of work; anything that is a fact about *this app* belongs here, because nothing else can
+     * say it.
+     *
+     * The test of a line: **could a project prompt say it?** "Read before you write" — yes, and it
+     * moved there. "A result that would not fit is written to a file and you are told where" — no,
+     * that is this app's behaviour and no project could know it.
+     *
+     * ## Why the rules are stated twice
+     *
+     * The rules here are the ones the loop also *enforces*. That duplication is deliberate: a rule
+     * only in the prompt is one a model can talk itself out of, and a rule only in the code is one
+     * the model trips over without being told.
+     *
+     * **This text changes with app updates**, which is why it is the right home for the environment's
+     * shape: when a folder appears or a tool changes, the app is what changed.
      */
     val SYSTEM_DEFAULT = """
         You are working inside a phone app. A person is talking to you about one project of
@@ -185,39 +204,6 @@ object AgentPrompt {
         layer(File(projectDir, PROJECT_FILE), PROJECT_DEFAULT, mayCreate = false)
 
     /**
-     * ③ — **the preset for this project's type**, read from the system project.
-     *
-     * ## Where this layer sits, and why it is not the project's own
-     *
-     * The type's preset is a **starting point**, copied into the project when the project is made. So
-     * the project's own `project_prompt.txt` is normally that copy, already. This layer exists for the
-     * case the copy cannot cover: a preset the person improved in the system project after the project
-     * was made, which should reach every project that has not overridden it.
-     *
-     * ## What it will not do
-     *
-     * **It is never written.** The system project is the app's, and a reader that creates files there
-     * is the same bug that recreated a deleted project folder — see [layer]'s `mayCreate`.
-     *
-     * A project with no type, or a type with no preset, answers empty. Empty is the right answer: a
-     * project whose preset was deleted should keep working under its own instructions rather than
-     * being handed a default it never chose.
-     */
-    fun preset(accountDir: File, type: AppType?): String {
-        if (type == null) return ""
-        val file = File(
-            File(File(File(accountDir, Workspace.SYSTEM_PROJECT), Workspace.TYPES), type.id),
-            PRESET_FILE,
-        )
-        if (!file.isFile) return ""
-        return try {
-            file.readText().trim()
-        } catch (e: Throwable) {
-            ""
-        }
-    }
-
-    /**
      * The two layers as they were at one moment, and the message they make together.
      *
      * **[read] is called at the start of a turn, never once at startup and never per request.**
@@ -230,19 +216,8 @@ object AgentPrompt {
      * request only from ② onwards: a provider's implicit cache matches on the longest common
      * *prefix*, and the instructions above are still the same bytes.
      */
-    data class Layers(
-        val system: String,
-        val project: String,
-        /**
-         * The type's preset, between the two — **empty when there is none.**
-         *
-         * It sits here rather than first because the system prompt is about the app and the preset is
-         * about the kind of work; and before the project because a project's own instructions are the
-         * more specific answer and should win where the two disagree.
-         */
-        val preset: String = "",
-    ) {
-        /** What the model is told: ①, then the preset, then ②, and then nothing. */
+    data class Layers(val system: String, val project: String) {
+        /** What the model is told: ①, then ②, and then nothing. */
         val message: String get() = withLine(null)
 
         /**
@@ -255,13 +230,6 @@ object AgentPrompt {
          */
         fun withLine(line: String?): String = buildString {
             append(system.trim())
-            // **The preset goes after the system layer and before the project's own**, so a provider's
-            // cache still matches the longest common prefix: the system text is the same bytes for
-            // every project, and the preset only changes when the type does.
-            if (preset.isNotBlank()) {
-                append(SEPARATOR)
-                append(preset.trim())
-            }
             append(SEPARATOR)
             append("# This project\n\n")
             append(project.trim())
@@ -282,10 +250,7 @@ object AgentPrompt {
      */
     const val SEPARATOR = "\n\n---\n\n"
 
-    /** Reads every layer from its file, now. */
-    fun read(accountDir: File, projectDir: File): Layers = Layers(
-        system(accountDir),
-        project(projectDir),
-        preset(accountDir, ProjectMeta.read(projectDir).type),
-    )
+    /** Reads both layers from their files, now. */
+    fun read(accountDir: File, projectDir: File): Layers =
+        Layers(system(accountDir), project(projectDir))
 }

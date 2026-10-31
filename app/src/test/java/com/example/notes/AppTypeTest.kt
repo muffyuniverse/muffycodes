@@ -252,12 +252,35 @@ class AppTypeTest {
         ws.accountDir.deleteRecursively()
     }
 
-    // ---- the three layers ------------------------------------------------
+    // ---- the prompt a project gets ---------------------------------------
 
     @Test
-    fun `the message is the system prompt, then the preset, then the project's own`() {
-        // **The order is the cache.** The system text is the same bytes for every project, so a
-        // provider matches the longest common prefix and only the layers below it are re-read.
+    fun `the project prompt a project gets is the type's preset, copied`() {
+        // **There is no second reading of the preset.** The design has three things in the agent's
+        // context: the system prompt, the project prompt, and the log. The type's prompt is not a
+        // layer — it is the starting text of the project's own file, copied in and then the
+        // project's. A fourth layer would mean the preset is read twice and the project's edit
+        // could never win outright.
+        val ws = account()
+        val project = File(ws.accountDir, "my-app").apply { mkdirs() }
+
+        Presets.copy(ws.accountDir, project, AppType.ANDROID)
+
+        val copied = File(project, AgentPrompt.PROJECT_FILE).readText()
+        val preset = File(
+            File(File(File(ws.accountDir, "system"), Workspace.TYPES), "android"),
+            AgentPrompt.PRESET_FILE,
+        ).readText()
+        assertEquals("the copy is the preset, word for word", preset.trim(), copied.trim())
+        assertTrue(
+            "and it says how to build an Android app",
+            copied.contains("Gradle"),
+        )
+        ws.accountDir.deleteRecursively()
+    }
+
+    @Test
+    fun `the message is the system prompt and then the project prompt, and nothing else`() {
         val ws = account()
         val project = File(ws.accountDir, "my-app").apply { mkdirs() }
         Presets.copy(ws.accountDir, project, AppType.ANDROID)
@@ -265,27 +288,37 @@ class AppTypeTest {
         val layers = AgentPrompt.read(ws.accountDir, project)
         val message = layers.message
 
-        assertTrue("the preset is in the message", layers.preset.isNotBlank())
-        val systemAt = message.indexOf(layers.system.trim())
-        val presetAt = message.indexOf(layers.preset.trim())
-        val projectAt = message.indexOf("# This project")
-        assertTrue("the system layer comes first", systemAt >= 0 && systemAt < presetAt)
-        assertTrue("then the preset", presetAt < projectAt)
+        // **Two separators means three parts: ①, the "# This project" heading, ②.** A third layer
+        // would be a third separator, and this is the test that would catch it coming back.
+        assertEquals(
+            "exactly two layers",
+            1,
+            message.split(AgentPrompt.SEPARATOR).size - 1,
+        )
+        assertTrue("the system prompt is there", message.startsWith(layers.system.trim()))
+        assertTrue("and the project's own", message.contains(layers.project.trim()))
         ws.accountDir.deleteRecursively()
     }
 
     @Test
-    fun `a project with no preset still gets a message`() {
-        // Empty is a real answer: a project whose preset was deleted should keep working under its
-        // own instructions rather than being handed a default it never chose.
+    fun `a locked project prompt is refused, and the lock is the whole rule`() {
+        // The agent may edit its brief; when the person locks it, it may not. There is no third
+        // state and no special case for this path.
         val ws = account()
         val project = File(ws.accountDir, "my-app").apply { mkdirs() }
-        File(File(ws.accountDir, "system"), Workspace.TYPES).deleteRecursively()
+        Presets.copy(ws.accountDir, project, AppType.ANDROID)
+        val brief = File(project, AgentPrompt.PROJECT_FILE)
 
-        val layers = AgentPrompt.read(ws.accountDir, project)
+        assertNull(
+            "unlocked, the agent may edit it",
+            ws.agentLockProblem(brief),
+        )
 
-        assertEquals("no preset", "", layers.preset)
-        assertTrue("but a message all the same", layers.message.contains("# This project"))
+        ws.setLocked(setOf(project.name + "/" + AgentPrompt.PROJECT_FILE))
+        assertNotNull(
+            "locked, it may not",
+            ws.agentLockProblem(brief),
+        )
         ws.accountDir.deleteRecursively()
     }
 }
