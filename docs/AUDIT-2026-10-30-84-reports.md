@@ -133,8 +133,37 @@ what is needed.**
 | **77** | 23:18 | for output add subline "writing" | output / writing subline — 64668b4 |
 | **78** | 23:23 | Cached is part of input, not a column beside it. A dash is a number that does not exist — an interval with no  | Explanatory note removed — 64668b4 |
 | **79** | 23:25 | for agent status just write waiting/working/stopped + current context (just "131k" for example - laconic) | Status + context, laconic — 64668b4 |
-| **80** | 23:30 | does "restore deleted" show all the files deleted from the selected folder?  like all that existed in previous | Restore deleted — ANSWERED, see below |
+| **80** | 23:30 | does "restore deleted" show all the files deleted from the selected folder?  like all that existed in previous | **ANSWERED — and the answer was never written down, which is why it was asked again.** See "What restore deleted does" below. |
 | **81** | 23:34 | limit on displayed lines doesnt account for long lines that are wrapping. Do we need to live with it or is it  | **CLOSED** — `AgentChat.rowsOf` counts rows, not source lines (`8f745c4`) |
 | **82** | 23:36 | expand to read - I want this phrase at the bottom of messages to be clickable (and of selectable color) so tha | Expand to read is a control — 25de8d2 |
 | **83** | 23:38 | why in fullscreen at the top left corner agent is repeated 2 times: "agent agent"? | 'agent agent' — 25de8d2 |
 | **84** | 23:41 | why background results filenames are so insane? make them shorter, they should be named by hash 64base 8 numbe | **CLOSED** — SHA-256 → base64url → 8 chars (`762a686`) |
+
+---
+
+## What "restore deleted" does
+
+**Yes — everything that existed in the folder's history and does not exist now, newest version only.**
+
+The rule, from `AppViewModel.deletedIn`:
+
+1. **It walks the folder as it is now**, and makes a set of every name in it — files *and* folders.
+   A folder that is still there is not a folder that was deleted; collecting only files made every
+   existing folder look gone, which was a bug once.
+2. **It walks the last `DELETED_LOOKBACK` commits of the project's own repository**, newest first, and
+   for each name that is not on disk it takes the **first version it meets**. That is the newest one,
+   so restoring brings back the file as it last was — not as it was years ago.
+3. **A name appears once.** Because the walk stops at the first commit that holds it, "restore" never
+   offers two versions of one path. Choosing which *version* is the history screen's job, for a file
+   that still exists.
+4. **It is the folder you asked from, not the whole project.** The list is built from the folder that
+   is open, so "restore deleted" in `src/` offers what `src/` lost, and a file deleted from a
+   different folder is not offered there.
+
+So the answer to the two halves of the question is: **all of them** (not a sample), and **no
+duplicates** (the newest variant of each).
+
+**What it does not do:** it does not restore a file that was deleted *before* the lookback window,
+because those commits are no longer in the project's history — the history is shortened to the
+configured length, and a version that has been pruned cannot be restored. That is a real limit and it
+is worth saying out loud rather than discovering.

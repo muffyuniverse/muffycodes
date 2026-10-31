@@ -286,9 +286,15 @@ class StatsScreenTest {
         // **And it says WHICH period it is**, because the rule is unusual enough that a person who
         // knows this code asked about it. The window is the same length, ending where this one
         // starts - not the whole of yesterday.
-        // The fixture opens at 14:30, so the current interval is 00:00-14:30 - fourteen and a
-        // half hours - and the window before it begins at 09:30 on the 27th.
-        compose.onNodeWithText("before: 27 Oct 2026, 09:30", substring = true).assertExists()
+        //
+        // **In the dotted format the operator named** ("format for time and date is 30.10.2026,
+        // 03:00"), not the long month name this used to assert. The fixture opens at 14:30, so the
+        // current interval is 00:00-14:30 and the window before it begins at 09:30 on the 27th.
+        compose.onNodeWithText("before: 27.10.2026, 09:30", substring = true).assertExists()
+        // **Exactly one.** The operator's report: "why before written second time? duplicate line."
+        // Two lines were drawn from the same number in two formats, and asserting the text alone
+        // would pass with both of them on screen.
+        compose.onAllNodesWithText("before:", substring = true).assertCountEquals(1)
     }
 
     @Test
