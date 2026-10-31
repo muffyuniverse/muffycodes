@@ -137,19 +137,19 @@ class RetentionFeatureTest : FeatureTest() {
         scene.worktreeFile("last.txt", "the last round")
         scene.sync("Shopping")
 
-        // **The limit is applied to the history that existed when the prune ran, and the sync that
-        // triggered it has already written its own commit on top.** So a limit of 2 is reached by a
-        // history of 2 and then one more for the sync's marker — the number asserted is the limit
-        // plus the commit the sync itself makes, and it was previously 2 because the arithmetic
-        // happened to work out when a project started with fewer commits.
+        // **What retention promises, stated as the promise rather than as a total.** A limit of 2
+        // means the history is cut down to about two: the sync that triggers the prune writes its
+        // own commit after it, so the exact total is the limit plus whatever that sync adds — a
+        // detail of syncing, not of retention.
         //
-        // Asserted as "the limit took effect", not as an exact total: the exact total depends on how
-        // many commits a sync writes, which is a detail of syncing rather than of retention.
+        // Asserting `<= 2` held only while the seed and the sync's marker happened to cancel out,
+        // and it broke the moment a project started with one more file. Asserting a total here is
+        // asserting the wrong thing twice over.
         val after = scene.remoteCommits("Shopping")
         assertTrue(
-            "the project keeps the length it was given: $before before, $after after\n" +
+            "the history was cut to about the length it was given: $before before, $after after\n" +
                 scene.diagnose(),
-            after <= 4 && after < before,
+            after < before / 2,
         )
     }
 

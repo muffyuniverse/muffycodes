@@ -323,6 +323,10 @@ class Scenario(
             viewModel.projectNames.any { it.equals(name, ignoreCase = true) }
         }
         await("the making of $name to finish", 60_000) { !viewModel.busy }
+        // **What the project arrived with, measured now**, while nothing has been saved into it yet.
+        // A later `seedCommits` call after a save would answer with the save included, which is the
+        // one number this must not be.
+        seeds[name] = remoteCommits(name)
         return this
     }
 
@@ -514,6 +518,21 @@ class Scenario(
         }
         return answer
     }
+
+    /**
+     * How many commits the remote held **before the test touched the project.**
+     *
+     * A project is made with a licence and the preset pair, so its remote starts with commits that
+     * nobody in the test wrote. Asking "did my change reach GitHub" needs that number subtracted:
+     * asserting a total instead means the test fails when the app starts making projects with one
+     * more file in them, which says nothing about the change under test.
+     *
+     * The answer is the seed's own commit count, measured from the remote the moment the project
+     * exists — so it stays right whatever the seed is.
+     */
+    private val seeds = mutableMapOf<String, Int>()
+
+    fun seedCommits(project: String): Int = seeds.getOrPut(project) { remoteCommits(project) }
 
     /** How many commits the remote has. */
     fun remoteCommits(project: String): Int = try {

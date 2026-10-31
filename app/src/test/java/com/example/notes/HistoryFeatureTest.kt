@@ -497,11 +497,13 @@ class HistoryFeatureTest : FeatureTest() {
         // exactly one commit. Counting the seed instead of the difference meant this test failed
         // when the app started making projects with one more file in them, which is a fact about
         // the seed and not about saving.
+        // **Asked as a difference, because that is the only number that means anything here.** The
+        // seed is a licence and a preset pair, and how many commits those make is a fact about how a
+        // project is made — not about saving. Three saves that each reached GitHub would move the
+        // count by three, so "the count did not move" is exactly the claim.
         val arrived = scene.remoteCommits("shopping")
-        assertTrue(
-            "no sync happened: $arrived commit(s) on the remote, all of them from making the project",
-            arrived <= 3,
-        )
+        val moved = arrived - scene.seedCommits("shopping")
+        assertEquals("no save reached GitHub: $arrived total, $moved from the saves", 0, moved)
     }
 
     @Test
