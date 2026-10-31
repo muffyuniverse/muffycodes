@@ -6,10 +6,13 @@ package com.example.notes
  *
  * ## What these are, and are not
  *
- * They are **templates**. A project gets a copy in its own `.github/workflows/`, and the copy is what
- * runs — because GitHub only dispatches a workflow that is in the repository, so a file in
- * `system/workflows/` cannot be dispatched at all. The template is the source; the copy is the
- * workflow.
+ * They are **presets**. A project gets a copy in its own `.github/workflows/`, and the copy is what
+ * runs — because GitHub only dispatches a workflow that is in the repository, so a file in the system
+ * project cannot be dispatched at all. The preset is the source; the copy is the workflow.
+ *
+ * **They live at `system/project_types/<type>/workflows/`**, one folder per type, beside that type's
+ * `project_prompt.txt`. The folder is the mapping: to know what an Android project starts with, look in
+ * `project_types/android/` rather than in a table in code.
  *
  * A copy is the project's own file, so a project that needs an extra step can have one without asking
  * the template to change for everybody.

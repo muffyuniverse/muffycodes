@@ -1324,8 +1324,6 @@ class Workspace(val accountDir: File) {
          */
         const val TYPES = "project_types"
 
-        /** The template files, which are also the names a project's own workflow may take. */
-        val TEMPLATE_NAMES: List<String> get() = WorkflowTemplates.ALL.keys.toList()
 
         /**
          * True when [path] — account-relative, as `Workspace.relative` writes it — is a template.

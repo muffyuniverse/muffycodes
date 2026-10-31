@@ -67,48 +67,15 @@ class Workflows {
         val canReachSecrets: Boolean get() = declaresEnvironment || secrets
     }
 
-    /**
-     * What a project's secrets look like from the outside, and the one finding that matters.
-     *
-     * **A repository-level secret is the hole the whole design cannot close.** Every workflow in a
-     * repository reads every repository secret, including one the agent wrote and started — so a single
-     * one at this scope makes the environment rule decorative. The app cannot move it; only the person
-     * can. So the honest thing is to name it, in the place a person is looking when they set secrets up.
-     */
-    data class Secrets(
-        /** Names of the secrets at repository scope. **Any of these is a finding.** */
-        val atRepository: List<String>,
-        /** Names of the secrets in the environment this app writes to. */
-        val inEnvironment: List<String>,
-        /** The environment's name, for the sentence. */
-        val environment: String,
-    ) {
-        /** True when nothing is wrong and nothing is missing. */
-        val settled: Boolean get() = atRepository.isEmpty() && inEnvironment.isNotEmpty()
-
-        /**
-         * One sentence, or null when there is nothing to say.
-         *
-         * **Silence is a real answer**: a person who has done this right should not be told about it
-         * every time they open a project.
-         */
-        fun said(): String? {
-            if (atRepository.isNotEmpty()) {
-                val names = atRepository.take(3).joinToString(", ")
-                val rest = if (atRepository.size > 3) " and ${atRepository.size - 3} more" else ""
-                return "This repository has ${atRepository.size} secret" +
-                    (if (atRepository.size == 1) "" else "s") +
-                    " at repository scope ($names$rest). Every workflow in the repository can read " +
-                    "them, including one the agent wrote — so they should be moved to the " +
-                    "`$environment` environment."
-            }
-            if (inEnvironment.isEmpty()) {
-                return "Nothing is in the `$environment` environment, so this project's builds " +
-                    "cannot sign anything. Send the signing key to fix it."
-            }
-            return null
-        }
-    }
+    // **There was a `Secrets` class here, and it was a duplicate.** It read the repository's secret
+    // names and the environment's and wrote one sentence about a repository-scope secret being
+    // readable by every workflow. All of that is `ReleaseKey.Reconcile`, which says the same thing
+    // *and* knows how to fix it in one press (`Signing.move`) — so this class was a second answer to
+    // the same question that nothing called, because the first one already answered it better.
+    //
+    // Deleted rather than wired: a finding that can only be reported is worth less than the same
+    // finding with a button beside it, and two sentences about one state is how a person learns to
+    // read neither.
 
     /** One workflow in a project, as a list row needs it. */
     data class Row(

@@ -245,8 +245,15 @@ class ReleaseKeyTest {
         )
     }
 
-    private fun reconcileOf(haveKey: Boolean): ReleaseKey.Reconcile {
+    private fun reconcileOf(
+        haveKey: Boolean,
+        atRepository: List<String>? = null,
+    ): ReleaseKey.Reconcile {
         val file = if (haveKey) properties else File(project, "nothing-here.properties")
+        // **A repository-scope answer has to be put into the fake**, because the real path asks GitHub
+        // and the fake answers from what it holds. Passing a list here is how a test says "this
+        // repository has these at the wrong scope".
+        atRepository?.forEach { github.putRepoSecret(ref.name, it, "sealed".toByteArray()) }
         return key().reconcile(github, "a-key", ref, file)
     }
 
@@ -293,5 +300,50 @@ class ReleaseKeyTest {
         assertFalse("it does not claim anything is missing", result.needsSending)
         assertEquals("and says nothing", null, result.said())
         assertEquals("though it remembers why", "Bad credentials", result.unknown)
+    }
+
+    // ---- the finding that matters ----------------------------------------
+
+    @Test
+    fun `a secret at repository scope is named, because every workflow can read it`() {
+        // **The state this repository was actually in when the design was finished**: four signing
+        // secrets at repository scope, no environment. Every workflow could read them, including one
+        // the agent wrote — so the environment rule was decorative.
+        //
+        // **This test lived in `WorkflowsTest` against a `Workflows.Secrets` class nothing called.**
+        // The finding is real and this is the class that reports it, so the test moved here rather
+        // than being deleted with the duplicate.
+        val result = reconcileOf(haveKey = true, atRepository = listOf("MUFFY_KEYSTORE_BASE64"))
+
+        val said = result.said().orEmpty()
+        assertTrue("it names the count: $said", said.contains("1 secret"))
+        assertTrue("and the name: $said", said.contains("MUFFY_KEYSTORE_BASE64"))
+        assertTrue("and where it should go: $said", said.contains("release"))
+        assertTrue("and it can be fixed in one press", result.fixable)
+    }
+
+    @Test
+    fun `two repository secrets are counted as two`() {
+        // The singular is a real case — one leftover is what a half-finished move leaves — and a
+        // sentence that said "1 secrets" would be the kind of thing that makes a person doubt the
+        // rest of it.
+        val result = reconcileOf(
+            haveKey = true,
+            atRepository = listOf("MUFFY_KEYSTORE_BASE64", "MUFFY_KEY_PASSWORD"),
+        )
+
+        assertTrue("plural", result.said().orEmpty().contains("2 secrets"))
+    }
+
+    @Test
+    fun `a project that is set up right is not nagged about`() {
+        // **Silence is a real answer.** A person who has done this correctly should not be told about
+        // it every time they open a project.
+        ReleaseKey.Field.entries.forEach { store(it.secretName) }
+        val result = reconcileOf(haveKey = true, atRepository = emptyList())
+
+        assertFalse("nothing at repository scope", result.atRepository.isNotEmpty())
+        assertFalse("nothing to fix", result.fixable)
+        assertEquals("and says nothing", null, result.said())
     }
 }
