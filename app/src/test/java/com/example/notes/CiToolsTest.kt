@@ -221,16 +221,24 @@ class CiToolsTest {
     }
 
     @Test
-    fun `starting a run is not among the things the agent can do`() {
-        // **A regression guard, and it is about a decision rather than a bug.** `ci` reads; it does
-        // not dispatch. Starting a workflow is a capability that waits on the workflow guard — a run
-        // the agent starts must not be able to reach repository secrets — and a key that quietly
-        // existed here would be that capability granted by accident.
-        assertFalse(
-            "`ci` takes no event key",
-            AgentTools.KEYS.getValue("ci").contains("event"),
-        )
-        val body = call("ci", """{"event":"workflow_dispatch"}""")
-        assertTrue("and sending one is refused: $body", body.startsWith(AgentLog.FAILURE))
+    fun `a dispatch is refused for a workflow that is not there, and names the ones that are`() {
+        // **The guard moved, so the test moves with it.** `ci` used to have no `event` key at all; it
+        // does now, because the operator ruled that an unapproved workflow still runs. What remains
+        // worth asserting is the refusal that is still a refusal: a workflow the project does not have
+        // cannot be started, and the answer says which ones it does have.
+        val body = call("ci", """{"event":"workflow_dispatch","workflow":"nope.yml"}""")
+
+        assertTrue("it is a refusal: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("it names the path it looked for: $body", body.contains("nope.yml"))
+    }
+
+    @Test
+    fun `the only startable event is workflow_dispatch`() {
+        // A `push` happens when something is pushed and a `schedule` happens on its own. Accepting
+        // either as an `event` would look like it started something and start nothing.
+        val body = call("ci", """{"event":"push","workflow":"build.yml"}""")
+
+        assertTrue("it is a refusal: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("and it says which event it takes: $body", body.contains("workflow_dispatch"))
     }
 }
