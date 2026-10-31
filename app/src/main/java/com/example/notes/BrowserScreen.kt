@@ -677,20 +677,34 @@ private fun ProjectList(
                             .combinedClickable(onClick = { viewModel.open(listOf(name)) }),
                     ) {
                         Text(name, style = MaterialTheme.typography.bodyLarge)
-                        // **A local project has no second line.** The row exists to answer "how
-                        // much is unsent", and a project with no remote has no answer to give —
-                        // "local · this phone only" said the absence twice and made the row look
-                        // broken beside its neighbours. Reported from the live log: "still have
-                        // "local" word under filenames, should we really keep it?" — no.
-                        if (!viewModel.isLocalProject(name)) {
+                        // **What it is, and how much is unsent, on one line.** The list is where a
+                        // person scans every project at once, so it is the only place a project
+                        // whose type nobody chose can be noticed without opening it — and an
+                        // undecided project is the one thing on this screen that is waiting for
+                        // them rather than reporting.
+                        //
+                        // The type is left off a local project only when it is undecided, because
+                        // "local · decide later" would be two ways of saying "nothing has happened
+                        // yet" about a project that is fine as it is.
+                        val type = viewModel.typeOf(name)
+                        val sending = if (viewModel.isLocalProject(name)) {
+                            null
+                        } else {
+                            viewModel.changesOf(name).let { if (it > 0) "$it to send" else "up to date" }
+                        }
+                        val second = listOfNotNull(
+                            type?.takeIf { it.undecided || !viewModel.isLocalProject(name) }?.label,
+                            sending,
+                        ).joinToString(" · ")
+                        if (second.isNotEmpty()) {
                             Text(
-                                // The same words as the row inside the project: what GitHub does
-                                // not have yet, which is the only reason a person opens this screen.
-                                text = viewModel.changesOf(name).let {
-                                    if (it > 0) "$it to send" else "up to date"
-                                },
+                                text = second,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = if (type?.undecided == true) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
                             )
                         }
                     }

@@ -567,10 +567,20 @@ class AppViewModel @JvmOverloads constructor(
      * project; a folder inside one is the project's, and the bar still names the project's type
      * because that is what the folder belongs to. Only the account root has no type to show.
      */
-    val typeOfProject: AppType? get() {
-        val project = currentProject ?: return null
+    val typeOfProject: AppType? get() = currentProject?.let(::typeOf)
+
+    /**
+     * What a named project is, for a row in the list — the same read as [typeOfProject], for a project
+     * nobody has opened.
+     *
+     * **One function, so the caption and the row cannot disagree.** A second copy of "read the
+     * metadata" is a second answer to one question, and this file has paid for that before.
+     */
+    fun typeOf(project: String): AppType? {
         val ws = workspace ?: return null
-        return ProjectMeta.read(ws.projectDir(project)).type
+        val dir = ws.projectDir(project)
+        if (!dir.isDirectory) return null
+        return ProjectMeta.read(dir).type
     }
 
     /**

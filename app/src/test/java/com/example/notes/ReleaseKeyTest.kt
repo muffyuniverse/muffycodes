@@ -316,23 +316,26 @@ class ReleaseKeyTest {
         val result = reconcileOf(haveKey = true, atRepository = listOf("MUFFY_KEYSTORE_BASE64"))
 
         val said = result.said().orEmpty()
-        assertTrue("it names the count: $said", said.contains("1 secret"))
-        assertTrue("and the name: $said", said.contains("MUFFY_KEYSTORE_BASE64"))
+        // **The names, not a count.** "2 secrets are exposed" makes a person go and look; the names
+        // are what they can act on. The sentence says what is wrong, what it means, and where it goes.
+        assertTrue("it names it: $said", said.contains("MUFFY_KEYSTORE_BASE64"))
+        assertTrue("it says every workflow can read it: $said", said.contains("every workflow"))
         assertTrue("and where it should go: $said", said.contains("release"))
         assertTrue("and it can be fixed in one press", result.fixable)
     }
 
     @Test
-    fun `two repository secrets are counted as two`() {
-        // The singular is a real case — one leftover is what a half-finished move leaves — and a
-        // sentence that said "1 secrets" would be the kind of thing that makes a person doubt the
-        // rest of it.
+    fun `both names are listed when two are exposed`() {
+        // A half-finished move leaves more than one, and a sentence that named only the first would
+        // send a person to delete one secret and think they were done.
         val result = reconcileOf(
             haveKey = true,
             atRepository = listOf("MUFFY_KEYSTORE_BASE64", "MUFFY_KEY_PASSWORD"),
         )
 
-        assertTrue("plural", result.said().orEmpty().contains("2 secrets"))
+        val said = result.said().orEmpty()
+        assertTrue("the first: $said", said.contains("MUFFY_KEYSTORE_BASE64"))
+        assertTrue("and the second: $said", said.contains("MUFFY_KEY_PASSWORD"))
     }
 
     @Test
