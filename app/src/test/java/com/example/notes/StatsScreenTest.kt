@@ -206,20 +206,20 @@ class StatsScreenTest {
     }
 
     @Test
-    fun `the interval lines sit under the button and describe what was generated`() {
-        draw()
-        // The operator's other half: "text lines on 'before', 'after' and interval duration draw
-        // under generate button, just above the table with metrics - update them on every generate".
+    fun `nothing describes the interval under the button`() {
+        // **The operator's report**: "and on before, now and interval lines, we dont need them".
+        // They described the interval the table is about, and the table *is* that interval - a
+        // person who set it up knows which one they generated, and a line repeating it is a line to
+        // read past on every visit.
         //
-        // Above the button they described the *picks* while the table below held the last interval
-        // generated - two intervals on screen, one labelled, and the label on the wrong one.
-        val button = compose.onNodeWithText("Generated").fetchSemanticsNode()
-        val duration = compose.onNodeWithText("14 hours 30 minutes", substring = true)
-            .fetchSemanticsNode()
-        assertTrue(
-            "the duration line is below the Generate button",
-            duration.positionInRoot.y > button.positionInRoot.y,
-        )
+        // **Asserted as an absence, because an absence is the change.** A test that only checked
+        // the table still drew would pass with all three lines back on screen.
+        draw(withRows = true)
+        compose.onNodeWithText("now:", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("before:", substring = true).assertDoesNotExist()
+        // The duration as a caption is gone too. It still appears inside a button (the picker's own
+        // label), so this asserts the *caption* by asking for the exact sentence the caption used.
+        compose.onAllNodesWithText("14 hours 30 minutes").assertCountEquals(0)
     }
 
     @Test
@@ -271,31 +271,32 @@ class StatsScreenTest {
         // **No heading at all**, because there is no table. A person opening this before the agent
         // has run is told why it is empty rather than shown a grid of dashes that reads like a fault
         // - and the headings below would be headings over nothing.
-        // **Substring, because the caption is one string**: "14 hours 30 minutes · no log yet".
+        // **The sentence, and not the table.** The caption lines are gone, but this one fact
+        // survives because it is a different kind of fact: it says the table is empty because the
+        // log begins after the interval, which is the one thing a person cannot work out from the
+        // numbers.
         compose.onNodeWithText("no log yet", substring = true).assertExists()
-        compose.onNodeWithText("now").assertDoesNotExist()
+        compose.onNodeWithText("requests").assertDoesNotExist()
     }
 
     @Test
-    fun `the table names its two value columns`() {
-        // **A heading is needed now and was not before.** With one column the caption above the
-        // table was its heading; two values per row make "which is which" a real question.
-        draw(withRows = true)
-        compose.onNodeWithText("now").assertExists()
-        // **The previous column appears once there is a baseline to compare against.**
-        compose.onNodeWithText("before").assertExists()
-        // **And it says WHICH period it is**, because the rule is unusual enough that a person who
-        // knows this code asked about it. The window is the same length, ending where this one
-        // starts - not the whole of yesterday.
+    fun `the table has one value column and a change column, and no headings`() {
+        // **The operator's report**: "we dont need before column either - its data is only used for
+        // comparison and column with relative change is good enough on its own", and then "and this
+        // way we dont need title headers for the table either".
         //
-        // **In the dotted format the operator named** ("format for time and date is 30.10.2026,
-        // 03:00"), not the long month name this used to assert. The fixture opens at 14:30, so the
-        // current interval is 00:00-14:30 and the window before it begins at 09:30 on the 27th.
-        compose.onNodeWithText("before: 27.10.2026, 09:30", substring = true).assertExists()
-        // **Exactly one.** The operator's report: "why before written second time? duplicate line."
-        // Two lines were drawn from the same number in two formats, and asserting the text alone
-        // would pass with both of them on screen.
-        compose.onAllNodesWithText("before:", substring = true).assertCountEquals(1)
+        // Both are right and they are one decision: a number printed beside another number makes the
+        // reader do the subtraction the change column has already done, and a heading over the only
+        // value column names what the reader can see.
+        //
+        // **Asserted as absences, because the change is what is missing.** A test that only checked
+        // the rows still drew would pass with the old three-column table restored.
+        draw(withRows = true)
+        compose.onNodeWithText("now").assertDoesNotExist()
+        compose.onNodeWithText("before").assertDoesNotExist()
+        // And the rows that matter are still there, with their change.
+        compose.onNodeWithText("requests").assertExists()
+        compose.onNodeWithText("cost $").assertExists()
     }
 
     @Test

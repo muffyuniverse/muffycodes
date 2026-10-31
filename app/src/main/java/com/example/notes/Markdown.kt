@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -388,6 +389,34 @@ fun MarkdownBody(
     val link = MaterialTheme.colorScheme.primary
     Column(modifier = modifier) {
         blocks.forEach { block ->
+            // **One selection container per block, and it is the handles that decided this.**
+            //
+            // A prose page is several `Text`s in a `Column`. Compose's selection can span siblings,
+            // but each handle anchors to the node that holds the focus — so a selection dragged from
+            // one paragraph into the next drew one handle correctly and the other a paragraph away,
+            // which the operator reported as "handles are in some random places".
+            //
+            // A container around a single `Text` has exactly one text layout, so both handles anchor
+            // to it and sit where the words are. **The cost is real and worth stating: a selection
+            // cannot cross a paragraph break.** Copying one paragraph at a time is the trade, and the
+            // fullscreen view is where a whole page is one block for the cases that need more.
+            SelectionContainer {
+                OneBlock(block, link, baseDir)
+            }
+        }
+    }
+}
+
+/**
+ * One parsed block, drawn — the body of [MarkdownBody]'s loop, pulled out so each block can sit in
+ * its own `SelectionContainer` without the loop reading as a container per case.
+ */
+@Composable
+private fun OneBlock(
+    block: Markdown.Block,
+    link: androidx.compose.ui.graphics.Color,
+    baseDir: File?,
+) {
             when (block) {
                 is Markdown.Block.Heading -> Text(
                     text = Markdown.inline(block.text, link),
@@ -446,8 +475,6 @@ fun MarkdownBody(
                     baseDir = baseDir,
                 )
             }
-        }
-    }
 }
 
 /**

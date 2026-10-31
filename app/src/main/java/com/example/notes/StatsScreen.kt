@@ -274,7 +274,16 @@ fun StatsScreen(
     // **It is not shown when the history does not reach it.** A previous column of dashes beside a
     // real current column reads as "traffic collapsed", when the truth is that the log begins after
     // the previous period did. `oldest` decides that, and the column is dropped entirely.
-    val previousSpan = remember(span) { RequestStats.previousOf(span) }
+    // **Two rules, and which one applies is the picker's answer.** A clock preset compares against
+    // the same calendar period one period earlier, cut to the same point; a hand-set interval has no
+    // calendar period to be the previous of, so it keeps the length rule. The operator's report:
+    // "clock 1 day is selected, why before description says 13:59 instead of 00:00?" - and their
+    // choice of the answer.
+    val previousSpan = remember(span, clockPick) {
+        val picked = clockPick
+        if (picked != null) RequestStats.previousClockOf(span, picked)
+        else RequestStats.previousOf(span)
+    }
     val previousTotals = remember(history, previousSpan) {
         history?.totals(previousSpan.fromMs, previousSpan.toMs) ?: RequestStats.Totals()
     }
@@ -386,78 +395,29 @@ fun StatsScreen(
                         Text(if (pending) "Generate" else "Generated")
                     }
 
-                    // **And what was generated, under the button that generated it.** The
-                    // operator's report: "text lines on 'before', 'after' and interval duration draw
-                    // under generate button, just above the table with metrics - update them on
-                    // every generate".
+                    // **Nothing is printed under the button.** The operator's report: "and on
+                    // before, now and interval lines, we dont need them". They described the interval
+                    // the table was about, and the table is the interval — a person who set it up
+                    // knows which one they generated, and one line saying it again is a line to read
+                    // past every time.
                     //
-                    // Above the button they described the *picks* - the interval you were setting up
-                    // - while the table below them held the last one generated. Two intervals on
-                    // screen, one of them labelled, and the label on the wrong one. Under the button
-                    // they read as its output, which is what they are: every one of them is computed
-                    // from `span`, and `span` is `generated`.
-                    //
-                    // **The `Text` below is unchanged otherwise** - same three facts, same rules
-                    // about which empty screen is which.
-                    // **Three lines, one per question.** The operator's report: "this line is
-                    // wrong when clock time is selected. and there should be 3 lines: interval span,
-                    // before (from and to time and date), now (from and to time and date)."
-                    //
-                    // The old line concatenated a length with a fact about the log, so "20 hours 15
-                    // minutes · the log starts 30 Oct 2026, 03:00" was read as one claim and was
-                    // wrong whenever the clock picker was used: the length belonged to the span and
-                    // the date belonged to the log, and neither said which interval the table was
-                    // about. Three lines, each with one subject.
-                    //
-                    // **Both ends of both windows, in the dotted format the operator named.** A
-                    // length alone does not locate an interval, and a window described only by its
-                    // start leaves the reader doing arithmetic to find where it stopped.
-                    Column(modifier = Modifier.padding(top = 2.dp, bottom = 0.dp)) {
-                        Text(
-                            StatsFormat.span(span.minutes),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        if (showPrevious) {
-                            Text(
-                                "before: " + StatsFormat.dotted(previousSpan.fromMs) +
-                                    " — " + StatsFormat.dotted(previousSpan.toMs),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Text(
-                            "now: " + StatsFormat.dotted(span.fromMs) +
-                                " — " + StatsFormat.dotted(span.toMs),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        // **The log's reach, only when it is a problem.** "from the log" beside two
-                        // real windows says nothing; "the log starts …" is the one that stops a
-                        // person thinking an empty table means nothing happened.
-                        val reach = when {
-                            !loaded -> "reading"
-                            !anyAtAll -> "no log yet"
-                            covered -> null
-                            oldest == null -> "no log yet"
-                            else -> "the log starts " + StatsFormat.dotted(oldest)
-                        }
-                        if (reach != null) {
-                            Text(
-                                reach,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                    // **The log's reach stays, because it is a different fact**: it says the table is
+                    // empty because the log begins after the interval, which is the one thing a
+                    // person cannot work out by looking at the numbers.
+                    val reach = when {
+                        !loaded -> "reading"
+                        !anyAtAll -> "no log yet"
+                        covered -> null
+                        oldest == null -> "no log yet"
+                        else -> "the log starts " + StatsFormat.dotted(oldest)
                     }
-                    // **The second `before:` line is gone, and it was the operator's report.**
-                    // "why before written second time? duplicate line." Two lines were drawn from
-                    // the same number in two formats - `dotted` in the caption column above and
-                    // `instantMinute` here - so the screen said the same thing twice and neither
-                    // said it better. The caption column keeps it: it is where the interval's own
-                    // three lines belong, and a second copy under the button is a duplicate by
-                    // construction, not a second opinion.
-
+                    if (reach != null) {
+                        Text(
+                            reach,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
 
@@ -555,12 +515,10 @@ fun StatsScreen(
                         // two different values now, so "which is which" is a real question and the
                         // answer has to be on screen. The headings are right-aligned to match the
                         // figures beneath them.
-                        ColumnHeading(showPrevious = showPrevious, previousSpan = previousSpan)
                         val t = totals.total
                         val p = previousTotals.total
                         CompareRow(
                             "requests",
-                            previous = StatsFormat.count(p.requests).takeIf { showPrevious },
                             current = StatsFormat.count(t.requests),
                             change = StatsFormat.change(
                                 RequestStats.change(p.requests.toDouble(), t.requests.toDouble())
@@ -574,8 +532,6 @@ fun StatsScreen(
                             // input, then a cached row, then nothing saying which contains which
                             // makes a reader add two numbers that must not be added.
                             "input\n  · new",
-                            previous = StatsFormat.tokens(p.promptTokens - p.cachedTokens)
-                                .takeIf { showPrevious },
                             current = StatsFormat.tokens(t.promptTokens - t.cachedTokens),
                             change = StatsFormat.change(
                                 RequestStats.change(
@@ -590,9 +546,6 @@ fun StatsScreen(
                         // reassuring. The absolute beside it already moved.
                         CompareRow(
                             "  · cached",
-                            previous = StatsFormat.absoluteAndShare(
-                                StatsFormat.tokens(p.cachedTokens), p.cachedShare,
-                            ).takeIf { showPrevious },
                             current = StatsFormat.absoluteAndShare(
                                 StatsFormat.tokens(t.cachedTokens), t.cachedShare,
                             ),
@@ -605,7 +558,6 @@ fun StatsScreen(
                             // wrote, which is what a person pays for and what the bubble shows.
                             // "thinking" is counted separately and is not output.
                             "output\n  · writing",
-                            previous = StatsFormat.tokens(p.completionTokens).takeIf { showPrevious },
                             current = StatsFormat.tokens(t.completionTokens),
                             change = StatsFormat.change(
                                 RequestStats.change(
@@ -615,9 +567,6 @@ fun StatsScreen(
                         )
                         CompareRow(
                             "  · thinking",
-                            previous = StatsFormat.absoluteAndShare(
-                                StatsFormat.tokens(p.reasoningTokens), p.thinkingShare,
-                            ).takeIf { showPrevious },
                             current = StatsFormat.absoluteAndShare(
                                 StatsFormat.tokens(t.reasoningTokens), t.thinkingShare,
                             ),
@@ -626,9 +575,6 @@ fun StatsScreen(
                         )
                         CompareRow(
                             "cost $",
-                            previous = StatsFormat.cost(
-                                p.cost.takeIf { p.costReported > 0 },
-                            ).takeIf { showPrevious },
                             current = StatsFormat.cost(t.cost.takeIf { t.costReported > 0 }),
                             change = StatsFormat.change(
                                 RequestStats.change(
@@ -643,7 +589,6 @@ fun StatsScreen(
                             // the count above it, so it belongs beside cost rather than in the list
                             // of measured things.
                             "  · per request",
-                            previous = StatsFormat.perRequest(p.perRequest).takeIf { showPrevious },
                             current = StatsFormat.perRequest(t.perRequest),
                             change = StatsFormat.change(
                                 RequestStats.change(p.perRequest, t.perRequest)
@@ -824,60 +769,12 @@ private fun TimeDialog(
     }
 }
 
-/**
- * The three column headings, right-aligned over the figures they name.
- *
- * **A heading is needed now and was not before.** With one column the caption above the table was
- * already its heading - "15 hours · from the log" said what the figures were. Two different values
- * per row make "which is which" a real question, and a table where a person has to guess the answer
- * is a table that will be misread.
- *
- * **No heading over the change column**, because `+18.2%` is unambiguous once the two columns beside
- * it are named.
- */
-@Composable
-private fun ColumnHeading(showPrevious: Boolean, previousSpan: RequestStats.Interval) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // The name column, empty here so the headings line up with the figures below.
-        Spacer(modifier = Modifier.weight(1f))
-        if (showPrevious) {
-            Text(
-                // **"before", not "previous".** The word alone does not say *what* the period is,
-                // and the honest answer is unusual enough to be worth stating: it is the same
-                // length, ending where this one starts. Not the whole of yesterday - comparing
-                // twelve hours against twenty-four would report a 46% drop caused by nothing.
-                //
-                // **The dates for both windows are on the lines above the table**, so this heading
-                // does not have to carry them and stays one word wide.
-                "before",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.End,
-                maxLines = 1,
-                modifier = Modifier.width(PREVIOUS_WIDTH),
-            )
-            Rule()
-        }
-        Rule()
-        Text(
-            "now",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.End,
-            maxLines = 1,
-            modifier = Modifier.width(CURRENT_WIDTH),
-        )
-        Rule()
-        Text(
-            "",
-            style = MaterialTheme.typography.labelSmall,
-            modifier = Modifier.width(CHANGE_WIDTH),
-        )
-    }
-}
+// **There is no heading row any more.** The operator's report: "and this way we dont need title
+// headers for the table either". With two columns and one of them a relative change, the row above
+// was naming "now" over the only value column and leaving the change column blank — a heading for a
+// table whose shape the reader can see. It was added when there were two value columns and "which is
+// which" was a real question; with one, the question is gone.
+
 
 /**
  * One metric across three columns: **previous, current, and the relative change.**
@@ -888,7 +785,6 @@ private fun ColumnHeading(showPrevious: Boolean, previousSpan: RequestStats.Inte
 @Composable
 private fun CompareRow(
     name: String,
-    previous: String?,
     current: String,
     change: String,
     muted: Boolean = false,
@@ -911,20 +807,13 @@ private fun CompareRow(
                 )
             }
         }
-        // **Vertical rules between the columns.** The operator's report: "add vertical lines between
-        // table columns". Three columns of figures with nothing between them read as one run of
-        // numbers, and the eye needs a line to follow when a row is long.
-        if (previous != null) {
-            Rule()
-            Text(
-                previous,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.End,
-                maxLines = 1,
-                modifier = Modifier.width(PREVIOUS_WIDTH),
-            )
-        }
+        // **Two columns, and no previous one.** The operator's report: "we dont need before column
+        // either - its data is only used for comparison and column with relative change is good
+        // enough on its own". They are right, and it is the better table: a number beside another
+        // number makes the reader do the subtraction, and the change column has already done it.
+        //
+        // The previous totals are still measured — they are what `change` is computed from — they
+        // are simply not printed.
         Rule()
         Text(
             current,
@@ -1011,6 +900,5 @@ private fun MetricRow(name: String, cell: String, muted: Boolean = false) {
  * The change column is narrower than the others because `+18.2%` is never longer than `1.35393`
  * beside a token count, and on a 360dp phone every dp of the name column is worth having.
  */
-private val PREVIOUS_WIDTH = 76.dp
 private val CURRENT_WIDTH = 84.dp
 private val CHANGE_WIDTH = 64.dp

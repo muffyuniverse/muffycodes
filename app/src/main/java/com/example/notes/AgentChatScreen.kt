@@ -1008,19 +1008,22 @@ private fun MessageRow(
                 )
             }
         }
-        // **The page is selectable, and so is the header.** A result is the thing a person copies
-        // out of a chat - a path, a line of a file, an error - which is why this is here rather
-        // than only on the operator's own words.
-        SelectionContainer {
-            Column {
-                PageBody(
-                    page = page,
-                    cap = cap,
-                    ink = ink,
-                    expanded = false,
-                    onExpand = { onFullscreen(at) },
-                )
-            }
+        // **No container here, because the text brings its own.** `MarkdownBody` wraps each block in
+        // a `SelectionContainer` so both handles anchor to one text layout — the operator's
+        // "handles are in some random places" — and nesting this one around them would put a second
+        // selection on top of the first, which is how a person gets a toolbar for a range they
+        // cannot see.
+        //
+        // The plain-text branch below is not markdown and has no container of its own, so it is
+        // wrapped directly.
+        Column {
+            PageBody(
+                page = page,
+                cap = cap,
+                ink = ink,
+                expanded = false,
+                onExpand = { onFullscreen(at) },
+            )
         }
         Text(
             footer(message, page),
@@ -1096,6 +1099,10 @@ private fun PageBody(
     if (page.prose) {
         MarkdownBody(text = body, modifier = Modifier.fillMaxWidth())
     } else {
+        // **The plain branch carries its own container.** A tool result is not markdown, so it does
+        // not go through `MarkdownBody` and gets none of its per-block containers — and the caller
+        // above no longer wraps it, so this is the one place its selection comes from.
+        SelectionContainer {
         Text(
             body,
             style = MaterialTheme.typography.bodyMedium,
@@ -1109,6 +1116,7 @@ private fun PageBody(
                 else -> MaterialTheme.colorScheme.onSurface
             },
         )
+        }
     }
     if (cut && onExpand != null) {
         // **A real control, in the accent colour.** It is the same act as the magnifier in the top

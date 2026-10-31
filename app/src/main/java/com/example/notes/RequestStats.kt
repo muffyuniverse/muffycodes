@@ -218,7 +218,14 @@ object RequestStats {
     enum class Preset(
         val label: String,
         /** How far back it reaches, in calendar terms. Null for [TOTAL]. */
-        private val back: Back?,
+        /**
+         * How far this preset reaches back, or null for [TOTAL].
+         *
+         * **Readable rather than private**, because [previousClockOf] needs it: the previous period
+         * of a clock interval is one `back` earlier, and re-deriving that from the interval would
+         * lose which unit the person picked.
+         */
+        val back: Back?,
     ) {
         MINUTES_15("15 min", Back.Duration(15 * 60_000L)),
         HOUR_1("1 hour", Back.Duration(3_600_000L)),
@@ -353,6 +360,55 @@ object RequestStats {
      * the wrong length - and `intervalAt` would measure from the wrong instant. Subtraction is exact
      * by construction.
      */
+    /**
+     * The previous period of a **clock** preset: the whole period before this one, **cut to the same
+     * point in it.**
+     *
+     * ## Why a clock preset needs a different rule
+     *
+     * [previousOf] subtracts the current *length*, which is right for an interval somebody set by
+     * hand and wrong for a clock one. "1 day" at 13:59 covers 00:00 to 13:59 — fourteen hours — so
+     * subtracting fourteen hours gives 10:01 yesterday to midnight, which is not yesterday and not
+     * any period a person thinks in. The operator's report: *"clock 1 day is selected, why before
+     * description says 13:59 instead of 00:00?"*
+     *
+     * The rule here is: **the same calendar period, one period earlier, with the same amount of it
+     * elapsed.** So at 13:59 on the 31st:
+     *
+     *   now     31st 00:00 → 13:59
+     *   before  30th 00:00 → 13:59
+     *
+     * Both are fourteen hours, both begin at a real midnight, and the comparison stays fair — which
+     * is the property [previousOf] was protecting. The difference is that the start is a calendar
+     * boundary rather than "fourteen hours ago".
+     *
+     * ## The two rules must not be merged
+     *
+     * A hand-set interval has no calendar period to be the previous of — 10:17 to 10:43 has no
+     * "yesterday's 10:17" that means anything — so it keeps [previousOf]. [previousOf] is asked when
+     * [clock] is null, and this when it is not.
+     */
+    fun previousClockOf(
+        current: Interval,
+        preset: Preset,
+        zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
+    ): Interval {
+        val length = current.toMs - current.fromMs
+        if (length <= 0) return Interval(current.fromMs, current.fromMs)
+        val start = java.time.Instant.ofEpochMilli(current.fromMs).atZone(zone)
+        // **One period back, in the preset's own unit.** The same `back` arithmetic that put this
+        // period's start on a boundary, applied to that start — so a day goes to the previous day, a
+        // week to the previous week, a quarter to the previous quarter.
+        val earlier = when (val b = preset.back) {
+            is Back.Duration -> start.minus(java.time.Duration.ofMillis(b.ms))
+            is Back.Days -> start.minusDays(b.count.toLong())
+            is Back.Months -> start.minusMonths(b.count.toLong())
+            null -> return previousOf(current, zone)
+        }
+        val from = earlier.toInstant().toEpochMilli()
+        return Interval(from, from + length)
+    }
+
     fun previousOf(
         current: Interval,
         zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
