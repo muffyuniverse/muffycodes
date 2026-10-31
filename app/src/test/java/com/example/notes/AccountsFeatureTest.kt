@@ -297,4 +297,12 @@ private class RefusingGitHub : GitHub {
 
     override fun artifactBytes(token: String, ref: RepoRef, id: Long): GitHubResult<ByteArray> =
         GitHubResult(error = "Bad credentials", status = 401)
+
+    override fun dispatch(
+        token: String,
+        ref: RepoRef,
+        workflow: String,
+        branch: String,
+        inputs: Map<String, String>,
+    ): GitHubResult<Unit> = GitHubResult(error = "Bad credentials", status = 401)
 }
