@@ -208,7 +208,7 @@ class AgentTools(
             "reason" to setOf("text"),
             "browse" to setOf("url", "wait", "eval", "from", "to"),
             "shot" to setOf("url", "full", "eval"),
-            "ci" to setOf("workflow", "branch", "limit", "event"),
+            "ci" to setOf("workflow", "branch", "limit", "event", "inputs"),
             "runs" to setOf("run", "job", "grep", "from", "to"),
         )
 
@@ -381,7 +381,9 @@ class AgentTools(
                     "A run that has not finished has no conclusion, and is shown as `running` " +
                     "rather than as a failure. Use `runs` to read what a run actually said. " +
                     "**With `event` set to `workflow_dispatch`, it starts the workflow instead.** " +
-                    "It runs on `development` unless `branch` says otherwise. " +
+                    "It runs on `development`, and `branch` may only repeat that: `main` " +
+                    "publishes a release, so it is started by the person and never from here. " +
+                    "`inputs` are the workflow's own dispatch inputs, as strings. " +
                     "**A runner is a sandbox for the machine and not for the repository**: every " +
                     "workflow in a repository can read every repository secret, so a workflow you " +
                     "write can read one and hand it back as an artifact. That is why a workflow a " +
@@ -389,7 +391,7 @@ class AgentTools(
                     "stop the run. **Never put a secret in a workflow you wrote.** If a job needs " +
                     "one, say so and let the person write that job.",
                 "{\"workflow\":\"build-and-release.yml\",\"branch\":\"development\"," +
-                    "\"limit\":10,\"event\":\"workflow_dispatch\"}",
+                    "\"limit\":10,\"event\":\"workflow_dispatch\",\"inputs\":{}}",
             ),
             spec(
                 "runs",
@@ -1779,7 +1781,23 @@ class AgentTools(
                     "\"workflow\":\"build-and-release.yml\"}. `ci` with no `event` lists runs.",
             )
         }
-        val branch = args.optString("branch").trim().ifEmpty { AGENT_BRANCH }
+        // **The branch is the agent's own, and naming another is refused rather than ignored.**
+        //
+        // `AGENT_BRANCH` used to be only the *default*, so `{"branch":"main"}` would dispatch on main —
+        // which is where a release is published, and the one path the two-lane decision exists to keep
+        // out of the agent's hands. A default that can be overridden is not a boundary.
+        //
+        // It is refused rather than silently replaced, because a model that asked for main and got
+        // development would believe it had started a release.
+        val asked = args.optString("branch").trim()
+        if (asked.isNotEmpty() && asked != AGENT_BRANCH) {
+            return refusal(
+                "The agent starts workflows on `$AGENT_BRANCH` only, and this call asked for " +
+                    "\"$asked\". `main` publishes a release, so it is started by the person and " +
+                    "never from here. Leave `branch` out, or say `$AGENT_BRANCH`.",
+            )
+        }
+        val branch = AGENT_BRANCH
         val there = when (val w = ciWhere()) {
             is Where.Refused -> return refusal(w.said)
             is Where.Found -> w
@@ -1826,7 +1844,27 @@ class AgentTools(
             )
         }
         deadline.check("ci")
-        val started = there.gh.dispatch(there.token, there.ref, path.substringAfterLast('/'), branch)
+        // **Inputs go through, or a workflow that requires one is dispatched without it.** GitHub then
+        // rejects the dispatch with a message that does not name the missing input, and the model has no
+        // way to learn which one to supply.
+        val inputs = args.optJSONObject("inputs")
+        val values = buildMap {
+            if (inputs != null) {
+                for (key in inputs.keys()) {
+                    val one = inputs.opt(key)
+                    // **A string, because that is what a dispatch input is.** A number or a boolean in
+                    // the JSON would be sent as a JSON number and rejected by GitHub's schema.
+                    if (one != null && one !== JSONObject.NULL) put(key, one.toString())
+                }
+            }
+        }
+        val started = there.gh.dispatch(
+            there.token,
+            there.ref,
+            path.substringAfterLast('/'),
+            branch,
+            values,
+        )
         if (started.error != null) return refusal(ciSaid(started.error, started.status))
         // **The trace is where the state is recorded.** A model's answer is read by the model; a trace
         // line is read by the person when something goes wrong, and it is the only place that can say

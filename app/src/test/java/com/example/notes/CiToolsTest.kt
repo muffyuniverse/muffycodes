@@ -337,4 +337,51 @@ class CiToolsTest {
             body.contains("expression"),
         )
     }
+
+    @Test
+    fun `starting a workflow on main is refused, because main publishes a release`() {
+        // **The hole this closes.** `AGENT_BRANCH` used to be only the default, so `{"branch":"main"}`
+        // dispatched on main — the one path the two-lane decision exists to keep out of the agent's
+        // hands. A default that can be overridden is not a boundary.
+        workflow("build.yml", "jobs:\n  a:\n    runs-on: ubuntu-24.04\n")
+
+        val body = call(
+            "ci",
+            """{"event":"workflow_dispatch","workflow":"build.yml","branch":"main"}""",
+        )
+
+        assertTrue("it is refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("it says why: $body", body.contains("main"))
+        assertTrue("and names the branch it may use: $body", body.contains("development"))
+    }
+
+    @Test
+    fun `naming the agent's own branch is allowed, and so is saying nothing`() {
+        // **The refusal must not take away a legitimate call.** A model that spells out `development`
+        // has asked for exactly what it would have got.
+        workflow("build.yml", "jobs:\n  a:\n    runs-on: ubuntu-24.04\n")
+
+        val explicit = call(
+            "ci",
+            """{"event":"workflow_dispatch","workflow":"build.yml","branch":"development"}""",
+        )
+        val silent = call("ci", """{"event":"workflow_dispatch","workflow":"build.yml"}""")
+
+        assertTrue("explicit is fine: $explicit", explicit.startsWith(AgentLog.SUCCESS))
+        assertTrue("and so is silent: $silent", silent.startsWith(AgentLog.SUCCESS))
+    }
+
+    @Test
+    fun `dispatch inputs are passed through as strings`() {
+        // A workflow with a required input is otherwise dispatched without it, and GitHub rejects the
+        // call with a message that does not name the missing input.
+        workflow("build.yml", "jobs:\n  a:\n    runs-on: ubuntu-24.04\n")
+
+        val body = call(
+            "ci",
+            """{"event":"workflow_dispatch","workflow":"build.yml","inputs":{"version_name":"1.5"}}""",
+        )
+
+        assertTrue("it started: $body", body.startsWith(AgentLog.SUCCESS))
+    }
 }
