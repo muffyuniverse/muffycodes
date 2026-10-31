@@ -2224,21 +2224,20 @@ class AppViewModel @JvmOverloads constructor(
         val dir = ws.projectDir(project)
         val keyFile = File(dir, ReleaseKey.FILE)
         // **The workflow that signs**, which is the one the app can find and a person would have to
-        // choose. A project with several workflows has one that reads a keystore, and `Signing` finds
-        // it by what it reads rather than by its name.
+        // choose. It is found by what it reads rather than by its name, because a workflow may call
+        // the step "Build the release", "Sign", or anything else — and `Signing.nameEnvironment` walks
+        // to the job from the same evidence, so the two agree by construction rather than by a shared
+        // guess.
         val signing = Workflows.survey(dir, ws.locked())
             .map { File(dir, it.path) }
-            .firstOrNull { Workflows.reach(it).secrets && Workflows.reach(it).declaresEnvironment }
-            ?: Workflows.survey(dir, ws.locked())
-                .map { File(dir, it.path) }
-                .firstOrNull { file ->
-                    val text = try {
-                        file.readText()
-                    } catch (e: Throwable) {
-                        ""
-                    }
-                    text.contains("MUFFY_KEYSTORE") || text.contains("assembleRelease")
+            .firstOrNull { file ->
+                val text = try {
+                    file.readText()
+                } catch (e: Throwable) {
+                    ""
                 }
+                text.contains("MUFFY_KEYSTORE") || text.contains("assembleRelease")
+            }
         if (signing == null) {
             message = "There is no workflow in $project that builds a release, so there is nothing to " +
                 "give the key to."
