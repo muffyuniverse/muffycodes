@@ -819,6 +819,22 @@ class AgentSessionFeatureTest : FeatureTest() {
             project.renameTo(away),
         )
         assertFalse("the folder is really gone before the tick", project.isDirectory)
+        // **What the tick will actually see**, printed before it runs. This test failed on one shard
+        // and passed on the other for six runs in a row, which is the shape of a race rather than a
+        // rule - so the failure has to say WHICH fact was wrong: the session not in the store, the
+        // store not on disk, or the tick reading a different account folder.
+        val store = AgentSessions(scene.viewModel.workspace!!.accountDir)
+        val before = store.read().map { it.project }
+        assertTrue(
+            "the session is in the store before the tick, and the store is " +
+                "${scene.viewModel.workspace!!.accountDir}: $before",
+            before.contains("groceries"),
+        )
+        assertFalse(
+            "and the runner would see the folder as gone: " +
+                "projectDir=${scene.viewModel.workspace!!.projectDir("groceries")}",
+            scene.viewModel.workspace!!.projectDir("groceries").isDirectory,
+        )
         scene.viewModel.tickAgents(due)
         // **The tick answers on the main thread.** It posts the new session list there, so the
         // screen's own state is only true once that post has run — asserting straight after the
