@@ -312,7 +312,13 @@ class StatsScreenTest {
         // computed at all, and this is what would catch it being dropped with the column.
         draw(withRows = true, rowsBefore = false)
         compose.onNodeWithText("requests").assertExists()
-        // The row is drawn, and no percentage appears anywhere on the table.
+        // **The change cell is the dash, which is the app's word for "a number that does not
+        // exist".** `StatsFormat.change(null)` answers `NONE` — an em dash — and the alternative,
+        // a rise from zero, would read as a jump that never happened.
+        //
+        // Asking for "no % anywhere" was too broad (a share line carries one) and asking for "no +"
+        // was worse (a date has one). The dash is the exact thing the rule produces.
+        compose.onNodeWithText(StatsFormat.NONE).assertExists()
         compose.onAllNodesWithText("%", substring = true).assertCountEquals(0)
     }
 

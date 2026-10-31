@@ -470,12 +470,24 @@ class RequestStatsTest {
         // screen; claiming 18.243% invites arithmetic that cannot be trusted.
         assertEquals("a rise carries a plus", "+18.2%", StatsFormat.change(0.182))
         assertEquals("a fall carries its own minus", "-4.0%", StatsFormat.change(-0.04))
-        assertEquals("it stopped", "-100.0%", StatsFormat.change(-1.0))
+        // **A period that stopped is `<-99%`, not `-100.0%`.** The digits would be right and would
+        // read as a measurement; the cap says what a person needs — it fell by more than the table
+        // can usefully express.
+        assertEquals("it stopped", "<-99%", StatsFormat.change(-1.0))
         assertEquals("no change", "0.0%", StatsFormat.change(0.0))
         // **No baseline prints a dash**, the same as every other absent figure.
         assertEquals("absent", StatsFormat.NONE, StatsFormat.change(null))
         // **Rounded before it is signed**, so a change of -0.04% is `0.0%` and not `-0.0%`.
         assertEquals("a negligible fall is not a negative zero", "0.0%", StatsFormat.change(-0.0001))
+        // **Past 99% it is a direction, not a ratio.** The operator's rule: "if change is big then
+        // just show >99%". The further past 100 it goes the less the digits mean, because the
+        // previous period held almost nothing — the percentage is then dominated by how small the
+        // denominator is rather than by anything that happened.
+        assertEquals("a big rise", ">99%", StatsFormat.change(1.0))
+        assertEquals("and a bigger one says the same", ">99%", StatsFormat.change(12.4))
+        assertEquals("a big fall", "<-99%", StatsFormat.change(-1.0))
+        // **The boundary is exact**, because a change of exactly 99% is a number a person can use.
+        assertEquals("99.0% is still a number", "+99.0%", StatsFormat.change(0.99))
     }
 
     @Test

@@ -209,11 +209,22 @@ object StatsFormat {
      * the positive case needs one added.
      */
     fun change(value: Double?): String = when {
+        // **No baseline is a dash**, the same as every other absent figure — and it is not zero. A
+        // row with nothing behind it compared against nothing would read as "no change", which is a
+        // measurement; the truth is that there was nothing to measure.
         value == null -> NONE
-        // **Rounded first, then signed**, so a change of -0.04% prints `0.0%` rather than `-0.0%`.
         else -> {
+            // **Rounded first, then signed**, so a change of -0.04% prints `0.0%` rather than `-0.0%`.
             val percent = Math.round(value * 1000.0) / 10.0
             when {
+                // **A change past 99% is reported as "more than", not as a number.** The operator's
+                // rule: "if change is big then just show >99%". A table whose change column reads
+                // `+1240.0%` is telling a person a ratio when what they need is a direction and a
+                // magnitude — and the further past 100% it goes, the less the digits mean: the
+                // previous period had almost nothing in it, so the percentage is dominated by how
+                // small the denominator is rather than by anything that happened.
+                percent > 99.0 -> ">99%"
+                percent < -99.0 -> "<-99%"
                 percent > 0.0 -> "+" + String.format(java.util.Locale.UK, "%.1f%%", percent)
                 else -> String.format(java.util.Locale.UK, "%.1f%%", percent)
             }
