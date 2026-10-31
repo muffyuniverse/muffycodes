@@ -870,4 +870,45 @@ class AgentSessionFeatureTest : FeatureTest() {
             AgentSessions(scene.viewModel.workspace!!.accountDir).read().any { it.project == "groceries" },
         )
     }
+
+    // ---- the flake, as a rule rather than a race -------------------------
+
+    @Test
+    fun `reading a project's instructions does not recreate a folder that is gone`() {
+        // **This is the flake, written down as a rule.** `the screen's tick drops a session whose
+        // folder was deleted` failed three times across three pushes and passed on every re-run, and
+        // the cause was not the tick: the SERVICE runs its own `tick()` on a fifteen-second clock, a
+        // warm ping there called `Agent.warm()`, that read the project layer, and the layer
+        // `mkdirs()`ed the folder — recreating the very thing the tick was about to remove the
+        // session for. Whichever thread got there first decided whether the test passed.
+        //
+        // Asked directly, with no clock and no threads: read the project layer of a folder that does
+        // not exist, and assert nothing was made.
+        val project = File(scene.viewModel.workspace!!.accountDir, "groceries")
+        assertFalse("the folder is not there to begin with", project.exists())
+
+        val said = AgentPrompt.project(project)
+
+        assertTrue("the fallback is still returned, so a brief is never empty", said.isNotBlank())
+        assertFalse(
+            "and NOTHING was made: a reader must not recreate a project the person deleted",
+            project.exists(),
+        )
+    }
+
+    @Test
+    fun `the system prompt is still written on first use, because its folder is the app's`() {
+        // **The two layers differ here on purpose.** The system prompt's folder is made by
+        // `Workspace.ensure()` on every refresh, so writing into it is right; the project's folder is
+        // the person's, so writing into it is how a deleted project comes back. A single shared rule
+        // for both would have to pick one of those, and either choice is wrong for the other.
+        val system = File(scene.viewModel.workspace!!.accountDir, Workspace.SYSTEM_PROJECT)
+        val file = File(system, AgentPrompt.SYSTEM_FILE)
+        file.delete()
+
+        val said = AgentPrompt.system(scene.viewModel.workspace!!.accountDir)
+
+        assertTrue("the fallback is returned", said.isNotBlank())
+        assertTrue("and it was written down, so the person can edit it", file.isFile)
+    }
 }

@@ -118,13 +118,29 @@ object AgentPrompt {
      * the answer is the same as for a missing one — the agent must not be handed an empty
      * instruction set because a save was interrupted.
      */
-    fun layer(file: File, fallback: String): String {
+    fun layer(file: File, fallback: String, mayCreate: Boolean = true): String {
         val text = try {
             if (file.isFile) file.readText() else ""
         } catch (t: Throwable) {
             ""
         }
         if (text.isNotBlank()) return text
+        // **A layer that may not create a folder is answered from memory and written nowhere.**
+        //
+        // The project layer must never make its folder, and this is the bug that cost three flaky CI
+        // runs before it was found: a keepalive ping on the service's own fifteen-second clock called
+        // `warm()`, which read this layer, which `mkdirs()`ed the project — **recreating a folder the
+        // person had just deleted, and which `AgentRunner.tick` was about to remove the session for.**
+        // The tick then saw a folder that was present, kept the session, and the test's assertion that
+        // it had gone failed for a reason that had nothing to do with what it was testing.
+        //
+        // It is the same class of bug `AgentLog.open` records: *any reader recreating a project folder
+        // the person had deleted*. The fix there was to stop a reader from making the project; this is
+        // the same fix, in the one other reader that writes.
+        //
+        // The fallback is still returned, so the agent is never handed an empty brief — it is simply
+        // not written down for a project that is not there.
+        if (!mayCreate) return fallback
         return try {
             file.parentFile?.mkdirs()
             file.writeText(fallback)
@@ -151,9 +167,14 @@ object AgentPrompt {
     fun system(accountDir: File): String =
         layer(File(File(accountDir, Workspace.SYSTEM_PROJECT), SYSTEM_FILE), SYSTEM_DEFAULT)
 
-    /** ② for the project in [projectDir]. */
+    /**
+     * ② for the project in [projectDir].
+     *
+     * **`mayCreate = false`, because a project that is not there is not a project to write to.** See
+     * [layer]: a reader that makes the folder recreates one the person deleted.
+     */
     fun project(projectDir: File): String =
-        layer(File(projectDir, PROJECT_FILE), PROJECT_DEFAULT)
+        layer(File(projectDir, PROJECT_FILE), PROJECT_DEFAULT, mayCreate = false)
 
     /**
      * The two layers as they were at one moment, and the message they make together.
