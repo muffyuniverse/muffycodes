@@ -178,7 +178,10 @@ class ReleaseKeyTest {
         val report = key().send(github, "a-key", ref, reviewers = listOf("muffyuniverse"))
             .getOrThrow()
 
-        val environments = github.environments("a-key", ref).getOrThrow()
+        // **`GitHubResult`, not `Result`** — it carries a status as well as a value, so it has no
+        // `getOrThrow`. The value is present exactly when the error is absent, which is what
+        // `isSuccess` says.
+        val environments = github.environments("a-key", ref).value.orEmpty()
         assertEquals(1, environments.size)
         assertEquals("release", environments.first().name)
         assertTrue("it has a reviewer", environments.first().protected)
