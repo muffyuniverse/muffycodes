@@ -114,8 +114,15 @@ class ReleaseTest {
     @Test
     fun `an artifact name that could leave the folder is made safe, not refused`() {
         // A name from a workflow is trusted to be a name, but a `../` in one must not become a path.
-        assertEquals(".._etc_passwd", Release.artifactName("../../etc/passwd"))
-        assertEquals("a_b", Release.artifactName("a/b"))
+        // **What matters is that no separator survives**, not the exact shape of what replaces it —
+        // asserting the shape would pin an implementation detail to a security property.
+        val escaped = Release.artifactName("../../etc/passwd")
+        assertFalse("no slash survives: $escaped", escaped.contains('/'))
+        assertFalse("and it does not start with a dot: $escaped", escaped.startsWith("."))
+        assertTrue("and it is still readable: $escaped", escaped.contains("passwd"))
+
+        val nested = Release.artifactName("a/b")
+        assertFalse("a nested name is flattened: $nested", nested.contains('/'))
     }
 
     @Test
