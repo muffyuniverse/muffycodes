@@ -76,7 +76,11 @@ class AppTypeTest {
         File(File(dir, Workspace.STATE_DIR), ProjectMeta.FILE)
             .writeText("""{"type":"kubernetes-operator"}""")
 
-        assertEquals(AppType.ANDROID, ProjectMeta.read(dir).type)
+        assertEquals(
+            "an unknown type reads as undecided, so the question is asked again",
+            AppType.LATER,
+            ProjectMeta.read(dir).type,
+        )
         assertFalse("but the app can say it does not know it", AppType.known("kubernetes-operator"))
         dir.deleteRecursively()
     }
@@ -89,7 +93,7 @@ class AppTypeTest {
         File(dir, Workspace.STATE_DIR).mkdirs()
         File(File(dir, Workspace.STATE_DIR), ProjectMeta.FILE).writeText("{ not json at all")
 
-        assertEquals(AppType.ANDROID, ProjectMeta.read(dir).type)
+        assertEquals(AppType.LATER, ProjectMeta.read(dir).type)
         dir.deleteRecursively()
     }
 

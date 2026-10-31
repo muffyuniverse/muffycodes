@@ -393,7 +393,11 @@ class ProjectsFeatureTest : FeatureTest() {
             File(dir, ".github/workflows/android.yml").isFile,
         )
         assertEquals("the record says what it is now", AppType.WEB, ProjectMeta.read(dir).type)
-        assertEquals("and the bar agrees", AppType.WEB, scene.viewModel.typeOfProject)
+        // **The bar is only about the OPEN project**, so it has nothing to say while nobody is in
+        // one — which is the assertion that catches a caption shown at the account root.
+        assertNull("nothing is open, so the bar says nothing", scene.viewModel.typeOfProject)
+        scene.open("scratch")
+        assertEquals("and once it is open the bar agrees", AppType.WEB, scene.viewModel.typeOfProject)
     }
 
     @Test
