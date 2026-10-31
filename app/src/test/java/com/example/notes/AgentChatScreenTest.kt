@@ -4,11 +4,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.performTextInput
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -163,6 +165,38 @@ class AgentChatScreenTest {
         compose.onNodeWithText(treePage.caption).assertDoesNotExist()
         // And the first message is the operator's, drawn as a plain row.
         assertEquals("the person speaks first", AgentChat.Side.OPERATOR, scene.viewModel.chatBox!!.messages.first().side)
+    }
+
+    @Test
+    fun `the operator's own words can be selected, which is what a long press asks for`() {
+        // **Report #42, twice: "text selection is broken for user messages".**
+        //
+        // The previous attempt removed `animateContentSize()` from this bubble and said plainly that
+        // it could not be verified, because "selection is a platform long-press gesture Robolectric
+        // does not perform". That claim was wrong in an important way: `SelectionContainer` is
+        // **pure Compose**, not a platform text view, so its long-press is a Compose pointer
+        // gesture and `performTouchInput { longClick() }` reaches it.
+        //
+        // What the gesture produces is a `SemanticsProperties.TextSelectionRange` on the container.
+        // Asserting on that is asserting the selection itself rather than "the text was drawn".
+        val door = ScriptedDoor(Reply("Noted."))
+        chat(door)
+        say("remember the milk")
+        awaitTurns(1)
+
+        val words = compose.onNodeWithText("remember the milk")
+        words.assertExists()
+
+        words.performTouchInput { longClick() }
+        compose.waitForIdle()
+
+        val selected = words.fetchSemanticsNode()
+            .config.getOrNull(SemanticsProperties.TextSelectionRange)
+
+        assertTrue(
+            "a long press on the operator's message selects some of it, not none of it",
+            selected != null && !selected.collapsed,
+        )
     }
 
     @Test
