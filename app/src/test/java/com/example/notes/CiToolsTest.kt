@@ -468,8 +468,10 @@ class CiToolsTest {
     fun `a run with no artifacts says so rather than failing`() {
         // A workflow that uploads nothing is ordinary, and "there is nothing here" is an answer.
         val id = runWithArtifact("unused", "x".toByteArray())
-        File(File(github.repoDir(repo), "ci/$id/artifacts"), "unused").delete()
-        File(File(github.repoDir(repo), "ci/$id/artifacts")).delete()
+        // **The folder itself goes, not just the file in it**, because that is the difference between
+        // "the run made no artifacts" and "the run does not exist" — and only the first is the case
+        // this test is about. `deleteRecursively()` is a tree walk, which is fine for one empty folder.
+        File(github.repoDir(repo), "ci/$id/artifacts").deleteRecursively()
 
         val body = call("artifact", """{"run":$id}""")
 
