@@ -24,7 +24,6 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.GraphicsMode
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.io.File
@@ -39,13 +38,6 @@ import java.io.File
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w411dp-h891dp")
-// **Real graphics, because a selection draws handles.** Legacy mode stubs `Bitmap` to null and
-// `SelectionContainer` builds a handle bitmap the moment a press selects something, so a test that
-// performs a long press dies with `Cannot invoke "android.graphics.Bitmap.setHasAlpha(boolean)"
-// because "bm" is null`. That NPE is the harness saying it cannot draw a handle, not the app failing
-// to select — the gesture had already reached the selection machinery. `EditorScreenTest` and
-// `ScenariosTest` run this way for the same reason: anything that draws needs something to draw with.
-@GraphicsMode(GraphicsMode.Mode.NATIVE)
 class AgentChatScreenTest {
 
     @get:Rule
@@ -191,9 +183,15 @@ class AgentChatScreenTest {
         assertEquals("the person speaks first", AgentChat.Side.OPERATOR, scene.viewModel.chatBox!!.messages.first().side)
     }
 
+    // **API 27, because the selection magnifier does not exist below 28.** The gesture reaches
+    // `SelectionContainer` on any API level, but on 28+ Compose also builds a `Magnifier`, and
+    // Robolectric's version of it NPEs on `Surface.destroy()` during the next frame — which is the
+    // harness failing to draw, not the app failing to select. 27 is a device this app supports
+    // (`minSdk 26`) and there is no magnifier there to crash on.
+    @Config(sdk = [27])
     @Test
     fun `the operator's own words can be selected, which is what a long press asks for`() {
-        // **Report #42, twice: "text selection is broken for user messages".**
+        // **Report #42: "text selection is broken for user messages".**
         //
         // The previous attempt removed `animateContentSize()` from this bubble and said plainly that
         // it could not be verified, because "selection is a platform long-press gesture Robolectric
