@@ -236,7 +236,14 @@ class AgentChatScreenTest {
         val words = compose.onNodeWithText("remember the milk")
         words.assertExists()
 
-        words.performTouchInput { longClick() }
+        // **An explicit hold, not `longClick()`.** `longClick()` releases the instant the timeout
+        // expires, and the selection's own gesture detector wants the press to still be down when it
+        // decides this is a long press rather than a tap. Holding for a second is what a finger does.
+        words.performTouchInput {
+            down(center)
+            advanceEventTime(1_000)
+            up()
+        }
         compose.waitForIdle()
 
         assertTrue(
