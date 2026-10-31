@@ -24,6 +24,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.GraphicsMode
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.io.File
@@ -183,11 +184,19 @@ class AgentChatScreenTest {
         assertEquals("the person speaks first", AgentChat.Side.OPERATOR, scene.viewModel.chatBox!!.messages.first().side)
     }
 
-    // **API 27, because the selection magnifier does not exist below 28.** The gesture reaches
-    // `SelectionContainer` on any API level, but on 28+ Compose also builds a `Magnifier`, and
-    // Robolectric's version of it NPEs on `Surface.destroy()` during the next frame — which is the
-    // harness failing to draw, not the app failing to select. 27 is a device this app supports
-    // (`minSdk 26`) and there is no magnifier there to crash on.
+    // **Two harness limits, and this is the combination that avoids both.**
+    //
+    // A selection draws handles, and Robolectric's legacy graphics mode stubs `Bitmap` to null — so
+    // drawing a handle throws `Bitmap.setHasAlpha(null)`. `GraphicsMode.NATIVE` gives it real
+    // bitmaps.
+    //
+    // On API 28+ a selection ALSO builds a `Magnifier`, and Robolectric's magnifier has a null
+    // `Surface` that throws on `destroy()` during the next frame. API 27 is a device this app
+    // supports (`minSdk 26`) and Compose uses no magnifier there.
+    //
+    // Neither limit is the app: in NATIVE mode the run got as far as building handles, asking for
+    // the toolbar and starting a magnifier — which is a selection that happened.
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
     @Config(sdk = [27])
     @Test
     fun `the operator's own words can be selected, which is what a long press asks for`() {
