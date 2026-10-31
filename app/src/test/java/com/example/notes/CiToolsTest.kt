@@ -48,9 +48,15 @@ class CiToolsTest {
         )
         ws.projectDir(repo).mkdirs()
         ws.write(File(ws.projectDir(repo), "milk.txt"), "two litres")
-        // **A remote that is the fake GitHub**, because that is what `where()` reads: the tools ask
+        // **A remote that is the fake GitHub**, because that is what `ciWhere()` reads: the tools ask
         // the repository where it lives, and a project with no remote has no CI to read.
         assertTrue("the project has a repository", git.init(repo).isSuccess)
+        // **The remote's target has to exist.** `makeRemote` only records a URL, and `DiskGitHub`
+        // answers 404 for a repository that is not on its disk — which is what the real GitHub does,
+        // and is why the fake is worth having. Making the folder is all `dispatch` asks of it; going
+        // through `createRepo` would run a real git seed, which is more machinery than the question
+        // needs and slower than the test deserves.
+        assertTrue("the fake GitHub has the repository", github.repoDir(repo).mkdirs())
         assertTrue("and a remote", git.makeRemote(repo, github.cloneUrlFor(account.login, repo)))
     }
 
