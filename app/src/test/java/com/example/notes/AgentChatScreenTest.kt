@@ -187,21 +187,24 @@ class AgentChatScreenTest {
         say("make a shapes folder")
         awaitTurns(2)
 
-        // The call's page, opened fullscreen from its own bubble.
-        compose.onAllNodesWithContentDescription("Read this message fullscreen")
-            .onFirst()
-            .performClick()
+        // **A bubble opens on the page it is showing**, which is its LAST one - so the reply's
+        // bubble opens on the words, and the call is one page back. That is the bubble's own rule
+        // ("follow the newest page"), and the test turns back rather than assuming.
+        val reply = scene.viewModel.chatBox!!.bubbles.last()
+        compose.onAllNodesWithContentDescription("Read this message fullscreen").onLast().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Agent · words").assertExists()
+
+        // Back to the call's page in the bubble, then fullscreen again.
+        // **The pager is the way there.** Its arrows are `contentDescription`s, not text.
+        compose.onAllNodesWithContentDescription("Previous page").onLast().performClick()
+        compose.waitForIdle()
+        compose.onAllNodesWithContentDescription("Read this message fullscreen").onLast().performClick()
         compose.waitForIdle()
 
         // **The words, not the raw tool name.** `create` on its own is the question the report
         // asked; "Agent · call · create" is the answer.
         compose.onNodeWithText("Agent · call · create").assertExists()
-        // And an ordinary reply is not a call, so it says so rather than repeating its own name.
-        compose.onAllNodesWithContentDescription("Read this message fullscreen")
-            .onLast()
-            .performClick()
-        compose.waitForIdle()
-        compose.onNodeWithText("Agent · words").assertExists()
         compose.onNodeWithText("Agent · agent").assertDoesNotExist()
     }
 
