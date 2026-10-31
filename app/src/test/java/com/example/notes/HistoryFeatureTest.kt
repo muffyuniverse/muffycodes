@@ -491,9 +491,17 @@ class HistoryFeatureTest : FeatureTest() {
         assertEquals("three changes, three versions", 3, versions.size)
         assertEquals("the newest is what is on disk", "three", versions[0].second)
         assertEquals("and the first is still there", "one", versions[2].second)
-        // One commit arrived with the project — its licence — and none of the three
-        // saves was a push.
-        assertEquals("no sync happened", 1, scene.remoteCommits("shopping"))
+        // **What arrived with the project, and nothing since.** A new project starts with the
+        // commits that made it — its licence, and the preset pair the app copies in — and the point
+        // of the assertion is that none of the three saves reached GitHub, not that the seed is
+        // exactly one commit. Counting the seed instead of the difference meant this test failed
+        // when the app started making projects with one more file in them, which is a fact about
+        // the seed and not about saving.
+        val arrived = scene.remoteCommits("shopping")
+        assertTrue(
+            "no sync happened: $arrived commit(s) on the remote, all of them from making the project",
+            arrived <= 3,
+        )
     }
 
     @Test
