@@ -75,13 +75,24 @@ object StatsFormat {
      * `null` is not zero: a span with no input tokens has no share, which is a different fact from a
      * share of 0%, and the screen prints a dash for it.
      */
-    fun share(value: Double?): String = when {
-        value == null -> NONE
-        // **Whole percents, like every other percentage on this screen.** The operator's rule: "no
-        // decimals for percents". A share of 95.62% was precise about a division of two numbers that
-        // are themselves rounded, and the second decimal was the one nobody could act on.
-        else -> String.format(Locale.UK, "%.0f%%", value * 100)
-    }
+    fun share(value: Double?): String =
+        if (value == null) NONE else String.format(Locale.UK, "%.2f%%", value * 100)
+
+    // **Two decimals here, none in [change], and the difference is deliberate.**
+    //
+    // The operator asked for both, separately, and the wording was specific each time: *"add cached %
+    // line as share of total input with .00% precision"* for a share, and *"no decimals for percents"*
+    // for a change. They are different numbers and they answer different questions:
+    //
+    //   a share  — what fraction of this period's input was served from cache. Two decimals, because
+    //              97.10% and 97.05% are different facts about how well the cache is working, and the
+    //              whole point of the line is to watch it move.
+    //   a change — how much a figure moved between two periods. No decimals, because it is a ratio of
+    //              two numbers already rounded on screen, and a column of `+18.2%` is a column of
+    //              digits to read past.
+    //
+    // **Do not unify them.** A rule applied to "percents" that treats these the same would take the
+    // precision out of the one line whose purpose is precision.
 
     /**
      * A cost, in dollars, to **five decimals**.

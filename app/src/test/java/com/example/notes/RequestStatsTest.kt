@@ -80,18 +80,17 @@ class RequestStatsTest {
         // a percent of another — and a table with a `before` column beside it shows a change as a
         // change rather than as a fourth digit.
         //
-        // Pinned as strings because the FORMAT is the thing under test.
-        //
-        // **Whole percents, and the earlier reasoning for two decimals was overturned by the
-        // operator**: "no decimals for percents". The argument for two was that a share of 97.10%
-        // and one of 97.05% are different facts — but a percentage of two numbers that are
-        // themselves rounded is not precise to a hundredth, and the digit was one nobody could act
-        // on. A column of whole percents is a column a person reads.
-        assertEquals("a share", "97%", StatsFormat.share(0.971))
-        assertEquals("nearly all of it rounds up", "100%", StatsFormat.share(0.99999))
-        assertEquals("the low end", "0%", StatsFormat.share(0.0005))
-        assertEquals("a share of nothing", "0%", StatsFormat.share(0.0))
-        assertEquals("a full share", "100%", StatsFormat.share(1.0))
+        // Pinned as strings because the FORMAT is the thing under test: the arithmetic was already
+        // right, and the screen was throwing the digits away on the way out.
+        assertEquals("two decimals", "97.10%", StatsFormat.share(0.971))
+        assertEquals("a share that is nearly all of it", "100.00%", StatsFormat.share(0.99999))
+        // **The case one decimal cannot express**: these differ by a fifth of a percent and must not
+        // print the same, because at 10k requests a day that is twenty requests.
+        assertNotEquals("two close shares print differently", StatsFormat.share(0.9705), StatsFormat.share(0.97149))
+        assertEquals("and each is exact", "97.05%", StatsFormat.share(0.9705))
+        assertEquals("the low end keeps its zeros", "0.05%", StatsFormat.share(0.0005))
+        assertEquals("a share of nothing", "0.00%", StatsFormat.share(0.0))
+        assertEquals("a full share", "100.00%", StatsFormat.share(1.0))
         // **No share is not a share of zero.** A bucket with no input tokens has nothing to divide,
         // and printing "0.000%" would claim the cache missed when nothing was asked.
         assertEquals("absent, not zero", StatsFormat.NONE, StatsFormat.share(null))
