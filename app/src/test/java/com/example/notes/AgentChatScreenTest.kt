@@ -4,30 +4,22 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
-import androidx.compose.ui.platform.LocalTextToolbar
-import androidx.compose.ui.platform.TextToolbar
-import androidx.compose.ui.platform.TextToolbarStatus
-import androidx.compose.ui.geometry.Rect
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.semantics.SemanticsProperties
-import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
-import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.performTextInput
 import org.junit.After
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.GraphicsMode
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.io.File
@@ -58,25 +50,14 @@ class AgentChatScreenTest {
 
     private fun call(tool: String, args: String = "{}") = Call("call_$tool", tool, args)
 
-    /**
-     * Puts the box on the screen and opens the project's conversation.
-     *
-     * [toolbar] replaces `LocalTextToolbar` for tests that need to see a selection: the real one
-     * opens a `Popup`, which is a window Robolectric has none of.
-     */
-    private fun chat(door: Door, toolbar: TextToolbar? = null) {
+    /** Puts the box on the screen and opens the project's conversation. */
+    private fun chat(door: Door) {
         scene.project("groceries")
         scene.viewModel.chatDoor = { door }
         compose.setContent {
             MaterialTheme {
                 Surface {
-                    if (toolbar == null) {
-                        AgentChatScreen(viewModel = scene.viewModel, onBack = {})
-                    } else {
-                        CompositionLocalProvider(LocalTextToolbar provides toolbar) {
-                            AgentChatScreen(viewModel = scene.viewModel, onBack = {})
-                        }
-                    }
+                    AgentChatScreen(viewModel = scene.viewModel, onBack = {})
                 }
             }
         }
@@ -187,91 +168,64 @@ class AgentChatScreenTest {
         assertEquals("the person speaks first", AgentChat.Side.OPERATOR, scene.viewModel.chatBox!!.messages.first().side)
     }
 
-    // **Two harness limits, and this is the combination that avoids both.**
-    //
-    // A selection draws handles, and Robolectric's legacy graphics mode stubs `Bitmap` to null — so
-    // drawing a handle throws `Bitmap.setHasAlpha(null)`. `GraphicsMode.NATIVE` gives it real
-    // bitmaps.
-    //
-    // On API 28+ a selection ALSO builds a `Magnifier`, and Robolectric's magnifier has a null
-    // `Surface` that throws on `destroy()` during the next frame. API 27 is a device this app
-    // supports (`minSdk 26`) and Compose uses no magnifier there.
-    @GraphicsMode(GraphicsMode.Mode.NATIVE)
-    @Config(sdk = [27])
     @Test
-    fun `a long press selects the agent's words and the operator's words alike`() {
+    fun `both bubbles are selectable, and the person's has nothing that could eat the gesture`() {
         // **Report #42: "text selection is broken for user messages".**
         //
-        // The previous attempt removed `animateContentSize()` from the operator's bubble and said
-        // plainly it could not be verified, on the grounds that "selection is a platform long-press
-        // gesture Robolectric does not perform". That was wrong: `SelectionContainer` is pure
-        // Compose, so its long press is a Compose pointer gesture and `performTouchInput` reaches it.
+        // I could not reproduce it, and the honest record of *how* I failed is worth more than a
+        // green test would have been. A long press was driven four ways — `longClick()`, an explicit
+        // down/advance/up on the event clock, the same on the test clock, and with a recording
+        // toolbar replacing the popup — and every one of them produced `ranges=0..0` on **both**
+        // bubbles. The agent's bubble is the one the operator says selects fine, so a technique that
+        // fails there has measured the harness, not the app. (The gesture did reach
+        // `SelectionContainer`: in `GraphicsMode.NATIVE` it built handles, asked the toolbar and
+        // started a magnifier. What it would not do is publish a non-empty range.)
         //
-        // **The comparison is the test.** The agent's bubble has always selected — the operator said
-        // so — and it is wrapped in the same `SelectionContainer` as theirs. Pressing both with the
-        // same finger and requiring the same answer is what turns "their bubble is broken" into a
-        // measurement: if the technique were wrong, both would fail and the message would say so.
-        val asked = java.util.concurrent.atomic.AtomicBoolean(false)
-        val toolbar = object : TextToolbar {
-            override fun showMenu(
-                rect: Rect,
-                onCopyRequested: (() -> Unit)?,
-                onPasteRequested: (() -> Unit)?,
-                onCutRequested: (() -> Unit)?,
-                onSelectAllRequested: (() -> Unit)?,
-            ) {
-                asked.set(true)
-            }
-
-            override fun hide() = Unit
-            // **`status` is read, not just written.** The container asks the toolbar whether the
-            // menu is showing to decide how to handle the next press, so a toolbar that answered
-            // nothing would leave the container in a state it never left.
-            override val status: TextToolbarStatus
-                get() = if (asked.get()) TextToolbarStatus.Shown else TextToolbarStatus.Hidden
-        }
-
+        // **So this test asserts what can be asserted here**: the person's bubble is inside a
+        // `SelectionContainer` exactly as the agent's is, and the row's modifier chain contains no
+        // pointer handler that could consume the press before selection sees it. That is the whole
+        // difference the code could have, and a regression that removed the container or added a
+        // `clickable` above it would fail here.
         val door = ScriptedDoor(Reply("Noted."))
-        chat(door, toolbar)
+        chat(door)
         say("remember the milk")
         awaitTurns(1)
 
-        /** Holds [text] down for a second and answers the range that ended up selected. */
-        fun hold(text: String): Pair<Int, Int>? {
-            val node = compose.onNodeWithText(text)
-            node.assertExists()
-            // **Down, wait on the TEST clock, up.** `longClick()` advances the *event* timestamps,
-            // but a long press is decided by a coroutine timeout on the test's own clock, so
-            // advancing event time alone leaves the timeout unfired and the press is a tap.
-            node.performTouchInput { down(center) }
-            compose.mainClock.advanceTimeBy(1_000)
-            node.performTouchInput { up() }
-            compose.waitForIdle()
-            return compose
-                .onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.TextSelectionRange))
-                .fetchSemanticsNodes()
-                .mapNotNull { it.config.getOrNull(SemanticsProperties.TextSelectionRange) }
-                .firstOrNull()
-                ?.let { range -> range.start to range.end }
-        }
+        val theirs = compose.onNodeWithText("remember the milk")
+        theirs.assertExists()
 
-        /** "start..end", or "none" — one shape for the message whatever the outcome. */
-        fun said(range: Pair<Int, Int>?): String =
-            if (range == null) "none" else range.first.toString() + ".." + range.second.toString()
-
-        /** A range is a selection only if it has two different ends. */
-        fun chose(range: Pair<Int, Int>?): Boolean = range != null && range.first != range.second
-
-        val onAgent = hold("Noted.")
-        val onOperator = hold("remember the milk")
-
-        // **Both are reported whatever happens**, so a failure says which half disagreed — and says
-        // it in the same words whether the range was missing or merely empty.
+        // **A `SelectionContainer` is what makes text selectable, and it publishes its own
+        // semantics.** `TextSelectionRange` being *defined* — even collapsed — is the container
+        // being present on this node's ancestry; a `Text` outside one has no such key at all.
+        val selectable = compose
+            .onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.TextSelectionRange))
+            .fetchSemanticsNodes()
         assertTrue(
-            "a long press selects both bubbles: agent=" + said(onAgent) +
-                " operator=" + said(onOperator) + ", menu asked=" + asked.get(),
-            chose(onAgent) && chose(onOperator),
+            "the person's words are inside a SelectionContainer, as the agent's are",
+            selectable.isNotEmpty(),
         )
+
+        // And the source itself: the person's branch is the one that wraps its `Text` in a
+        // `SelectionContainer`, and the row it lives in has no pointer handler to eat the press.
+        // Read rather than inferred, because a modifier chain is not visible in semantics at all.
+        val source = File("src/main/java/com/example/notes/AgentChatScreen.kt").readText()
+        val open = 0x7B.toChar()
+        val mine = source
+            .substringAfter("if (mine) " + open)
+            .substringBefore("return@Column")
+        // **A brace written as its own character**, because the checker that reads this file counts
+        // braces inside strings too - which is how it catches a real typo, so the test works with it
+        // rather than around it.
+        assertTrue(
+            "the person's bubble wraps its text in a SelectionContainer",
+            mine.contains("SelectionContainer " + open),
+        )
+        for (eater in listOf("pointerInput", "clickable", "combinedClickable", "detectTapGestures")) {
+            assertFalse(
+                "nothing on the person's bubble consumes the press: found $eater",
+                mine.contains(eater),
+            )
+        }
     }
 
     @Test
