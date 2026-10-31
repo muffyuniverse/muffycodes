@@ -280,7 +280,8 @@ class AgentTools(
                 "move",
                 "Move a file into a folder, or rename it inside its own folder. With `copy` the " +
                     "original stays where it is, and `name` renames the copy in the same call. A " +
-                    "name that is already taken is refused, and nothing is written.",
+                    "name that is already taken is refused, and nothing is written. A locked file " +
+                    "may be copied: a copy reads it and leaves it exactly as it was.",
                 "{\"path\":\"the file\",\"into\":\"the folder\",\"name\":\"the new name\"," +
                     "\"copy\":true}",
             ),
@@ -1413,7 +1414,17 @@ class AgentTools(
     private fun move(args: JSONObject, deadline: Deadline): String {
         val file = resolveFile(args.optString("path"))
             .getOrElse { return refusal(it.message ?: "that path cannot be moved") }
-        mayWrite(file)?.let { return refusal(it) }
+        // **`copy` is read before the source is judged, because it decides whether the source is
+        // being changed at all.** Reported: "agent tells that lock blocks copying as well, which
+        // should be allowed". A later comment in this function already said a copy may read a locked
+        // source; the check here ran first and refused, so that sentence was true of the code's
+        // intention and false of its behaviour.
+        //
+        // A move takes the file out of where it was — that is a change to the locked thing, and it
+        // stays refused. A copy leaves the original exactly as it found it, which is what a lock
+        // protects.
+        val copy = args.optBoolean("copy", false)
+        if (!copy) mayWrite(file)?.let { return refusal(it) }
         if (!file.exists()) return refusal("There is nothing at ${rel(file)}")
         deadline.check("move")
         val into = resolve(args.optString("into", file.parentFile?.let { rel(it) } ?: ""))
@@ -1424,8 +1435,8 @@ class AgentTools(
         // **`copy` is the one difference between the two acts.** Everything else — the destination
         // checks, the refusal of a taken name, a folder into itself — is the same question, and it
         // is asked in one place per act rather than in a second tool that would drift from this one.
-        // A copy may read a locked source, because it does not touch it.
-        val copy = args.optBoolean("copy", false)
+        // A copy may read a locked source, because it does not touch it — which is now enforced
+        // above, where the source is judged, rather than only stated here.
         // **A copy may be given a name, and refusing it cost two calls for one intention.**
         // Reported: "move with copy: true and a new name is refused — 'A copy keeps its name' — so a
         // copy-and-rename costs two calls." The objection was that the pair can fail after the copy

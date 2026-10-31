@@ -2,6 +2,7 @@ package com.example.notes
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -1855,6 +1856,53 @@ class AgentTest {
         val again = tool("move", """{"path":"milk.txt","into":"drafts","copy":true}""")
         assertTrue("the second copy is refused: $again", again.startsWith(AgentLog.FAILURE))
         assertFalse("and no numbered name was invented", File(dir, "drafts/milk 2.txt").exists())
+    }
+
+    @Test
+    fun `the agent may copy a locked file, because a copy reads it and does not change it`() {
+        // **Report #57: "agent tells that lock blocks copying as well, which should be allowed".**
+        //
+        // The prompt already said the right thing — "A tool that would CHANGE it is refused" — so
+        // the lie was in the tool, not in the words it was given. `move` asked `mayWrite` about its
+        // SOURCE before it had read `copy`, so a locked file could not be copied by the agent at
+        // all: the refusal came back and the model reported the lock as the reason.
+        //
+        // The person's own copy has always worked (`CopyFeatureTest` says so), which is what made
+        // this easy to miss: the rule was right in one place and applied in the other.
+        val dir = ws.repoOf("shopping")
+        val milk = File(dir, "milk.txt")
+        ws.write(milk, "two litres")
+        ws.createFolder(dir, "drafts")
+        // Locked the way the screen does it: by path, through the funnel that owns the list.
+        val path = ws.relative(milk) ?: error("the file is not in the account")
+        ws.setLocked(setOf(ws.pathString(path)))
+        assertNotNull("it really is locked for the agent", ws.agentLockProblem(milk))
+
+        val body = tool("move", """{"path":"milk.txt","into":"drafts","copy":true}""")
+
+        assertTrue("a copy of a locked file is accepted: $body", body.startsWith(AgentLog.SUCCESS))
+        assertEquals("the copy holds the text", "two litres", File(dir, "drafts/milk.txt").readText())
+        assertEquals("and the locked original is untouched", "two litres", milk.readText())
+    }
+
+    @Test
+    fun `moving a locked file is still refused, because a move does change it`() {
+        // **The other half of the same rule.** #57 asked for copying to be allowed; it did not ask
+        // for the lock to stop meaning anything. A move takes the file out of where it was, which is
+        // a change to the locked thing, so it stays refused - and the difference between the two acts
+        // is the difference the lock is about.
+        val dir = ws.repoOf("shopping")
+        val milk = File(dir, "milk.txt")
+        ws.write(milk, "two litres")
+        ws.createFolder(dir, "drafts")
+        val path = ws.relative(milk) ?: error("the file is not in the account")
+        ws.setLocked(setOf(ws.pathString(path)))
+
+        val body = tool("move", """{"path":"milk.txt","into":"drafts"}""")
+
+        assertTrue("moving a locked file is refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("and it is still where it was", milk.isFile)
+        assertFalse("with nothing moved into the folder", File(dir, "drafts/milk.txt").exists())
     }
 
     @Test
