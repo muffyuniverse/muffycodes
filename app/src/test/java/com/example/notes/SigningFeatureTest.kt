@@ -17,6 +17,18 @@ import java.io.File
  */
 class SigningFeatureTest : FeatureTest() {
 
+    /**
+     * Gives the test account a token, because **signing in as the test account deliberately does
+     * not.** `signInAsTestAccount` makes a folder that behaves like GitHub and never calls
+     * `credentials.setToken`, so every path that asks for a token finds none — which is right for an
+     * account with no key behind it, and is the state this test has to leave before it can ask GitHub
+     * anything at all.
+     */
+    private fun withToken(): SigningFeatureTest {
+        scene.credentials.setToken(scene.login, "a-key")
+        return this
+    }
+
     /** A key in the project's own folder, shaped like the one a person would have. */
     private fun putKey(project: String) {
         val dir = scene.viewModel.workspace!!.projectDir(project)
@@ -48,6 +60,7 @@ class SigningFeatureTest : FeatureTest() {
     fun `a first push asks about the signing key, and sends nothing`() {
         // **The first push is the first moment a repository is reachable**, and so the first moment a
         // key could go to it. Adding a project is a local act with no repository behind it.
+        withToken()
         scene.project("groceries")
         putKey("groceries")
 
@@ -69,6 +82,7 @@ class SigningFeatureTest : FeatureTest() {
     fun `a project with no key is never asked about, and never told`() {
         // This app has projects that are a folder of notes. Telling every one of them about a signing
         // key would be the nagging that makes the one real warning invisible.
+        withToken()
         scene.project("groceries")
 
         scene.sync("groceries")
@@ -82,6 +96,7 @@ class SigningFeatureTest : FeatureTest() {
     fun `pressing send puts the four in the environment, and the row goes away`() {
         // **The press is the whole permission.** There is no setting and no confirmation beyond the
         // row existing, and the row exists only because a key is on the phone that CI cannot see.
+        withToken()
         scene.project("groceries")
         putKey("groceries")
         scene.sync("groceries")
@@ -105,6 +120,7 @@ class SigningFeatureTest : FeatureTest() {
         // **A secret put into an unrestricted environment is unprotected for however long the rest of
         // the setup takes.** The policy is what makes the environment unreachable by the agent, which
         // only ever touches `development`.
+        withToken()
         scene.project("groceries")
         putKey("groceries")
         scene.sync("groceries")
@@ -124,7 +140,8 @@ class SigningFeatureTest : FeatureTest() {
         // **The operator's point, as a test.** A repository already on their GitHub is obviously
         // theirs, so a project pulled from it is one whose signing key belongs there — the check must
         // find its key missing rather than assuming a fresh project.
-        val made = scene.viewModel.createProject("groceries", "mit")
+        withToken()
+        scene.viewModel.createProject("groceries", "mit")
         scene.await("the project to exist") {
             scene.viewModel.projectNames.any { it.equals("groceries", ignoreCase = true) }
         }
