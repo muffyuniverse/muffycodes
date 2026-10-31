@@ -2543,11 +2543,16 @@ class AppViewModel @JvmOverloads constructor(
             } else {
                 null
             }
-            // **Committed, for the reason the local path gives** — a project that opens with two
-            // changed files and a "to send" count is showing work nobody did. It is also not pushed:
-            // the person pushes, always.
+            // **Sent, not merely committed.** A project made on GitHub is on GitHub; leaving the
+            // preset as a commit waiting to be sent would greet a person with "1 to send" on a
+            // project they have not touched, and a Sync button that pushes files they never wrote.
+            //
+            // This is the app's own act on a repository it just created, not the agent's: the person
+            // pressed Create, the app already spoke to GitHub to make the repository, and what it
+            // starts with is part of what was made. The agent's rule — that nothing it does is pushed
+            // — is unchanged.
             if (copied != null && copied.written.isNotEmpty()) {
-                git.commitOutcome(clean, "Start from the ${type.label} preset")
+                git.sync(clean, "Start from the ${type.label} preset")
             }
 
             main.post {
