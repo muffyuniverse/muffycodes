@@ -2439,12 +2439,22 @@ class AgentTools(
         if (ws.isRecord(file)) {
             return "$path is the record of what happened. You may read it and not change it"
         }
-        // **Your own instructions are the person's.** Reading the brief is how a turn starts;
-        // rewriting it is a different act, and one that would let one turn quietly change what
-        // the next turn is told to do. The paragraph above says so and the rule did not: the
-        // merged layout made this an ordinary file inside the project, and it stopped refusing.
+        // **The project's instructions are the project's, and may be edited — by anybody.**
+        //
+        // This used to refuse the agent outright: *"the agent may read the instructions it is given
+        // and may not rewrite them, which is the difference between following a brief and editing
+        // it."* That reasoning still holds, and the operator overruled it on a better one: a preset
+        // is copied into the project as a starting point, so the file is the project's own text and
+        // treating it as sacred would make the preset a lock-in rather than a preset.
+        //
+        // **What replaces the refusal is visibility, not silence.** Every save is a commit and the
+        // history shows the diff, so the change is recoverable; what was missing is that nobody would
+        // be looking. `edit` and `create` name the file in their answer, and a write to this path is
+        // traced as `agent-brief` so the log says who changed the brief and when. A person who wants
+        // the old behaviour locks the file — the lock is theirs and the agent honours it.
         if (path == AgentPrompt.PROJECT_FILE) {
-            return "$path is the person's instructions to you. You may read it and not change it"
+            Trace.note("agent-brief", "$path rewritten by the agent")
+            return null
         }
         // **The lock, asked here so no tool can forget it.** Each tool used to check it separately,
         // which meant a tool added later could simply not, and one of them (`restore`) checked it

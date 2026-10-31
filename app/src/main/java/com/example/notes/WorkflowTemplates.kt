@@ -45,6 +45,32 @@ object WorkflowTemplates {
     )
 
     /**
+     * What the agent is told when it works in a project of this type — **the hard-won part.**
+     *
+     * ## Why this exists
+     *
+     * The system prompt says how this app works. The project prompt says what this project is for.
+     * **Neither says how to build a program**, and that is the knowledge that took this repository
+     * months: tests that wait for the right fact, traces that record what happened rather than what
+     * was intended, workflows that fail a build rather than warn, bug reports that a person can act on.
+     *
+     * A new project starts with none of it, and an agent that has to rediscover it per project spends
+     * its first hours learning what is already known here. So the presets carry it.
+     *
+     * ## Why they are short
+     *
+     * They are read at the start of **every turn**, and a provider's cache matches on the longest
+     * common prefix — so a thousand-line briefing would be paid for on every request and read by
+     * nobody. These are the rules that changed an outcome, not a style guide.
+     */
+    fun promptFor(type: AppType): String? = when (type) {
+        AppType.ANDROID -> androidPrompt()
+        AppType.WEB -> webPrompt()
+        AppType.PLAIN -> plainPrompt()
+        AppType.NONE -> null
+    }
+
+    /**
      * The template for an [AppType].
      *
      * **Null for [AppType.NONE]**, which is a folder the person keeps notes in. It has no build, so it
@@ -56,6 +82,129 @@ object WorkflowTemplates {
         AppType.PLAIN -> PLAIN
         AppType.NONE -> null
     }
+
+    /**
+     * The shared half of every prompt: **how this project is worked in, whatever it builds.**
+     *
+     * These are the rules that changed an outcome here. Each one cost a session to learn, and each is
+     * stated as the thing to do rather than as the story of what went wrong — a brief is read every
+     * turn, and the story is in the repository's own docs for whoever wants it.
+     */
+    private fun common(): String = """
+        ## How work is done here
+
+        **Test what you changed, and make the test say what broke.** A test's failure message is the
+        only thing anyone reads at 2am, so it names the fact that was wrong rather than the line that
+        asserted it. "waited 10s for the folder to be dropped: folder=true" sends a reader straight to
+        the cause; "expected true but was false" sends them to the test.
+
+        **Wait for the exact fact the code reads.** A test that waits for a neighbouring fact — the
+        file on disk when the function reads the history — passes or fails by timing. That is a race
+        wearing a test's clothes.
+
+        **A test can encode a bug as an expectation.** Before fixing a failure, ask whether the test
+        was asserting the behaviour you want or the behaviour you have. One here asserted that a file
+        contained text, and passed only because the app wrote that file on every read.
+
+        **Write down what happened, not what you meant to do.** A trace line is for the person reading
+        it when something is wrong, and it is the only place that can say which of several paths ran.
+        Name the thing that happened: "agent-gone", not "handling".
+
+        **A default that can be overridden is not a boundary.** If something must not happen, refuse it
+        — and refuse it *loudly*, naming what was asked and what is allowed. A value silently replaced
+        is a value the caller believes it set.
+
+        **Silence is a real answer.** A check that finds nothing wrong should say nothing. A warning
+        nobody can act on trains people to ignore the ones they can.
+
+        **Say why, in the code, where the next reader is.** Not a changelog — the reason the obvious
+        alternative is wrong. The obvious alternative is what the next person will try.
+
+        ## When something is refused
+
+        A refusal names the thing that was wrong, the thing that is allowed, and how to get from one to
+        the other. "There is no workflow at that path. The workflows it has are: a.yml, b.yml." A model
+        that guessed the wrong name learns the right one; a model told only "no" guesses again.
+    """.trimIndent()
+
+    private fun androidPrompt(): String = """
+        # This is an Android app
+
+        ${'$'}common
+
+        ## Building and testing
+
+        **Gradle, and never a build you cannot see the result of.** `./gradlew` fails before it compiles
+        anything when the SDK is missing, and a pipe swallows that: `./gradlew ... | grep -E "^e: "`
+        prints nothing and `echo OK` then reports success on a build that never ran. **Echo the exit
+        code**, and never let a pipe be the last thing that decides what happened.
+
+        **Unit tests are the fast loop.** Robolectric gives you a real Android environment without a
+        device; a feature test extends the project's shared base class rather than building its own
+        setup, because a test that duplicates the scaffolding drifts from it and then fails for reasons
+        that have nothing to do with what it tests.
+
+        **Screenshots are evidence.** If the project can render a screen to an image, do that rather
+        than describing the screen in prose — a layout bug is visible and a paragraph about it is not.
+
+        ## Signing and release
+
+        **The signing key is never in the repository.** It lives in a GitHub *environment* called
+        `release`, and only a job that names that environment can read it. A repository secret is
+        readable by every workflow in the repository, including one you write, so one at that scope
+        makes the environment rule decorative.
+
+        **The environment is restricted to the branches that build**, so a workflow on any other branch
+        cannot use it even if it names it. That is what makes an approval step unnecessary.
+
+        **A release that is not signed cannot be installed over an existing one.** If a build suddenly
+        produces an APK that will not install, the certificate changed — not the phone.
+
+        **Never auto-install or auto-open an artifact.** Opening the system installer is the app's
+        business; installing without a press is not.
+    """.trimIndent()
+
+    private fun webPrompt(): String = """
+        # This is a web app
+
+        ${'$'}common
+
+        ## Building and testing
+
+        **`npm ci --frozen-lockfile`, not `npm install`.** A build that quietly changes its own
+        dependencies is a build whose result nobody can reproduce. A lockfile that is out of date is a
+        decision for a person.
+
+        **Test the behaviour, not the framework.** A test that asserts a component rendered is a test
+        that the framework works; a test that asserts what a person sees when they do a thing is a test
+        of this project.
+
+        **Nothing here is signed, and that is correct.** What makes a web app trusted is the domain it
+        is served from, not a certificate in the repository. Do not add signing steps to a web project.
+
+        ## Publishing
+
+        **Only `main` publishes.** A pull request builds so somebody can see whether it would work;
+        publishing from a branch is how a work in progress becomes the thing people are looking at.
+    """.trimIndent()
+
+    private fun plainPrompt(): String = """
+        # This is a program or a script
+
+        ${'$'}common
+
+        ## Building and testing
+
+        **One step, and it is the one to change.** The template guesses from what it finds — a
+        `package.json`, a `Makefile`, a `Cargo.toml`, a `pyproject.toml` — and a project that is none of
+        those needs its build command written. That is expected, not a failure of the template.
+
+        **Nothing here is signed.** A program is trusted because of where a person got it, not because
+        of a certificate in the repository. Do not add signing steps.
+
+        **A script that fails must fail loudly.** An exit code of zero after an error is how a broken
+        build reports success, and it is the most expensive kind of wrong because it is invisible.
+    """.trimIndent()
 
     private fun android(): String = """
         # Build, test and release an Android app.

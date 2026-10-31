@@ -123,16 +123,169 @@ class AppTypeTest {
         // one must not: the folder is called `workflows`, and every project with CI has a
         // `.github/workflows/` the agent has to be able to read. A name rule would lock those too.
         assertTrue(
-            "the template folder is the app's",
-            Workspace.isTemplatePath("system/workflows/android.yml"),
+            "a preset is the app's",
+            Workspace.isTemplatePath("system/project_types/android/workflows/android.yml"),
+        )
+        assertTrue(
+            "and the preset's own prompt is too",
+            Workspace.isTemplatePath("system/project_types/android/project_prompt.txt"),
         )
         assertFalse(
             "a project's own workflows are the project's",
             Workspace.isTemplatePath("my-app/.github/workflows/android.yml"),
         )
         assertFalse(
-            "and a project that is merely called 'workflows' is not the template folder",
+            "and so is the copy a project got when it was made",
+            Workspace.isTemplatePath("my-app/.github/workflows/android.yml"),
+        )
+        assertFalse(
+            "a project that is merely called 'workflows' is not the preset folder",
             Workspace.isTemplatePath("workflows/something.yml"),
         )
+        assertFalse(
+            "and neither is one called 'system' with no presets in it",
+            Workspace.isTemplatePath("system/README.md"),
+        )
+    }
+
+    // ---- copying a preset into a project ---------------------------------
+
+    /** An account with the presets written, as `Workspace.ensure()` does on every refresh. */
+    private fun account(): Workspace {
+        val root = temp()
+        val ws = Workspace(root)
+        ws.ensure()
+        return ws
+    }
+
+    @Test
+    fun `a new project gets the workflow and the prompt for its type`() {
+        val ws = account()
+        val project = File(ws.accountDir, "my-app").apply { mkdirs() }
+
+        val copied = Presets.copy(ws.accountDir, project, AppType.ANDROID)
+
+        assertTrue("both arrived: ${copied.written}", copied.written.size == 2)
+        assertTrue(
+            "the workflow is where GitHub looks for it",
+            File(project, ".github/workflows/android.yml").isFile,
+        )
+        assertTrue("and so is the prompt", File(project, AgentPrompt.PROJECT_FILE).isFile)
+        assertEquals("the type is recorded", AppType.ANDROID, ProjectMeta.read(project).type)
+        ws.accountDir.deleteRecursively()
+    }
+
+    @Test
+    fun `a project that already has its own files keeps them, word for word`() {
+        // **This is what makes a preset a preset.** A person who adapted the workflow to their project
+        // would lose it if the copy overwrote what was there.
+        val ws = account()
+        val project = File(ws.accountDir, "my-app").apply { mkdirs() }
+        val mine = File(project, ".github/workflows/android.yml")
+        mine.parentFile?.mkdirs()
+        mine.writeText("# mine, not the preset's")
+        File(project, AgentPrompt.PROJECT_FILE).writeText("# my instructions")
+
+        val copied = Presets.copy(ws.accountDir, project, AppType.ANDROID)
+
+        assertEquals("nothing was written", emptyList<String>(), copied.written)
+        assertEquals("both were kept", 2, copied.kept.size)
+        assertEquals("and the file is unchanged", "# mine, not the preset's", mine.readText())
+        assertEquals(
+            "and so is the prompt",
+            "# my instructions",
+            File(project, AgentPrompt.PROJECT_FILE).readText(),
+        )
+        ws.accountDir.deleteRecursively()
+    }
+
+    @Test
+    fun `changing type adds the new pair and leaves the old one`() {
+        // A project that changes type is a project somebody has already worked in. Tidying up after
+        // the change would delete work, and the app is not entitled to it.
+        val ws = account()
+        val project = File(ws.accountDir, "my-app").apply { mkdirs() }
+        Presets.copy(ws.accountDir, project, AppType.ANDROID)
+
+        val second = Presets.copy(ws.accountDir, project, AppType.WEB)
+
+        assertTrue(
+            "the web workflow arrived",
+            File(project, ".github/workflows/web.yml").isFile,
+        )
+        assertTrue(
+            "and the android one is still there, untouched",
+            File(project, ".github/workflows/android.yml").isFile,
+        )
+        assertEquals("the record says what it is now", AppType.WEB, ProjectMeta.read(project).type)
+        assertTrue("the prompt was kept, not replaced", second.kept.contains(AgentPrompt.PROJECT_FILE))
+        ws.accountDir.deleteRecursively()
+    }
+
+    @Test
+    fun `just files gets no workflow, and says so rather than failing`() {
+        val ws = account()
+        val project = File(ws.accountDir, "notes").apply { mkdirs() }
+
+        val copied = Presets.copy(ws.accountDir, project, AppType.NONE)
+
+        assertFalse(
+            "no workflow was invented for a folder of notes",
+            File(project, ".github").exists(),
+        )
+        assertEquals("and the type is still recorded", AppType.NONE, ProjectMeta.read(project).type)
+        ws.accountDir.deleteRecursively()
+    }
+
+    @Test
+    fun `a preset a person deleted is not an error`() {
+        // A project that keeps working without a preset is the right outcome; an app that refused
+        // because its own template was missing would be an app that cannot be repaired by hand.
+        val ws = account()
+        val project = File(ws.accountDir, "my-app").apply { mkdirs() }
+        File(File(ws.accountDir, "system"), Workspace.TYPES).deleteRecursively()
+
+        val copied = Presets.copy(ws.accountDir, project, AppType.ANDROID)
+
+        assertEquals("nothing to copy", emptyList<String>(), copied.written)
+        assertEquals("but the type is recorded", AppType.ANDROID, ProjectMeta.read(project).type)
+        ws.accountDir.deleteRecursively()
+    }
+
+    // ---- the three layers ------------------------------------------------
+
+    @Test
+    fun `the message is the system prompt, then the preset, then the project's own`() {
+        // **The order is the cache.** The system text is the same bytes for every project, so a
+        // provider matches the longest common prefix and only the layers below it are re-read.
+        val ws = account()
+        val project = File(ws.accountDir, "my-app").apply { mkdirs() }
+        Presets.copy(ws.accountDir, project, AppType.ANDROID)
+
+        val layers = AgentPrompt.read(ws.accountDir, project)
+        val message = layers.message
+
+        assertTrue("the preset is in the message", layers.preset.isNotBlank())
+        val systemAt = message.indexOf(layers.system.trim())
+        val presetAt = message.indexOf(layers.preset.trim())
+        val projectAt = message.indexOf("# This project")
+        assertTrue("the system layer comes first", systemAt >= 0 && systemAt < presetAt)
+        assertTrue("then the preset", presetAt < projectAt)
+        ws.accountDir.deleteRecursively()
+    }
+
+    @Test
+    fun `a project with no preset still gets a message`() {
+        // Empty is a real answer: a project whose preset was deleted should keep working under its
+        // own instructions rather than being handed a default it never chose.
+        val ws = account()
+        val project = File(ws.accountDir, "my-app").apply { mkdirs() }
+        File(File(ws.accountDir, "system"), Workspace.TYPES).deleteRecursively()
+
+        val layers = AgentPrompt.read(ws.accountDir, project)
+
+        assertEquals("no preset", "", layers.preset)
+        assertTrue("but a message all the same", layers.message.contains("# This project"))
+        ws.accountDir.deleteRecursively()
     }
 }

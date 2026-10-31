@@ -112,40 +112,57 @@ class Workspace(val accountDir: File) {
      */
     private fun ensureReadme(dir: File) {
         val readme = File(dir, README)
-        if (readme.isFile) return
-        readme.writeText(README_TEXT)
-        // **The templates are written once, beside the readme, on the same rule.** A file that is
-        // already there is the person's, word for word: they may have adapted a template to their own
-        // project, and rewriting it on every refresh would silently undo that.
-        ensureTemplates(dir)
+        if (!readme.isFile) readme.writeText(README_TEXT)
+        // **Beside the readme call, not inside it.** This was written *after* the readme's early
+        // return, so on any account that already had a readme — which is every account that has ever
+        // been opened — the presets were never written at all. It only worked on a fresh install,
+        // which is the one case a person testing it would not have.
+        ensurePresets(dir)
     }
 
     /**
-     * The standard workflows, in the system project, **as text a person can read and change.**
+     * The presets, in the system project: **one folder per project type, holding that type's
+     * workflows and the instructions its agent starts with.**
      *
-     * ## Why they live here rather than in the APK
+     * ## Why per type, and why in a folder
      *
-     * A template compiled into the app can only change when the app changes, and a person who wants a
-     * step added has no way to ask for it except by writing the whole workflow themselves. In the
-     * system project it is an ordinary file: the agent can read it, the person can edit it, and every
-     * project copies from the same source.
+     * A flat `workflows/` folder would put the mapping from type to template in code, where a person
+     * cannot see or change it. Here it is the layout: to know what an Android project gets, look in
+     * `project_types/android/`. Adding a type is making a folder, and the app reads the folders that
+     * are there rather than an enum it was compiled with.
      *
-     * ## Why they are templates and not workflows
+     * ## Why these are presets and not lock-ins
      *
-     * **GitHub only dispatches a workflow that is in the repository**, at `.github/workflows/`. A file
-     * in `system/workflows/` is not on GitHub, so a dispatch against it would be a 404. So a project
-     * gets a **copy** in its own `.github/workflows/`, which is the file that actually runs — and the
-     * copy is the project's, so a project that needs a different step can have one without forking the
-     * template for everybody.
+     * A project gets a **copy** of the pair when it is made, and another copy when its type changes.
+     * The copy is the project's, editable, and an old copy is never removed — a person who has adapted
+     * a workflow to their project would lose it if a type change tidied up after itself.
+     *
+     * ## Why the folder is locked
+     *
+     * These are the app's own text, held at `system/project_types/…` by a **path** rule rather than a
+     * name one, because every project with CI has a folder called `workflows` that the agent must be
+     * able to read. See [isTemplatePath].
      */
-    private fun ensureTemplates(dir: File) {
-        val folder = File(dir, TEMPLATES)
+    private fun ensurePresets(dir: File) {
+        val root = File(dir, TYPES)
         try {
-            folder.mkdirs()
-            for ((name, text) in WorkflowTemplates.ALL) {
-                val file = File(folder, name)
-                // **Never overwritten.** The second run finds the person's file and leaves it.
-                if (!file.isFile) file.writeText(text)
+            root.mkdirs()
+            for (type in AppType.entries) {
+                val one = File(root, type.id)
+                one.mkdirs()
+                // **The prompt is written once and never overwritten**, so a person who has tuned
+                // their preset keeps the tuning.
+                val prompt = File(one, AgentPrompt.PRESET_FILE)
+                if (!prompt.isFile) {
+                    WorkflowTemplates.promptFor(type)?.let { prompt.writeText(it) }
+                }
+                // **A type with nothing to build gets no workflows folder.** An empty folder is a
+                // promise that something belongs in it.
+                val name = WorkflowTemplates.forType(type) ?: continue
+                val workflows = File(one, TEMPLATES)
+                workflows.mkdirs()
+                val file = File(workflows, name)
+                if (!file.isFile) file.writeText(WorkflowTemplates.ALL.getValue(name))
             }
         } catch (t: Throwable) {
             // A folder that cannot be made is a phone problem, and every write that needs it says so
@@ -1298,6 +1315,15 @@ class Workspace(val accountDir: File) {
          */
         const val TEMPLATES = "workflows"
 
+        /**
+         * The folder of presets, one per project type.
+         *
+         * **The name is plural and the contents are types**, so `system/project_types/android/` reads
+         * as what it is. The folder is the list: a type the app does not know about but which has a
+         * folder here is a type a person added, and it appears.
+         */
+        const val TYPES = "project_types"
+
         /** The template files, which are also the names a project's own workflow may take. */
         val TEMPLATE_NAMES: List<String> get() = WorkflowTemplates.ALL.keys.toList()
 
@@ -1311,7 +1337,7 @@ class Workspace(val accountDir: File) {
             val parts = path.trim('/').split('/')
             return parts.size >= 2 &&
                 parts[0].equals(SYSTEM_PROJECT, ignoreCase = true) &&
-                parts[1].equals(TEMPLATES, ignoreCase = true)
+                parts[1].equals(TYPES, ignoreCase = true)
         }
 
         /** A project's ignore file, and the two lines the app keeps in it. */

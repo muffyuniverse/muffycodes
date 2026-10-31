@@ -95,6 +95,107 @@ enum class AppType(
 }
 
 /**
+ * Copying a type's preset into a project — **the act that makes a preset a preset rather than a lock-in.**
+ *
+ * ## What it copies
+ *
+ * The type's workflow (into `.github/workflows/`) and its prompt (into the project's own
+ * `project_prompt.txt`). Both are ordinary files in the project afterwards: editable, lockable, and
+ * theirs.
+ *
+ * ## What it will not do
+ *
+ * **It never overwrites, and it never deletes.** A person who has adapted a workflow to their project,
+ * or a prompt to their codebase, would lose it if a type change tidied up after itself — and a project
+ * that changes type is a project somebody has already worked in. So an existing file is left exactly
+ * as it is, and the old type's files stay. The metadata records what was installed, which is how the
+ * app can later say "this project still has an android.yml from when it was an Android app" rather
+ * than pretending it never happened.
+ *
+ * That is the whole difference between a preset and a template: a preset is something you start from,
+ * and starting from it does not entitle anybody to take it back.
+ */
+object Presets {
+
+    /** What a copy did, in words a screen or a tool can show. */
+    data class Copied(
+        val type: AppType,
+        /** Files that were written, relative to the project. */
+        val written: List<String>,
+        /** Files that were already there, and were left alone. */
+        val kept: List<String>,
+    ) {
+        /** True when there was something to copy and none of it was already there. */
+        val fresh: Boolean get() = written.isNotEmpty() && kept.isEmpty()
+
+        fun said(): String = when {
+            written.isEmpty() && kept.isEmpty() -> "There was nothing to copy for a ${type.label}."
+            written.isEmpty() -> "Everything a ${type.label} starts with was already here."
+            kept.isEmpty() -> "Added ${written.joinToString(", ")} from the ${type.label} preset."
+            else -> "Added ${written.joinToString(", ")} from the ${type.label} preset, and left " +
+                "${kept.joinToString(", ")} as it was."
+        }
+    }
+
+    /**
+     * Copies [type]'s preset into [projectDir], leaving anything that already exists.
+     *
+     * [accountDir] is where the system project lives. A preset that is not there is not an error: a
+     * person may have deleted it, and a project that keeps working without one is the right outcome.
+     */
+    fun copy(accountDir: File, projectDir: File, type: AppType): Copied {
+        val root = File(File(File(accountDir, Workspace.SYSTEM_PROJECT), Workspace.TYPES), type.id)
+        val written = mutableListOf<String>()
+        val kept = mutableListOf<String>()
+
+        val name = WorkflowTemplates.forType(type)
+        if (name != null) {
+            val from = File(File(root, Workspace.TEMPLATES), name)
+            val to = File(File(File(projectDir, ".github"), "workflows"), name)
+            if (to.isFile) {
+                kept.add(relative(projectDir, to))
+            } else if (from.isFile) {
+                try {
+                    to.parentFile?.mkdirs()
+                    to.writeBytes(from.readBytes())
+                    written.add(relative(projectDir, to))
+                } catch (e: Throwable) {
+                    // A file that cannot be copied is reported by what did not appear, which is the
+                    // honest answer: the list of what was written does not contain it.
+                }
+            }
+        }
+
+        val promptFrom = File(root, AgentPrompt.PRESET_FILE)
+        val promptTo = File(projectDir, AgentPrompt.PROJECT_FILE)
+        if (promptTo.isFile) {
+            kept.add(AgentPrompt.PROJECT_FILE)
+        } else if (promptFrom.isFile) {
+            try {
+                promptTo.writeBytes(promptFrom.readBytes())
+                written.add(AgentPrompt.PROJECT_FILE)
+            } catch (e: Throwable) {
+                // As above.
+            }
+        }
+
+        // **The record, written even when nothing was copied** — so the app can say which type a
+        // project was set up as, and a later version can tell an old preset from a fresh one.
+        ProjectMeta.write(
+            projectDir,
+            ProjectMeta(type, template = name),
+        )
+        return Copied(type, written, kept)
+    }
+
+    private fun relative(projectDir: File, file: File): String = try {
+        file.relativeTo(projectDir).invariantSeparatorsPath
+    } catch (e: Throwable) {
+        file.name
+    }
+}
+
+/**
  * A project's own metadata, in `.muffy/project.json`.
  *
  * **Inside the project's folder, not the account's**, because it describes the project and should
