@@ -2,18 +2,19 @@
 
 Written 2026-10-30 from `trace.log (3).txt`: **84 reports**, 51 from build 191, 2 from 194, 31 from 195.
 Every one is checked against the code, not against a plan. The batch that closed them is the chain
-ending `d69d4ef`.
+ending `b2e151a`.
 
-**78 were already closed before this session.** The 191/194 batches landed across the commits named in
-`PLAN-2026-10-30-reports.md`; the audit here confirmed each against the source rather than trusting
-that document. The ones that were marked done and were not: the `from`/`to` pair, the copy rename, the
-folder marks, the sync icon, the cap, and the filenames — six, listed below.
+**Nine reports were marked done and were not.** Two were found by reading the code against the report —
+#57's lock and #48's caption — and seven in the earlier pass. Every other status here was re-checked
+against the source rather than trusted, because "done (already in source)" turned out to be the weakest
+claim in this file: it meant *inspected*, not *tested*.
 
-**Seven were genuinely open, and this session closed all seven** (six defects and one question that
-turned out to be a defect):
+**Nine were genuinely open, and all nine are closed:**
 
 | Report | What was actually wrong |
 |---|---|
+| **#48** | The answer to "what is this `create` text" lived in a source comment. The screen still showed a bare tool name, which beside a Close button reads as a button. |
+| **#57** | `move` asked `mayWrite` about its **source** before reading `copy`, so the agent could not copy a locked file at all — and told the person the lock was the reason. |
 | **#66** | A `grep`+`from`/`to` edit with no `replace` key replaced the block with nothing and answered `0 … changed`. `optString` returns `""` for a key that is not there. **The file was emptied and the app said it worked.** |
 | **#67** | The same missing key made `from`/`to` and `at` unusable for what the description promised, so the cheap safe edit was unreachable. |
 | **#68** | A copy could not be renamed; empty and unreadable both answered `0` with no body. |
@@ -96,11 +97,11 @@ what is needed.**
 | **41** | 17:05 | and why first agent page is a page of nullnullnullnullnullnullnullnullnullnullnullnullnullnullnullnullnullnull | First page of nulls — earlier (`68c0d4f`) |
 | **42** | 17:08 | text selection is broken for user messages | **OPEN — and this is the honest reason.** The gesture cannot be made in this harness: four techniques all reached `SelectionContainer` (NATIVE mode built handles, asked the toolbar, started a magnifier) but none published a non-empty range, **including on the agent's bubble, which the operator says works**. A test that cannot make the gesture cannot close a report about the gesture. What IS pinned: the person's bubble is inside a `SelectionContainer` and nothing on its modifier chain consumes the press (`d69d4ef`). **If it is still broken on a device, the cause is in the platform's selection plumbing, not in this app's layout.** |
 | **43** | 17:10 | when keyboard pops up it covers messages, I want the screen to move down so that messages are above the keyboa | Keyboard pushes the list — earlier (`a44ecef`) |
-| **44** | 17:12 | I want write to the agent box be the color of the background - no visible edges | Composer is the page's colour — done (already in source) |
-| **45** | 17:17 | agent is "off" but it responds when user sends it a message. Make it so that a new message from user turns the | Speaking turns the agent on — done (already in source) |
-| **46** | 17:21 | when I enter the chat screen I should see the bottom (on entering the chat my view already should be positione | Opens at the bottom, no visible scroll — done (already in source) |
-| **47** | 17:22 | on message fullscreen view top bar buttons are too high, they are partly covered by system bar. move them a li | Fullscreen buttons below the status bar — done (already in source) |
-| **48** | 17:23 | and what is this "create" text at fullscreen view? | 'create' caption explained — done (already in source) |
+| **44** | 17:12 | I want write to the agent box be the color of the background - no visible edges | **VERIFIED + PINNED** (`85e1be9`) — all four colour slots transparent, indicator included. Was "already in source" on inspection only. |
+| **45** | 17:17 | agent is "off" but it responds when user sends it a message. Make it so that a new message from user turns the | **VERIFIED** — behaviour was always right; the header *word* was the lie, and it says "idle · waiting" now. |
+| **46** | 17:21 | when I enter the chat screen I should see the bottom (on entering the chat my view already should be positione | **VERIFIED + PINNED** (`85e1be9`) — `scrollToItem` on the first pass, so it *is* at the end rather than animating there. |
+| **47** | 17:22 | on message fullscreen view top bar buttons are too high, they are partly covered by system bar. move them a li | **VERIFIED** — `windowInsetsPadding(WindowInsets.statusBars)` on the overlay, which draws its own row. |
+| **48** | 17:23 | and what is this "create" text at fullscreen view? | **WAS NOT DONE — FIXED** (`818fb65`). The explanation was in a source comment; the screen still said a bare `create`. It says `Agent · call · create` now, and `Agent · words` for a reply. |
 | **49** | 17:29 | actually I want for presets not to be generated automatically - I want every interval to be generated via "gen | Presets generated by the button — earlier (`e09bb93`) |
 | **50** | 17:32 | text lines on "before", "after" and interval duration draw under generate button, just above the table with me | Caption lines under Generate — earlier (`e09bb93`) |
 | **51** | 17:34 | on exiting the screen where multiselection was active it should cancel and close - otherwise it shows on diffe | Selection clears on navigation — earlier (`6a9ca5a`) |
@@ -109,19 +110,19 @@ what is needed.**
 | **54** | 21:38 | sync icon still lags to change after tapping | Sync icon from state — cc9f434 |
 | **55** | 21:40 | why folders made by agents dont have lock and sync icons? | Folders carry the marks — cc9f434 |
 | **56** | 21:47 | screen should be at the bottom of the message list on chat menu opening. and it should scroll down when I star | Follows only when already at the bottom — 25de8d2 |
-| **57** | 21:59 | agent tells that lock blocks copying as well, which should be allowed | Lock does not block copying — done (already in source) |
+| **57** | 21:59 | agent tells that lock blocks copying as well, which should be allowed | **WAS NOT DONE — FIXED** (`f8c9b13`). `move` asked `mayWrite` about its **source** before reading `copy`, so the agent could not copy a locked file at all. Two tests now hold both halves. |
 | **58** | 22:02 | OpenRouter answered 403 # error messages should be only for session log, why are they shown as if they are "in | Errors out of the context — 25de8d2 |
-| **59** | 22:05 | message should autoflip to the next new page only if the last page  is selected. if i read not last page it sh | Autoflip only on the last page — done (already in source) |
+| **59** | 22:05 | message should autoflip to the next new page only if the last page  is selected. if i read not last page it sh | **VERIFIED** — `held` releases a message only when the person returns to its last page. |
 | **60** | 22:08 | thinking and output are not shown untill the burst is done - which defies their purpose of indicating that age | Thinking and output live — dba2ec1 |
 | **61** | 22:09 | it made 40 requests without ending the turn - what is this restriction? I dont need it, agent must be able to  | Request cap 40 → 500 — 25de8d2 |
 | **62** | 22:10 | and why user message isnt shown untill agent responds? | The person's words appear at once — dba2ec1 |
 | **63** | 22:13 | and we need >> button to fast move to the last page. and we need down arrow at the bottom right corner of the  | `>>` and the down arrow — 5804473 |
 | **64** | 22:21 | in full screen mode paging arrows are still tiny | Fullscreen arrows are real chevrons — 25de8d2 |
-| **65** | 22:25 | remember bug when I start talking with agent but top bar still shows "idle" and "start the agent" although it  | Header says waiting, not off — done (already in source) |
+| **65** | 22:25 | remember bug when I start talking with agent but top bar still shows "idle" and "start the agent" although it works! | **VERIFIED** — no session reads `idle · waiting`, and speaking starts one. |
 | **66** | 22:36 | Data loss on grep + replace (the serious one). The call answers 0 … changed, but the file then reads back as a | The edit that emptied a file — 707acfe |
 | **67** | 22:37 | from/to and at are unreachable for what they're documented to do. The docs say from/to alone replaces a block  | Where without what refuses; from/to + replace documented — 707acfe |
 | **68** | 22:38 | Smaller things worth a look:\n-  No versions are recorded for anything I created or edited (history → "has no  | Copy with a name; empty vs unreadable; created files have versions — 707acfe |
-| **69** | 22:42 | when agent message is together with toolcalls it is displayed as a separate message but should be just a page | Words with calls are pages of one message — done (already in source) |
+| **69** | 22:42 | when agent message is together with toolcalls it is displayed as a separate message but should be just a page | **VERIFIED** — one message per burst; calls and the closing words are its pages. |
 | **70** | 23:05 | can you remove any in-screen popup notifications that dont bring value and just restate what happened before ( | Only refusals cover the screen — 25de8d2 |
 | **71** | 23:07 | add vertical lines between table columns | Vertical rules between columns — 64668b4 |
 | **72** | 23:08 | reduce space between metrics and before columns | Rules carry the spacing — 64668b4 |
