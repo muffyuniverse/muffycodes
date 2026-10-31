@@ -98,4 +98,30 @@ class ReleaseTest {
             github.dispatches(ref)[0].inputs["dev_build"],
         )
     }
+
+    // ---- the artifact's name ---------------------------------------------
+
+    @Test
+    fun `an artifact keeps the name the workflow gave it`() {
+        // **`cleanName` turned `app-release` into `app_release`**, and a model that fetched one then
+        // read the other was looking for a file that does not exist. An artifact's name is the
+        // workflow's label, not a name a person typed.
+        assertEquals("app-release", Release.artifactName("app-release"))
+        assertEquals("scenarios", Release.artifactName("scenarios"))
+        assertEquals("Screenshot.2026.10.31", Release.artifactName("Screenshot.2026.10.31"))
+    }
+
+    @Test
+    fun `an artifact name that could leave the folder is made safe, not refused`() {
+        // A name from a workflow is trusted to be a name, but a `../` in one must not become a path.
+        assertEquals(".._etc_passwd", Release.artifactName("../../etc/passwd"))
+        assertEquals("a_b", Release.artifactName("a/b"))
+    }
+
+    @Test
+    fun `a name that is nothing but dots or separators becomes empty, for the caller to fall back on`() {
+        assertEquals("", Release.artifactName(".."))
+        assertEquals("", Release.artifactName("---"))
+        assertEquals("", Release.artifactName("   "))
+    }
 }

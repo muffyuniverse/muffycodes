@@ -84,6 +84,22 @@ object Release {
     }
 
     /**
+     * An artifact's name, kept but made safe — **the one rule both the tool and the menu use.**
+     *
+     * **Not `Workspace.cleanName`.** That is a naming policy for things a person makes: lowercase,
+     * every separator turned into `_`. An artifact's name is the workflow's own label, so
+     * `app-release` must stay `app-release` — a person looking for the file they were told about, and
+     * a model reading back what it fetched, both need the name they were given. Only what could leave
+     * the folder or break a path is replaced.
+     */
+    fun artifactName(name: String): String {
+        val cleaned = name.trim().map { ch ->
+            if (ch.isLetterOrDigit() || ch == '.' || ch == '-' || ch == '_') ch else '_'
+        }.joinToString("").trim('.', '_', '-')
+        return cleaned.take(80)
+    }
+
+    /**
      * Why [name] cannot be a version name, or null when it can.
      *
      * **The same rule the workflow applies**, so the answer arrives before a pipeline is spent rather

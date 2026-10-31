@@ -2051,10 +2051,14 @@ class AgentTools(
         if (bytes.error != null) return refusal(ciSaid(bytes.error, bytes.status))
         val data = bytes.value ?: return refusal("GitHub returned no bytes for \"$wanted\".")
         val dir = File(File(File(projectDir, RESULTS_DIR), "ci"), "artifacts")
-        // **`Workspace.cleanName`, the companion's**, because an artifact's name comes from a workflow
-        // and may hold anything — a slash would make a directory, and a name that is only symbols would
-        // make a file nobody can find.
-        val name = Workspace.cleanName(one.name, "artifact-${one.id}")
+        // **Not `Workspace.cleanName`.** That rule is for names a person types, and it lowercases and
+        // turns every separator into `_` — so `app-release` arrived as `app_release`, which is a
+        // different file from the one the workflow made and one a person would not recognise. An
+        // artifact's name belongs to the workflow, so it is kept and only made safe: anything that
+        // could leave this folder or confuse a path becomes `_`, and the rest is left alone.
+        // **`Release.artifactName`, the same rule the menu uses** — so the file a person exports and
+        // the file the agent fetches have the same name.
+        val name = Release.artifactName(one.name).ifBlank { "artifact-${one.id}" }
         val file = File(dir, name + ".zip")
         try {
             file.parentFile?.mkdirs()

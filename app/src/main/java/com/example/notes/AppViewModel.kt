@@ -2271,7 +2271,9 @@ class AppViewModel @JvmOverloads constructor(
                     // agent's are the same bytes from the same place.
                     val ws = workspace!!
                     val dir = File(File(ws.projectDir(project), AgentLog.DIR), "ci/artifacts")
-                    val file = File(dir, Workspace.cleanName(first.name, "artifact") + ".zip")
+                    // **The artifact's own name, made safe rather than re-styled** — see
+                    // `AgentTools.safeArtifactName` for why `cleanName` is the wrong rule here.
+                    val file = File(dir, Release.artifactName(first.name) + ".zip")
                     try {
                         dir.mkdirs()
                         file.writeBytes(bytes.value ?: ByteArray(0))
