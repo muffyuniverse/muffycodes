@@ -9,6 +9,9 @@ import androidx.compose.ui.platform.TextToolbar
 import androidx.compose.ui.platform.TextToolbarStatus
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -255,9 +258,25 @@ class AgentChatScreenTest {
         }
         compose.waitForIdle()
 
+        // **The selection itself, not the menu.** `SelectionContainer` publishes
+        // `SemanticsProperties.TextSelectionRange`, and a long press that did nothing leaves it
+        // either absent or collapsed — so "some of it is selected" is the question, asked directly.
+        // The toolbar is a second observable and a weaker one: whether it is asked depends on the
+        // platform's own selection plumbing, which is exactly the layer this harness replaces.
+        val ranges = compose
+            .onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.TextSelectionRange))
+            .fetchSemanticsNodes()
+            .mapNotNull { it.config.getOrNull(SemanticsProperties.TextSelectionRange) }
+
+        // The ranges are put in the message as their own string, because the checker that reads this
+        // file treats a quote inside `${...}` as an unbalanced quote — and it is right to: a nested
+        // string in an interpolation is exactly the shape that hides a real typo.
+        val seen = ranges.joinToString { range -> range.start.toString() + ".." + range.end.toString() }
+
         assertTrue(
-            "a long press on the operator's message selects it, which is what asks for the menu",
-            asked.get(),
+            "a long press on the operator's message selects it: ranges=" + seen +
+                ", menu asked=" + asked.get(),
+            ranges.any { it.start != it.end },
         )
     }
 
