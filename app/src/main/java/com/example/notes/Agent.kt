@@ -158,11 +158,21 @@ class Agent(
     private val privateAllowed: () -> Boolean = { false },
     /** How long a page may take, in milliseconds; zero is the browser's own bound. */
     private val browseMs: () -> Long = { 0L },
+    /**
+     * GitHub, and the key to reach it with, or nulls when this project is not a GitHub one.
+     *
+     * **A function, not a value**, for the same reason the model is: a person can sign out or change
+     * the key while an agent is idle, and the key that applies is the one in force when the call
+     * arrives. Null means the CI tools refuse — a local project has no runs to read.
+     */
+    private val github: () -> GitHub? = { null },
+    private val githubToken: () -> String? = { null },
 ) {
 
     private val tools = AgentTools(
         ws, project, git, log, maxResult, bg, backgroundMs, triggerTokens,
         browser = browser, browseMs = browseMs, privateAllowed = privateAllowed,
+        github = github, githubToken = githubToken,
     )
 
     /**

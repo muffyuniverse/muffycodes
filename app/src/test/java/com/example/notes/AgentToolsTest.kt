@@ -88,11 +88,16 @@ class AgentToolsTest {
         // that reach outside the phone, and both refuse private addresses unless the operator has
         // said otherwise — so the capability is granted deliberately rather than by the list
         // growing.
+        //
+        // `ci` and `runs` joined it when the agent was given sight of GitHub Actions. **Both are
+        // read-only**: a tool that starts a run is a different grant, and it waits on the workflow
+        // guard (a run the agent dispatches must not be able to reach repository secrets).
         assertEquals(
-            "and the thirteen that are",
+            "and the fifteen that are",
             listOf(
                 "tree", "read", "edit", "forget", "create", "delete",
                 "move", "history", "restore", "background", "reason", "browse", "shot",
+                "ci", "runs",
             ),
             specs.map { it.name },
         )

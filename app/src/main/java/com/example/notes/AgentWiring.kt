@@ -93,6 +93,12 @@ object AgentWiring {
             changed = changed,
             onPage = onPage,
             browser = browser,
+            // **The real GitHub, and the key read per call.** A local project has a remote that is
+            // not GitHub's, and `where()` in the tools refuses that in words rather than asking.
+            github = {
+                AppViewModel.githubFor(login, accounts, BuildConfig.DEBUG)
+            },
+            githubToken = { credentials.token(login) },
         )
     }
 

@@ -52,6 +52,89 @@ data class Repo(
 data class Licence(val key: String, val name: String)
 
 /**
+ * One workflow run, as GitHub describes it.
+ *
+ * **`conclusion` is null while the run is still going**, and that is a real state rather than an
+ * error: a run that has been queued and not started has no outcome yet, and answering `""` for it
+ * would be indistinguishable from a run that finished with nothing to say.
+ */
+data class CiRun(
+    val id: Long,
+    val name: String,
+    val status: String,
+    val conclusion: String?,
+    val branch: String,
+    val event: String,
+    val sha: String,
+    val createdAt: String,
+    val url: String,
+) {
+    /** True while GitHub has not finished with it. */
+    val running: Boolean get() = conclusion == null || status != "completed"
+}
+
+/** One job inside a run: the unit that has a log. */
+data class CiJob(
+    val id: Long,
+    val name: String,
+    val status: String,
+    val conclusion: String?,
+)
+
+/** One file a run produced. */
+data class CiArtifact(
+    val id: Long,
+    val name: String,
+    val bytes: Long,
+    val expired: Boolean,
+)
+
+/**
+ * `owner/name` from a clone address, or null when it is not one.
+ *
+ * **Every GitHub call below needs this pair**, and until now nothing in the app did: the sync
+ * pushed to a remote and never asked whose it was. A remote can be written three ways —
+ * `https://github.com/owner/name.git`, `git@github.com:owner/name.git`, and with a trailing slash
+ * or no `.git` — so the parsing lives here once rather than in each caller.
+ */
+data class RepoRef(val owner: String, val name: String) {
+    /** `owner/name`, as the API writes it in a path. */
+    val slug: String get() = "$owner/$name"
+
+    companion object {
+        /**
+         * `owner/name` from a remote, or null.
+         *
+         * The three shapes a remote is written in, all of which this app can meet: a clone URL
+         * (`https://github.com/owner/name.git`), an ssh one (`git@github.com:owner/name.git`), and
+         * a folder (`file:///…/owner/name.git`) — the last is [DiskGitHub], and it must parse too or
+         * every test of these tools would have to invent a remote.
+         */
+        fun of(remote: String?): RepoRef? {
+            val url = remote?.trim().orEmpty()
+            if (url.isEmpty()) return null
+            // Everything after the host: `https://host/a/b.git`, `git@host:a/b.git`, `file:/a/b.git`.
+            val rest = when {
+                url.startsWith("git@") -> url.substringAfter('@').substringAfter(':', "")
+                url.contains("://") -> url.substringAfter("://").substringAfter('/', "")
+                // **`file:/a/b.git`, with ONE slash** — which is what `File.toURI()` writes, and so
+                // what [DiskGitHub]'s clone addresses look like. Without this branch every test of
+                // these tools would have to invent a remote, and the fake would be untestable by
+                // the same code the phone runs.
+                url.startsWith("file:") -> url.removePrefix("file:")
+                else -> ""
+            }
+            val parts = rest.trim('/').removeSuffix(".git").split('/').filter { it.isNotEmpty() }
+            if (parts.size < 2) return null
+            // **The last two, not the first two**: a path may hold more segments, and the repository
+            // is always the last pair.
+            return RepoRef(parts[parts.size - 2], parts.last())
+        }
+    }
+}
+
+
+/**
  * Who a key belongs to, as GitHub itself says.
  *
  * Name and email are the account's own, so signing in asks for nothing but the
@@ -108,6 +191,37 @@ interface GitHub {
 
     /** True when a clone address belongs to this GitHub. */
     fun owns(remoteUrl: String): Boolean
+
+    /**
+     * The runs of a repository, newest first — **the answer to "did my push go green".**
+     *
+     * [workflow] narrows it to one workflow's file name (`build-and-release.yml`), which is what a
+     * person means by "the build". [branch] narrows it to one branch's runs.
+     */
+    fun runs(
+        token: String,
+        ref: RepoRef,
+        workflow: String = "",
+        branch: String = "",
+        limit: Int = 10,
+    ): GitHubResult<List<CiRun>>
+
+    /** The jobs of one run, which is how a log is found: a job is what has one. */
+    fun jobs(token: String, ref: RepoRef, run: Long): GitHubResult<List<CiJob>>
+
+    /** The jobs of a run, with their logs, as plain text keyed by job name. */
+    fun logs(token: String, ref: RepoRef, run: Long): GitHubResult<Map<String, String>>
+
+    /** The files a run produced. */
+    fun artifacts(token: String, ref: RepoRef, run: Long): GitHubResult<List<CiArtifact>>
+
+    /**
+     * One artifact's bytes, by id.
+     *
+     * **Bytes, not text.** An artifact is a zip of an APK, a screenshot or a report — reading one
+     * as UTF-8 is how it arrives corrupted.
+     */
+    fun artifactBytes(token: String, ref: RepoRef, id: Long): GitHubResult<ByteArray>
 }
 
 /**
@@ -223,6 +337,257 @@ class HttpGitHub(private val api: String = DEFAULT_API) : GitHub {
     override fun webUrl(cloneUrl: String): String = cloneUrl.removeSuffix(".git")
 
     override fun owns(remoteUrl: String): Boolean = remoteUrl.startsWith(API)
+
+    // ---- Actions ----------------------------------------------------------
+
+    override fun runs(
+        token: String,
+        ref: RepoRef,
+        workflow: String,
+        branch: String,
+        limit: Int,
+    ): GitHubResult<List<CiRun>> {
+        // **A workflow is addressed by its FILE NAME, not by its id.** The API accepts either, but a
+        // file name is what a person has in front of them — it is the name in the tree — and an id is
+        // a number that changes when a workflow is deleted and made again.
+        val path = if (workflow.isBlank()) {
+            "/repos/${ref.owner}/${ref.name}/actions/runs?per_page=$limit" +
+                (if (branch.isBlank()) "" else "&branch=" + urlPart(branch))
+        } else {
+            "/repos/${ref.owner}/${ref.name}/actions/workflows/" + urlPart(workflow) +
+                "/runs?per_page=$limit" +
+                (if (branch.isBlank()) "" else "&branch=" + urlPart(branch))
+        }
+        val response = get("GET", path, token)
+        if (response.error != null) {
+            return GitHubResult(error = response.error, status = response.status)
+        }
+        val array = response.value?.optJSONArray("workflow_runs")
+            ?: response.array
+            ?: return GitHubResult(error = "GitHub did not return any runs")
+        val runs = mutableListOf<CiRun>()
+        for (i in 0 until array.length()) {
+            val obj = array.optJSONObject(i) ?: continue
+            runs.add(
+                CiRun(
+                    id = obj.optLong("id"),
+                    name = obj.optString("name").ifBlank { obj.optString("display_title") },
+                    status = obj.optString("status"),
+                    // **`null` when the key is absent, and `""` when it is present but empty** — the
+                    // difference between "not finished" and "finished with no conclusion" is the
+                    // whole reason this is not `optString`.
+                    conclusion = if (obj.isNull("conclusion")) null else obj.optString("conclusion"),
+                    branch = obj.optString("head_branch"),
+                    event = obj.optString("event"),
+                    sha = obj.optString("head_sha").take(7),
+                    createdAt = obj.optString("created_at"),
+                    url = obj.optString("html_url"),
+                ),
+            )
+        }
+        return GitHubResult(value = runs)
+    }
+
+    override fun jobs(token: String, ref: RepoRef, run: Long): GitHubResult<List<CiJob>> {
+        val response = get("GET", "/repos/${ref.owner}/${ref.name}/actions/runs/$run/jobs?per_page=100", token)
+        if (response.error != null) {
+            return GitHubResult(error = response.error, status = response.status)
+        }
+        val array = response.value?.optJSONArray("jobs")
+            ?: response.array
+            ?: return GitHubResult(error = "GitHub did not return any jobs")
+        val jobs = mutableListOf<CiJob>()
+        for (i in 0 until array.length()) {
+            val obj = array.optJSONObject(i) ?: continue
+            jobs.add(
+                CiJob(
+                    id = obj.optLong("id"),
+                    name = obj.optString("name"),
+                    status = obj.optString("status"),
+                    conclusion = if (obj.isNull("conclusion")) null else obj.optString("conclusion"),
+                ),
+            )
+        }
+        return GitHubResult(value = jobs)
+    }
+
+    /**
+     * Every job's log, as text.
+     *
+     * **A log is not JSON**, so it cannot go through [get]: that function parses a body as an object
+     * or an array and would throw on a page of test output. It is also not small — a job log is tens
+     * of kilobytes of timestamps — so this reads it as a string and lets the caller decide what to do
+     * with the size.
+     *
+     * **A job with no log is not a failure.** A job that never started has none, and answering an
+     * error for it would make a cancelled run look like a broken token.
+     */
+    override fun logs(token: String, ref: RepoRef, run: Long): GitHubResult<Map<String, String>> {
+        val found = jobs(token, ref, run)
+        if (found.error != null) return GitHubResult(error = found.error, status = found.status)
+        val out = LinkedHashMap<String, String>()
+        for (job in found.value.orEmpty()) {
+            val text = raw("GET", "/repos/${ref.owner}/${ref.name}/actions/jobs/${job.id}/logs", token)
+            // A log that cannot be read is recorded as such rather than dropped: a job missing from
+            // the answer reads as a job that does not exist.
+            out[job.name] = text.getOrElse { "(" + (it.message ?: "no log") + ")" }
+        }
+        return GitHubResult(value = out)
+    }
+
+    override fun artifacts(token: String, ref: RepoRef, run: Long): GitHubResult<List<CiArtifact>> {
+        val response = get("GET", "/repos/${ref.owner}/${ref.name}/actions/runs/$run/artifacts", token)
+        if (response.error != null) {
+            return GitHubResult(error = response.error, status = response.status)
+        }
+        val array = response.value?.optJSONArray("artifacts")
+            ?: response.array
+            ?: return GitHubResult(error = "GitHub did not return any artifacts")
+        val files = mutableListOf<CiArtifact>()
+        for (i in 0 until array.length()) {
+            val obj = array.optJSONObject(i) ?: continue
+            files.add(
+                CiArtifact(
+                    id = obj.optLong("id"),
+                    name = obj.optString("name"),
+                    bytes = obj.optLong("size_in_bytes"),
+                    expired = obj.optBoolean("expired"),
+                ),
+            )
+        }
+        return GitHubResult(value = files)
+    }
+
+    /**
+     * An artifact's bytes.
+     *
+     * ## The redirect, which is the whole difficulty
+     *
+     * `GET /actions/artifacts/{id}/zip` does not answer with the file. It answers **302** to a
+     * pre-signed blob URL on `*.blob.core.windows.net`, and that URL carries its own credentials in
+     * its query string.
+     *
+     * **Sending our token along is not merely useless, it is a leak and it fails.** Measured against
+     * this repository: the forwarded request answers `401` with a 397-byte body, because Azure
+     * rejects a bearer token it did not issue. So the naive implementation — which is what
+     * `HttpURLConnection` does by default, since it follows redirects *and keeps the request
+     * headers* — writes a 397-byte "APK" and hands the person a file that will not install. And
+     * before it fails, it has sent GitHub's token to Microsoft's storage.
+     *
+     * So: no automatic redirects, read `Location`, and fetch it **without** the `Authorization`
+     * header. That is a security control first and a correctness fix second.
+     */
+    override fun artifactBytes(token: String, ref: RepoRef, id: Long): GitHubResult<ByteArray> {
+        var connection: HttpURLConnection? = null
+        var redirect: HttpURLConnection? = null
+        return try {
+            connection = (URL(API + "/repos/${ref.owner}/${ref.name}/actions/artifacts/$id/zip")
+                .openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 20_000
+                readTimeout = 120_000
+                // **The line the whole comment above is about.**
+                instanceFollowRedirects = false
+                setRequestProperty("Accept", "application/vnd.github+json")
+                setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
+                setRequestProperty("User-Agent", "MuffyCodes")
+                if (token.isNotBlank() && Secrets.isGitHubHost(API)) {
+                    setRequestProperty("Authorization", "Bearer $token")
+                }
+            }
+            val code = connection.responseCode
+            if (code == 302 || code == 301 || code == 307 || code == 308) {
+                val location = connection.getHeaderField("Location")
+                    ?: return GitHubResult(error = "GitHub did not say where the artifact is")
+                // The signature is in the URL itself, so no header is set here at all. It is a
+                // different host on purpose and the token must not travel to it.
+                redirect = (URL(location).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 20_000
+                    readTimeout = 120_000
+                    instanceFollowRedirects = true
+                    setRequestProperty("User-Agent", "MuffyCodes")
+                }
+                val got = redirect.responseCode
+                if (got !in 200..299) {
+                    return GitHubResult(
+                        error = "The artifact could not be downloaded (HTTP $got)",
+                        status = got,
+                    )
+                }
+                return GitHubResult(value = redirect.inputStream.use { it.readBytes() })
+            }
+            if (code !in 200..299) {
+                return GitHubResult(
+                    error = "The artifact could not be downloaded (HTTP $code)",
+                    status = code,
+                )
+            }
+            GitHubResult(value = connection.inputStream.use { it.readBytes() })
+        } catch (e: Throwable) {
+            GitHubResult(error = Secrets.scrub(e.message ?: "The artifact could not be downloaded"))
+        } finally {
+            connection?.disconnect()
+            redirect?.disconnect()
+        }
+    }
+
+    /**
+     * A request whose answer is text that is not JSON — a job log.
+     *
+     * The log endpoint also redirects (to a signed blob URL), so this follows the same rule as
+     * [artifactBytes]: no automatic redirects, and no token on the second hop.
+     */
+    private fun raw(method: String, path: String, token: String): Result<String> {
+        var connection: HttpURLConnection? = null
+        var redirect: HttpURLConnection? = null
+        return try {
+            connection = (URL(API + path).openConnection() as HttpURLConnection).apply {
+                requestMethod = method
+                connectTimeout = 20_000
+                readTimeout = 60_000
+                instanceFollowRedirects = false
+                setRequestProperty("Accept", "application/vnd.github+json")
+                setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
+                setRequestProperty("User-Agent", "MuffyCodes")
+                if (token.isNotBlank() && Secrets.isGitHubHost(API)) {
+                    setRequestProperty("Authorization", "Bearer $token")
+                }
+            }
+            val code = connection.responseCode
+            val from = when (code) {
+                in 200..299 -> connection
+                302, 301, 307, 308 -> {
+                    val location = connection.getHeaderField("Location")
+                        ?: return Result.failure(IllegalStateException("No location for the log"))
+                    redirect = (URL(location).openConnection() as HttpURLConnection).apply {
+                        requestMethod = "GET"
+                        connectTimeout = 20_000
+                        readTimeout = 60_000
+                        instanceFollowRedirects = true
+                        setRequestProperty("User-Agent", "MuffyCodes")
+                    }
+                    redirect
+                }
+                else -> {
+                    val why = connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                    return Result.failure(
+                        IllegalStateException(
+                            Secrets.scrub(
+                                if (why.isBlank()) "HTTP $code" else "HTTP $code: " + why.take(200),
+                            ),
+                        ),
+                    )
+                }
+            }
+            Result.success(from.inputStream.use { it.readBytes().toString(Charsets.UTF_8) })
+        } catch (e: Throwable) {
+            Result.failure(IllegalStateException(Secrets.scrub(e.message ?: "The log could not be read")))
+        } finally {
+            connection?.disconnect()
+            redirect?.disconnect()
+        }
+    }
 
     private fun repo(obj: JSONObject) = Repo(
         name = obj.optString("name"),
@@ -445,6 +810,127 @@ class DiskGitHub(
 
     override fun owns(remoteUrl: String): Boolean = remoteUrl.startsWith(root.toURI().toString()) ||
         remoteUrl.startsWith("file:")
+
+    // ---- Actions, out of a folder ----------------------------------------
+    //
+    // **A fake that answers "there is nothing" would make every test of the CI tools pass while the
+    // phone behaved differently**, which is the one thing this seam exists to prevent. So a run is a
+    // directory under the repository, and its parts are read from files a test writes:
+    //
+    //     <repo>.git/ci/<run id>/run.json      name, status, conclusion, branch, event, sha
+    //     <repo>.git/ci/<run id>/jobs/<job>.log
+    //     <repo>.git/ci/<run id>/artifacts/<name>
+    //
+    // That is enough to exercise listing, log reading, artifact listing and the download, without a
+    // network, a token, or a real workflow.
+
+    private fun ciDir(ref: RepoRef, run: Long): File =
+        File(File(repoDir(ref.name), "ci"), run.toString())
+
+    override fun runs(
+        token: String,
+        ref: RepoRef,
+        workflow: String,
+        branch: String,
+        limit: Int,
+    ): GitHubResult<List<CiRun>> {
+        if (!repoDir(ref.name).exists()) {
+            return GitHubResult(error = "There is no repository called \"${ref.name}\"", status = 404)
+        }
+        val dirs = File(repoDir(ref.name), "ci").listFiles()
+            ?.filter { it.isDirectory && it.name.toLongOrNull() != null }
+            ?.sortedByDescending { it.name.toLongOrNull() ?: 0L }
+            .orEmpty()
+        val runs = dirs.mapNotNull { dir ->
+            val id = dir.name.toLongOrNull() ?: return@mapNotNull null
+            val meta = try {
+                JSONObject(File(dir, "run.json").readText())
+            } catch (e: Throwable) {
+                JSONObject()
+            }
+            CiRun(
+                id = id,
+                name = meta.optString("name", "run $id"),
+                status = meta.optString("status", "completed"),
+                conclusion = if (meta.isNull("conclusion")) null else meta.optString("conclusion"),
+                branch = meta.optString("branch"),
+                event = meta.optString("event"),
+                sha = meta.optString("sha"),
+                createdAt = meta.optString("created_at"),
+                url = meta.optString("url"),
+            )
+        }.filter { branch.isBlank() || it.branch == branch }.take(limit)
+        return GitHubResult(value = runs)
+    }
+
+    override fun jobs(token: String, ref: RepoRef, run: Long): GitHubResult<List<CiJob>> {
+        val dir = File(ciDir(ref, run), "jobs")
+        if (!dir.isDirectory) {
+            return if (ciDir(ref, run).exists()) {
+                GitHubResult(value = emptyList())
+            } else {
+                GitHubResult(error = "There is no run $run", status = 404)
+            }
+        }
+        return GitHubResult(
+            value = dir.listFiles().orEmpty().sortedBy { it.name }.mapIndexed { i, file ->
+                CiJob(
+                    id = run * 100 + i,
+                    name = file.name.removeSuffix(".log"),
+                    status = "completed",
+                    conclusion = "success",
+                )
+            },
+        )
+    }
+
+    override fun logs(token: String, ref: RepoRef, run: Long): GitHubResult<Map<String, String>> {
+        val found = jobs(token, ref, run)
+        if (found.error != null) return GitHubResult(error = found.error, status = found.status)
+        val out = LinkedHashMap<String, String>()
+        for (job in found.value.orEmpty()) {
+            out[job.name] = try {
+                File(File(ciDir(ref, run), "jobs"), job.name + ".log").readText()
+            } catch (e: Throwable) {
+                "(no log)"
+            }
+        }
+        return GitHubResult(value = out)
+    }
+
+    override fun artifacts(token: String, ref: RepoRef, run: Long): GitHubResult<List<CiArtifact>> {
+        val dir = File(ciDir(ref, run), "artifacts")
+        if (!dir.isDirectory) {
+            return if (ciDir(ref, run).exists()) {
+                GitHubResult(value = emptyList())
+            } else {
+                GitHubResult(error = "There is no run $run", status = 404)
+            }
+        }
+        return GitHubResult(
+            value = dir.listFiles().orEmpty().mapIndexed { i, file ->
+                CiArtifact(
+                    id = run * 100 + i,
+                    name = file.name,
+                    bytes = file.length(),
+                    expired = false,
+                )
+            },
+        )
+    }
+
+    override fun artifactBytes(token: String, ref: RepoRef, id: Long): GitHubResult<ByteArray> {
+        val run = id / 100
+        val index = (id % 100).toInt()
+        val dir = File(ciDir(ref, run), "artifacts")
+        val file = dir.listFiles().orEmpty().sortedBy { it.name }.getOrNull(index)
+            ?: return GitHubResult(error = "There is no artifact $id", status = 404)
+        return try {
+            GitHubResult(value = file.readBytes())
+        } catch (e: Throwable) {
+            GitHubResult(error = "The artifact could not be read: ${e.message}")
+        }
+    }
 
     /**
      * Makes one repository the way GitHub does when it is asked to initialise:

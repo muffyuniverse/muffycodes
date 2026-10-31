@@ -73,6 +73,17 @@ class AgentTools(
      * reached the operator's router without either of them asking for it.
      */
     private val privateAllowed: () -> Boolean = { false },
+    /**
+     * GitHub, and the key to reach it with — **nulls when there is nothing to reach.**
+     *
+     * Read per call like every other limit here, because signing out or pasting a new key while the
+     * agent is idle must apply to the next call rather than to the runner built before it.
+     *
+     * Null is not an error: a project with no remote has no runs, and a refusal that says so is the
+     * honest answer. It is also what keeps the tests of every other tool free of a fake GitHub.
+     */
+    private val github: () -> GitHub? = { null },
+    private val githubToken: () -> String? = { null },
 ) {
 
     /** The project's own folder: what the agent stands in. */
@@ -178,6 +189,8 @@ class AgentTools(
             "reason" to setOf("text"),
             "browse" to setOf("url", "wait", "eval", "from", "to"),
             "shot" to setOf("url", "full", "eval"),
+            "ci" to setOf("workflow", "branch", "limit"),
+            "runs" to setOf("run", "job", "grep", "from", "to"),
         )
 
         /** The keys [args] carries that [tool] does not take, in the order the model wrote them. */
@@ -330,6 +343,30 @@ class AgentTools(
                     "\"from\":1,\"to\":200}",
             ),
             spec(
+                "ci",
+                "What this project's GitHub Actions have been doing. **Read-only**: it lists runs, " +
+                    "newest first, with their status, conclusion, branch, event and the short SHA " +
+                    "they were built from. That is the answer to \"did my push go green\". " +
+                    "`workflow` narrows it to one workflow file — its **file name**, such as " +
+                    "`build-and-release.yml`, which is the name in the tree. `branch` narrows it to " +
+                    "one branch. `limit` is how many runs to show, ten by default. " +
+                    "A run that has not finished has no conclusion, and is shown as `running` " +
+                    "rather than as a failure. Use `runs` to read what a run actually said.",
+                "{\"workflow\":\"build-and-release.yml\",\"branch\":\"development\",\"limit\":10}",
+            ),
+            spec(
+                "runs",
+                "Read the log of one run. **The log does not enter this conversation whole**: it " +
+                    "is written into the project and the answer is its path plus the lines you " +
+                    "asked for, so a forty-kilobyte log costs what `grep` costs rather than what " +
+                    "the log costs. `run` is the id `ci` gave you; `job` keeps only that job's log " +
+                    "(the names are in the answer when you leave it out). `grep` is a regular " +
+                    "expression, case-insensitive, matched inside one line, and answers with the " +
+                    "matching lines — which is how to find `FAILED` or `e: file` in a build. " +
+                    "`from`/`to` are line numbers of the filed log, both included.",
+                "{\"run\":41177826224,\"job\":\"Test (0)\",\"grep\":\"FAILED\",\"from\":1,\"to\":40}",
+            ),
+            spec(
                 "shot",
                 "Photograph a web page and save it as a picture. The answer is the path of a PNG " +
                     "under `agent/browser/` — the picture is not put in this conversation, so read " +
@@ -452,6 +489,8 @@ class AgentTools(
             "reason" -> reason(args)
             "browse" -> browse(args, deadline)
             "shot" -> shot(args, deadline)
+            "ci" -> ci(args)
+            "runs" -> runs(args, deadline)
             else -> refusal("There is no tool called ${call.tool}")
         }
     } catch (e: StoppedException) {
@@ -1601,6 +1640,207 @@ class AgentTools(
         val where = if (page.url == url) url else "$url → ${page.url}"
         val head = "0\n" + where + (page.title?.let { " · $it" } ?: "") + "\n"
         return head + chosen.joinToString("\n")
+    }
+
+    // ---- CI --------------------------------------------------------------
+
+    /**
+     * Where this project's CI is, or a sentence saying which part is missing.
+     *
+     * **A sealed answer rather than a `Result<Pair<…>>`**, because Kotlin cannot destructure a
+     * `Result` — it has no `component1` — and writing the three refusals as a thrown exception would
+     * put "no GitHub" in the same channel as a network failure. They are different: one is a fact
+     * about the project, the other is something to retry.
+     */
+    private sealed class Where {
+        data class Found(val gh: GitHub, val ref: RepoRef, val token: String) : Where()
+        data class Refused(val said: String) : Where()
+    }
+
+    private fun ciWhere(): Where {
+        val gh = github() ?: return Where.Refused(
+            "This project has no GitHub behind it, so there are no runs to read. " +
+                "A project is on GitHub once it has been synced.",
+        )
+        val token = githubToken()?.takeIf { it.isNotBlank() } ?: return Where.Refused(
+            "Nobody is signed in, so GitHub cannot be asked.",
+        )
+        val ref = RepoRef.of(git.remoteUrl(project)) ?: return Where.Refused(
+            "This project's remote is not a GitHub repository, so there is no CI to read.",
+        )
+        return Where.Found(gh, ref, token)
+    }
+
+    /**
+     * The runs of this project, newest first.
+     *
+     * **Read-only on purpose, and it stays that way until the workflow guard exists.** A tool that
+     * dispatches a workflow is a tool that starts a build on somebody's account; a tool that lists
+     * runs costs nothing and answers the question the agent actually has while it is working.
+     */
+    private fun ci(args: JSONObject): String {
+        val there = when (val w = ciWhere()) {
+            is Where.Refused -> return refusal(w.said)
+            is Where.Found -> w
+        }
+        val token = there.token
+        val workflow = args.optString("workflow").trim()
+        val branch = args.optString("branch").trim()
+        val limit = args.optInt("limit", 10).coerceIn(1, 50)
+        val found = there.gh.runs(token, there.ref, workflow, branch, limit)
+        if (found.error != null) {
+            return refusal(ciSaid(found.error, found.status))
+        }
+        val runs = found.value.orEmpty()
+        val head = if (runs.isEmpty()) {
+            "No runs" + (if (branch.isBlank()) "" else " on $branch") +
+                (if (workflow.isBlank()) "" else " of $workflow") +
+                ". A branch that has never been pushed has none."
+        } else {
+            runs.size.toString() + " run" + (if (runs.size == 1) "" else "s") + ", newest first"
+        }
+        val rows = runs.map { run ->
+            // **`running` rather than a blank conclusion**, because a blank reads as "it passed and
+            // had nothing to say", which is the opposite of "it has not finished".
+            val outcome = run.conclusion ?: if (run.running) "running" else "no conclusion"
+            "${run.id}  $outcome  ${run.branch.ifBlank { "?" }}  ${run.event}" +
+                "  ${run.sha}  ${run.createdAt.take(16).replace('T', ' ')}  ${run.name}"
+        }
+        return success(
+            (head + "\n" + rows.joinToString("\n")).trimEnd() +
+                (if (runs.isNotEmpty()) {
+                    "\n\nRead what a run said with runs {\"run\": <id>}."
+                } else {
+                    ""
+                }),
+        )
+    }
+
+    /**
+     * One run's logs, filed and then answered in the shape the caller asked for.
+     *
+     * **The filing is the point.** A job log is tens of kilobytes of timestamps; putting it in the
+     * conversation whole would spend the window on a build's scrollback and leave nothing for the
+     * work. So it is written under `agent/ci/` — inside the project, and inside the folder git
+     * excludes — and the answer is the path plus whatever `grep`/`from`/`to` selected. That is the
+     * same protocol as `shot` and `background`, and it is the same reason: the destination differs,
+     * so the result-size rule does not apply to it.
+     */
+    private fun runs(args: JSONObject, deadline: Deadline): String {
+        val id = args.optLong("run", 0L)
+        if (id <= 0L) {
+            return refusal("Say which run: {\"run\": 41177826224}. `ci` lists them with their ids.")
+        }
+        val there = when (val w = ciWhere()) {
+            is Where.Refused -> return refusal(w.said)
+            is Where.Found -> w
+        }
+        deadline.check("runs")
+        val found = there.gh.logs(there.token, there.ref, id)
+        if (found.error != null) {
+            return refusal(ciSaid(found.error, found.status))
+        }
+        val all = found.value.orEmpty()
+        val wanted = args.optString("job").trim()
+        val chosen = if (wanted.isBlank()) {
+            all
+        } else {
+            // **An exact name, or a refusal that lists the real ones.** A model that guessed
+            // "Test" for "Test (0)" would otherwise get an empty file and conclude the job said
+            // nothing, which is a very different fact from "that job is not in this run".
+            val hit = all.filterKeys { it == wanted }
+            if (hit.isEmpty()) {
+                return refusal(
+                    "This run has no job called \"$wanted\". Its jobs are: " +
+                        all.keys.joinToString(", ") { "\"$it\"" } + ".",
+                )
+            }
+            hit
+        }
+        val body = if (chosen.size == 1) {
+            chosen.values.first()
+        } else {
+            chosen.entries.joinToString("\n\n") { (name, text) ->
+                "===== $name =====\n" + text.trimEnd()
+            }
+        }
+        if (body.isBlank()) return success("Run $id has no log: no job in it has started.")
+        val file = File(File(File(projectDir, RESULTS_DIR), "ci"), "run-$id.log")
+        try {
+            file.parentFile?.mkdirs()
+            file.writeText(body)
+        } catch (e: Throwable) {
+            return refusal("The log could not be filed: " + Secrets.explain(e, "not written"))
+        }
+        val rel = file.relativeTo(projectDir).invariantSeparatorsPath
+        return success(slice(body, rel, args))
+    }
+
+    /**
+     * The part of a filed log the call asked for, or its shape when it asked for nothing.
+     *
+     * **Nothing asked for is not everything**: a log with no selector answers with its job names, its
+     * line count and a first screenful, because the caller has already been told where the file is
+     * and a whole log is exactly what this tool exists to avoid spending.
+     */
+    private fun slice(body: String, path: String, args: JSONObject): String {
+        val lines = body.split('\n')
+        val pattern = args.optString("grep").trim().ifEmpty { null }
+        if (pattern != null) {
+            val regex = try {
+                Regex(pattern, RegexOption.IGNORE_CASE)
+            } catch (e: Throwable) {
+                return "`grep` is not a pattern: \"$pattern\""
+            }
+            val hits = lines.withIndex().filter { regex.containsMatchIn(it.value) }
+            if (hits.isEmpty()) {
+                return "$path has ${lines.size} lines and none of them match \"$pattern\"."
+            }
+            return "$path — ${hits.size} line(s) matching \"$pattern\":\n" +
+                hits.joinToString("\n") { "${it.index + 1}: ${it.value}" }
+        }
+        val from = args.optInt("from", 1).coerceAtLeast(1)
+        val to = if (args.has("to")) args.optInt("to", 0) else 0
+        if (from > 1 || to > 0) {
+            val end = if (to > 0) to.coerceAtMost(lines.size) else lines.size
+            if (from > lines.size) {
+                return "$path has ${lines.size} lines, so there is no line $from."
+            }
+            return "$path — lines $from to $end of ${lines.size}:\n" +
+                lines.subList(from - 1, end).joinToString("\n")
+        }
+        // Nothing asked: the file, and the first screenful of it.
+        val head = lines.take(SHOW).joinToString("\n")
+        return "written to $path (${lines.size} lines)\n" + head +
+            (if (lines.size > SHOW) {
+                "\n… and ${lines.size - SHOW} more. Read them with " +
+                    "{\"run\": ${args.optLong("run", 0L)},\"from\":${SHOW + 1},\"to\":${lines.size}} " +
+                    "or select with {\"grep\":\"FAILED\"}."
+            } else {
+                ""
+            })
+    }
+
+    /** How many lines of a filed log a call that asked for nothing is shown. */
+    private val SHOW = 60
+
+    /**
+     * GitHub's failure, in words that name the permission when it is one.
+     *
+     * **A fine-grained key without a permission answers `403 Resource not accessible by personal
+     * access token`**, which names neither what was wanted nor how to grant it. The tools check
+     * capability where they can (see the operator's answer in the proposal), and this is the
+     * fallback for when GitHub is the one that says no.
+     */
+    private fun ciSaid(error: String, status: Int): String = when (status) {
+        401 -> "$error — the key was refused. Sign in again."
+        403, 404 -> if (error.contains("not accessible", ignoreCase = true)) {
+            "$error. A fine-grained key needs the Actions permission (read for runs and logs, " +
+                "write to start a run) on this repository."
+        } else {
+            error
+        }
+        else -> error
     }
 
     /**
