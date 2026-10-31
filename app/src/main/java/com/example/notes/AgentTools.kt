@@ -2427,9 +2427,13 @@ class AgentTools(
      * Why [file] may not be written, or null when it may.
      *
      * One sentence for every writing tool, in one place, for the same reason the lock lives in
-     * the funnel: a rule each tool remembers is a rule one tool forgets. `project_prompt.txt`
-     * is the case that matters — the agent may read the instructions it is given and may not
-     * rewrite them, which is the difference between following a brief and editing it.
+     * the funnel: a rule each tool remembers is a rule one tool forgets.
+     *
+     * **No path has a rule of its own here.** `project_prompt.txt` used to, twice — first an outright
+     * refusal, then an allowance with a trace note — and both were machinery for one file. It is an
+     * ordinary file in an ordinary project: the person may edit it, the agent may edit it when it is
+     * not locked, and the lock stops it. A special case would be a second lock that only one path
+     * has, and a lock that behaves differently from every other lock is one nobody can reason about.
      */
     private fun mayWrite(file: File): String? {
         val path = rel(file)
