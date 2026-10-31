@@ -196,30 +196,21 @@ class AgentChatScreenTest {
     // On API 28+ a selection ALSO builds a `Magnifier`, and Robolectric's magnifier has a null
     // `Surface` that throws on `destroy()` during the next frame. API 27 is a device this app
     // supports (`minSdk 26`) and Compose uses no magnifier there.
-    //
-    // Neither limit is the app: in NATIVE mode the run got as far as building handles, asking for
-    // the toolbar and starting a magnifier — which is a selection that happened.
     @GraphicsMode(GraphicsMode.Mode.NATIVE)
     @Config(sdk = [27])
     @Test
-    fun `the operator's own words can be selected, which is what a long press asks for`() {
+    fun `a long press selects the agent's words and the operator's words alike`() {
         // **Report #42: "text selection is broken for user messages".**
         //
-        // The previous attempt removed `animateContentSize()` from this bubble and said plainly that
-        // it could not be verified, because "selection is a platform long-press gesture Robolectric
-        // does not perform". That claim was wrong in an important way: `SelectionContainer` is
-        // **pure Compose**, not a platform text view, so its long-press is a Compose pointer
-        // gesture and `performTouchInput { longClick() }` reaches it.
+        // The previous attempt removed `animateContentSize()` from the operator's bubble and said
+        // plainly it could not be verified, on the grounds that "selection is a platform long-press
+        // gesture Robolectric does not perform". That was wrong: `SelectionContainer` is pure
+        // Compose, so its long press is a Compose pointer gesture and `performTouchInput` reaches it.
         //
-        // And what it produces is a request for the copy menu, which is the observable consequence
-        // of a selection: a press that selected nothing asks for no menu. Asserting on that is
-        // asserting the gesture worked rather than "the text was drawn".
-        // **A recording toolbar, because the real one is a popup window.** `SelectionContainer`
-        // asks `LocalTextToolbar` to show the copy menu as soon as a press selects something, and
-        // the default implementation puts it in a `Popup` — which Robolectric cannot create, so the
-        // test died inside the framework's own window code rather than in anything this app wrote.
-        // Supplying a toolbar that records the request is what makes the gesture observable: the
-        // question "did the long press select?" is answered by the toolbar being asked to appear.
+        // **The comparison is the test.** The agent's bubble has always selected — the operator said
+        // so — and it is wrapped in the same `SelectionContainer` as theirs. Pressing both with the
+        // same finger and requiring the same answer is what turns "their bubble is broken" into a
+        // measurement: if the technique were wrong, both would fail and the message would say so.
         val asked = java.util.concurrent.atomic.AtomicBoolean(false)
         val toolbar = object : TextToolbar {
             override fun showMenu(
@@ -245,37 +236,41 @@ class AgentChatScreenTest {
         say("remember the milk")
         awaitTurns(1)
 
-        val words = compose.onNodeWithText("remember the milk")
-        words.assertExists()
+        /** Holds [text] down for a second and answers the range that ended up selected. */
+        fun hold(text: String): Pair<Int, Int>? {
+            val node = compose.onNodeWithText(text)
+            node.assertExists()
+            // **Down, wait on the TEST clock, up.** `longClick()` advances the *event* timestamps,
+            // but a long press is decided by a coroutine timeout on the test's own clock, so
+            // advancing event time alone leaves the timeout unfired and the press is a tap.
+            node.performTouchInput { down(center) }
+            compose.mainClock.advanceTimeBy(1_000)
+            node.performTouchInput { up() }
+            compose.waitForIdle()
+            return compose
+                .onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.TextSelectionRange))
+                .fetchSemanticsNodes()
+                .mapNotNull { it.config.getOrNull(SemanticsProperties.TextSelectionRange) }
+                .firstOrNull()
+                ?.let { range -> range.start to range.end }
+        }
 
-        // **Down, wait on the TEST clock, up.** `longClick()` advances the *event* timestamps, but a
-        // long press is detected by a coroutine timeout that runs on the test's own clock — so
-        // advancing event time alone leaves the timeout unfired and the press is a tap. Advancing
-        // `mainClock` between the two is what makes the hold real.
-        words.performTouchInput { down(center) }
-        compose.mainClock.advanceTimeBy(1_000)
-        words.performTouchInput { up() }
-        compose.waitForIdle()
+        /** "start..end", or "none" — one shape for the message whatever the outcome. */
+        fun said(range: Pair<Int, Int>?): String =
+            if (range == null) "none" else range.first.toString() + ".." + range.second.toString()
 
-        // **The selection itself, not the menu.** `SelectionContainer` publishes
-        // `SemanticsProperties.TextSelectionRange`, and a long press that did nothing leaves it
-        // either absent or collapsed — so "some of it is selected" is the question, asked directly.
-        // The toolbar is a second observable and a weaker one: whether it is asked depends on the
-        // platform's own selection plumbing, which is exactly the layer this harness replaces.
-        val ranges = compose
-            .onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.TextSelectionRange))
-            .fetchSemanticsNodes()
-            .mapNotNull { it.config.getOrNull(SemanticsProperties.TextSelectionRange) }
+        /** A range is a selection only if it has two different ends. */
+        fun chose(range: Pair<Int, Int>?): Boolean = range != null && range.first != range.second
 
-        // The ranges are put in the message as their own string, because the checker that reads this
-        // file treats a quote inside `${...}` as an unbalanced quote — and it is right to: a nested
-        // string in an interpolation is exactly the shape that hides a real typo.
-        val seen = ranges.joinToString { range -> range.start.toString() + ".." + range.end.toString() }
+        val onAgent = hold("Noted.")
+        val onOperator = hold("remember the milk")
 
+        // **Both are reported whatever happens**, so a failure says which half disagreed — and says
+        // it in the same words whether the range was missing or merely empty.
         assertTrue(
-            "a long press on the operator's message selects it: ranges=" + seen +
-                ", menu asked=" + asked.get(),
-            ranges.any { it.start != it.end },
+            "a long press selects both bubbles: agent=" + said(onAgent) +
+                " operator=" + said(onOperator) + ", menu asked=" + asked.get(),
+            chose(onAgent) && chose(onOperator),
         )
     }
 
