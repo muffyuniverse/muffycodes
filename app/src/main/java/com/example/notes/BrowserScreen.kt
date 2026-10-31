@@ -99,6 +99,8 @@ fun BrowserScreen(
     onAddProject: () -> Unit,
     onRowChat: (String) -> Unit,
     onRowSync: (String) -> Unit,
+    /** Exports the project's newest artifact, or the project's own files when it has none. */
+    onRowExport: (String) -> Unit = {},
     onRowRename: (String) -> Unit,
     onRowDelete: (String) -> Unit,
     /** Local -> synced. Asks for a licence first, because publishing is a decision. */
@@ -336,7 +338,7 @@ fun BrowserScreen(
                 } else if (projects) {
                     ProjectList(
                         viewModel, onRowChat, onRowSync, onRowRename, onRowDelete,
-                        onRowPublish, onRowKeepLocal,
+                        onRowPublish, onRowKeepLocal, onRowExport,
                     )
                 } else {
                     EntryList(viewModel, actions)
@@ -621,6 +623,8 @@ private fun ProjectList(
     onPublish: (String) -> Unit,
     /** Synced -> local: take the remote away, keeping every version here. */
     onKeepLocal: (String) -> Unit,
+    /** Puts a file of the project into Downloads, through the same function the agent's tool uses. */
+    onExport: (String) -> Unit,
 ) {
     val names = viewModel.projectNames
     if (names.isEmpty()) {
@@ -709,6 +713,17 @@ private fun ProjectList(
                                     },
                                 )
                             }
+                            // **The same function the agent's `downloads` tool calls.** Two
+                            // implementations of "copy this to Downloads" drift in the ways that are
+                            // hardest to notice, and a person and an agent exporting the same file
+                            // should find them identical.
+                            DropdownMenuItem(
+                                text = { Text("Export to Downloads") },
+                                onClick = {
+                                    menu = false
+                                    onExport(name)
+                                },
+                            )
                             DropdownMenuItem(
                                 text = { Text("Rename…") },
                                 onClick = {

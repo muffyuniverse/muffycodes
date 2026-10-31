@@ -167,12 +167,21 @@ class Agent(
      */
     private val github: () -> GitHub? = { null },
     private val githubToken: () -> String? = { null },
+    /**
+     * Where a `downloads` call puts a file, or null when the app has no way to write one.
+     *
+     * **Injected for the same reason the browser is**: `MediaStore` needs a `Context`, and an `Agent`
+     * built in a test must not need one. Null makes the tool refuse in words rather than fail at the
+     * last moment, which is the difference between a model that learns the app cannot do this and one
+     * that learns nothing.
+     */
+    private val downloads: ((File) -> Result<Export.Done>)? = null,
 ) {
 
     private val tools = AgentTools(
         ws, project, git, log, maxResult, bg, backgroundMs, triggerTokens,
         browser = browser, browseMs = browseMs, privateAllowed = privateAllowed,
-        github = github, githubToken = githubToken,
+        github = github, githubToken = githubToken, downloads = downloads,
     )
 
     /**

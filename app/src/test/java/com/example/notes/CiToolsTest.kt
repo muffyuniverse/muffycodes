@@ -66,10 +66,24 @@ class CiToolsTest {
     }
 
     /** The tools, wired to the fake GitHub and its key. */
-    private fun tools(withGitHub: Boolean = true) = AgentTools(
+    /** What `downloads` was asked to export, so a test can see the call rather than the store. */
+    private val exported = mutableListOf<File>()
+
+    private fun tools(withGitHub: Boolean = true, withDownloads: Boolean = false) = AgentTools(
         ws, repo, git, log,
         github = { if (withGitHub) github else null },
         githubToken = { if (withGitHub) "a-key" else null },
+        // **Injected rather than reached for**, because `MediaStore` needs a `Context` and this test
+        // has no phone. The real one is `Export.copyToDownloads`, and what is being tested here is the
+        // tool's decisions: what it refuses, and what it hands over.
+        downloads = if (withDownloads) {
+            { file ->
+                exported += file
+                Result.success(Export.Done(file.name, file.length(), Export.FOLDER))
+            }
+        } else {
+            null
+        },
     )
 
     /** A run on the fake GitHub: an id, an outcome, and the jobs it had. */
@@ -93,7 +107,8 @@ class CiToolsTest {
         }
     }
 
-    private fun call(tool: String, args: String) = tools().run(Call("c1", tool, args))
+    private fun call(tool: String, args: String, withDownloads: Boolean = false) =
+        tools(withDownloads = withDownloads).run(Call("c1", tool, args))
 
     /** Puts a workflow in the project, and answers its path from the project's root. */
     private fun workflow(name: String, text: String): String {
@@ -476,5 +491,69 @@ class CiToolsTest {
         val body = call("artifact", """{"run":1,"branch":"main"}""")
         assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
         assertTrue("and it names the key: $body", body.contains("branch"))
+    }
+
+    // ---- downloads --------------------------------------------------------
+
+    @Test
+    fun `a file is handed to the exporter, through the same function the menu uses`() {
+        // **The one exit from the project.** A file inside an app's private storage is a file nobody
+        // can open, so an APK the agent fetched or a report it wrote is only useful once it can leave.
+        ws.write(File(ws.projectDir(repo), "release/app-release.apk"), "not really an apk")
+
+        val body = call("downloads", """{"path":"release/app-release.apk"}""", withDownloads = true)
+
+        assertTrue("it says where it went: $body", body.contains("Downloads"))
+        assertEquals("one file was handed over", 1, exported.size)
+        assertEquals("and it is the one asked for", "app-release.apk", exported[0].name)
+    }
+
+    @Test
+    fun `a folder is refused, because a flat Downloads cannot hold a tree honestly`() {
+        ws.write(File(ws.projectDir(repo), "release/one.txt"), "x")
+
+        val body = call("downloads", """{"path":"release"}""", withDownloads = true)
+
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("and it says why: $body", body.contains("folder"))
+        assertTrue("and nothing was handed over", exported.isEmpty())
+    }
+
+    @Test
+    fun `a path that escapes the project is refused`() {
+        // **The same rule `read` and `edit` use**, so an exit that reaches any file on the phone
+        // cannot exist by a different route.
+        val body = call("downloads", """{"path":"../../etc/passwd"}""", withDownloads = true)
+
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("and it says where the limit is: $body", body.contains("inside this project"))
+        assertTrue("and nothing was handed over", exported.isEmpty())
+    }
+
+    @Test
+    fun `a file that is not there is refused rather than exported as nothing`() {
+        val body = call("downloads", """{"path":"release/nothing.apk"}""", withDownloads = true)
+
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("and it says so: $body", body.contains("no file"))
+    }
+
+    @Test
+    fun `naming nothing is refused with the shape of a real call`() {
+        val body = call("downloads", """{}""", withDownloads = true)
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("and it shows what to say: $body", body.contains("path"))
+    }
+
+    @Test
+    fun `an app with no way to write Downloads says so rather than failing at the last moment`() {
+        // **A model that learns the app cannot do this is better than one that learns nothing.** The
+        // file is still in the project, and the answer names where.
+        ws.write(File(ws.projectDir(repo), "report.md"), "# hello")
+
+        val body = call("downloads", """{"path":"report.md"}""")
+
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("and it says the file is still there: $body", body.contains("report.md"))
     }
 }

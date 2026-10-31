@@ -49,6 +49,15 @@ class AgentTools(
      */
     private val triggerTokens: () -> Long = { 0L },
     /**
+     * Where a file goes when the call asks for it in Downloads — or `null` when it may not.
+     *
+     * **Injected rather than reached for**, for the same reason [bg] and the browser are: `MediaStore`
+     * needs a `Context`, and a tool set built in a test must not need one. It is a `null` default so a
+     * tool set built without a decision cannot write into a person's Downloads by accident, and the app
+     * passes the real one at the one place it builds tools for a turn.
+     */
+    private val downloads: ((File) -> Result<Export.Done>)? = null,
+    /**
      * The browser, or `Browser.NONE` when the agent may not browse.
      *
      * **Injected rather than made here**, for the same reason [bg] is: a test must be able to say
@@ -211,6 +220,7 @@ class AgentTools(
             "ci" to setOf("workflow", "branch", "limit", "event", "inputs"),
             "runs" to setOf("run", "job", "grep", "from", "to"),
             "artifact" to setOf("run", "name"),
+            "downloads" to setOf("path"),
         )
 
         /** The keys [args] carries that [tool] does not take, in the order the model wrote them. */
@@ -418,6 +428,16 @@ class AgentTools(
                     "file. Artifacts expire; an expired one is refused with the reason.",
                 "{\"run\":41177826224,\"name\":\"app-release\"}",
             ),
+            spec(
+                "downloads",
+                "Put one file of this project into the phone's Downloads, so a person can open it. " +
+                    "**This is the only way a file leaves the project**: an app's own storage is a " +
+                    "place nobody can browse, so a report you wrote, an APK you fetched or a " +
+                    "screenshot you took is only useful once it is here. `path` is one file, " +
+                    "relative to the project. A folder is refused — a project is a tree and " +
+                    "Downloads is one flat folder — so zip it first if you mean several files.",
+                "{\"path\":\"release/app-release.apk\"}",
+            ),
         )
 
         /**
@@ -535,6 +555,7 @@ class AgentTools(
             "ci" -> ci(args, deadline)
             "runs" -> runs(args, deadline)
             "artifact" -> artifact(args)
+            "downloads" -> downloads(args)
             else -> refusal("There is no tool called ${call.tool}")
         }
     } catch (e: StoppedException) {
@@ -2030,7 +2051,10 @@ class AgentTools(
         if (bytes.error != null) return refusal(ciSaid(bytes.error, bytes.status))
         val data = bytes.value ?: return refusal("GitHub returned no bytes for \"$wanted\".")
         val dir = File(File(File(projectDir, RESULTS_DIR), "ci"), "artifacts")
-        val name = ws.cleanName(one.name).ifEmpty { "artifact-${one.id}" }
+        // **`Workspace.cleanName`, the companion's**, because an artifact's name comes from a workflow
+        // and may hold anything — a slash would make a directory, and a name that is only symbols would
+        // make a file nobody can find.
+        val name = Workspace.cleanName(one.name, "artifact-${one.id}")
         val file = File(dir, name + ".zip")
         try {
             file.parentFile?.mkdirs()
@@ -2058,6 +2082,67 @@ class AgentTools(
         }
         return success(
             "Fetched \"${one.name}\" (${data.size} bytes) from run $id into $rel." + listing,
+        )
+    }
+
+    /**
+     * Copies one file of the project into the phone's Downloads, so a person can open it.
+     *
+     * ## Why the agent needs this at all
+     *
+     * The agent can write a file into the project, and a file inside an app's private storage is a file
+     * nobody can open. An APK it fetched, a report it wrote, a screenshot it took — all of them are
+     * only useful if they can leave the project. This is the one exit.
+     *
+     * ## Why it is the same function the menu uses
+     *
+     * `Export.copyToDownloads` is called by the ⋮ menu and by this tool, because two implementations of
+     * "copy this to Downloads" drift in the ways that are hardest to notice: one cleans the name and
+     * the other does not, one overwrites and the other makes `name (1)`. A person who downloaded a file
+     * and an agent that downloaded the same file should find them identical.
+     *
+     * ## What it refuses
+     *
+     * A folder, because a project is a tree and a flat Downloads folder cannot hold one honestly. A
+     * path outside the project, because `read` and `edit` already refuse one and an exit that could
+     * reach any file on the phone would undo that. And everything, when the app gave no way to write —
+     * see the [downloads] constructor parameter.
+     */
+    private fun downloads(args: JSONObject): String {
+        val asked = args.optString("path").trim()
+        if (asked.isEmpty()) {
+            return refusal(
+                "Say which file to put in Downloads: {\"path\":\"release/app-release.apk\"}. " +
+                    "A folder is not exported; a project is a tree and Downloads is one folder.",
+            )
+        }
+        val file = File(projectDir, asked.trim('/'))
+        // **Inside the project, by the resolved path** — the same [withinProject] rule `read` and
+        // `edit` use, so an exit that reaches any file on the phone cannot exist by a different route.
+        // A `../` that escapes is caught here, and so is a symlink pointing out.
+        if (!withinProject(file)) {
+            return refusal(
+                "\"$asked\" is not inside this project, and only the project can be exported from.",
+            )
+        }
+        if (file.isDirectory) {
+            return refusal(
+                "\"$asked\" is a folder. A folder is not exported: a project is a tree and Downloads " +
+                    "is one flat folder, so its files would arrive with names that no longer tell " +
+                    "them apart. Name a file, or zip one first.",
+            )
+        }
+        if (!file.isFile) {
+            return refusal("There is no file at \"$asked\" in this project.")
+        }
+        val put = downloads ?: return refusal(
+            "This app was not given a way to write into Downloads, so nothing can be exported from " +
+                "here. The file is at ${file.relativeTo(projectDir).invariantSeparatorsPath} in the " +
+                "project.",
+        )
+        return put(file).fold(
+            onSuccess = { success(it.said()) },
+            onFailure = { refusal(it.message ?: "The file could not be put in Downloads") },
         )
     }
 

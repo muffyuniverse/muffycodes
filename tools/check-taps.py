@@ -61,6 +61,8 @@ VOCABULARY = {
     "add project", "new local project", "sync", "see changes", "rename project", "delete project",
     # the local<->synced cycle: giving a local project a repository, and taking it back
     "publish", "keep local", "confirm publish", "confirm keep local",
+    # a project's newest artifact out to the phone, through the same function the agent's tool uses
+    "export",
     # the account
     "add account", "confirm add account", "remove account", "use test account",
     # the log itself, and the table counted from the request logs

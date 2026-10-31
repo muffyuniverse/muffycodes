@@ -2228,6 +2228,70 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /**
+     * Puts a project's newest CI artifact into Downloads — the menu's "Export to Downloads".
+     *
+     * **It exports the artifact, not the project.** A person pressing Export on a project wants the
+     * thing the build produced: an APK they can install, a bundle of screenshots, a report. Exporting
+     * the project's source tree would be a hundred files in a flat folder with names that no longer
+     * tell them apart, which is why `Export` refuses a folder.
+     *
+     * When there is no artifact it says so rather than guessing at a file, because "the newest run has
+     * not produced one" and "the build failed" are different facts and the person needs the first one
+     * to understand the second.
+     */
+    fun exportArtifact(project: String) {
+        val login = activeLogin
+        val api = githubFor(login) ?: return
+        val token = login?.let { credentials.token(it) }.orEmpty()
+        if (token.isBlank()) {
+            message = "Sign in to GitHub first"
+            return
+        }
+        val ref = RepoRef.of(remoteUrlOf(project).orEmpty())
+        if (ref == null) {
+            message = "$project has no GitHub repository, so it has no artifacts to export"
+            return
+        }
+        busy = true
+        onWorker {
+            // **The newest run with artifacts**, because a project has many runs and the one a person
+            // means by "export" is the last thing that was built.
+            val runs = api.runs(token, ref, limit = 20)
+            val run = runs.value.orEmpty().firstOrNull { it.conclusion == "success" }
+            val artifacts = run?.let { api.artifacts(token, ref, it.id) }?.value.orEmpty()
+            val first = artifacts.firstOrNull()
+            val outcome = if (first == null) {
+                "There is no artifact to export: no successful run has produced one yet."
+            } else {
+                val bytes = api.artifactBytes(token, ref, first.id)
+                if (bytes.error != null) {
+                    "The artifact could not be downloaded: ${bytes.error}"
+                } else {
+                    // **Through the same file the tool writes to**, so a person's export and the
+                    // agent's are the same bytes from the same place.
+                    val ws = workspace!!
+                    val dir = File(File(ws.projectDir(project), AgentLog.DIR), "ci/artifacts")
+                    val file = File(dir, Workspace.cleanName(first.name, "artifact") + ".zip")
+                    try {
+                        dir.mkdirs()
+                        file.writeBytes(bytes.value ?: ByteArray(0))
+                        Export.copyToDownloads(getApplication(), file).fold(
+                            onSuccess = { it.said() },
+                            onFailure = { it.message ?: "It could not be put in Downloads" },
+                        )
+                    } catch (e: Throwable) {
+                        "The artifact could not be filed: " + Secrets.explain(e, "not written")
+                    }
+                }
+            }
+            main.post {
+                busy = false
+                message = outcome
+            }
+        }
+    }
+
+    /**
      * Starts a release of [versionName] from `main`.
      *
      * **The other lane, and the one the agent cannot reach.** `AgentTools`' `ci` refuses any branch but

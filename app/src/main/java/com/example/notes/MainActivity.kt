@@ -480,6 +480,9 @@ private fun AppRoot(viewModel: AppViewModel) {
                 onRowDelete = { project -> tap("delete project", project); pending = Pending.DeleteProject(project) },
                 onRowPublish = { project -> tap("publish", project); pending = Pending.PublishProject(project) },
                 onRowKeepLocal = { project -> tap("keep local", project); pending = Pending.KeepLocal(project) },
+                // **The same function the agent's `downloads` tool calls**, so a person's export and
+                // the agent's are the same bytes from the same place.
+                onRowExport = { project -> tap("export", project); viewModel.exportArtifact(project) },
                 onCreateFile = { tap("new file"); viewModel.currentDir?.let { pending = Pending.NewFile(it) } },
                 onCreateFolder = { tap("new folder"); viewModel.currentDir?.let { pending = Pending.NewFolder(it) } },
                 onUploadFiles = { pickingFiles = tap("upload files"); pickFiles.launch(arrayOf("*/*")) },
