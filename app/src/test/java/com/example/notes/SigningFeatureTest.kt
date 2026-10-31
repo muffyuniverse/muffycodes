@@ -29,6 +29,34 @@ class SigningFeatureTest : FeatureTest() {
         return this
     }
 
+    /**
+     * A workflow that signs, because **the fix needs one to give the environment to.**
+     *
+     * `fixSigning` finds the workflow by what it reads rather than by its name, so the fixture has to
+     * look like a real one: a job, and a step whose `env:` names the keystore secret.
+     */
+    private fun putWorkflow(project: String) {
+        val dir = File(scene.viewModel.workspace!!.projectDir(project), ".github/workflows")
+        dir.mkdirs()
+        File(dir, "build-and-release.yml").writeText(
+            """
+            name: Build and release
+            on:
+              push:
+                branches: [main, development]
+            jobs:
+              build-release:
+                name: Build the release
+                runs-on: ubuntu-24.04
+                steps:
+                  - name: Build the release
+                    env:
+                      MUFFY_KEYSTORE_BASE64: ${'$'}{{ secrets.MUFFY_KEYSTORE_BASE64 }}
+                    run: ./gradlew assembleRelease
+            """.trimIndent(),
+        )
+    }
+
     /** A key in the project's own folder, shaped like the one a person would have. */
     private fun putKey(project: String) {
         val dir = scene.viewModel.workspace!!.projectDir(project)
@@ -99,6 +127,7 @@ class SigningFeatureTest : FeatureTest() {
         withToken()
         scene.project("groceries")
         putKey("groceries")
+        putWorkflow("groceries")
         scene.sync("groceries")
         scene.await("the check to run") { scene.viewModel.signingSaid != null }
         assertNotNull("the row is offering the key", scene.viewModel.signingKeyFile)
@@ -123,6 +152,7 @@ class SigningFeatureTest : FeatureTest() {
         withToken()
         scene.project("groceries")
         putKey("groceries")
+        putWorkflow("groceries")
         scene.sync("groceries")
         scene.await("the check to run") { scene.viewModel.signingSaid != null }
 
