@@ -423,32 +423,7 @@ class AppViewModel @JvmOverloads constructor(
      * to a folder on this phone that behaves like one, so every feature that needs
      * an account can be walked through without a key ever existing.
      */
-    fun githubFor(login: String?): GitHub? = githubFor(login, accounts, testAccountsAllowed)
-
-    companion object {
-        /**
-         * Which GitHub a login talks to — **the rule, in one place, for the app and the agent alike.**
-         *
-         * It was a method on [AppViewModel] only, and the agent's CI tools need the same answer
-         * without a view model: a debug build's test account is a folder pretending to be GitHub, and
-         * a release build must refuse to act as one even when a stored account claims to be. Writing
-         * that twice would be writing it two slightly different ways.
-         *
-         * **The provisional account has no GitHub.** Its folder is a real workspace, but there is no
-         * account behind it, so answering with an `HttpGitHub` would give every caller something
-         * that looks usable and sends unauthenticated requests to the internet. `null` is the honest
-         * answer, and it is the one the screens already handle.
-         */
-        fun githubFor(login: String?, accounts: AccountStore, testAccountsAllowed: Boolean): GitHub? {
-            if (accounts.isProvisional(login)) return null
-            val stored = accounts.account(login) ?: return null
-            return if (stored.dev && testAccountsAllowed) {
-                DiskGitHub(accounts.devGitHubDir(stored.login), stored.login)
-            } else {
-                HttpGitHub()
-            }
-        }
-    }
+    fun githubFor(login: String?): GitHub? = Companion.githubFor(login, accounts, testAccountsAllowed)
 
     /** The GitHub of the active account, or null when nobody is signed in. */
     val github: GitHub? get() = githubFor(activeLogin)
@@ -3810,6 +3785,29 @@ class AppViewModel @JvmOverloads constructor(
          * adopted into a signed-in account.
          */
         val PROVISIONAL_AUTHOR = GitAuthor("Muffy Codes", "local@muffy.local")
+
+        /**
+         * Which GitHub a login talks to — **the rule, in one place, for the app and the agent alike.**
+         *
+         * It was a method on [AppViewModel] only, and the agent's CI tools need the same answer
+         * without a view model: a debug build's test account is a folder pretending to be GitHub, and
+         * a release build must refuse to act as one even when a stored account claims to be. Writing
+         * that twice would be writing it two slightly different ways.
+         *
+         * **The provisional account has no GitHub.** Its folder is a real workspace, but there is no
+         * account behind it, so answering with an `HttpGitHub` would give every caller something
+         * that looks usable and sends unauthenticated requests to the internet. `null` is the honest
+         * answer, and it is the one the screens already handle.
+         */
+        fun githubFor(login: String?, accounts: AccountStore, testAccountsAllowed: Boolean): GitHub? {
+            if (accounts.isProvisional(login)) return null
+            val stored = accounts.account(login) ?: return null
+            return if (stored.dev && testAccountsAllowed) {
+                DiskGitHub(accounts.devGitHubDir(stored.login), stored.login)
+            } else {
+                HttpGitHub()
+            }
+        }
         private const val SEARCH_LIMIT = 4000
 
         /** How many commits back the "what used to be here" list looks. */
