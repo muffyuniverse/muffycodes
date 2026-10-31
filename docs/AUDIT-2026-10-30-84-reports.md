@@ -2,14 +2,15 @@
 
 Written 2026-10-30 from `trace.log (3).txt`: **84 reports**, 51 from build 191, 2 from 194, 31 from 195.
 Every one is checked against the code, not against a plan. The batch that closed them is the chain
-ending `8f745c4`.
+ending `d69d4ef`.
 
 **78 were already closed before this session.** The 191/194 batches landed across the commits named in
 `PLAN-2026-10-30-reports.md`; the audit here confirmed each against the source rather than trusting
 that document. The ones that were marked done and were not: the `from`/`to` pair, the copy rename, the
 folder marks, the sync icon, the cap, and the filenames — six, listed below.
 
-**Six were genuinely open, and this session closed them all:**
+**Seven were genuinely open, and this session closed all seven** (six defects and one question that
+turned out to be a defect):
 
 | Report | What was actually wrong |
 |---|---|
@@ -17,7 +18,7 @@ folder marks, the sync icon, the cap, and the filenames — six, listed below.
 | **#67** | The same missing key made `from`/`to` and `at` unusable for what the description promised, so the cheap safe edit was unreachable. |
 | **#68** | A copy could not be renamed; empty and unreadable both answered `0` with no body. |
 | **#55** | Folders had no lock or unsync mark: the marks were drawn only on `EntryKind.TEXT` while `hold`/`unsync` had always understood folders. |
-| **#53/#54** | The sync icon lagged: `unsync` re-read the flags file on every call, which Compose cannot see, so a tap changed nothing the row was watching. |
+| **#53/#54** | The sync icon lagged: `unsync` re-read the flags file on every call, which Compose cannot see, so a tap changed nothing the row was watching. (Two numbers, one defect.) |
 | **#81** | The bubble cap counted source lines, not rows, so a wrapped paragraph was three times the height the cap allowed. |
 | **#84** | Background result filenames carried a 31-character provider id. |
 
@@ -29,12 +30,22 @@ once, as the newest variant, and a test now says so), #81 (a simple fix, made), 
 agent and agent-chat blocks) was reversed by #30 (rename them instead), and #75 was corrected in the
 next message.
 
-**#42 (text selection on user messages) stays OPEN.** It was reported in build 191 and again in 195
-("text selection is broken for user messages"). One structural difference was removed —
-`animateContentSize()` on the operator's bubble — and the suite cannot verify it: selection is a
-platform long-press gesture that Robolectric does not perform. A test was written claiming to verify
-it and then reverted, because it only checked that the text was drawn. **If it is still broken, the
-cause is elsewhere and a trace is what is needed.**
+**#42 (text selection on user messages) is the one item still OPEN, and the reason is now measured
+rather than assumed.** It was reported once — build 191, 17:08 — and build 191 was `4eaccaa`, which is
+**before** `7d683dd` removed `animateContentSize()` from that bubble. So that change has never been
+tested against the build the report came from.
+
+Four ways of making the long press were tried, and all four reached `SelectionContainer` (NATIVE
+graphics mode built the handles, asked the toolbar and started a magnifier) without ever publishing a
+non-empty selection range — **and the agent's bubble behaved identically, and that is the one the
+operator says selects fine.** A technique that fails on the working case has measured the harness. So
+the harness cannot answer this question, and a green test here would claim more than it measured.
+
+What *is* pinned (`d69d4ef`): the person's bubble is inside a `SelectionContainer` exactly as the
+agent's is, and nothing on its modifier chain — no `clickable`, no `pointerInput` — can consume the
+press first. That is the whole difference the code could have. **If it is still broken on a device,
+the cause is in the platform's selection plumbing rather than in this app's layout, and a trace is
+what is needed.**
 
 ---
 
@@ -83,7 +94,7 @@ cause is elsewhere and a trace is what is needed.**
 | **39** | 17:02 | and I need it to show only hh:mm as time - not freaking milliseconds | hh:mm in the footer — earlier (`ed34a26`) |
 | **40** | 17:04 | nullnullnullnullnullnullnullnullnullnullnullnullnullnullnullnullnullnull - what is the reason for such rows in | nullnullnull — earlier (`68c0d4f`) |
 | **41** | 17:05 | and why first agent page is a page of nullnullnullnullnullnullnullnullnullnullnullnullnullnullnullnullnullnull | First page of nulls — earlier (`68c0d4f`) |
-| **42** | 17:08 | text selection is broken for user messages | Text selection on user messages — OPEN, could not verify |
+| **42** | 17:08 | text selection is broken for user messages | **OPEN — and this is the honest reason.** The gesture cannot be made in this harness: four techniques all reached `SelectionContainer` (NATIVE mode built handles, asked the toolbar, started a magnifier) but none published a non-empty range, **including on the agent's bubble, which the operator says works**. A test that cannot make the gesture cannot close a report about the gesture. What IS pinned: the person's bubble is inside a `SelectionContainer` and nothing on its modifier chain consumes the press (`d69d4ef`). **If it is still broken on a device, the cause is in the platform's selection plumbing, not in this app's layout.** |
 | **43** | 17:10 | when keyboard pops up it covers messages, I want the screen to move down so that messages are above the keyboa | Keyboard pushes the list — earlier (`a44ecef`) |
 | **44** | 17:12 | I want write to the agent box be the color of the background - no visible edges | Composer is the page's colour — done (already in source) |
 | **45** | 17:17 | agent is "off" but it responds when user sends it a message. Make it so that a new message from user turns the | Speaking turns the agent on — done (already in source) |
@@ -122,7 +133,7 @@ cause is elsewhere and a trace is what is needed.**
 | **78** | 23:23 | Cached is part of input, not a column beside it. A dash is a number that does not exist — an interval with no  | Explanatory note removed — 64668b4 |
 | **79** | 23:25 | for agent status just write waiting/working/stopped + current context (just "131k" for example - laconic) | Status + context, laconic — 64668b4 |
 | **80** | 23:30 | does "restore deleted" show all the files deleted from the selected folder?  like all that existed in previous | Restore deleted — ANSWERED, see below |
-| **81** | 23:34 | limit on displayed lines doesnt account for long lines that are wrapping. Do we need to live with it or is it  | Wrapped lines in the display cap — OPEN |
+| **81** | 23:34 | limit on displayed lines doesnt account for long lines that are wrapping. Do we need to live with it or is it  | **CLOSED** — `AgentChat.rowsOf` counts rows, not source lines (`8f745c4`) |
 | **82** | 23:36 | expand to read - I want this phrase at the bottom of messages to be clickable (and of selectable color) so tha | Expand to read is a control — 25de8d2 |
 | **83** | 23:38 | why in fullscreen at the top left corner agent is repeated 2 times: "agent agent"? | 'agent agent' — 25de8d2 |
-| **84** | 23:41 | why background results filenames are so insane? make them shorter, they should be named by hash 64base 8 numbe | Short hash filenames — OPEN |
+| **84** | 23:41 | why background results filenames are so insane? make them shorter, they should be named by hash 64base 8 numbe | **CLOSED** — SHA-256 → base64url → 8 chars (`762a686`) |
