@@ -370,17 +370,174 @@ app itself"* — and needs nothing from GitHub but one download.
 
 ---
 
-## 8. Open questions for the operator
+## 8. The operator's answers, and what they change
 
-1. **Should the agent be able to push at all?** Today the prompt says the person pushes. Giving the
-   agent `ci` and `artifact` does not require that to change — it can *observe* CI on the person's push.
-   Making it push is a separate decision and a larger one.
-2. **Should `.github/` be agent-writable?** It is the difference between "the agent can fix the build"
-   and "the agent can change what the build does". I would default to no.
-3. **Is `Downloads` the destination, or is the app's own folder enough?** The operator asked for both,
-   and they serve different purposes: the app's folder is where the agent works, `Downloads` is where
-   the *person* takes a file out. Both are cheap; the question is which one the 3-dot item should
-   default to.
-4. **Fine-grained tokens:** accept them with a sentence naming the permissions, or require classic and
-   be done? I recommend accepting both — and the §2 correction is the reason: they can do everything
-   this app does, so refusing them would cost a capability for no gain.
+All four questions were answered inline. Three confirm a direction; **one reverses mine, and it is the
+one that changes the shape of the whole thing.**
+
+### 8.1 Push: person → `main`, agent → `development`
+
+> *"can we make it so that person pushes to main, while agent pushes to dev?"*
+
+**Yes, and it is nearly free — the workflow already implements it.** Measured from
+`.github/workflows/build-and-release.yml`:
+
+| Ref | tests | release build | deep checks (lint) | publishes a release |
+|---|---|---|---|---|
+| `refs/heads/main` | ✓ | ✓ | ✓ | **✓** |
+| `refs/heads/development` | ✓ | ✓ | ✗ | ✗ |
+| `workflow_dispatch` on **any** ref | ✓ | ✓ | **✓** | ✗ |
+
+So `development` is already exactly the lane the operator described: tested, built, an APK uploaded as
+`build-bundle` for seven days, and **nothing published**. The agent pushes there and the person's `main`
+stays the only door to a release.
+
+**The mechanism is already in `GitService.pushWithout`, which pushes by explicit refspec:**
+
+```kotlin
+.setRefSpecs(RefSpec("${commit.name}:refs/heads/$onto"))
+```
+
+`onto` is `remoteBranch(repo, local) ?: local` — so **the destination branch is a parameter, not a
+constant.** The change is: `ProjectGit.sync` keeps `onto` for the person's button; the agent's push
+passes `"development"` explicitly. One argument.
+
+**Three things to get right, and they are the reason this is not a one-liner:**
+
+1. **The agent must never be able to name `main`.** Not "should not" — *must not*. A refspec built from a
+   tool argument is one typo or one prompt injection from a release. The destination should be a
+   constant in the tool, not a key: `push(branch)` does not exist; there is `push()` and it goes to the
+   agent's branch. If the person's branch is `main` and the agent's is `development`, the app can even
+   refuse to start the agent push when they are the same branch.
+2. **The agent's commits are on the phone's `HEAD`, which is the person's branch.** Pushing `HEAD`'s
+   derived commit to `refs/heads/development` is what `pushWithout` already does for the omitted-paths
+   case, so the technique exists — but the *local* branch and the *remote* branch now differ on purpose,
+   and `remoteBranch(repo, local)` would answer `main`. The agent's push must not consult it.
+3. **`development` must not be a protected branch**, or the agent's push fails with a 422 that reads like
+   a bug. If it *is* protected, that is the person's decision and the app should say so in words.
+
+**What this does not give the agent: `main`.** Which means it cannot publish, cannot tag, and cannot
+overwrite what a person approved. That is the right shape — and it makes the agent's lane *safe to be
+generous in*, which matters for the next answer.
+
+### 8.2 `.github/` is writable, and the runner is the sandbox
+
+> *"writable, this is our version of 'bash' command - agent executes scripts and deploys artefacts there.
+> We should turn it into a powerfull tool with root permission to the agent (because github runner is the
+> ideal sandbox)."*
+
+**Accepted, and the operator is right about the important part: the runner is the sandbox.** This app has
+no shell — that is why `background` is not a shell — so "run this program" has no honest in-app answer.
+A GitHub runner *is* the answer: a disposable Ubuntu machine that executes a script and hands back its
+output, its exit code and its files. `workflow_dispatch` + `runs` + `artifact` is a shell with a
+two-minute latency and a much better blast radius.
+
+**But two things must be said plainly, because they are not what "sandbox" suggests:**
+
+1. **The runner is a sandbox for the *machine*. It is not a sandbox for the *repository*.** A workflow
+   file is not data the runner processes — **it is the thing the runner obeys.** So "the agent can write
+   `.github/`" does not mean "the agent can run code safely"; it means "the agent can change what this
+   repository's CI does, for every future push, including the person's". That is a *persistent*
+   capability, where running a script is a *transient* one.
+
+2. **This directly contradicts §5, and the contradiction has to be resolved rather than papered over.**
+   §5's whole design is that a secret's value never reaches the conversation, a file, or a process. An
+   agent that can write `.github/workflows/*.yml` can write:
+
+   ```yaml
+   - run: echo "${{ secrets.ANYTHING }}" > out.txt
+   - uses: actions/upload-artifact@…   # …and hand it back to itself
+   ```
+
+   — which is **precisely the attack the operator named** in the vault requirement: *"an agent can just
+   print a secret inside a runner and export value as artifact even if he gets only the key."* The vault
+   as designed does not stop this, because the secret is not in the vault's gift — it is in
+   `secrets.*`, and the workflow is what reads it.
+
+**So §5's guarantee needs one more clause, and it is the honest version of the operator's own idea:**
+
+> **An agent-authored workflow may not reach repository secrets.** Either it runs with no `secrets.*`
+> at all, or the app pins the workflow it will dispatch to a **hash approved by the person**, and refuses
+> to dispatch a file that changed since. The agent can then write `.github/` freely — it just cannot make
+> the *secrets* flow to a file it wrote.
+
+That is a real restriction and it is worth naming as one. It is also the only version of "root permission
+to the agent" that survives the operator's own threat model.
+
+**A third, smaller consequence:** the person's `main` still publishes. If `.github/` is agent-writable,
+then the agent's change to a workflow takes effect **on the person's next push to `main`** — the
+sandbox's output is reviewed by nobody. A workflow change should therefore be visible as a *change* (it
+already is: it is a file in the tree, it has history, it appears in `changes waiting`) and the app should
+call it out by name, because a person who sees "3 changes waiting" will not notice that one of them is
+the build.
+
+### 8.3 Both directions, and the `+` menu already has half of it
+
+> *"both, and I want a full circle, to upload and to download (including folders - and we already do this
+> partly in + command menu button)."*
+
+**Correct — the inbound half exists and is well built.** `Imports.filesInto` / `Imports.folderInto` take
+system-picker `content://` URIs and copy them into a folder: folders are followed to `MAX_DEPTH = 32`,
+capped at `MAX_FILES = 5_000`, names are cleaned, collisions are numbered, and **nothing runs on the UI
+thread** (a 40 MB APK copied inline would be an ANR). The outbound half is `DownloadsSink`, which writes
+`trace.log` into `Download/MuffyCodes/` through `MediaStore` with no permission.
+
+**So "the full circle" is: `Imports` in, `Downloads` out, and the same two acts as agent tools.** The
+work is smaller than it sounds:
+
+- **Out, for a folder**, is the one genuinely new piece. `MediaStore` writes one file at a time, so a
+  folder becomes *n* inserts, which is why it wants a progress count and a cap. A tree that fails
+  halfway must say which files landed rather than claiming success.
+- **In, from Downloads**, already works — but a file picked *by the agent* (an artifact) does not come
+  through a picker. That is why §3.3 writes straight into the workspace and then §8.3 offers it outward:
+  the agent's inbound path and the person's inbound path share the *destination*, not the *source*.
+
+### 8.4 Fine-grained tokens, with capabilities the tools check
+
+> *"accept and make sure that app tools can handle scoped permission"*
+
+**Accepted, and the second half is the real requirement.** "Handle a scoped permission" means the app
+must know, per act, which permission it needs — and answer before GitHub does:
+
+| Act | Permission | What the app says without it |
+|---|---|---|
+| push commits | Contents: write | "This key cannot write files in `owner/repo`." |
+| push `.github/workflows/` | **Workflows: write** | "This key cannot change workflow files." |
+| dispatch / read runs | Actions: write / read | "This key cannot run workflows." |
+| artifacts, job logs | Actions: read | "This key cannot read what the run produced." |
+| rename / delete repo | Administration: write | "This key cannot delete repositories." |
+| create repo | Repository creation: write | "This key cannot create repositories." |
+
+**A fine-grained token's actual grants are readable from the API**, which makes this check real rather
+than guessed: `GET /repos/{owner}/{repo}` returns a `permissions` object (`admin`, `maintain`, `push`,
+`pull`, `triage`), and a failed call returns `X-Accepted-GitHub-Permissions` naming what it wanted. So
+the app can answer *"this key can push but cannot run workflows"* from one request instead of from a
+sentence in a dialog. **The permission table above is the fallback for when the header is absent.**
+
+The dialog's text then stops being a scope list at all. It becomes: *paste a key; the app will tell you
+what it can do* — which is true for both token types and is the only version that stays correct when
+GitHub adds a permission.
+
+---
+
+## 9. What I would build first, now that §8 is answered
+
+The answers reorder the plan. **§8.2 is the one that must come first, because it is the one that can
+hurt**: a writable `.github/` with `secrets.*` reachable is the operator's own attack, and building the
+runner-as-shell before the guard would be building the vulnerability.
+
+1. **`ci` read + `runs`** (§3.1, §3.2) — read-only, no `.github/` write, no secrets. This is where the
+   agent learns to *see* CI, and it is safe today.
+2. **The workflow guard** (§8.2) — dispatch pinned to a person-approved hash, or no `secrets.*`. Small,
+   and it is the precondition for everything after it.
+3. **`.github/` writable + `ci` dispatch** (§8.2) — the runner as the agent's shell, with the guard from
+   step 2 already in place.
+4. **Agent push to `development`** (§8.1) — one refspec, but it needs the branch constant and the
+   protection check, so it belongs after the agent has something worth pushing.
+5. **Artifact → workspace → tap to open, and `downloads` both ways** (§3.3, §3.4, §8.3) — no permission,
+   no risk, and it closes the loop the operator asked for.
+6. **The vault** (§5) — last, and now with a precise job: it is the thing that keeps §8.2's power from
+   becoming §5's attack.
+
+**The dependency worth staring at:** step 3 without step 2 is the vulnerability. That is why they are two
+steps and not one.
