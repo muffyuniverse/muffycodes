@@ -1217,7 +1217,14 @@ class ScenariosTest {
             // suite is run by CI, so a sentence that went missing would fail a build exactly as it
             // would from the other file.
             assertTrue("it asks for the key", there("Personal access key"))
-            assertTrue("and names the scopes it needs", there("repo and delete_repo"))
+            // **All three, because a token missing one fails in a way that does not name it.** A
+            // token without `workflow` pushes every file except a workflow, and GitHub answers with
+            // the same "Resource not accessible" that a dozen other refusals produce.
+            assertTrue("and names the scopes it needs", there("repo, workflow and delete_repo"))
+            // **And says which kind of token.** One token type means one instruction; a fine-grained
+            // token fails the same way with different words, so the dialog names the supported path
+            // rather than leaving a person to discover it from a 403.
+            assertTrue("and says which kind of token", there("classic token"))
             assertTrue("and says whose commits they will be", there("belongs to"))
             assertTrue("it names GitHub in the title", there("Sign in to GitHub"))
             // **The button is "Sign in", the title is "Sign in to GitHub"** - two different strings,
