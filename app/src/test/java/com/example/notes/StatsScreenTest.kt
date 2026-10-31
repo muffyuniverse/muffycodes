@@ -317,8 +317,13 @@ class StatsScreenTest {
         // a rise from zero, would read as a jump that never happened.
         //
         // Asking for "no % anywhere" was too broad (a share line carries one) and asking for "no +"
-        // was worse (a date has one). The dash is the exact thing the rule produces.
-        compose.onNodeWithText(StatsFormat.NONE).assertExists()
+        // was worse (a date has one). The dash is the exact thing the rule produces — and there is
+        // **more than one**, because every row's change cell answers the same way, so the assertion
+        // is "at least one" rather than "exactly one".
+        assertTrue(
+            "the change cells are dashes",
+            compose.onAllNodesWithText(StatsFormat.NONE).fetchSemanticsNodes().isNotEmpty(),
+        )
         compose.onAllNodesWithText("%", substring = true).assertCountEquals(0)
     }
 
