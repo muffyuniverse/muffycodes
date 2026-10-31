@@ -6,6 +6,9 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -166,6 +169,40 @@ class AgentChatScreenTest {
         compose.onNodeWithText(treePage.caption).assertDoesNotExist()
         // And the first message is the operator's, drawn as a plain row.
         assertEquals("the person speaks first", AgentChat.Side.OPERATOR, scene.viewModel.chatBox!!.messages.first().side)
+    }
+
+    @Test
+    fun `a fullscreen page says whether it is a call or the agent's words`() {
+        // **Report #48: "and what is this 'create' text at fullscreen view?"** The answer was that
+        // `create` is the agent's own tool, so the page is that call's result - and the answer lived
+        // in a source comment, which is no answer for the person looking at the screen.
+        //
+        // A bare tool name beside a Close button reads as a verb you could press. Saying "call" makes
+        // it a label, and a label cannot be mistaken for a control.
+        val door = ScriptedDoor(
+            Reply("", listOf(call("create", """{"path":"shapes"}"""))),
+            Reply("Made the folder."),
+        )
+        chat(door)
+        say("make a shapes folder")
+        awaitTurns(2)
+
+        // The call's page, opened fullscreen from its own bubble.
+        compose.onAllNodesWithContentDescription("Read this message fullscreen")
+            .onFirst()
+            .performClick()
+        compose.waitForIdle()
+
+        // **The words, not the raw tool name.** `create` on its own is the question the report
+        // asked; "Agent · call · create" is the answer.
+        compose.onNodeWithText("Agent · call · create").assertExists()
+        // And an ordinary reply is not a call, so it says so rather than repeating its own name.
+        compose.onAllNodesWithContentDescription("Read this message fullscreen")
+            .onLast()
+            .performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Agent · words").assertExists()
+        compose.onNodeWithText("Agent · agent").assertDoesNotExist()
     }
 
     @Test

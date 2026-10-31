@@ -588,8 +588,21 @@ fun AgentChatScreen(
                     // something: a page whose caption is the tool that made it reads "Agent · read",
                     // which says who and what; a page whose caption is already "agent" says it once.
                     val caption = shown?.caption ?: "message"
+                    // **"call" and "words", because a tool's name alone is a question.** Reported:
+                    // "and what is this 'create' text at fullscreen view?" - and the answer was in a
+                    // comment, which is no answer at all. `create` is the agent's own tool, so the
+                    // page IS its result; saying so turns a bare word into a label, and a label
+                    // cannot be mistaken for a button.
+                    //
+                    // An ordinary reply is not a call, so it says "words" rather than "agent · agent"
+                    // - which was the same word twice.
+                    val who = if (caption.equals("agent", ignoreCase = true)) {
+                        "Agent · words"
+                    } else {
+                        "Agent · call · " + caption
+                    }
                     Text(
-                        if (caption.equals("agent", ignoreCase = true)) "Agent" else "Agent · $caption",
+                        who,
                         style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier.weight(1f),
                     )
