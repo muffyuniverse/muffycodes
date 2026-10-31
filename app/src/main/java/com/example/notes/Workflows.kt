@@ -216,6 +216,111 @@ class Workflows {
                 )
         }
 
+    /**
+     * The environment a workflow names, or null when it names none.
+     *
+     * **The first name in the file**, because a workflow with more than one job may name more than one
+     * environment and the one that matters to the caller is the one a person wrote first. Null is a
+     * real answer and not a failure: it is what a workflow that has not been set up looks like.
+     */
+    fun environmentNameOf(workflow: File): String? {
+        val text = try {
+            workflow.readText()
+        } catch (e: Throwable) {
+            return null
+        }
+        return environmentsOf(text).firstOrNull()
+    }
+
+    /**
+     * Makes [workflow] name [environment], and says which file it changed.
+     *
+     * ## Why this is a text edit and not a YAML round-trip
+     *
+     * There is no YAML parser in this app, and adding one to change one line would be a dependency
+     * whose own bugs could rewrite a workflow. More importantly a round-trip **loses comments**, and
+     * this repository's workflows are mostly comments — every one of them explains a decision that
+     * would otherwise be re-litigated. So the edit is the smallest one that is correct: find the job
+     * that the signing step is in, and put `environment:` at the job's own indent.
+     *
+     * ## Which job, and why it is found this way
+     *
+     * The signing step is the one whose `env:` names a keystore secret, or failing that the one whose
+     * `run:` mentions `assembleRelease`. Walking backwards from it to the nearest line at two-space
+     * indent gives the job. **A workflow with no such step is refused** rather than guessed at: an
+     * `environment:` on the wrong job is a key the build still cannot see, and the failure would look
+     * exactly like the mistake it is.
+     */
+    fun nameEnvironment(workflow: File, environment: String): Result<String> {
+        val text = try {
+            workflow.readText()
+        } catch (e: Throwable) {
+            return Result.failure(
+                IllegalStateException("${workflow.name} could not be read: ${e.message}"),
+            )
+        }
+        if (environmentsOf(text).isNotEmpty()) return Result.success(workflow.name)
+        val lines = text.lines().toMutableList()
+        // **The step that signs**, found by what it reads rather than by its name: a workflow may call
+        // it "Build the release", "Sign", or anything else.
+        val signer = lines.indexOfFirst { line ->
+            val one = line.trim()
+            !one.startsWith("#") && (
+                one.contains("MUFFY_KEYSTORE_BASE64") ||
+                    one.contains("assembleRelease")
+                )
+        }
+        if (signer < 0) {
+            return Result.failure(
+                IllegalStateException(
+                    "${workflow.name} has no step that reads a signing key, so there is nothing to " +
+                        "give an environment to.",
+                ),
+            )
+        }
+        // **Backwards to the job**, which is the nearest line at two-space indent that ends in a
+        // colon. Anything deeper belongs to the step, and anything at column zero is the top level.
+        var job = -1
+        for (i in signer downTo 0) {
+            val line = lines[i]
+            if (line.startsWith("  ") && !line.startsWith("   ") && line.trimEnd().endsWith(":")) {
+                job = i
+                break
+            }
+        }
+        if (job < 0) {
+            return Result.failure(
+                IllegalStateException(
+                    "${workflow.name}'s signing step is not inside a job, so there is nowhere to put " +
+                        "an environment.",
+                ),
+            )
+        }
+        // **After the job's own line and its comments**, so the header a person reads stays a header.
+        var at = job + 1
+        while (at < lines.size && lines[at].trimStart().startsWith("#")) at++
+        lines.add(at, "    environment: $environment")
+        val fresh = lines.joinToString("\n")
+        // **Read back before writing.** A text edit that produced something the scan cannot see would
+        // be a change reported as done and not done, and the next step deletes the repository copies.
+        if (environmentsOf(fresh).isEmpty()) {
+            return Result.failure(
+                IllegalStateException(
+                    "The environment could not be added to ${workflow.name}: the edit did not read " +
+                        "back, so nothing was changed.",
+                ),
+            )
+        }
+        return try {
+            workflow.writeText(fresh)
+            Result.success(workflow.name)
+        } catch (e: Throwable) {
+            Result.failure(
+                IllegalStateException("${workflow.name} could not be written: ${e.message}"),
+            )
+        }
+    }
+
     private fun environmentsOf(text: String): List<String> {
         val found = LinkedHashSet<String>()
         val lines = text.lines()

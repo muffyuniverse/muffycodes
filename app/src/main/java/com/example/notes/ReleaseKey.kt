@@ -190,6 +190,13 @@ class ReleaseKey(private val properties: File) {
         val environment: String,
         /** Why the environment could not be asked about, or null when it was. */
         val unknown: String? = null,
+        /**
+         * Secrets sitting at **repository** scope, where every workflow can read them.
+         *
+         * **The state the app exists to get a person out of**, and the one it can fix: see
+         * [Signing.move]. Empty is the ordinary answer.
+         */
+        val atRepository: List<String> = emptyList(),
     ) {
         /** Every name the build reads, in the order the report lists them. */
         private val all: List<String> get() = Field.entries.map { it.secretName }
@@ -201,12 +208,30 @@ class ReleaseKey(private val properties: File) {
         val needsSending: Boolean get() = haveKey && unknown == null && missing.isNotEmpty()
 
         /**
+         * True when the app can fix this in one press — a key on the phone, and something to do.
+         *
+         * **This is what the row is for.** A person who installs this app and has a signing key should
+         * not have to know that five steps on github.com have an order; the app knows the order.
+         */
+        val fixable: Boolean get() = haveKey && unknown == null && (needsSending || atRepository.isNotEmpty())
+
+        /**
          * One line for a screen, or null when there is nothing worth saying.
          *
          * **Silence is the common answer**, and that is the design: the warning exists for one state,
          * and a state that is fine, absent, or unknowable all read as fine.
          */
         fun said(): String? {
+            // **Exposure first, because it is the worse of the two.** A missing key means the release
+            // is unsigned; a repository-level key means every workflow the agent writes can read the
+            // key that signs them. The second is the one worth interrupting for.
+            if (atRepository.isNotEmpty()) {
+                val names = atRepository.take(3).joinToString(", ")
+                val rest = if (atRepository.size > 3) " and ${atRepository.size - 3} more" else ""
+                return "This project's signing key can be read by every workflow in the repository " +
+                    "($names$rest). It should be moved to the `$environment` environment, where " +
+                    "only a build on ${BRANCHES.joinToString(" or ")} can reach it."
+            }
             if (!needsSending) return null
             return "This project can't sign releases yet: ${missing.size} of the four signing " +
                 "secret" + (if (missing.size == 1) " is" else "s are") + " not in the " +
@@ -239,10 +264,16 @@ class ReleaseKey(private val properties: File) {
                 unknown = names.error,
             )
         }
+        // **Asked here rather than by a second call from the screen**, because the two answers are one
+        // question: "is this project's key where it should be". A screen that asked twice could draw
+        // half an answer.
+        val exposed = github.repoSecretNames(token, ref).value.orEmpty()
+            .filter { it in Field.entries.map { field -> field.secretName } }
         return Reconcile(
             haveKey = true,
             inEnvironment = names.value.orEmpty().toSet(),
             environment = environment,
+            atRepository = exposed,
         )
     }
 

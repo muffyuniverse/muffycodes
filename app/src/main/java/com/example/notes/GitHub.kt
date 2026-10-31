@@ -328,6 +328,32 @@ interface GitHub {
     ): GitHubResult<List<String>>
 
     /**
+     * Removes a secret from an environment.
+     *
+     * **The second half of a move, and the half that is easy to skip.** Copying the four to the
+     * environment leaves the originals in place, and a repository secret is readable by every
+     * workflow — so a move that only copies is a move that changed nothing about the exposure.
+     */
+    fun deleteEnvironmentSecret(
+        token: String,
+        ref: RepoRef,
+        environment: String,
+        name: String,
+    ): GitHubResult<Unit>
+
+    /**
+     * Removes a **repository-level** secret.
+     *
+     * **This is the one that closes the hole.** Every workflow in the repository can read a secret at
+     * this scope, including one the agent wrote and started, so leaving one here makes the environment
+     * rule decorative no matter how the environment is configured.
+     *
+     * The app never *writes* one — the only reason it can delete is that a person's repository may
+     * already have one, and a move that cannot remove the original is not a move.
+     */
+    fun deleteRepoSecret(token: String, ref: RepoRef, name: String): GitHubResult<Unit>
+
+    /**
      * Restricts an environment to named branches.
      *
      * **This is the gate that replaces a reviewer, and it is better than one.** The threat is the agent
@@ -903,6 +929,36 @@ class HttpGitHub(private val api: String = DEFAULT_API) : GitHub {
             if (added.error != null) {
                 return GitHubResult(error = added.error, status = added.status)
             }
+        }
+        return GitHubResult(value = Unit)
+    }
+
+    override fun deleteEnvironmentSecret(
+        token: String,
+        ref: RepoRef,
+        environment: String,
+        name: String,
+    ): GitHubResult<Unit> = delete(
+        token,
+        "/repos/${ref.owner}/${ref.name}/environments/" + urlPart(environment) +
+            "/secrets/" + urlPart(name),
+    )
+
+    override fun deleteRepoSecret(token: String, ref: RepoRef, name: String): GitHubResult<Unit> =
+        delete(token, "/repos/${ref.owner}/${ref.name}/actions/secrets/" + urlPart(name))
+
+    /**
+     * A DELETE, and the one thing it must not do is call 404 a failure.
+     *
+     * **A secret that is already gone is the state the caller wanted.** A move that runs twice — a
+     * person pressing the button again, or a retry after a dropped connection — must land on "it is
+     * not there" and stop, rather than reporting a failure for having already succeeded.
+     */
+    private fun delete(token: String, path: String): GitHubResult<Unit> {
+        val response = get("DELETE", path, token)
+        if (response.status == 404) return GitHubResult(value = Unit)
+        if (response.error != null) {
+            return GitHubResult(error = response.error, status = response.status)
         }
         return GitHubResult(value = Unit)
     }
@@ -1533,6 +1589,26 @@ class DiskGitHub(
             value = dir.listFiles().orEmpty().filter { it.isFile }
                 .map { it.name.removeSuffix(".bin") }.sorted(),
         )
+    }
+
+    override fun deleteEnvironmentSecret(
+        token: String,
+        ref: RepoRef,
+        environment: String,
+        name: String,
+    ): GitHubResult<Unit> {
+        if (token.isBlank()) return GitHubResult(error = "Bad credentials", status = 401)
+        val file = File(File(File(environmentsDir(ref), environment), "secrets"), "$name.bin")
+        // **A secret that is already gone is the state the caller wanted** — the same rule the real
+        // one follows, so a test of a second run is testing the rule rather than the fake.
+        file.delete()
+        return GitHubResult(value = Unit)
+    }
+
+    override fun deleteRepoSecret(token: String, ref: RepoRef, name: String): GitHubResult<Unit> {
+        if (token.isBlank()) return GitHubResult(error = "Bad credentials", status = 401)
+        File(File(repoDir(ref.name), "ci-secrets"), "$name.bin").delete()
+        return GitHubResult(value = Unit)
     }
 
     /** The branches an environment is restricted to, for a test to read back. */

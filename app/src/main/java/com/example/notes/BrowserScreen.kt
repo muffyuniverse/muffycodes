@@ -297,7 +297,7 @@ fun BrowserScreen(
                 // the material, the build cannot see it, and their next release would be unsigned —
                 // which they would otherwise discover from a failed install. The row asks; the
                 // press sends. See `AppViewModel.checkSigning`.
-                SigningRow(viewModel, onSend = { project -> viewModel.sendSigningKey(project) })
+                SigningRow(viewModel, onSend = { project -> viewModel.fixSigning(project) })
 
                 // What can be done with what is chosen. It appears only when
                 // something is chosen, because it is a mode: a long press on a row
@@ -605,7 +605,10 @@ private fun SigningRow(viewModel: AppViewModel, onSend: (String) -> Unit) {
                 color = MaterialTheme.colorScheme.onSecondaryContainer,
                 modifier = Modifier.weight(1f),
             )
-            TextButton(onClick = { onSend(project) }) { Text("Send") }
+            // **"Fix", not "Send".** The press may create an environment, restrict it to two
+            // branches, add `environment:` to the workflow, write four secrets and delete four
+            // others — and a button called "Send" would not have said so.
+            TextButton(onClick = { onSend(project) }) { Text("Fix") }
         }
     }
 }

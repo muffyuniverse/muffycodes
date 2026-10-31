@@ -103,7 +103,7 @@ class SigningFeatureTest : FeatureTest() {
         scene.await("the check to run") { scene.viewModel.signingSaid != null }
         assertNotNull("the row is offering the key", scene.viewModel.signingKeyFile)
 
-        scene.viewModel.sendSigningKey("groceries")
+        scene.viewModel.fixSigning("groceries")
         scene.await("the send to finish", 60_000) { !scene.viewModel.busy }
         scene.await("the row to go away") { scene.viewModel.signingSaid == null }
 
@@ -126,7 +126,7 @@ class SigningFeatureTest : FeatureTest() {
         scene.sync("groceries")
         scene.await("the check to run") { scene.viewModel.signingSaid != null }
 
-        scene.viewModel.sendSigningKey("groceries")
+        scene.viewModel.fixSigning("groceries")
         scene.await("the send to finish", 60_000) { !scene.viewModel.busy }
 
         assertEquals(

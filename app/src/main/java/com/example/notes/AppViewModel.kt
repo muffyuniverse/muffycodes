@@ -2194,13 +2194,24 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /**
-     * Sends the key a person pressed for.
+     * Puts a project's signing key where only a build can reach it — **the whole job, in one press.**
      *
-     * **The press is the whole permission.** Nothing here checks a setting or a previous confirmation:
-     * the only way to reach it is a row that exists because a key is on the phone and CI cannot see it,
-     * and the sentence beside the button says what it will do.
+     * ## Why the app does this rather than explaining it
+     *
+     * Doing it by hand is five steps on github.com, and two of them are dangerous in a specific order:
+     * a repository secret is visible to every workflow, so leaving it there defeats the arrangement —
+     * but deleting it *before* the workflow names the environment makes the key invisible and every
+     * build fails, appearing later as "the release is unsigned".
+     *
+     * That is not knowledge a person installing an app should need. [Signing.move] knows the order and
+     * runs it.
+     *
+     * ## The press is the whole permission
+     *
+     * There is no setting and no confirmation beyond the row existing. The row exists because the app
+     * asked and found something wrong; the sentence beside the button says what pressing it does.
      */
-    fun sendSigningKey(project: String) {
+    fun fixSigning(project: String) {
         val ws = workspace ?: return
         val login = activeLogin
         val api = githubFor(login) ?: return
@@ -2210,15 +2221,37 @@ class AppViewModel @JvmOverloads constructor(
             return
         }
         val ref = RepoRef.of(git?.remoteUrl(project).orEmpty()) ?: return
-        val keyFile = File(ws.projectDir(project), ReleaseKey.FILE)
+        val dir = ws.projectDir(project)
+        val keyFile = File(dir, ReleaseKey.FILE)
+        // **The workflow that signs**, which is the one the app can find and a person would have to
+        // choose. A project with several workflows has one that reads a keystore, and `Signing` finds
+        // it by what it reads rather than by its name.
+        val signing = Workflows.survey(dir, ws.locked())
+            .map { File(dir, it.path) }
+            .firstOrNull { Workflows.reach(it).secrets && Workflows.reach(it).declaresEnvironment }
+            ?: Workflows.survey(dir, ws.locked())
+                .map { File(dir, it.path) }
+                .firstOrNull { file ->
+                    val text = try {
+                        file.readText()
+                    } catch (e: Throwable) {
+                        ""
+                    }
+                    text.contains("MUFFY_KEYSTORE") || text.contains("assembleRelease")
+                }
+        if (signing == null) {
+            message = "There is no workflow in $project that builds a release, so there is nothing to " +
+                "give the key to."
+            return
+        }
         busy = true
         onWorker {
-            val sent = ReleaseKey(keyFile).send(api, token, ref)
+            val moved = Signing.move(api, token, ref, dir, keyFile, signing)
             main.post {
                 busy = false
-                message = sent.fold(
+                message = moved.fold(
                     onSuccess = { it.said() },
-                    onFailure = { it.message ?: "The key could not be sent" },
+                    onFailure = { it.message ?: "The signing key could not be moved" },
                 )
                 // **Asked again rather than assumed.** The row disappears because the answer changed,
                 // not because the app decided its own call had worked.

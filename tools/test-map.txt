@@ -74,6 +74,7 @@ AgentLogTest  app/src/main/java/com/example/notes/AgentLog.kt app/src/main/java/
 AgentToolsTest  app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Door.kt
 CiToolsTest    app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/GitHub.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/Secrets.kt
 WorkflowsTest  app/src/main/java/com/example/notes/Workflows.kt
+SigningTest  app/src/main/java/com/example/notes/Signing.kt app/src/main/java/com/example/notes/ReleaseKey.kt app/src/main/java/com/example/notes/Workflows.kt app/src/main/java/com/example/notes/GitHub.kt
 SealedBoxTest  app/src/main/java/com/example/notes/SealedBox.kt app/src/main/java/com/example/notes/Secrets.kt
 ReleaseKeyTest  app/src/main/java/com/example/notes/ReleaseKey.kt app/src/main/java/com/example/notes/SealedBox.kt app/src/main/java/com/example/notes/GitHub.kt
 SigningFeatureTest  app/src/main/java/com/example/notes/ReleaseKey.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/BrowserScreen.kt

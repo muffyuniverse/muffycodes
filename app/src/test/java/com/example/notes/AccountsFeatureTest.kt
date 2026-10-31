@@ -346,4 +346,14 @@ private class RefusingGitHub : GitHub {
         environment: String,
         branches: List<String>,
     ): GitHubResult<Unit> = GitHubResult(error = "Bad credentials", status = 401)
+
+    override fun deleteEnvironmentSecret(
+        token: String,
+        ref: RepoRef,
+        environment: String,
+        name: String,
+    ): GitHubResult<Unit> = GitHubResult(error = "Bad credentials", status = 401)
+
+    override fun deleteRepoSecret(token: String, ref: RepoRef, name: String): GitHubResult<Unit> =
+        GitHubResult(error = "Bad credentials", status = 401)
 }
