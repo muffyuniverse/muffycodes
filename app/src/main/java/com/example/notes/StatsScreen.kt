@@ -450,25 +450,13 @@ fun StatsScreen(
                             )
                         }
                     }
-                    if (showPrevious) {
-                        // **The previous window, named in full.** Its rule is unusual enough that a
-                        // person who knows this code asked about it: it is the same LENGTH, ending
-                        // where the current interval starts - not the whole of yesterday. Without
-                        // this line the reader has to infer the window from the arithmetic, and the
-                        // natural guess ("all of yesterday") is the one that would report a 46% drop
-                        // caused by the day not being over yet.
-                        //
-                        // **Both ends, because a length alone does not locate it.** "12 hours 52
-                        // minutes" beside "12 hours 52 minutes" still leaves the reader guessing
-                        // whether it is the period before this one or yesterday's same span.
-                        Text(
-                            "before: " + StatsFormat.instantMinute(previousSpan.fromMs) +
-                                " to " + StatsFormat.instantMinute(previousSpan.toMs),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(bottom = 6.dp),
-                        )
-                    }
+                    // **The second `before:` line is gone, and it was the operator's report.**
+                    // "why before written second time? duplicate line." Two lines were drawn from
+                    // the same number in two formats - `dotted` in the caption column above and
+                    // `instantMinute` here - so the screen said the same thing twice and neither
+                    // said it better. The caption column keeps it: it is where the interval's own
+                    // three lines belong, and a second copy under the button is a duplicate by
+                    // construction, not a second opinion.
 
                 }
             }

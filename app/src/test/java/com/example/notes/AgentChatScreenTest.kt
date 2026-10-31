@@ -610,4 +610,38 @@ class AgentChatScreenTest {
         )
     }
 
+
+
+
+
+    // ---- what the bar says while a turn is running ------------------------
+
+    @Test
+    fun `a turn in flight says working, whatever the session row says`() {
+        // **Reported twice**: "when I send a message and agent starts working, top bar still shows
+        // 'start the agent' button, and idle waiting status". The row is written when a turn *ends*
+        // as well as when it starts, and a project's first message runs a turn before any row
+        // exists — so the bar described the row rather than the work.
+        assertEquals("a turn outranks the row", "working", ChatBar.status(true, "idle · waiting"))
+        assertEquals("and outranks a real state too", "working", ChatBar.status(true, "stopped"))
+        assertEquals(
+            "with no turn the row speaks",
+            "idle · waiting",
+            ChatBar.status(false, "idle · waiting"),
+        )
+        assertEquals(
+            "and a project that has never had a session says what it is doing",
+            "idle · waiting",
+            ChatBar.status(false, null),
+        )
+    }
+
+    @Test
+    fun `the control offers Stop while a turn is running`() {
+        // Offering to start what is already going is how a header teaches a person not to trust it.
+        assertTrue("a turn in flight is on", ChatBar.on(working = true, running = false))
+        assertTrue("and so is a running session", ChatBar.on(working = false, running = true))
+        assertTrue("and both", ChatBar.on(working = true, running = true))
+        assertFalse("only an idle project is off", ChatBar.on(working = false, running = false))
+    }
 }

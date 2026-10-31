@@ -281,8 +281,25 @@ fun AgentChatScreen(
                         // write waiting/working/stopped + current context (just '131k' for example
                         // - laconic)". The figure is measured by the log and carried here by the
                         // view model, so the words and the number come from one place.
-                        text = session?.label(System.currentTimeMillis(), viewModel.chatContextTokens)
-                            ?: "idle · waiting",
+                        // **A turn in flight outranks the session's own word.** The operator reported
+                        // this twice: "when I send a message and agent starts working, top bar still
+                        // shows 'start the agent' button, and idle waiting status - and I already
+                        // asked to change how status is presented, read reports from yesterday!"
+                        //
+                        // Both halves came from `session`, and `session` is a *stored* thing: a turn
+                        // can be running before a session row exists (the first message of a project),
+                        // and a session can read `idle` while the work is happening, because the row
+                        // is written when the turn *ends* as well as when it starts. So the screen
+                        // asked the wrong object. `chatWorking` is the view model's own answer to
+                        // "is a turn running now", which is the question the header is actually
+                        // asking.
+                        text = ChatBar.status(
+                            working = viewModel.chatWorking,
+                            sessionLabel = session?.label(
+                                System.currentTimeMillis(),
+                                viewModel.chatContextTokens,
+                            ),
+                        ),
                         style = MaterialTheme.typography.labelSmall,
                         color = if (session?.needsYou == true) {
                             MaterialTheme.colorScheme.error
@@ -317,16 +334,19 @@ fun AgentChatScreen(
                     }
                     // **One control, and its label is what it will do.** An agent is on or off;
                     // a switch would need a name for the on state that is not a button's.
+                    //
+                    // **And a turn in flight is already on**, which is the half that was wrong. A
+                    // person who has just sent a message and watched it start working is not offered
+                    // "Start the agent" — the agent is running, whether or not a session row has been
+                    // written yet. Offering to start what is already going is how a header teaches a
+                    // person not to trust it.
+                    val on = ChatBar.on(viewModel.chatWorking, session?.running == true)
                     TextButton(
                         onClick = {
-                            if (session?.running == true) {
-                                viewModel.stopAgent(project)
-                            } else {
-                                viewModel.startAgent(project)
-                            }
+                            if (on) viewModel.stopAgent(project) else viewModel.startAgent(project)
                         },
                     ) {
-                        Text(if (session?.running == true) "Stop the agent" else "Start the agent")
+                        Text(if (on) "Stop the agent" else "Start the agent")
                     }
                     // **The report button, which this screen never had.** The operator asked for it
                     // twice - "bug report icon still isnt added to agent chat as I instructed in an
@@ -1126,4 +1146,27 @@ private fun footer(message: AgentChat.Message, page: AgentChat.Page): String {
     if (message.thinking > 0) parts.add("thinking ${ContextBudget.short(message.thinking)}")
     if (message.output > 0) parts.add("output ${ContextBudget.short(message.output)}")
     return parts.joinToString(" · ")
+}
+
+
+/**
+ * What the bar's two controls should say, given what is happening.
+ *
+ * **A function rather than two inline expressions, because the operator reported the same bug
+ * twice** and the reason it kept happening is that both expressions asked `session` — a *stored*
+ * row that is written when a turn ends as well as when one starts, and that does not exist at all
+ * for a project's first message. The question the bar is asking is "is a turn running now", and
+ * that is [working], not a row.
+ *
+ * Pulled out so it can be asserted without a running turn: driving a real one to the moment between
+ * "the person pressed send" and "the session row was written" is a race, and a test that has to win a
+ * race to check a word is a test that fails on CI for reasons that have nothing to do with the word.
+ */
+internal object ChatBar {
+    /** The state word: "working" outranks the session's own label. */
+    fun status(working: Boolean, sessionLabel: String?): String =
+        if (working) "working" else sessionLabel ?: "idle · waiting"
+
+    /** True when the one control should offer to stop: a turn in flight is already on. */
+    fun on(working: Boolean, running: Boolean): Boolean = working || running
 }
