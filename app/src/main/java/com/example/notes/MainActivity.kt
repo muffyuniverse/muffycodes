@@ -10,6 +10,9 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
+import androidx.compose.foundation.text.selection.TextSelectionColors
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -74,8 +77,28 @@ class MainActivity : ComponentActivity() {
                 colorScheme = if (settings.useDark) settings.theme.darkScheme()
                 else settings.theme.lightScheme(),
             ) {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    AppRoot(viewModel)
+                // **The selection handles are the app's colours, not the platform's black.**
+                //
+                // The operator's screenshots of report 88 show the range highlighted correctly and
+                // the two handles as solid black teardrops that cover the words under them, plus no
+                // toolbar. The cause is not the selection plumbing — a range IS made, which is what
+                // #42 could not establish — it is that **nothing here ever said what a handle looks
+                // like.** `LocalTextSelectionColors` defaults to `Color.Black` for the handle and a
+                // translucent blue for the background, and this app has a whole theme system the
+                // selection never asked about.
+                //
+                // So a person on a dark theme gets black handles on a near-black bubble, and on a
+                // light theme black blobs over the words. Both read as "selection is broken", and
+                // both are one provider away from being right.
+                CompositionLocalProvider(
+                    LocalTextSelectionColors provides TextSelectionColors(
+                        handleColor = MaterialTheme.colorScheme.primary,
+                        backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.30f),
+                    ),
+                ) {
+                    Surface(modifier = Modifier.fillMaxSize()) {
+                        AppRoot(viewModel)
+                    }
                 }
             }
         }

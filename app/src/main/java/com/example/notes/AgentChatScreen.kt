@@ -666,13 +666,28 @@ fun AgentChatScreen(
                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
                 // **A fresh scroll per page**, so turning the page starts at its beginning rather
                 // than wherever the last one was scrolled to.
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState()),
-                ) {
-                    if (shown != null) {
-                        PageBody(page = shown, cap = 0, ink = MaterialTheme.colorScheme.onSurface, expanded = true)
+                //
+                // **And selectable, which it never was.** The operator asked twice — "make it so
+                // that I could select text from fullscreen mode message screen" — and the reason it
+                // was missing is that this branch was written for *reading*: the list's bubble has
+                // had a `SelectionContainer` since the beginning, and the fullscreen view of the
+                // same page was the one place a person most wants to copy from (a long result, a
+                // stack trace) and could not.
+                //
+                // **The container goes outside the scroll, not inside it.** A `verticalScroll`
+                // between the container and the text is the documented way to get handles in the
+                // wrong place: the selection caches the text's geometry, and a scroll moves it
+                // without the selection being told. Outside, the container measures the whole
+                // scrollable column and the offsets stay true.
+                SelectionContainer {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        if (shown != null) {
+                            PageBody(page = shown, cap = 0, ink = MaterialTheme.colorScheme.onSurface, expanded = true)
+                        }
                     }
                 }
             }
