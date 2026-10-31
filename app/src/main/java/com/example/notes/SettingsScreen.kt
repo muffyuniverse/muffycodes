@@ -611,37 +611,19 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable {
-                        settings.keepRecordAgentWorkflowApprovals(
-                            !settings.recordAgentWorkflowApprovals,
-                        )
-                    },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Mark a workflow the agent starts as read", style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        // **The switch does not change what runs.** Saying so is the point: a person
-                        // who reads "approve" here would think they had granted permission, and they
-                        // have not — GitHub has no per-workflow secret scoping, so nothing an app can
-                        // do withholds a secret from one file.
-                        "Off, a workflow the agent writes stays marked unread until you approve " +
-                            "it, so a checkmark always means somebody read those bytes. On, " +
-                            "starting one records it as read for you and the row says " +
-                            "\"auto-approved\" instead. It does not change what the workflow can " +
-                            "reach either way.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(
-                    checked = settings.recordAgentWorkflowApprovals,
-                    onCheckedChange = { settings.keepRecordAgentWorkflowApprovals(it) },
-                )
-            }
+            Text(
+                // **The rule that makes everything else true.** If a secret sits at repository
+                // level, every workflow reads it and no lock matters. The sentence is here rather
+                // than in a document because this is the screen a person is on when they decide
+                // where to put one.
+                "So put a secret on an environment, never on the repository: a workflow that names " +
+                    "no environment reaches no environment secret, and one that names an " +
+                    "environment waits for that environment's reviewers. A workflow that names an " +
+                    "environment is only started from here when its file is locked — a locked file " +
+                    "cannot be written by the agent, so its bytes are yours.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
 
             Text("Keepalive", style = MaterialTheme.typography.titleMedium)
             Row(

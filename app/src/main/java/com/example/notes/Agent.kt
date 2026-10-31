@@ -167,15 +167,12 @@ class Agent(
      */
     private val github: () -> GitHub? = { null },
     private val githubToken: () -> String? = { null },
-    /** Whether starting a workflow also records it as approved. */
-    private val recordAgentWorkflowApprovals: () -> Boolean = { false },
 ) {
 
     private val tools = AgentTools(
         ws, project, git, log, maxResult, bg, backgroundMs, triggerTokens,
         browser = browser, browseMs = browseMs, privateAllowed = privateAllowed,
         github = github, githubToken = githubToken,
-        recordAgentWorkflowApprovals = recordAgentWorkflowApprovals,
     )
 
     /**

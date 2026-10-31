@@ -84,26 +84,19 @@ class AgentTools(
      */
     private val github: () -> GitHub? = { null },
     private val githubToken: () -> String? = { null },
-    /**
-     * Whether starting a workflow also records it as approved.
-     *
-     * Read per call like the other settings. **Off is the default**, so the checkmark in the workflow
-     * list keeps meaning "a person read these bytes" — see [SettingsStore.recordAgentWorkflowApprovals].
-     */
-    private val recordAgentWorkflowApprovals: () -> Boolean = { false },
 ) {
 
     /** The project's own folder: what the agent stands in. */
     val projectDir: File get() = ws.projectDir(project)
 
     /**
-     * Which workflows the agent may start.
+     * What a workflow file can reach, and whether a person has sealed it.
      *
-     * **Built from the account's state folder, not the project's**, because an approval is a fact
-     * about this phone's trust in a file rather than something to commit and push. A workflow approved
-     * here must not arrive pre-approved on somebody else's phone.
+     * **It holds nothing and stores nothing.** The approval is the person's lock, which
+     * `Workspace` already keeps account-relative and already enforces on the agent's writes — so
+     * there is no second store here and nothing to keep in step with the lock file.
      */
-    private val workflows: Workflows get() = Workflows(File(ws.accountDir, Workspace.STATE_DIR))
+    private val workflows: Workflows get() = Workflows()
 
     /**
      * The part of it that lives on GitHub — **which is the project's folder itself.**
@@ -1803,33 +1796,51 @@ class AgentTools(
             return refusal(
                 "There is no workflow at $path in this project. " +
                     "The workflows it has are: " +
-                    (workflows.survey(projectDir).map { it.name }.joinToString(", ")
+                    (workflows.survey(projectDir, ws.locked()).map { it.name }.joinToString(", ")
                         .ifBlank { "none" }) + ".",
             )
         }
-        val approval = workflows.approval(projectDir, path)
         val reach = workflows.reach(target)
-        // **An unapproved file is approved only if the operator said the agent may stop asking.** The
-        // record says which of the two it was, so the checkmark in the list keeps meaning "a person
-        // read this" and never quietly comes to mean "nobody objected".
-        if (!approval.checked && recordAgentWorkflowApprovals()) {
-            workflows.approve(projectDir, path, Workflows.By.AUTO)
+        val sealed = workflows.isLocked(path, ws.locked(), project)
+        // **The check the operator asked for: a workflow that names an environment, in a file nobody
+        // has sealed, is not started from here.** The lock is the approval — a locked file cannot be
+        // written by the agent, so its bytes are the bytes a person left — and the environment
+        // declaration is what decides whether a run can read a secret at all.
+        //
+        // **What this does and does not protect.** It gates *this app's* dispatch, which is the
+        // agent's own act. It does not stop a run started from github.com or by a push; for that the
+        // protection is required reviewers on the environment, which GitHub enforces whatever started
+        // the run. Said here rather than in a document, because the next person to read this function
+        // is the one who needs to know which of the two they are looking at.
+        if (reach.declaresEnvironment && !sealed) {
+            val what = if (reach.environments.isEmpty()) {
+                "names an environment this app cannot read (it is an expression)"
+            } else {
+                "names " + reach.environments.joinToString(", ") { "`$it`" }
+            }
+            return refusal(
+                "$path $what, so its runs can read that environment's secrets — and the file is " +
+                    "not locked, so nobody has sealed these bytes. Lock it to approve them, then " +
+                    "start it again. A workflow that names no environment can be started without " +
+                    "a lock, because it reaches no environment secret.",
+            )
         }
         deadline.check("ci")
         val started = there.gh.dispatch(there.token, there.ref, path.substringAfterLast('/'), branch)
         if (started.error != null) return refusal(ciSaid(started.error, started.status))
-        // **The trace is where the risk is recorded.** A model's answer is read by the model; a trace
+        // **The trace is where the state is recorded.** A model's answer is read by the model; a trace
         // line is read by the person when something goes wrong, and it is the only place that can say
-        // "nobody read this file" without turning every dispatch into a conversation.
+        // what a run had in reach without turning every dispatch into a conversation.
         Trace.note(
             "ci",
             "$project · started ${path.substringAfterLast('/')} on $branch · " +
-                approval.said() +
+                (if (sealed) "locked" else "unlocked") +
                 (if (reach.environments.isEmpty()) {
-                    if (reach.secrets) " · names a secret, no environment" else ""
+                    if (reach.declaresEnvironment) " · environment (expression)" else ""
                 } else {
                     " · environment: " + reach.environments.joinToString(", ")
-                }),
+                }) +
+                (if (reach.secrets) " · names a secret" else ""),
         )
         return success(
             "Started ${path.substringAfterLast('/')} on $branch. It appears in `ci` within a few " +

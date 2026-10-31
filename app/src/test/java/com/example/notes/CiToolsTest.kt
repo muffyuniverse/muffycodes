@@ -89,6 +89,24 @@ class CiToolsTest {
 
     private fun call(tool: String, args: String) = tools().run(Call("c1", tool, args))
 
+    /** Puts a workflow in the project, and answers its path from the project's root. */
+    private fun workflow(name: String, text: String): String {
+        val path = Workflows.DIR + "/" + name
+        ws.write(File(ws.projectDir(repo), path), text)
+        return path
+    }
+
+    /**
+     * Locks [path], the way the screen's lock button does.
+     *
+     * **Account-relative, not project-relative**, because that is the shape `Workspace` stores and
+     * the shape the app compares against. A test that locked the project-relative path would pass
+     * while the phone never matched it — which is precisely the bug this helper exists to avoid.
+     */
+    private fun lock(path: String) {
+        ws.setLocked(ws.locked() + "$repo/$path")
+    }
+
     @Test
     fun `a remote is read as a repository whichever way it is written`() {
         // **Three shapes, because the app meets all three.** A clone URL from GitHub, an ssh one a
@@ -240,5 +258,77 @@ class CiToolsTest {
 
         assertTrue("it is a refusal: $body", body.startsWith(AgentLog.FAILURE))
         assertTrue("and it says which event it takes: $body", body.contains("workflow_dispatch"))
+    }
+
+    // ---- dispatch: the environment check ----------------------------------
+
+    @Test
+    fun `a workflow that names an environment is refused while its file is unlocked`() {
+        // **The operator's rule, and the reason the lock is the approval.** A locked file cannot be
+        // written by the agent, so its bytes are the bytes a person left. An unlocked file that names
+        // an environment can be rewritten by the agent *and* can read that environment's secrets —
+        // which is exactly the attack: write `run: echo "${{ secrets.X }}"`, dispatch, read the
+        // artifact.
+        workflow("deploy.yml", "jobs:\n  ship:\n    environment: release\n")
+
+        val body = call(
+            "ci",
+            """{"event":"workflow_dispatch","workflow":"deploy.yml"}""",
+        )
+
+        assertTrue("it is refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("it names the environment: $body", body.contains("release"))
+        assertTrue("and says how to approve: $body", body.contains("Lock"))
+    }
+
+    @Test
+    fun `the same workflow is started once the file is locked`() {
+        val path = workflow("deploy.yml", "jobs:\n  ship:\n    environment: release\n")
+        lock(path)
+
+        val body = call(
+            "ci",
+            """{"event":"workflow_dispatch","workflow":"deploy.yml"}""",
+        )
+
+        assertTrue("it started: $body", body.startsWith(AgentLog.SUCCESS))
+    }
+
+    @Test
+    fun `a workflow that names no environment starts without a lock`() {
+        // **The other half of the operator's ruling.** An unapproved workflow still runs — it simply
+        // reaches no environment secret, so there is nothing to approve. Refusing it would make the
+        // agent unable to test CI at all, which is what my first design got wrong.
+        workflow("build.yml", "jobs:\n  a:\n    runs-on: ubuntu-24.04\n")
+
+        val body = call(
+            "ci",
+            """{"event":"workflow_dispatch","workflow":"build.yml"}""",
+        )
+
+        assertTrue("it started: $body", body.startsWith(AgentLog.SUCCESS))
+    }
+
+    @Test
+    fun `a workflow whose environment name is an expression is refused too, and says why`() {
+        // **The scan cannot resolve an expression**, so the declaration is what counts. Reporting
+        // "names no environment" here would be the dangerous direction: the file can still read one.
+        val dollar = "$"
+        workflow(
+            "dynamic.yml",
+            "jobs:\n  ship:\n    environment:\n      name: " + dollar +
+                "{{ github.ref_name }}\n",
+        )
+
+        val body = call(
+            "ci",
+            """{"event":"workflow_dispatch","workflow":"dynamic.yml"}""",
+        )
+
+        assertTrue("it is refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue(
+            "and it says the name could not be read: $body",
+            body.contains("expression"),
+        )
     }
 }

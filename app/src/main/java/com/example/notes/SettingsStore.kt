@@ -272,36 +272,6 @@ class SettingsStore(context: Context, name: String = "settings") {
     }
 
     /**
-     * Whether starting a workflow the agent wrote also records it as approved.
-     *
-     * **This does not gate anything, and the wording matters.** An unapproved workflow runs either way
-     * — GitHub has no per-workflow secret scoping, so an app cannot withhold a secret from one file,
-     * and a scan for `secrets.*` can be defeated. What the switch decides is whether the list keeps
-     * showing the file as unread.
-     *
-     * **Off, so the checkmark keeps meaning "a person read these bytes."** With it on, the agent can
-     * iterate on CI without a tap after every edit, and the row says `auto-approved` rather than
-     * `approved` — the record never launders "nobody objected" into "somebody read it".
-     */
-    var recordAgentWorkflowApprovals: Boolean by
-        mutableStateOf(prefs.getBoolean(KEY_AUTO_APPROVE, false))
-        private set
-
-    /** Turns automatic recording of agent-written workflow approvals on or off. */
-    fun keepRecordAgentWorkflowApprovals(on: Boolean) {
-        Trace.tap("auto approve workflows", if (on) "on" else "off")
-        recordAgentWorkflowApprovals = on
-        prefs.edit().putBoolean(KEY_AUTO_APPROVE, on).apply()
-        Trace.said(
-            if (on) {
-                "a workflow the agent starts is marked approved without being read"
-            } else {
-                "a workflow the agent starts stays marked unread until somebody approves it"
-            },
-        )
-    }
-
-    /**
      * How long one page may take, in milliseconds; zero is the browser's own bound.
      *
      * Read per call like the other limits, so a number changed while an agent is idle applies to the
@@ -788,7 +758,6 @@ class SettingsStore(context: Context, name: String = "settings") {
      * of them asking. A home server or a NAS is a real use, and it is one a person should choose.
      */
     const val KEY_BROWSE_PRIVATE = "agent_browse_private"
-    const val KEY_AUTO_APPROVE = "agent_auto_approve_workflows"
     const val KEY_BROWSE_SECONDS = "agent_browse_seconds"
 
     /** How often a waiting agent is warmed, and how long a command may run before it is stopped. */

@@ -9,13 +9,13 @@ import org.junit.Test
 import java.io.File
 
 /**
- * The workflow record: whether a person read these bytes, and what the file can reach.
+ * What a workflow file can reach, and whether a person has sealed it.
  *
- * **These tests are mostly about what the app does NOT claim.** The operator's ruling was that an
- * unapproved workflow still runs — because GitHub has no per-workflow secret scoping, so an app cannot
- * withhold a secret from one file — which means this class is a *record* and never a gate. The tests
- * below pin the two things that would make the record dishonest: a checkmark that survives an edit, and
- * a reach report that says "safe".
+ * **The tests are mostly about the direction the scan errs in.** The environment name can be an
+ * expression — GitHub's own example is `name: ${{ github.ref_name }}` — so no scan can resolve every
+ * declaration. A false "it names an environment" costs a person one glance; a false "it names none"
+ * lets an unreviewed workflow read a secret. Every ambiguous case here is asserted in the safe
+ * direction.
  */
 class WorkflowsTest {
 
@@ -29,23 +29,13 @@ class WorkflowsTest {
         root.mkdirs()
         project = File(root, "project")
         File(project, Workflows.DIR).mkdirs()
-        workflows = Workflows(File(root, "state"))
+        workflows = Workflows()
     }
 
     @After
     fun tearDown() {
         root.deleteRecursively()
     }
-
-    /**
-     * A secrets expression, built rather than written.
-     *
-     * **The repository's brace check counts raw characters**, and a GitHub expression is unbalanced by
-     * design, so a literal one in this file would fail a gate for a reason that has nothing to do with
-     * the test. Concatenation keeps the file balanced and still puts the real text in front of the scan.
-     */
-    private val SECRET_EXPRESSION =
-        "$" + "{" + "{" + " secrets.DEPLOY_TOKEN " + "}" + "}"
 
     private fun write(name: String, text: String): File {
         val file = File(File(project, Workflows.DIR), name)
@@ -54,102 +44,31 @@ class WorkflowsTest {
         return file
     }
 
-    // ---- the checkmark is about bytes -------------------------------------
-
-    @Test
-    fun `an approval is of these bytes, and one character changes it`() {
-        // **The whole value of the checkmark.** It means "a person read exactly this"; a mark that
-        // survived an edit would mean "a person read something with this name", which is a different
-        // and much weaker claim — and it is the one that would let an agent add `secrets.X` to an
-        // approved file and keep the mark.
-        val file = write("build.yml", "on: push\njobs:\n  a:\n    runs-on: ubuntu-24.04\n")
-        assertTrue(workflows.approve(project, ".github/workflows/build.yml").isSuccess)
-        assertEquals(
-            "the approved bytes are trusted",
-            Workflows.Approval.Trusted::class,
-            workflows.approval(project, ".github/workflows/build.yml")::class,
-        )
-
-        file.writeText("on: push\njobs:\n  a:\n    runs-on: ubuntu-24.04 \n")
-
-        val after = workflows.approval(project, ".github/workflows/build.yml")
-        assertTrue("one character is enough: ${after.said()}", after is Workflows.Approval.Changed)
-        assertFalse("and it is not a checkmark", after.checked)
-    }
-
-    @Test
-    fun `an approval the agent made for itself is not the same mark`() {
-        // **Two different facts must not share one symbol.** "A person read this" and "nobody
-        // objected" are not the same claim, and a list that drew both as a checkmark would launder
-        // the second into the first.
-        write("agent-made.yml", "on: push\njobs:\n  a:\n    runs-on: ubuntu-24.04\n")
-        workflows.approve(project, ".github/workflows/agent-made.yml", Workflows.By.AUTO)
-
-        val auto = workflows.approval(project, ".github/workflows/agent-made.yml")
-        assertTrue("it is recorded: ${auto.said()}", auto is Workflows.Approval.Automatic)
-        assertFalse("but it is not the checkmark", auto.checked)
-        assertEquals("and the row says which it was", "auto-approved", auto.said())
-    }
-
-    @Test
-    fun `a workflow nobody has approved is not approved`() {
-        write("fresh.yml", "on: push\n")
-        val none = workflows.approval(project, ".github/workflows/fresh.yml")
-        assertTrue(none is Workflows.Approval.None)
-        assertFalse(none.checked)
-    }
-
-    @Test
-    fun `a corrupt approvals file approves nothing`() {
-        // **A damaged flag must not become a grant.** The opposite choice — treating an unparseable
-        // list as "everything was approved" — would turn a half-written file into blanket permission.
-        write("build.yml", "on: push\n")
-        workflows.approve(project, ".github/workflows/build.yml")
-        // Deliberately unparseable, and written without a brace so the repository's raw-character
-        // brace check is not tripped by a string whose whole point is to be broken.
-        File(File(root, "state"), Workflows.FILE).writeText("not json at all [")
-
-        assertTrue(
-            "nothing survives a corrupt file",
-            workflows.approval(project, ".github/workflows/build.yml") is Workflows.Approval.None,
-        )
-    }
-
-    @Test
-    fun `withdrawing an approval takes the mark away`() {
-        write("build.yml", "on: push\n")
-        workflows.approve(project, ".github/workflows/build.yml")
-        workflows.withdraw(".github/workflows/build.yml")
-        assertTrue(
-            workflows.approval(project, ".github/workflows/build.yml") is Workflows.Approval.None,
-        )
-    }
+    /** A GitHub expression, built by concatenation so this file's own braces stay balanced. */
+    private val open = "$" + "{"
+    private val close = "}"
 
     // ---- what a file can reach --------------------------------------------
 
     @Test
     fun `a workflow that names an environment is reported with it`() {
-        // **The one place the app can show real protection.** GitHub's own rule: "Secrets stored in an
-        // environment are only available to workflow jobs that reference the environment. If the
-        // environment requires approval, a job cannot access environment secrets until one of the
-        // required reviewers approves it." So naming the environment is the fact that matters — a
-        // human may stand between the run and the secret.
+        // **The one fact that decides whether a run can read a secret.** GitHub: "Secrets stored in an
+        // environment are only available to workflow jobs that reference the environment."
         val file = write(
             "deploy.yml",
             """
-            on: push
             jobs:
               ship:
                 runs-on: ubuntu-24.04
                 environment: production
                 steps:
-                  - run: echo "@A_SECRET@"
-            """.trimIndent().replace("@A_SECRET@", SECRET_EXPRESSION),
+                  - run: echo hello
+            """.trimIndent(),
         )
 
         val reach = workflows.reach(file)
         assertEquals(listOf("production"), reach.environments)
-        assertTrue("it mentions a secret", reach.secrets)
+        assertTrue("it declares one", reach.declaresEnvironment)
     }
 
     @Test
@@ -169,7 +88,28 @@ class WorkflowsTest {
     }
 
     @Test
-    fun `a commented-out environment is not a reference`() {
+    fun `an environment whose name is an expression declares one without naming it`() {
+        // **The case that decides the scan's shape.** GitHub documents `name: ${{ github.ref_name }}`
+        // as legal, so the name is unknowable at scan time. The declaration must still be seen —
+        // answering "names no environment" here is the failure that would let an unreviewed workflow
+        // read a secret.
+        val file = write(
+            "dynamic.yml",
+            """
+            jobs:
+              ship:
+                environment:
+                  name: ${open}{{ github.ref_name }}$close
+            """.trimIndent(),
+        )
+
+        val reach = workflows.reach(file)
+        assertTrue("the declaration is seen", reach.declaresEnvironment)
+        assertEquals("but there is no name to report", emptyList<String>(), reach.environments)
+    }
+
+    @Test
+    fun `a commented-out environment is not a declaration`() {
         // A note in the file must not make a row claim protection the run never touches.
         val file = write(
             "notes.yml",
@@ -180,25 +120,19 @@ class WorkflowsTest {
                 runs-on: ubuntu-24.04
             """.trimIndent(),
         )
-        assertEquals(emptyList<String>(), workflows.reach(file).environments)
+        assertFalse(workflows.reach(file).declaresEnvironment)
     }
 
     @Test
-    fun `a workflow that mentions no secret is reported as mentioning none, which is not a promise`() {
-        // **The report is deliberately one-sided.** `secrets = false` means the scan found no mention,
-        // not that the file cannot read one — see [Workflows.Reach]. The test pins the scan's shape so
-        // that a change to it is a decision rather than an accident.
-        val file = write("plain.yml", "jobs:\n  a:\n    runs-on: ubuntu-24.04\n")
-        assertFalse(workflows.reach(file).secrets)
+    fun `an environment with a space before the colon still counts`() {
+        // `environment :` is legal YAML, and a scan that missed it would be the wrong kind of wrong.
+        val file = write("odd.yml", "jobs:\n  a:\n    environment : production\n")
+        assertTrue(workflows.reach(file).declaresEnvironment)
     }
 
     @Test
     fun `the several ways a workflow reaches a token all count`() {
-        // Every shape the scan must not miss, because a miss here is a row that reads "no secret".
-        // **Built by concatenation rather than written as a literal expression**, because the
-        // repository's own brace check counts raw characters and a GitHub secrets expression is
-        // unbalanced by design. The concatenation below produces exactly the text a workflow holds.
-        val dollar = "\$"
+        val dollar = "$"
         for (text in listOf(
             "run: echo " + dollar + "{{ secrets.ANY }}",
             "with:\n  token: " + dollar + "{{ github.token }}",
@@ -211,36 +145,109 @@ class WorkflowsTest {
     }
 
     @Test
-    fun `a file that will not open is reported as reaching a secret`() {
-        // **Unknown is not safe.** A row that read "no secret" for a file whose contents could not be
-        // read would be the report lying in the direction that matters.
-        val missing = File(File(project, Workflows.DIR), "gone.yml")
-        assertTrue(workflows.reach(missing).secrets)
+    fun `a workflow with no environment and no secret reaches nothing`() {
+        val file = write("plain.yml", "jobs:\n  a:\n    runs-on: ubuntu-24.04\n")
+        val reach = workflows.reach(file)
+        assertFalse("no environment", reach.declaresEnvironment)
+        assertFalse("no secret", reach.secrets)
+        assertFalse("so nothing is in reach", reach.canReachSecrets)
     }
 
-    // ---- the survey -------------------------------------------------------
+    @Test
+    fun `a file that will not open is reported as reaching everything`() {
+        // **Unknown is not safe.** Reporting "reaches nothing" for a file whose contents could not be
+        // read would be the report lying in the direction that matters.
+        val missing = File(File(project, Workflows.DIR), "gone.yml")
+        val reach = workflows.reach(missing)
+        assertTrue(reach.declaresEnvironment)
+        assertTrue(reach.secrets)
+    }
+
+    // ---- the lock is the approval -----------------------------------------
 
     @Test
-    fun `the survey lists every workflow once, with both halves of the answer`() {
-        write("build.yml", "on: push\njobs:\n  a:\n    runs-on: ubuntu-24.04\n")
+    fun `a locked workflow is sealed, and an unlocked one is exposed`() {
+        // **The operator's design: locked file = approved and sealed file.** A locked file cannot be
+        // written by the agent, so its bytes are the bytes a person left — which is what approval
+        // means, and it needs no second store.
+        write("deploy.yml", "jobs:\n  a:\n    environment: release\n")
+        write("build.yml", "jobs:\n  a:\n    runs-on: ubuntu-24.04\n")
+
+        val rows = workflows.survey(project, setOf("project/.github/workflows/deploy.yml"))
+
+        val deploy = rows.first { it.name == "deploy.yml" }
+        assertTrue("the locked one is sealed", deploy.locked)
+        assertFalse("so it is not exposed", deploy.exposed)
+
+        val build = rows.first { it.name == "build.yml" }
+        assertFalse("the other is unlocked", build.locked)
+        assertFalse("but it reaches nothing, so it is not exposed either", build.exposed)
+    }
+
+    @Test
+    fun `an unlocked workflow that names an environment is the exposed state`() {
+        // The one state worth drawing in red: a file the agent can still rewrite, which can read a
+        // secret. This is the state the dispatch check refuses.
+        write("deploy.yml", "jobs:\n  a:\n    environment: release\n")
+        val row = workflows.survey(project, emptySet()).single()
+        assertFalse(row.locked)
+        assertTrue("it can reach secrets and nobody sealed it", row.exposed)
+    }
+
+    @Test
+    fun `a lock covers what is inside the folder`() {
+        // The inheritance rule is Workspace's, and a workflow in a subfolder of a locked folder is
+        // as sealed as one at the top.
+        write("nested/deep.yml", "jobs:\n  a:\n    environment: release\n")
+        val rows = workflows.survey(project, setOf("project/.github/workflows/nested"))
+        val deep = rows.first { it.name == "deep.yml" }
+        assertTrue("the folder's lock covers it", deep.locked)
+        assertFalse(deep.exposed)
+    }
+
+    @Test
+    fun `the survey lists every workflow once, sealed or not`() {
+        write("build.yml", "on: push\n")
         write("deploy.yml", "jobs:\n  a:\n    environment: production\n")
-        workflows.approve(project, ".github/workflows/build.yml")
 
-        val rows = workflows.survey(project)
+        val rows = workflows.survey(project, setOf("project/.github/workflows/build.yml"))
 
-        assertEquals("both are listed, approved or not", 2, rows.size)
+        assertEquals("both are listed", 2, rows.size)
         assertEquals(listOf("build.yml", "deploy.yml"), rows.map { it.name })
-        assertTrue("the approved one is checked", rows.first { it.name == "build.yml" }.approval.checked)
-        assertFalse("the other is not", rows.first { it.name == "deploy.yml" }.approval.checked)
-        assertEquals(
-            "and its environment is reported",
-            listOf("production"),
-            rows.first { it.name == "deploy.yml" }.reach.environments,
-        )
     }
 
     @Test
     fun `a folder with no workflows surveys to nothing rather than failing`() {
-        assertEquals(emptyList<Workflows.Row>(), workflows.survey(File(root, "nowhere")))
+        assertEquals(emptyList<Workflows.Row>(), workflows.survey(File(root, "nowhere"), emptySet()))
+    }
+
+    @Test
+    fun `a lock path is account-relative, and the check knows it`() {
+        // **The trap this test exists for.** `Workspace` stores lock paths relative to the ACCOUNT
+        // folder, so a workflow in `project/.github/workflows/x.yml` is locked as
+        // `project/.github/workflows/x.yml` — and everything this class reports is relative to the
+        // PROJECT. Comparing the two directly would never match, so the dispatch check would never
+        // fire, and a security check that silently never fires is worse than none.
+        val projectRelative = ".github/workflows/deploy.yml"
+
+        assertTrue(
+            "the account-relative path matches",
+            workflows.isLocked(projectRelative, setOf("project/.github/workflows/deploy.yml"), "project"),
+        )
+        assertFalse(
+            "and a project-relative lock path does not, which is why the project is prepended",
+            workflows.isLocked(projectRelative, setOf(projectRelative), "project"),
+        )
+        assertTrue(
+            "a locked folder covers what is inside it",
+            workflows.isLocked(projectRelative, setOf("project/.github"), "project"),
+        )
+    }
+
+    @Test
+    fun `only yaml files count as workflows`() {
+        assertTrue(Workflows.isWorkflow(".github/workflows/build.yml"))
+        assertTrue(Workflows.isWorkflow(".github/workflows/build.yaml"))
+        assertFalse("a text file is not a workflow", Workflows.isWorkflow("README.md"))
     }
 }

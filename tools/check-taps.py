@@ -88,9 +88,6 @@ VOCABULARY = {
     "new project", "local project", "confirm add project",
     # replacing a copy that is already here
     "replace", "confirm replace",
-    # whether a workflow the agent writes may be started without being read first — a switch whose
-    # default is a security decision rather than a preference
-    "auto approve workflows",
     # the agent's conversation: one project's, and the turns inside it
     "chat", "close chat", "send", "previous turn", "next turn", "latest turn", "turn",
     # **A bubble is what the conversation is made of now**, so opening one is its own act - and the
