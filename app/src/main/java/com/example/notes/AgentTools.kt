@@ -343,6 +343,15 @@ class AgentTools(
                     "\"from\":1,\"to\":200}",
             ),
             spec(
+                "shot",
+                "Photograph a web page and save it as a picture. The answer is the path of a PNG " +
+                    "under `agent/browser/` — the picture is not put in this conversation, so read " +
+                    "the path or tell the person where it is. `full` takes the whole document " +
+                    "rather than the visible part. Use `browse` when you want to read a page; use " +
+                    "this when the picture itself is the answer.",
+                "{\"url\":\"https://example.com\",\"full\":false,\"eval\":\"a JS expression\"}",
+            ),
+            spec(
                 "ci",
                 "What this project's GitHub Actions have been doing. **Read-only**: it lists runs, " +
                     "newest first, with their status, conclusion, branch, event and the short SHA " +
@@ -365,15 +374,6 @@ class AgentTools(
                     "matching lines — which is how to find `FAILED` or `e: file` in a build. " +
                     "`from`/`to` are line numbers of the filed log, both included.",
                 "{\"run\":41177826224,\"job\":\"Test (0)\",\"grep\":\"FAILED\",\"from\":1,\"to\":40}",
-            ),
-            spec(
-                "shot",
-                "Photograph a web page and save it as a picture. The answer is the path of a PNG " +
-                    "under `agent/browser/` — the picture is not put in this conversation, so read " +
-                    "the path or tell the person where it is. `full` takes the whole document " +
-                    "rather than the visible part. Use `browse` when you want to read a page; use " +
-                    "this when the picture itself is the answer.",
-                "{\"url\":\"https://example.com\",\"full\":false,\"eval\":\"a JS expression\"}",
             ),
         )
 
