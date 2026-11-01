@@ -134,6 +134,18 @@ class AgentTools(
      */
     private val github: () -> GitHub? = { null },
     private val githubToken: () -> String? = { null },
+    /**
+     * Whether the model in force can see a picture — or `null` when nothing has said.
+     *
+     * **`ModelCatalogue.Entry.inputModalities` already answers this**, read from the provider's own
+     * catalogue, so the app knows before it spends anything. Null means "not told", which lets every
+     * existing test build a tool set without a model and still call `look`; the app passes the real
+     * answer at the one place it builds tools for a turn.
+     *
+     * A blind model sent an image either errors or — worse — silently ignores it, and the second is
+     * a conversation that goes nowhere for no visible reason. So this refuses in words instead.
+     */
+    private val modelSees: (() -> Boolean)? = null,
 ) {
 
     /** The project's own folder: what the agent stands in. */
@@ -170,6 +182,16 @@ class AgentTools(
          * argument is one typo — or one injected instruction — away from a release.
          */
         const val AGENT_BRANCH = "development"
+
+        /**
+         * The most pictures one `look` may attach.
+         *
+         * **Four, because attention is finite and so is the budget.** Each picture is roughly a
+         * thousand tokens, so four is a fifth of a small conversation; more than that and the model
+         * spends its attention across images rather than reading any of them. "Here is the before
+         * and here is the after" needs two.
+         */
+        const val MAX_PICTURES = 4
 
         /** The tools that change a file. */
         val WRITING = setOf("edit", "create", "delete", "move", "restore")
@@ -309,6 +331,7 @@ class AgentTools(
             "reason" to setOf("text"),
             "browse" to setOf("url", "wait", "eval", "from", "to"),
             "shot" to setOf("url", "full", "eval"),
+            "look" to setOf("paths"),
             "ci" to setOf("workflow", "branch", "limit", "event", "inputs"),
             "runs" to setOf("run", "job", "grep", "from", "to"),
             "artifact" to setOf("run", "name"),
@@ -520,6 +543,18 @@ class AgentTools(
                     "rather than the visible part. Use `browse` when you want to read a page; use " +
                     "this when the picture itself is the answer.",
                 "{\"url\":\"https://example.com\",\"full\":false,\"eval\":\"a JS expression\"}",
+            ),
+            spec(
+                "look",
+                "See pictures. `paths` is one or more files — a screenshot `shot` took, a photo the " +
+                    "person added, a drawing they made — and they are **attached to the next message " +
+                    "you receive**, so you will see them on the turn after this one. The answer here " +
+                    "only says what was attached and roughly what it costs. " +
+                    "This works because a tool result cannot carry a picture: the picture travels " +
+                    "with the conversation instead. Takes " + Look.EXTENSIONS.sorted().joinToString(", ") +
+                    ". A large picture is shrunk to the size the model charges for anyway, so asking " +
+                    "for a photo is not as expensive as its file size suggests.",
+                "{\"paths\":[\"agent/browser/shot-1.png\"]}",
             ),
             spec(
                 "ci",
@@ -746,6 +781,7 @@ class AgentTools(
             "reason" -> reason(args)
             "browse" -> browse(args, deadline)
             "shot" -> shot(args, deadline)
+            "look" -> look(args)
             "ci" -> ci(args, deadline)
             "runs" -> runs(args, deadline)
             "artifact" -> artifact(args)
@@ -3354,8 +3390,84 @@ class AgentTools(
         }
     }
 
-    // ---- the promises -------------------------------------------------------
+    /**
+     * Attach pictures to the next message, and say what was attached.
+     *
+     * **The pictures do not come back in this result, and cannot.** The chat contract makes a
+     * `role: "tool"` message text-only, so an image has nowhere to go here. Instead this writes a
+     * `see` note into the record, and `Agent.messages` turns that note into a **user message that
+     * carries the picture** — so the agent sees it on the very next turn, which is the turn it was
+     * asked to act on.
+     *
+     * **The note is a row rather than memory, and that is what makes a retry safe.** A picture held
+     * in a field would be attached to one request and lost by the next rebuild; a row is part of the
+     * conversation, so the picture comes back with the conversation exactly as the text does. It
+     * also means `forget` can drop it like anything else.
+     *
+     * The note's name is `see` and its detail is the data URLs joined by a newline — one picture per
+     * line, so a reader can count them and a line break cannot appear inside one.
+     */
+    private fun look(args: JSONObject): String {
+        if (modelSees != null && !modelSees!!()) {
+            return refusal(
+                "This model cannot see pictures. Say so rather than sending one: " +
+                    "the person can switch to a model that takes images, and `read` still works " +
+                    "for anything that is text.",
+            )
+        }
+        val asked = args.optJSONArray("paths")
+            ?: return refusal("Say which pictures to look at: {\"paths\":[\"a.png\"]}")
+        if (asked.length() == 0) {
+            return refusal("`paths` was empty, so there is nothing to look at.")
+        }
+        if (asked.length() > MAX_PICTURES) {
+            return refusal(
+                "That is ${asked.length()} pictures and the most this can attach at once is " +
+                    "$MAX_PICTURES. Ask for the fewest that answer the question.",
+            )
+        }
 
+        val seen = mutableListOf<Look.Seen>()
+        val said = mutableListOf<String>()
+        val failed = mutableListOf<String>()
+        for (i in 0 until asked.length()) {
+            val path = asked.optString(i).trim()
+            if (path.isEmpty()) continue
+            // **`resolve`, not a path of my own.** It is what every other tool uses, so `look` reads
+            // from exactly the places `read` does — including the one `..` the operator allowed, and
+            // never anything outside the account folder.
+            val file = resolve(path).getOrElse {
+                failed.add("$path: ${it.message ?: "that path cannot be read"}")
+                continue
+            }
+            Look.read(file).fold(
+                onSuccess = { seen.add(it); said.add("$path (${it.width}\u00d7${it.height})") },
+                onFailure = { failed.add((it as? Look.LookFailed)?.said ?: "${file.name} could not be read") },
+            )
+        }
+
+        // **Nothing usable is a refusal, not a success with a complaint.** A result that begins with
+        // `0` says something happened, and the turn then carries on as though a picture had been
+        // seen — which is the one outcome worse than being told no.
+        if (seen.isEmpty()) {
+            return refusal(failed.joinToString("; ").ifEmpty { "No pictures were named." })
+        }
+
+        val total = seen.sumOf { it.tokens }
+        log.note("see", seen.joinToString("\n") { it.url })
+
+        val body = buildString {
+            append("attached: ").append(said.joinToString(", "))
+            append(". They arrive with your next message, so you will see them on the turn after ")
+            append("this one. About ").append(total).append(" tokens")
+            // The refusals ride along, because a model that asked for two pictures and got one needs
+            // to know which — and a silent partial success reads as though both arrived.
+            if (failed.isNotEmpty()) append(". Not attached: ").append(failed.joinToString("; "))
+        }
+        return success(body)
+    }
+
+    // ---- the promises -------------------------------------------------------
     /**
      * Commits what a tool just changed, and says which of the two things happened.
      *

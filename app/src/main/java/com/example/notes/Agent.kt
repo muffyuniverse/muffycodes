@@ -212,6 +212,15 @@ class Agent(
      * that learns nothing.
      */
     private val downloads: ((File) -> Result<Export.Done>)? = null,
+    /**
+     * Whether the model in force can see a picture — or `null` when nothing has said.
+     *
+     * **`ModelCatalogue.Entry.inputModalities` already answers this** for any model the app has
+     * looked up, so the wiring passes the real answer where it has one. Null is the default because
+     * an `Agent` built in a test has no catalogue and must still be able to call `look`: the check is
+     * a courtesy that stops a blind model wasting a turn, never a gate on the capability itself.
+     */
+    private val modelSees: (() -> Boolean)? = null,
 ) {
 
     private val tools = AgentTools(
@@ -221,6 +230,7 @@ class Agent(
         mcp = mcp, credentials = credentials, scanner = scanner,
         fetchAllowed = fetchAllowed,
         github = github, githubToken = githubToken, downloads = downloads,
+        modelSees = modelSees,
     )
 
     /**
@@ -1273,6 +1283,29 @@ class Agent(
                     "woke" -> {
                         flush()
                         out.add(Msg.user(row.body))
+                    }
+                    // **A picture the agent asked to see, arriving on the turn it is asked to act on.**
+                    // `look` cannot answer with an image — a `role: "tool"` message is text-only — so
+                    // it writes this note and the note becomes the message that carries the picture.
+                    //
+                    // **A row rather than memory, and that is what makes it correct on every rebuild.**
+                    // This function builds the whole array from the record each time; a picture held in
+                    // a field would be attached once and lost. As a row it is part of the conversation,
+                    // it counts against the budget, and `forget` can drop it like anything else.
+                    //
+                    // A `user` role because that is the only one a conversation may carry mid-array,
+                    // and it is honest: the picture is context being handed over, not an answer.
+                    "see" -> {
+                        flush()
+                        val pictures = row.body.split('\n').filter { it.isNotBlank() }
+                        if (pictures.isNotEmpty()) {
+                            out.add(
+                                Msg.user(
+                                    "here is the picture you asked to see",
+                                    pictures = pictures,
+                                ),
+                            )
+                        }
                     }
                     "agent", "reason" -> {
                         text.append(row.body).append("\n")

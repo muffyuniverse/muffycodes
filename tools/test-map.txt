@@ -23,6 +23,8 @@ StatsScreenTest    app/src/main/java/com/example/notes/StatsScreen.kt app/src/ma
 StreamTest  app/src/main/java/com/example/notes/Stream.kt
 DoorTest    app/src/main/java/com/example/notes/Door.kt app/src/main/java/com/example/notes/Timeouts.kt
 PicturesInDoorTest  app/src/main/java/com/example/notes/Door.kt
+LookTest  app/src/main/java/com/example/notes/Look.kt app/src/main/java/com/example/notes/ContextBudget.kt
+LookToolTest  app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Look.kt app/src/main/java/com/example/notes/Agent.kt
 WorkspaceTest       app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AgentLog.kt
 RequestStatsTest    app/src/main/java/com/example/notes/RequestStats.kt app/src/main/java/com/example/notes/RequestLog.kt app/src/main/java/com/example/notes/StatsFormat.kt app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/StatsScreen.kt
 ModelConfigTest     app/src/main/java/com/example/notes/ModelConfig.kt
