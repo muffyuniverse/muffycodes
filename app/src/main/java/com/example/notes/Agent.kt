@@ -185,6 +185,13 @@ class Agent(
     private val scanner: Scanner = Scanner.NONE,
     /** Whether the agent may reach this phone and the private network. Off unless asked. */
     private val privateAllowed: () -> Boolean = { false },
+    /**
+     * Whether downloading is allowed — **the tool is dropped from the list when it is not.**
+     *
+     * A function rather than a value, like the other limits: a person who turns downloading off while an agent
+     * is idle means the next turn.
+     */
+    private val fetchAllowed: () -> Boolean = { true },
     /** How long a page may take, in milliseconds; zero is the browser's own bound. */
     private val browseMs: () -> Long = { 0L },
     /**
@@ -212,6 +219,7 @@ class Agent(
         browser = browser, browseMs = browseMs, privateAllowed = privateAllowed,
         fetcher = fetcher,
         mcp = mcp, credentials = credentials, scanner = scanner,
+        fetchAllowed = fetchAllowed,
         github = github, githubToken = githubToken, downloads = downloads,
     )
 
@@ -471,7 +479,7 @@ class Agent(
             // not a row in the record: a `TOLD` row here would enter the conversation the ping
             // exists to keep warm, and the next real turn would be answering a question the person
             // never asked. `build` reads the record; this is the one thing added after it.
-            val built = build(layers, readOpening(layers, log, AgentTools.specs()))
+            val built = build(layers, readOpening(layers, log, AgentTools.specs(fetchAllowed())))
             built.copy(messages = built.messages + pingInstruction())
         } catch (t: Throwable) {
             // **A request that could not be built is not a ping that got through.** This said
@@ -546,7 +554,7 @@ class Agent(
         // array — and a provider's cache matches the longest common prefix, so the warning would
         // invalidate the whole conversation on every request of the turn it appeared in. That is
         // the 50× cost §2.4 is about, paid by the feature meant to prevent it.
-        val opening = readOpening(layers, log, AgentTools.specs())
+        val opening = readOpening(layers, log, AgentTools.specs(fetchAllowed()))
         try {
             return loop(layers, opening, operator, progress)
         } finally {
@@ -924,7 +932,7 @@ class Agent(
     )
 
     private fun build(layers: AgentPrompt.Layers, opening: Opening): Request {
-        val tools = AgentTools.specs()
+        val tools = AgentTools.specs(fetchAllowed())
         var rows = log.contextRows()
         val size = measure(layers.message, rows, tools)
         // **Said by the trim, not inferred from two measurements.** Rows grow between requests as
@@ -1157,13 +1165,13 @@ class Agent(
         // invalidate.
         ContextBudget.tokens(AgentPrompt.read(accountDir, tools.projectDir).message) +
             log.contextTokens() +
-            AgentTools.specs().sumOf {
+            AgentTools.specs(fetchAllowed()).sumOf {
                 ContextBudget.tokens(it.description, it.parameters.toString())
             }
 
     fun request(): Request {
         val layers = AgentPrompt.read(accountDir, tools.projectDir)
-        return build(layers, readOpening(layers, log, AgentTools.specs()))
+        return build(layers, readOpening(layers, log, AgentTools.specs(fetchAllowed())))
     }
 
     /**

@@ -116,10 +116,14 @@ object AgentWiring {
             credentials = credentials,
             // **The real scanner, and the account's own threshold.** Read per call, like the other limits: a
             // person who moves the number while an agent is idle means the next page read.
+            // **The account's own answer, read per call.** A threshold of zero and the switch being off are
+            // two ways to say "do not scan", and the switch is checked here so the number survives it — a
+            // person who turns the scanner back on should not have to remember what it used to be.
             scanner = Scanner.openRouter(
                 key = { credentials.modelKey(login) },
-                threshold = { settings.scanThreshold },
+                threshold = { if (settings.scanAllowed) settings.scanThreshold else 0.0 },
             ),
+            fetchAllowed = { settings.fetchAllowed },
             // **The real GitHub, and the key read per call.** A local project has a remote that is
             // not GitHub's, and `where()` in the tools refuses that in words rather than asking.
             github = {

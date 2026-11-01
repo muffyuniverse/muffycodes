@@ -288,6 +288,61 @@ class SettingsStore(context: Context, name: String = "settings") {
     }
 
     /**
+     * Whether the agent may download files from the web at all.
+     *
+     * **On by default, unlike [browsePrivate]**, and the difference is the direction of the risk: a download
+     * writes bytes onto the phone, which a person can see and delete, while reaching the private network is a
+     * capability that should never appear without being granted. `fetch` is the one tool that turns an address
+     * into a file, and turning this off removes it rather than making it refuse.
+     *
+     * **Removing it is the point.** A tool that refuses still appears in the tool list, and the tool list is
+     * part of every request's cache prefix — so a person who turns this off would pay for the description of a
+     * capability they do not have, in every request, for ever.
+     */
+    var fetchAllowed: Boolean by mutableStateOf(prefs.getBoolean(KEY_FETCH, true))
+        private set
+
+    /** Turns downloading on or off. */
+    fun keepFetch(on: Boolean) {
+        Trace.tap("fetch", if (on) "on" else "off")
+        fetchAllowed = on
+        prefs.edit().putBoolean(KEY_FETCH, on).apply()
+        Trace.said(
+            if (on) {
+                "the agent may download a file from the web into agent/fetched/"
+            } else {
+                "the agent may not download files from the web"
+            },
+        )
+    }
+
+    /**
+     * Whether text the agent reads from outside the app is scanned for injected instructions.
+     *
+     * **On by default**, because the scanner is the app's only defence against a page that says "ignore your
+     * instructions" — and a defence a person has to find and switch on is a defence that is off.
+     *
+     * Separate from [scanAt] on purpose: a threshold of zero also means "off", and a person who wants to turn
+     * the scanner back on should not have to remember what the number used to be.
+     */
+    var scanAllowed: Boolean by mutableStateOf(prefs.getBoolean(KEY_SCAN, true))
+        private set
+
+    /** Turns the scanner on or off. */
+    fun keepScan(on: Boolean) {
+        Trace.tap("scan", if (on) "on" else "off")
+        scanAllowed = on
+        prefs.edit().putBoolean(KEY_SCAN, on).apply()
+        Trace.said(
+            if (on) {
+                "text from the web and from servers is scanned before the agent reads it"
+            } else {
+                "text from the web and from servers reaches the agent unscanned"
+            },
+        )
+    }
+
+    /**
      * The injection scanner's threshold, as a percentage: a section scoring at or above it is cut.
      *
      * **Zero is off**, and that is why the setting is a number rather than a switch — the design's own
@@ -797,6 +852,12 @@ class SettingsStore(context: Context, name: String = "settings") {
 
     /** The scanner's threshold, as a percentage. A different key from the browse limit, which is seconds. */
     const val KEY_SCAN_AT = "agent_scan_at"
+
+    /** Whether downloading is allowed at all. */
+    const val KEY_FETCH = "agent_fetch"
+
+    /** Whether the scanner runs at all — separate from its threshold, because zero also means "off". */
+    const val KEY_SCAN = "agent_scan"
     const val KEY_BROWSE_SECONDS = "agent_browse_seconds"
 
     /** How often a waiting agent is warmed, and how long a command may run before it is stopped. */

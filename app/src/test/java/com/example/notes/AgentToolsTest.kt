@@ -122,6 +122,18 @@ class AgentToolsTest {
     }
 
     @Test
+    fun `turning downloading off removes the tool rather than making it refuse`() {
+        // **A described tool is a tool the model reaches for**, and its description is paid for in every
+        // request's cache prefix — so a capability a person turned off must not be in the list at all.
+        val without = AgentTools.specs(fetchAllowed = false).map { it.name }
+
+        assertFalse("fetch is not offered: $without", "fetch" in without)
+        // **And everything else still is**, because a switch that quietly removed a second tool would be a
+        // worse bug than the one it fixed.
+        assertEquals("only fetch went", specs.map { it.name } - "fetch", without)
+    }
+
+    @Test
     fun `a tool's description is a sentence a model can act on, not its own name`() {
         // The description is the whole of what the model knows about when to call a tool, and the
         // failure mode is silent: a tool described as "tree" is one the model uses at random.

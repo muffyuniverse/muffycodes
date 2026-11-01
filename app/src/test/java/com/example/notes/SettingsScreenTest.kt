@@ -397,4 +397,36 @@ class SettingsScreenTest {
         compose.onNodeWithText("Stop all").performScrollTo().assertIsNotEnabled()
     }
 
+    // ---- the two capabilities that can be turned off ------------------------
+
+    @Test
+    fun `downloading is on by default, and turning it off says what changes`() {
+        // **On by default, unlike the private-network switch**, because the direction of the risk is different:
+        // a download writes a file a person can see and delete. The test asserts the default *and* the act,
+        // because a switch whose default is wrong is the harder bug to notice.
+        assertTrue("a fresh account may download", scene.settings.fetchAllowed)
+        settings()
+
+        compose.onNodeWithText("Let it download files").performScrollTo()
+        compose.onNodeWithText("Let it download files").performClick()
+
+        assertEquals("and one tap turns it off", false, scene.settings.fetchAllowed)
+    }
+
+    @Test
+    fun `the scanner is on by default, and its number is hidden when it is off`() {
+        // **A threshold beside a switch that is off is a field that does nothing** — the same trap as a preset
+        // that is never written. The field goes with the switch.
+        assertTrue("a fresh account scans", scene.settings.scanAllowed)
+        settings()
+
+        compose.onNodeWithText("Cut a section at (percent)").performScrollTo()
+        compose.onNodeWithText("Cut a section at (percent)").assertExists()
+
+        compose.onNodeWithText("Scan what it reads from outside").performScrollTo()
+        compose.onNodeWithText("Scan what it reads from outside").performClick()
+
+        assertEquals("the switch is off", false, scene.settings.scanAllowed)
+        compose.onAllNodesWithText("Cut a section at (percent)").assertCountEquals(0)
+    }
 }

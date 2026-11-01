@@ -141,6 +141,10 @@ VOCABULARY = {
     # Its own act rather than part of the browse block, because it decides *what survives* rather than
     # where or how long.
     "scan at",
+    # the two capabilities themselves, on or off: whether the agent may download a file at all, and
+    # whether foreign text is scanned before it reads it. Both remove the thing rather than making it
+    # refuse, so both are worth a tap of their own.
+    "fetch", "scan",
     # the two ways back through a long conversation: the pager's own arrows, and the jump to the end
     # that only appears when the person has scrolled away from it
     "chat to bottom",

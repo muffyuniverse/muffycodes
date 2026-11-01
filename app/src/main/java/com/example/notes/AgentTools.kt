@@ -83,6 +83,15 @@ class AgentTools(
      */
     private val privateAllowed: () -> Boolean = { false },
     /**
+     * Whether the agent may download at all — **and it removes the tool rather than making it refuse.**
+     *
+     * The tool list is part of every request's cache prefix, so a capability a person has turned off should not
+     * be described to the model in every request for ever. A refusal would also teach the model to keep trying.
+     *
+     * Read per call like every other limit here.
+     */
+    private val fetchAllowed: () -> Boolean = { true },
+    /**
      * Where downloaded bytes come from.
      *
      * **The same shape as [browser]**, and for the same reason: a tool that could only be tested by
@@ -348,7 +357,15 @@ class AgentTools(
                 ". It takes $keys.$renamed\nIts shape: $shape"
         }
 
-        fun specs(): List<ToolSpec> = listOf(
+        /**
+         * Every tool the agent has, **minus the ones this account has turned off.**
+         *
+         * [fetchAllowed] defaults to true so a caller that has not asked — a test, or a spec listing — sees the
+         * whole set. The agent passes the account's answer, because a capability that is off must not be
+         * *described* to the model: the tool list is part of every request's cache prefix, and a refusal would
+         * also teach it to keep trying.
+         */
+        fun specs(fetchAllowed: Boolean = true): List<ToolSpec> = listOf(
             spec(
                 "search",
                 "Find files by what they say. **Searches every project in the account, not just " +
@@ -614,7 +631,7 @@ class AgentTools(
                     "result arrives in a file.",
                 "{\"server\":\"linear\",\"tool\":\"list_issues\",\"args\":{\"team\":\"ENG\"}}",
             ),
-        )
+        ).filter { fetchAllowed || it.name != "fetch" }
 
         /**
          * One tool, described to the model.
@@ -734,7 +751,14 @@ class AgentTools(
             "artifact" -> artifact(args)
             "downloads" -> downloads(args)
             "archive" -> archive(args, deadline)
-            "fetch" -> fetch(args, deadline)
+            "fetch" -> if (fetchAllowed()) {
+                fetch(args, deadline)
+            } else {
+                refusal(
+                    "Downloading is switched off in this account's settings, so nothing can be fetched. " +
+                        "A page can still be read with `browse`.",
+                )
+            }
             "mcp" -> mcp(args, deadline)
             else -> refusal("There is no tool called ${call.tool}")
         }
