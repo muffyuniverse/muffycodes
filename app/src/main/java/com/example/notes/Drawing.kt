@@ -287,34 +287,6 @@ object Drawing {
             )
         }
 
-        /**
-         * The view that shows the whole picture in a surface of [surfaceWidth]×[surfaceHeight].
-         *
-         * **The default, because 1:1 is the wrong place to start.** A 1080-pixel picture in a
-         * 320-pixel-wide window at 1:1 shows a third of it, and the person's first act is to zoom out
-         * before they can see what they are annotating. Fitting first means the picture is whole on
-         * arrival and zooming in is a deliberate choice rather than a correction.
-         *
-         * **Never larger than 1:1.** A small picture — a 100-pixel icon — is shown at its own size
-         * rather than blown up to fill the window, because an upscaled picture is blurry and a person
-         * checking a detail wants the pixels the file actually has.
-         *
-         * Centred, so a picture narrower than the surface sits in the middle rather than against an
-         * edge.
-         */
-        fun fittedTo(pictureWidth: Int, pictureHeight: Int, surfaceWidth: Float, surfaceHeight: Float): View {
-            if (pictureWidth <= 0 || pictureHeight <= 0 || surfaceWidth <= 0f || surfaceHeight <= 0f) {
-                return View()
-            }
-            val fit = minOf(surfaceWidth / pictureWidth, surfaceHeight / pictureHeight)
-            val zoom = fit.coerceIn(MIN_ZOOM, 1f)
-            // The leftover space on each axis, halved: that is where the picture's top-left goes for
-            // it to sit in the middle.
-            val panX = (surfaceWidth - pictureWidth * zoom) / 2f
-            val panY = (surfaceHeight - pictureHeight * zoom) / 2f
-            return View(zoom, panX, panY)
-        }
-
         companion object {
             /** Zoomed out enough to see a big picture whole, without becoming a thumbnail. */
             const val MIN_ZOOM = 0.25f
@@ -327,6 +299,34 @@ object Drawing {
 
             /** How much of the picture may be panned past its own edge. */
             const val EDGE_MARGIN = 0.5f
+
+            /**
+             * The view that shows the whole picture in a surface of [surfaceWidth]×[surfaceHeight].
+             *
+             * **The default, because 1:1 is the wrong place to start.** A 1080-pixel picture in a
+             * 320-pixel-wide window at 1:1 shows a third of it, and the person's first act is to zoom out
+             * before they can see what they are annotating. Fitting first means the picture is whole on
+             * arrival and zooming in is a deliberate choice rather than a correction.
+             *
+             * **Never larger than 1:1.** A small picture — a 100-pixel icon — is shown at its own size
+             * rather than blown up to fill the window, because an upscaled picture is blurry and a person
+             * checking a detail wants the pixels the file actually has.
+             *
+             * Centred, so a picture narrower than the surface sits in the middle rather than against an
+             * edge.
+             */
+            fun fittedTo(pictureWidth: Int, pictureHeight: Int, surfaceWidth: Float, surfaceHeight: Float): View {
+                if (pictureWidth <= 0 || pictureHeight <= 0 || surfaceWidth <= 0f || surfaceHeight <= 0f) {
+                    return View()
+                }
+                val fit = minOf(surfaceWidth / pictureWidth, surfaceHeight / pictureHeight)
+                val zoom = fit.coerceIn(MIN_ZOOM, 1f)
+                // The leftover space on each axis, halved: that is where the picture's top-left goes for
+                // it to sit in the middle.
+                val panX = (surfaceWidth - pictureWidth * zoom) / 2f
+                val panY = (surfaceHeight - pictureHeight * zoom) / 2f
+                return View(zoom, panX, panY)
+            }
         }
     }
 
