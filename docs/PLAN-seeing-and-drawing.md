@@ -258,9 +258,17 @@ its source with the hash in the name.
 
 **Touches:** `EditorScreen.kt`.
 
-Small, and they are what makes the canvas usable rather than present: the drawing survives a rotation, the
-canvas scrolls when the image is bigger than the screen, and a tap on **View** does not lose unsaved strokes
-without asking.
+Two things, and the third that was here is gone:
+
+- **A tap on `View` does not lose unsaved strokes without asking.** The one way the canvas can lose work.
+- **The canvas scrolls when the picture is bigger than the screen**, so a person can draw on the corner of a
+  4000-pixel screenshot.
+
+**Rotation is not on the list, because the app is portrait-only** — the operator's answer, and the reason the
+manifest now says so. A rotation rebuilds the activity and would take the editor's unsaved state with it; a
+half-finished drawing is the one thing a rotation must not be able to lose. Locking the orientation is honest
+about what the app is, and `rememberSaveable` on every piece of editor state would be ceremony for a screen
+that does not rotate.
 
 **Proved by:** `EditorScreenTest`.
 

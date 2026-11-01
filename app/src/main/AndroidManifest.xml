@@ -50,10 +50,21 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Notes">
 
+        <!--
+            **Portrait only, and it is the operator's answer rather than a default.** The app is a
+            phone app in one hand: a list of files, a page of text, a picture to draw on. A rotation
+            would rebuild the activity and take the editor's unsaved state with it — and a drawing
+            half-finished is the one thing a rotation must not be able to lose.
+
+            Locking it here is honest about what the app is. The alternative was `rememberSaveable` on
+            every piece of editor state, which is a real fix for a screen that rotates and ceremony
+            for one that does not.
+        -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
+            android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.Notes">
             <intent-filter>
