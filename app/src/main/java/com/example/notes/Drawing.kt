@@ -2,7 +2,6 @@ package com.example.notes
 
 import android.graphics.Bitmap
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -18,8 +17,15 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.padding
+import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Alignment
@@ -210,6 +216,83 @@ object Drawing {
         return distance(at, Point(from.x + t * dx, from.y + t * dy))
     }
 
+    /**
+     * How the picture is shown: how far in, and how far along.
+     *
+     * **One value, and every mapping goes through it.** A zoom and a pan are two numbers that must
+     * agree — the point under a person's fingers has to stay under their fingers while they pinch —
+     * and two separate states would let them drift apart on the frame after a gesture.
+     *
+     * **[zoom] of 1 is one picture pixel per screen pixel.** Below it the whole picture is visible and
+     * a mark is coarse; above it a person can put a correction on a single letter of a screenshot,
+     * which is the case this exists for.
+     */
+    data class View(val zoom: Float = 1f, val panX: Float = 0f, val panY: Float = 0f) {
+
+        /** A screen point, as a point on the picture. */
+        fun toPicture(x: Float, y: Float): Point = Point((x - panX) / zoom, (y - panY) / zoom)
+
+        /** A picture point, as a point on the screen. */
+        fun toScreen(point: Point): Point = Point(point.x * zoom + panX, point.y * zoom + panY)
+
+        /**
+         * Pinched by [factor] about the screen point ([x], [y]).
+         *
+         * **The focal point is what makes a pinch feel like a pinch**: whatever was under the fingers
+         * stays under them, so the picture grows *around* the place being examined rather than around
+         * its own corner. The algebra is the whole of it — the picture point under the fingers is
+         * fixed, so the pan that keeps it there is `p - p·zoom'`.
+         */
+        fun zoomedBy(factor: Float, x: Float, y: Float): View {
+            val next = (zoom * factor).coerceIn(MIN_ZOOM, MAX_ZOOM)
+            // Nothing moved: at a limit the pan must not creep, or a pinch that hits the ceiling
+            // would slide the picture sideways while the person thinks they are only zooming.
+            if (next == zoom) return this
+            val under = toPicture(x, y)
+            return View(next, x - under.x * next, y - under.y * next)
+        }
+
+        /** Dragged by a finger, in screen pixels. */
+        fun pannedBy(dx: Float, dy: Float): View = copy(panX = panX + dx, panY = panY + dy)
+
+        /**
+         * The view after a new picture size, so a zoom cannot leave the picture off screen.
+         *
+         * **Bounded rather than free**, because a picture panned entirely out of view is a blank
+         * screen with no gesture that brings it back — the person would have to close and reopen the
+         * file. The allowance is a margin either side so the edges can still be reached.
+         */
+        fun bounded(width: Int, height: Int): View {
+            val shownWidth = width * zoom
+            val shownHeight = height * zoom
+            val marginX = shownWidth * EDGE_MARGIN
+            val marginY = shownHeight * EDGE_MARGIN
+            // The picture's left edge may sit anywhere from `marginX` to `screen - shownWidth + margin`.
+            // Without a screen size here, the bound is expressed against the picture alone: never
+            // further than its own width away from home, in either direction.
+            val limitX = shownWidth - marginX
+            val limitY = shownHeight - marginY
+            return copy(
+                panX = panX.coerceIn(-limitX, limitX),
+                panY = panY.coerceIn(-limitY, limitY),
+            )
+        }
+
+        companion object {
+            /** Zoomed out enough to see a big picture whole, without becoming a thumbnail. */
+            const val MIN_ZOOM = 0.25f
+
+            /**
+             * 8×, which is where a 1080-wide screenshot shows about 135 pixels across the screen —
+             * enough to place a mark on one character.
+             */
+            const val MAX_ZOOM = 8f
+
+            /** How much of the picture may be panned past its own edge. */
+            const val EDGE_MARGIN = 0.5f
+        }
+    }
+
     /** Draws [strokes] on the screen. The screen half of [flatten]'s job, over the same list. */
     fun DrawScope.drawStrokes(strokes: List<Stroke>, scale: Float) {
         for (stroke in strokes) {
@@ -279,60 +362,142 @@ fun DrawingSurface(
 ) {
     // The stroke being drawn, in picture pixels, so the screen can show it as it happens.
     var current by remember { mutableStateOf<List<Drawing.Point>>(emptyList()) }
-    // **The scale is read inside the gesture, not passed in**, because the canvas measures itself
-    // after layout and the finger arrives after that. `IntSize` → picture pixels is the one mapping,
-    // so what is drawn and what is flattened cannot disagree.
-    var scale by remember { mutableStateOf(1f) }
+    // **One value for zoom and pan together**, so the two cannot disagree on the frame after a
+    // gesture — see `Drawing.View`.
+    var view by remember(picture) { mutableStateOf(Drawing.View()) }
 
-    Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        Image(
-            bitmap = picture,
-            contentDescription = null,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Fit,
-        )
+    /**
+     * **One finger draws, two fingers move the picture.**
+     *
+     * That split is the whole interaction: a canvas where a drag both drew and panned would do one of
+     * them by accident, and a person would find their stroke had become a scroll. Counting pointers is
+     * how the two are told apart without a mode switch nobody would remember to press.
+     *
+     * A second finger arriving **cancels the stroke in progress** rather than leaving a half-drawn
+     * mark behind — the person's intent changed at that moment, so the mark up to it is not something
+     * they meant.
+     */
+    Box(modifier = modifier.clipToBounds()) {
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(tool, colour, width, scale) {
-                    detectDragGestures(
-                        onDragStart = { at ->
-                            val point = Drawing.Point(at.x / scale, at.y / scale)
+                .pointerInput(tool, colour, width) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        // What a single finger is doing: drawing, or erasing as it moves.
+                        var drawing = false
+                        var erasing = false
+                        var lastPan = down.position
+                        // The previous frame's finger span, for the pinch ratio.
+                        var lastSpan = 0f
+                        // The touch count at the moment the gesture began decides its kind, and a
+                        // second finger arriving cancels a stroke rather than converting it.
+                        val startCount = currentEvent.changes.size
+                        if (startCount == 1) {
+                            val at = view.toPicture(down.position.x, down.position.y)
                             if (tool == Drawing.Tool.ERASER) {
-                                Drawing.hit(strokes, point, 8f / scale)?.let(onErase)
+                                erasing = true
+                                Drawing.hit(strokes, at, 8f / view.zoom)?.let(onErase)
                             } else {
-                                current = listOf(point)
+                                drawing = true
+                                current = listOf(at)
                             }
-                        },
-                        onDrag = { change, _ ->
-                            if (tool == Drawing.Tool.ERASER) return@detectDragGestures
-                            val point = Drawing.Point(change.position.x / scale, change.position.y / scale)
-                            // A line and a box keep two points — where it started and where it is now.
-                            // The pen keeps every one, because its shape is the path.
-                            current = if (tool == Drawing.Tool.PEN) current + point else
-                                listOf(current.firstOrNull() ?: point, point)
-                        },
-                        onDragEnd = {
-                            if (current.isNotEmpty() && tool != Drawing.Tool.ERASER) {
-                                onAdd(Drawing.Stroke(tool, current, colour, width))
+                        }
+
+                        do {
+                            val event = awaitPointerEvent()
+                            val pressed = event.changes.filter { it.pressed }
+                            // **Bounded on every frame, before any branch can `continue` past it**, so
+                            // a pan cannot walk the picture off screen and leave a blank canvas with no
+                            // gesture that brings it back. It sits above the branches for exactly that
+                            // reason: two of them skip to the next frame.
+                            view = view.bounded(picture.width, picture.height)
+                            if (pressed.size >= 2) {
+                                // **Two fingers: scale about their midpoint, and move with it.** Any
+                                // stroke in progress is dropped, because the person has changed what
+                                // they are doing — leaving the mark so far would be a mark they never
+                                // finished.
+                                if (drawing || erasing) {
+                                    current = emptyList()
+                                    drawing = false
+                                    erasing = false
+                                }
+                                val a = pressed[0].position
+                                val b = pressed[1].position
+                                val span = (a - b).getDistance()
+                                val middle = (a + b) / 2f
+                                // **Compared with the previous frame's values**, which is what makes
+                                // this incremental: one pinch is many small ratios, not one big one.
+                                if (lastSpan > 0f && span > 0f) {
+                                    view = view.zoomedBy(span / lastSpan, middle.x, middle.y)
+                                }
+                                view = view.pannedBy(
+                                    middle.x - lastPan.x,
+                                    middle.y - lastPan.y,
+                                )
+                                lastSpan = span
+                                lastPan = middle
+                                event.changes.forEach { it.consume() }
+                                continue
                             }
-                            current = emptyList()
-                        },
-                        onDragCancel = { current = emptyList() },
-                    )
+
+                            if (!drawing && !erasing && pressed.size == 1) {
+                                // A gesture that started as a pan (two fingers) and lost one keeps
+                                // panning rather than suddenly drawing.
+                                val at = pressed[0].position
+                                view = view.pannedBy(at.x - lastPan.x, at.y - lastPan.y)
+                                lastPan = at
+                                pressed[0].consume()
+                                continue
+                            }
+
+                            val change = pressed.firstOrNull() ?: break
+                            val at = view.toPicture(change.position.x, change.position.y)
+                            change.consume()
+                            if (erasing) {
+                                Drawing.hit(strokes, at, 8f / view.zoom)?.let(onErase)
+                            } else if (drawing) {
+                                // A line and a box keep two points — where it started and where it is
+                                // now. The pen keeps every one, because its shape is the path.
+                                current = if (tool == Drawing.Tool.PEN) current + at else
+                                    listOf(current.firstOrNull() ?: at, at)
+                            }
+                        } while (event.changes.any { it.pressed })
+
+                        if (drawing && current.isNotEmpty()) {
+                            onAdd(Drawing.Stroke(tool, current, colour, width))
+                        }
+                        current = emptyList()
+                    }
                 },
         ) {
-            // The surface is the picture's box, so `size` divided by the picture's own width is the
-            // mapping between the two coordinate systems.
-            scale = size.width / picture.width.toFloat()
-            with(Drawing) { drawStrokes(strokes, scale) }
-            if (current.isNotEmpty()) {
-                with(Drawing) {
-                    drawStrokes(
-                        listOf(Drawing.Stroke(tool, current, colour, width)),
-                        scale,
-                    )
+            // **Scaled and panned by hand rather than by a modifier**, because the strokes are in the
+            // picture's coordinates and must move with it. A `graphicsLayer` would transform the
+            // picture and leave the marks where they were.
+            withTransform({
+                translate(view.panX, view.panY)
+                scale(view.zoom, view.zoom, pivot = Offset.Zero)
+            }) {
+                drawImage(
+                    picture,
+                    dstSize = androidx.compose.ui.unit.IntSize(picture.width, picture.height),
+                )
+                with(Drawing) { drawStrokes(strokes, 1f) }
+                if (current.isNotEmpty()) {
+                    with(Drawing) {
+                        drawStrokes(listOf(Drawing.Stroke(tool, current, colour, width)), 1f)
+                    }
                 }
+            }
+        }
+        // **The zoom, said out loud**, because a pinch is invisible once it has happened: a person who
+        // has zoomed to 8× and cannot find their place needs a way to know, and a way back.
+        if (view.zoom != 1f) {
+            TextButton(
+                onClick = { view = Drawing.View() },
+                modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp),
+            ) {
+                Text("${(view.zoom * 100).roundToInt()}% · reset")
             }
         }
     }

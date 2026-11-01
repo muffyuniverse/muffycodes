@@ -156,21 +156,6 @@ fun EditorScreen(
      * into Diff" look the same on a screen with no log. The name is the mode's own lowercase word,
      * so the trace reads `EDITOR VIEW milk.txt` rather than a sentence about a button.
      */
-    val choose: (Mode) -> Unit = { next ->
-        // **Literal names, not a name built from the enum.** The vocabulary check refuses a
-        // computed tap name, and it is right to: a name it cannot read is a name nobody can grep
-        // for, and the list of what a person can press is the point of having a vocabulary.
-        Trace.tap(
-            when (next) {
-                Mode.VIEW -> "editor view"
-                Mode.EDIT -> "editor edit"
-                Mode.DIFF -> "editor diff"
-                Mode.DRAW -> "editor draw"
-            },
-            file.name,
-        )
-        mode = next
-    }
     var focused by remember { mutableStateOf(false) }
     val focus = LocalFocusManager.current
 
@@ -202,6 +187,46 @@ fun EditorScreen(
                     null
                 }
             }
+        }
+    }
+
+    /**
+     * Whether the person has drawn something that is not on disk yet.
+     *
+     * **The one way the canvas can lose work**, and the reason the guard below exists: a stroke list is
+     * session-only by design (D4), so leaving Draw throws it away — silently, unless something asks.
+     */
+    val unsavedStrokes = strokes.isNotEmpty()
+
+    /**
+     * One place a mode is entered, so one place records it **and one place can refuse it.**
+     *
+     * **Leaving `Draw` with unsaved strokes asks first.** Every other mode switch is free — text lives
+     * in a field and Save is still there, Diff only reads — but a stroke list is held in memory and
+     * dies with the screen, so a stray tap on `View` would throw away a drawing with no undo. The
+     * prompt is the same `ConfirmDialog` every other destructive act uses, so the question looks like
+     * the app rather than like a special case.
+     */
+    var pendingMode by remember { mutableStateOf<Mode?>(null) }
+    val choose: (Mode) -> Unit = { next ->
+        if (mode == Mode.DRAW && next != Mode.DRAW && unsavedStrokes) {
+            // Asked, not done. The mode changes in the dialog's confirm, so backing out leaves the
+            // person exactly where they were — still in Draw, with the drawing intact.
+            pendingMode = next
+        } else {
+            Trace.tap(
+                // **Literal names, not a name built from the enum.** The vocabulary check refuses a
+                // computed tap name, and it is right to: a name it cannot read is a name nobody can
+                // grep for, and the list of what a person can press is the point of having a vocabulary.
+                when (next) {
+                    Mode.VIEW -> "editor view"
+                    Mode.EDIT -> "editor edit"
+                    Mode.DIFF -> "editor diff"
+                    Mode.DRAW -> "editor draw"
+                },
+                file.name,
+            )
+            mode = next
         }
     }
 
@@ -523,6 +548,35 @@ fun EditorScreen(
                 }
             }
         }
+    }
+
+    // **The question, drawn outside the layout** so it can appear over whatever mode is showing. The
+    // answer is what changes the mode: dismissing leaves the person in Draw with the drawing intact,
+    // which is the whole point of asking rather than warning after the fact.
+    val leaving = pendingMode
+    if (leaving != null) {
+        ConfirmDialog(
+            title = "Leave the drawing?",
+            text = "What you have drawn is not saved yet. Leaving Draw discards it, and there is no " +
+                "undo once the canvas is closed.",
+            confirm = "Discard",
+            destructive = true,
+            onDismiss = { pendingMode = null },
+            onConfirm = {
+                pendingMode = null
+                strokes = emptyList()
+                Trace.tap(
+                    when (leaving) {
+                        Mode.VIEW -> "editor view"
+                        Mode.EDIT -> "editor edit"
+                        Mode.DIFF -> "editor diff"
+                        Mode.DRAW -> "editor draw"
+                    },
+                    file.name,
+                )
+                mode = leaving
+            },
+        )
     }
 }
 

@@ -145,4 +145,100 @@ class DrawingTest {
         assertEquals("four colours", Drawing.COLOURS.size, Drawing.COLOURS.distinct().size)
         assertEquals("three widths", Drawing.WIDTHS.size, Drawing.WIDTHS.distinct().size)
     }
+
+    // ---- zoom and pan, which is the part that can be asked here --------------------------------
+
+    @Test
+    fun `one picture pixel is one screen pixel at 1 to 1`() {
+        // The identity that makes every other mapping checkable: at zoom 1 and no pan, a screen point
+        // *is* a picture point.
+        val view = Drawing.View()
+        assertEquals("to the picture", Drawing.Point(120f, 240f), view.toPicture(120f, 240f))
+        assertEquals("and back", Drawing.Point(120f, 240f), view.toScreen(Drawing.Point(120f, 240f)))
+    }
+
+    @Test
+    fun `a pinch keeps the point under the fingers where it was`() {
+        // **The property that makes a pinch feel like a pinch.** Whatever the person is looking at
+        // grows around itself; the picture must not slide out from under their fingers.
+        val before = Drawing.View()
+        val under = before.toPicture(300f, 400f)
+
+        val after = before.zoomedBy(2f, 300f, 400f)
+        val where = after.toScreen(under)
+
+        assertEquals("x stayed under the fingers", 300f, where.x, 0.01f)
+        assertEquals("y stayed under the fingers", 400f, where.y, 0.01f)
+        assertEquals("and it really zoomed", 2f, after.zoom, 0.001f)
+    }
+
+    @Test
+    fun `zooming out and back in returns to where it started`() {
+        // Round-tripping a pinch about the same point must be the identity — otherwise a person who
+        // overshoots and corrects would find their place moved for no reason.
+        val start = Drawing.View()
+        val out = start.zoomedBy(0.5f, 200f, 200f)
+        val back = out.zoomedBy(2f, 200f, 200f)
+
+        assertEquals("zoom", start.zoom, back.zoom, 0.001f)
+        assertEquals("pan x", start.panX, back.panX, 0.01f)
+        assertEquals("pan y", start.panY, back.panY, 0.01f)
+    }
+
+    @Test
+    fun `a pinch at the limit does not slide the picture`() {
+        // At the ceiling a further pinch must do nothing at all. Letting the pan drift while the zoom
+        // is clamped is how a picture creeps sideways under a person who thinks they are only zooming.
+        val atMax = Drawing.View(zoom = Drawing.View.MAX_ZOOM)
+        assertEquals("unchanged", atMax, atMax.zoomedBy(2f, 100f, 100f))
+
+        val atMin = Drawing.View(zoom = Drawing.View.MIN_ZOOM)
+        assertEquals("and at the floor", atMin, atMin.zoomedBy(0.5f, 100f, 100f))
+    }
+
+    @Test
+    fun `zoom is held between the floor and the ceiling`() {
+        // A single wild pinch cannot escape the range, because the clamp is applied to the product
+        // rather than to each step.
+        val view = Drawing.View().zoomedBy(1000f, 50f, 50f)
+        assertEquals("at the ceiling", Drawing.View.MAX_ZOOM, view.zoom, 0.001f)
+        assertEquals(
+            "and at the floor",
+            Drawing.View.MIN_ZOOM,
+            Drawing.View().zoomedBy(0.0001f, 50f, 50f).zoom,
+            0.001f,
+        )
+    }
+
+    @Test
+    fun `a pan moves the picture with the finger`() {
+        val view = Drawing.View().pannedBy(30f, -20f)
+        assertEquals("x", 30f, view.panX, 0.001f)
+        assertEquals("y", -20f, view.panY, 0.001f)
+        // The finger moved right, so the picture did too: the point that was at 0 is now at 30.
+        assertEquals("the picture moved with it", Drawing.Point(30f, -20f), view.toScreen(Drawing.Point(0f, 0f)))
+    }
+
+    @Test
+    fun `a point maps to the picture through both zoom and pan`() {
+        // The composition, stated once: screen = picture·zoom + pan, and its inverse.
+        val view = Drawing.View(zoom = 4f, panX = -100f, panY = -200f)
+        val onPicture = view.toPicture(300f, 400f)
+        assertEquals("x", (300f + 100f) / 4f, onPicture.x, 0.001f)
+        assertEquals("y", (400f + 200f) / 4f, onPicture.y, 0.001f)
+        assertEquals("and back to the screen", Drawing.Point(300f, 400f), view.toScreen(onPicture))
+    }
+
+    @Test
+    fun `the picture cannot be panned entirely out of view`() {
+        // **A picture panned away is a blank screen with no gesture that brings it back** — the person
+        // would have to close and reopen the file. The bound allows half the picture past its own
+        // edge so the corners are still reachable, and no further.
+        val far = Drawing.View(zoom = 2f, panX = 100_000f, panY = -100_000f).bounded(1000, 500)
+        assertEquals("x is bounded", 1000f * 2f * Drawing.View.EDGE_MARGIN, far.panX, 0.01f)
+        assertEquals("y is bounded the other way", -500f * 2f * Drawing.View.EDGE_MARGIN, far.panY, 0.01f)
+
+        val gentle = Drawing.View(zoom = 2f, panX = 10f, panY = 10f).bounded(1000, 500)
+        assertEquals("and a small pan is left alone", 10f, gentle.panX, 0.01f)
+    }
 }
