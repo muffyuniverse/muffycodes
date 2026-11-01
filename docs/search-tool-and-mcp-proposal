@@ -1,0 +1,3 @@
+can you make it so that app records are registered only in session
+log, and appear as separate messages, and then go away when the problem
+is solved (when normal message record arrives). also I want remote mcp support - add mcp command for agent to call remote web based mcp servers. And I need to give the agent semantic search command that allows to reranc file contents inside the project against the search query (therefore we need to add embedding and rerank model selection from openrouter to settings, and embed every file version of a project filesystem branch the moment it enters the app, and keep those hash, path and vector tuples (if I understand it correctly) in our db with one table for every project.
