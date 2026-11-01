@@ -290,4 +290,16 @@ class DrawingTest {
         assertEquals("zero surface", Drawing.View(), Drawing.View.fittedTo(100, 100, 0f, 0f))
         assertEquals("zero picture", Drawing.View(), Drawing.View.fittedTo(0, 0, 320f, 400f))
     }
+
+    @Test
+    fun `a page-shaped picture fits the window, which is the Photo case`() {
+        // **The case the tour picture showed unfitted.** A photographed page is 1240 wide and taller
+        // than the window; at 1:1 the person sees a corner of a letter. The fit must bring the whole
+        // width in.
+        val page = Drawing.View.fittedTo(1240, 900, 300f, 380f)
+        assertTrue("zoomed out: ${page.zoom}", page.zoom < 0.5f)
+        val right = page.toScreen(Drawing.Point(1240f, 0f)).x
+        assertTrue("the whole width is visible: $right", right <= 300f + 0.5f)
+        assertEquals("and the left edge is inside", 0f, page.toScreen(Drawing.Point(0f, 0f)).x, 0.5f)
+    }
 }

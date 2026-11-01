@@ -37,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.foundation.layout.padding
 import kotlin.math.roundToInt
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Alignment
 import java.io.ByteArrayOutputStream
@@ -427,13 +428,20 @@ fun DrawingSurface(
     // it is white, so an unframed canvas is indistinguishable from one that failed to load — which is
     // exactly what the first tour picture showed: a white rectangle nobody could see. The border and
     // the shadow say "this is the picture, and it is here", and they cost nothing to draw.
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .clipToBounds()
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .padding(8.dp),
         contentAlignment = Alignment.Center,
     ) {
+    // **The window's size, which is what a fit is measured against.** A `DrawScope`'s `size` is the
+    // canvas's own box — the picture's natural size — so reading it there made every fit 1:1.
+    val density = androidx.compose.ui.platform.LocalDensity.current.density
+    val windowSize = androidx.compose.ui.unit.IntSize(
+        (maxWidth.value * density).toInt(),
+        (maxHeight.value * density).toInt(),
+    )
       Box(
         modifier = Modifier
             .shadow(2.dp)
@@ -553,7 +561,14 @@ fun DrawingSurface(
         ) {
             // **The surface's own size, which is what the fit needs and what the picture is drawn
             // into.** Read here because a composition knows its size only after layout.
-            if (size != surface.toSize()) surface = androidx.compose.ui.unit.IntSize(size.width.toInt(), size.height.toInt())
+            // **`size` is the DrawScope's own box**, which is the picture's natural size here because
+            // the canvas is `fillMaxSize` inside the framed box — so it is *not* what the fit needs.
+            // The fit needs the **window**, and the only place that is known is the layout. Reading
+            // `size` here gave the picture's own width back, so `fittedTo` computed 1:1 every time and
+            // the canvas opened unfitted — which is exactly what the tour picture showed: a corner of
+            // a page at full size.
+            val window = windowSize
+            if (window != androidx.compose.ui.unit.IntSize.Zero && window != surface) surface = window
             val shown = view ?: Drawing.View()
             // **Scaled and panned by hand rather than by a modifier**, because the strokes are in the
             // picture's coordinates and must move with it. A `graphicsLayer` would transform the
