@@ -28,15 +28,15 @@ class PhotoTest {
 
     @Test
     fun `a page is as wide as the setting and as tall as its content`() {
+        // **Height grows with block count, not with line count.** Robolectric's `measureText` returns
+        // 0, so nothing wraps and every paragraph is one line — but each *block* still adds its own
+        // height, which is real arithmetic. A render that returned a constant would fail here.
         val one = render("A short note.")
         assertEquals("the width is fixed", Photo.WIDTH, one.width)
-        assertTrue("a line of text is not a whole page", one.height < 500)
-        assertTrue("but it is a page", one.height > 100)
+        assertTrue("one block is a small page: ${one.height}", one.height in 100..400)
 
-        // **Taller content makes a taller page.** A render that returned a constant would pass every
-        // assertion above.
-        val many = render((1..40).joinToString("\n\n") { "Paragraph $it with some words in it." })
-        assertTrue("more text, more page: ${many.height} vs ${one.height}", many.height > one.height)
+        val many = render((1..40).joinToString("\n\n") { "Paragraph $it." })
+        assertTrue("more blocks, more page: ${many.height} vs ${one.height}", many.height > one.height)
     }
 
     @Test
@@ -147,25 +147,16 @@ class PhotoTest {
         assertTrue("with bytes", one.bytes.size > 500)
     }
 
-    @Test
-    fun `a very long word is broken rather than running off the page`() {
-        // A URL in a note is common, and a line that runs past the page is a paragraph nobody can
-        // circle — which is the whole point of the photograph.
-        val url = "https://example.com/" + "a".repeat(600)
-        val one = render("Look at $url for details.")
-        assertTrue("it rendered", one.height > 0)
-        // Two lines rather than one: the URL alone is wider than the page at this text size.
-        val short = render("Look at it for details.")
-        assertTrue(
-            "the long word wrapped onto more lines: ${one.height} vs ${short.height}",
-            one.height > short.height,
-        )
-    }
+    // **There is no test here for "a long word wraps", and that is a limitation, not an omission.**
+    // Robolectric's `Paint.measureText` returns 0 for every string, so every word "fits" and nothing
+    // ever wraps — a test asserting a taller page for a long URL passed 198 vs 198 and could not have
+    // passed any other way. Wrapping is real arithmetic against a real text measurer, and the only
+    // place it can be seen is the tour, which renders a real page.
 
     @Test
-    fun `a blockquote and a rule do not collapse the page`() {
+    fun `a rule takes room of its own`() {
         // Every branch adds its own height; one that added nothing would let the next block draw on
-        // top of it.
+        // top of it. A rule is the clearest case because it draws a line and no text.
         val withRule = render("above\n\n---\n\nbelow")
         val without = render("above\n\nbelow")
         assertTrue(
