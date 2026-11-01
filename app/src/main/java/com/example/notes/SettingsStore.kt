@@ -287,6 +287,35 @@ class SettingsStore(context: Context, name: String = "settings") {
         Trace.said("a page may take $clean seconds")
     }
 
+    /**
+     * The injection scanner's threshold, as a percentage: a section scoring at or above it is cut.
+     *
+     * **Zero is off**, and that is why the setting is a number rather than a switch — the design's own
+     * decision is *"0.8 default, per-account"*, and a person who wants it stricter or looser should be able to
+     * say so without a second control.
+     *
+     * It is read per call like the other limits, so a change applies to the next page read rather than to the
+     * runner built before it.
+     */
+    val scanAt: Int get() = prefs.getInt(KEY_SCAN_AT, DEFAULT_SCAN_AT)
+
+    /** The threshold as the fraction [Scanner] compares against, so the conversion is in one place. */
+    val scanThreshold: Double get() = scanAt / 100.0
+
+    /** Sets the threshold, in whole percents. */
+    fun keepScanAt(percent: Int) {
+        val clean = percent.coerceIn(0, 100)
+        Trace.tap("scan at", "$clean%")
+        prefs.edit().putInt(KEY_SCAN_AT, clean).apply()
+        Trace.said(
+            if (clean == 0) {
+                "text from the web and from servers is not scanned"
+            } else {
+                "a section scoring $clean% or more is cut out of what the agent reads"
+            },
+        )
+    }
+
     /** What [keepBrowseSeconds] last set, in seconds, for the field to show. */
     val browseSeconds: Int get() = prefs.getInt(KEY_BROWSE_SECONDS, DEFAULT_BROWSE_SECONDS)
 
@@ -733,6 +762,13 @@ class SettingsStore(context: Context, name: String = "settings") {
      */
     /** A page: long enough for a slow site, short enough that a turn is not lost to one. */
     const val DEFAULT_BROWSE_SECONDS = 30
+
+    /**
+     * The scanner's default threshold, in percents — **the design's own number**, from
+     * `docs/COUNTERPROPOSAL-III-search-mcp-articles.md` §2: high enough not to cut prose *about* prompt
+     * injection, low enough to cut the thing.
+     */
+    const val DEFAULT_SCAN_AT = 80
     const val MIN_BROWSE_SECONDS = 5
     const val MAX_BROWSE_SECONDS = 180
 
@@ -758,6 +794,9 @@ class SettingsStore(context: Context, name: String = "settings") {
      * of them asking. A home server or a NAS is a real use, and it is one a person should choose.
      */
     const val KEY_BROWSE_PRIVATE = "agent_browse_private"
+
+    /** The scanner's threshold, as a percentage. A different key from the browse limit, which is seconds. */
+    const val KEY_SCAN_AT = "agent_scan_at"
     const val KEY_BROWSE_SECONDS = "agent_browse_seconds"
 
     /** How often a waiting agent is warmed, and how long a command may run before it is stopped. */

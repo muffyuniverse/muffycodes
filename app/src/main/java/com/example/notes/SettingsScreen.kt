@@ -612,6 +612,25 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary,
             )
+            LengthField(
+                label = "Cut a section at (percent)",
+                value = settings.scanAt,
+                placeholder = "${SettingsStore.DEFAULT_SCAN_AT}",
+                onValueChange = { settings.keepScanAt(it) },
+            )
+            Text(
+                text = if (settings.scanAt == 0) {
+                    "Now: off. A page and a server's answer are shown exactly as they arrived. " +
+                        "Turn it up to have a guard model cut out sections that read like " +
+                        "instructions aimed at the agent."
+                } else {
+                    "Now: a section scoring " + settings.scanAt + "% or more is cut out of what the " +
+                        "agent reads, and the result says how many went. What was cut stays in the " +
+                        "session log, never in the conversation."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
 
             Text("Workflows", style = MaterialTheme.typography.titleMedium)
             Text(

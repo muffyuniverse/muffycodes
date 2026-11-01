@@ -114,6 +114,12 @@ object AgentWiring {
             // so a test can be a store without a keystore.
             mcp = Mcp.http(),
             credentials = credentials,
+            // **The real scanner, and the account's own threshold.** Read per call, like the other limits: a
+            // person who moves the number while an agent is idle means the next page read.
+            scanner = Scanner.openRouter(
+                key = { credentials.modelKey(login) },
+                threshold = { settings.scanThreshold },
+            ),
             // **The real GitHub, and the key read per call.** A local project has a remote that is
             // not GitHub's, and `where()` in the tools refuses that in words rather than asking.
             github = {

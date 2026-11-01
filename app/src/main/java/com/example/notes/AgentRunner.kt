@@ -74,6 +74,13 @@ class AgentRunner(
      */
     private val credentials: Credentials? = null,
     /**
+     * The injection scanner, for `browse` and `mcp`.
+     *
+     * **A default that passes text through**, like every other capability here: a runner built without a
+     * decision does not cut sections out of a page it was told to read.
+     */
+    private val scanner: Scanner = Scanner.NONE,
+    /**
      * Where a `background` call's work runs — **one thread per call, made when it is asked for.**
      *
      * The previous design kept a fixed pool here and held the test suite open for eighteen minutes
@@ -367,6 +374,7 @@ class AgentRunner(
                     fetcher = fetcher,
                     mcp = mcp,
                     credentials = credentials,
+                    scanner = scanner,
                     // **Read from the settings at the moment of the call**, like the other limits:
                     // a switch flipped while the agent is idle applies to the next page it reads.
                     privateAllowed = { settings.browsePrivate },

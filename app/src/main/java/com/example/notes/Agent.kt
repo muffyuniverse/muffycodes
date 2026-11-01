@@ -176,6 +176,13 @@ class Agent(
      * secret" are two different refusals and only the second one is actionable.
      */
     private val credentials: Credentials? = null,
+    /**
+     * What cuts suspected instructions out of text brought in from outside the app.
+     *
+     * **Passed in rather than made here**, like the browser and the fetcher, and the default passes everything
+     * through — so an agent built without a decision does not silently cut sections of a page.
+     */
+    private val scanner: Scanner = Scanner.NONE,
     /** Whether the agent may reach this phone and the private network. Off unless asked. */
     private val privateAllowed: () -> Boolean = { false },
     /** How long a page may take, in milliseconds; zero is the browser's own bound. */
@@ -204,7 +211,7 @@ class Agent(
         ws, project, git, log, maxResult, bg, backgroundMs, triggerTokens,
         browser = browser, browseMs = browseMs, privateAllowed = privateAllowed,
         fetcher = fetcher,
-        mcp = mcp, credentials = credentials,
+        mcp = mcp, credentials = credentials, scanner = scanner,
         github = github, githubToken = githubToken, downloads = downloads,
     )
 

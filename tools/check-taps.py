@@ -137,6 +137,10 @@ VOCABULARY = {
     # page may take. Two acts because they answer two questions - *where* may it read, and *how long*
     # may it spend - and the first is a capability rather than a limit.
     "browse private", "browse timeout",
+    # the injection scanner's threshold: how sure a guard model must be before a section of a page is cut.
+    # Its own act rather than part of the browse block, because it decides *what survives* rather than
+    # where or how long.
+    "scan at",
     # the two ways back through a long conversation: the pager's own arrows, and the jump to the end
     # that only appears when the person has scrolled away from it
     "chat to bottom",
