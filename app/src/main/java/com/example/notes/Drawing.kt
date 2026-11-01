@@ -112,11 +112,23 @@ object Drawing {
         val canvas = Bitmap.createBitmap(picture.width, picture.height, Bitmap.Config.ARGB_8888)
         val ink = android.graphics.Canvas(canvas)
         ink.drawBitmap(picture, 0f, 0f, null)
-        for (stroke in strokes) draw(ink, stroke)
+        drawAll(ink, strokes)
         val bytes = ByteArrayOutputStream()
         canvas.compress(Bitmap.CompressFormat.PNG, 100, bytes)
         canvas.recycle()
         return bytes.toByteArray()
+    }
+
+    /**
+     * Draws [strokes] onto an android canvas, over whatever is already on it.
+     *
+     * **`internal` rather than private, because a test has to be able to look at the pixels.** The
+     * alternative was asserting against a decoded PNG — and Robolectric has no image encoder, so a
+     * decode of `flatten`'s own output answers "unimplemented". Reaching the same drawing code
+     * through a canvas the test owns is the only honest way to ask whether a stroke landed.
+     */
+    internal fun drawAll(canvas: android.graphics.Canvas, strokes: List<Stroke>) {
+        for (stroke in strokes) draw(canvas, stroke)
     }
 
     /** One stroke onto an android canvas — the flattening half, shared with nothing else. */

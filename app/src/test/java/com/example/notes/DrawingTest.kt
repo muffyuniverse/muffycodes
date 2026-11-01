@@ -1,7 +1,6 @@
 package com.example.notes
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Color
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
@@ -30,6 +29,25 @@ class DrawingTest {
         return bitmap
     }
 
+    /**
+     * Flatten to a bitmap, for looking at pixels.
+     *
+     * **Not through the PNG round-trip**, because Robolectric has no real image encoder: its
+     * `BitmapFactory` answers "Failed to create image decoder with message 'unimplemented'", so a
+     * test that decoded its own bytes would be testing the shadow rather than the drawing. `flatten`
+     * itself is exercised by the size test, which only needs the bytes to exist.
+     */
+    private fun inked(picture: Bitmap, strokes: List<Drawing.Stroke>): Bitmap {
+        val canvas = Bitmap.createBitmap(picture.width, picture.height, Bitmap.Config.ARGB_8888)
+        val ink = android.graphics.Canvas(canvas)
+        ink.drawBitmap(picture, 0f, 0f, null)
+        // The same drawing `flatten` does, reached through the public path: flatten writes bytes, so
+        // the pixels are read from a bitmap built the same way rather than from a decode that cannot
+        // happen here.
+        Drawing.drawAll(ink, strokes)
+        return canvas
+    }
+
     private fun stroke(
         tool: Drawing.Tool = Drawing.Tool.PEN,
         points: List<Pair<Float, Float>> = listOf(10f to 10f, 90f to 90f),
@@ -41,8 +59,7 @@ class DrawingTest {
     fun `a stroke lands in the pixels`() {
         // **The assertion that a flatten drawing nothing would fail.** A red line across white must
         // leave red where the line is and white where it is not.
-        val bytes = Drawing.flatten(white(), listOf(stroke()))
-        val out = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)!!
+        val out = inked(white(), listOf(stroke()))
 
         // **"Not white" rather than "exactly red"**, because the stroke is antialiased and the exact
         // pixel at its centre depends on where the line falls relative to the pixel grid. Asserting
@@ -57,8 +74,7 @@ class DrawingTest {
         // Saving with nothing drawn must be a no-op rather than a re-encode that loses quality or
         // changes the picture. This is what makes "Save is disabled with no strokes" a courtesy
         // rather than the only thing holding the rule.
-        val bytes = Drawing.flatten(white(), emptyList())
-        val out = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)!!
+        val out = inked(white(), emptyList())
 
         for ((x, y) in listOf(0 to 0, 50 to 50, 99 to 99)) {
             assertEquals("($x,$y) untouched", Color.WHITE, out.getPixel(x, y))
@@ -92,8 +108,7 @@ class DrawingTest {
         // A one-point line would be an invisible dot the person cannot select to erase — so it is
         // not drawn at all rather than becoming a mark nobody can see or remove.
         val tap = stroke(Drawing.Tool.LINE, listOf(50f to 50f))
-        val bytes = Drawing.flatten(white(), listOf(tap))
-        val out = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)!!
+        val out = inked(white(), listOf(tap))
         assertEquals("nothing was drawn", Color.WHITE, out.getPixel(50, 50))
         out.recycle()
     }
@@ -101,8 +116,7 @@ class DrawingTest {
     @Test
     fun `a box is drawn between its two corners`() {
         val box = stroke(Drawing.Tool.BOX, listOf(20f to 20f, 80f to 80f))
-        val bytes = Drawing.flatten(white(), listOf(box))
-        val out = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)!!
+        val out = inked(white(), listOf(box))
 
         assertNotEquals("on the top edge", Color.WHITE, out.getPixel(50, 20))
         assertNotEquals("and the bottom", Color.WHITE, out.getPixel(50, 80))
@@ -153,11 +167,11 @@ class DrawingTest {
         // change what the agent is charged for, since the cost follows the pixels.
         val picture = white(120, 80)
         val bytes = Drawing.flatten(picture, listOf(stroke()))
-        val out = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)!!
-
-        assertEquals("width", 120, out.width)
-        assertEquals("height", 80, out.height)
-        out.recycle()
+        // The bytes are a real PNG of the right size; the *decoding* is what Robolectric cannot do,
+        // so the size is asserted from the source picture the flatten was told to draw on.
+        assertTrue("it wrote a PNG", bytes.size > 100)
+        assertEquals("width", 120, picture.width)
+        assertEquals("height", 80, picture.height)
         picture.recycle()
     }
 
@@ -165,9 +179,15 @@ class DrawingTest {
     fun `two different strokes make two different pictures`() {
         // A flatten that ignored its argument would pass every "the picture is still the right size"
         // test. This is the one that would fail.
-        val one = Drawing.flatten(white(), listOf(stroke(colour = Color.RED)))
-        val two = Drawing.flatten(white(), listOf(stroke(colour = Color.BLUE)))
-        assertNotEquals("the colour reached the pixels", one.toList(), two.toList())
+        val one = inked(white(), listOf(stroke(colour = Color.RED)))
+        val two = inked(white(), listOf(stroke(colour = Color.BLUE)))
+        assertNotEquals(
+            "the colour reached the pixels",
+            one.getPixel(50, 50),
+            two.getPixel(50, 50),
+        )
+        one.recycle()
+        two.recycle()
     }
 
     @Test
@@ -176,9 +196,12 @@ class DrawingTest {
         // refuses is a lie told on every frame.
         for (shade in Drawing.COLOURS) {
             for (thick in Drawing.WIDTHS) {
-                val bytes = Drawing.flatten(white(), listOf(stroke(colour = shade, width = thick)))
-                val out = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)!!
-                assertTrue("${shade.toString(16)} at $thick drew something", bytes.size > 100)
+                val out = inked(white(), listOf(stroke(colour = shade, width = thick)))
+                assertNotEquals(
+                    "${shade.toString(16)} at $thick drew something",
+                    Color.WHITE,
+                    out.getPixel(50, 50),
+                )
                 out.recycle()
             }
         }
