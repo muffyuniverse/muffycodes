@@ -258,7 +258,8 @@ class AgentTools(
                     "`name` keeps only paths whose own name matches, and may answer with a folder; " +
                     "`grep` keeps only files whose text matches, and shows the matching lines. " +
                     "A pattern is a regular expression, case-insensitive, matched inside one line. " +
-                    "`from`/`to` pick a range of the result's lines, which here are paths.",
+                    "`from`/`to` pick a range of the result's lines, which here are paths. " +
+                    "**A path starting `../` lists another project**, which is allowed.",
                 "{\"path\":\"where to look, relative to the project\",\"depth\":2," +
                     "\"name\":\"a pattern for file names\",\"grep\":\"a pattern for their text\"," +
                     "\"from\":1,\"to\":200}",
@@ -278,7 +279,10 @@ class AgentTools(
                     "line. A file is shown exactly as it is stored, columns and all. " +
                     "Your own `agent/context.log` is the rows in your context as " +
                     "`id size name body`, and `agent/session.log` is everything that happened, " +
-                    "with `kind` and `ctx`.",
+                    "with `kind` and `ctx`. " +
+                    "**A path starting `../` reads another project** — `../other/src/x.kt` — which is " +
+                    "allowed and is how you learn from work that already solved this problem. You may " +
+                    "read across; you may not write across.",
                 "{\"path\":\"the file, relative to the project\",\"from\":1,\"to\":200," +
                     "\"grep\":\"a pattern to select\",\"revision\":\"an id from history\"}",
             ),
@@ -778,8 +782,21 @@ class AgentTools(
     }
 
     /** True while [file] is inside the project once the phone's own links are followed. */
+    /**
+     * True when [file] is inside **the account** — which is the boundary, not the project.
+     *
+     * **This used to be the project, and the answer changed it.** The operator's rule gives a project's
+     * agent read-only access to the account's other folders, so a listing of `../other/` has to be
+     * allowed to walk out of this project; bounding it at the project would have returned an empty
+     * listing for a folder the agent may read, which reads as "that project is empty" rather than
+     * "you may not look there".
+     *
+     * What it still stops is the walk *itself* leaving the account — `..` past the account folder, or
+     * a symlink pointing at the phone's storage. Everything the agent can reach is under one folder,
+     * and that folder is the rule.
+     */
     private fun withinProject(file: File): Boolean = try {
-        val base = projectDir.canonicalFile
+        val base = ws.accountDir.canonicalFile
         val target = file.canonicalFile
         target == base || target.path.startsWith(base.path + File.separator)
     } catch (e: Exception) {
@@ -2399,31 +2416,58 @@ class AgentTools(
         val clean = raw.trim().replace('\\', '/').trimStart('/')
         if (clean.isEmpty()) return Result.success(projectDir)
         val parts = clean.split('/')
-        if (parts.any { it == ".." }) {
-            return Result.failure(
-                IllegalArgumentException("A path may not go up out of the project")
-            )
-        }
         if (parts.any { it.isEmpty() }) {
             return Result.failure(IllegalArgumentException("That path has an empty name in it"))
         }
+        // **`..` is allowed exactly once, and only to leave the project.** The operator's rule:
+        // *"any project's agent gets readonly access to account folders outside his project (other
+        // projects, including system)"*. So `../other_project/src/x.kt` is a path the agent may read,
+        // and the refusal it used to get — "A path may not go up out of the project" — was the rule
+        // before that answer.
+        //
+        // It is still bounded: everything resolves under the account folder and nowhere else, so no
+        // number of `..` reaches the phone's storage. What bounds it is the account, not the project.
         val target = try {
             File(projectDir, clean).canonicalFile
         } catch (e: Exception) {
             return Result.failure(IllegalArgumentException("That path could not be read"))
         }
-        val base = try {
-            projectDir.canonicalFile
+        val account = try {
+            ws.accountDir.canonicalFile
         } catch (e: Exception) {
             return Result.failure(
-                IllegalArgumentException("This project's folder could not be read")
+                IllegalArgumentException("This account's folder could not be read")
             )
         }
-        if (target != base && !target.path.startsWith(base.path + File.separator)) {
-            return Result.failure(IllegalArgumentException("That path is outside this project"))
+        if (target != account && !target.path.startsWith(account.path + File.separator)) {
+            return Result.failure(
+                IllegalArgumentException(
+                    "That path is outside this account. Everything you can reach is under " +
+                        "`${ws.accountDir.name}/`, and `..` from here is the account itself.",
+                ),
+            )
         }
         return Result.success(target)
     }
+
+    /**
+     * The project [file] belongs to, or null when it belongs to none.
+     *
+     * **Asked of the path, not remembered**, because a file's project is a fact about where it sits:
+     * a project is a top-level folder of the account, so the first segment of its path is the answer.
+     * This is what lets the refusal name the owner — *"`other/src/x.kt` belongs to `other`"* — rather
+     * than the false sentence the old rule gave, which called a readable path "outside this project".
+     */
+    fun projectOf(file: File): String? {
+        val account = ws.accountDir.absolutePath
+        val full = file.absolutePath
+        if (!full.startsWith(account + File.separator)) return null
+        val rest = full.substring(account.length + 1)
+        return rest.substringBefore(File.separator).ifEmpty { null }
+    }
+
+    /** True when [file] is inside the project the agent is working in. */
+    fun isMine(file: File): Boolean = projectOf(file) == project
 
     /**
      * Why [file] may not be written, or null when it may.
@@ -2463,6 +2507,20 @@ class AgentTools(
         // locks restrict both users and agents, and user locks restrict agents (not users
         // themselves!)" - so the agent asks [Workspace.isAgentLocked], which covers both kinds,
         // while a person's own acts ask `isLocked`, which is the app's locks alone.
+        // **Another project is readable and not writable**, which is the operator's rule and the one
+        // that matters most: *"any project's agent gets readonly access to account folders outside his
+        // project (other projects, including system)"*.
+        //
+        // The refusal names three things, because a refusal that names only the wrong thing leaves the
+        // model trying another spelling of the same path: **what it belongs to**, **what is allowed**
+        // (reading it), and **how to get from one to the other** (the project has to be open). The old
+        // sentence — "That path is outside this project" — was true when nothing outside was reachable
+        // and is false now, so it would have been a refusal that misdescribed the situation.
+        val owner = projectOf(file)
+        if (owner != null && owner != project) {
+            return "$path belongs to `$owner`, another project. You may read it; changing it needs " +
+                "`$owner` open. Say so if the change is needed and the person can make it there."
+        }
         ws.agentLockProblem(file)?.let { return it }
         if (insideWorktreeOrAgent(file)) return null
         // **Why, and not "outside this project".** That sentence was given for a path that is
@@ -2485,6 +2543,12 @@ class AgentTools(
      * contents would destroy the repository, and it is refused here rather than by each tool.
      */
     private fun insideWorktreeOrAgent(file: File): Boolean {
+        // **Outside the project is outside, whatever the name looks like.** `rel` now spells an
+        // outside path `../other/x`, whose first segment is `..` — which does not start with a dot in
+        // the sense this test means (a dot *name*), so without this line a file in another project
+        // would have been "inside the worktree" and writable. The owner check in [mayWrite] catches it
+        // first; this makes the predicate true on its own rather than true only because of the order.
+        if (!isMine(file)) return false
         val path = rel(file)
         if (path.isEmpty()) return true
         val first = path.substringBefore('/')
@@ -2494,15 +2558,26 @@ class AgentTools(
     /** A version's time, in the one shape a row reads in. */
     private fun stamp(at: Long): String = LogFormat.stamp(at)
 
-    /** A file's name as the agent says it: relative to the project, with forward slashes. */
+    /**
+     * A file's name as the agent says it: relative to the project, with forward slashes.
+     *
+     * **A path outside the project is named from the account instead**, as `../other/src/x.kt` — the
+     * same spelling the agent used to reach it, so an answer echoes the question and a next call can
+     * paste it. It used to answer with the bare file name, which was fine when nothing outside was
+     * reachable and is misleading now: `x.kt` names a file in *this* project to anyone reading it,
+     * and the whole point of the answer is that it is somewhere else.
+     */
     fun rel(file: File): String {
         val base = projectDir.absolutePath
         val full = file.absolutePath
         if (full == base) return ""
-        return if (full.startsWith(base + File.separator)) {
-            full.substring(base.length + 1).replace(File.separatorChar, '/')
-        } else {
-            file.name
+        if (full.startsWith(base + File.separator)) {
+            return full.substring(base.length + 1).replace(File.separatorChar, '/')
         }
+        val account = ws.accountDir.absolutePath
+        if (full.startsWith(account + File.separator)) {
+            return "../" + full.substring(account.length + 1).replace(File.separatorChar, '/')
+        }
+        return file.name
     }
 }

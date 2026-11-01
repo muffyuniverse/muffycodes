@@ -103,7 +103,11 @@ object AgentPrompt {
             wiki/            what has been learned about this code.
             mcp/             servers this project may reach, one article each.
         A folder that is not there holds nothing yet, which is not the same as nothing to know.
-        You may read anything in this project. You may not change anything outside it.
+        You may change anything in this project. **You may READ the rest of the account** - other
+        projects and the system project - by starting a path with `../`, as in
+        `read ../other/src/x.kt`. Reading across is how you learn from a project that already solved
+        your problem. You cannot WRITE across: an edit there is refused and names the project that
+        owns the file.
 
         HOW A TURN WORKS
         Call one or more tools. Every call gets a result whose first line is 0 (it worked) or 1

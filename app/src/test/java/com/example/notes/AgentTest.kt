@@ -156,25 +156,49 @@ class AgentTest {
     }
 
     @Test
-    fun `a path that leaves the project is refused, and the file is not touched`() {
-        // The agent asks to go one folder up, which is where another project's work is. The
-        // refusal is a sentence; the thing that must also be true is that nothing happened.
+    fun `another project may be read, and not written`() {
+        // **This test used to assert the opposite, and the operator's answer is why it changed.**
+        // It was "a path that leaves the project is refused" — the rule before *"any project's agent
+        // gets readonly access to account folders outside his project (other projects, including
+        // system)"*.
+        //
+        // Both halves are asserted here, because the change is a **narrowing of the write rule, not
+        // a removal of a boundary**: reading across is now allowed, and writing across is still not.
+        // A test that only checked the read would pass if the write refusal had been deleted too.
         val outside = File(ws.accountDir, "groceries/notes.txt")
         outside.parentFile.mkdirs()
         outside.writeText("somebody else's work")
 
         val door = ScriptedDoor(
             Reply("", listOf(call("read", """{"path":"../groceries/notes.txt"}"""))),
+            Reply(
+                "",
+                listOf(
+                    call("edit", """{"path":"../groceries/notes.txt","grep":"somebody","replace":"nobody"}""")
+                ),
+            ),
             Reply("understood"),
         )
 
         agent(door).burst("read the other project")
 
-        val got = gotRows().first()
-        assertTrue("refused: ${got.body}", got.body.startsWith(AgentLog.FAILURE))
-        assertTrue("and it says why", got.body.contains("up out of the project"))
-        assertFalse("the other project's text is not in the record", log.session.readText()
-            .contains("somebody else's work"))
+        val read = gotRows().first()
+        assertTrue("the read worked: ${read.body}", read.body.startsWith(AgentLog.SUCCESS))
+        assertTrue("and it carries the text", read.body.contains("somebody else's work"))
+
+        val write = gotRows()[1]
+        assertTrue("the edit is refused: ${write.body}", write.body.startsWith(AgentLog.FAILURE))
+        // **The refusal names three things**, because one that names only the wrong thing leaves a
+        // model trying another spelling of the same path: what the file belongs to, what is allowed,
+        // and how the change could be made.
+        assertTrue("it names the owner: ${write.body}", write.body.contains("groceries"))
+        assertTrue("what is allowed", write.body.contains("may read"))
+        assertTrue("and the way across", write.body.contains("open"))
+        assertEquals(
+            "and the other project's file is untouched",
+            "somebody else's work",
+            outside.readText(),
+        )
     }
 
     @Test
@@ -1345,12 +1369,63 @@ class AgentTest {
     }
 
     @Test
-    fun `a link out of the project is not followed, in a listing or a search`() {
-        // **`resolve` refuses `..` for a path a model wrote; a link is the same escape with no path
-        // to check.** The rule has to hold for every entry a walk meets, or a search reads files the
+    fun `another project's folder can be listed, and its paths come back named from the account`() {
+        // **The listing half of the read-only rule.** `tree ../groceries/` has to work, because
+        // otherwise the agent cannot discover what it may read — and `walk` was bounded at the
+        // *project*, so it would have answered "empty" for a folder it is allowed to read. An empty
+        // answer for a permitted read is worse than a refusal: it says the project holds nothing.
+        //
+        // **And the paths come back as `../groceries/…`**, which is the same spelling the agent used
+        // to get there. A bare `milk.txt` would name a file in *this* project to anyone reading the
+        // answer, which is the one thing it is not.
+        val other = File(ws.accountDir, "groceries").apply { mkdirs() }
+        File(other, "milk.txt").writeText("two litres")
+
+        val listed = tool("tree", """{"path":"../groceries/"}""")
+
+        assertTrue("it is a listing: $listed", listed.startsWith(AgentLog.SUCCESS))
+        assertTrue("and it has the file: $listed", listed.contains("../groceries/milk.txt"))
+        // **Every path in the answer is spelled from the account.** The direct form of that: no line
+        // of the listing is a bare path, which is what a path in *this* project looks like.
+        val paths = listed.lines().drop(1).filter { it.contains("milk.txt") }
+        assertTrue("the file appears: $listed", paths.isNotEmpty())
+        for (line in paths) {
+            assertTrue(
+                "spelled from the account, not from here: $line",
+                line.contains("../groceries/"),
+            )
+        }
+    }
+
+    @Test
+    fun `the account itself is the boundary, so two levels up is refused`() {
+        // **The read-only rule widened the boundary from the project to the account, and no
+        // further.** One `..` reaches a sibling project; two reach whatever holds the accounts, which
+        // is the phone's storage and not the agent's business. The refusal has to say where the
+        // boundary is, because "outside this project" is now false — this project is not what bounds
+        // it any more.
+        val body = tool("read", """{"path":"../../etc/hosts"}""")
+
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("naming the account as the edge: $body", body.contains("account"))
+        assertFalse("and nothing of the file: $body", body.contains("localhost"))
+    }
+
+    @Test
+    fun `a link out of the account is not followed, in a listing or a search`() {
+        // **`resolve` bounds a path at the account; a link is the same escape with no path to
+        // check.** The rule has to hold for every entry a walk meets, or a search reads files the
         // instructions promise the agent cannot see.
-        val outside = File(account, "elsewhere").apply { mkdirs() }
-        ws.write(File(outside, "secret.txt"), "a needle outside the project")
+        //
+        // **Outside the ACCOUNT, not outside the project.** Another project's folder is readable now
+        // — that is the point of the read-only rule — so a link into one is not an escape and this
+        // test would have been asserting that a permitted read was refused. The boundary is the
+        // account, and that is what the link has to cross.
+        val outside = File(
+            System.getProperty("java.io.tmpdir"),
+            "elsewhere-${System.nanoTime()}",
+        ).apply { mkdirs() }
+        File(outside, "secret.txt").writeText("a needle outside the account")
         val link = File(ws.repoOf("shopping"), "escape")
         try {
             java.nio.file.Files.createSymbolicLink(link.toPath(), outside.toPath())
