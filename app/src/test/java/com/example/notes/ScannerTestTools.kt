@@ -44,14 +44,28 @@ class ScannerTestTools {
 
     private fun call(tool: String, args: String) = Call(id = "1", tool = tool, args = args)
 
-    /** A browser that answers [text] for any page. */
+    /**
+     * A browser that answers [text] for any page.
+     *
+     * **`com.example.notes.browser.Deadline`, spelled out**, because this file has two `Deadline` classes in
+     * scope: the browser module's own and the tools'. The browser's is the one its interface takes, and a bare
+     * `Deadline` would resolve to the tools' and override nothing.
+     */
     private fun browser(text: String) = object : Browser {
         override val engine = "fake"
-        override fun text(url: String, wait: Wait, eval: String?, deadline: Deadline): Result<Page> =
-            Result.success(Page(text = text, url = url, title = "A page"))
+        override fun text(
+            url: String,
+            wait: Wait,
+            eval: String?,
+            deadline: com.example.notes.browser.Deadline,
+        ): Result<Page> = Result.success(Page(text = text, url = url, title = "A page"))
 
-        override fun shot(url: String, full: Boolean, eval: String?, deadline: Deadline): Result<ByteArray> =
-            Result.success(byteArrayOf(1, 2, 3))
+        override fun shot(
+            url: String,
+            full: Boolean,
+            eval: String?,
+            deadline: com.example.notes.browser.Deadline,
+        ): Result<ByteArray> = Result.success(byteArrayOf(1, 2, 3))
     }
 
     /** A server that answers [text]. */
