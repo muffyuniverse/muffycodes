@@ -108,10 +108,15 @@ class PicturesInDoorTest {
     @Test
     fun `a tool result cannot carry a picture, and does not pretend to`() {
         // **The API's shape, not a choice.** `role: "tool"` is text-only, which is why `look` records a
-        // pending picture for the next message rather than answering with one. A `pictures` list set
-        // on a tool message is ignored here; the assertion is that the content stays a string, so a
-        // future change cannot start emitting a form the provider will reject.
-        val one = sent(Msg.tool("call_1", "attached: a.png (1024×768)", pictures = listOf(png)), at = 1)
+        // pending picture for the next message rather than answering with one.
+        //
+        // The message is built through the **constructor** rather than `Msg.tool`, and deliberately:
+        // `tool()` takes no pictures, so the only way to ask this question at all is to hand the
+        // branch one it should refuse. That is the point — a future edit that starts emitting an
+        // array here would produce a body the provider rejects, and nothing else in the suite looks
+        // at this branch.
+        val tool = Msg("tool", "attached: a.png (1024×768)", callId = "call_1", pictures = listOf(png))
+        val one = sent(tool, at = 1)
 
         assertEquals("tool", one.getString("role"))
         assertEquals("call_1", one.getString("tool_call_id"))
