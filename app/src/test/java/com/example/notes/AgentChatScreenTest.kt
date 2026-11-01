@@ -226,7 +226,11 @@ class AgentChatScreenTest {
         awaitTurns(2)
 
         // The bubble opens on its last page, which is the words. Two pages: the call and the words.
-        val message = scene.viewModel.chatBox!!.bubbles.last()
+        //
+        // **`messages`, not `bubbles`** — a `Bubble` is one page; the pages belong to the message
+        // that holds them. Asking a bubble for its pages is asking the wrong object, which CI said
+        // in one line.
+        val message = scene.viewModel.chatBox!!.messages.last()
         assertEquals("the fixture has two pages", 2, message.pages.size)
 
         compose.onAllNodesWithContentDescription("Read this message fullscreen").onLast().performClick()
