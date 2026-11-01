@@ -126,8 +126,9 @@ data class Msg(
     val pictures: List<String> = emptyList(),
 ) {
     companion object {
-        /** The operator's words. */
-        fun user(text: String) = Msg("user", text)
+        /** The operator's words, and the pictures that came with them. */
+        fun user(text: String, pictures: List<String> = emptyList()) =
+            Msg("user", text, pictures = pictures)
 
         /** The agent's own words, with the calls it made in the same reply. */
         fun assistant(text: String, calls: List<Call> = emptyList(), thinking: String = "") =

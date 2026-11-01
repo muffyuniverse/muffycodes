@@ -20,7 +20,12 @@ import org.junit.Test
  */
 class PicturesInDoorTest {
 
-    private val door = OpenRouterDoor(account = "test", key = { "sk-or-v1-test" })
+    private val door = OpenRouterDoor(
+        key = { "sk-or-v1-test" },
+        model = "deepseek/deepseek-v4.1-flash-1017",
+        provider = "deepinfra/fp8/flex",
+        effort = "",
+    )
 
     /** One small valid-looking data URL. The bytes are never decoded here — only the shape is read. */
     private val png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg=="
