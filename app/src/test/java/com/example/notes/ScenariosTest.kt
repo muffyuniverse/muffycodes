@@ -457,6 +457,7 @@ class ScenariosTest {
         // like a scenario that passed. `await` drains the looper, which is what makes the worker's
         // answer land.
         var photographed: File? = null
+        var pressedDraw = false
         scenario(
             compose, "34-a-page-of-writing-photographed",
             "A page, photographed.",
@@ -482,10 +483,18 @@ class ScenariosTest {
                 }
                 photographed = viewModel.editingFile
                 compose.waitForIdle()
-                // Draw, so the picture shows the canvas the photograph became.
-                compose.onAllNodesWithText("Draw")[0].performClick()
-                compose.waitForIdle()
             }
+            // **Draw is pressed after the swap, in `ready`**, because the button only exists once the
+            // after-screen is composed — and `then(...)` runs on the screen before it. Splitting the
+            // two is the whole reason `ready` exists.
+            ready = {
+                if (!pressedDraw) {
+                    pressedDraw = true
+                    compose.onAllNodesWithText("Draw")[0].performClick()
+                    compose.waitForIdle()
+                }
+                true
+            },
             after()
             result(
                 "Photo renders the file's view — the rendered page, not the raw source — to a PNG " +
