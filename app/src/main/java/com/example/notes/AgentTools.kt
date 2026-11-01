@@ -170,6 +170,25 @@ class AgentTools(
         const val MAX_IDS = 4_096
 
         /**
+         * How many files `search` answers with when the model does not say.
+         *
+         * **Ten, because a search is a question and not a survey.** The operator asked for a flag on
+         * *"how many paths are shown"*, and the default has to be small enough that an agent that
+         * forgot the flag still gets a readable answer — a hundred hits with no filter is a list
+         * nobody reads, and the agent then guesses at the first line.
+         */
+        const val DEFAULT_PATHS = 10
+
+        /**
+         * The most files one `search` will name, however large `paths` is.
+         *
+         * A hundred is a page of paths, which is as many as a model can hold beside the question it
+         * is answering. Past this the answer is not "more results", it is "a narrower query" — and
+         * saying so is more useful than a list that stops mid-thought.
+         */
+        const val MOST_PATHS = 100
+
+        /**
          * What a range may be written with, normalised to `..` before anything is split.
          *
          * A hyphen **between two digits**, so `7-19` and `7 - 19` are one range while `-3` stays a
@@ -205,6 +224,7 @@ class AgentTools(
          */
         val KEYS: Map<String, Set<String>> = mapOf(
             "tree" to setOf("path", "depth", "name", "grep", "from", "to"),
+            "search" to setOf("query", "in", "paths", "depth"),
             "read" to setOf("path", "from", "to", "grep", "revision"),
             "edit" to setOf("path", "grep", "replace", "from", "to", "at", "text"),
             "forget" to setOf("ids"),
@@ -252,6 +272,24 @@ class AgentTools(
         }
 
         fun specs(): List<ToolSpec> = listOf(
+            spec(
+                "search",
+                "Find files by what they say. **Searches every project in the account, not just " +
+                    "this one** — a thing worth finding may live in another project or in the " +
+                    "system project, and a search that silently missed them would answer \"there is " +
+                    "nothing\" about a question it did not ask. " +
+                    "`in` keeps the search to folders: a list of path prefixes, matched against a " +
+                    "file's path, so `[\"wiki/\"]` means the wiki of every project and " +
+                    "`[\"groceries/wiki/\"]` means one. Empty or left out searches everywhere. " +
+                    "`paths` is **how many files to answer with** (10 by default, 100 at most) — a " +
+                    "count of paths, not a score, because a path is what you read next. " +
+                    "Each answer line is `path:line: the text`, and the paths are relative to the " +
+                    "account so a hit in another project says which one. " +
+                    "**Search before you guess**, and search before you write a wiki article: a " +
+                    "duplicate article is worse than a missing one.",
+                "{\"query\":\"the text to find, a case-insensitive regular expression\"," +
+                    "\"in\":[\"src/\",\"wiki/\"],\"paths\":10}",
+            ),
             spec(
                 "tree",
                 "List the files in a folder of this project. Folders end with a slash. " +
@@ -546,6 +584,7 @@ class AgentTools(
         if (unknown.isNotEmpty()) return refuseKeys(call.tool, unknown)
         when (call.tool) {
             "tree" -> tree(args, deadline)
+            "search" -> searchTool(args, deadline)
             "read" -> read(args, deadline)
             "edit" -> edit(args, deadline)
             "forget" -> forget(args)
@@ -727,6 +766,168 @@ class AgentTools(
         val chosen = slice(found, args).getOrElse { return refusal(it.message ?: "that range cannot be used") }
         if (chosen.isEmpty()) return success("nothing in that range: ${found.size} matches")
         return success(chosen.joinToString("\n"))
+    }
+
+    /**
+     * Find files by what they say, **across the whole account.**
+     *
+     * ## Why this is not `tree` with a `grep`
+     *
+     * `tree` answers about one folder and lists everything under it. `search` answers about a
+     * *question*: the agent has a fact to find and does not know which project holds it. The
+     * operator's rule — *"all text files are embedded and searched the same way with folders as
+     * search filter flags"* — makes the difference a matter of defaults and filters, not of scope:
+     * `search` starts at the account, and `in` narrows it.
+     *
+     * ## The three arguments
+     *
+     * - **`query`** is the pattern, a case-insensitive regular expression matched inside one line.
+     *   Required: a search with no pattern is a listing, and `tree` is the tool for that.
+     * - **`in`** is a list of **path prefixes**, matched against the account-relative path. So
+     *   `["wiki/"]` finds the wiki of *every* project, and `["groceries/wiki/"]` finds one. This is
+     *   what "folders as filter flags" means: no scopes, no modes, just prefixes.
+     * - **`paths`** is **how many files to answer with** — the operator asked for a flag *"on how many
+     *   paths are shown"*, and a count is what an agent can act on, because a path is what it reads
+     *   next. Not a score: a score threshold makes the agent guess what a number means.
+     *
+     * ## Why the answer is per-file and not per-match
+     *
+     * `paths` counts **files**, so a file matching forty times is one answer, not forty. The first
+     * match in each file is shown — the line and its number — and the count of the rest, because a
+     * list that hides "and 39 more" reads as a file that says it once.
+     *
+     * ## What is never searched
+     *
+     * The app's own folders (`agent/`, `.git`, dot-folders) are skipped by [ws.list], and a file the
+     * app refuses to read as text is skipped here too — the same rule `read` applies, so the two
+     * cannot disagree about what exists.
+     */
+    private fun searchTool(args: JSONObject, deadline: Deadline): String {
+        val query = pattern(args.optString("query", ""))
+            .getOrElse { return refusal("That is not a pattern: ${it.message}") }
+            ?: return refusal(
+                "`search` needs a `query`: a pattern to find. To list what is in a folder, use `tree`.",
+            )
+        val paths = count(args, "paths", DEFAULT_PATHS)
+            .getOrElse { return refusal(it.message ?: "that count cannot be used") }
+            .coerceIn(1, MOST_PATHS)
+        val depth = count(args, "depth", 12)
+            .getOrElse { return refusal(it.message ?: "that depth cannot be used") }
+            .coerceIn(1, 32)
+        // **The prefixes, cleaned once.** A trailing slash is how a person writes a folder, and
+        // matching `wiki/` against `wiki/article.md` needs it kept — the prefix ends with the slash
+        // and the path continues after it.
+        val filters = args.optJSONArray("in")
+        val inFolders = mutableListOf<String>()
+        if (filters != null) {
+            for (i in 0 until filters.length()) {
+                val raw = filters.optString(i, "").trim().replace('\\', '/').trim('/')
+                if (raw.isNotEmpty()) inFolders.add("$raw/")
+            }
+        }
+
+        val found = mutableListOf<String>()
+        val state = SearchState(paths)
+        walkForSearch(ws.accountDir, depth, query, inFolders, state, found, deadline)
+        if (found.isEmpty()) {
+            val where = if (inFolders.isEmpty()) "this account" else inFolders.joinToString(", ")
+            return success("nothing matches \"${args.optString("query")}\" in $where")
+        }
+        // **"stopped at N" is only true when the walk stopped at N.** It reaches `paths` and there
+        // were more files to look at; if the walk finished exactly on the limit, there is nothing
+        // more to promise and the sentence would send the agent looking for a remainder that does
+        // not exist.
+        val head = if (state.full && state.more) {
+            "stopped at $paths paths; narrow `in` or the query for the rest\n"
+        } else {
+            ""
+        }
+        return success(head + found.joinToString("\n"))
+    }
+
+    /** How many files a search has answered with, so the walk can stop. */
+    private class SearchState(val limit: Int) {
+        var count: Int = 0
+
+        /** True once the answer holds as many files as the model asked for. */
+        val full: Boolean get() = count >= limit
+
+        /**
+         * True when the walk stopped **because of the limit** rather than because it ran out.
+         *
+         * Set by the walk when it gives up with files still unasked. The distinction is the
+         * difference between "there is more, ask again" and a promise the app cannot keep.
+         */
+        var more: Boolean = false
+    }
+
+    /**
+     * Walks [dir] depth-first and adds one line per matching file.
+     *
+     * **Depth-first in the order `ws.list` gives**, so a search that hits its `paths` limit answers
+     * with the first N in the order a person reading the tree would meet them rather than an
+     * arbitrary N. A folder that cannot be listed is skipped rather than failing the search: one
+     * unreadable folder must not make the whole account unsearchable.
+     */
+    private fun walkForSearch(
+        dir: File,
+        left: Int,
+        query: Regex,
+        inFolders: List<String>,
+        state: SearchState,
+        found: MutableList<String>,
+        deadline: Deadline,
+    ) {
+        if (left <= 0 || state.full) return
+        val entries = try {
+            ws.list(dir)
+        } catch (e: Throwable) {
+            return
+        }
+        for (entry in entries) {
+            deadline.check("search")
+            if (state.full) {
+                // **There was more to ask.** Recorded here rather than inferred later, because only
+                // the walk knows whether it stopped short or simply finished.
+                state.more = true
+                return
+            }
+            // **A link is followed only while it stays in the account**, the same rule every walk
+            // applies: a link inside the account can point anywhere, and a search that followed one
+            // would read files the instructions promise it cannot see.
+            if (!withinProject(entry.file)) continue
+            if (entry.isFolder) {
+                walkForSearch(entry.file, left - 1, query, inFolders, state, found, deadline)
+                continue
+            }
+            val path = relToAccount(entry.file)
+            // **A filter is a prefix on the account-relative path**, so `wiki/` matches
+            // `groceries/wiki/x.md` and `system/muffycodes_data/wiki/y.md` — the operator's "the
+            // wiki of every project" — while `groceries/wiki/` matches one.
+            if (inFolders.isNotEmpty() && inFolders.none { path.startsWith(it) }) continue
+            if (ws.kindOf(entry.file) != EntryKind.TEXT) continue
+            val text = try {
+                readText(entry.file, deadline, "search")
+            } catch (e: Throwable) {
+                continue
+            }
+            val lines = text.split("\n")
+            var first = -1
+            var at = 0
+            var hits = 0
+            for ((index, line) in lines.withIndex()) {
+                val where = hit(line, query, deadline, "search") ?: continue
+                hits++
+                if (first < 0) {
+                    first = index
+                    at = where
+                }
+            }
+            if (first < 0) continue
+            val more = if (hits > 1) " (+${hits - 1} more)" else ""
+            found.add("$path:${first + 1}: ${excerpt(lines[first], at, HIT)}$more")
+            state.count++
+        }
     }
 
     /**
