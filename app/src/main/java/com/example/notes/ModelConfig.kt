@@ -41,14 +41,46 @@ data class ActiveModel(
 )
 
 /**
+ * A model chosen for one job, **where the job decides what the third value means.**
+ *
+ * The three catalogues are the same shape and their choices are not: a chat model has an effort
+ * ladder, an embedding model has **dimensions**, and a rerank model has neither. The operator's
+ * instruction is what settles the third one — *"dims can replace effort screen for embedding
+ * model"* — so `extra` is named for what it holds rather than pretending the three are the same.
+ *
+ * **The dimension is a request parameter, not a property of the model.** `qwen/qwen3-embedding-8b`
+ * answers 1024, 2048 or 4096 on demand (measured), so it belongs beside the id exactly as
+ * `ActiveModel.contextLength` does — for the same reason: *"the two places that build an agent
+ * have no catalogue to ask."* An index stores the dimension it was built at, and a mismatch is
+ * "re-index needed", never a comparison.
+ */
+data class PickedModel(
+    val model: String,
+    val provider: String,
+    /** The embedding dimension. Null for a chat or rerank model, which have no such choice. */
+    val dimensions: Int? = null,
+    /** The endpoints allowed for this model, in the order the person put them. */
+    val providers: List<String> = emptyList(),
+)
+
+/**
  * `model_conf.json` at the account root: the catalogue and the choice.
  *
  * **The file is the only store.** The settings rows and the picker are editors of it, so there
  * is no second copy of the same three values to disagree with the first.
+ *
+ * **[embedding] and [rerank] are nullable, and that is the honest shape.** A config written before
+ * this app could search has no embedding model, and the right answer is "not chosen yet" — not a
+ * default slug silently picked on the person's behalf, which would be a model choice they never
+ * made and cannot see. `null` reads as "no embedding model", and the search feature says so.
  */
 data class ModelConfig(
     val active: ActiveModel,
     val models: List<ModelChoice>,
+    /** The model that turns text into vectors, and the dimension to ask it for. */
+    val embedding: PickedModel? = null,
+    /** The model that reorders search results. */
+    val rerank: PickedModel? = null,
 ) {
     /** The endpoints allowed for [model], in the order the person put them. */
     fun providersOf(model: String): List<String> =
@@ -136,8 +168,17 @@ object ModelConfigFile {
         file.parentFile?.mkdirs()
         // Pretty rather than one line: a person may open this from the editor, and a single
         // 400-character line is the one shape nobody can read.
-        file.writeText(toJson(config).toString(2))
+        file.writeText(text(config))
     }
+
+    /**
+     * The file's text for [config], **without writing it.**
+     *
+     * The round-trip test needs this, and so does any caller that wants to show a person what the app
+     * would write before it writes it. `write` is this plus a file, so the two cannot disagree about
+     * the shape — which is the only way a "what we write is what we can read" test means anything.
+     */
+    fun text(config: ModelConfig): String = toJson(config).toString(2)
 
     private fun toJson(config: ModelConfig): JSONObject = JSONObject().apply {
         put("version", VERSION)
@@ -158,6 +199,19 @@ object ModelConfigFile {
                 })
             }
         })
+        // **Only when chosen.** A null written as `{}` would read back as a model with no id, and
+        // the difference between "no embedding model" and "an empty one" is the difference between
+        // a feature that is off and a config that is broken.
+        config.embedding?.let { put("embedding", picked(it)) }
+        config.rerank?.let { put("rerank", picked(it)) }
+    }
+
+    /** One chosen model as JSON, with the dimension only when the job has one. */
+    private fun picked(one: PickedModel): JSONObject = JSONObject().apply {
+        put("model", one.model)
+        put("provider", one.provider)
+        put("providers", JSONArray(one.providers))
+        one.dimensions?.let { put("dimensions", it) }
     }
 
     /**
@@ -255,7 +309,70 @@ object ModelConfigFile {
         // tokens is a claim the catalogue never made.
         val window = if (activeObject.has("contextLength")) activeObject.optInt("contextLength", -1).takeIf { it > 0 } else null
         val reply = if (activeObject.has("maxOutput")) activeObject.optInt("maxOutput", -1).takeIf { it > 0 } else null
-        return Result.success(ModelConfig(ActiveModel(model, provider, effort, window, reply), models))
+        // **The two optional blocks, read only when present.** A block that is there and wrong is a
+        // refusal like any other, because a config that silently dropped a model the person chose
+        // would leave search using nothing while the file plainly names one.
+        var failed: Throwable? = null
+        val embedding = pickedIn(root, "embedding").getOrElse {
+            failed = it
+            null
+        }
+        if (failed != null) return Result.failure(failed!!)
+        val rerank = pickedIn(root, "rerank").getOrElse {
+            failed = it
+            null
+        }
+        if (failed != null) return Result.failure(failed!!)
+        return Result.success(
+            ModelConfig(
+                ActiveModel(model, provider, effort, window, reply),
+                models,
+                embedding = embedding,
+                rerank = rerank,
+            ),
+        )
+    }
+
+    /**
+     * One optional chosen-model block, or null when the file has none.
+     *
+     * **A block that is present must be complete.** `{"model":"x"}` with no provider is not a
+     * half-chosen model, it is a file someone edited wrongly, and the refusal names the place —
+     * `embedding.provider` — because that is what the person has to fix.
+     */
+    private fun pickedIn(root: JSONObject, key: String): Result<PickedModel?> {
+        val one = root.optJSONObject(key) ?: return Result.success(null)
+        val model = one.optString("model").trim()
+        if (model.isEmpty()) {
+            return Result.failure(IllegalArgumentException("$key.model is empty"))
+        }
+        val provider = one.optString("provider").trim()
+        if (provider.isEmpty()) {
+            return Result.failure(IllegalArgumentException("$key.provider is empty"))
+        }
+        val providersRaw = one.optJSONArray("providers")
+        val providers = ArrayList<String>(providersRaw?.length() ?: 0)
+        if (providersRaw != null) {
+            for (j in 0 until providersRaw.length()) {
+                val tag = providersRaw.optString(j).trim()
+                if (tag.isNotEmpty()) providers.add(tag)
+            }
+        }
+        // **The dimension, when the file names one.** Not checked against a list here: a model may
+        // support dimensions this build has never heard of, and refusing them would make the file
+        // less capable than the API. A value that is not a positive number is a typo, though.
+        val dimensions = if (one.has("dimensions")) {
+            val value = one.optInt("dimensions", -1)
+            if (value <= 0) {
+                return Result.failure(
+                    IllegalArgumentException("$key.dimensions must be a positive whole number"),
+                )
+            }
+            value
+        } else {
+            null
+        }
+        return Result.success(PickedModel(model, provider, dimensions, providers))
     }
 
     /**

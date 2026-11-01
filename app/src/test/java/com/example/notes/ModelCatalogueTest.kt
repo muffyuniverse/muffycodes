@@ -210,4 +210,78 @@ class ModelCatalogueTest {
             list.first { it.tag == "deepseek" }.priceCache == null,
         )
     }
+
+    // ---- three catalogues, one parser ---------------------------------------
+
+    @Test
+    fun `the three catalogues are three paths and one payload shape`() {
+        // **The operator's correction, as a test.** I had concluded there were no embedding models
+        // because I only looked at `/api/v1/models`. There are three catalogues, the payloads are the
+        // same shape, and so the generalization is a URL rather than a parser.
+        assertEquals("chat", "/api/v1/models", CatalogueKind.CHAT.path)
+        assertEquals("embedding", "/api/v1/embeddings/models", CatalogueKind.EMBEDDING.path)
+        // **A query parameter for rerank**, because rerank models are chat models filtered by what
+        // they can output — which is why the "path" argument has to be a whole path with its query
+        // rather than a segment the class appends.
+        assertTrue(
+            "rerank is filtered, not a folder: ${CatalogueKind.RERANK.path}",
+            CatalogueKind.RERANK.path.startsWith("/api/v1/models?output_modalities="),
+        )
+    }
+
+    @Test
+    fun `the same parser reads an embedding payload`() {
+        // Captured from /api/v1/embeddings/models on 2026-11-01, trimmed to the fields the app reads.
+        // **The shape is the same and the meaning is not**: `output_modalities` is `["embeddings"]`,
+        // the prompt price is per token of input, and `supported_parameters` carries no `tools`.
+        val payload = """
+            { "data": [
+              { "id": "qwen/qwen3-embedding-8b", "name": "Qwen3 Embedding 8B",
+                "created": 1750000000, "context_length": 32768,
+                "architecture": { "input_modalities": ["text"],
+                                  "output_modalities": ["embeddings"] },
+                "top_provider": { "context_length": 32768 },
+                "pricing": { "prompt": "0.00000002" },
+                "supported_parameters": [] },
+              { "id": "nvidia/nemotron-3.5-embed-8b:free", "name": "Nemotron Embed 8B (free)",
+                "created": 1751000000, "context_length": 4096,
+                "architecture": { "input_modalities": ["text"],
+                                  "output_modalities": ["embeddings"] },
+                "pricing": { "prompt": "0" },
+                "supported_parameters": [] }
+            ] }
+        """.trimIndent()
+
+        val found = OpenRouterCatalogue.parseModels(payload, "qwen/qwen3-embedding-8b")
+        assertTrue("it is read: ${found.exceptionOrNull()}", found.isSuccess)
+        val info = found.getOrThrow()
+        assertEquals("the input window is what matters here", 32768, info.contextLength)
+        assertEquals("and it outputs embeddings", listOf("embeddings"), info.outputModalities)
+        // **No effort ladder, and that is not a missing field.** An embedding model has no reasoning
+        // to be graded, so the row that would show it is the dimension instead.
+        assertTrue("no effort ladder", info.efforts.isEmpty())
+    }
+
+    @Test
+    fun `a dimension is a request parameter, so the choice carries it`() {
+        // **Measured, not assumed:** `qwen/qwen3-embedding-8b` answers 1024, 2048 or 4096 on demand.
+        // That is why the dimension lives beside the model id rather than being a property of the
+        // model — and why the picker offers it as a choice at all.
+        assertEquals(
+            "three sizes, and the smallest is the default because the index is what costs",
+            listOf(1024, 2048, 4096),
+            CatalogueKind.EMBEDDING.dimensions,
+        )
+        assertNull("a chat model has no dimension to ask for", CatalogueKind.CHAT.dimensions)
+        assertNull("and neither does a rerank model", CatalogueKind.RERANK.dimensions)
+    }
+
+    @Test
+    fun `whether tools matter is a fact about the kind, not about the row`() {
+        // **"tools: no" is a warning on a chat model and noise on an embedding model.** That
+        // difference is what makes one picker serve three catalogues instead of three screens.
+        assertTrue("the agent needs tools", CatalogueKind.CHAT.toolsMatter)
+        assertFalse("an embedder never calls a tool", CatalogueKind.EMBEDDING.toolsMatter)
+        assertFalse("nor does a reranker", CatalogueKind.RERANK.toolsMatter)
+    }
 }

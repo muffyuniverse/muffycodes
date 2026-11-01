@@ -6,6 +6,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -79,6 +80,10 @@ class ModelSectionTest {
                 Column {
                     KeyRow(viewModel = scene.viewModel, onSetKey = onSetKey)
                     ModelSection(viewModel = scene.viewModel)
+                    // **Both sections, because the settings screen draws both** and the embedding
+                    // rows are only meaningful beside the chat model's — the point of "dims can
+                    // replace effort screen for embedding model" is that they are the same block.
+                    PickedSection(viewModel = scene.viewModel)
                 }
             }
         }
@@ -95,6 +100,109 @@ class ModelSectionTest {
         compose.onNodeWithText(ModelConfigFile.DEFAULT_MODEL).assertIsDisplayed()
         compose.onNodeWithText("deepseek").assertIsDisplayed()
         compose.onNodeWithText("high").assertIsDisplayed()
+    }
+
+    // ---- the two models that are not the chat model -------------------------
+
+    @Test
+    fun `the embedding and rerank rows are on the screen, and say not chosen`() {
+        // **The operator's instruction is that a non-chat model is chosen the same way** — a row, a
+        // sheet, a pick — so the rows have to be on the same screen as the chat model's. And with no
+        // embedding model chosen, the honest word is "not chosen": a slug picked on the person's
+        // behalf would be a choice they never made and cannot see.
+        scene.viewModel.catalogue = scripted()
+        compose.setContent { Section() }
+
+        compose.onNodeWithText("Embedding model").assertIsDisplayed()
+        compose.onNodeWithText("Rerank model").assertIsDisplayed()
+        compose.onAllNodesWithText("not chosen").fetchSemanticsNodes().let {
+            assertTrue("both rows say so, and there are two of them: ${it.size}", it.size >= 2)
+        }
+        // **No Dimensions row while nothing is chosen**, because a size for a model that does not
+        // exist is a setting with nothing to apply to.
+        compose.onAllNodesWithText("Dimensions").fetchSemanticsNodes().let {
+            assertTrue("no dimension row yet: ${it.size}", it.isEmpty())
+        }
+    }
+
+    @Test
+    fun `a dimension row replaces the effort row for the embedding model`() {
+        // **"Dims can replace effort screen for embedding model."** The chat model's third value is
+        // effort; the embedding model's is the dimension, in the same place, because it is the same
+        // kind of fact — a value the model publishes and the person picks.
+        //
+        // The dimension is a REQUEST parameter (measured: qwen3-embedding-8b answers 1024, 2048 or
+        // 4096 on demand), which is what makes it a choice rather than a description.
+        scene.viewModel.choosePicked(
+            CatalogueKind.EMBEDDING,
+            "qwen/qwen3-embedding-8b",
+            "deepinfra",
+            1024,
+        )
+        compose.setContent { Section() }
+
+        compose.onNodeWithText("Dimensions").assertIsDisplayed()
+        compose.onNodeWithText("1024").assertIsDisplayed()
+        // **And the effort row is still there for the chat model**, which is the point: the two rows
+        // belong to two different models and both are shown.
+        compose.onNodeWithText("Effort").assertIsDisplayed()
+    }
+
+    @Test
+    fun `choosing an embedding model writes it, with its dimension, into the file`() {
+        // The file is the only store, so the claim is about the file: what the picker sets has to
+        // land there rather than in a copy held by a screen — and the dimension has to land *with*
+        // the model, because the index built later has no catalogue to ask.
+        scene.viewModel.choosePicked(
+            CatalogueKind.EMBEDDING,
+            "qwen/qwen3-embedding-8b",
+            "deepinfra",
+            2048,
+        )
+
+        val read = ModelConfigFile.load(scene.viewModel.workspace!!.accountDir).getOrThrow()
+        assertEquals("the model", "qwen/qwen3-embedding-8b", read.embedding?.model)
+        assertEquals("the endpoint", "deepinfra", read.embedding?.provider)
+        assertEquals("and the size it was chosen at", 2048, read.embedding?.dimensions)
+        // **The chat choice is untouched**, because choosing an embedder is not choosing a
+        // conversation model.
+        assertEquals(
+            "the chat model is still the chat model",
+            ModelConfigFile.DEFAULT_MODEL,
+            read.active.model,
+        )
+    }
+
+    @Test
+    fun `a rerank model is given no dimension, because the job has none`() {
+        // **The three jobs are not the same shape.** Passing a size for a reranker would store a
+        // number nothing reads, and a later reader would try to honour it.
+        scene.viewModel.choosePicked(
+            CatalogueKind.RERANK,
+            "voyageai/rerank-2.5-lite",
+            "voyageai",
+            1024,
+        )
+
+        val read = ModelConfigFile.load(scene.viewModel.workspace!!.accountDir).getOrThrow()
+        assertEquals("the model", "voyageai/rerank-2.5-lite", read.rerank?.model)
+        assertEquals("and no dimension was kept", null, read.rerank?.dimensions)
+    }
+
+    @Test
+    fun `clearing the embedding choice turns the feature off rather than picking one`() {
+        // **A model the person cannot see is worse than a feature that is off.** Clearing has to
+        // leave `null` in the file, which is the state the picker reads as "not chosen".
+        scene.viewModel.choosePicked(
+            CatalogueKind.EMBEDDING,
+            "qwen/qwen3-embedding-8b",
+            "deepinfra",
+            1024,
+        )
+        scene.viewModel.clearPicked(CatalogueKind.EMBEDDING)
+
+        val read = ModelConfigFile.load(scene.viewModel.workspace!!.accountDir).getOrThrow()
+        assertEquals("nothing is chosen", null, read.embedding)
     }
 
     @Test

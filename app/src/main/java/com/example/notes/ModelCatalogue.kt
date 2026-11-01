@@ -58,16 +58,74 @@ interface Catalogue {
 }
 
 /**
+ * **Which catalogue a picker is showing, because the three answer different questions.**
+ *
+ * The operator's correction: *"it seems that they are just inside different catalogues, we already have
+ * model picker screens and mechanics, generalize them to take catalogue path as an argument and
+ * implement for models, embedding and rerank."* All three are OpenRouter endpoints with the same payload
+ * shape, so the parser does not change — what changes is **what a row means**:
+ *
+ * | | chat | embedding | rerank |
+ * |---|---|---|---|
+ * | `architecture.output_modalities` | `["text"]` | `["embeddings"]` | `["rerank"]` |
+ * | `pricing.prompt` | per token | per token | **0** — charged per call |
+ * | `context_length` | the conversation window | the input window | query + documents |
+ * | "can call tools" | matters | **meaningless** | meaningless |
+ *
+ * Showing *"tools: no"* on an embedding model is noise; showing it on a chat model is a warning. That is
+ * a `when (kind)`, not a second screen — which is what makes one picker serve all three.
+ */
+enum class CatalogueKind(
+    /** The path the catalogue is read from. */
+    val path: String,
+    /** What a row is called, in the picker's own words. */
+    val label: String,
+) {
+    CHAT("/api/v1/models", "Model"),
+    EMBEDDING("/api/v1/embeddings/models", "Embedding model"),
+    // **A query parameter, not a path**, because rerank models are chat models filtered by what they
+    // can output. The operator's design is one argument and this is what that argument is here.
+    RERANK("/api/v1/models?output_modalities=rerank", "Rerank model"),
+    ;
+
+    /**
+     * The dimensions this kind can be asked for, **when the dimension is a request parameter.**
+     *
+     * `qwen/qwen3-embedding-8b` answers 1024, 2048 or 4096 on demand — measured, not assumed — which is
+     * why the dimension is a property of the *choice* and not of the model. A chat or rerank model has
+     * no such choice, and `null` is how this says so rather than an empty list that reads as "none
+     * available".
+     */
+    val dimensions: List<Int>? get() = when (this) {
+        CHAT, RERANK -> null
+        EMBEDDING -> listOf(1024, 2048, 4096)
+    }
+
+    /** True when "can call tools" says something about this kind of model. */
+    val toolsMatter: Boolean get() = this == CHAT
+}
+
+/**
  * OpenRouter's own catalogue, over the two endpoints that carry what the picker shows.
  *
  * The app makes these calls when a picker is opened and when a model is added — never on a
  * timer, and never while a session is running, so a catalogue that is down costs a form and not
  * an agent.
  */
-class OpenRouterCatalogue(private val key: () -> String?) : Catalogue {
+class OpenRouterCatalogue(
+    private val key: () -> String?,
+    /**
+     * **Which catalogue to read — the operator's one argument.**
+     *
+     * The three endpoints answer the same payload shape, so `parseModels` reads all of them and the
+     * only thing that differs is the URL. That is why this is a parameter rather than three classes:
+     * *"generalize them to take catalogue path as an argument"*.
+     */
+    private val kind: CatalogueKind = CatalogueKind.CHAT,
+) : Catalogue {
 
     override fun model(id: String): Result<ModelInfo> = try {
-        val text = get("/api/v1/models")
+        val text = get(kind.path)
         parseModels(text, id).fold(
             onSuccess = { Result.success(it) },
             onFailure = { Result.failure(IllegalStateException("OpenRouter does not have \"$id\"")) },

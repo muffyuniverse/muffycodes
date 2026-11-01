@@ -273,4 +273,103 @@ class ModelConfigTest {
         assertNotNull(ModelConfigFile.file(account))
         assertEquals("model_conf.json", ModelConfigFile.file(account).name)
     }
+
+    // ---- the two models that are not the chat model -------------------------
+
+    @Test
+    fun `an embedding choice keeps its dimension, and a file without one keeps no dimension`() {
+        // **The dimension is a request parameter, so it is stored with the choice** — the same rule
+        // `contextLength` follows, and for the same reason: the index built from it has no catalogue
+        // to ask. A file that names no dimension is not an error; it is a config from before this
+        // app could embed, and the picker says "not chosen" rather than inventing a size.
+        val config = ModelConfigFile.default().copy(
+            embedding = PickedModel(
+                model = "qwen/qwen3-embedding-8b",
+                provider = "deepinfra",
+                dimensions = 1024,
+                providers = listOf("deepinfra", "together"),
+            ),
+        )
+        val read = ModelConfigFile.parse(ModelConfigFile.text(config)).getOrThrow()
+
+        assertEquals("the model", "qwen/qwen3-embedding-8b", read.embedding?.model)
+        assertEquals("its provider", "deepinfra", read.embedding?.provider)
+        assertEquals("its size", 1024, read.embedding?.dimensions)
+        assertEquals(
+            "and the endpoints it may use",
+            listOf("deepinfra", "together"),
+            read.embedding?.providers,
+        )
+    }
+
+    @Test
+    fun `a config with no embedding model says so instead of guessing one`() {
+        // **`null` is the honest answer.** A default slug picked on the person's behalf would be a
+        // model choice they never made and cannot see — and search would then spend money on a model
+        // nobody chose. The row says "not chosen", and the feature is off.
+        val read = ModelConfigFile.parse(ModelConfigFile.text(ModelConfigFile.default()))
+            .getOrThrow()
+
+        assertNull("no embedding model", read.embedding)
+        assertNull("and no rerank model", read.rerank)
+    }
+
+    @Test
+    fun `a half-written embedding block is refused by name`() {
+        // A block that is there and incomplete is a file someone edited wrongly, and the refusal has
+        // to say which key — `embedding.provider` is the sentence that lets them fix it.
+        val text = """
+            {"version":1,
+             "active":{"model":"deepseek/deepseek-v4.1-flash-1017","provider":"deepseek","effort":"high"},
+             "models":[{"id":"deepseek/deepseek-v4.1-flash-1017","providers":["deepseek"]}],
+             "embedding":{"model":"qwen/qwen3-embedding-8b"}}
+        """.trimIndent()
+
+        val read = ModelConfigFile.parse(text)
+
+        assertTrue("it is refused", read.isFailure)
+        assertTrue(
+            "and names the key: ${read.exceptionOrNull()?.message}",
+            read.exceptionOrNull()?.message.orEmpty().contains("embedding.provider"),
+        )
+    }
+
+    @Test
+    fun `a dimension that is not a positive number is refused`() {
+        // **A typo, not a size.** Zero or negative cannot be a vector length, and silently treating
+        // it as "not set" would build an index at whatever the model defaulted to — an index the
+        // person believes is 1024 and is not.
+        val text = """
+            {"version":1,
+             "active":{"model":"deepseek/deepseek-v4.1-flash-1017","provider":"deepseek","effort":"high"},
+             "models":[{"id":"deepseek/deepseek-v4.1-flash-1017","providers":["deepseek"]}],
+             "embedding":{"model":"qwen/qwen3-embedding-8b","provider":"deepinfra","dimensions":0}}
+        """.trimIndent()
+
+        val read = ModelConfigFile.parse(text)
+
+        assertTrue("it is refused", read.isFailure)
+        assertTrue(
+            "and says what is wrong: ${read.exceptionOrNull()?.message}",
+            read.exceptionOrNull()?.message.orEmpty().contains("dimensions"),
+        )
+    }
+
+    @Test
+    fun `a rerank choice has no dimension and is not given one`() {
+        // **The three jobs are not the same shape**, and a rerank model has no third value. Writing
+        // one anyway would put a number in the file that nothing reads and a later reader would try
+        // to honour.
+        val config = ModelConfigFile.default().copy(
+            rerank = PickedModel(
+                model = "voyageai/rerank-2.5-lite",
+                provider = "voyageai",
+                providers = listOf("voyageai"),
+            ),
+        )
+        val read = ModelConfigFile.parse(ModelConfigFile.text(config)).getOrThrow()
+
+        assertEquals("the model", "voyageai/rerank-2.5-lite", read.rerank?.model)
+        assertNull("and no dimension", read.rerank?.dimensions)
+    }
 }

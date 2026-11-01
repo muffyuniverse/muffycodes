@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -164,6 +165,322 @@ fun ModelSection(viewModel: AppViewModel) {
             onDismiss = { picking = null },
         )
     }
+}
+
+/**
+ * The two models that are **not** the chat model: the one that embeds and the one that reranks.
+ *
+ * ## Why this is a second section and not three copies of the first
+ *
+ * The operator's instruction was to reuse the machinery: *"we already have model picker screens and
+ * mechanics, generalize them to take catalogue path as an argument."* So this draws the same
+ * [SettingRow], the same dialog shape, and the same mark-then-Select rule as [ModelSection] — what it
+ * does not reuse is the effort ladder, because a non-chat model has no effort.
+ *
+ * ## What replaces the effort row, and why
+ *
+ * *"Dims can replace effort screen for embedding model."* The third row of an embedding choice is
+ * **dimensions**, and it is the same kind of fact the effort row carries: a value that belongs to the
+ * model in use rather than to the endpoint. It is written beside the model in `model_conf.json`
+ * because the index built from it has no catalogue to ask.
+ *
+ * A rerank model has no third row at all, and gets none — an empty row would be a control that
+ * changes nothing.
+ *
+ * ## Why the two are nullable
+ *
+ * A config written before this app could search has no embedding model, and "not chosen yet" is the
+ * true answer. The row says so and the search feature says so; neither invents a slug on the person's
+ * behalf, because a model choice they never made and cannot see is worse than a feature that is off.
+ */
+@Composable
+fun PickedSection(viewModel: AppViewModel) {
+    val config = viewModel.modelConfig
+    var picking by remember { mutableStateOf<CatalogueKind?>(null) }
+
+    for (kind in listOf(CatalogueKind.EMBEDDING, CatalogueKind.RERANK)) {
+        val chosen = if (kind == CatalogueKind.EMBEDDING) config.embedding else config.rerank
+        SettingRow(
+            label = kind.label,
+            value = chosen?.model ?: "not chosen",
+            onTap = { picking = kind },
+        )
+        // **The dimension, only where it exists.** This is the row that replaces effort: the same
+        // place in the same block, because it is the same kind of choice — a value the model
+        // publishes and the person picks.
+        if (kind.dimensions != null && chosen != null) {
+            SettingRow(
+                label = "Dimensions",
+                value = chosen.dimensions?.toString() ?: "not chosen",
+                onTap = { picking = kind },
+            )
+        }
+    }
+
+    picking?.let { kind ->
+        PickedPicker(
+            viewModel = viewModel,
+            kind = kind,
+            onDismiss = { picking = null },
+        )
+    }
+}
+
+/**
+ * The dialog for one of the two non-chat models.
+ *
+ * **Mark then Select, like the chat picker**, because the same rule applies: a tap while scrolling
+ * past a row would change a model, and these rows carry the numbers a person is reading to decide.
+ *
+ * **The list comes from the catalogue, and the choice does not.** What is already chosen is in the
+ * config file on the phone; what could be chosen is what OpenRouter says, read when the sheet opens.
+ * A sheet that showed nothing until the network answered would be unusable offline, and one that
+ * showed only the config would have nothing to pick from.
+ */
+@Composable
+private fun PickedPicker(
+    viewModel: AppViewModel,
+    kind: CatalogueKind,
+    onDismiss: () -> Unit,
+) {
+    val config = viewModel.modelConfig
+    val chosen = if (kind == CatalogueKind.EMBEDDING) config.embedding else config.rerank
+    var picked by remember { mutableStateOf<String?>(null) }
+    var provider by remember { mutableStateOf(chosen?.provider.orEmpty()) }
+    var dimensions by remember { mutableStateOf(chosen?.dimensions ?: kind.dimensions?.firstOrNull()) }
+    var adding by remember { mutableStateOf(false) }
+    val failure = viewModel.catalogueProblem
+    val reading = viewModel.catalogueReading
+
+    LaunchedEffect(kind, chosen?.model) {
+        chosen?.model?.let { viewModel.readCatalogue(it) }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(kind.label) },
+        text = {
+            Column {
+                if (failure != null) {
+                    Text(
+                        text = failure!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                if (chosen == null) {
+                    Text(
+                        text = "Nothing chosen yet. Add one by its OpenRouter name.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    // **The rows are the numbers about the model in use**, because that is the one
+                    // the person is deciding about. Another model is asked for its own numbers when
+                    // it is added.
+                    val info = viewModel.modelInfo
+                    Column(
+                        modifier = Modifier
+                            .heightIn(max = 360.dp)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        PickedRow(
+                            label = chosen.model,
+                            detail = pickedDetail(kind, info, viewModel.modelEndpoints),
+                            marked = true,
+                            onClick = { picked = chosen.model },
+                        )
+                        HorizontalDivider()
+                        // **The provider, when there is more than one to choose.** Same act as the
+                        // chat picker's provider step, for the same reason: the endpoint decides the
+                        // price and the limits.
+                        val endpoints = viewModel.modelEndpoints
+                        if (endpoints.size > 1) {
+                            endpoints.forEach { one ->
+                                PickedRow(
+                                    label = one.tag,
+                                    detail = endpointDetail(one),
+                                    marked = one.tag == provider,
+                                    onClick = { provider = one.tag },
+                                )
+                                HorizontalDivider()
+                            }
+                        }
+                        // **The dimension ladder, where the model has one.** Every value is a
+                        // request parameter, so this is a real choice rather than a description of
+                        // the model: the same model at 1024 and at 4096 are two different indexes.
+                        val sizes = kind.dimensions
+                        if (sizes != null) {
+                            sizes.forEach { size ->
+                                PickedRow(
+                                    label = "$size dimensions",
+                                    detail = if (size == sizes.first()) "smallest index" else "",
+                                    marked = size == dimensions,
+                                    onClick = { dimensions = size },
+                                )
+                                HorizontalDivider()
+                            }
+                        }
+                        if (reading) {
+                            Text(
+                                text = "Reading OpenRouter…",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = { adding = true }) { Text("Add") }
+                if (chosen != null) {
+                    TextButton(onClick = {
+                        viewModel.clearPicked(kind)
+                        onDismiss()
+                    }) { Text("Remove") }
+                }
+                Spacer(Modifier.weight(1f))
+                TextButton(
+                    // **Select takes effect only when there is something to take.** A sheet whose
+                    // Select did nothing because no row was marked would be a button that lies about
+                    // being enabled.
+                    enabled = chosen != null && provider.isNotEmpty(),
+                    onClick = {
+                        val model = chosen?.model ?: return@TextButton
+                        Trace.tap(kind.label.lowercase(), model)
+                        viewModel.choosePicked(kind, model, provider, dimensions)
+                        onDismiss()
+                    },
+                ) { Text("Select") }
+            }
+        },
+    )
+
+    if (adding) {
+        AddPickedDialog(viewModel = viewModel, kind = kind, onDismiss = { adding = false })
+    }
+}
+
+/** One row in a [PickedPicker]: a mark, a name, and a line about it. */
+@Composable
+private fun PickedRow(label: String, detail: String, marked: Boolean, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 6.dp),
+    ) {
+        Text(
+            text = (if (marked) "● " else "○ ") + label,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (detail.isNotEmpty()) {
+            Text(
+                text = detail,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * What an embedding or rerank row says about itself.
+ *
+ * **The "tools" column is deliberately absent**, which is the whole point of [CatalogueKind.toolsMatter]:
+ * an embedding model cannot call tools and saying so would be noise dressed as a warning. What matters
+ * here is the input window, and — for an embedding model — that the dimension is a request parameter
+ * rather than a property of the model.
+ */
+private fun pickedDetail(kind: CatalogueKind, info: ModelInfo?, numbers: List<EndpointInfo>): String {
+    if (info == null) return ""
+    val window = numbers.firstOrNull()?.contextLength ?: info.contextLength
+    val parts = mutableListOf<String>()
+    window?.let { parts.add("${tokens(it)} input") }
+    if (kind == CatalogueKind.EMBEDDING) {
+        parts.add("dimension is your choice")
+    }
+    return parts.joinToString(" · ")
+}
+
+/** The price of one endpoint, in the same words the chat picker uses. */
+private fun endpointDetail(one: EndpointInfo): String {
+    val price = when {
+        one.priceIn == null && one.priceOut == null -> "price not published"
+        else -> "in ${money(one.priceIn)} · out ${money(one.priceOut)} per M"
+    }
+    return price
+}
+
+/**
+ * Adding a non-chat model by its OpenRouter name — **the same form the chat picker uses.**
+ *
+ * The id is typed rather than listed because the embedding catalogue has 38 entries and the rerank
+ * catalogue 10, and a person adding one knows which they want. The catalogue is asked whether the id
+ * exists before it becomes the choice, so a typo is a refusal rather than a broken index.
+ */
+@Composable
+private fun AddPickedDialog(
+    viewModel: AppViewModel,
+    kind: CatalogueKind,
+    onDismiss: () -> Unit,
+) {
+    var id by remember { mutableStateOf("") }
+    var provider by remember { mutableStateOf("") }
+    var problem by remember { mutableStateOf<String?>(null) }
+    val reading = viewModel.catalogueReading
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add a ${kind.label.lowercase()}") },
+        text = {
+            Column {
+                Text(
+                    text = "Its OpenRouter name, and one provider tag. Both are on the model's page.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = id,
+                    onValueChange = { id = it },
+                    label = { Text("Model id") },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = provider,
+                    onValueChange = { provider = it },
+                    label = { Text("Provider tag") },
+                    singleLine = true,
+                )
+                problem?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = id.isNotBlank() && provider.isNotBlank() && !reading,
+                onClick = {
+                    viewModel.addPicked(kind, id, provider).fold(
+                        onSuccess = { onDismiss() },
+                        onFailure = { problem = it.message ?: "That could not be added" },
+                    )
+                },
+            ) { Text("Add") }
+        },
+    )
 }
 
 private const val MODEL = "model"

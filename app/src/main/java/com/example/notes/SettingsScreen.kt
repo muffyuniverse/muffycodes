@@ -292,6 +292,17 @@ fun SettingsScreen(
             ModelSection(viewModel = viewModel)
             RowDivider()
 
+            // **The two models that are not the chat model**, and they are here rather than in a
+            // search screen of their own because they are the same kind of fact: a model, a
+            // provider, and one value the model publishes. The operator's instruction: *"dims can
+            // replace effort screen for embedding model"* — so the third row is the dimension, in
+            // the place the effort row sits for the chat model.
+            //
+            // **A row, not a feature switch.** An embedding model is chosen by picking one; there is
+            // no "turn search on", because a model that is chosen is the switch.
+            PickedSection(viewModel = viewModel)
+            RowDivider()
+
             // ---- how big the working context may get ----
             // Two numbers, and they are different acts. The trigger is a message to the agent —
             // "you are over, clear up" — and the agent decides what to remove. The hard limit is

@@ -782,6 +782,70 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /**
+     * Chooses the model that turns text into vectors, **or the one that reorders results.**
+     *
+     * One function for both because they are the same act on the same shape of block — the operator's
+     * instruction: *"generalize them to take catalogue path as an argument and implement for models,
+     * embedding and rerank."* What differs is the third value, and it is passed rather than inferred:
+     * `dimensions` is the embedding model's choice of size, and a rerank model has none.
+     *
+     * **The dimension is written with the model, not beside it in a second field**, for the reason
+     * `contextLength` is: the index that is built later has no catalogue to ask, and a dimension read
+     * from the wrong place is an index that has to be rebuilt.
+     */
+    fun choosePicked(kind: CatalogueKind, model: String, provider: String, dimensions: Int?) {
+        val one = PickedModel(
+            model = model,
+            provider = provider,
+            dimensions = if (kind == CatalogueKind.EMBEDDING) dimensions else null,
+            providers = providersFor(kind, model),
+        )
+        val next = when (kind) {
+            CatalogueKind.CHAT -> return
+            CatalogueKind.EMBEDDING -> modelConfig.copy(embedding = one)
+            CatalogueKind.RERANK -> modelConfig.copy(rerank = one)
+        }
+        writeModelConfig(next, "Chose $model on $provider for ${kind.label.lowercase()}")
+    }
+
+    /** The endpoints stored for [model] in [kind]'s block, so a choice keeps its provider list. */
+    private fun providersFor(kind: CatalogueKind, model: String): List<String> = when (kind) {
+        CatalogueKind.CHAT -> modelConfig.providersOf(model)
+        CatalogueKind.EMBEDDING -> modelConfig.embedding
+            ?.takeIf { it.model == model }?.providers.orEmpty()
+        CatalogueKind.RERANK -> modelConfig.rerank
+            ?.takeIf { it.model == model }?.providers.orEmpty()
+    }
+
+    /**
+     * Adds a model to the embedding or rerank list — **the same act as adding a chat model**, which
+     * is what "same structure as we already use" asks for.
+     *
+     * There is no list to add to in the file, because each of the two jobs has exactly one model
+     * chosen: adding one *is* choosing it. So this exists for the picker's Add button, which asks
+     * the catalogue whether the id is real before it becomes the choice.
+     */
+    fun addPicked(kind: CatalogueKind, id: String, provider: String): Result<Unit> {
+        if (kind == CatalogueKind.CHAT) return Result.failure(IllegalArgumentException("not this one"))
+        val clean = id.trim()
+        if (clean.isEmpty()) return Result.failure(IllegalArgumentException("A model needs an id"))
+        val tag = provider.trim()
+        if (tag.isEmpty()) return Result.failure(IllegalArgumentException("A model needs a provider"))
+        choosePicked(kind, clean, tag, kind.dimensions?.firstOrNull())
+        return Result.success(Unit)
+    }
+
+    /** Forgets the embedding or rerank choice, so the feature says "not chosen" rather than guessing. */
+    fun clearPicked(kind: CatalogueKind) {
+        val next = when (kind) {
+            CatalogueKind.CHAT -> return
+            CatalogueKind.EMBEDDING -> modelConfig.copy(embedding = null)
+            CatalogueKind.RERANK -> modelConfig.copy(rerank = null)
+        }
+        writeModelConfig(next, "Cleared the ${kind.label.lowercase()}")
+    }
+
+    /**
      * Asks the catalogue for one model's window, once, and writes it beside the choice.
      *
      * **A file write, not a field.** The poll that builds an agent runs in another process and
