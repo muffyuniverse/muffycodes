@@ -109,6 +109,11 @@ object AgentWiring {
             // different answer from a browse would be two rules for one question — and the one that
             // is wrong is the one nobody reads.
             fetcher = fetcher ?: Fetcher.http(privateAllowed = { settings.browsePrivate }),
+            // **The real transport, and the account's own store.** An MCP article names a secret; the store
+            // is what turns that name into a token, and it is passed here rather than read inside the tool
+            // so a test can be a store without a keystore.
+            mcp = Mcp.http(),
+            credentials = credentials,
             // **The real GitHub, and the key read per call.** A local project has a remote that is
             // not GitHub's, and `where()` in the tools refuses that in words rather than asking.
             github = {

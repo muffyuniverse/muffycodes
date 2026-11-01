@@ -59,6 +59,26 @@ interface Credentials {
 
     /** Keeps [key] for [login]. */
     fun setModelKey(login: String, key: String)
+
+    /**
+     * A **named** secret of the active account, or null when the phone has none.
+     *
+     * The operator's design has an MCP article naming its token rather than holding it —
+     * `token: linear` — because an article is in git and syncs to GitHub, so *"an article with a token in it
+     * is a leaked token in a repository, which is the one failure mode of this whole feature that cannot be
+     * undone."* This is where the name resolves.
+     *
+     * **A third kind of secret in the same store, behind the same door**, for the same reasons as the other
+     * two: encrypted with the keystore key, unreadable while the phone is locked, scrubbed out of every
+     * message. It is not a fourth mechanism.
+     *
+     * A default of null rather than an abstract method, so a store that has never heard of named secrets —
+     * every fake in the suite — compiles and answers honestly.
+     */
+    fun secret(name: String): String? = null
+
+    /** Keeps [value] as [name]'s secret for the active account. */
+    fun setSecret(name: String, value: String) {}
 }
 
 /** The three things a store can say about a stored key. */
@@ -191,9 +211,14 @@ class CredentialStore(context: Context) : Credentials {
 
     /** Removes [login] and its token from this phone. */
     override fun forget(login: String) {
+        // **The named secrets go with the account.** A key that reached a server is that account's, and a
+        // signed-out account leaving its MCP tokens on the phone would be a leak the person believes they
+        // closed.
+        val mine = prefs.all.keys.filter { it.startsWith("secret_${login}_") }
         prefs.edit()
             .remove(tokenKey(login))
             .remove(modelKeyKey(login))
+            .also { edit -> mine.forEach { edit.remove(it) } }
             .putString(KEY_LOGINS, logins().filter { it != login }.joinToString("\n"))
             .apply()
         if (activeLogin == login) activeLogin = null
@@ -241,6 +266,30 @@ class CredentialStore(context: Context) : Credentials {
         prefs.edit().putString(modelKeyKey(login), encrypt(key)).apply()
     }
 
+    /**
+     * A named secret of the active account — `token: linear` in an MCP article resolves here.
+     *
+     * **Per account, and the account is the active one**, because that is the identity the app acts as and
+     * the key that reaches a server belongs to it. The name is not a path: a secret called `../x` is a key
+     * in this store like any other, and nothing is opened on disk.
+     */
+    override fun secret(name: String): String? {
+        val login = activeLogin ?: return null
+        val stored = prefs.getString(secretKey(login, name), null) ?: return null
+        return try {
+            decrypt(stored)
+        } catch (e: Exception) {
+            // **Kept rather than dropped**, unlike the GitHub token: a locked phone is ordinary here too,
+            // and the caller is a tool that can say "that secret could not be read" and try again.
+            null
+        }
+    }
+
+    override fun setSecret(name: String, value: String) {
+        val login = activeLogin ?: return
+        prefs.edit().putString(secretKey(login, name), encrypt(value)).apply()
+    }
+
     /** True when [login] has a token stored. */
     override fun hasToken(login: String): Boolean = token(login) != null
 
@@ -248,6 +297,15 @@ class CredentialStore(context: Context) : Credentials {
 
     /** A different prefs key, because the two secrets must not overwrite each other. */
     private fun modelKeyKey(login: String): String = "model_key_$login"
+
+    /**
+     * A prefs key per (account, name).
+     *
+     * **The name is escaped rather than used raw**, because `a/b` and `a_b` would otherwise be one key and
+     * one article's token would be another's. Percent-encoding is reversible and needs no table.
+     */
+    private fun secretKey(login: String, name: String): String =
+        "secret_${login}_${java.net.URLEncoder.encode(name, "UTF-8")}"
 
     // ---- encryption --------------------------------------------------------
 

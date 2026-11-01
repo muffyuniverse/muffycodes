@@ -59,6 +59,21 @@ class AgentRunner(
      */
     private val fetcher: Fetcher = Fetcher.NONE,
     /**
+     * The MCP servers an article describes, for `mcp`.
+     *
+     * **A default that refuses**, like [fetcher] and [browser]: a runner built without a decision cannot
+     * call out to a server. The real one is passed at the one place the app builds a runner for a turn.
+     */
+    private val mcp: Mcp = Mcp.NONE,
+    /**
+     * Where an MCP article's named secret is resolved.
+     *
+     * **Null rather than a store**, because "no store" and "the store does not have this secret" are two
+     * different refusals and the second one is actionable. A default empty store would answer the second
+     * sentence for the first situation.
+     */
+    private val credentials: Credentials? = null,
+    /**
      * Where a `background` call's work runs — **one thread per call, made when it is asked for.**
      *
      * The previous design kept a fixed pool here and held the test suite open for eighteen minutes
@@ -350,6 +365,8 @@ class AgentRunner(
                     onPage = { live -> onPage(project, live) },
                     browser = browser,
                     fetcher = fetcher,
+                    mcp = mcp,
+                    credentials = credentials,
                     // **Read from the settings at the moment of the call**, like the other limits:
                     // a switch flipped while the agent is idle applies to the next page it reads.
                     privateAllowed = { settings.browsePrivate },

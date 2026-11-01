@@ -1380,6 +1380,14 @@ class Workspace(val accountDir: File) {
          */
         val SUBJECTS = listOf("dictionary", "skills", "wiki", "mcp")
 
+        /**
+         * Where a project's MCP articles are — **derived from [SUBJECTS] rather than written again.**
+         *
+         * A second literal would be a folder the agent reads that [ensureProjectData] does not make, and the
+         * two would drift on the first rename.
+         */
+        val MCP_DIR: String = SUBJECTS.first { it == "mcp" }
+
 
         /**
          * A project's own four subject folders, made when the project is.
