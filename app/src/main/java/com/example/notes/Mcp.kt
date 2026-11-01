@@ -242,10 +242,13 @@ interface Mcp {
 
         /** No MCP, for a tool set built without one — and every test that is not about this. */
         val NONE: Mcp = object : Mcp {
-            override fun tools(server: McpServer, credentials: Credentials, deadline: Deadline) =
-                Result.failure(
-                    IllegalStateException("This app was not given a way to reach MCP servers."),
-                )
+            override fun tools(
+                server: McpServer,
+                credentials: Credentials,
+                deadline: Deadline,
+            ): Result<List<Mcp.Tool>> = Result.failure(
+                IllegalStateException("This app was not given a way to reach MCP servers."),
+            )
 
             override fun call(
                 server: McpServer,
@@ -253,7 +256,7 @@ interface Mcp {
                 tool: String,
                 args: JSONObject,
                 deadline: Deadline,
-            ) = Result.failure(
+            ): Result<Mcp.Answer> = Result.failure(
                 IllegalStateException("This app was not given a way to reach MCP servers."),
             )
         }

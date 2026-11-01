@@ -298,7 +298,11 @@ private class RecordingMcp : Mcp {
     var lastArgs: JSONObject? = null
     var lastAuth: String? = null
 
-    override fun tools(server: McpServer, credentials: Credentials, deadline: Deadline): Result<List<Mcp.Tool>> {
+    override fun tools(
+        server: McpServer,
+        credentials: Credentials,
+        deadline: Deadline,
+    ): Result<List<Mcp.Tool>> {
         calls++
         lastServer = server
         lastAuth = server.authorization(credentials)
