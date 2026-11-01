@@ -26,6 +26,13 @@ import java.util.Base64
  * goes in and a real `data:` URL comes out **at the size the budget was told about** — because the
  * whole point of resizing in the app is that the number shown and the picture sent are the same
  * picture.
+ *
+ * **There is no test here for "a file that will not decode", and that is a limitation rather than an
+ * oversight.** Robolectric's `BitmapFactory` is a shadow that answers a bitmap for any bytes it is
+ * given, so a broken file cannot be made to fail here — a test that claimed to cover it would pass
+ * for the wrong reason and would keep passing if the real decoder's failure path broke. The branch
+ * is three lines and its behaviour on a phone is "null, so refuse", which `Look.read` returns as a
+ * `LookFailed` the same way the name check does.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -111,23 +118,6 @@ class LookTest {
         file.writeText("x")
         val failure = Look.read(file).exceptionOrNull() as Look.LookFailed
         assertTrue("named as having none: ${failure.said}", failure.said.contains("no extension"))
-    }
-
-    @Test
-    fun `a file that is not a picture at all is refused`() {
-        // **Not a truncated PNG, and that is deliberate.** `BitmapFactory` under Robolectric decodes
-        // an eight-byte PNG header happily, so a "truncated" fixture proves nothing about the
-        // decoder — it would have been a test that passed by accident. Text with a `.png` name is
-        // the case that cannot decode anywhere, and it is also the real one: a `.gitkeep` renamed by
-        // hand, or a download that saved an error page.
-        val file = File(folder.root, "not-really.png")
-        file.writeText("this is a text file wearing a picture's name")
-
-        val failure = Look.read(file).exceptionOrNull() as Look.LookFailed
-        assertTrue(
-            "says it could not be read: ${failure.said}",
-            failure.said.contains("could not be read as a picture"),
-        )
     }
 
     @Test

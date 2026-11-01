@@ -100,6 +100,9 @@ class AgentToolsTest {
                 // about one folder, `search` about a question, and both only read.
                 "search", "tree", "read", "edit", "forget", "create", "delete",
                 "move", "history", "restore", "background", "reason", "browse", "shot",
+                // **`look` sits beside `shot`**, because they are the two halves of one loop:
+                // `shot` makes a picture and nothing could consume one until `look` existed.
+                "look",
                 "ci", "runs",
                 // **The two that move a file rather than words.** `artifact` fetches what a run
                 // produced, and `downloads` is the only way anything leaves the project.
@@ -116,10 +119,6 @@ class AgentToolsTest {
                 // list is part of every request's cache prefix, so a server's own catalogue is
                 // something the agent reads on demand instead.
                 "mcp",
-                // **`look` is the one tool that changes what the model can perceive**, and it
-                // sits beside `shot` because they are the two halves of one loop: `shot` makes a
-                // picture and nothing could consume one until `look` existed.
-                "look",
             ),
             specs.map { it.name },
         )
