@@ -170,6 +170,23 @@ class AccountsFeatureTest : FeatureTest() {
             "and so is everything the account owned",
             scene.viewModel.accounts.dirOf(scene.login).exists(),
         )
+
+        // **And the queued save must not bring it back.** This is the half the assertion above
+        // cannot see: `await` returns the instant the folder is gone, so a write still waiting on
+        // the worker recreates it *after* the test has already passed. `ws.write` makes the folder
+        // it writes into, so without a guard the account reappears a moment later — deleted by the
+        // person, restored by a save they had already given up on.
+        //
+        // **A bounded wait, because the worker has no drain to ask for.** The save is queued with a
+        // zero debounce, so it runs almost at once; half a second is far longer than the write needs
+        // *if it were going to happen*, which is what makes the assertion below about the guard
+        // rather than about luck.
+        Thread.sleep(500)
+        assertFalse(
+            "and a save that was still queued did not put it back",
+            scene.viewModel.accounts.dirOf(scene.login).exists(),
+        )
+        assertFalse("nor the file it was saving", gone.exists())
     }
 
     @Test

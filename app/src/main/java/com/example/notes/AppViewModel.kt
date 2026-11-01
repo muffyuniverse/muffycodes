@@ -2083,6 +2083,16 @@ class AppViewModel @JvmOverloads constructor(
         // the second found nothing to commit, so the intermediate version vanished
         // and the history could not be walked back through it.
         onWorker {
+            // **A save must not bring a deleted account back.** The person may remove an account
+            // while a save is still queued — the test below does exactly that — and `ws.write` makes
+            // the folder it writes into, so the queued save recreated the account tree a moment
+            // after it was deleted. The commit half of this block already asks `accounts.exists`;
+            // the write half did not, and the write is the half that makes folders.
+            //
+            // Refused silently rather than reported: the account is gone, so there is no screen left
+            // to report it on, and a message about a file in an account that no longer exists would
+            // be the app talking about something the person already ended.
+            if (login == null || !accounts.exists(login)) return@onWorker
             ws.write(file, text)
             if (saveDebounceMs > 0) Thread.sleep(saveDebounceMs)
             // **The text is on disk and its version may not be,** and those are two
