@@ -680,15 +680,30 @@ class EditorScreenTest {
     fun `a drawn picture is committed, so it is in the history`() {
         // A picture that existed only on the phone would be the one kind of work this app does not
         // record — and the whole point of the app is that every change is a version.
+        //
+        // **Asked of the newest commit's tree, not of the commit count.** `scene.file` already made
+        // and committed the file, and a count can be unchanged by a commit that recorded nothing
+        // new — so the count answers "did a commit happen", which is not the question. The question is
+        // "is the drawn-on picture in the history", and the tree answers that.
         val file = scene.file("drawing.png")
         file.writeBytes(ONE_PIXEL_PNG)
         scene.viewModel.openEditor(file)
         scene.await("the picture to open") { scene.viewModel.editingFile == file }
-        val before = scene.versions("groceries")
+
+        val before = scene.repo("groceries").head()
 
         scene.viewModel.savePicture(OTHER_PIXEL_PNG)
-        scene.await("the save to be committed", 20_000) { scene.versions("groceries") > before }
-        assertTrue("a new version exists", scene.versions("groceries") > before)
+        // **A new commit exists, and the file is tracked in it.** The bytes cannot be read back
+        // through `fileAt` — that returns text, and a PNG is not text — so the assertions are that
+        // HEAD moved and that the picture is in the tree at it.
+        scene.await("the drawn-on picture to be committed", 20_000) {
+            val now = scene.repo("groceries").head()
+            now != null && now != before
+        }
+        assertTrue(
+            "the picture is tracked: ${scene.repo("groceries").tracked()}",
+            "drawing.png" in scene.repo("groceries").tracked(),
+        )
     }
 
     private companion object {
