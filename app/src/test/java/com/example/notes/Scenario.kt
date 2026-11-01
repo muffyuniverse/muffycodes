@@ -290,6 +290,22 @@ class Scenario(
         return file
     }
 
+    /**
+     * Makes a picture in the folder that is open, the way `+ New image` does.
+     *
+     * **Through the view model, not by writing a file**, so the scenario exercises the same path a
+     * person's press does — the size dialogue's choice, the writer, the commit and the redraw.
+     */
+    fun picture(name: String, canvas: Look.Canvas = Look.DEFAULT_CANVAS): File {
+        val made = Workspace.cleanName(if (name.contains('.')) name else "$name.png", "drawing.png")
+        val file = File(viewModel.currentDir!!, made)
+        val before = headOf(file)
+        viewModel.createImage(name, canvas)
+        await("\"$made\" to be made") { viewModel.entries.any { it.name == made } }
+        awaitRecordedFor(file, before, "\"$made\" being made")
+        return file
+    }
+
     /** Makes a folder in the folder that is open. */
     fun folder(name: String): File {
         require(!name.contains("/")) { "a folder is made in the folder that is open, not at a path" }

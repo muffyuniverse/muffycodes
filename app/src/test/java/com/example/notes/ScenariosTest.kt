@@ -438,6 +438,49 @@ class ScenariosTest {
     }
 
     @Test
+    fun `an image with a pen over it`() {
+        // **The one picture that shows the canvas paints.** Everything about the drawing that can be
+        // tested in this container is tested — the strokes, the eraser, undo, the zoom arithmetic —
+        // but Robolectric's `Canvas` rasterises nothing, so "a stroke appears on the screen" is only
+        // answerable here. If this scenario shows a blank white rectangle, the canvas is broken and no
+        // unit test could have said so.
+        scene.signedIn()
+        scene.open("groceries")
+        val picture = scene.picture("correction", Look.CANVASES.first { it.label == "Square" })
+
+        scenario(
+            compose, "33-a-picture-with-a-pen-over-it",
+            "An image, drawn on.",
+            "a picture open in Draw, with a red mark on it.",
+            screen = { browser() },
+            afterScreen = {
+                Screen {
+                    EditorScreen(
+                        viewModel = viewModel,
+                        file = picture,
+                        onBack = {},
+                        onOpenHistory = {},
+                    )
+                }
+            },
+        ) {
+            before()
+            then("The picture is opened, and Draw is chosen.") {
+                scene.openEditor(picture)
+                compose.onNodeWithText("Draw").performClick()
+                compose.waitForIdle()
+            }
+            after()
+            result(
+                "An image is a file like any other, so it has View and Draw rather than the " +
+                    "text modes: a blank PNG is a sketch, a screenshot is an annotation, and " +
+                    "a photo is a correction. The pen, line, box and eraser are the four marks; " +
+                    "a pinch zooms, two fingers move the picture, and one finger draws.",
+            )
+        }
+    }
+
+    @Test
     fun `the history with select on the right`() {
         scene.signedIn()
         scene.project("groceries")
