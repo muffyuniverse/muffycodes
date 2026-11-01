@@ -131,7 +131,11 @@ class ArchiveTest {
         // archive would be the app handing out its own record, and `ws.list` is what already decides
         // that the record is not part of the project a person browses.
         write("README.md", "# readme")
-        File(project(), "agent/session.log").writeText("   1     4 TOLD    in  operator  task\n")
+        // **`parentFile.mkdirs()`, because `agent/` is the app's folder and nothing here has made
+        // it yet.** A test that wrote the path without the folder was writing to a path that did not
+        // exist — which threw, and looked like a pack that had done something wrong.
+        File(project(), "agent/session.log").apply { parentFile?.mkdirs() }
+            .writeText("   1     4 TOLD    in  operator  task\n")
 
         val answer = tools().run(call("""{"pack":["."],"as":"agent/out.zip"}"""))
 
