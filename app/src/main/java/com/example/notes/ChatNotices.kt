@@ -76,11 +76,30 @@ object ChatNotices {
      * that need the change, so a caller can do nothing on the common case where the answer is empty.
      */
     fun toClose(rows: List<AgentLog.Row>): Set<Int> {
+        // **Not `id !in open`.** That was the first version and it was wrong in the one case that
+        // matters: when the agent speaks after two notices, `open` is empty, so *every* notice looked
+        // "not open" and every one was returned — including ones already flipped. The test said
+        // `expected:<[2]> but was:<[]>` on a different shape and caught the same confusion.
+        //
+        // The question is about the **column**, not about the derivation: a notice needs flipping when
+        // it is still `app` and the derivation says it is no longer open.
         val open = open(rows).map { it.id }.toSet()
-        return rows.filter { isNotice(it) && it.id !in open }.map { it.id }.toSet()
+        return rows.filter { isNotice(it) && it.ctx != AgentLog.OUT && it.id !in open }
+            .map { it.id }
+            .toSet()
     }
 
-    /** True for a row that is part of the conversation, and so ends a notice. */
+    /**
+     * True for a row that is part of the conversation, and so ends a notice.
+     *
+     * **`ctx == IN`, not `ctx == OUT`.** The agent's own words are a `NOTE` written with the context's
+     * column — `note("agent", …)` — so they are `in`. Checking for `out` would have counted only the
+     * rows the agent had *forgotten*, which is the opposite of speaking.
+     *
+     * So: a person's message, or anything the model is sent that is not itself a notice. A `CALL` or a
+     * `GOT` counts too, and should: the agent doing something about the failure is at least as much an
+     * answer as saying so.
+     */
     private val AgentLog.Row.isSpoken: Boolean
-        get() = kind == AgentLog.TOLD || ctx == AgentLog.OUT
+        get() = kind == AgentLog.TOLD || (ctx == AgentLog.IN && !isNotice(this))
 }
