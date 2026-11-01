@@ -673,6 +673,91 @@ class WorkspaceTest {
         assertTrue("with nothing left out", workspace.unsentFrom("shopping").isEmpty())
     }
 
+    // ---- the four folders, and the prompt that names them -------------------
+
+    @Test
+    fun `the system prompt names every subject folder, and no folder it does not have`() {
+        // **The prompt and the layout are two lists that must not drift.** The prompt tells the agent
+        // to look in `dictionary/`, `skills/`, `wiki/` and `mcp/`; `Workspace.SUBJECTS` is what the app
+        // actually makes. A folder added to one and not the other produces the worst kind of bug: the
+        // prompt sends the agent to a folder that is not there, which it reports as "this project has
+        // none" — a true sentence about the wrong thing.
+        //
+        // This is the test the plan calls a **prompt-order test**, and it is deliberately written
+        // against the constant rather than against four literal strings: a literal list here would
+        // pass while the app made a different set.
+        val prompt = AgentPrompt.SYSTEM_DEFAULT
+        for (folder in Workspace.SUBJECTS) {
+            assertTrue(
+                "the prompt names $folder/ : it is one of the folders the app makes",
+                prompt.contains("$folder/"),
+            )
+        }
+        // **And the other direction**: a folder the prompt names that is not in the list would be a
+        // folder the app never makes. The four are named in one block, so the block is found and every
+        // `word/` in it is checked - which catches a rename on either side.
+        val block = prompt.lines().filter { line ->
+            Workspace.SUBJECTS.any { line.contains("$it/") }
+        }
+        assertEquals(
+            "the four are named once each, in the block that describes where things are",
+            Workspace.SUBJECTS.size,
+            block.size,
+        )
+    }
+
+    @Test
+    fun `a project gets the four folders, so the prompt never points at nothing`() {
+        // **A project, not just the system project.** The system project holds the core; a project
+        // grows its own, because a dictionary entry is the operator's vocabulary and a word means
+        // something different in two projects. A project without the folders sent the agent to places
+        // that were not there.
+        val dir = File(workspace.accountDir, "shopping")
+        dir.mkdirs()
+        Workspace.ensureProjectData(dir)
+
+        val data = File(dir, AgentPrompt.DATA)
+        for (folder in Workspace.SUBJECTS) {
+            val one = File(data, folder)
+            assertTrue("$folder/ is made", one.isDirectory)
+            // **Empty and marked**, so it is committable: a dictionary entry travels with the project,
+            // and an empty folder is invisible to git.
+            assertEquals(
+                "$folder/ holds only the marker, so it is a folder in the repository",
+                listOf(Workspace.KEEPER),
+                one.list()?.toList(),
+            )
+        }
+        // **Nothing else appeared.** The folders are the whole of what this makes; a stray
+        // `prompts/` would be a second place the project prompt could live.
+        assertEquals(
+            "only the four",
+            Workspace.SUBJECTS.toSet(),
+            data.list()?.toSet(),
+        )
+    }
+
+    @Test
+    fun `the folders are made once and a written article is never lost`() {
+        // **Idempotent, and it does not tidy.** `ensureProjectData` runs every time a project is
+        // copied, and a person who has written a dictionary entry must keep it: the marker is only
+        // written when the folder is otherwise empty, and nothing is ever removed.
+        val dir = File(workspace.accountDir, "shopping")
+        dir.mkdirs()
+        Workspace.ensureProjectData(dir)
+        val entry = File(File(File(dir, AgentPrompt.DATA), "dictionary"), "analyze.md")
+        entry.writeText("when the operator says analyze, mean: read the code and say what it does")
+
+        Workspace.ensureProjectData(dir)
+
+        assertTrue("the entry is still there", entry.isFile)
+        assertEquals(
+            "and it is untouched",
+            "when the operator says analyze, mean: read the code and say what it does",
+            entry.readText(),
+        )
+    }
+
     @Test
     fun `a secret is left out of what is sent even though it is never named`() {
         val dir = project()

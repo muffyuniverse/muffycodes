@@ -210,7 +210,14 @@ class AppTypeTest {
 
         val copied = Presets.copy(ws.accountDir, project, AppType.ANDROID)
 
-        assertTrue("both arrived: ${copied.written}", copied.written.size == 2)
+        // **The two the preset brings, and the four folders the app makes.** The count is six rather
+        // than two because `ensureProjectData` reports its markers: they are written by the app at
+        // this moment and must be in the first commit, or the project opens with changes nobody made.
+        assertEquals(
+            "the workflow, the prompt, and one marker per subject folder: ${copied.written}",
+            2 + Workspace.SUBJECTS.size,
+            copied.written.size,
+        )
         assertTrue(
             "the workflow is where GitHub looks for it",
             File(project, ".github/workflows/android.yml").isFile,
@@ -237,7 +244,18 @@ class AppTypeTest {
 
         val copied = Presets.copy(ws.accountDir, project, AppType.ANDROID)
 
-        assertEquals("nothing was written", emptyList<String>(), copied.written)
+        // **Nothing of the preset's was written — only the app's own folder markers.** A project that
+        // already has its own prompt and workflow keeps them; the four subject folders are still made,
+        // because they are the layout rather than the preset.
+        assertEquals(
+            "only the markers were written: ${copied.written}",
+            Workspace.SUBJECTS.size,
+            copied.written.size,
+        )
+        assertTrue(
+            "and none of them is the person's file",
+            copied.written.none { it.endsWith("project_prompt.txt") || it.endsWith("android.yml") },
+        )
         assertEquals("both were kept", 2, copied.kept.size)
         assertEquals("and the file is unchanged", "# mine, not the preset's", mine.readText())
         assertEquals(
@@ -290,30 +308,64 @@ class AppTypeTest {
     }
 
     @Test
-    fun `a new project does not get four empty folders it did not ask for`() {
-        // **This test is the opposite of what I first wrote, and the run is why.**
+    fun `a new project gets the four folders, and they arrive COMMITTED`() {
+        // **This test is the correction of a correction, and the run is why both exist.**
         //
-        // I had `Presets.copy` make `dictionary/`, `skills/`, `wiki/` and `mcp/` eagerly, reasoning
-        // that a prompt naming a folder the app has not made sends the agent somewhere that is not
-        // there. The idea was right and the execution broke fifteen tests: **git cannot record an
-        // empty folder**, so four untracked directories appeared in every new project — and
-        // `changesOf` counts `untrackedFolders`, so a project nobody had touched reported five
-        // changes and every "a save is one change" assertion in the suite failed.
+        // First I made `Presets.copy` create `dictionary/`, `skills/`, `wiki/` and `mcp/` eagerly —
+        // the idea being right: a prompt naming a folder the app has not made sends the agent
+        // somewhere that is not there. It broke fifteen tests, because **git cannot record an empty
+        // folder**: four untracked directories appeared in every new project, and every "a save is
+        // one change" assertion saw five phantom changes.
         //
-        // A folder that appears when the person first writes in it is honest, and it is what the
-        // person would do by hand. The agent creates one with `create` when it needs to, and the
-        // system prompt says the folders are *where such text goes*, not that they already exist.
+        // The fix is not to stop making the folders. It is to **report their markers in `written`**,
+        // so the project's first commit includes them — a tracked `.gitkeep` is a folder that exists
+        // in the repository, and `status()` then counts nothing. So this asserts both halves:
+        // the folders are there, AND the project opens clean.
         val ws = account()
         val project = File(ws.accountDir, "my-app").apply { mkdirs() }
 
-        Presets.copy(ws.accountDir, project, AppType.ANDROID)
+        val copied = Presets.copy(ws.accountDir, project, AppType.ANDROID)
 
         for (name in Workspace.SUBJECTS) {
-            assertFalse(
-                "$name/ is not made before there is anything to put in it",
-                File(File(project, AgentPrompt.DATA), name).exists(),
+            val one = File(File(project, AgentPrompt.DATA), name)
+            assertTrue("$name/ is made", one.isDirectory)
+            assertTrue(
+                "$name/ has the marker that makes it a folder in git",
+                File(one, Workspace.KEEPER).isFile,
+            )
+            // **Reported, not merely written.** The caller commits when `written` is not empty; a
+            // marker missing from this list is a marker left uncommitted.
+            assertTrue(
+                "and $name/ is reported so the first commit takes it",
+                copied.written.any { it.endsWith("${name}/${Workspace.KEEPER}") },
             )
         }
+        ws.accountDir.deleteRecursively()
+    }
+
+    @Test
+    fun `a project made by this build opens with nothing waiting`() {
+        // **The assertion the first attempt failed**, made explicit rather than left to fifteen
+        // other tests to notice. A folder that is made but not committed is a change nobody made,
+        // and the app would greet a brand-new project with "5 changes to send".
+        val ws = account()
+        val project = File(ws.accountDir, "my-app").apply { mkdirs() }
+        val git = ProjectGit(ws, { null }, { GitAuthor("Someone", "a@b.c") }, { 50 })
+        assertTrue("the repository starts", git.init("my-app").isSuccess)
+
+        val copied = Presets.copy(ws.accountDir, project, AppType.ANDROID)
+        assertTrue("there was something to commit: ${copied.written}", copied.written.isNotEmpty())
+        git.commitOutcome("my-app", "Start from the ${AppType.ANDROID.label} preset")
+
+        val repo = git.open("my-app")!!
+        val changes = GitService.status(repo)
+        assertEquals("nothing staged", 0, changes.staged)
+        assertEquals("nothing modified", 0, changes.unstaged)
+        assertEquals(
+            "and nothing untracked: the four markers are in the first commit",
+            0,
+            changes.untracked,
+        )
         ws.accountDir.deleteRecursively()
     }
 

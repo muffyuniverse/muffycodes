@@ -214,6 +214,18 @@ object Presets {
             }
         }
 
+        // **The four subject folders, made beside the prompt.** `dictionary/`, `skills/`, `wiki/` and
+        // `mcp/` are what the system prompt tells the agent to look in, and a project without them
+        // would send it to folders that are not there. Made here because this is the moment a project
+        // becomes a project — and made even when the prompt was kept, because a project copied from
+        // an older version has a prompt and no folders.
+        //
+        // **Their markers go in `written`, and that is the whole reason this returns a list.** The
+        // caller commits only when something was written; a marker omitted from the list is a marker
+        // left uncommitted, and the project opens showing four changes nobody made. The first attempt
+        // at these folders failed fifteen tests for exactly that reason.
+        written.addAll(Workspace.ensureProjectData(projectDir))
+
         // **The record, written even when nothing was copied** — so the app can say which type a
         // project was set up as, and a later version can tell an old preset from a fresh one.
         ProjectMeta.write(

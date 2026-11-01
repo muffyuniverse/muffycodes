@@ -1382,6 +1382,64 @@ class Workspace(val accountDir: File) {
 
 
         /**
+         * A project's own four subject folders, made when the project is.
+         *
+         * **The system project holds the core and a project grows its own** — that is the layout in
+         * `docs/COUNTERPROPOSAL-IV-search-mcp-articles.md` §4, and the reason a project needs the
+         * folders rather than only the system's: a dictionary entry is *the operator's vocabulary*,
+         * and a word means something different in two projects. A `wiki/` article about how this code
+         * works cannot be shared with a project that has different code.
+         *
+         * **Made empty, and that is not a placeholder.** The system prompt says a folder that is not
+         * there holds nothing yet, *"which is not the same as nothing to know"* — and the opposite is
+         * just as true: a folder that IS there and empty says the place exists and nobody has written
+         * in it, which is a state the person can see and change. An absent folder cannot be told from
+         * an app that does not support dictionaries.
+         *
+         * **The marker, for the same reason as the system's copy.** These folders are part of the
+         * project's repository — a dictionary entry is committed and travels to the next phone — and an
+         * empty folder is invisible to git, so without it they would read as untracked the moment a
+         * project was made.
+         *
+         * Called by `Presets.copy` beside the prompt, because that is the moment the project becomes a
+         * project. Idempotent: `mkdirs` on a folder that is there does nothing, and the marker is only
+         * written when the folder is otherwise empty.
+         */
+        fun ensureProjectData(projectDir: File): List<String> {
+            val root = File(projectDir, AgentPrompt.DATA)
+            val written = mutableListOf<String>()
+            try {
+                for (name in SUBJECTS) {
+                    val one = File(root, name)
+                    one.mkdirs()
+                    // The marker is the app's own empty-file convention; see `markTrackable`. Written
+                    // only when the folder is otherwise empty, so an article is never disturbed.
+                    if (one.listFiles()?.isEmpty() != false) {
+                        val keeper = File(one, KEEPER)
+                        keeper.writeText("")
+                        // **Reported, so the first commit includes it.** `Presets.copy`'s caller
+                        // commits only when `written` is not empty, and a marker left out of that
+                        // list is a marker left uncommitted — which is a project that opens showing
+                        // changes nobody made. This is the bug that made the first attempt at this
+                        // fail fifteen tests: the folders were made, the count was not, and every
+                        // "a save is one change" assertion saw four phantom changes.
+                        written.add(
+                            try {
+                                keeper.relativeTo(projectDir).invariantSeparatorsPath
+                            } catch (e: Throwable) {
+                                keeper.name
+                            },
+                        )
+                    }
+                }
+            } catch (t: Throwable) {
+                // A folder that cannot be made is a phone problem, and every write that needs it says
+                // so on its own. What was written is still reported, because it is on disk either way.
+            }
+            return written
+        }
+
+        /**
          * True when [path] — account-relative, as `Workspace.relative` writes it — is a template.
          *
          * The system project's own name is the first segment, so a project that happens to be called
