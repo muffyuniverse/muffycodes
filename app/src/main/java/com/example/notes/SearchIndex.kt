@@ -135,7 +135,7 @@ class SearchIndex private constructor(
         return try {
             db.delete(
                 "chunks",
-                "path = ? AND \"commit\" = ?",
+                "path = ? AND version = ?",
                 arrayOf(path, commit),
             )
             for (chunk in chunks) {
@@ -144,7 +144,7 @@ class SearchIndex private constructor(
                     null,
                     ContentValues().apply {
                         put("path", path)
-                        put("commit", commit)
+                        put("version", commit)
                         put("hash", chunk.hash)
                         put("start", chunk.start)
                         put("end", chunk.end)
@@ -208,12 +208,12 @@ class SearchIndex private constructor(
             )
         }
         // **`history: false` is a filter, not a second table.** Versions are rows with a commit, so
-        // "current files only" is `commit = ''` — the same query, one clause.
-        val where = if (history) "1 = 1" else "c.\"commit\" = ''"
+        // "current files only" is `version = ''` — the same query, one clause.
+        val where = if (history) "1 = 1" else "c.version = ''"
         val rows = mutableListOf<Hit>()
         db.rawQuery(
             """
-            SELECT c.path, c."commit", c.start, c.end, v.vector
+            SELECT c.path, c.version, c.start, c.end, v.vector
             FROM chunks c JOIN vectors v ON v.hash = c.hash
             WHERE $where
             """.trimIndent(),
@@ -252,7 +252,7 @@ class SearchIndex private constructor(
     fun forget(path: String, commit: String = "") {
         db.beginTransaction()
         try {
-            db.delete("chunks", "path = ? AND \"commit\" = ?", arrayOf(path, commit))
+            db.delete("chunks", "path = ? AND version = ?", arrayOf(path, commit))
             // **A vector nothing points at is dead weight**, and collecting it here rather than on a
             // timer keeps the table honest: the count of vectors means "distinct text indexed".
             db.execSQL("DELETE FROM vectors WHERE hash NOT IN (SELECT hash FROM chunks)")
@@ -336,21 +336,23 @@ class SearchIndex private constructor(
                 """
                 CREATE TABLE IF NOT EXISTS chunks(
                   path    TEXT NOT NULL,
-                  -- **Quoted, because `commit` is a reserved word in SQLite** and an unquoted
-                  -- CREATE TABLE fails with `near "commit": syntax error`. The column is still
-                  -- called `commit` everywhere in Kotlin; only SQL needs the quotes.
-                  "commit" TEXT NOT NULL DEFAULT '',
+                  -- **`version`, not `commit`, and the name is the fix rather than a preference.**
+                  -- `commit` is a reserved word in SQLite: quoted it parses in CREATE TABLE, but
+                  -- `ContentValues` builds an INSERT with bare column names, so every write failed
+                  -- with `near "commit": syntax error`. A column name that has to be quoted in one
+                  -- place and cannot be in another is a name to stop using.
+                  version TEXT NOT NULL DEFAULT '',
                   hash    TEXT NOT NULL,
                   start   INTEGER NOT NULL,
                   end     INTEGER NOT NULL,
-                  PRIMARY KEY(path, "commit", start)
+                  PRIMARY KEY(path, version, start)
                 )
                 """.trimIndent(),
             )
             // **The hash is the join**, so it is indexed on both sides: a lookup per chunk when
             // writing, and the whole of the join when reading.
             db.execSQL("CREATE INDEX IF NOT EXISTS ix_chunks_hash ON chunks(hash)")
-            db.execSQL("CREATE INDEX IF NOT EXISTS ix_chunks_path ON chunks(path, \"commit\")")
+            db.execSQL("CREATE INDEX IF NOT EXISTS ix_chunks_path ON chunks(path, version)")
             db.execSQL(
                 """
                 CREATE TABLE IF NOT EXISTS vectors(
