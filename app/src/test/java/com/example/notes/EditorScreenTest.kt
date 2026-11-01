@@ -696,7 +696,18 @@ class EditorScreenTest {
         // **A new commit exists, and the file is tracked in it.** The bytes cannot be read back
         // through `fileAt` — that returns text, and a PNG is not text — so the assertions are that
         // HEAD moved and that the picture is in the tree at it.
-        scene.await("the drawn-on picture to be committed", 20_000) {
+        // **The file first, then the history.** Two promises, and a failure that says which one broke:
+        // "the bytes were not written" and "the bytes were written but not committed" are different
+        // bugs with the same symptom at this level.
+        scene.await("the drawn-on picture to be written", 20_000) {
+            file.readBytes().toList() == OTHER_PIXEL_PNG.toList()
+        }
+        scene.await(
+            "the drawn-on picture to be committed (head was $before, " +
+                "project=${scene.viewModel.workspace!!.projectOf(file)}, " +
+                "tracked=${scene.repo("groceries").tracked()})",
+            20_000,
+        ) {
             val now = scene.repo("groceries").head()
             now != null && now != before
         }
