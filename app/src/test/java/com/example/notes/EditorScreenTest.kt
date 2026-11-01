@@ -639,6 +639,58 @@ class EditorScreenTest {
         ).assertDoesNotExist()
     }
 
+    // ---- a picture that was drawn on ----------------------------------------------------------
+    //
+    // **`savePicture` had no test at all**, which meant the entire output path of the drawing feature
+    // was unverified: the strokes flatten into bytes, the bytes go through `Workspace.writeBytes`, and
+    // the file is committed. The canvas itself cannot be rasterised here (Robolectric draws nothing),
+    // but the *saving* is ordinary arithmetic and file work.
+
+    @Test
+    fun `saving a picture writes its bytes and the file is a picture afterwards`() {
+        val file = scene.file("drawing.png")
+        file.writeBytes(ONE_PIXEL_PNG)
+        val before = file.readBytes()
+
+        scene.viewModel.openEditor(file)
+        scene.await("the picture to open") { scene.viewModel.editingFile == file }
+        scene.viewModel.savePicture(OTHER_PIXEL_PNG)
+        scene.await("the picture to be written") { !file.readBytes().contentEquals(before) }
+
+        assertEquals("the bytes are what was given", OTHER_PIXEL_PNG.toList(), file.readBytes().toList())
+        assertEquals("and it is still a picture", EntryKind.IMAGE, scene.viewModel.workspace!!.kindOf(file))
+    }
+
+    @Test
+    fun `saving a picture refuses to write over a text file`() {
+        // **The mirror of `saveEditor`'s refusal.** A bug in the drawing screen must not be able to
+        // turn a document into bytes — and the guard is in the view model, not only on the screen,
+        // because a guarantee held only by the caller is a convention.
+        val file = scene.file("notes.txt", "two litres")
+        scene.viewModel.openEditor(file)
+        scene.await("the text file to open") { scene.viewModel.editingFile == file }
+
+        scene.viewModel.savePicture(OTHER_PIXEL_PNG)
+
+        assertEquals("the text is untouched", "two litres", file.readText())
+        assertEquals("and still text", EntryKind.TEXT, scene.viewModel.workspace!!.kindOf(file))
+    }
+
+    @Test
+    fun `a drawn picture is committed, so it is in the history`() {
+        // A picture that existed only on the phone would be the one kind of work this app does not
+        // record — and the whole point of the app is that every change is a version.
+        val file = scene.file("drawing.png")
+        file.writeBytes(ONE_PIXEL_PNG)
+        scene.viewModel.openEditor(file)
+        scene.await("the picture to open") { scene.viewModel.editingFile == file }
+        val before = scene.versions("groceries")
+
+        scene.viewModel.savePicture(OTHER_PIXEL_PNG)
+        scene.await("the save to be committed", 20_000) { scene.versions("groceries") > before }
+        assertTrue("a new version exists", scene.versions("groceries") > before)
+    }
+
     private companion object {
         /**
          * The smallest valid PNG: 1×1, transparent.
@@ -647,6 +699,19 @@ class EditorScreenTest {
          * this is a real decode and not a stub. A fake would only prove the test's
          * belief about bitmaps.
          */
+        /** A 1×1 PNG that is a *different* file from [ONE_PIXEL_PNG], so "the bytes changed" means something. */
+        val OTHER_PIXEL_PNG: ByteArray = byteArrayOf(
+            0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+            0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+            0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02,
+            0x08, 0x02, 0x00, 0x00, 0x00, 0xFD.toByte(), 0xD4.toByte(), 0x9A.toByte(),
+            0x73, 0x00, 0x00, 0x00, 0x10, 0x49, 0x44, 0x41,
+            0x54, 0x78, 0x9C.toByte(), 0x63, 0xF8.toByte(), 0xCF.toByte(), 0xC0.toByte(),
+            0x00, 0x44, 0x0C, 0x10, 0x0A, 0x00, 0x1F, 0xEE.toByte(), 0x03, 0xFD.toByte(),
+            0x8B.toByte(), 0x5F, 0x14, 0xD4.toByte(), 0x00, 0x00, 0x00, 0x00,
+            0x49, 0x45, 0x4E, 0x44, 0xAE.toByte(), 0x42, 0x60, 0x82.toByte(),
+        )
+
         val ONE_PIXEL_PNG: ByteArray = byteArrayOf(
             0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
             0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
