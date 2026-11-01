@@ -2218,6 +2218,65 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /**
+     * Photographs a text file's **view**: renders it to a PNG beside the file, and opens that picture.
+     *
+     * The operator's *"a photo option for a text file to make an image based off its view"* — so a
+     * person can circle a paragraph and say *this goes there*, which is the one correction that cannot
+     * be said in words.
+     *
+     * **Beside the file, not in `agent/`.** A photograph of a file is a note about that file, so it
+     * lives with it and syncs with the project; the name carries a hash of what was rendered, so the
+     * same page twice is the same name and a changed page is a new one.
+     *
+     * **The text is the editor's current text, not what is on disk.** A person who has typed and not
+     * saved is looking at the version they mean to annotate, and photographing the older one would put
+     * their circle next to a paragraph that is no longer there.
+     */
+    fun photograph(text: String) {
+        val ws = workspace ?: return
+        val file = editingFile ?: return
+        if (ws.kindOf(file) != EntryKind.TEXT) return
+        val dir = file.parentFile ?: return
+        val tap = Trace.tap("photo", file.name)
+        onWorker {
+            Photo.render(text, dir).fold(
+                onSuccess = { rendered ->
+                    val name = Photo.nameFor(file, rendered.bytes)
+                    val target = File(dir, name)
+                    if (!ws.writeBytes(target, rendered.bytes)) {
+                        Trace.failed(tap, "The photograph could not be written", "photo")
+                        main.post { message = "The photograph could not be written" }
+                        return@fold
+                    }
+                    // **Its own commit, so the picture is in the history with the file it is about.**
+                    // A photograph that existed only on the phone would be the one kind of work this
+                    // app does not record.
+                    val project = ws.projectOf(file)
+                    project?.let { git?.commitOutcome(it, "Photographed ${file.name}") }
+                    Trace.answered(
+                        tap,
+                        "Photographed ${file.name} as $name " +
+                            "(${rendered.width}\u00d7${rendered.height})",
+                    )
+                    main.post {
+                        refresh()
+                        refreshChanges()
+                        message = "Photographed ${file.name} as $name"
+                        // **Opened, because drawing on it is the point.** A picture nobody is looking
+                        // at is a file the person has to go and find.
+                        openEditor(target)
+                    }
+                },
+                onFailure = { failure ->
+                    val said = (failure as? Photo.PhotoFailed)?.said ?: "This file could not be photographed"
+                    Trace.failed(tap, said, "photo")
+                    main.post { message = said }
+                },
+            )
+        }
+    }
+
+    /**
      * Saves a picture that was drawn on: the bytes go to the file, and the file is committed.
      *
      * **Its own function rather than an overload of [saveEditor], and the reason is the guard at the

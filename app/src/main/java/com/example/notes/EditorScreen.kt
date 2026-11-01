@@ -364,6 +364,17 @@ fun EditorScreen(
                             onOpenHistory()
                         }
                     }
+                    // **Photo turns this page into a picture**, so a person can circle a paragraph
+                    // and say "this goes there" — the correction that cannot be said in words.
+                    // Only for text: an image has no view to photograph.
+                    if (kind == EntryKind.TEXT) {
+                        TextButton(
+                            onClick = {
+                                focus.clearFocus()
+                                viewModel.photograph(text)
+                            },
+                        ) { Text("Photo") }
+                    }
                     ReportButton(onReport)
                 },
             )
