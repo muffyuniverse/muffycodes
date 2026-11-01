@@ -447,37 +447,22 @@ fun AgentChatScreen(
                         // shape: what the person asked, what the agent did about it, what the person
                         // asked next. The list lasts as long as the session.
                         items(box.messages, key = { it.id }) { message ->
-                            Column {
-                                // **No bubble when there is nothing to put in it.** A turn cut
-                                // short before the agent said or did anything leaves a message whose
-                                // only content is the app's notice; drawing an empty surface above it
-                                // would be a blank box the person has to interpret. The notice alone
-                                // says what happened.
-                                if (message.pages.isNotEmpty()) {
-                                    MessageRow(
-                                        message = message,
-                                        at = showing[message.id] ?: 0,
-                                        cap = viewModel.settings.bubbleLines,
-                                        onTurn = { delta ->
-                                            val pages = message.pages.size
-                                            if (pages > 1) {
-                                                val now = showing[message.id] ?: (pages - 1)
-                                                turn(message.id, (now + delta).coerceIn(0, pages - 1))
-                                            }
-                                        },
-                                        onFullscreen = { index ->
-                                            page = Fullscreen(message, index)
-                                            Trace.tap("message fullscreen", "#${message.id}")
-                                        },
-                                    )
-                                }
-                                // **After the message, in the same item.** The operator's rule:
-                                // "they are added as the last message after the one that triggered
-                                // them". Inside the item rather than as their own list entry, so a
-                                // notice cannot be separated from the turn it is about by a scroll
-                                // position — and so `key = message.id` stays the list's identity.
-                                for (notice in message.notices) NoticeLine(notice.said)
-                            }
+                            MessageRow(
+                                message = message,
+                                at = showing[message.id] ?: 0,
+                                cap = viewModel.settings.bubbleLines,
+                                onTurn = { delta ->
+                                    val pages = message.pages.size
+                                    if (pages > 1) {
+                                        val now = showing[message.id] ?: (pages - 1)
+                                        turn(message.id, (now + delta).coerceIn(0, pages - 1))
+                                    }
+                                },
+                                onFullscreen = { index ->
+                                    page = Fullscreen(message, index)
+                                    Trace.tap("message fullscreen", "#${message.id}")
+                                },
+                            )
                         }
                         // **The reply being written, as a bubble where it will end up.**
                         // The operator's report: "agent's messages should be in their own bubble,
@@ -987,7 +972,15 @@ private fun MessageRow(
             }
             return@Column
         }
-        val page = message.pages.getOrNull(at) ?: message.pages.firstOrNull() ?: return@Column
+        val page = message.pages.getOrNull(at) ?: message.pages.firstOrNull()
+        if (page == null) {
+            // **A message with no pages still has something to say when it carries a notice.** A
+            // turn cut short before the agent called anything or spoke leaves exactly that shape, and
+            // returning here dropped the app's sentence — the one thing the person needed. The
+            // notices are drawn by the same loop below, in the same place.
+            for (notice in message.notices) NoticeLine(notice.said)
+            return@Column
+        }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 page.caption,
@@ -1089,6 +1082,11 @@ private fun MessageRow(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.outline,
         )
+        // **The app's own line, at the foot of the bubble.** Red, full width, and *inside* the
+        // message it followed: the operator's rule is "added as the last message after the one that
+        // triggered them", and the bubble is where that message ends. A separate list item would let
+        // a scroll position separate a failure from the turn it is about.
+        for (notice in message.notices) NoticeLine(notice.said)
     }
 }
 
