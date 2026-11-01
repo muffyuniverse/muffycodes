@@ -93,9 +93,12 @@ class AgentToolsTest {
         // read-only**: a tool that starts a run is a different grant, and it waits on the workflow
         // guard (a run the agent dispatches must not be able to reach repository secrets).
         assertEquals(
-            "and the seventeen that are",
+            "and the eighteen that are",
             listOf(
-                "tree", "read", "edit", "forget", "create", "delete",
+                // **`search` is the account-wide reader**, and it sits beside `tree` because the
+                // difference between them is a default rather than a permission: `tree` answers
+                // about one folder, `search` about a question, and both only read.
+                "search", "tree", "read", "edit", "forget", "create", "delete",
                 "move", "history", "restore", "background", "reason", "browse", "shot",
                 "ci", "runs",
                 // **The two that move a file rather than words.** `artifact` fetches what a run

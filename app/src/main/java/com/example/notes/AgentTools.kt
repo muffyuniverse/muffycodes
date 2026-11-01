@@ -189,6 +189,16 @@ class AgentTools(
         const val MOST_PATHS = 100
 
         /**
+         * How deep `search` walks.
+         *
+         * **Twelve, which is more than any real project is deep.** The deepest thing the app itself
+         * writes is `system/muffycodes_data/starters/<kind>/workflows/<file>`, at five; a person's own
+         * nesting is rarely past eight. The number exists to stop a walk that runs away on a symlink
+         * loop, not to bound the answer — `paths` does that.
+         */
+        const val SEARCH_DEPTH = 12
+
+        /**
          * What a range may be written with, normalised to `..` before anything is split.
          *
          * A hyphen **between two digits**, so `7-19` and `7 - 19` are one range while `-3` stays a
@@ -224,7 +234,7 @@ class AgentTools(
          */
         val KEYS: Map<String, Set<String>> = mapOf(
             "tree" to setOf("path", "depth", "name", "grep", "from", "to"),
-            "search" to setOf("query", "in", "paths", "depth"),
+            "search" to setOf("query", "in", "paths"),
             "read" to setOf("path", "from", "to", "grep", "revision"),
             "edit" to setOf("path", "grep", "replace", "from", "to", "at", "text"),
             "forget" to setOf("ids"),
@@ -811,9 +821,10 @@ class AgentTools(
         val paths = count(args, "paths", DEFAULT_PATHS)
             .getOrElse { return refusal(it.message ?: "that count cannot be used") }
             .coerceIn(1, MOST_PATHS)
-        val depth = count(args, "depth", 12)
-            .getOrElse { return refusal(it.message ?: "that depth cannot be used") }
-            .coerceIn(1, 32)
+        // **No `depth` argument.** A search that could be told how deep to go is a search whose
+        // caller has to know the tree, which is the thing it is asking about. The walk goes deep
+        // enough to reach a `wiki/` article in a project that keeps its text in a subfolder, and the
+        // `paths` limit is what bounds the work.
         // **The prefixes, cleaned once.** A trailing slash is how a person writes a folder, and
         // matching `wiki/` against `wiki/article.md` needs it kept — the prefix ends with the slash
         // and the path continues after it.
@@ -828,7 +839,7 @@ class AgentTools(
 
         val found = mutableListOf<String>()
         val state = SearchState(paths)
-        walkForSearch(ws.accountDir, depth, query, inFolders, state, found, deadline)
+        walkForSearch(ws.accountDir, SEARCH_DEPTH, query, inFolders, state, found, deadline)
         if (found.isEmpty()) {
             val where = if (inFolders.isEmpty()) "this account" else inFolders.joinToString(", ")
             return success("nothing matches \"${args.optString("query")}\" in $where")
