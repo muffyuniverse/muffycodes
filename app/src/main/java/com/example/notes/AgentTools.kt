@@ -2595,11 +2595,17 @@ class AgentTools(
             into.add(rel(source) to source)
             return
         }
-        // **`ws.list` rather than `listFiles`**, so the app's own folders — `agent/`, dot-folders —
-        // stay out of a zip the person is going to open. Packing `agent/session.log` into a
-        // downloadable archive would be the app handing out its own record.
+        // **`ws.list` rather than `listFiles`**, so dot-folders stay out of a zip the person is
+        // going to open.
+        //
+        // **And `isStructural`, because `agent/` is not a hidden name.** It is an ordinary folder
+        // that `ws.list` returns, so a walk that only filtered hidden names put `agent/session.log`
+        // in a zip — the app handing out its own record, which is exactly what the record's
+        // read-only rule exists to prevent. The predicate is the app's own answer to "is this folder
+        // the app's", so this cannot drift from the rule every other tool asks.
         for (entry in ws.list(source)) {
             deadline.check("archive")
+            if (ws.isStructural(entry.file)) continue
             if (entry.isFolder) collectForPack(entry.file, into, deadline) else into.add(rel(entry.file) to entry.file)
         }
     }
