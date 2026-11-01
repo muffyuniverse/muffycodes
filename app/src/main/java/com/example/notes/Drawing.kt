@@ -577,7 +577,16 @@ fun DrawingSurface(
             // a page at full size.
             val window = windowSize
             if (window != androidx.compose.ui.unit.IntSize.Zero && window != surface) surface = window
-            val shown = view ?: Drawing.View()
+            // **Fitted on the very first frame, not after a `LaunchedEffect` hop.** The effect runs
+            // after the composition, so the first frame drew at 1:1 — and in a screenshot tour the
+            // capture happens on a frame where the effect has not landed, which is why the picture
+            // showed a corner of a page even though `fittedTo` was correct.
+            val shown = view ?: Drawing.View.fittedTo(
+                picture.width,
+                picture.height,
+                windowSize.width.toFloat(),
+                windowSize.height.toFloat(),
+            )
             // **Scaled and panned by hand rather than by a modifier**, because the strokes are in the
             // picture's coordinates and must move with it. A `graphicsLayer` would transform the
             // picture and leave the marks where they were.
