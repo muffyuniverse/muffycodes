@@ -241,4 +241,53 @@ class DrawingTest {
         val gentle = Drawing.View(zoom = 2f, panX = 10f, panY = 10f).bounded(1000, 500)
         assertEquals("and a small pan is left alone", 10f, gentle.panX, 0.01f)
     }
+
+    @Test
+    fun `the default view shows the whole picture, not a corner of it`() {
+        // **The operator's correction, as a test.** A 1080-pixel picture in a 320-pixel window at 1:1
+        // shows a third of it, and the person's first act is to zoom out before they can see what
+        // they are annotating. Fitting first makes zooming in a choice rather than a correction.
+        val view = Drawing.View.fittedTo(1080, 1080, 320f, 400f)
+
+        assertEquals("the width is what limits it", 320f / 1080f, view.zoom, 0.001f)
+        // And the whole picture really fits: its right edge lands on or inside the surface.
+        val right = view.toScreen(Drawing.Point(1080f, 0f)).x
+        assertTrue("the right edge is inside the window: $right", right <= 320f + 0.01f)
+        val bottom = view.toScreen(Drawing.Point(0f, 1080f)).y
+        assertTrue("and the bottom edge: $bottom", bottom <= 400f + 0.01f)
+    }
+
+    @Test
+    fun `a fitted picture is centred rather than pinned to a corner`() {
+        // A square picture in a wide window leaves space on the sides, and half of it belongs on each
+        // side — a picture hugging the left edge looks like a layout mistake.
+        val view = Drawing.View.fittedTo(100, 100, 400f, 100f)
+        assertEquals("at 1:1, because it fits", 1f, view.zoom, 0.001f)
+        assertEquals("centred horizontally", (400f - 100f) / 2f, view.panX, 0.01f)
+        assertEquals("and flush vertically", 0f, view.panY, 0.01f)
+    }
+
+    @Test
+    fun `a small picture is never blown up to fill the window`() {
+        // An upscaled picture is blurry, and a person checking a detail wants the pixels the file
+        // actually has. A 100-pixel icon in a 400-pixel window stays 100 pixels.
+        val view = Drawing.View.fittedTo(100, 100, 400f, 400f)
+        assertEquals("not enlarged", 1f, view.zoom, 0.001f)
+    }
+
+    @Test
+    fun `the fit is never below the zoom floor`() {
+        // A huge picture in a tiny window would otherwise compute a zoom that the rest of the canvas
+        // refuses to accept — so the fit obeys the same limits a pinch does.
+        val view = Drawing.View.fittedTo(100_000, 100_000, 100f, 100f)
+        assertEquals("clamped to the floor", Drawing.View.MIN_ZOOM, view.zoom, 0.001f)
+    }
+
+    @Test
+    fun `a fit with no measurements is the identity rather than a crash`() {
+        // The first frame has no size yet. Returning 1:1 for one frame is invisible; dividing by zero
+        // is not.
+        assertEquals("zero surface", Drawing.View(), Drawing.View.fittedTo(100, 100, 0f, 0f))
+        assertEquals("zero picture", Drawing.View(), Drawing.View.fittedTo(0, 0, 320f, 400f))
+    }
 }

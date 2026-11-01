@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -17,6 +18,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
@@ -285,6 +287,34 @@ object Drawing {
             )
         }
 
+        /**
+         * The view that shows the whole picture in a surface of [surfaceWidth]×[surfaceHeight].
+         *
+         * **The default, because 1:1 is the wrong place to start.** A 1080-pixel picture in a
+         * 320-pixel-wide window at 1:1 shows a third of it, and the person's first act is to zoom out
+         * before they can see what they are annotating. Fitting first means the picture is whole on
+         * arrival and zooming in is a deliberate choice rather than a correction.
+         *
+         * **Never larger than 1:1.** A small picture — a 100-pixel icon — is shown at its own size
+         * rather than blown up to fill the window, because an upscaled picture is blurry and a person
+         * checking a detail wants the pixels the file actually has.
+         *
+         * Centred, so a picture narrower than the surface sits in the middle rather than against an
+         * edge.
+         */
+        fun fittedTo(pictureWidth: Int, pictureHeight: Int, surfaceWidth: Float, surfaceHeight: Float): View {
+            if (pictureWidth <= 0 || pictureHeight <= 0 || surfaceWidth <= 0f || surfaceHeight <= 0f) {
+                return View()
+            }
+            val fit = minOf(surfaceWidth / pictureWidth, surfaceHeight / pictureHeight)
+            val zoom = fit.coerceIn(MIN_ZOOM, 1f)
+            // The leftover space on each axis, halved: that is where the picture's top-left goes for
+            // it to sit in the middle.
+            val panX = (surfaceWidth - pictureWidth * zoom) / 2f
+            val panY = (surfaceHeight - pictureHeight * zoom) / 2f
+            return View(zoom, panX, panY)
+        }
+
         companion object {
             /** Zoomed out enough to see a big picture whole, without becoming a thumbnail. */
             const val MIN_ZOOM = 0.25f
@@ -371,7 +401,15 @@ fun DrawingSurface(
     var current by remember { mutableStateOf<List<Drawing.Point>>(emptyList()) }
     // **One value for zoom and pan together**, so the two cannot disagree on the frame after a
     // gesture — see `Drawing.View`.
-    var view by remember(picture) { mutableStateOf(Drawing.View()) }
+    // **Null until the surface has measured itself**, because the fit needs a size and a composition
+    // has none. The first frame draws nothing; the second draws the picture whole.
+    var view by remember(picture) { mutableStateOf<Drawing.View?>(null) }
+    var surface by remember(picture) { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+    LaunchedEffect(surface, picture) {
+        if (view == null && surface != androidx.compose.ui.unit.IntSize.Zero) {
+            view = Drawing.View.fittedTo(picture.width, picture.height, surface.width.toFloat(), surface.height.toFloat())
+        }
+    }
 
     /**
      * **One finger draws, two fingers move the picture.**
@@ -408,8 +446,11 @@ fun DrawingSurface(
                 // no text and no children, so without this there is nothing to address — and the one
                 // question that matters here ("does a stroke appear") is only askable through a touch.
                 .semantics { contentDescription = "drawing canvas" }
-                .pointerInput(tool, colour, width) {
+                .pointerInput(tool, colour, width, view) {
                     awaitEachGesture {
+                        // **The view as it is when this gesture begins**, so the arithmetic inside is
+                        // not reading a state that a previous frame has already changed.
+                        var currentView = view ?: Drawing.View()
                         val down = awaitFirstDown(requireUnconsumed = false)
                         // What a single finger is doing: drawing, or erasing as it moves.
                         var drawing = false
@@ -421,10 +462,10 @@ fun DrawingSurface(
                         // second finger arriving cancels a stroke rather than converting it.
                         val startCount = currentEvent.changes.size
                         if (startCount == 1) {
-                            val at = view.toPicture(down.position.x, down.position.y)
+                            val at = currentView.toPicture(down.position.x, down.position.y)
                             if (tool == Drawing.Tool.ERASER) {
                                 erasing = true
-                                Drawing.hit(strokes, at, 8f / view.zoom)?.let(onErase)
+                                Drawing.hit(strokes, at, 8f / currentView.zoom)?.let(onErase)
                             } else {
                                 drawing = true
                                 current = listOf(at)
@@ -438,7 +479,8 @@ fun DrawingSurface(
                             // a pan cannot walk the picture off screen and leave a blank canvas with no
                             // gesture that brings it back. It sits above the branches for exactly that
                             // reason: two of them skip to the next frame.
-                            view = view.bounded(picture.width, picture.height)
+                            currentView = currentView.bounded(picture.width, picture.height)
+                            view = currentView
                             if (pressed.size >= 2) {
                                 // **Two fingers: scale about their midpoint, and move with it.** Any
                                 // stroke in progress is dropped, because the person has changed what
@@ -456,12 +498,13 @@ fun DrawingSurface(
                                 // **Compared with the previous frame's values**, which is what makes
                                 // this incremental: one pinch is many small ratios, not one big one.
                                 if (lastSpan > 0f && span > 0f) {
-                                    view = view.zoomedBy(span / lastSpan, middle.x, middle.y)
+                                    currentView = currentView.zoomedBy(span / lastSpan, middle.x, middle.y)
                                 }
-                                view = view.pannedBy(
+                                currentView = currentView.pannedBy(
                                     middle.x - lastPan.x,
                                     middle.y - lastPan.y,
                                 )
+                                view = currentView
                                 lastSpan = span
                                 lastPan = middle
                                 event.changes.forEach { it.consume() }
@@ -472,17 +515,18 @@ fun DrawingSurface(
                                 // A gesture that started as a pan (two fingers) and lost one keeps
                                 // panning rather than suddenly drawing.
                                 val at = pressed[0].position
-                                view = view.pannedBy(at.x - lastPan.x, at.y - lastPan.y)
+                                currentView = currentView.pannedBy(at.x - lastPan.x, at.y - lastPan.y)
+                                view = currentView
                                 lastPan = at
                                 pressed[0].consume()
                                 continue
                             }
 
                             val change = pressed.firstOrNull() ?: break
-                            val at = view.toPicture(change.position.x, change.position.y)
+                            val at = currentView.toPicture(change.position.x, change.position.y)
                             change.consume()
                             if (erasing) {
-                                Drawing.hit(strokes, at, 8f / view.zoom)?.let(onErase)
+                                Drawing.hit(strokes, at, 8f / currentView.zoom)?.let(onErase)
                             } else if (drawing) {
                                 // A line and a box keep two points — where it started and where it is
                                 // now. The pen keeps every one, because its shape is the path.
@@ -498,12 +542,16 @@ fun DrawingSurface(
                     }
                 },
         ) {
+            // **The surface's own size, which is what the fit needs and what the picture is drawn
+            // into.** Read here because a composition knows its size only after layout.
+            if (size != surface.toSize()) surface = androidx.compose.ui.unit.IntSize(size.width.toInt(), size.height.toInt())
+            val shown = view ?: Drawing.View()
             // **Scaled and panned by hand rather than by a modifier**, because the strokes are in the
             // picture's coordinates and must move with it. A `graphicsLayer` would transform the
             // picture and leave the marks where they were.
             withTransform({
-                translate(view.panX, view.panY)
-                scale(view.zoom, view.zoom, pivot = Offset.Zero)
+                translate(shown.panX, shown.panY)
+                scale(shown.zoom, shown.zoom, pivot = Offset.Zero)
             }) {
                 drawImage(
                     picture,
@@ -519,12 +567,18 @@ fun DrawingSurface(
         }
         // **The zoom, said out loud**, because a pinch is invisible once it has happened: a person who
         // has zoomed to 8× and cannot find their place needs a way to know, and a way back.
-        if (view.zoom != 1f) {
-            TextButton(
-                onClick = { view = Drawing.View() },
-                modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp),
-            ) {
-                Text("${(view.zoom * 100).roundToInt()}% · reset")
+        // **The reset returns to the fitted view, not to 1:1** — "reset" means "show me the whole
+        // picture again", which is where the person started, not the pixel size of the file.
+        val shownZoom = view?.zoom ?: 1f
+        if (view != null && surface != androidx.compose.ui.unit.IntSize.Zero) {
+            val fitted = Drawing.View.fittedTo(picture.width, picture.height, surface.width.toFloat(), surface.height.toFloat())
+            if (view != fitted) {
+                TextButton(
+                    onClick = { view = fitted },
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp),
+                ) {
+                    Text("${(shownZoom * 100).roundToInt()}% · fit")
+                }
             }
         }
       }
