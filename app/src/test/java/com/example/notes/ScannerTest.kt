@@ -23,9 +23,21 @@ import org.junit.Test
  */
 class ScannerTest {
 
-    /** A file of [count] chunks, each a paragraph of its own, with the headings the chunker will keep. */
+    /**
+     * A page of [count] chunks — **and the sections are long enough to BE chunks.**
+     *
+     * The chunker fills 800 characters before it cuts, so three short lines are **one** chunk. That is the
+     * fixture trap this file walked into first: the claim "a section can be cut while its neighbours survive"
+     * needs sections bigger than the budget, or the test is asking the splitter to do something the text cannot
+     * express.
+     */
     private fun page(count: Int, words: String = "ordinary prose about the weather"): String =
-        (1..count).joinToString("\n") { "Section $it of the page. $words, repeated enough to fill a line." }
+        (1..count).joinToString("\n") { section(it, words) }
+
+    /** One section: its own first line, then enough ordinary prose to fill a chunk on its own. */
+    private fun section(number: Int, words: String = "ordinary prose about the weather"): String =
+        "Section $number of the page. " +
+            (1..10).joinToString(" ") { "$words, number $it" }
 
     private fun scanner(scores: List<Double>, threshold: Double = 0.8) =
         Scanner(score = { Result.success(scores) }, threshold = { threshold })

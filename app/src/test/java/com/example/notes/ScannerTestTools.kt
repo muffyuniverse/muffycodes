@@ -108,11 +108,19 @@ class ScannerTestTools {
         file.writeText("# $name\n\n```mcp\nurl: https://mcp.example.com/mcp\n```\n")
     }
 
-    /** Three paragraphs, each a chunk of its own. */
-    private fun page(): String =
-        (1..3).joinToString("\n") {
-            "Section $it of the page, with enough ordinary words in it to fill a line of text."
-        }
+    /**
+     * Three paragraphs, each a chunk of its own.
+     *
+     * **Each section is longer than the chunker's 800-character budget**, because three short lines are one
+     * chunk — and "a section can be cut while its neighbours survive" is unreachable if the fixture cannot
+     * produce three sections.
+     */
+    private fun page(): String = (1..3).joinToString("\n") { section(it) }
+
+    /** One section: its own opening line, then enough prose to be a chunk by itself. */
+    private fun section(number: Int): String =
+        "Section $number of the page. " +
+            (1..12).joinToString(" ") { "ordinary words to fill a line of text, number $it" }
 
     // ---- browse --------------------------------------------------------------
 
