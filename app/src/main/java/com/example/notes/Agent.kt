@@ -162,6 +162,20 @@ class Agent(
      * refuses, so an agent built without a decision cannot download.
      */
     private val fetcher: Fetcher = Fetcher.NONE,
+    /**
+     * The MCP servers an article describes, for `mcp`.
+     *
+     * **Passed in rather than made here**, like the browser and the fetcher, and the default refuses — so an
+     * agent built without a decision cannot call out to a server.
+     */
+    private val mcp: Mcp = Mcp.NONE,
+    /**
+     * Where an MCP article's named secret is resolved.
+     *
+     * **Null rather than an empty store**, because "this app has no store" and "the store does not have this
+     * secret" are two different refusals and only the second one is actionable.
+     */
+    private val credentials: Credentials? = null,
     /** Whether the agent may reach this phone and the private network. Off unless asked. */
     private val privateAllowed: () -> Boolean = { false },
     /** How long a page may take, in milliseconds; zero is the browser's own bound. */
@@ -190,6 +204,7 @@ class Agent(
         ws, project, git, log, maxResult, bg, backgroundMs, triggerTokens,
         browser = browser, browseMs = browseMs, privateAllowed = privateAllowed,
         fetcher = fetcher,
+        mcp = mcp, credentials = credentials,
         github = github, githubToken = githubToken, downloads = downloads,
     )
 
