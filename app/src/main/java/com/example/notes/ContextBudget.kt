@@ -152,6 +152,76 @@ object ContextBudget {
     fun tokens(vararg texts: String): Long = texts.sumOf { tokens(it) }
 
     /**
+     * What one picture costs, from its **pixels** — never from its encoded length.
+     *
+     * **The two numbers that would both be wrong.** A data URL is base64, a third larger than the
+     * bytes it carries, so counting the encoding overcharges every picture by 33%. And the charge is
+     * not proportional to the file at all: a 4 MB photo and a 200 kB one cost the same, because the
+     * provider resizes both before it looks at them.
+     *
+     * **So the arithmetic is the provider's own**, published and measured: resize into a 2048×2048
+     * box keeping the aspect ratio, then resize again so the **shortest side is 768**, then charge
+     * 85 tokens plus 170 for each 512×512 tile, a partial tile counted as a whole one.
+     *
+     * **Portrait costs more than landscape, and that is not a bug.** The shortest side is pinned, so a
+     * tall picture keeps its height: 768×2048 is four tiles across and four down, 1,445 tokens, where
+     * a landscape 1024×768 is four tiles in all, 765. Any rule that capped the *long* edge would make
+     * a portrait picture cost **more** by shrinking it into a worse tile count.
+     *
+     * Like [tokens], this is a **policy** number and not a bill — a provider that tiles differently
+     * charges differently — which is why every place it is shown says "about".
+     */
+    fun pictureTokens(width: Int, height: Int): Long {
+        if (width <= 0 || height <= 0) return 0L
+        val (w, h) = fitted(width, height)
+        val tiles = ceilDiv(w, TILE) * ceilDiv(h, TILE)
+        return PICTURE_BASE + PICTURE_PER_TILE * tiles
+    }
+
+    /**
+     * The size a picture is actually charged at: the provider's two resize steps, applied here.
+     *
+     * **Done in the app so the estimate and the wire agree.** Sending a 4000×3000 photo means the
+     * provider shrinks it anyway; doing the same shrink first makes the number shown to a person the
+     * number that will be billed, and cuts the request from megabytes to a couple of hundred
+     * kilobytes — which is the difference between a request that works on a train and one that times
+     * out.
+     */
+    fun fitted(width: Int, height: Int): Pair<Int, Int> {
+        var w = width
+        var h = height
+        // Step 1: inside the 2048 box, aspect kept. Only ever shrinks.
+        val longest = maxOf(w, h).toDouble()
+        if (longest > FITTED_BOX) {
+            val scale = FITTED_BOX / longest
+            w = Math.round(w * scale).toInt()
+            h = Math.round(h * scale).toInt()
+        }
+        // Step 2: the shortest side at 768. Only ever shrinks, so a small picture is left alone.
+        val shortest = minOf(w, h).toDouble()
+        if (shortest > SHORT_SIDE) {
+            val scale = SHORT_SIDE / shortest
+            w = Math.round(w * scale).toInt()
+            h = Math.round(h * scale).toInt()
+        }
+        // Rounding can take a very thin picture's short side to zero; one pixel is the floor.
+        return maxOf(w, 1) to maxOf(h, 1)
+    }
+
+    private fun ceilDiv(value: Int, by: Int): Int = (value + by - 1) / by
+
+    /** The provider's resize box: a picture larger than this is scaled into it first. */
+    const val FITTED_BOX = 2048.0
+
+    /** The shortest side a picture is charged at, after the second resize step. */
+    const val SHORT_SIDE = 768.0
+
+    /** One tile's size and charge, and the flat framing charge around all of them. */
+    const val TILE = 512
+    const val PICTURE_BASE = 85L
+    const val PICTURE_PER_TILE = 170L
+
+    /**
      * A limit as the operator asked for it and as it is in force.
      *
      * [asked] is stored; [inForce] is derived, every time, from the pin that is active now.

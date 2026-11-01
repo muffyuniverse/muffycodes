@@ -453,4 +453,79 @@ class ContextBudgetTest {
         }
     }
 
+    // ---- pictures -------------------------------------------------------------------------------
+    //
+    // The arithmetic is the provider's own, and the numbers below are the table from
+    // `docs/DESIGN-seeing-images.md` §6 Q1 — which was written to answer the operator's question
+    // "what is the difference before and after 1568px?" and found that 1568 is not a number the
+    // provider has.
+
+    @Test
+    fun `a landscape picture is four tiles and a tall one is eight`() {
+        // **The case that corrected the design.** The provider pins the SHORTEST side at 768, so a
+        // tall picture keeps its height: 768x2048 is 2x4 tiles, not 2x2. A rule capping the long edge
+        // would have made this picture cost MORE by shrinking it into a worse tile count.
+        assertEquals("1024x768 is four tiles", 765L, ContextBudget.pictureTokens(1024, 768))
+        assertEquals("768x2048 is eight", 1_445L, ContextBudget.pictureTokens(768, 2048))
+        assertEquals("and a 16:9 phone screenshot is six", 1_105L, ContextBudget.pictureTokens(1080, 1920))
+    }
+
+    @Test
+    fun `a big photo costs what its resized self costs, not what its bytes cost`() {
+        // A 4000x3000 phone photo is 3-6 MB on disk and would be 8,245 tokens sent as-is. After the
+        // provider's two resize steps it is 1024x768: four tiles, the same 765 as a small picture.
+        // **Counting the base64 would have overcharged it by a third and still been wrong.**
+        assertEquals(
+            "a 12MP photo costs what a 1024x768 does",
+            ContextBudget.pictureTokens(1024, 768),
+            ContextBudget.pictureTokens(4000, 3000),
+        )
+        assertEquals(
+            "and the resize is the provider's own two steps",
+            1024 to 768,
+            ContextBudget.fitted(4000, 3000),
+        )
+    }
+
+    @Test
+    fun `a picture smaller than the shortest side is left alone`() {
+        // Nothing is ever enlarged: a 320x200 icon is sent as it is. **And it is ONE tile, not four** —
+        // 320 and 200 both fit inside a single 512 square, so it is charged 85 + 170 = 255. Assuming
+        // "four tiles" for anything small would over-report by a factor of three, and the budget's
+        // safe direction is the one that never under-counts, not one that inflates everything.
+        assertEquals("untouched", 320 to 200, ContextBudget.fitted(320, 200))
+        assertEquals("one tile, 255 tokens", 255L, ContextBudget.pictureTokens(320, 200))
+    }
+
+    @Test
+    fun `the first resize step happens before the second, and only shrinks`() {
+        // A 3000x1000 is 3:1, so after the box it is 2048x683 - and the short side is already under
+        // 768, so step two leaves it. **Eight tiles, 1,445 tokens**: two across and two down is not
+        // how tiling works, because 2048 needs four columns and 683 needs two rows. That is the case
+        // where doing the two steps in the other order gives a different answer, and the reason the
+        // order matters.
+        assertEquals("inside the box, short side under 768", 2048 to 683, ContextBudget.fitted(3000, 1000))
+        assertEquals("four columns of tiles, two rows", 1_445L, ContextBudget.pictureTokens(3000, 1000))
+        assertEquals("a square over the box is 768 square", 768 to 768, ContextBudget.fitted(4000, 4000))
+    }
+
+    @Test
+    fun `a picture with no size costs nothing rather than crashing`() {
+        // A file that would not decode has no dimensions, and the row still has to be countable.
+        assertEquals("zero is not a picture", 0L, ContextBudget.pictureTokens(0, 0))
+        assertEquals("and a negative is not either", 0L, ContextBudget.pictureTokens(-1, 100))
+    }
+
+    @Test
+    fun `a picture is never cheaper than the framing charge`() {
+        // The floor is the 85-token base: even a 1x1 picture is charged it. This is the property that
+        // makes the estimate never under-report, which is the safe direction for a budget.
+        for ((w, h) in listOf(1 to 1, 10 to 10, 512 to 512, 513 to 513)) {
+            assertTrue(
+                "${w}x$h must cost at least the base",
+                ContextBudget.pictureTokens(w, h) >= ContextBudget.PICTURE_BASE,
+            )
+        }
+    }
+
 }
