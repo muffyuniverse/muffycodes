@@ -114,11 +114,14 @@ class LookTest {
     }
 
     @Test
-    fun `a broken png is refused rather than sent as nothing`() {
-        // A truncated download is not a picture. Sending the bytes anyway would be a request that
-        // costs tokens to show the model a grey box.
-        val file = File(folder.root, "truncated.png")
-        file.writeBytes(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x00, 0x01))
+    fun `a file that is not a picture at all is refused`() {
+        // **Not a truncated PNG, and that is deliberate.** `BitmapFactory` under Robolectric decodes
+        // an eight-byte PNG header happily, so a "truncated" fixture proves nothing about the
+        // decoder — it would have been a test that passed by accident. Text with a `.png` name is
+        // the case that cannot decode anywhere, and it is also the real one: a `.gitkeep` renamed by
+        // hand, or a download that saved an error page.
+        val file = File(folder.root, "not-really.png")
+        file.writeText("this is a text file wearing a picture's name")
 
         val failure = Look.read(file).exceptionOrNull() as Look.LookFailed
         assertTrue(

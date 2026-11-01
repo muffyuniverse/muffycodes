@@ -93,7 +93,7 @@ class AgentToolsTest {
         // read-only**: a tool that starts a run is a different grant, and it waits on the workflow
         // guard (a run the agent dispatches must not be able to reach repository secrets).
         assertEquals(
-            "and the twenty-one that are",
+            "and the twenty-two that are",
             listOf(
                 // **`search` is the account-wide reader**, and it sits beside `tree` because the
                 // difference between them is a default rather than a permission: `tree` answers
@@ -116,6 +116,10 @@ class AgentToolsTest {
                 // list is part of every request's cache prefix, so a server's own catalogue is
                 // something the agent reads on demand instead.
                 "mcp",
+                // **`look` is the one tool that changes what the model can perceive**, and it
+                // sits beside `shot` because they are the two halves of one loop: `shot` makes a
+                // picture and nothing could consume one until `look` existed.
+                "look",
             ),
             specs.map { it.name },
         )
