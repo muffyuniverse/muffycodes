@@ -83,6 +83,14 @@ class AgentTools(
      */
     private val privateAllowed: () -> Boolean = { false },
     /**
+     * Where downloaded bytes come from.
+     *
+     * **The same shape as [browser]**, and for the same reason: a tool that could only be tested by
+     * downloading something is a tool tested by hand or not at all. `Fetcher.NONE` is the default, so
+     * a tool set built without a decision cannot download.
+     */
+    private val fetcher: Fetcher = Fetcher.NONE,
+    /**
      * GitHub, and the key to reach it with — **nulls when there is nothing to reach.**
      *
      * Read per call like every other limit here, because signing out or pasting a new key while the
@@ -211,6 +219,15 @@ class AgentTools(
         const val UNPACKED_SHOWN = 20
 
         /**
+         * How many entry names a `fetch` answer lists.
+         *
+         * **The names, not the bytes**: a fetched zip in the conversation would cost the whole
+         * context to say nothing, and the names are what a model asks about next — the same reason
+         * `artifact` reports them.
+         */
+        const val FETCHED_SHOWN = 40
+
+        /**
          * What a range may be written with, normalised to `..` before anything is split.
          *
          * A hyphen **between two digits**, so `7-19` and `7 - 19` are one range while `-3` stays a
@@ -268,6 +285,10 @@ class AgentTools(
             // one of the two key sets is ever used per call, and a call naming neither is refused
             // with both shapes.
             "archive" to setOf("pack", "as", "unpack", "into"),
+            // **No `into`.** A fetched file lands in `agent/fetched/` always, and `unpack` is what
+            // moves it into the project — the operator's *"everything can land there"*, and the
+            // reason vendoring is two visible steps rather than one that commits 40 MB.
+            "fetch" to setOf("url"),
         )
 
         /** The keys [args] carries that [tool] does not take, in the order the model wrote them. */
@@ -528,6 +549,24 @@ class AgentTools(
                 "{\"pack\":[\"src/\",\"README.md\"],\"as\":\"agent/out.zip\"," +
                     "\"unpack\":\"agent/fetched/lib.zip\",\"into\":\"vendor/lib\"}",
             ),
+            spec(
+                "fetch",
+                "Download a file from the web. **This is the only way bytes reach the phone from a " +
+                    "URL** — `browse` gives you a page's text and `shot` a picture, and neither is " +
+                    "a file. Use it for a dependency tarball " +
+                    "(`https://github.com/o/r/archive/refs/heads/main.tar.gz`), a release asset, or " +
+                    "anything a person gives you a link to. " +
+                    "**It always lands in `agent/fetched/`**, which is not in git, so a download " +
+                    "never commits itself; `archive` with `unpack` is how files get into the " +
+                    "project. The answer is the path, the size, and for a zip the names inside — " +
+                    "**never the bytes**, because binary in this conversation costs the whole " +
+                    "context to say nothing. " +
+                    "Private addresses are refused unless the person has allowed them, and so is " +
+                    "anything past ${Fetcher.size(Fetched.LIMIT_BYTES)}. A download that is too big " +
+                    "is refused, not truncated: half an archive is worse than none, because it " +
+                    "fails later with the cause three steps back.",
+                "{\"url\":\"https://example.com/data.zip\"}",
+            ),
         )
 
         /**
@@ -648,6 +687,7 @@ class AgentTools(
             "artifact" -> artifact(args)
             "downloads" -> downloads(args)
             "archive" -> archive(args, deadline)
+            "fetch" -> fetch(args, deadline)
             else -> refusal("There is no tool called ${call.tool}")
         }
     } catch (e: StoppedException) {
@@ -2452,6 +2492,96 @@ class AgentTools(
             onSuccess = { success(it.said()) },
             onFailure = { refusal(it.message ?: "The file could not be put in Downloads") },
         )
+    }
+
+    /**
+     * Downloads one file from a URL into `agent/fetched/`.
+     *
+     * ## Why this tool had to exist
+     *
+     * The app could not turn a URL into a file at all. `browse` gives a page's **text**, `shot` a
+     * **PNG**, `artifact` one file from a **CI run** — and none of them takes a URL. So "vendor this
+     * library" or "get me that release asset" had no answer, which is a hole in a coding agent
+     * rather than a missing convenience.
+     *
+     * ## Why there is no `into`
+     *
+     * The operator's answer to *"where does a fetch land"* was *"everything can land there"*, and
+     * `agent/` is already git-excluded — so a download never commits itself. That makes **vendoring
+     * two visible steps**: `fetch`, then `archive` with `unpack`. A `fetch` that could write into
+     * `vendor/` would commit forty megabytes on the strength of one call the person never saw.
+     *
+     * ## What it refuses, and why each refusal is its own sentence
+     *
+     * - **A private address**, by the same call `browse` makes. A fetcher is a worse SSRF surface
+     *   than a browser: a page can lie, a download can *write into the project*.
+     * - **A size past the cap** — refused, never truncated, because half an archive fails later with
+     *   the cause three steps back.
+     * - **A server error**, quoted, because "the download failed" tells a model nothing it can act
+     *   on and the person can act on a `404`.
+     *
+     * ## What it answers
+     *
+     * The path, the size, and for a zip the entry names — **the same shape `artifact` returns**,
+     * because that shape was right: a zip in the conversation is binary that costs the whole context
+     * to say nothing.
+     */
+    private fun fetch(args: JSONObject, deadline: Deadline): String {
+        val url = args.optString("url", "").trim()
+        if (url.isEmpty()) {
+            return refusal("`fetch` needs a `url`: the address of the file to download.")
+        }
+        // **The address rule first, before anything is opened.** The refusal has to come before the
+        // request, not after it: the request is the harm, and a check that ran after the connection
+        // would already have reached the operator's router.
+        Addresses.problem(url, privateAllowed())?.let { return refusal(it) }
+        deadline.check("fetch")
+        val got = fetcher.bytes(url, Fetched.LIMIT_BYTES).getOrElse {
+            return refusal(it.message ?: "The file could not be downloaded")
+        }
+        if (got.isEmpty()) {
+            return refusal("The server sent nothing for \"$url\".")
+        }
+        val dir = File(projectDir, Fetched.DIR)
+        val name = Fetched.nameFor(url)
+        val file = File(dir, name)
+        return try {
+            dir.mkdirs()
+            file.writeBytes(got)
+            val rel = file.relativeTo(projectDir).invariantSeparatorsPath
+            // **What is inside, when it can be read.** An archive is what a person fetches most of
+            // the time, and "which files did this produce" is the question a model asks next. A zip
+            // that will not open is not a failure of the download — the bytes are on disk either
+            // way.
+            val inside = try {
+                java.util.zip.ZipFile(file).use { zip ->
+                    zip.entries().asSequence().filterNot { it.isDirectory }
+                        .take(FETCHED_SHOWN).map { it.name }.toList()
+                }
+            } catch (e: Throwable) {
+                emptyList()
+            }
+            val listing = if (inside.isEmpty()) {
+                ""
+            } else {
+                "\n\nIt holds:\n" + inside.joinToString("\n") { "- $it" } +
+                    if (inside.size == FETCHED_SHOWN) "\n- … and possibly more" else ""
+            }
+            success(
+                "Fetched ${Fetcher.size(got.size.toLong())} from $url into $rel." +
+                    listing +
+                    // **The next step, named**, because a fetched archive that stays in `agent/`
+                    // never reaches the project and the agent has to be told how it does.
+                    if (inside.isNotEmpty()) {
+                        "\n\nTo put it in the project, " +
+                            "{\"unpack\":\"$rel\",\"into\":\"<folder>\"}."
+                    } else {
+                        ""
+                    },
+            )
+        } catch (e: Throwable) {
+            refusal("The file could not be saved: " + Secrets.explain(e, "not written"))
+        }
     }
 
     /**

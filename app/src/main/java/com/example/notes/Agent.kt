@@ -154,6 +154,14 @@ class Agent(
      * cannot reach the web.
      */
     private val browser: com.example.notes.browser.Browser = com.example.notes.browser.Browser.NONE,
+    /**
+     * Where downloaded bytes come from, for `fetch`.
+     *
+     * **Passed in rather than made here**, like the browser: a download needs a network and a socket,
+     * and an `Agent` that made its own would be one that cannot be constructed in a test. The default
+     * refuses, so an agent built without a decision cannot download.
+     */
+    private val fetcher: Fetcher = Fetcher.NONE,
     /** Whether the agent may reach this phone and the private network. Off unless asked. */
     private val privateAllowed: () -> Boolean = { false },
     /** How long a page may take, in milliseconds; zero is the browser's own bound. */
@@ -181,6 +189,7 @@ class Agent(
     private val tools = AgentTools(
         ws, project, git, log, maxResult, bg, backgroundMs, triggerTokens,
         browser = browser, browseMs = browseMs, privateAllowed = privateAllowed,
+        fetcher = fetcher,
         github = github, githubToken = githubToken, downloads = downloads,
     )
 

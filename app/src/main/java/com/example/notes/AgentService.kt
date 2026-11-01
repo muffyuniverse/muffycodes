@@ -61,6 +61,7 @@ class AgentService : Service() {
         runner = AgentWiring.runnerFor(
             app = application,
             browser = engine,
+
             // **The session, not its sentence.** The notification carries the project's own
             // buttons — Stop this session has to know which one — so narrowing it to a string here
             // would be narrowing it to the one thing the buttons do not need.

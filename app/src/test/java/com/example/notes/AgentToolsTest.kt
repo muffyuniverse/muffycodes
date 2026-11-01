@@ -93,7 +93,7 @@ class AgentToolsTest {
         // read-only**: a tool that starts a run is a different grant, and it waits on the workflow
         // guard (a run the agent dispatches must not be able to reach repository secrets).
         assertEquals(
-            "and the nineteen that are",
+            "and the twenty that are",
             listOf(
                 // **`search` is the account-wide reader**, and it sits beside `tree` because the
                 // difference between them is a default rather than a permission: `tree` answers
@@ -108,6 +108,10 @@ class AgentToolsTest {
                 // one file for that flat folder, and it unpacks a fetched dependency into the
                 // project — the two directions of one capability, which is why it is one tool.
                 "archive",
+                // **`fetch` is the missing primitive**, and it is the only tool that turns a URL
+                // into a file: `browse` gives a page's text, `shot` a picture, `artifact` one file
+                // from a CI run, and none of them takes an address.
+                "fetch",
             ),
             specs.map { it.name },
         )

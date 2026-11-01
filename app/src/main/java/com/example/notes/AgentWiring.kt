@@ -69,6 +69,17 @@ object AgentWiring {
          * Defaults to `Browser.NONE`, so a wiring built without a decision cannot browse.
          */
         browser: com.example.notes.browser.Browser = com.example.notes.browser.Browser.NONE,
+        /**
+         * Where `fetch` gets its bytes.
+         *
+         * **A parameter so a test can answer without a socket**, the same rule the browser follows.
+         *
+         * **Null means "the real one, with this wiring's settings"**, and that default is not
+         * `Fetcher.http()` with its own policy: the fetcher checks each redirect hop, and a fetcher
+         * that refused a private hop while the operator had allowed private addresses would be a
+         * rule the person turned off coming back through a different door.
+         */
+        fetcher: Fetcher? = null,
     ): AgentRunner? {
         val login = credentials.activeLogin ?: return null
         val accounts = AccountStore(rootDir)
@@ -93,6 +104,11 @@ object AgentWiring {
             changed = changed,
             onPage = onPage,
             browser = browser,
+            // **The real fetcher, and the private-address switch is the browser's own.** One
+            // setting decides "may this agent reach the private network", because a fetch obeying a
+            // different answer from a browse would be two rules for one question — and the one that
+            // is wrong is the one nobody reads.
+            fetcher = fetcher ?: Fetcher.http(privateAllowed = { settings.browsePrivate }),
             // **The real GitHub, and the key read per call.** A local project has a remote that is
             // not GitHub's, and `where()` in the tools refuses that in words rather than asking.
             github = {

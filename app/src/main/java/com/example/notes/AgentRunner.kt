@@ -51,6 +51,14 @@ class AgentRunner(
      */
     private val browser: com.example.notes.browser.Browser = com.example.notes.browser.Browser.NONE,
     /**
+     * Where downloaded bytes come from, for `fetch`.
+     *
+     * **A default that refuses**, so a runner built without a decision cannot download — the same
+     * rule the browser follows, and the reason every test that is not about `fetch` is free of a
+     * fake network.
+     */
+    private val fetcher: Fetcher = Fetcher.NONE,
+    /**
      * Where a `background` call's work runs — **one thread per call, made when it is asked for.**
      *
      * The previous design kept a fixed pool here and held the test suite open for eighteen minutes
@@ -341,6 +349,7 @@ class AgentRunner(
                     sessionTokens = settings.sessionLimit,
                     onPage = { live -> onPage(project, live) },
                     browser = browser,
+                    fetcher = fetcher,
                     // **Read from the settings at the moment of the call**, like the other limits:
                     // a switch flipped while the agent is idle applies to the next page it reads.
                     privateAllowed = { settings.browsePrivate },

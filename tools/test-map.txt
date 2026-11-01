@@ -84,6 +84,7 @@ ExportTest  app/src/main/java/com/example/notes/Export.kt
 BrowseToolsTest     app/src/main/java/com/example/notes/AgentTools.kt
 SearchTest    app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Workspace.kt
 ArchiveTest    app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Workspace.kt
+FetchTest    app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Fetcher.kt app/src/main/java/com/example/notes/Workspace.kt
 BrowserTest         browser/src/main/java/com/example/notes/browser/Browser.kt browser/src/main/java/com/example/notes/browser/WebViewBrowser.kt
 AgentTest  app/src/main/java/com/example/notes/Agent.kt app/src/main/java/com/example/notes/AgentPrompt.kt app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Door.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitService.kt
 AgentChatTest  app/src/main/java/com/example/notes/AgentChat.kt app/src/main/java/com/example/notes/AgentLog.kt
