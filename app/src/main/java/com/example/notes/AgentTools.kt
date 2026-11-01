@@ -152,6 +152,15 @@ class AgentTools(
     val projectDir: File get() = ws.projectDir(project)
 
     /**
+     * One picture that was read: where it came from, and what it became.
+     *
+     * **The path travels with the picture** because the message that carries it has to name it. A
+     * `see` row is two things at once — the bytes to send and the name of what was sent — and a
+     * conversation with several of them is unreadable without the second.
+     */
+    private data class Seen(val path: String, val picture: Look.Seen)
+
+    /**
      * What a workflow file can reach, and whether a person has sealed it.
      *
      * **It holds nothing and stores nothing.** The approval is the person's lock, which
@@ -3427,7 +3436,7 @@ class AgentTools(
             )
         }
 
-        val seen = mutableListOf<Look.Seen>()
+        val seen = mutableListOf<Seen>()
         val said = mutableListOf<String>()
         val failed = mutableListOf<String>()
         for (i in 0 until asked.length()) {
@@ -3441,7 +3450,10 @@ class AgentTools(
                 continue
             }
             Look.read(file).fold(
-                onSuccess = { seen.add(it); said.add("$path (${it.width}\u00d7${it.height})") },
+                onSuccess = {
+                    seen.add(Seen(path, it))
+                    said.add("$path (${it.width}\u00d7${it.height})")
+                },
                 onFailure = { failed.add((it as? Look.LookFailed)?.said ?: "${file.name} could not be read") },
             )
         }
@@ -3453,11 +3465,16 @@ class AgentTools(
             return refusal(failed.joinToString("; ").ifEmpty { "No pictures were named." })
         }
 
-        val total = seen.sumOf { it.tokens }
+        val total = seen.sumOf { it.picture.tokens }
         // **Charged by the pixels, not by the base64.** The body is a data URL the model never reads
         // as text — it reads the picture — so measuring the string would charge about 77,000 tokens
         // for a picture that costs 765, and the budget would start clearing up over one image.
-        log.note("see", seen.joinToString("\n") { it.url }, cost = total)
+        //
+        // **Each line is `path<TAB>url`, so the message carrying the pictures can say which is
+        // which.** Without the path, a conversation with three of these has three messages reading
+        // "here is the picture you asked to see" and no way to tell which file each one is — the model
+        // would have to guess from the image's contents, which is exactly the guessing a path removes.
+        log.note("see", seen.joinToString("\n") { "${it.path}\t${it.picture.url}" }, cost = total)
 
         val body = buildString {
             append("attached: ").append(said.joinToString(", "))

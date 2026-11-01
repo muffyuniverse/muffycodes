@@ -266,4 +266,42 @@ class LookToolTest {
             carrying[0].pictures[0].length > 100,
         )
     }
+
+    @Test
+    fun `the message carrying the picture names the file it came from`() {
+        // **The audit finding.** With the row storing only the data URL, a conversation with several
+        // pictures had several identical sentences and no way to tell which file each one was — the
+        // model would have to guess from the image's contents, which is exactly the guessing a path
+        // removes.
+        picture(64, 64, "first.png")
+        picture(64, 64, "second.png")
+        look("first.png")
+        look("second.png")
+
+        val carrying = agent().messages(log.contextRows()).filter { it.pictures.isNotEmpty() }
+        assertEquals("two messages carry pictures", 2, carrying.size)
+        assertTrue(
+            "the first names its file: ${carrying[0].text}",
+            carrying[0].text.contains("first.png"),
+        )
+        assertTrue(
+            "the second names its own: ${carrying[1].text}",
+            carrying[1].text.contains("second.png"),
+        )
+        assertFalse(
+            "and neither names the other's: ${carrying[0].text}",
+            carrying[0].text.contains("second.png"),
+        )
+    }
+
+    @Test
+    fun `one picture is said in the singular, several in the plural`() {
+        // A sentence that said "the pictures you asked to see: a.png" for one picture is a sentence
+        // nobody wrote on purpose.
+        picture(64, 64, "one.png")
+        look("one.png")
+        val single = agent().messages(log.contextRows()).first { it.pictures.isNotEmpty() }
+        assertTrue("singular: ${single.text}", single.text.contains("the picture you asked"))
+        assertFalse("not plural: ${single.text}", single.text.contains("the pictures you asked"))
+    }
 }

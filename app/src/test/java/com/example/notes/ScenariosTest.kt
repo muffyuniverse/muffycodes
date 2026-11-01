@@ -467,20 +467,28 @@ class ScenariosTest {
                     )
                 }
             },
+            // **Waits for the photograph to be open, not just for the press.** The first version
+            // pressed Photo and answered true immediately — and the picture was of the text editor,
+            // because the render runs on the worker and the capture happens on the main thread a
+            // moment later. A scenario that photographs the screen it started on is a scenario that
+            // proves nothing while looking like it passed.
             ready = {
                 if (!pressedPhoto) {
                     pressedPhoto = true
                     compose.onAllNodesWithText("Photo")[0].performClick()
-                    compose.waitForIdle()
-                    // The photograph opens in the image editor, which starts in View; pressing Draw
-                    // shows the canvas it has become.
+                }
+                // The photograph is a *new* file in the project, and the editor opens it: so the
+                // editor is showing something other than the note it started on.
+                val opened = viewModel.editingFile?.name?.let { it != note.name && it.endsWith(".png") }
+                if (opened == true) {
+                    // And Draw, so the picture shows the canvas the photograph became.
                     val drawn = compose.onAllNodesWithText("Draw").fetchSemanticsNodes()
                     if (drawn.isNotEmpty()) {
                         compose.onAllNodesWithText("Draw")[0].performClick()
                         compose.waitForIdle()
                     }
                 }
-                true
+                opened == true
             },
         ) {
             before()

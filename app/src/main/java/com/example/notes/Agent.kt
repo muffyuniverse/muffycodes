@@ -1297,12 +1297,21 @@ class Agent(
                     // and it is honest: the picture is context being handed over, not an answer.
                     "see" -> {
                         flush()
-                        val pictures = row.body.split('\n').filter { it.isNotBlank() }
-                        if (pictures.isNotEmpty()) {
+                        // **Each line is `path<TAB>url`**, so the message can name what it carries.
+                        // A conversation with three of these otherwise has three identical sentences
+                        // and no way to tell which picture is which file.
+                        val attached = row.body.split('\n').filter { it.isNotBlank() }.mapNotNull { line ->
+                            val tab = line.indexOf('\t')
+                            if (tab <= 0) null
+                            else line.substring(0, tab) to line.substring(tab + 1)
+                        }
+                        if (attached.isNotEmpty()) {
                             out.add(
                                 Msg.user(
-                                    "here is the picture you asked to see",
-                                    pictures = pictures,
+                                    "the picture" + (if (attached.size > 1) "s" else "") +
+                                        " you asked to see: " +
+                                        attached.joinToString(", ") { it.first },
+                                    pictures = attached.map { it.second },
                                 ),
                             )
                         }
