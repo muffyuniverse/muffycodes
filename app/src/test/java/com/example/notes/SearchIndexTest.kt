@@ -9,6 +9,9 @@ import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import java.io.File
 
 /**
@@ -27,6 +30,11 @@ import java.io.File
  *
  * **No socket.** [Embedder] is an interface for that reason, and every vector here is made by the test.
  */
+// **Robolectric, because SQLite is Android's.** `SQLiteDatabase.openOrCreateDatabase` reaches for the
+// platform's native library, so a plain JVM test throws at the first `open` — which is how this file
+// failed the first time it ran.
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class SearchIndexTest {
 
     @get:Rule
