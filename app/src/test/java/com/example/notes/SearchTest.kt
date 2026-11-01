@@ -142,7 +142,10 @@ class SearchTest {
         // with half its evidence missing is one that costs a second CI run to understand.
         val said = answer.replace("\n", " | ")
         assertTrue("the many file is named once: $said", answer.split("many.txt").size == 2)
-        assertTrue("and says there is more in it: $said", answer.contains("(39 more)"))
+        // **`(+39 more)`, with the plus.** The count is how many *further* matches there are, so the
+        // sign is part of the sentence rather than decoration — and writing the assertion without it
+        // is how this failed once while the answer was right in front of it.
+        assertTrue("and says there is more in it: $said", answer.contains("(+39 more)"))
         assertTrue("and the second file is not crowded out: $said", answer.contains("once.txt"))
     }
 
