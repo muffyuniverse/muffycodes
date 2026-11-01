@@ -298,8 +298,14 @@ class DrawingTest {
         // width in.
         val page = Drawing.View.fittedTo(1240, 900, 300f, 380f)
         assertTrue("zoomed out: ${page.zoom}", page.zoom < 0.5f)
-        val right = page.toScreen(Drawing.Point(1240f, 0f)).x
-        assertTrue("the whole width is visible: $right", right <= 300f + 0.5f)
-        assertEquals("and the left edge is inside", 0f, page.toScreen(Drawing.Point(0f, 0f)).x, 0.5f)
+        // **The whole picture is inside the window on both axes** — the property that "fits" means.
+        // Asserting only the right edge caught a real defect but asserted the wrong thing: a centred
+        // picture narrower than the window starts at x > 0, so `right == width` is not the test.
+        val left = page.toScreen(Drawing.Point(0f, 0f))
+        val right = page.toScreen(Drawing.Point(1240f, 900f))
+        assertTrue("the left edge is inside: ${left.x}", left.x >= -0.5f)
+        assertTrue("the right edge is inside: ${right.x}", right.x <= 300f + 0.5f)
+        assertTrue("the top is inside: ${left.y}", left.y >= -0.5f)
+        assertTrue("and the bottom: ${right.y}", right.y <= 380f + 0.5f)
     }
 }

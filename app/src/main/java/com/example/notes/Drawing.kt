@@ -290,8 +290,16 @@ object Drawing {
         }
 
         companion object {
-            /** Zoomed out enough to see a big picture whole, without becoming a thumbnail. */
-            const val MIN_ZOOM = 0.25f
+            /**
+             * Zoomed out enough to see a **page** whole.
+             *
+             * **0.25 was too high, and a photograph of a page proved it.** A 1240-pixel page in a
+             * 300-pixel window needs 0.24 to fit; at a 0.25 floor it was 310 pixels wide and
+             * overflowed five pixels on each side, so "fit" did not fit and the person could not see
+             * the whole page they had just made. 0.1 shows a page at a tenth, which is small but
+             * whole — and a thumbnail is still recognisable as a page.
+             */
+            const val MIN_ZOOM = 0.1f
 
             /**
              * 8×, which is where a 1080-wide screenshot shows about 135 pixels across the screen —
