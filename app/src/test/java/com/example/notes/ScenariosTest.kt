@@ -439,6 +439,64 @@ class ScenariosTest {
     }
 
     @Test
+    fun `a page of writing, photographed`() {
+        // **The step-9 picture.** A text file's *view* — rendered markdown, wrapped — becomes a PNG
+        // beside it, so a person can circle a paragraph and say "this goes there". Robolectric cannot
+        // rasterise, so the only place "the letters are on the page" can be seen is here.
+        scene.signedIn()
+        scene.open("groceries")
+        var pressedPhoto = false
+        val note = scene.file(
+            "plan.md",
+            "# Shopping\n\nThe list is short this week.\n\n- two litres of milk\n" +
+                "- a loaf of bread\n- something for the weekend\n\n> check the freezer first\n",
+        )
+
+        scenario(
+            compose, "34-a-page-of-writing-photographed",
+            "A page, photographed.",
+            "a note's own view as a picture, ready to be drawn on.",
+            screen = { browser() },
+            afterScreen = {
+                Screen {
+                    EditorScreen(
+                        viewModel = viewModel,
+                        file = note,
+                        onBack = {},
+                        onOpenHistory = {},
+                    )
+                }
+            },
+            ready = {
+                if (!pressedPhoto) {
+                    pressedPhoto = true
+                    compose.onAllNodesWithText("Photo")[0].performClick()
+                    compose.waitForIdle()
+                    // The photograph opens in the image editor, which starts in View; pressing Draw
+                    // shows the canvas it has become.
+                    val drawn = compose.onAllNodesWithText("Draw").fetchSemanticsNodes()
+                    if (drawn.isNotEmpty()) {
+                        compose.onAllNodesWithText("Draw")[0].performClick()
+                        compose.waitForIdle()
+                    }
+                }
+                true
+            },
+        ) {
+            before()
+            then("The note is opened, and Photo is pressed.") {
+                scene.openEditor(note)
+            }
+            after()
+            result(
+                "Photo renders the file's view — the rendered page, not the raw source — to a PNG " +
+                    "beside it, named after the file plus a hash of what was drawn. It opens in the " +
+                    "image editor, so the drawing tools are already to hand.",
+            )
+        }
+    }
+
+    @Test
     fun `an image with a pen over it`() {
         // **The one picture that shows the canvas paints.** Everything about the drawing that can be
         // tested in this container is tested — the strokes, the eraser, undo, the zoom arithmetic —
