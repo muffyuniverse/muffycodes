@@ -177,16 +177,26 @@ fun EditorScreen(
      * Decoding twice is the price of not letting a save depend on what the screen happens to be
      * showing — and a save that drew on the screen's own bitmap would corrupt the preview.
      */
-    var decoded by remember(session) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    /**
+     * The picture as it was when this screen opened, in **three states rather than two**.
+     *
+     * **`null` used to mean both "still decoding" and "cannot be read"**, and the canvas said "this
+     * picture could not be opened" for the first frames of every picture — the same conflation
+     * `PictureState` exists to avoid, which I reintroduced here and the tour picture caught. Loading
+     * and unreadable are different answers and each has its own thing to say.
+     */
+    var decoded by remember(session) { mutableStateOf<PictureOpen>(PictureOpen.Loading) }
     LaunchedEffect(file.path, kind) {
         if (kind == EntryKind.IMAGE) {
-            decoded = withContext(Dispatchers.IO) {
+            decoded = PictureOpen.Loading
+            val bitmap = withContext(Dispatchers.IO) {
                 try {
                     android.graphics.BitmapFactory.decodeFile(file.path)
                 } catch (e: Throwable) {
                     null
                 }
             }
+            decoded = if (bitmap == null) PictureOpen.Unreadable else PictureOpen.Ready(bitmap)
         }
     }
 
@@ -431,9 +441,9 @@ fun EditorScreen(
                             // Clearing matters: what is now on disk includes them, so keeping them
                             // would draw every mark twice on the next save — the same bug in the
                             // other direction from losing them.
-                            decoded?.let { picture ->
+                            (decoded as? PictureOpen.Ready)?.let { open ->
                                 if (strokes.isNotEmpty()) {
-                                    viewModel.savePicture(Drawing.flatten(picture, strokes))
+                                    viewModel.savePicture(Drawing.flatten(open.bitmap, strokes))
                                     strokes = emptyList()
                                 }
                             }
@@ -450,7 +460,7 @@ fun EditorScreen(
                     enabled = when (kind) {
                         EntryKind.TEXT -> !readOnly && text != saved
                         // An image has nothing to save until something is drawn on it.
-                        EntryKind.IMAGE -> !readOnly && strokes.isNotEmpty() && decoded != null
+                        EntryKind.IMAGE -> !readOnly && strokes.isNotEmpty() && decoded is PictureOpen.Ready
                         else -> false
                     },
                 ) { Text("Save") }
@@ -687,7 +697,7 @@ private sealed interface PictureState {
  */
 @Composable
 private fun DrawMode(
-    picture: android.graphics.Bitmap?,
+    picture: PictureOpen,
     strokes: List<Drawing.Stroke>,
     tool: Drawing.Tool,
     colour: Int,
@@ -699,19 +709,29 @@ private fun DrawMode(
     onAdd: (Drawing.Stroke) -> Unit,
     onErase: (Int) -> Unit,
 ) {
-    // `null` is a real answer — a picture this phone cannot decode — and it is not the same as
-    // "still loading", so it says which one it is rather than showing an empty canvas.
-    if (picture == null) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(
-                text = "This picture could not be opened, so it cannot be drawn on.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+    // **Each state says which one it is.** Saying "could not be opened" while a picture is still
+    // opening is a screen telling the person their file is broken when it is not.
+    when (picture) {
+        PictureOpen.Loading -> {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+            return
         }
-        return
+        PictureOpen.Unreadable -> {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    text = "This picture could not be opened, so it cannot be drawn on.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            return
+        }
+        is PictureOpen.Ready -> Unit
     }
-    val shown = remember(picture) { picture.asImageBitmap() }
+    val bitmap = (picture as PictureOpen.Ready).bitmap
+    val shown = remember(bitmap) { bitmap.asImageBitmap() }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -894,6 +914,19 @@ private fun CannotEdit(file: java.io.File, padding: androidx.compose.foundation.
  * cosmetic: with a switch there was nowhere to put a third mode, so Diff had no home.
  */
 private enum class Mode { VIEW, EDIT, DIFF, DRAW }
+
+/**
+ * What the editor knows about an image file: still opening, open, or not a picture this phone can read.
+ *
+ * **Three states, because two cannot tell the truth.** With a nullable bitmap, "still decoding" and
+ * "cannot be read" are the same value — so a screen says "this picture could not be opened" for the
+ * first frames of every picture it opens successfully. The tour picture caught exactly that.
+ */
+private sealed interface PictureOpen {
+    data object Loading : PictureOpen
+    data class Ready(val bitmap: android.graphics.Bitmap) : PictureOpen
+    data object Unreadable : PictureOpen
+}
 
 /**
  * One of the three, selected when it is the mode in force.
