@@ -197,9 +197,14 @@ class AgentChatScreenTest {
             "which is what it found: ${agent[1].pages.last().body}",
             agent[1].pages.last().body.contains("Two litres"),
         )
-        // **Neither sentence is behind an arrow.** The first bubble has one page and no pager; the
-        // second opens on its last page, which is the sentence.
-        compose.onAllNodesWithContentDescription("Previous page").assertCountEquals(0)
+        // **Neither sentence is behind an arrow.** The second bubble does have a pager — it holds the
+        // call and the sentence — but it opens on its last page, so the sentence is what is read.
+        // The first bubble has one page and therefore no pager at all.
+        assertEquals(
+            "the sentence-only bubble has no pager",
+            1,
+            agent[0].pages.size,
+        )
         // **Both sentences are on screen.** The whole point is that neither needs a press.
         compose.onNodeWithText("Reading the config first.", substring = true).assertExists()
         compose.onNodeWithText("Two litres, as expected.", substring = true).assertExists()

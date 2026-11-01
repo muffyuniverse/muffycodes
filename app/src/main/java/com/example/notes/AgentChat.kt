@@ -717,7 +717,11 @@ object AgentChat {
             // **A burst that ends on a call has no closing text**, and its last bubble is just the
             // call. That is not a gap: the agent stopped mid-work, and inventing a full stop would
             // put words in its mouth.
-            val bubbles = splitAtUtterances(pages)
+            // **A burst with no pages is still one bubble when it has a notice.** `splitAtUtterances`
+            // of an empty list is an empty list, so a turn cut short before the agent called anything
+            // or spoke produced no bubble at all — and the notice had nothing to hang off. One empty
+            // bubble carries it, and the screen draws the notice without a surface around it.
+            val bubbles = splitAtUtterances(pages).ifEmpty { listOf(emptyList()) }
             for ((index, group) in bubbles.withIndex()) {
                 // The last group carries the turn's notices; the earlier ones are just acts.
                 val last = index == bubbles.lastIndex
