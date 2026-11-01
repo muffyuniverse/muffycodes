@@ -263,7 +263,7 @@ class AgentTools(
          */
         val KEYS: Map<String, Set<String>> = mapOf(
             "tree" to setOf("path", "depth", "name", "grep", "from", "to"),
-            "search" to setOf("query", "in", "paths"),
+            "search" to setOf("query", "in", "paths", "history"),
             "read" to setOf("path", "from", "to", "grep", "revision"),
             "edit" to setOf("path", "grep", "replace", "from", "to", "at", "text"),
             "forget" to setOf("ids"),
@@ -334,9 +334,13 @@ class AgentTools(
                     "Each answer line is `path:line: the text`, and the paths are relative to the " +
                     "account so a hit in another project says which one. " +
                     "**Search before you guess**, and search before you write a wiki article: a " +
-                    "duplicate article is worse than a missing one.",
+                    "duplicate article is worse than a missing one. " +
+                    "`history: true` also searches **every saved version** and answers " +
+                    "`path@sha7` instead of `path` — a form `read {revision}` and `restore` both " +
+                    "accept, so a hit is directly usable as the next call. Use it for \"what did " +
+                    "this say before\" and for finding the commit that introduced something.",
                 "{\"query\":\"the text to find, a case-insensitive regular expression\"," +
-                    "\"in\":[\"src/\",\"wiki/\"],\"paths\":10}",
+                    "\"in\":[\"src/\",\"wiki/\"],\"paths\":10,\"history\":false}",
             ),
             spec(
                 "tree",
@@ -931,6 +935,86 @@ class AgentTools(
             ""
         }
         return success(head + found.joinToString("\n"))
+    }
+
+    /**
+     * Adds the **saved versions** of the files the walk already found, as `path@sha7`.
+     *
+     * ## Why only the paths that already matched
+     *
+     * `versionsOf` opens every version of a file — it loads a tree per commit — so doing it for the
+     * whole account would be every repository's history for a question about one function. The walk
+     * has already narrowed to files whose **current** text matches, and those are the ones whose
+     * history is worth reading.
+     *
+     * ## What it answers
+     *
+     * `path@sha7` for each version whose text matches, which is **exactly what `read {revision}` and
+     * `restore` already accept** — so a hit is directly usable as the next call, with no translation.
+     */
+    private fun searchVersions(
+        paths: List<String>,
+        query: Regex,
+        state: SearchState,
+        found: MutableList<String>,
+        deadline: Deadline,
+    ) {
+        // **Only this project.** `versionsOf` needs a repository, and another project's repository is
+        // not this one — reading across is allowed, but a history walk in a repository the agent does
+        // not have open is a different feature with its own costs.
+        val repo = try {
+            git.open(project) ?: return
+        } catch (e: Throwable) {
+            return
+        }
+        val seen = found.toMutableSet()
+        for (path in paths) {
+            if (state.full) return
+            deadline.check("search")
+            val file = try {
+                File(ws.accountDir, path).canonicalFile
+            } catch (e: Throwable) {
+                continue
+            }
+            // **A path from another project is skipped**, because its history is not in this
+            // repository — and answering with the current file alone would look like a file with no
+            // past rather than one this search cannot see.
+            if (projectOf(file) != project) continue
+            val inside = try {
+                file.relativeTo(projectDir).invariantSeparatorsPath
+            } catch (e: Throwable) {
+                continue
+            }
+            val versions = try {
+                GitService.versionsOf(repo, inside, limit = 40, deadline = deadline)
+            } catch (e: Throwable) {
+                continue
+            }
+            // **`CommitInfo`, not a string** — the pair is the commit and the file's text at it.
+            // `shortId` is the seven-character sha, which is exactly what `read {revision}` and
+            // `restore` accept.
+            for ((commit, text) in versions) {
+                if (state.full) return
+                deadline.check("search")
+                if (text == null) continue
+                val lines = text.split("\n")
+                var first = -1
+                var span: IntRange? = null
+                for ((index, line) in lines.withIndex()) {
+                    val where = hit(line, query, deadline, "search") ?: continue
+                    first = index
+                    span = where
+                    break
+                }
+                if (first < 0) continue
+                val shown = "$path@${commit.shortId}"
+                if (shown in seen) continue
+                val at = span ?: continue
+                found.add("$shown:${first + 1}: ${excerpt(lines[first], at, HIT)}")
+                seen.add(shown)
+                state.count++
+            }
+        }
     }
 
     /** How many files a search has answered with, so the walk can stop. */

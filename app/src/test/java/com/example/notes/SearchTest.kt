@@ -179,6 +179,60 @@ class SearchTest {
         assertEquals("both are there", 2, answer.lines().count { it.contains("note") })
     }
 
+    // ---- history ------------------------------------------------------------
+
+    @Test
+    fun `history finds a version whose text is no longer in the file`() {
+        // **The operator's reason for wanting it**: *"I believe history search will be important."*
+        // A line that was deleted is unreachable by any current-file search, and it is exactly what
+        // a person asks for when they want to know why something used to be the way it was.
+        val repo = File(ws.accountDir, "shopping")
+        val file = File(repo, "retries.txt")
+        file.writeText("the timeout is 90 seconds\n")
+        git.init("shopping").getOrThrow()
+        git.commit("shopping", "Started")
+
+        file.writeText("the timeout is 30 seconds\n")
+        git.commit("shopping", "Shortened")
+
+        // **The current file no longer says 90**, so a search without `history` must not find it.
+        val now = tools().run(call("""{"query":"90 seconds"}"""))
+        val past = tools().run(call("""{"query":"90 seconds","history":true}"""))
+
+        assertTrue("the old text is not in the file: $now", now.contains("nothing matches"))
+        assertTrue(
+            "but history finds the version: ${past.replace("\n", " | ")}",
+            past.contains("retries.txt@"),
+        )
+        // **`path@sha7`, which `read {revision}` and `restore` already accept** — so a hit is
+        // directly usable as the next call, with no translation.
+        val shown = Regex("""retries\.txt@([0-9a-f]{7})""").find(past)?.groupValues?.get(1)
+        assertTrue("and the sha is seven characters: $shown", shown != null && shown.length == 7)
+    }
+
+    @Test
+    fun `a version hit can be read with the revision form read already takes`() {
+        // **The whole value of `path@sha7` is that it is not a new syntax.** This asserts the join:
+        // the sha a search answers with is the sha `read {revision}` accepts.
+        val repo = File(ws.accountDir, "shopping")
+        val file = File(repo, "notes.txt")
+        file.writeText("first version\n")
+        git.init("shopping").getOrThrow()
+        git.commit("shopping", "Started")
+        file.writeText("second version\n")
+        git.commit("shopping", "Changed")
+
+        val answer = tools().run(call("""{"query":"first version","history":true}"""))
+        val sha = Regex("""notes\.txt@([0-9a-f]{7})""").find(answer)?.groupValues?.get(1)
+        assertTrue("a sha came back: $answer", sha != null)
+
+        // The same sha, given to `read` as a revision, returns the old text.
+        val read = tools().run(
+            Call(id = "2", tool = "read", args = """{"path":"notes.txt","revision":"$sha"}"""),
+        )
+        assertTrue("and read takes it: ${read.replace("\n", " | ")}", read.contains("first version"))
+    }
+
     // ---- what it refuses ----------------------------------------------------
 
     @Test
