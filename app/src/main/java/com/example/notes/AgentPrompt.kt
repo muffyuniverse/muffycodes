@@ -96,12 +96,13 @@ object AgentPrompt {
                          event that happened, with `kind` and `ctx`. Read them. Do not
                          change them. They are in git's exclude list, so they never leave
                          the phone.
-          muffycodes_data/    this project's own text, and it is yours to read:
-            prompts/project_prompt.txt   how to work here. Read it. It is short.
+          muffycodes_data/prompts/project_prompt.txt   how to work here. Read it. It is short.
+        Beside it there may be, in this project or in the system project:
             dictionary/      what the operator's words mean. Look before you assume.
             skills/          how to act in a particular situation, one folder each.
             wiki/            what has been learned about this code.
             mcp/             servers this project may reach, one article each.
+        A folder that is not there holds nothing yet, which is not the same as nothing to know.
         You may read anything in this project. You may not change anything outside it.
 
         HOW A TURN WORKS

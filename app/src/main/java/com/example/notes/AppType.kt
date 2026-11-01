@@ -214,20 +214,6 @@ object Presets {
             }
         }
 
-        // **The subject folders, made before anything goes in them.** The system prompt tells the
-        // agent to look in `dictionary/` and `wiki/`, and a prompt naming a folder the app has not
-        // made sends it to a place that is not there — which reads as "this project has none"
-        // rather than "nobody has written one yet". An empty folder is a promise; these promises are
-        // true, because they are where the person's own text goes.
-        for (name in Workspace.SUBJECTS) {
-            try {
-                File(File(projectDir, AgentPrompt.DATA), name).mkdirs()
-            } catch (e: Throwable) {
-                // A folder that cannot be made is reported by what did not appear, like every other
-                // copy here.
-            }
-        }
-
         // **The record, written even when nothing was copied** — so the app can say which type a
         // project was set up as, and a later version can tell an old preset from a fresh one.
         ProjectMeta.write(

@@ -137,8 +137,16 @@ class Workspace(val accountDir: File) {
     private fun ensureSystemData(dir: File) {
         val root = File(dir, AgentPrompt.DATA)
         try {
+            // **`markTrackable`, because an empty folder is invisible to git.** Without the marker
+            // these four folders would show as untracked the moment they were made — four phantom
+            // changes in a project nobody has touched — and with it they are a real, committable
+            // part of the system project, which is what lets the core articles be added to a clone.
             File(root, AgentPrompt.PROMPTS).mkdirs()
-            for (name in Workspace.SUBJECTS) File(root, name).mkdirs()
+            for (name in Workspace.SUBJECTS) {
+                val one = File(root, name)
+                one.mkdirs()
+                markTrackable(one)
+            }
         } catch (t: Throwable) {
             // As everywhere else in this class: a folder that cannot be made is a phone problem, and
             // every write that needs it says so on its own.

@@ -286,37 +286,53 @@ class AppTypeTest {
     }
 
     @Test
-    fun `a new project gets its subject folders, because the prompt names them`() {
-        // **A prompt that names a folder the app has not made is a prompt that lies.** The system
-        // prompt tells the agent to look in `dictionary/` before assuming what a word means and in
-        // `wiki/` for what has been learned here. If those folders are absent, the agent reads the
-        // absence as "this project has none" rather than "nobody has written one yet" — and the
-        // second is a state the person can change, which is the whole point of the folder.
+    fun `a new project does not get four empty folders it did not ask for`() {
+        // **This test is the opposite of what I first wrote, and the run is why.**
+        //
+        // I had `Presets.copy` make `dictionary/`, `skills/`, `wiki/` and `mcp/` eagerly, reasoning
+        // that a prompt naming a folder the app has not made sends the agent somewhere that is not
+        // there. The idea was right and the execution broke fifteen tests: **git cannot record an
+        // empty folder**, so four untracked directories appeared in every new project — and
+        // `changesOf` counts `untrackedFolders`, so a project nobody had touched reported five
+        // changes and every "a save is one change" assertion in the suite failed.
+        //
+        // A folder that appears when the person first writes in it is honest, and it is what the
+        // person would do by hand. The agent creates one with `create` when it needs to, and the
+        // system prompt says the folders are *where such text goes*, not that they already exist.
         val ws = account()
         val project = File(ws.accountDir, "my-app").apply { mkdirs() }
 
         Presets.copy(ws.accountDir, project, AppType.ANDROID)
 
         for (name in Workspace.SUBJECTS) {
-            assertTrue(
-                "$name/ is there before anything is put in it",
-                File(File(project, AgentPrompt.DATA), name).isDirectory,
+            assertFalse(
+                "$name/ is not made before there is anything to put in it",
+                File(File(project, AgentPrompt.DATA), name).exists(),
             )
         }
         ws.accountDir.deleteRecursively()
     }
 
     @Test
-    fun `the system project ships the core of every subject folder`() {
-        // The other half: the system project is where the core articles live, so its folders exist
-        // even when they are empty. A person opening `system/muffycodes_data/` sees the five places
-        // their text can go rather than an empty directory.
+    fun `the system project ships the core of every subject folder, and they are trackable`() {
+        // **The other half, and the difference is `markTrackable`.** A project's empty folders are
+        // noise the person did not ask for; the system project's are the five places the app's own
+        // core articles live, and a person opening `system/muffycodes_data/` should see them.
+        //
+        // Each carries a `.gitkeep`, because git cannot record an empty folder — without it these
+        // four would show as untracked the moment the system project was opened, which is four
+        // phantom changes in a repository nobody has touched.
         val ws = account()
         val root = File(File(ws.accountDir, "system"), AgentPrompt.DATA)
 
         assertTrue("the prompts folder", File(root, AgentPrompt.PROMPTS).isDirectory)
         for (name in Workspace.SUBJECTS) {
-            assertTrue("$name/ is there", File(root, name).isDirectory)
+            val one = File(root, name)
+            assertTrue("$name/ is there", one.isDirectory)
+            assertTrue(
+                "$name/ has the marker that gives it a version",
+                File(one, Workspace.KEEPER).isFile,
+            )
         }
         ws.accountDir.deleteRecursively()
     }
