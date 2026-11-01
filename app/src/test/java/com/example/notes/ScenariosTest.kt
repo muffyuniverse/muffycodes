@@ -447,6 +447,8 @@ class ScenariosTest {
         scene.signedIn()
         scene.open("groceries")
         val picture = scene.picture("correction", Look.CANVASES.first { it.label == "Square" })
+        // Declared outside the composition so `ready` can press Draw exactly once.
+        var pressedDraw = false
 
         scenario(
             compose, "33-a-picture-with-a-pen-over-it",
@@ -463,13 +465,25 @@ class ScenariosTest {
                     )
                 }
             },
+            // **The one hook that runs between the swap and the capture.** `after()` switches the
+            // composition and photographs it immediately, so a press that has to happen on the new
+            // screen goes here: press Draw, answer true, and the picture shows the canvas.
+            ready = {
+                if (!pressedDraw) {
+                    pressedDraw = true
+                    compose.onAllNodesWithText("Draw")[0].performClick()
+                    compose.waitForIdle()
+                }
+                true
+            },
         ) {
             before()
             then("The picture is opened, and Draw is chosen.") {
                 scene.openEditor(picture)
-                compose.onNodeWithText("Draw").performClick()
-                compose.waitForIdle()
             }
+            // **`after()` swaps to the editor and captures at once**, so the mode has to be chosen
+            // *after* the swap. `ready` is the hook that runs between the two: it presses Draw and
+            // then answers true, which is what lets the picture show the canvas rather than View.
             after()
             result(
                 "An image is a file like any other, so it has View and Draw rather than the " +
