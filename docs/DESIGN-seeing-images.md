@@ -230,21 +230,72 @@ needs the agent to be able to see.
 
 ## 6. The questions this design leaves open
 
-**Q1 — Is the downscale cap 1568 px, or the operator's number?** 1568 is where OpenAI's tiling stops helping;
-a phone photo is 4000 px wide, so it is a real change rather than a formality.
+**Q1 — Is the downscale cap 1568 px, or the operator's number?**
+
+*The operator asked what the difference is before and after 1568 px. Answering it corrected this document, so
+the correction is here rather than in a reply.*
+
+**1568 is not a threshold the provider has.** It is a number I derived wrongly from the tiling arithmetic. The
+provider's own pipeline, which is published, is two steps and neither is 1568:
+
+1. **Scale to fit inside a 2048×2048 box**, keeping the aspect ratio.
+2. **Then scale so the shortest side is 768.**
+
+So a 4000×3000 phone photo becomes 2048×1536 at step one and 1024×768 at step two — four tiles, 765 tokens.
+**The provider already shrinks every picture for us**, and it does it after the bytes have crossed the network.
+
+| the picture | what the provider does | tiles | tokens |
+|---|---|---|---|
+| 1024×768 (landscape) | shortest side 768 already | 4 | **765** |
+| 2048×1536 | step 2 shrinks it to 1024×768 | 4 | **765** |
+| 4000×3000 | step 1 → 2048×1536, step 2 → 1024×768 | 4 | **765** |
+| 1080×1920 (a portrait phone screenshot) | → 768×1365 | 6 | **1,105** |
+| 768×2048 (portrait, shortest side already 768) | unchanged | 8 | **1,445** |
+
+**Portrait costs more than landscape, and that is not a bug.** The provider pins the *shortest* side at 768, so a
+tall picture keeps its height: 768×2048 is four tiles across and four down. A 16:9 phone screenshot is 1,105 and
+a very tall one is 1,445 — the number follows the shape, and the app should show the number it will actually be
+charged rather than a guess from one edge.
+
+**So what does the cap actually buy?** Not tokens at the model — the provider normalises those anyway. It buys
+three things that are real:
+
+- **Upload.** A 4000×3000 PNG is 3–6 MB, base64-inflated to 4–8 MB, inside a JSON body, over a phone
+  connection. At 1024×768 it is ~200 kB. That is the difference between a request that works on a train and one
+  that times out.
+- **The app's own memory.** Decoding 4000×3000 is 48 MB of `Bitmap`; `Pictures.MAX_BITMAP_PIXELS` already
+  refuses above 16 MP for this reason.
+- **Our own budget arithmetic.** `ContextBudget` has to count the image *before* it is sent, and the honest
+  count is what the provider will actually charge — which is the **post-resize** size, not the file's.
+
+**The revised rule, and it is simpler than the one it replaces:** shrink so the **shortest side is 768**, which
+is exactly the provider's own second step, and leave anything already at or below that alone. A 1568 px long-edge
+cap would have left a 1024×768 picture untouched while shrinking a portrait 768×2048 to 588×1568 — making it
+*cost more*, because the tile count is `ceil(w/512) × ceil(h/512)` and the arithmetic does not care about area.
+
+**One thing the resize costs, and it is the one that matters for this feature.** Text gets smaller when a page
+shrinks, and small text is what a vision model misreads. A screenshot of an app is usually already ≤1024 px
+wide, so it is untouched; a **photo of a page** is where detail is lost — which is an argument for `Photo`
+rendering at a readable size rather than for a different cap.
 
 **Q2 — Does `look` take more than one path?** Two pictures in one call is one request rather than two, and
 "here is the before and here is the after" is a real thing to ask. It also doubles the cost of one call.
+**Answered: yes, multiple paths.**
 
 **Q3 — Where does **Photo** save?** `agent/drafts/` is scratch and never committed; the file's own folder makes
 the picture part of the project and syncs it. My reading of the operator's model is that a photo of a file
 belongs beside the file, because it is a note about that file — but a scratch one that is deleted after the turn
 is also a real way to work.
+**Answered: beside the file**, named after it plus an eight-character hash, renameable later.
 
 **Q4 — Does the image editor's `Draw` keep a history of strokes?** Undo within a session is cheap; a saved undo
 stack is a second file format and a second thing to keep in sync with the PNG. My answer is **session-only
 undo** — the PNG is the document, and the history of the PNG is git's.
+**Answered: session-only undo, plus saved versions.**
 
 **Q5 — What does a **new blank image**'s name default to, and what size is it?** A canvas has to have
 dimensions before it has content, and the screen's own size is the wrong answer for a file that outlives the
 phone.
+**Answered: standard size options in the creation dialogue**, defaulting to the most common size for phone image
+editing (1080×1080 is the default candidate — square, the phone's own width, and the shape most screenshots of a
+list or a card take).
