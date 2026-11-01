@@ -473,17 +473,6 @@ class ScenariosTest {
                     )
                 }
             },
-        ) {
-            before()
-            then("The note is opened, Photo is pressed, and the drawing tools are chosen.") {
-                scene.openEditor(note)
-                viewModel.photograph(viewModel.textOf(note))
-                scene.await("the photograph to be made and opened") {
-                    viewModel.editingFile?.name?.let { it != note.name && it.endsWith(".png") } == true
-                }
-                photographed = viewModel.editingFile
-                compose.waitForIdle()
-            }
             // **Draw is pressed after the swap, in `ready`**, because the button only exists once the
             // after-screen is composed — and `then(...)` runs on the screen before it. Splitting the
             // two is the whole reason `ready` exists.
@@ -495,6 +484,17 @@ class ScenariosTest {
                 }
                 true
             },
+        ) {
+            before()
+            then("The note is opened, Photo is pressed, and the drawing tools are chosen.") {
+                scene.openEditor(note)
+                viewModel.photograph(viewModel.textOf(note))
+                scene.await("the photograph to be made and opened") {
+                    viewModel.editingFile?.name?.let { it != note.name && it.endsWith(".png") } == true
+                }
+                photographed = viewModel.editingFile
+                compose.waitForIdle()
+            }
             after()
             result(
                 "Photo renders the file's view — the rendered page, not the raw source — to a PNG " +
