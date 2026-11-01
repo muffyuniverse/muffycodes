@@ -90,18 +90,28 @@ class SearchIndexTest {
         // **This is what makes history affordable**, and it is the claim the design rests on. A file
         // saved twice with one line changed stores one new vector, not two copies of everything.
         built()
-        val before = Chunker.split("one\ntwo\nthree")
-        val after = Chunker.split("one\ntwo\nTHREE")
+        // **A file long enough to be several chunks**, because that is the shape the claim is about:
+        // one paragraph edited in a file of many. A three-line file is one chunk, so editing it
+        // changes the whole chunk and there is nothing to share.
+        val lines = (1..60).map { "line $it of the file" }
+        val before = Chunker.split(lines.joinToString("\n"))
+        val after = Chunker.split(lines.joinToString("\n").replace("line 40 of", "LINE 40 of"))
 
+        assertTrue("the file is several chunks: ${before.size}", before.size > 1)
         val first = index.put("a.txt", "", before, vectors()).getOrThrow()
         val second = index.put("a.txt", "abc1234", after, vectors()).getOrThrow()
 
         assertEquals("the first pass embedded everything", before.size, first)
-        assertEquals("and the version embedded only what changed", 1, second)
         assertEquals(
-            "so there are fewer vectors than chunks: the shared text is stored once",
-            index.size() - 1,
-            index.vectors(),
+            "and the version embedded only the chunk that changed: $second",
+            1,
+            second,
+        )
+        // **Fewer vectors than chunks**, which is the whole claim: the text that did not change is
+        // one vector referenced by both versions.
+        assertTrue(
+            "there are more chunk rows than vectors: ${index.size()} chunks, ${index.vectors()} vectors",
+            index.vectors() < index.size(),
         )
     }
 
