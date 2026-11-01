@@ -710,7 +710,12 @@ class AgentChatScreenTest {
         log.told("do the thing")
         log.appNote("stopped", "OpenRouter answered 403")
         scene.viewModel.openChat("groceries")
-        scene.await("the conversation to be read") { scene.viewModel.chatBox != null }
+        // **Wait for the notice itself, not for a box.** `openChat` nulls the box and posts the read,
+        // so `chatBox != null` is satisfied by the box `chat()` had already produced — the await
+        // would pass against the *previous* conversation and the assertion below would read it.
+        scene.await("the notice to reach the screen") {
+            scene.viewModel.chatBox?.messages?.any { it.notices.isNotEmpty() } == true
+        }
         assertTrue(
             "it is there while it is the last word",
             scene.viewModel.chatBox!!.messages.last().notices.isNotEmpty(),
