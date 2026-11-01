@@ -46,6 +46,21 @@ open class MemoryCredentials : Credentials {
     override fun setModelKey(login: String, key: String) {
         modelKeys[login] = key
     }
+
+    /**
+     * The named secrets, kept the same way.
+     *
+     * **A store that inherits the interface's default of null is a store with no secrets**, which is right for
+     * every test that is not about MCP and wrong for one that is: a test asserting a token reaches a server
+     * would be asserting that `null` reaches it.
+     */
+    private val secrets = LinkedHashMap<String, String>()
+
+    override fun secret(name: String): String? = secrets[name]
+
+    override fun setSecret(name: String, value: String) {
+        secrets[name] = value
+    }
 }
 
 /**
