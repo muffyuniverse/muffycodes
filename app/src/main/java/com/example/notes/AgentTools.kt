@@ -3454,7 +3454,10 @@ class AgentTools(
         }
 
         val total = seen.sumOf { it.tokens }
-        log.note("see", seen.joinToString("\n") { it.url })
+        // **Charged by the pixels, not by the base64.** The body is a data URL the model never reads
+        // as text — it reads the picture — so measuring the string would charge about 77,000 tokens
+        // for a picture that costs 765, and the budget would start clearing up over one image.
+        log.note("see", seen.joinToString("\n") { it.url }, cost = total)
 
         val body = buildString {
             append("attached: ").append(said.joinToString(", "))

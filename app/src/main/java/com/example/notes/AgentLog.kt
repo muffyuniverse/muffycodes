@@ -677,7 +677,8 @@ class AgentLog private constructor(
     /** The terminating question, and the terminating statement. */
 
     /** A row the agent or the app wants on the record without it being a tool. */
-    fun note(name: String, detail: String): Int = record(NOTE, name, detail)
+    fun note(name: String, detail: String, cost: Long? = null): Int =
+        record(NOTE, name, detail, cost = cost)
 
     /**
      * A note the **app** wrote, which is in the record and not in the context.
@@ -767,13 +768,26 @@ class AgentLog private constructor(
         ctx: String = IN,
         answers: Int = 0,
         now: Long = System.currentTimeMillis(),
+        /**
+         * What this row costs the context, when the body is **not** what the model reads.
+         *
+         * Null means "measure the text", which is right for every row whose body is the words that
+         * will be sent. It is wrong for exactly one kind of row — a `see`, whose body is base64 that
+         * the model never reads as text: it reads the *picture*, and a picture is charged by its
+         * pixels.
+         *
+         * **The difference is not small.** A 200 kB PNG is a 270 kB data URL, which `tokens()` counts
+         * as about 77,000 tokens; the real charge is 765. Without this the budget would believe one
+         * picture had filled the context and start clearing up for no reason.
+         */
+        cost: Long? = null,
     ): Int {
         synchronized(guard) {
             val id = nextId()
             // **Measured once, here, and never again.** The body is what a request carries, so the
             // cost of the body is what this row costs — not the formatted line, whose padding the
             // model never sees.
-            val cost = ContextBudget.tokens(detail)
+            val measured = cost ?: ContextBudget.tokens(detail)
             // **The row's own shape is this writer's promise, and a name is where it can break.**
             // The columns are separated by spaces and the name is one of them, so a name with a
             // space in it does not make a wide column - it makes the row unparseable, and a row
@@ -781,11 +795,11 @@ class AgentLog private constructor(
             // Most names are the app's own one-word words, but `GOT`'s is a tool name from the
             // model, which can be anything at all.
             val oneWord = name.trim().replace(Regex("\\s+"), "_").ifEmpty { "-" }
-            append(file, LogFormat.recordRow(now, id, cost, kind, ctx, answers, oneWord, detail))
+            append(file, LogFormat.recordRow(now, id, measured, kind, ctx, answers, oneWord, detail))
             // **The context file grows with the evidence, one row at a time.** A row the app wrote
             // for itself (`app`) never enters it, which is what keeps a repeated `wait` out of the
             // request and the request byte-identical between polls.
-            if (ctx == IN) append(context, LogFormat.contextRow(id, cost, oneWord, detail))
+            if (ctx == IN) append(context, LogFormat.contextRow(id, measured, oneWord, detail))
             gate.seen = size()
             return id
         }

@@ -220,4 +220,50 @@ class LookToolTest {
             spec.description.contains("png"),
         )
     }
+
+    @Test
+    fun `a picture is charged by its pixels, not by its base64`() {
+        // **The defect this test exists for.** A row's cost is normally the text of its body, which
+        // is right for every row whose body the model reads. A `see` row's body is a data URL the
+        // model never reads as text — it reads the picture — and base64 is roughly 4 characters per
+        // 3 bytes, so measuring it charges tens of thousands of tokens for a picture that costs 765.
+        // The budget would then believe one image had filled the context.
+        picture(1024, 768)
+        val body = look("shot.png")
+        assertTrue("it worked: $body", body.startsWith(AgentLog.SUCCESS))
+
+        val see = log.rows().first { it.kind == AgentLog.NOTE && it.name == "see" }
+        // The body is genuinely large — otherwise this test would pass on a row that had nothing to
+        // mismeasure, which is the fixture trap in miniature.
+        assertTrue(
+            "the body really is a big data URL: ${see.body.length} chars",
+            see.body.length > 10_000,
+        )
+        assertEquals(
+            "charged as a 1024x768 picture, not as 10k+ characters of base64",
+            ContextBudget.pictureTokens(1024, 768),
+            see.size,
+        )
+        assertTrue(
+            "which is far less than the text would have cost: ${see.size} vs " +
+                ContextBudget.tokens(see.body),
+            see.size < ContextBudget.tokens(see.body) / 10,
+        )
+    }
+
+    @Test
+    fun `the picture still arrives when it is charged cheaply`() {
+        // The other half: a cost that does not measure the body must not stop the body being sent.
+        // A row could be charged 765 and still carry the whole URL, and if a later change "optimised"
+        // the row by truncating what it stores, the picture would silently become a fragment.
+        picture(64, 64)
+        look("shot.png")
+
+        val carrying = agent().messages(log.contextRows()).filter { it.pictures.isNotEmpty() }
+        assertEquals("one message carries it", 1, carrying.size)
+        assertTrue(
+            "and the URL is complete: ${carrying[0].pictures[0].length} chars",
+            carrying[0].pictures[0].length > 100,
+        )
+    }
 }
