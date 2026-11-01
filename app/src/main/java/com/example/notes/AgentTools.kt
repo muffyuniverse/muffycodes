@@ -913,7 +913,9 @@ class AgentTools(
             }
             val lines = text.split("\n")
             var first = -1
-            var at = 0
+            // **An `IntRange`, because that is what `hit` returns** — the span of the match inside
+            // the line, which `excerpt` widens into a readable window around it.
+            var at: IntRange? = null
             var hits = 0
             for ((index, line) in lines.withIndex()) {
                 val where = hit(line, query, deadline, "search") ?: continue
@@ -923,9 +925,12 @@ class AgentTools(
                     at = where
                 }
             }
-            if (first < 0) continue
+            // **`first` and `at` are set together**, so a `first` that is not -1 always has a span.
+            // Writing `?: IntRange.EMPTY` here would be a fallback for a case that cannot happen,
+            // and a fallback that cannot be reached is a claim that it can.
+            val span = at ?: continue
             val more = if (hits > 1) " (+${hits - 1} more)" else ""
-            found.add("$path:${first + 1}: ${excerpt(lines[first], at, HIT)}$more")
+            found.add("$path:${first + 1}: ${excerpt(lines[first], span, HIT)}$more")
             state.count++
         }
     }
