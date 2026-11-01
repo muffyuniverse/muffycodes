@@ -14,16 +14,21 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.foundation.layout.padding
 import kotlin.math.roundToInt
@@ -378,10 +383,30 @@ fun DrawingSurface(
      * mark behind — the person's intent changed at that moment, so the mark up to it is not something
      * they meant.
      */
-    Box(modifier = modifier.clipToBounds()) {
+    // **The picture is framed, and the frame is the point.** A blank PNG is white and the page behind
+    // it is white, so an unframed canvas is indistinguishable from one that failed to load — which is
+    // exactly what the first tour picture showed: a white rectangle nobody could see. The border and
+    // the shadow say "this is the picture, and it is here", and they cost nothing to draw.
+    Box(
+        modifier = modifier
+            .clipToBounds()
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(8.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+      Box(
+        modifier = Modifier
+            .shadow(2.dp)
+            .border(1.dp, MaterialTheme.colorScheme.outline)
+            .clipToBounds(),
+      ) {
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
+                // **A description, so a test can find the surface it is drawing on.** The canvas has
+                // no text and no children, so without this there is nothing to address — and the one
+                // question that matters here ("does a stroke appear") is only askable through a touch.
+                .semantics { contentDescription = "drawing canvas" }
                 .pointerInput(tool, colour, width) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
@@ -501,5 +526,6 @@ fun DrawingSurface(
                 Text("${(view.zoom * 100).roundToInt()}% · reset")
             }
         }
+      }
     }
 }

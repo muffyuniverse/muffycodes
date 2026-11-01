@@ -473,6 +473,24 @@ class ScenariosTest {
                     pressedDraw = true
                     compose.onAllNodesWithText("Draw")[0].performClick()
                     compose.waitForIdle()
+                    // **A real stroke, driven through the same gesture a finger makes.** This is the
+                    // only place in the whole suite where "the canvas paints" can be asked: the
+                    // Robolectric unit tests cannot rasterise, so a picture of an *empty* canvas
+                    // would be a picture of the one thing that is already proved — that the screen
+                    // opens. A swipe across the surface is what makes the picture evidence.
+                    compose.onAllNodes(androidx.compose.ui.test.hasContentDescription("drawing canvas"))
+                        .fetchSemanticsNodes()
+                        .firstOrNull()
+                        ?.let {
+                            compose.onAllNodes(androidx.compose.ui.test.hasContentDescription("drawing canvas"))[0]
+                                .performTouchInput {
+                                    down(androidx.compose.ui.geometry.Offset(40f, 60f))
+                                    moveTo(androidx.compose.ui.geometry.Offset(120f, 140f))
+                                    moveTo(androidx.compose.ui.geometry.Offset(200f, 90f))
+                                    up()
+                                }
+                            compose.waitForIdle()
+                        }
                 }
                 true
             },
