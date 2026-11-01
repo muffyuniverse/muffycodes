@@ -58,15 +58,18 @@ class SearchIndexTest {
     /** A vector with one component set, so two of them are orthogonal and the ranking is arithmetic. */
     private fun axis(size: Int, at: Int) = FloatArray(size) { if (it == at) 1f else 0f }
 
-    /** An embedder that answers one vector per text, deterministically, so the test owns the space. */
-    private fun embedder(size: Int = 4, at: (String) -> Int = { it.length % 4 }) =
-        object : Embedder {
-            override fun embed(texts: List<String>, model: String, dims: Int): Result<List<FloatArray>> =
-                Result.success(texts.map { axis(size, at(it)) })
-
-            override fun rerank(query: String, documents: List<String>, model: String) =
-                Result.success(documents.indices.map { Embedder.Ranked(it, 1.0 - it * 0.1) })
-        }
+    /**
+     * The vector function the index asks for, **bound to the size the test declared.**
+     *
+     * `SearchIndex.put` takes `(List<String>) -> Result<List<FloatArray>>` — the hashes' texts in, one
+     * vector each out — rather than an [Embedder], because the index never needs a model name: it has
+     * already decided what it is built with, and the caller is the one who knows which model answers.
+     * So the test supplies the function directly, and it is deterministic so the ranking is arithmetic.
+     */
+    private fun vectors(size: Int = 4, at: (String) -> Int = { it.length % 4 }):
+        (List<String>) -> Result<List<FloatArray>> = { texts ->
+        Result.success(texts.map { axis(size, at(it)) })
+    }
 
     private fun built(size: Int = 4) {
         index.declare("test/embed", size).getOrThrow()
@@ -82,8 +85,8 @@ class SearchIndexTest {
         val before = Chunker.split("one\ntwo\nthree")
         val after = Chunker.split("one\ntwo\nTHREE")
 
-        val first = index.put("a.txt", "", before, embedder()::embed).getOrThrow()
-        val second = index.put("a.txt", "abc1234", after, embedder()::embed).getOrThrow()
+        val first = index.put("a.txt", "", before, vectors()).getOrThrow()
+        val second = index.put("a.txt", "abc1234", after, vectors()).getOrThrow()
 
         assertEquals("the first pass embedded everything", before.size, first)
         assertEquals("and the version embedded only what changed", 1, second)
@@ -99,8 +102,8 @@ class SearchIndexTest {
         // **`history` is a filter, not a second table.** Versions are rows with a commit, so "current
         // files only" is `commit = ''` — one clause on the same query.
         built()
-        index.put("a.txt", "", Chunker.split("the timeout is 90"), embedder()::embed).getOrThrow()
-        index.put("a.txt", "deadbee", Chunker.split("the timeout is 30"), embedder()::embed).getOrThrow()
+        index.put("a.txt", "", Chunker.split("the timeout is 90"), vectors()).getOrThrow()
+        index.put("a.txt", "deadbee", Chunker.split("the timeout is 30"), vectors()).getOrThrow()
 
         val now = index.nearest(axis(4, 0), paths = 10, history = false).getOrThrow()
         val all = index.nearest(axis(4, 0), paths = 10, history = true).getOrThrow()
@@ -116,7 +119,7 @@ class SearchIndexTest {
         // **A search hit is directly usable as the next call**, with no translation: `read
         // {revision}` and `restore` both take a sha, so `path@sha7` is the form that can be pasted.
         built()
-        index.put("a.txt", "abcdef1234567890", Chunker.split("old text"), embedder()::embed).getOrThrow()
+        index.put("a.txt", "abcdef1234567890", Chunker.split("old text"), vectors()).getOrThrow()
 
         val hit = index.nearest(axis(4, 0), paths = 5, history = true).getOrThrow().single()
 
@@ -148,7 +151,7 @@ class SearchIndexTest {
         // A cosine between a 4-vector and an 8-vector is either an exception or a number from the
         // wrong vectors — and the second is worse, because it looks like a score.
         built(4)
-        index.put("a.txt", "", Chunker.split("text"), embedder()::embed).getOrThrow()
+        index.put("a.txt", "", Chunker.split("text"), vectors()).getOrThrow()
 
         val answer = index.nearest(axis(8, 0), paths = 5, history = false)
 
@@ -164,15 +167,11 @@ class SearchIndexTest {
         // **The model disagreeing with the index is a fact about the model**, so the sentence names
         // it rather than a table the person never saw.
         built(4)
-        val wrong = object : Embedder {
-            override fun embed(texts: List<String>, model: String, dims: Int) =
-                Result.success(texts.map { FloatArray(8) { 1f } })
-
-            override fun rerank(query: String, documents: List<String>, model: String) =
-                Result.success(emptyList<Embedder.Ranked>())
+        val wrong: (List<String>) -> Result<List<FloatArray>> = { texts ->
+            Result.success(texts.map { FloatArray(8) { 1f } })
         }
 
-        val answer = index.put("a.txt", "", Chunker.split("text"), wrong::embed)
+        val answer = index.put("a.txt", "", Chunker.split("text"), wrong)
 
         assertTrue("it is refused", answer.isFailure)
         assertTrue(
@@ -190,8 +189,8 @@ class SearchIndexTest {
         // not only about the presence of a result.
         built(4)
         // "one" is 3 characters → axis 3; "two" is 3 → axis 3; "sixxxx" is 6 → axis 2.
-        index.put("a.txt", "", Chunker.split("one"), embedder { 3 }::embed).getOrThrow()
-        index.put("b.txt", "", Chunker.split("sixxxx"), embedder { 2 }::embed).getOrThrow()
+        index.put("a.txt", "", Chunker.split("one"), vectors(at = { 3 })).getOrThrow()
+        index.put("b.txt", "", Chunker.split("sixxxx"), vectors(at = { 2 })).getOrThrow()
 
         val hits = index.nearest(axis(4, 3), paths = 5, history = false).getOrThrow()
 
@@ -203,7 +202,7 @@ class SearchIndexTest {
     fun `paths caps the answer`() {
         built(4)
         for (i in 1..5) {
-            index.put("f$i.txt", "", Chunker.split("text $i"), embedder()::embed).getOrThrow()
+            index.put("f$i.txt", "", Chunker.split("text $i"), vectors()).getOrThrow()
         }
 
         val hits = index.nearest(axis(4, 0), paths = 2, history = false).getOrThrow()
@@ -218,7 +217,7 @@ class SearchIndexTest {
         // **A vector nothing references is dead weight**, and collecting it here rather than on a
         // timer keeps the count honest: "vectors" means "distinct text indexed".
         built(4)
-        index.put("a.txt", "", Chunker.split("only a"), embedder()::embed).getOrThrow()
+        index.put("a.txt", "", Chunker.split("only a"), vectors()).getOrThrow()
         assertEquals("one chunk, one vector", 1, index.size())
 
         index.forget("a.txt")
@@ -232,8 +231,8 @@ class SearchIndexTest {
         // A file's current text and its history are separate rows, so forgetting a version must not
         // take the current file with it.
         built()
-        index.put("a.txt", "", Chunker.split("same"), embedder()::embed).getOrThrow()
-        index.put("a.txt", "abc1234", Chunker.split("same"), embedder()::embed).getOrThrow()
+        index.put("a.txt", "", Chunker.split("same"), vectors()).getOrThrow()
+        index.put("a.txt", "abc1234", Chunker.split("same"), vectors()).getOrThrow()
 
         index.forget("a.txt", "abc1234")
 
