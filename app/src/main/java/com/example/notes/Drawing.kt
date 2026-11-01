@@ -122,12 +122,13 @@ object Drawing {
     /**
      * Draws [strokes] onto an android canvas, over whatever is already on it.
      *
-     * **`internal` rather than private, because a test has to be able to look at the pixels.** The
-     * alternative was asserting against a decoded PNG — and Robolectric has no image encoder, so a
-     * decode of `flatten`'s own output answers "unimplemented". Reaching the same drawing code
-     * through a canvas the test owns is the only honest way to ask whether a stroke landed.
+     * **Private again, and the story is worth keeping.** It was `internal` for a while so a test
+     * could look at the pixels — and that test then failed with every pixel still white, because
+     * Robolectric's `Canvas` accepts draw calls and rasterises nothing. There is no way to ask
+     * "did the stroke land" in this container, so the visibility was opened for a question that
+     * cannot be asked here. The rasterising is checked by the screenshot tour on a device.
      */
-    internal fun drawAll(canvas: android.graphics.Canvas, strokes: List<Stroke>) {
+    private fun drawAll(canvas: android.graphics.Canvas, strokes: List<Stroke>) {
         for (stroke in strokes) draw(canvas, stroke)
     }
 
