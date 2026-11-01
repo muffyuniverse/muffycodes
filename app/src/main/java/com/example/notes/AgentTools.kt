@@ -920,10 +920,23 @@ class AgentTools(
 
         val found = mutableListOf<String>()
         val state = SearchState(paths)
+        // **`history` is a second pass, not a second tool.** The operator asked for *"a special flag
+        // to search - 'history' so that results show not just filepaths but also version hashes"*,
+        // and the flag is enough because a version is a file at a commit.
+        val history = args.optBoolean("history", false)
         walkForSearch(ws.accountDir, SEARCH_DEPTH, query, inFolders, state, found, deadline)
+        if (history) {
+            // **Even when nothing current matches, and that is the whole point.** A line that was
+            // deleted is unreachable by any current-file search, and it is exactly what a person
+            // asks for when they want to know why something used to be the way it was.
+            searchVersions(query, inFolders, state, found, deadline)
+        }
         if (found.isEmpty()) {
             val where = if (inFolders.isEmpty()) "this account" else inFolders.joinToString(", ")
-            return success("nothing matches \"${args.optString("query")}\" in $where")
+            // **"and not in any version" when history was asked for**, because a person told only
+            // "nothing matches" cannot tell whether their history was searched at all.
+            val also = if (history) ", in any version of it" else ""
+            return success("nothing matches \"${args.optString("query")}\" in $where$also")
         }
         // **"stopped at N" is only true when the walk stopped at N.** It reaches `paths` and there
         // were more files to look at; if the walk finished exactly on the limit, there is nothing
@@ -938,14 +951,49 @@ class AgentTools(
     }
 
     /**
-     * Adds the **saved versions** of the files the walk already found, as `path@sha7`.
+     * Every text file under [dir], as account-relative paths — **without reading any of them.**
      *
-     * ## Why only the paths that already matched
+     * The history pass needs the list of candidates rather than the list of matches, because its whole
+     * purpose is the file whose current text does not match. Reading every file to decide would be the
+     * expensive half of the search done twice, so this only walks.
+     */
+    private fun collectPaths(
+        dir: File,
+        left: Int,
+        inFolders: List<String>,
+        out: MutableList<String>,
+        deadline: Deadline,
+    ) {
+        if (left <= 0) return
+        val entries = try {
+            ws.list(dir)
+        } catch (e: Throwable) {
+            return
+        }
+        for (entry in entries) {
+            deadline.check("search")
+            if (!withinProject(entry.file)) continue
+            if (ws.isStructural(entry.file)) continue
+            if (entry.isFolder) {
+                collectPaths(entry.file, left - 1, inFolders, out, deadline)
+                continue
+            }
+            if (ws.kindOf(entry.file) != EntryKind.TEXT) continue
+            val path = relToAccount(entry.file)
+            if (inFolders.isNotEmpty() && inFolders.none { atFolder(path, it) }) continue
+            out.add(path)
+        }
+    }
+
+    /**
+     * Adds the **saved versions** of every file, as `path@sha7`.
      *
-     * `versionsOf` opens every version of a file — it loads a tree per commit — so doing it for the
-     * whole account would be every repository's history for a question about one function. The walk
-     * has already narrowed to files whose **current** text matches, and those are the ones whose
-     * history is worth reading.
+     * ## Why only this project's files
+     *
+     * `versionsOf` opens every version of a file — it loads a tree per commit — so doing it for every
+     * project in the account would be every repository's history for a question about one function.
+     * The candidates are the text files of **this** project, which is the one whose repository the
+     * agent has open.
      *
      * ## What it answers
      *
@@ -953,8 +1001,8 @@ class AgentTools(
      * `restore` already accept** — so a hit is directly usable as the next call, with no translation.
      */
     private fun searchVersions(
-        paths: List<String>,
         query: Regex,
+        inFolders: List<String>,
         state: SearchState,
         found: MutableList<String>,
         deadline: Deadline,
@@ -968,7 +1016,13 @@ class AgentTools(
             return
         }
         val seen = found.toMutableSet()
-        for (path in paths) {
+        // **The candidate paths, found by walking.** `found` holds the files whose CURRENT text
+        // matched, and the point of `history` is the ones whose current text does not — a deleted
+        // line, a renamed function. So the walk is repeated for paths only, without the content
+        // test, and every file is a candidate whose versions are worth reading.
+        val candidates = mutableListOf<String>()
+        collectPaths(ws.accountDir, SEARCH_DEPTH, inFolders, candidates, deadline)
+        for (path in candidates) {
             if (state.full) return
             deadline.check("search")
             val file = try {

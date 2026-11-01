@@ -113,7 +113,10 @@ object Chunker {
             if (end == at) end = at + 1
             val body = lines.subList(at, end).joinToString("\n")
             if (body.isNotBlank()) {
-                out.addAll(cutLong(body, at + 1))
+                // **The last line is `end`, not `at`** — `subList(at, end)` is exclusive at the top,
+                // so the chunk covers lines `at+1` through `end` counting from 1. Passing `at + 1`
+                // twice made every chunk claim to be one line long.
+                out.addAll(cutLong(body, at + 1, end))
             }
             if (end >= lines.size) break
             // **The overlap, taken in whole lines from the tail of what was just emitted.** The next
@@ -142,13 +145,16 @@ object Chunker {
      * Each piece keeps the **same line number**, because they are all one line — a search hit says
      * "line 1" and `read` shows the whole line, which is what a person wants.
      */
-    private fun cutLong(body: String, line: Int): List<Chunk> {
-        if (body.length <= CHARS) return listOf(Chunk(body, line, line))
+    private fun cutLong(body: String, first: Int, last: Int): List<Chunk> {
+        if (body.length <= CHARS) return listOf(Chunk(body, first, last))
         val out = mutableListOf<Chunk>()
         var from = 0
         while (from < body.length) {
             val to = (from + CHARS).coerceAtMost(body.length)
-            out.add(Chunk(body.substring(from, to), line, line))
+            // **Every piece keeps the same line span**, because they are all one run of lines cut at
+            // the character budget rather than at a line boundary. A search hit says "lines 3 to 7"
+            // and `read` shows them, which is what a person wants.
+            out.add(Chunk(body.substring(from, to), first, last))
             // **The same overlap**, so a cut inside a long line does not lose the join either.
             val next = (to - OVERLAP).coerceAtLeast(from + 1)
             from = next
