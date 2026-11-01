@@ -253,18 +253,24 @@ class LookTest {
     }
 
     @Test
-    fun `a picture refuses a locked folder`() {
-        // **The same lock, whatever kind of file is being made.** `createFile` and `createFolder` both
-        // ask; a new way of adding to a folder that did not would be the door nobody thinks of as a
-        // door, which is exactly how importing files once got past it.
+    fun `a person's lock does not stop the person making a picture there`() {
+        // **The operator's two locks, and this is the one people get wrong.** *"system locks restrict
+        // both users and agents, and user locks restrict agents (not users themselves!)"* — so a
+        // folder the person locked still accepts a new picture from that person, and it is the
+        // *agent* that is refused. Asserting a refusal here would have encoded the opposite rule, and
+        // the test would have passed against a writer that took a lever away from its own operator.
         val ws = space()
-        val locked = File(ws.accountDir, "locked")
-        locked.mkdirs()
-        // `setLocked` takes the account-relative paths, which is how the flag file stores them.
-        val relative = ws.relative(locked) ?: error("the folder must be inside the account")
+        val folder = File(ws.accountDir, "mine")
+        folder.mkdirs()
+        val relative = ws.relative(folder) ?: error("the folder must be inside the account")
         ws.setLocked(setOf(ws.pathString(relative)))
 
-        assertTrue("refused", ws.createImage(locked, "drawing.png", Look.CANVASES.first()).isFailure)
+        // The flag really is set — otherwise the rest of this test proves nothing.
+        assertTrue("the folder is locked, as the person asked", ws.isLockedHere(folder))
+        val made = ws.createImage(folder, "drawing.png", Look.CANVASES.first())
+        assertTrue("made, not refused: ${made.exceptionOrNull()?.message}", made.isSuccess)
+        // And the agent is the one held back — the same lock, read by the other question.
+        assertTrue("the agent is refused", ws.isAgentLocked(File(folder, "other.png")))
     }
 
     @Test
