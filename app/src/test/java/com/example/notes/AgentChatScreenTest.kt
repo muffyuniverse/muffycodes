@@ -664,6 +664,68 @@ class AgentChatScreenTest {
     // ---- what the bar says while a turn is running ------------------------
 
     @Test
+    fun `a stopped turn is a notice under the message, not a page inside it`() {
+        // **Reported: "OpenRouter answered 403 — error messages should be only for session log, why
+        // are they shown as if they are 'in context'?"** The row was already `app`, so the model never
+        // saw it. What was wrong is that the *screen* drew it as a page: same column as the agent's
+        // work, with a pager arrow and a footer it had not earned.
+        //
+        // The operator's rule for where it belongs: *"they are added as the last message after the one
+        // that triggered them to show up, and they are removed from chat message list and session log
+        // with the next message"*. So it is drawn after the message, in red, and it goes when the next
+        // thing is said.
+        // `chat()` opens `groceries`, so the record written here is the one the screen reads.
+        chat(ScriptedDoor(Reply("ok")))
+        val log = AgentLog.open(File(scene.workspace!!.accountDir, "groceries"))
+        log.told("do the thing")
+        log.appNote("stopped", "OpenRouter answered 403")
+
+        scene.viewModel.refresh()
+        compose.waitForIdle()
+
+        val box = scene.viewModel.chatBox!!
+        val last = box.messages.last()
+        assertEquals("the notice hangs off the message", 1, last.notices.size)
+        assertEquals(
+            "and it carries the app's own words",
+            "OpenRouter answered 403",
+            last.notices.first().said,
+        )
+        assertTrue(
+            "and it is NOT a page: ${last.pages.map { it.caption }}",
+            last.pages.none { it.caption == "stopped" },
+        )
+        compose.onNodeWithText("OpenRouter answered 403").assertExists()
+    }
+
+    @Test
+    fun `a notice goes when the person speaks again`() {
+        // The second half of the rule, and the half that makes it a notice rather than a scar.
+        chat(ScriptedDoor(Reply("ok")))
+        val log = AgentLog.open(File(scene.workspace!!.accountDir, "groceries"))
+        log.told("do the thing")
+        log.appNote("stopped", "OpenRouter answered 403")
+        scene.viewModel.refresh()
+        assertTrue(
+            "it is there while it is the last word",
+            scene.viewModel.chatBox!!.messages.last().notices.isNotEmpty(),
+        )
+
+        log.told("try again")
+        scene.viewModel.refresh()
+
+        assertTrue(
+            "and gone the moment the person answers",
+            scene.viewModel.chatBox!!.messages.none { it.notices.isNotEmpty() },
+        )
+        // **The record still holds it**, flipped rather than deleted — the same rule `forget` follows.
+        assertTrue(
+            "the row is still in the evidence, marked out",
+            log.rows().any { it.name == "stopped" && it.ctx == AgentLog.OUT },
+        )
+    }
+
+    @Test
     fun `a turn in flight says working, whatever the session row says`() {
         // **Reported twice**: "when I send a message and agent starts working, top bar still shows
         // 'start the agent' button, and idle waiting status". The row is written when a turn *ends*

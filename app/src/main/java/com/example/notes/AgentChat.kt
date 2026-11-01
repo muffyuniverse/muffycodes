@@ -181,7 +181,26 @@ object AgentChat {
         val forgotten: Boolean = false,
         val thinking: Long = 0,
         val output: Long = 0,
+        /**
+         * **The app's own lines, drawn under this message in red.**
+         *
+         * Not pages: a page is something the agent did and a person can turn to, and these are the app
+         * talking about the turn rather than part of it. They are attached to the message they
+         * followed because that is where the operator asked for them — *"they are added as the last
+         * message after the one that triggered them to show up"* — and [ChatNotices] decides which
+         * ones are still open, so nothing here has a lifetime of its own.
+         */
+        val notices: List<Notice> = emptyList(),
     )
+
+    /**
+     * One line the app wrote, in the chat, while it is still true.
+     *
+     * A `Notice` and not an `AgentLog.Row`, because the screen needs the two things it draws and
+     * nothing else: the words, and the id a tap could name. Passing the row would hand the screen the
+     * ctx column and the size and invite it to decide something with them.
+     */
+    data class Notice(val id: Int, val said: String)
 
     /**
      * One thing that happened, with its own footer.
@@ -260,6 +279,17 @@ object AgentChat {
         // the record now begins rather than where the session did.
         return bursts.flatten()
     }
+
+    /**
+     * The app's open lines **inside one burst**, oldest first.
+     *
+     * Asked of the burst and not of the whole record, because that is where they are drawn: a notice
+     * belongs to the message it followed. [ChatNotices.open] already applies the rule — open until
+     * somebody speaks after it — and within a burst that means a notice raised after the agent's last
+     * words, which is exactly the shape of a turn that failed at the end.
+     */
+    private fun noticesOf(burst: List<AgentLog.Row>): List<Notice> =
+        ChatNotices.open(burst).map { Notice(it.id, it.body.trim().ifEmpty { it.name }) }
 
     /**
      * The turns of [conversation], oldest first.
@@ -620,9 +650,11 @@ object AgentChat {
                             // several requests, and the message reports what all of them cost.
                             charged[row.id]?.let { spent = spent + it }
                         }
-                        // "stopped" and its reason, most of all: the only thing a failed turn has to
-                        // say, so it is drawn.
-                        else -> pages.add(
+                        // **A notice is not a page.** It used to be drawn as one, which put the app's
+                        // own sentence in the same column as the agent's work and gave it a pager
+                        // arrow and a footer it had not earned. It is collected by [noticesOf] below
+                        // and drawn under the message in red instead.
+                        else -> if (ChatNotices.isNotice(row)) Unit else pages.add(
                             Page(
                                 caption = row.name,
                                 body = oneLine(row.body, 200),
@@ -636,7 +668,13 @@ object AgentChat {
                     else -> Unit
                 }
             }
-            if (pages.isEmpty()) continue
+            // **A burst with nothing but a notice still has something to say.** A turn that was cut
+            // short before the agent called anything or spoke — a refused key, a transport that
+            // failed on the first request — leaves exactly that shape: the person's message, and the
+            // app's sentence about why nothing happened. Dropping the burst because it has no pages
+            // dropped the one thing the person needed, and left a question with no answer at all.
+            val notices = noticesOf(burst)
+            if (pages.isEmpty() && notices.isEmpty()) continue
             // **The closing page is the last thing the agent said**, and only when nothing was
             // called after it - which is exactly the reply that made no calls. A burst that ended
             // on a tool result has no closing page: the agent stopped mid-work, and saying otherwise
@@ -649,14 +687,19 @@ object AgentChat {
             // the last page - which is what "ends with a finishing message from the agent" means.
             // Nothing is reordered to make that true; it is true because the record is a chronology.
             val spend = spent
+            // **Identified by its first page, or by the notice when there is no page.** The id is
+            // the list's key, so it has to exist; a message with only a notice is keyed by that
+            // notice's row, which is the record's own handle for it.
+            val first = pages.firstOrNull()
             out.add(
                 Message(
                     side = Side.AGENT,
                     pages = pages,
-                    id = pages.first().id,
-                    stamp = pages.first().stamp,
+                    id = first?.id ?: notices.first().id,
+                    stamp = first?.stamp ?: "",
                     thinking = spend.thinking,
                     output = spend.output,
+                    notices = notices,
                 ),
             )
         }

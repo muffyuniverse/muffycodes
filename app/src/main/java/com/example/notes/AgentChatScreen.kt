@@ -447,22 +447,37 @@ fun AgentChatScreen(
                         // shape: what the person asked, what the agent did about it, what the person
                         // asked next. The list lasts as long as the session.
                         items(box.messages, key = { it.id }) { message ->
-                            MessageRow(
-                                message = message,
-                                at = showing[message.id] ?: 0,
-                                cap = viewModel.settings.bubbleLines,
-                                onTurn = { delta ->
-                                    val pages = message.pages.size
-                                    if (pages > 1) {
-                                        val now = showing[message.id] ?: (pages - 1)
-                                        turn(message.id, (now + delta).coerceIn(0, pages - 1))
-                                    }
-                                },
-                                onFullscreen = { index ->
-                                    page = Fullscreen(message, index)
-                                    Trace.tap("message fullscreen", "#${message.id}")
-                                },
-                            )
+                            Column {
+                                // **No bubble when there is nothing to put in it.** A turn cut
+                                // short before the agent said or did anything leaves a message whose
+                                // only content is the app's notice; drawing an empty surface above it
+                                // would be a blank box the person has to interpret. The notice alone
+                                // says what happened.
+                                if (message.pages.isNotEmpty()) {
+                                    MessageRow(
+                                        message = message,
+                                        at = showing[message.id] ?: 0,
+                                        cap = viewModel.settings.bubbleLines,
+                                        onTurn = { delta ->
+                                            val pages = message.pages.size
+                                            if (pages > 1) {
+                                                val now = showing[message.id] ?: (pages - 1)
+                                                turn(message.id, (now + delta).coerceIn(0, pages - 1))
+                                            }
+                                        },
+                                        onFullscreen = { index ->
+                                            page = Fullscreen(message, index)
+                                            Trace.tap("message fullscreen", "#${message.id}")
+                                        },
+                                    )
+                                }
+                                // **After the message, in the same item.** The operator's rule:
+                                // "they are added as the last message after the one that triggered
+                                // them". Inside the item rather than as their own list entry, so a
+                                // notice cannot be separated from the turn it is about by a scroll
+                                // position — and so `key = message.id` stays the list's identity.
+                                for (notice in message.notices) NoticeLine(notice.said)
+                            }
                         }
                         // **The reply being written, as a bubble where it will end up.**
                         // The operator's report: "agent's messages should be in their own bubble,
@@ -1075,6 +1090,35 @@ private fun MessageRow(
             color = MaterialTheme.colorScheme.outline,
         )
     }
+}
+
+/**
+ * **The app's own line, under the message it followed.**
+ *
+ * Red, full width, and outside the bubble: it is not the agent speaking and it is not a page a person
+ * can turn to, so it must not look like either. The operator's answer to how it should look was one
+ * word — *"ok, with red background"* — and the reason it is a background rather than red text is that
+ * a failed turn is the thing a person is scanning for when a reply did not arrive.
+ *
+ * **It carries no footer and no id.** Those belong to rows of the conversation, and a notice is a line
+ * about the turn rather than a part of it. The id is kept in [AgentChat.Notice] because the record has
+ * one and a later screen may want to name it; the chat does not show it, because "row 47" beside "the
+ * key was refused" is a fact for the trace, not for the person reading the answer.
+ */
+@Composable
+private fun NoticeLine(said: String) {
+    val ink = MaterialTheme.colorScheme.onErrorContainer
+    Text(
+        said,
+        style = MaterialTheme.typography.labelMedium,
+        color = ink,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .background(MaterialTheme.colorScheme.errorContainer)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+    )
 }
 
 /**

@@ -594,7 +594,57 @@ class AgentLog private constructor(
     // ---- writing ------------------------------------------------------------
 
     /** The operator's words, in the context: this is what a turn is for. */
-    fun told(text: String): Int = record(TOLD, "operator", text)
+    fun told(text: String): Int {
+        // **A person speaking ends every open notice, and the record says so.**
+        //
+        // [ChatNotices.open] derives the same answer without this, so the screen would be right either
+        // way. The flip is what makes the *record* right: a notice that has been answered reads `out`,
+        // so the evidence shows that the app told the person something and the person moved on — and a
+        // reader that cannot see the whole history (a trimmed log, a later build) still gets it right.
+        //
+        // **Called before the new row is written**, so the new message is not itself the thing that
+        // closes the notice it is answering: the id rule in [ChatNotices] would have handled that, but
+        // flipping first means the rewrite never has to reason about a row that is about to exist.
+        //
+        // An agent's own words close them too, and this is not called there: the notice stays `app`
+        // until the next person's message, which [ChatNotices.open] already ignores. That is the
+        // cheaper choice and the honest one — the app is not asked to rewrite its evidence on every
+        // turn, and the derivation is right in the meantime.
+        closeNotices()
+        return record(TOLD, "operator", text)
+    }
+
+    /**
+     * Flips every notice that is no longer open to `out` — **one rewrite, and usually none.**
+     *
+     * The same shape as [reset] and [forget]: the rows are read, the few that need the column changed
+     * are copied, and the file is written once beside itself. The answer is how many changed, which is
+     * zero on the common path and therefore costs one read.
+     */
+    fun closeNotices(): Int = synchronized(guard) {
+        val rows = rows()
+        val closing = ChatNotices.toClose(rows)
+        // **The empty case is the common one, and it costs one read.** Written as a branch rather
+        // than an early `return` because a non-local return out of `synchronized` is legal and easy to
+        // mistake for the surrounding function's return when this is read quickly.
+        if (closing.isEmpty()) {
+            0
+        } else {
+            val said = closing.sorted().joinToString(",")
+            val marker = LogFormat.recordRow(
+                System.currentTimeMillis(),
+                nextId(),
+                ContextBudget.tokens(said),
+                NOTE,
+                APP,
+                0,
+                "noticed",
+                said,
+            )
+            store(rows.map { if (it.id in closing) it.flipped(OUT) else it }, marker)
+            closing.size
+        }
+    }
 
     /** A tool the agent called: the name, and its arguments as the model wrote them. */
     fun call(tool: String, args: String): Int = record(CALL, tool, args)
