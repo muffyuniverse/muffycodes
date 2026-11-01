@@ -3,6 +3,7 @@ package com.example.notes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -112,46 +113,33 @@ class AgentChatScreenTest {
         // press ‹ to see the call that produced the answer they were reading; a conversation is a
         // list and a list scrolls.
         compose.onNodeWithText("what is in the project", substring = true).assertExists()
-        // **The closing words are a PAGE, so they are behind the pager.** The message opens on page
-        // one - the call - and the words that ended it are the last page. That is the shape the
-        // operator asked for: a message holds its pages, and a call and its closing words are one
-        // message rather than two.
-        val agentBox = scene.viewModel.chatBox!!.messages.filter { it.side == AgentChat.Side.AGENT }
-        val withWords = agentBox.first { m -> m.pages.any { it.closing } }
-        assertEquals(
-            "the closing page is last",
-            true,
-            withWords.pages.last().closing,
-        )
-        assertTrue(
-            "and it holds the words: ${withWords.pages.last().body}",
-            withWords.pages.last().body.contains("There is one file."),
-        )
-        // **The message opens on its LAST page**, so the pager reads 2/2: a person arrives at the
-        // end of the conversation, and the closing words are where a conversation ends.
-        compose.onNodeWithText("2/2", substring = true).assertExists()
-        // **The message opens on its LAST page, so the call's caption is not on screen** - it is one
-        // turn of the pager back. What IS drawn is the caption of the page being shown, and the
-        // pager that says there is more. Both are asserted below; asserting `tree` here would be
-        // asserting the page the operator asked not to open on.
-        compose.onNodeWithText("agent").assertExists()
-        // **The message is a turn, not an act.** Two replies are two turns, and the one that called
-        // `tree` holds both the call and the words that closed it - so its page count is what says
-        // the grouping happened.
-        // **One exchange is ONE agent message**, holding the call and the words that closed it as
-        // its pages. It is not one message per request: a request is a turn, and a turn is smaller
-        // than the thing the person asked about.
+        // **The words are their own bubble now, and they are ON SCREEN.**
+        //
+        // The operator's rule: *"pages should add up to the message bubble, but when a page is a
+        // message it ends the bubble, and next responses form a next bubble until that one is also
+        // closed with a message"*. So the call is one bubble and the sentence that closed the turn is
+        // another — which means the sentence is drawn rather than sitting behind a pager arrow.
+        //
+        // This is the assertion that would have caught the old shape: the words were page 2 of 2 of a
+        // bubble that opened on page 2, so they *were* visible — but a turn that spoke mid-work had
+        // its earlier sentences behind `‹`, and nobody reads those.
         val agent = scene.viewModel.chatBox!!.messages.filter { it.side == AgentChat.Side.AGENT }
-        assertEquals("one agent message for the one exchange", 1, agent.size)
-        val calling = agent.first()
-        assertEquals("holding the call and the words that closed it", 2, calling.pages.size)
-        assertEquals("the call first", "tree", calling.pages[0].caption)
-        assertEquals("the closing words last", true, calling.pages.last().closing)
+        assertEquals("a call bubble and a words bubble", 2, agent.size)
+        assertEquals("the call first", "tree", agent[0].pages.single().caption)
+        assertEquals("and the words last", "agent", agent[1].pages.single().caption)
+        assertTrue(
+            "the words are the agent's sentence: ${agent[1].pages.single().body}",
+            agent[1].pages.single().body.contains("There is one file."),
+        )
+        // **Neither bubble has a pager**, because neither has more than one page. A control that
+        // cannot do anything is a control that teaches a person to ignore it.
+        compose.onAllNodesWithContentDescription("Previous page").assertCountEquals(0)
+        compose.onAllNodesWithContentDescription("Next page").assertCountEquals(0)
         // **The call's page carries its result, and the page's own line is a SUMMARY of it.** The
         // body is the one line a person reads in the list; the whole of it is the detail, which is
         // what the page view shows. So the two differ by design, and the assertion is that the body
         // is drawn - not that it equals the result.
-        val treePage = calling.pages.first { it.caption == "tree" }
+        val treePage = agent[0].pages.single()
         assertTrue(
             "the call's page carries a result: '${treePage.body}'",
             treePage.body.isNotBlank(),
@@ -160,15 +148,54 @@ class AgentChatScreenTest {
             "and the whole of it is kept for the page view: '${treePage.detail}'",
             treePage.detail.length > treePage.body.length,
         )
-        // **The whole body, not a prefix.** A 20-character slice can cut through the separator that
-        // `summary()` puts between the status and the rest, so the assertion would fail on a body
-        // that IS drawn - which is the worst kind of test: right about the app and wrong about
-        // itself.
-        // **The call's page is not on screen while the closing page is showing**, so its body is
-        // asserted through the pager: turning back to it is what draws it.
-        compose.onNodeWithText(treePage.caption).assertDoesNotExist()
         // And the first message is the operator's, drawn as a plain row.
         assertEquals("the person speaks first", AgentChat.Side.OPERATOR, scene.viewModel.chatBox!!.messages.first().side)
+    }
+
+    @Test
+    fun `a sentence the agent says mid-turn is its own bubble, not a page behind an arrow`() {
+        // **The case the rule exists for.** A turn that says something, calls a tool, then says
+        // something else used to be ONE bubble of three pages: the first sentence was behind `‹`,
+        // and the bubble opened on page 3. The agent wrote that sentence because it expected the
+        // person to read it, and a sentence nobody reads until they page back is a sentence the app
+        // hid.
+        //
+        // The operator's rule: *"when a page is a message it ends the bubble, and next responses form
+        // a next bubble until that one is also closed with a message"*.
+        val door = ScriptedDoor(
+            Reply("Reading the config first.", listOf(call("read", """{"path":"milk.txt"}"""))),
+            Reply("Two litres, as expected."),
+        )
+        chat(door)
+        say("what is in the file")
+        awaitTurns(2)
+
+        val agent = scene.viewModel.chatBox!!.messages.filter { it.side == AgentChat.Side.AGENT }
+
+        // **Three bubbles**: the sentence, the call, the sentence. Each is one page, so no bubble has
+        // a pager and nothing the agent said is behind an arrow.
+        assertEquals("a sentence, a call, a sentence", 3, agent.size)
+        assertEquals("the first sentence", "agent", agent[0].pages.single().caption)
+        assertTrue(
+            "and it is the words: ${agent[0].pages.single().body}",
+            agent[0].pages.single().body.contains("Reading the config"),
+        )
+        assertEquals("then the call", "read", agent[1].pages.single().caption)
+        assertEquals("then the closing sentence", "agent", agent[2].pages.single().caption)
+        assertTrue(
+            "which is what it found: ${agent[2].pages.single().body}",
+            agent[2].pages.single().body.contains("Two litres"),
+        )
+        for ((index, message) in agent.withIndex()) {
+            assertEquals(
+                "bubble $index has no pager: one page",
+                1,
+                message.pages.size,
+            )
+        }
+        // **Both sentences are on screen.** The whole point is that neither needs a press.
+        compose.onNodeWithText("Reading the config first.", substring = true).assertExists()
+        compose.onNodeWithText("Two litres, as expected.", substring = true).assertExists()
     }
 
     @Test

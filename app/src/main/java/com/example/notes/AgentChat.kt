@@ -136,21 +136,11 @@ object AgentChat {
         val forgotten: Boolean = false,
         /** True for the agent's own words, which are drawn as markdown rather than as a line. */
         val prose: Boolean = false,
-        /**
-         * **True for the reply that ended the burst: the agent spoke and called nothing.**
-         *
-         * The three kinds of page, and this is what tells the third apart:
-         *
-         *  - a **tool call and its result** - a `CALL` and the `GOT` that names it;
-         *  - the agent **speaking mid-work** - a note written while it still had calls to make;
-         *  - the **closing message** - the last note in the burst, after the last call.
-         *
-         * **It is decided by position, not by a row of its own.** The record already says which
-         * reply was last - it is the one with no call after it - and a `CONCLUDE` row saying so was
-         * removed precisely because it duplicated the words it was marking. So this is read off the
-         * order, which is the same thing the loop does when it decides a turn has ended.
-         */
-        val closing: Boolean = false,
+        // **`closing` used to live here, and it is gone rather than always true.** It marked the
+        // reply that ended a burst, decided by "the last prose page with no call after it". Now that
+        // a bubble is cut at every utterance, **the last page of every bubble is its closing** — a
+        // fact about the split, not a flag a page has to carry. A property that is true for exactly
+        // one page per bubble is a property of the bubble.
     )
 
     /**
@@ -278,6 +268,39 @@ object AgentChat {
         // The trim still removes whole bursts from the front, so the first message here is wherever
         // the record now begins rather than where the session did.
         return bursts.flatten()
+    }
+
+    /**
+     * One burst's pages, cut into bubbles — **a bubble ends at every utterance.**
+     *
+     * The operator's rule: *"pages should add up to the message bubble, but when a page is a message
+     * it ends the bubble, and next responses form a next bubble until that one is also closed with a
+     * message"*.
+     *
+     * So `[call, result, text]` is one bubble and `[call, result, text, call, result, text]` is two.
+     * The text is always the **last** page of its bubble, which is the whole point: a bubble opens on
+     * its last page, so what the agent said is what the person reads without pressing anything.
+     *
+     * **A trailing run of calls with no text stays its own bubble.** The agent stopped mid-work; the
+     * bubble shows the last thing it did, and no full stop is invented for it.
+     *
+     * **A page is an utterance when it is prose.** `Page.prose` is set by exactly one place — the
+     * `agent` note — so this cannot drift from what the screen treats as words.
+     */
+    fun splitAtUtterances(pages: List<Page>): List<List<Page>> {
+        val out = mutableListOf<List<Page>>()
+        var group = mutableListOf<Page>()
+        for (page in pages) {
+            group.add(page)
+            if (page.prose) {
+                out.add(group)
+                group = mutableListOf()
+            }
+        }
+        // The remainder is the acts after the last sentence: a bubble of its own, because the turn
+        // did something after it spoke and that work is what the person is waiting for.
+        if (group.isNotEmpty()) out.add(group)
+        return out
     }
 
     /**
@@ -675,33 +698,45 @@ object AgentChat {
             // dropped the one thing the person needed, and left a question with no answer at all.
             val notices = noticesOf(burst)
             if (pages.isEmpty() && notices.isEmpty()) continue
-            // **The closing page is the last thing the agent said**, and only when nothing was
-            // called after it - which is exactly the reply that made no calls. A burst that ended
-            // on a tool result has no closing page: the agent stopped mid-work, and saying otherwise
-            // would put a full stop where the record has none.
-            val lastSaid = pages.indexOfLast { it.prose }
-            val lastCall = pages.indexOfLast { it.caption != "agent" && it.prose.not() && !it.closing }
-            val closingAt = if (lastSaid > lastCall) lastSaid else -1
-            if (closingAt >= 0) pages[closingAt] = pages[closingAt].copy(closing = true)
-            // **The pages are already in the order they happened**, so the agent's last utterance is
-            // the last page - which is what "ends with a finishing message from the agent" means.
-            // Nothing is reordered to make that true; it is true because the record is a chronology.
-            val spend = spent
-            // **Identified by its first page, or by the notice when there is no page.** The id is
-            // the list's key, so it has to exist; a message with only a notice is keyed by that
-            // notice's row, which is the record's own handle for it.
-            val first = pages.firstOrNull()
-            out.add(
-                Message(
-                    side = Side.AGENT,
-                    pages = pages,
-                    id = first?.id ?: notices.first().id,
-                    stamp = first?.stamp ?: "",
-                    thinking = spend.thinking,
-                    output = spend.output,
-                    notices = notices,
-                ),
-            )
+            // **A bubble accumulates pages, and a page that is a MESSAGE ends it.**
+            //
+            // The operator's rule: *"pages should add up to the message bubble, but when a page is a
+            // message it ends the bubble, and next responses form a next bubble until that one is
+            // also closed with a message"*.
+            //
+            // So a burst is cut at every utterance. `[call, result, text]` is one bubble — the text
+            // is its last page, and the bubble opens on its last page, so the person reads what the
+            // agent said without pressing anything. `[call, result, text, call, result, text]` is two
+            // bubbles, each closed by its own sentence.
+            //
+            // **Why this matters and is not cosmetic:** a single bubble holding the whole burst made
+            // every utterance but the last one a page behind `‹`. The agent writes a message because
+            // it expects the person to see it, and a sentence nobody reads until they page back is a
+            // sentence the app hid.
+            //
+            // **A burst that ends on a call has no closing text**, and its last bubble is just the
+            // call. That is not a gap: the agent stopped mid-work, and inventing a full stop would
+            // put words in its mouth.
+            val bubbles = splitAtUtterances(pages)
+            for ((index, group) in bubbles.withIndex()) {
+                // The last group carries the turn's notices; the earlier ones are just acts.
+                val last = index == bubbles.lastIndex
+                val first = group.firstOrNull()
+                out.add(
+                    Message(
+                        side = Side.AGENT,
+                        pages = group,
+                        id = first?.id ?: notices.first().id,
+                        stamp = first?.stamp ?: "",
+                        // **The cost belongs to the bubble the person is reading**, which is where
+                        // the footer is: every bubble of the turn reports what the whole turn cost,
+                        // because splitting a turn into three bubbles did not make it three turns.
+                        thinking = spent.thinking,
+                        output = spent.output,
+                        notices = if (last) notices else emptyList(),
+                    ),
+                )
+            }
         }
         return out
     }
