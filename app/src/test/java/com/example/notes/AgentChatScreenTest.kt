@@ -761,6 +761,13 @@ class AgentChatScreenTest {
         )
 
         log.told("try again")
+        // **The flip is what the record must show**, and it is asked of the record rather than of the
+        // screen: `told` calls `closeNotices`, which rewrites the file, and a screen that has not
+        // re-read yet would still be drawing the old answer.
+        assertTrue(
+            "the notice is flipped to out: ${log.rows().filter { it.name == "stopped" }}",
+            log.rows().any { it.name == "stopped" && it.ctx == AgentLog.OUT },
+        )
         scene.viewModel.openChat("groceries")
         scene.await("the conversation to be re-read") {
             scene.viewModel.chatBox?.messages?.none { it.notices.isNotEmpty() } == true

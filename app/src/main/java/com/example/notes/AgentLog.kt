@@ -602,16 +602,20 @@ class AgentLog private constructor(
         // so the evidence shows that the app told the person something and the person moved on — and a
         // reader that cannot see the whole history (a trimmed log, a later build) still gets it right.
         //
-        // **Called before the new row is written**, so the new message is not itself the thing that
-        // closes the notice it is answering: the id rule in [ChatNotices] would have handled that, but
-        // flipping first means the rewrite never has to reason about a row that is about to exist.
+        // **After the row, not before — and the first version got this backwards.**
+        //
+        // `closeNotices` asks the record which notices are answered. Called *before* the new message
+        // exists, the notice was still the last thing in the record, so nothing was answered and
+        // nothing flipped: the screen kept the notice forever. The new row has to be written first,
+        // because it is the thing that answers.
         //
         // An agent's own words close them too, and this is not called there: the notice stays `app`
         // until the next person's message, which [ChatNotices.open] already ignores. That is the
         // cheaper choice and the honest one — the app is not asked to rewrite its evidence on every
         // turn, and the derivation is right in the meantime.
+        val id = record(TOLD, "operator", text)
         closeNotices()
-        return record(TOLD, "operator", text)
+        return id
     }
 
     /**
