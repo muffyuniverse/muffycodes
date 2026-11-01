@@ -1,6 +1,7 @@
 package com.example.notes
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
