@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -166,6 +165,27 @@ fun AgentChatScreen(
      * needing a third gesture.
      */
     var held by remember(generation) { mutableStateOf<Set<Int>>(emptySet()) }
+
+    /**
+     * Turn [message] to page [next], and record whether that means the person is holding it.
+     *
+     * **One function because there are two places that turn a page** — the bubble's arrows and the
+     * fullscreen view's — and report 87 was exactly what happens when they each keep their own idea
+     * of the current page. The hold rule is not a detail that can differ between them: it decides
+     * whether an arriving page pulls the ground out from under someone mid-read.
+     *
+     * **Leaving the last page holds the message; coming back to it releases it.** That is what makes
+     * "follow the newest page" and "read the one I chose" one rule rather than two: the person's own
+     * act decides which, and there is no separate switch to find.
+     */
+    fun turn(message: Int, next: Int) {
+        val pages = box?.messages?.firstOrNull { it.id == message }?.pages?.size ?: return
+        if (pages <= 1) return
+        val target = next.coerceIn(0, pages - 1)
+        showing = showing + (message to target)
+        held = if (target == pages - 1) held - message else held + message
+        Trace.tap("message page", "#$message ${target + 1}/$pages")
+    }
 
     /**
      * **Every message sits on its last page, and follows it as pages arrive.**
@@ -435,16 +455,7 @@ fun AgentChatScreen(
                                     val pages = message.pages.size
                                     if (pages > 1) {
                                         val now = showing[message.id] ?: (pages - 1)
-                                        val next = (now + delta).coerceIn(0, pages - 1)
-                                        showing = showing + (message.id to next)
-                                        // **Leaving the last page holds the message; coming back to
-                                        // it releases it.** That is what makes "follow the newest
-                                        // page" and "read the one I chose" one rule rather than two:
-                                        // the person's own act decides which, and there is no
-                                        // separate switch to find.
-                                        held = if (next == pages - 1) held - message.id
-                                        else held + message.id
-                                        Trace.tap("message page", "#${message.id} ${next + 1}/$pages")
+                                        turn(message.id, (now + delta).coerceIn(0, pages - 1))
                                     }
                                 },
                                 onFullscreen = { index ->
@@ -574,7 +585,15 @@ fun AgentChatScreen(
     // cap; here it is read in full, scrolling, and the pages of that one message can be swapped.
     page?.let { open ->
         val pages = open.message.pages
-        var at by remember(open.message.id) { mutableStateOf(open.at.coerceIn(0, (pages.size - 1).coerceAtLeast(0))) }
+        // **The list's cursor, not a second one.** Report 87: "make it so that I can swap between
+        // message pages both in chat and fullscreen modes". The fullscreen view used to keep its own
+        // `at`, so turning a page there was invisible to the list and closing it snapped back. One
+        // cursor means the two views cannot disagree, and it is the same map the list already reads.
+        //
+        // Clamped on the way in, because the message may have grown or shrunk since the map was
+        // written: a page index is a fact about a list that can change.
+        val at = (showing[open.message.id] ?: open.at)
+            .coerceIn(0, (pages.size - 1).coerceAtLeast(0))
         val shown = pages.getOrNull(at)
         Surface(modifier = Modifier.fillMaxSize()) {
             Column(
@@ -636,7 +655,7 @@ fun AgentChatScreen(
                             pointingLeft = true,
                             enabled = at > 0,
                             description = "Previous page",
-                            onClick = { if (at > 0) at-- },
+                            onClick = { if (at > 0) turn(open.message.id, at - 1) },
                         )
                         Text(
                             "${at + 1}/${pages.size}",
@@ -648,7 +667,7 @@ fun AgentChatScreen(
                             pointingLeft = false,
                             enabled = at < pages.size - 1,
                             description = "Next page",
-                            onClick = { if (at < pages.size - 1) at++ },
+                            onClick = { if (at < pages.size - 1) turn(open.message.id, at + 1) },
                         )
                     }
                     TextButton(onClick = {
@@ -674,20 +693,26 @@ fun AgentChatScreen(
                 // same page was the one place a person most wants to copy from (a long result, a
                 // stack trace) and could not.
                 //
-                // **The container goes outside the scroll, not inside it.** A `verticalScroll`
-                // between the container and the text is the documented way to get handles in the
-                // wrong place: the selection caches the text's geometry, and a scroll moves it
-                // without the selection being told. Outside, the container measures the whole
-                // scrollable column and the offsets stay true.
-                SelectionContainer {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(rememberScrollState()),
-                    ) {
-                        if (shown != null) {
-                            PageBody(page = shown, cap = 0, ink = MaterialTheme.colorScheme.onSurface, expanded = true)
-                        }
+                // **No container here, and that is the fix.** This used to wrap the whole column in
+                // one `SelectionContainer` on the reasoning that a container outside the scroll
+                // keeps the handles true. It does the opposite: `PageBody` already puts **one
+                // container around each block** (see `MarkdownBody`), so the outer one wrapped a
+                // dozen inner ones — and a selection then has two owners. The inner container
+                // anchors the handle to its own text layout while the outer one measures the whole
+                // scrollable column, and the disagreement is what the operator saw as "handles are
+                // in some random places".
+                //
+                // **One owner per selection.** The per-block containers give correct handles and
+                // allow a selection within a paragraph; the plain-text branch of `PageBody` carries
+                // its own container for the same reason. A whole-page copy is a different act and
+                // it belongs to a button, not to a gesture that already means something narrower.
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    if (shown != null) {
+                        PageBody(page = shown, cap = 0, ink = MaterialTheme.colorScheme.onSurface, expanded = true)
                     }
                 }
             }
@@ -826,33 +851,52 @@ private fun PagerArrow(
     double: Boolean = false,
 ) {
     IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(40.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                imageVector = if (pointingLeft) {
-                    Icons.AutoMirrored.Filled.KeyboardArrowLeft
-                } else {
-                    Icons.AutoMirrored.Filled.KeyboardArrowRight
-                },
-                contentDescription = description,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(28.dp),
-            )
-            if (double) {
-                // **The second chevron is decoration, not a second control.** The whole 40dp button
-                // is the target, and two icons inside one button is how `>>` is drawn without
-                // making the row wider or the touch area smaller.
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            // **Negative, so the pair reads as one glyph rather than two icons.** Material's chevron
+            // is drawn inside a 24x24 box with its own side padding, so two of them at the same size
+            // still leave a gap wider than the stroke between them. Pulling the row in by 6dp closes
+            // it without touching either icon, which is what keeps them identical.
+            horizontalArrangement = Arrangement.spacedBy((-6).dp),
+        ) {
+            // **Both chevrons are the same size, and that is the fix for report 86.**
+            //
+            // The pair used to be 28dp and 20dp with a hand-tuned `offset(x = -8.dp)` on the second.
+            // The operator's report was ">> icon elements have different sizes, check it", and the
+            // reason is that they *were* different: an arrow at 28dp fills more of its 24dp box than
+            // one at 20dp, so the offset was compensating for a gap the icon's own padding created,
+            // and the two never matched at any offset. Two sizes and an offset is three numbers that
+            // have to agree; one size and a spacing is two.
+            repeat(if (double) 2 else 1) { index ->
                 Icon(
-                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = null,
+                    // **Both point the same way**, so a `double` is the same arrow twice rather than
+                    // a left-and-right pair. The flag only says how many, never which direction -
+                    // which is what makes `pointingLeft` and `double` independent instead of
+                    // secretly ordered.
+                    imageVector = if (pointingLeft) {
+                        Icons.AutoMirrored.Filled.KeyboardArrowLeft
+                    } else {
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight
+                    },
+                    // **Only the first says anything**, because a screen reader reading "next page,
+                    // next page" for one button is worse than reading it once. The second chevron is
+                    // decoration; the whole 40dp button is the target.
+                    contentDescription = if (index == 0) description else null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .size(20.dp)
-                        .offset(x = (-8).dp),
+                    modifier = Modifier.size(CHEVRON),
                 )
             }
         }
     }
 }
+
+/**
+ * The size of one chevron in the pager.
+ *
+ * A constant because report 86 was two sizes that drifted: the fix is that both chevrons are this,
+ * and there is no second number to keep in step.
+ */
+private val CHEVRON = 24.dp
 
 /**
  * **One message.** Two sides, drawn differently, because they are different things.
@@ -1103,19 +1147,20 @@ private fun PageBody(
         // not go through `MarkdownBody` and gets none of its per-block containers — and the caller
         // above no longer wraps it, so this is the one place its selection comes from.
         SelectionContainer {
-        Text(
-            body,
-            style = MaterialTheme.typography.bodyMedium,
-            fontFamily = if (expanded) FontFamily.Monospace else null,
-            // **Struck through, not hidden.** A page the agent forgot is still read here: that is
-            // what makes the forgetting auditable rather than something the app asks you to trust.
-            textDecoration = if (page.forgotten) TextDecoration.LineThrough else null,
-            color = when {
-                page.failed -> MaterialTheme.colorScheme.error
-                page.forgotten -> ink
-                else -> MaterialTheme.colorScheme.onSurface
-            },
-        )
+            Text(
+                body,
+                style = MaterialTheme.typography.bodyMedium,
+                fontFamily = if (expanded) FontFamily.Monospace else null,
+                // **Struck through, not hidden.** A page the agent forgot is still read here: that
+                // is what makes the forgetting auditable rather than something the app asks you to
+                // trust.
+                textDecoration = if (page.forgotten) TextDecoration.LineThrough else null,
+                color = when {
+                    page.failed -> MaterialTheme.colorScheme.error
+                    page.forgotten -> ink
+                    else -> MaterialTheme.colorScheme.onSurface
+                },
+            )
         }
     }
     if (cut && onExpand != null) {

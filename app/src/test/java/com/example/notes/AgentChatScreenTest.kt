@@ -209,6 +209,49 @@ class AgentChatScreenTest {
     }
 
     @Test
+    fun `turning a page fullscreen moves the bubble's page too`() {
+        // **Report 87: "make it so that I can swap between message pages both in chat and fullscreen
+        // modes".** Each view had its own cursor, so turning a page in one was invisible to the
+        // other and closing the fullscreen view snapped back to where the bubble already was.
+        //
+        // The proof is the round trip: page back **inside** fullscreen, close, and the bubble must
+        // still be on that page. Before the fix it was on the last one again, because fullscreen's
+        // `at` was a local that died with it.
+        val door = ScriptedDoor(
+            Reply("", listOf(call("create", """{"path":"shapes"}"""))),
+            Reply("Made the folder."),
+        )
+        chat(door)
+        say("make a shapes folder")
+        awaitTurns(2)
+
+        // The bubble opens on its last page, which is the words. Two pages: the call and the words.
+        val message = scene.viewModel.chatBox!!.bubbles.last()
+        assertEquals("the fixture has two pages", 2, message.pages.size)
+
+        compose.onAllNodesWithContentDescription("Read this message fullscreen").onLast().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Agent · words").assertExists()
+
+        // **Turn back inside the fullscreen view**, which is the gesture the report is about.
+        compose.onAllNodesWithContentDescription("Previous page").onLast().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Agent · call · create").assertExists()
+
+        // Close, and the bubble is on the call's page — not snapped back to the words.
+        compose.onNodeWithText("Close").performClick()
+        compose.waitForIdle()
+        // **The call's page, by its caption.** The bubble draws the page's caption above its body,
+        // so `create` on the screen means the bubble is showing the call rather than the reply.
+        compose.onNodeWithText("create").assertExists()
+
+        // And opening fullscreen again lands on the same page rather than resetting.
+        compose.onAllNodesWithContentDescription("Read this message fullscreen").onLast().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Agent · call · create").assertExists()
+    }
+
+    @Test
     fun `both bubbles are selectable, and the person's has nothing that could eat the gesture`() {
         // **Report #42: "text selection is broken for user messages".**
         //

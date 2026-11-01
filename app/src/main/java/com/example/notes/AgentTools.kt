@@ -435,7 +435,9 @@ class AgentTools(
                     "place nobody can browse, so a report you wrote, an APK you fetched or a " +
                     "screenshot you took is only useful once it is here. `path` is one file, " +
                     "relative to the project. A folder is refused — a project is a tree and " +
-                    "Downloads is one flat folder — so zip it first if you mean several files.",
+                    "Downloads is one flat folder — so several files have to be put into one " +
+                    "archive first, and there is no command that makes one yet: say so rather " +
+                    "than trying.",
                 "{\"path\":\"release/app-release.apk\"}",
             ),
         )
