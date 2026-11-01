@@ -912,10 +912,16 @@ class AgentTools(
                 continue
             }
             val path = relToAccount(entry.file)
-            // **A filter is a prefix on the account-relative path**, so `wiki/` matches
-            // `groceries/wiki/x.md` and `system/muffycodes_data/wiki/y.md` — the operator's "the
-            // wiki of every project" — while `groceries/wiki/` matches one.
-            if (inFolders.isNotEmpty() && inFolders.none { path.startsWith(it) }) continue
+            // **A filter matches where the folder appears, not only where the path begins.**
+            //
+            // This is the whole meaning of "folders as filter flags", and getting it wrong is
+            // invisible in the easy case: `shopping/wiki/` starts a path, so a plain `startsWith`
+            // finds it — while `wiki/`, the one a person would actually write, would match nothing at
+            // all, and the answer would be "no matches" about the wiki that is right there.
+            //
+            // So a filter matches at the start of the path **or** just after a slash, and it must end
+            // at a folder boundary — `wiki/` matches `shopping/wiki/x.md` but not `shopping/wiki2/x.md`.
+            if (inFolders.isNotEmpty() && inFolders.none { atFolder(path, it) }) continue
             if (ws.kindOf(entry.file) != EntryKind.TEXT) continue
             val text = try {
                 readText(entry.file, deadline, "search")
@@ -945,6 +951,18 @@ class AgentTools(
             state.count++
         }
     }
+
+    /**
+     * True when [folder] — a path prefix ending in `/` — names a folder [path] is inside.
+     *
+     * **A filter may name a folder at any depth**, which is what makes `wiki/` mean "the wiki of
+     * every project" rather than "a top-level folder called wiki". The match is at the start of the
+     * path or immediately after a slash, so `wiki/` finds `shopping/wiki/x.md` and
+     * `system/muffycodes_data/wiki/y.md`, while `shop/` does not find `shopping/wiki/x.md` — the
+     * slash in the filter is the folder boundary, and without it a prefix would match half a name.
+     */
+    private fun atFolder(path: String, folder: String): Boolean =
+        path.startsWith(folder) || path.contains("/$folder")
 
     /**
      * A file's path from the **account** folder, with forward slashes.

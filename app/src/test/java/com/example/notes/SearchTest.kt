@@ -97,9 +97,10 @@ class SearchTest {
 
         val answer = tools().run(call("""{"query":"milk","in":["wiki/"]}"""))
 
-        assertTrue("both wikis are searched: $answer", answer.contains("shopping/wiki/milk.md"))
-        assertTrue("including the other project's", answer.contains("work/wiki/retries.md"))
-        assertFalse("and the loose note is not", answer.contains("shopping/notes.txt"))
+        val said = answer.replace("\n", " | ")
+        assertTrue("both wikis are searched: $said", answer.contains("shopping/wiki/milk.md"))
+        assertTrue("including the other project's: $said", answer.contains("work/wiki/retries.md"))
+        assertFalse("and the loose note is not: $said", answer.contains("shopping/notes.txt"))
     }
 
     @Test
@@ -137,9 +138,12 @@ class SearchTest {
 
         val answer = tools().run(call("""{"query":"milk"}"""))
 
-        assertTrue("the many file is named once: $answer", answer.split("many.txt").size == 2)
-        assertTrue("and says there is more in it: $answer", answer.contains("(39 more)"))
-        assertTrue("and the second file is not crowded out: $answer", answer.contains("once.txt"))
+        // **One line in the message, because CI truncates at a newline.** An assertion that fails
+        // with half its evidence missing is one that costs a second CI run to understand.
+        val said = answer.replace("\n", " | ")
+        assertTrue("the many file is named once: $said", answer.split("many.txt").size == 2)
+        assertTrue("and says there is more in it: $said", answer.contains("(39 more)"))
+        assertTrue("and the second file is not crowded out: $said", answer.contains("once.txt"))
     }
 
     @Test
