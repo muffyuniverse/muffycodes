@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -439,6 +440,14 @@ fun DrawingSurface(
             .border(1.dp, MaterialTheme.colorScheme.outline)
             .clipToBounds(),
       ) {
+        // **The list and the view, read through a holder rather than captured.** A `pointerInput`
+        // block keeps the values it was built with, so an eraser drag that removed a stroke would go
+        // on testing indices against the list from before that erase — removing the wrong stroke, or
+        // none. Keying on `strokes` fixes the staleness but restarts the gesture handler, which ends a
+        // continuous erase drag after one stroke. `rememberUpdatedState` gives the handler the current
+        // value without restarting it, which is what both cases need.
+        val liveStrokes by rememberUpdatedState(strokes)
+        val liveView by rememberUpdatedState(view)
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
@@ -446,11 +455,11 @@ fun DrawingSurface(
                 // no text and no children, so without this there is nothing to address — and the one
                 // question that matters here ("does a stroke appear") is only askable through a touch.
                 .semantics { contentDescription = "drawing canvas" }
-                .pointerInput(tool, colour, width, view) {
+                .pointerInput(tool, colour, width) {
                     awaitEachGesture {
                         // **The view as it is when this gesture begins**, so the arithmetic inside is
                         // not reading a state that a previous frame has already changed.
-                        var currentView = view ?: Drawing.View()
+                        var currentView = liveView ?: Drawing.View()
                         val down = awaitFirstDown(requireUnconsumed = false)
                         // What a single finger is doing: drawing, or erasing as it moves.
                         var drawing = false
@@ -465,7 +474,7 @@ fun DrawingSurface(
                             val at = currentView.toPicture(down.position.x, down.position.y)
                             if (tool == Drawing.Tool.ERASER) {
                                 erasing = true
-                                Drawing.hit(strokes, at, 8f / currentView.zoom)?.let(onErase)
+                                Drawing.hit(liveStrokes, at, 8f / currentView.zoom)?.let(onErase)
                             } else {
                                 drawing = true
                                 current = listOf(at)
@@ -526,7 +535,7 @@ fun DrawingSurface(
                             val at = currentView.toPicture(change.position.x, change.position.y)
                             change.consume()
                             if (erasing) {
-                                Drawing.hit(strokes, at, 8f / currentView.zoom)?.let(onErase)
+                                Drawing.hit(liveStrokes, at, 8f / currentView.zoom)?.let(onErase)
                             } else if (drawing) {
                                 // A line and a box keep two points — where it started and where it is
                                 // now. The pen keeps every one, because its shape is the path.

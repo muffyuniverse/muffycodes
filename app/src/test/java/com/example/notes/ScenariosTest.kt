@@ -445,13 +445,18 @@ class ScenariosTest {
         // rasterise, so the only place "the letters are on the page" can be seen is here.
         scene.signedIn()
         scene.open("groceries")
-        var pressedPhoto = false
         val note = scene.file(
             "plan.md",
             "# Shopping\n\nThe list is short this week.\n\n- two litres of milk\n" +
                 "- a loaf of bread\n- something for the weekend\n\n> check the freezer first\n",
         )
 
+        // **The photograph is made before the screen is shown, and awaited.** A first version pressed
+        // the button from inside `ready` and answered immediately, so the capture happened before the
+        // worker had rendered anything — and the picture was of the *text editor*, which looks exactly
+        // like a scenario that passed. `await` drains the looper, which is what makes the worker's
+        // answer land.
+        var photographed: File? = null
         scenario(
             compose, "34-a-page-of-writing-photographed",
             "A page, photographed.",
@@ -461,39 +466,25 @@ class ScenariosTest {
                 Screen {
                     EditorScreen(
                         viewModel = viewModel,
-                        file = note,
+                        file = photographed ?: note,
                         onBack = {},
                         onOpenHistory = {},
                     )
                 }
             },
-            // **Waits for the photograph to be open, not just for the press.** The first version
-            // pressed Photo and answered true immediately — and the picture was of the text editor,
-            // because the render runs on the worker and the capture happens on the main thread a
-            // moment later. A scenario that photographs the screen it started on is a scenario that
-            // proves nothing while looking like it passed.
-            ready = {
-                if (!pressedPhoto) {
-                    pressedPhoto = true
-                    compose.onAllNodesWithText("Photo")[0].performClick()
-                }
-                // The photograph is a *new* file in the project, and the editor opens it: so the
-                // editor is showing something other than the note it started on.
-                val opened = viewModel.editingFile?.name?.let { it != note.name && it.endsWith(".png") }
-                if (opened == true) {
-                    // And Draw, so the picture shows the canvas the photograph became.
-                    val drawn = compose.onAllNodesWithText("Draw").fetchSemanticsNodes()
-                    if (drawn.isNotEmpty()) {
-                        compose.onAllNodesWithText("Draw")[0].performClick()
-                        compose.waitForIdle()
-                    }
-                }
-                opened == true
-            },
         ) {
             before()
-            then("The note is opened, and Photo is pressed.") {
+            then("The note is opened, Photo is pressed, and the drawing tools are chosen.") {
                 scene.openEditor(note)
+                viewModel.photograph(viewModel.textOf(note))
+                scene.await("the photograph to be made and opened") {
+                    viewModel.editingFile?.name?.let { it != note.name && it.endsWith(".png") } == true
+                }
+                photographed = viewModel.editingFile
+                compose.waitForIdle()
+                // Draw, so the picture shows the canvas the photograph became.
+                compose.onAllNodesWithText("Draw")[0].performClick()
+                compose.waitForIdle()
             }
             after()
             result(
