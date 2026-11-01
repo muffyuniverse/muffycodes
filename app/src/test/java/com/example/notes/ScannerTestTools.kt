@@ -117,10 +117,22 @@ class ScannerTestTools {
      */
     private fun page(): String = (1..3).joinToString("\n") { section(it) }
 
-    /** One section: its own opening line, then enough prose to be a chunk by itself. */
-    private fun section(number: Int): String =
-        "Section $number of the page. " +
-            (1..12).joinToString(" ") { "ordinary words to fill a line of text, number $it" }
+    /**
+     * One section, sized so that **each section is exactly one chunk.**
+     *
+     * Under [Chunker.CHARS] so a section stays whole, and padded close to it so three of them are three
+     * chunks rather than one. The tests here assert on the count, so the fixture has to produce it.
+     */
+    private fun section(number: Int): String {
+        val head = "Section $number of the page."
+        val words = "ordinary words to fill a line of text"
+        val body = StringBuilder(head)
+        var i = 1
+        while (body.length + words.length + 12 < Chunker.CHARS - 8) {
+            body.append(' ').append(words).append(", number ").append(i++)
+        }
+        return body.toString()
+    }
 
     // ---- browse --------------------------------------------------------------
 

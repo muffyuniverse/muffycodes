@@ -34,10 +34,37 @@ class ScannerTest {
     private fun page(count: Int, words: String = "ordinary prose about the weather"): String =
         (1..count).joinToString("\n") { section(it, words) }
 
-    /** One section: its own first line, then enough ordinary prose to fill a chunk on its own. */
-    private fun section(number: Int, words: String = "ordinary prose about the weather"): String =
-        "Section $number of the page. " +
-            (1..10).joinToString(" ") { "$words, number $it" }
+    /**
+     * One section, sized so that **each section is exactly one chunk.**
+     *
+     * The chunker fills [Chunker.CHARS] before it cuts, so a section must be under that to stay whole and the
+     * page must be over it for a cut to happen at all. Each section is therefore padded to just under the
+     * budget: the count of chunks equals the count of sections, which is what lets a test say "the second
+     * section was cut" and mean it.
+     *
+     * **`split` is asserted to agree** in every test that relies on it, rather than trusted, because the day
+     * this fixture stops producing one chunk per section the tests should say so instead of passing by
+     * accident.
+     */
+    private fun section(number: Int, words: String = "ordinary prose about the weather"): String {
+        val head = "Section $number of the page."
+        // Two characters of slack per line for the newline the join adds, and a little more for safety.
+        val room = Chunker.CHARS - head.length - 8
+        val body = StringBuilder(head)
+        var i = 1
+        while (body.length + words.length + 8 < Chunker.CHARS - 8 && body.length < room) {
+            body.append(' ').append(words).append(" number ").append(i++)
+        }
+        return body.toString()
+    }
+
+    /** The page's sections, asserted to be one chunk each — so a broken fixture fails as a fixture. */
+    private fun sectionsOf(count: Int): Pair<String, Int> {
+        val text = page(count)
+        val chunks = Chunker.split(text)
+        assertEquals("the fixture is one chunk per section: $count sections", count, chunks.size)
+        return text to chunks.size
+    }
 
     private fun scanner(scores: List<Double>, threshold: Double = 0.8) =
         Scanner(score = { Result.success(scores) }, threshold = { threshold })
@@ -47,13 +74,11 @@ class ScannerTest {
     @Test
     fun `a chunk above the threshold is cut and the rest of the page survives`() {
         // **The whole reason for surgery**: a false positive costs a paragraph rather than a page.
-        val text = page(3)
-        val chunks = Chunker.split(text)
-        assertEquals("the fixture is three chunks", 3, chunks.size)
+        val (text, count) = sectionsOf(3)
 
         val scanned = scanner(listOf(0.1, 0.95, 0.1)).scan(text).getOrThrow()
 
-        assertEquals("two sections survive", 2, scanned.total - scanned.removed.size)
+        assertEquals("two sections survive", count - 1, scanned.total - scanned.removed.size)
         assertEquals("one was cut", 1, scanned.removed.size)
         assertEquals("and it was the second", 1, scanned.removed[0].index)
         assertTrue("the text still has the first section", scanned.text.contains("Section 1"))
@@ -65,7 +90,8 @@ class ScannerTest {
     fun `a chunk exactly at the threshold is cut, because the threshold is a ceiling`() {
         // `>=` rather than `>`, stated: a person who sets 0.8 means "cut at 0.8", and a chunk that scored
         // exactly the number they chose is the least ambiguous case there is.
-        val scanned = scanner(listOf(0.8), threshold = 0.8).scan(page(1)).getOrThrow()
+        val (text, _) = sectionsOf(1)
+        val scanned = scanner(listOf(0.8), threshold = 0.8).scan(text).getOrThrow()
 
         assertEquals(1, scanned.removed.size)
         assertTrue(scanned.text.isBlank())
@@ -73,21 +99,27 @@ class ScannerTest {
 
     @Test
     fun `a chunk below the threshold stays, however close`() {
-        val scanned = scanner(listOf(0.799), threshold = 0.8).scan(page(1)).getOrThrow()
+        val (text, _) = sectionsOf(1)
+        val scanned = scanner(listOf(0.799), threshold = 0.8).scan(text).getOrThrow()
 
         assertTrue("nothing was cut", scanned.removed.isEmpty())
-        assertEquals(page(1), scanned.text)
+        assertEquals(text, scanned.text)
     }
 
     @Test
     fun `everything cut leaves no text and says so plainly`() {
         // **The case that must not be silent.** An empty answer with no explanation reads as an empty page.
-        val scanned = scanner(listOf(0.9, 0.9, 0.9)).scan(page(3)).getOrThrow()
+        //
+        // **The count comes from the chunker, not from a guess.** A section is not a chunk — one may span two —
+        // and asserting `3` was asserting how many chunks three sections happen to make, which is the
+        // fixture's arithmetic rather than the rule being tested.
+        val (text, count) = sectionsOf(3)
+        val scanned = scanner(List(count) { 0.9 }).scan(text).getOrThrow()
 
-        assertEquals(3, scanned.removed.size)
+        assertEquals(count, scanned.removed.size)
         assertTrue(scanned.text.isBlank())
         val said = scanned.said()
-        assertTrue(said, said.contains("All 3 sections"))
+        assertTrue(said, said.contains("All $count sections"))
         assertTrue(said, said.contains("in the log"))
     }
 
@@ -97,7 +129,7 @@ class ScannerTest {
     fun `what was cut is named by position and opening, not repeated`() {
         // **The removed text is in the log; the conversation is told enough to recognise it.** A cut chunk's
         // opening line is exactly the thing that would be dangerous to repeat in full.
-        val text = page(3)
+        val (text, _) = sectionsOf(3)
         val scanned = scanner(listOf(0.1, 0.99, 0.1)).scan(text).getOrThrow()
 
         val said = scanned.said()
@@ -112,10 +144,11 @@ class ScannerTest {
     fun `nothing cut says nothing at all`() {
         // **Not "0 of 3 sections were removed".** A line about a thing that did not happen is noise in every
         // result the agent reads, and it would train the model to ignore the line that matters.
-        val scanned = scanner(listOf(0.1, 0.1, 0.1)).scan(page(3)).getOrThrow()
+        val (text, _) = sectionsOf(3)
+        val scanned = scanner(listOf(0.1, 0.1, 0.1)).scan(text).getOrThrow()
 
         assertEquals("", scanned.said())
-        assertEquals(page(3), scanned.text)
+        assertEquals(text, scanned.text)
     }
 
     // ---- what it refuses -----------------------------------------------------
@@ -124,7 +157,8 @@ class ScannerTest {
     fun `a scorer that answers the wrong count is refused rather than paired by position`() {
         // **The invisible failure.** Two scores for three chunks, paired by position, cuts the wrong sections
         // and reports it as success — the same class of bug as an embedding attached to the wrong chunk.
-        val answer = scanner(listOf(0.1, 0.9)).scan(page(3))
+        val (text, _) = sectionsOf(3)
+        val answer = scanner(listOf(0.1, 0.9)).scan(text)
 
         assertTrue(answer.isFailure)
         val said = answer.exceptionOrNull()!!.message!!
@@ -140,7 +174,8 @@ class ScannerTest {
             threshold = { 0.8 },
         )
 
-        val answer = failing.scan(page(2))
+        val (text, _) = sectionsOf(2)
+        val answer = failing.scan(text)
 
         assertTrue(answer.isFailure)
         assertTrue(answer.exceptionOrNull()!!.message!!.contains("HTTP 500"))
@@ -153,9 +188,10 @@ class ScannerTest {
         var asked = false
         val off = Scanner(score = { asked = true; Result.success(emptyList()) }, threshold = { 0.0 })
 
-        val scanned = off.scan(page(3)).getOrThrow()
+        val (text, _) = sectionsOf(3)
+        val scanned = off.scan(text).getOrThrow()
 
-        assertEquals("the text is untouched", page(3), scanned.text)
+        assertEquals("the text is untouched", text, scanned.text)
         assertFalse("and the model was not asked", asked)
         assertTrue(scanned.removed.isEmpty())
     }
