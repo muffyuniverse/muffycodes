@@ -9,6 +9,10 @@ They are separate because the first is a **transport** problem and the second is
 transport is the one with the constraints. Drawing needs no new mechanism once `look` exists: it ends in a PNG,
 and `look` already reads PNGs.
 
+**An image is a file, not a mode.** It has its own editor, it is made by `+` like any other file, and a text
+file can be turned into one with **Photo** — a render of its view — to be drawn on. There is no "drawing mode"
+inside the text editor, because a drawing is a different kind of file rather than a different way of typing.
+
 ---
 
 ## 1. What is actually in the way
@@ -120,51 +124,69 @@ cap matters more than it looks.
 
 ---
 
-## 3. Drawing — two modes, one canvas
+## 3. Images are files, and the editor already has a slot for them
 
-The operator's framing, which is the requirement:
+**The operator's correction, and it is a better model than the one above:**
 
-> user can draw drafts or design corrections for the model to act upon — something that is almost impossible to
-> transfer via text
+> we can not mix text and image files but give a "photo" option for a text file to make an image based off its
+> "view". and images can have their own editor where user can draw over them, and blank image is just a new one
+> added via +
 
-Both modes, as two segments in the editor's existing mode row (`View · Edit · Diff · **Sketch** · **Mark**`).
+So there is **no separate drawing mode in the text editor.** A file is text or it is an image, and each has its
+own editor. The three pieces:
 
-### 3.1 Sketch — a blank canvas
+### 3.1 `+` gains **New image**
 
-Freehand, arrows, boxes, and text. For *"put the header here, the list under it, the button bottom-right"* —
-layouts, flows, structure. The model reads geometry well, and a sketch is the only way to say "this goes there".
+Beside *New file* and *New folder*, in the same menu: a blank canvas, saved as a PNG in the folder the person is
+looking at. That is the whole of "make a drawing" — an empty image, drawn on in the image editor.
 
-### 3.2 Mark — the file's own text, drawn on
+`Workspace.kindOf` already answers `EntryKind.IMAGE` for `png`, `jpg`, `jpeg`, `gif`, `webp` and `bmp`, so a new
+PNG appears as a picture the moment it is written. Nothing has to be taught what it is.
 
-The file's text rendered underneath, and the person draws **over** it: circle the bad line, arrow to where it
-should go, cross out a block.
+### 3.2 The image editor — which does not exist yet
 
-**This is the valuable one, and it has a trap.** A PNG of the editor is a *picture of text* — expensive and
-lossy. So `Mark` saves **two things**: the annotation image, and the file's text. The next message carries both,
-so the model reads **exact text** and uses the drawing only for **where**. A circle means nothing without the
-line it circles; the line means nothing without the circle.
+Today an image opens as a **read-only** `Picture` composable (`EditorScreen.kt:372`) with **no mode row at all**.
+That is the gap: an image is a thing you look at, not a thing you can change.
 
-### 3.3 What is saved, and where
+The image editor is a mode row of its own — `View · Draw · (text files only) Edit · Diff` — and `Draw` is the
+canvas: freehand, arrow, box, and an eraser, over the image as it is. Save writes the PNG back to the same path,
+so it is a commit like any other edit and the history of a picture works exactly as the history of a file does.
 
-```
-agent/drafts/<name>.png          the drawing
-agent/drafts/<name>.txt          the file's text, for Mark (and for Sketch, the prompt that asked for it)
-```
+**Drawing over the picture rather than replacing it** is what makes the same editor serve both cases: a blank
+PNG is a sketch, a screenshot is an annotation, a photo is a correction. There is one canvas and no modes inside
+it.
 
-`agent/` is in git's exclude list, so a draft is never committed and never pushed — the same rule every other
-result file follows. A person who wants to keep one can `move` it into the project.
+### 3.3 **Photo** — a text file's view, as an image
 
-### 3.4 What the model is told
+A button in the text editor's own bar: *Photo*. It renders the file's **view** — the same markdown-rendered,
+wrapped text a person is looking at, not the raw source — into a PNG, and opens it in the image editor.
 
-The draft is not attached by magic. The person draws, presses **Send**, and the app writes an ordinary operator
-message whose text is the draft's path, and `look` runs on it in the same turn:
+That is what makes *"circle this paragraph and say it goes there"* possible: the person presses Photo, draws on
+the rendered page, and the result is an image in the project with a name they chose.
+
+**Why the view and not the source.** The person is annotating what they *see* — wrapped lines, headings, a
+table laid out. Rendering the source would put hard-wrapped raw text under their pen, and the circle would sit
+beside the thing it was meant to circle.
+
+**The cost of that choice, stated plainly:** the PNG is a picture of text, so the model reads it lossily and
+expensively. Which is why `Mark` in the earlier draft is now just this — and why the agent should be told the
+path of the text file too when the person sends a photo of it. The drawing says *where*; the file says *what*.
+
+### 3.4 What the agent is told
+
+A person who wants the agent to act on a drawing sends it as an ordinary message naming its path:
 
 ```
 operator: here is what I mean — agent/drafts/03.png
 ```
 
-That is a **person** turning, not an agent acting on its own, and it means the drawing arrives as a message
-rather than as a surprise in the middle of the agent's own reasoning.
+and `look` runs on it in the same turn. That is a **person** turning, not an agent acting on its own: a picture
+arriving unannounced in the middle of the agent's own reasoning is exactly the kind of surprise the rest of the
+app avoids.
+
+Drafts live in `agent/drafts/`, which is in git's exclude list, so a scratch drawing is never committed. A
+person who wants to keep one moves it into the project — and then it is an ordinary image file, committed and
+synced like everything else.
 
 ---
 
@@ -194,11 +216,15 @@ time and silently wrong the rest), and any vector-drawing SDK.
 | 2 | `ContextBudget` counts an image by **dimensions**, not base64 bytes | a budget test with a known 1024×768 |
 | 3 | `look` — the tool, the four formats, the downscale, the refusal for a blind model | `LookTest`, `AgentToolsTest` |
 | 4 | the attachment rides the **next** message and is cleared after it | an `AgentTest` that looks, then asserts the parts |
-| 5 | the editor's `Sketch` and `Mark` segments, and the save | `EditorScreenTest` with a drawn path |
-| 6 | the person's **Send** writing the draft as an operator message | `AgentChatScreenTest` |
+| 5 | `+` gains **New image**, writing a blank PNG | `BrowserChromeTest`, a `WorkspaceTest` kind check |
+| 6 | the image editor's `Draw` mode: canvas, tools, save back to the path | `EditorScreenTest` with a drawn path |
+| 7 | **Photo**: the text view rendered to a PNG, opened in the image editor | `EditorScreenTest`, a known-size render |
 
-**Steps 1–4 are `look`, and `look` alone closes a loop the app already has**: `shot` produces a PNG, and today
-nothing can consume one. That is worth shipping before any canvas exists.
+**Steps 1–4 are `look`, and `look` alone closes a loop the app already has**: `shot` produces a PNG and nothing
+can consume one. That is worth shipping before any canvas exists.
+
+**Steps 5–7 are independent of 1–4** and could land first if the drawing matters more — nothing about a canvas
+needs the agent to be able to see.
 
 ---
 
@@ -208,9 +234,17 @@ nothing can consume one. That is worth shipping before any canvas exists.
 a phone photo is 4000 px wide, so it is a real change rather than a formality.
 
 **Q2 — Does `look` take more than one path?** Two pictures in one call is one request rather than two, and
-"here is the before and here is the after" is a real thing to ask. It also doubles the cost of one call, and a
-model given four images spends its attention across them.
+"here is the before and here is the after" is a real thing to ask. It also doubles the cost of one call.
 
-**Q3 — Should a draft be attached automatically when the person draws?** This design says **no** — Send writes
-an ordinary message, because a picture arriving unannounced in the middle of the agent's reasoning is exactly
-the kind of surprise the rest of the app avoids. The alternative is one fewer tap and a stranger conversation.
+**Q3 — Where does **Photo** save?** `agent/drafts/` is scratch and never committed; the file's own folder makes
+the picture part of the project and syncs it. My reading of the operator's model is that a photo of a file
+belongs beside the file, because it is a note about that file — but a scratch one that is deleted after the turn
+is also a real way to work.
+
+**Q4 — Does the image editor's `Draw` keep a history of strokes?** Undo within a session is cheap; a saved undo
+stack is a second file format and a second thing to keep in sync with the PNG. My answer is **session-only
+undo** — the PNG is the document, and the history of the PNG is git's.
+
+**Q5 — What does a **new blank image**'s name default to, and what size is it?** A canvas has to have
+dimensions before it has content, and the screen's own size is the wrong answer for a file that outlives the
+phone.
