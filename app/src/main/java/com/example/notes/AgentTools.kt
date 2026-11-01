@@ -2402,6 +2402,9 @@ class AgentTools(
      */
     private fun resolveFile(raw: String): Result<File> {
         val file = resolve(raw).getOrElse { return Result.failure(it) }
+        // **A folder is not a file, and which folder it is decides what to say.** The project's own
+        // folder has one sentence; the account's has another, because `../` reaches it now and "the
+        // project's own folder" would name a folder the agent did not ask about.
         if (rel(file).isEmpty()) {
             return Result.failure(
                 IllegalArgumentException(
@@ -2409,11 +2412,23 @@ class AgentTools(
                 ),
             )
         }
+        if (projectOf(file) == null) {
+            return Result.failure(
+                IllegalArgumentException(
+                    "That is the account's own folder, and this command needs a file inside a " +
+                        "project. Name one: `../<project>/<file>`.",
+                ),
+            )
+        }
         return Result.success(file)
     }
 
     fun resolve(raw: String): Result<File> {
-        val clean = raw.trim().replace('\\', '/').trimStart('/')
+        // **Both ends trimmed, and the trailing one matters.** `../groceries/` is how a person writes
+        // a folder, and splitting it leaves an empty last part — which the empty-name check below
+        // read as "that path has an empty name in it" for a perfectly ordinary path. A trailing slash
+        // says "this is a folder", not "there is a nameless thing here".
+        val clean = raw.trim().replace('\\', '/').trim('/')
         if (clean.isEmpty()) return Result.success(projectDir)
         val parts = clean.split('/')
         if (parts.any { it.isEmpty() }) {
