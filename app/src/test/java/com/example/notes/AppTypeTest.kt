@@ -229,7 +229,11 @@ class AppTypeTest {
         val mine = File(project, ".github/workflows/android.yml")
         mine.parentFile?.mkdirs()
         mine.writeText("# mine, not the preset's")
-        AgentPrompt.projectFile(project).writeText("# my instructions")
+        // **`parentFile.mkdirs()` first**: the prompt lives under `muffycodes_data/prompts/` now, and
+        // a test that wrote it without making the folder was writing to a path that did not exist —
+        // which threw, and looked like a copy that had done something wrong.
+        AgentPrompt.projectFile(project).apply { parentFile?.mkdirs() }
+            .writeText("# my instructions")
 
         val copied = Presets.copy(ws.accountDir, project, AppType.ANDROID)
 

@@ -124,7 +124,7 @@ class AgentTest {
     @Test
     fun `the project's own instructions are in the request and are not overwritten`() {
         val projectDir = File(ws.accountDir, "shopping")
-        val file = AgentPrompt.projectFile(projectDir)
+        val file = AgentPrompt.projectFile(projectDir).apply { parentFile?.mkdirs() }
         file.writeText("Always answer in one sentence.")
 
         val door = ScriptedDoor(Reply("ok"))
@@ -2516,7 +2516,7 @@ class AgentTest {
         // would never see the edit at all. The door does the editing, because that is the only
         // way to change the file *while* the agent is working.
         val projectDir = File(ws.accountDir, "shopping")
-        val brief = AgentPrompt.projectFile(projectDir)
+        val brief = AgentPrompt.projectFile(projectDir).apply { parentFile?.mkdirs() }
         brief.writeText("Answer in one sentence.")
 
         val door = object : Door {
@@ -3067,7 +3067,7 @@ class AgentTest {
         // The cache is a prefix match. ① first and ② after it is what makes editing the project's
         // brief cost a re-read of the brief rather than of everything the app was told.
         val dir = File(ws.accountDir, "shopping")
-        val brief = AgentPrompt.projectFile(dir)
+        val brief = AgentPrompt.projectFile(dir).apply { parentFile?.mkdirs() }
         brief.writeText("Old brief.")
         val before = agent(ScriptedDoor()).request().system
 
