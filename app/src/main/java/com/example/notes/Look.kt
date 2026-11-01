@@ -42,11 +42,6 @@ object Look {
         val tokens: Long get() = ContextBudget.pictureTokens(width, height)
     }
 
-    /** Why a file could not be looked at, as a sentence for the model. */
-    sealed interface Failed {
-        val said: String
-    }
-
     /**
      * Read [file] as a picture, or say why not.
      *
@@ -147,6 +142,12 @@ object Look {
         return "data:image/png;base64," + Base64.getEncoder().encodeToString(bytes.toByteArray())
     }
 
-    /** A refusal with a sentence the model can act on. */
-    class LookFailed(override val said: String) : Exception(said)
+    /**
+     * A refusal with a sentence the model can act on.
+     *
+     * **An exception rather than a sealed result type**, because the caller's job is to collect
+     * whichever of several pictures failed into one sentence — and `Result` already carries the
+     * failure and the message together. The alternative was a second result type wrapping the first.
+     */
+    class LookFailed(val said: String) : Exception(said)
 }
