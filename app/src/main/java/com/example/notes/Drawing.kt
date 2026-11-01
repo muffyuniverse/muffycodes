@@ -445,11 +445,15 @@ fun DrawingSurface(
     ) {
     // **The window's size, which is what a fit is measured against.** A `DrawScope`'s `size` is the
     // canvas's own box — the picture's natural size — so reading it there made every fit 1:1.
+    // **Guarded against an unbounded constraint.** A `BoxWithConstraints` inside a scrolling or
+    // weighted parent reports `Infinity` for the axis that is not bounded, and `Infinity` in the fit
+    // makes the zoom enormous — the picture became a speck in the middle of a blank page, which is
+    // what the second tour picture showed. A non-finite side means "not measured yet", and zero is the
+    // value the fit already treats as such.
     val density = androidx.compose.ui.platform.LocalDensity.current.density
-    val windowSize = androidx.compose.ui.unit.IntSize(
-        (maxWidth.value * density).toInt(),
-        (maxHeight.value * density).toInt(),
-    )
+    fun side(value: androidx.compose.ui.unit.Dp): Int =
+        if (value.value.isFinite()) (value.value * density).toInt() else 0
+    val windowSize = androidx.compose.ui.unit.IntSize(side(maxWidth), side(maxHeight))
       Box(
         modifier = Modifier
             .shadow(2.dp)
