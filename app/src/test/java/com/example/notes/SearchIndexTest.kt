@@ -93,11 +93,13 @@ class SearchIndexTest {
         // **A file long enough to be several chunks**, because that is the shape the claim is about:
         // one paragraph edited in a file of many. A three-line file is one chunk, so editing it
         // changes the whole chunk and there is nothing to share.
-        val lines = (1..60).map { "line $it of the file" }
+        // **Three or more chunks, so there are chunks the edit cannot reach.** With two, the overlap
+        // means a change to one re-embeds both and there is nothing left to prove the hash works.
+        val lines = (1..200).map { "line $it of the file, with enough words to fill a chunk" }
         val before = Chunker.split(lines.joinToString("\n"))
         val after = Chunker.split(lines.joinToString("\n").replace("line 40 of", "LINE 40 of"))
 
-        assertTrue("the file is several chunks: ${before.size}", before.size > 1)
+        assertTrue("the file is several chunks: ${before.size}", before.size >= 3)
         val first = index.put("a.txt", "", before, vectors()).getOrThrow()
         val second = index.put("a.txt", "abc1234", after, vectors()).getOrThrow()
 
