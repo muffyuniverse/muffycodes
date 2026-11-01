@@ -171,7 +171,10 @@ object Presets {
      * person may have deleted it, and a project that keeps working without one is the right outcome.
      */
     fun copy(accountDir: File, projectDir: File, type: AppType): Copied {
-        val root = File(File(File(accountDir, Workspace.SYSTEM_PROJECT), Workspace.TYPES), type.id)
+        val root = File(
+            File(File(File(accountDir, Workspace.SYSTEM_PROJECT), Workspace.STARTER_DATA), Workspace.STARTERS),
+            type.id,
+        )
         val written = mutableListOf<String>()
         val kept = mutableListOf<String>()
 
@@ -193,16 +196,35 @@ object Presets {
             }
         }
 
-        val promptFrom = File(root, AgentPrompt.PRESET_FILE)
-        val promptTo = File(projectDir, AgentPrompt.PROJECT_FILE)
+        val promptFrom = File(root, AgentPrompt.STARTER_FILE)
+        val promptTo = AgentPrompt.projectFile(projectDir)
+        // **`muffycodes_data/prompts/`, and reported by its path from the project root** — so a
+        // person reading "Added muffycodes_data/prompts/project_prompt.txt" knows exactly which file
+        // appeared rather than guessing at a bare name.
+        val promptName = "${AgentPrompt.DATA}/${AgentPrompt.PROMPTS}/${AgentPrompt.PROJECT_FILE}"
         if (promptTo.isFile) {
-            kept.add(AgentPrompt.PROJECT_FILE)
+            kept.add(promptName)
         } else if (promptFrom.isFile) {
             try {
+                promptTo.parentFile?.mkdirs()
                 promptTo.writeBytes(promptFrom.readBytes())
-                written.add(AgentPrompt.PROJECT_FILE)
+                written.add(promptName)
             } catch (e: Throwable) {
                 // As above.
+            }
+        }
+
+        // **The subject folders, made before anything goes in them.** The system prompt tells the
+        // agent to look in `dictionary/` and `wiki/`, and a prompt naming a folder the app has not
+        // made sends it to a place that is not there — which reads as "this project has none"
+        // rather than "nobody has written one yet". An empty folder is a promise; these promises are
+        // true, because they are where the person's own text goes.
+        for (name in Workspace.SUBJECTS) {
+            try {
+                File(File(projectDir, AgentPrompt.DATA), name).mkdirs()
+            } catch (e: Throwable) {
+                // A folder that cannot be made is reported by what did not appear, like every other
+                // copy here.
             }
         }
 

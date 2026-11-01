@@ -22,16 +22,39 @@ import java.io.File
  */
 object AgentPrompt {
 
+    /**
+     * The folder a project keeps the app's own text in: prompts, dictionary, skills, wiki, mcp.
+     *
+     * **One name for the whole set, and it is the operator's.** The point is that everything a
+     * project needs to be worked on — how to behave, what the person's words mean, what has been
+     * learned about this code — lives in one folder a person can open, read, edit and commit. It is
+     * *content*, not app state, so it syncs and it is not in `APP_IGNORES`.
+     */
+    const val DATA = "muffycodes_data"
+
+    /** Where the prompts live inside [DATA]. */
+    const val PROMPTS = "prompts"
+
     const val SYSTEM_FILE = "system_prompt.txt"
     const val PROJECT_FILE = "project_prompt.txt"
 
     /**
-     * The name a **preset** prompt has in the system project, inside its type's folder.
+     * What a **new project** starts with, in the system project, inside its kind's folder.
      *
-     * The same name as a project's own, deliberately: they are the same kind of thing — instructions
-     * for this work — and a person editing one should not have to learn a second name for the other.
+     * **A starter, not a type.** The folder is read exactly once — when the project is created, to
+     * copy its prompt and workflow in — and never again. That is what makes it a starter: after the
+     * copy it *is* the project's own text, editable like any other file, and nothing later consults
+     * the folder for it. A "type" would be consulted on every turn, which is a different thing and
+     * not what the operator wants.
      */
-    const val PRESET_FILE = PROJECT_FILE
+    const val STARTER_FILE = PROJECT_FILE
+
+    /** The prompt of [projectDir]'s own — ② — inside [DATA]. */
+    fun projectFile(projectDir: File): File = File(File(projectDir, DATA), "$PROMPTS/$PROJECT_FILE")
+
+    /** The prompt of the system project — ① — inside [DATA]. */
+    fun systemFile(accountDir: File): File =
+        File(File(File(accountDir, Workspace.SYSTEM_PROJECT), DATA), "$PROMPTS/$SYSTEM_FILE")
 
     /**
      * ① — **the tools and the shape of the environment. Nothing else.**
@@ -73,8 +96,13 @@ object AgentPrompt {
                          event that happened, with `kind` and `ctx`. Read them. Do not
                          change them. They are in git's exclude list, so they never leave
                          the phone.
-          project_prompt.txt  how to work in this project. Read it. It is short.
-        You cannot see or change anything outside this project, another project included.
+          muffycodes_data/    this project's own text, and it is yours to read:
+            prompts/project_prompt.txt   how to work here. Read it. It is short.
+            dictionary/      what the operator's words mean. Look before you assume.
+            skills/          how to act in a particular situation, one folder each.
+            wiki/            what has been learned about this code.
+            mcp/             servers this project may reach, one article each.
+        You may read anything in this project. You may not change anything outside it.
 
         HOW A TURN WORKS
         Call one or more tools. Every call gets a result whose first line is 0 (it worked) or 1
@@ -192,7 +220,7 @@ object AgentPrompt {
      * prompt is the agent given" would need a rule instead of a path.
      */
     fun system(accountDir: File): String =
-        layer(File(File(accountDir, Workspace.SYSTEM_PROJECT), SYSTEM_FILE), SYSTEM_DEFAULT)
+        layer(systemFile(accountDir), SYSTEM_DEFAULT)
 
     /**
      * ② for the project in [projectDir].
@@ -201,7 +229,7 @@ object AgentPrompt {
      * [layer]: a reader that makes the folder recreates one the person deleted.
      */
     fun project(projectDir: File): String =
-        layer(File(projectDir, PROJECT_FILE), PROJECT_DEFAULT, mayCreate = false)
+        layer(projectFile(projectDir), PROJECT_DEFAULT, mayCreate = false)
 
     /**
      * The two layers as they were at one moment, and the message they make together.

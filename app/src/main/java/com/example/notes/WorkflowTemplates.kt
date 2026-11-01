@@ -10,9 +10,9 @@ package com.example.notes
  * runs — because GitHub only dispatches a workflow that is in the repository, so a file in the system
  * project cannot be dispatched at all. The preset is the source; the copy is the workflow.
  *
- * **They live at `system/project_types/<type>/workflows/`**, one folder per type, beside that type's
+ * **They live at `system/muffycodes_data/starters/<kind>/workflows/`**, one folder per kind, beside that kind's
  * `project_prompt.txt`. The folder is the mapping: to know what an Android project starts with, look in
- * `project_types/android/` rather than in a table in code.
+ * `starters/android/` rather than in a table in code.
  *
  * A copy is the project's own file, so a project that needs an extra step can have one without asking
  * the template to change for everybody.

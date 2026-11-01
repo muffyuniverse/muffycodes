@@ -313,7 +313,7 @@ class ProjectsFeatureTest : FeatureTest() {
         val workflow = File(dir, ".github/workflows/android.yml")
         assertTrue("the workflow was copied in", workflow.isFile)
         assertTrue("and it is the Android one", workflow.readText().contains("assembleRelease"))
-        val prompt = File(dir, AgentPrompt.PROJECT_FILE)
+        val prompt = AgentPrompt.projectFile(dir)
         assertTrue("and so was the prompt", prompt.isFile)
         assertTrue("which says how to build this kind of project", prompt.readText().contains("Gradle"))
         assertEquals(
@@ -388,7 +388,7 @@ class ProjectsFeatureTest : FeatureTest() {
             "no workflow was invented for an unanswered question",
             File(dir, ".github").exists(),
         )
-        val brief = File(dir, AgentPrompt.PROJECT_FILE).readText()
+        val brief = AgentPrompt.projectFile(dir).readText()
         assertTrue("it says nobody has chosen", brief.contains("Nobody has said yet"))
         assertTrue("it names the choices", brief.contains("Android app") && brief.contains("web app"))
         assertTrue("it says to look before asking", brief.contains("Read the project first"))
@@ -410,7 +410,7 @@ class ProjectsFeatureTest : FeatureTest() {
 
         val dir = scene.workspace!!.projectDir("scratch")
         assertFalse("no workflow", File(dir, ".github").exists())
-        assertFalse("and no brief either", File(dir, AgentPrompt.PROJECT_FILE).exists())
+        assertFalse("and no brief either", AgentPrompt.projectFile(dir).exists())
         assertEquals("the type is recorded", AppType.CUSTOM, ProjectMeta.read(dir).type)
         assertFalse("and the bar stops asking", ProjectMeta.read(dir).type.undecided)
     }
@@ -478,7 +478,7 @@ class ProjectsFeatureTest : FeatureTest() {
         )
         assertTrue(
             "and the prompt is the web one",
-            File(dir, AgentPrompt.PROJECT_FILE).readText().contains("npm"),
+            AgentPrompt.projectFile(dir).readText().contains("npm"),
         )
     }
 
@@ -487,7 +487,7 @@ class ProjectsFeatureTest : FeatureTest() {
         // A preset a person deleted must not stop a project being made. The project is the thing;
         // the preset is what it started from.
         val dir = scene.workspace!!.projectDir("system")
-        File(dir, Workspace.TYPES).deleteRecursively()
+        File(File(dir, AgentPrompt.DATA), Workspace.STARTERS).deleteRecursively()
         scene.viewModel.createLocalProject("scratch", AppType.ANDROID)
         scene.await("the local project", 30_000) {
             scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
@@ -568,7 +568,7 @@ class ProjectsFeatureTest : FeatureTest() {
         // It used to live at the account's root — a place the app draws as the project list, with
         // nothing in the interface leading to it. A file nothing leads to is a file nobody edits.
         val ws = scene.workspace!!
-        val prompt = File(File(ws.accountDir, "system"), AgentPrompt.SYSTEM_FILE)
+        val prompt = AgentPrompt.systemFile(ws.accountDir)
 
         // **Asked first, because asking is what writes it.** The shipped text becomes a file the
         // first time the agent needs it — the same rule the project layer already follows, and the

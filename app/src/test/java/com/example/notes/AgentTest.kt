@@ -124,7 +124,7 @@ class AgentTest {
     @Test
     fun `the project's own instructions are in the request and are not overwritten`() {
         val projectDir = File(ws.accountDir, "shopping")
-        val file = File(projectDir, AgentPrompt.PROJECT_FILE)
+        val file = AgentPrompt.projectFile(projectDir)
         file.writeText("Always answer in one sentence.")
 
         val door = ScriptedDoor(Reply("ok"))
@@ -228,15 +228,17 @@ class AgentTest {
 
     @Test
     fun `a file outside the two writable folders is refused`() {
-        // `project_prompt.txt` is the person's, not the agent's: it can read it and cannot
-        // rewrite its own instructions.
+        // **The project prompt is the person's, not the agent's**: it can read it and cannot rewrite
+        // its own instructions. It lives under `muffycodes_data/prompts/` now, so the path names the
+        // folder it is really in — a test that wrote to the old root would have been testing a file
+        // the app no longer reads.
         val door = ScriptedDoor(
             Reply(
                 "",
                 listOf(
                     call(
                         "edit",
-                        """{"path":"project_prompt.txt","grep":"Nothing","replace":"Everything"}""",
+                        """{"path":"muffycodes_data/prompts/project_prompt.txt","grep":"Nothing","replace":"Everything"}""",
                     )
                 ),
             ),
@@ -253,7 +255,7 @@ class AgentTest {
         // `mkdirs()`-and-write that recreated a deleted project folder and made
         // `AgentSessionFeatureTest`'s tick test flake three times. The file did not exist before the
         // turn, so "as it was" is "still not there", and the fallback is answered from memory.
-        val prompt = File(ws.accountDir, "shopping/project_prompt.txt")
+        val prompt = AgentPrompt.projectFile(File(ws.accountDir, "shopping"))
         assertFalse(
             "and no instructions file was created by reading: $prompt",
             prompt.exists(),
@@ -539,7 +541,7 @@ class AgentTest {
         // so a file on the phone was written by this build or by a person — and comparing it
         // against half-remembered defaults would rewrite somebody's instructions to fix a phon
         // that does not exist.
-        val file = File(File(account, Workspace.SYSTEM_PROJECT), AgentPrompt.SYSTEM_FILE)
+        val file = AgentPrompt.systemFile(account)
         val theirs = "Work only in src/. Never touch the README.\n"
         file.writeText(theirs)
 
@@ -554,7 +556,7 @@ class AgentTest {
         // The one thing the file system has to do here: a fresh account has no instructions, and an
         // agent with none is an agent inventing its own rules. **The file is in the system project**
         // — the one place the prompt lives, with no second path to fall back to.
-        val file = File(File(account, Workspace.SYSTEM_PROJECT), AgentPrompt.SYSTEM_FILE)
+        val file = AgentPrompt.systemFile(account)
         file.delete()
 
         assertEquals("the shipped text", AgentPrompt.SYSTEM_DEFAULT, AgentPrompt.system(account))
@@ -2514,7 +2516,7 @@ class AgentTest {
         // would never see the edit at all. The door does the editing, because that is the only
         // way to change the file *while* the agent is working.
         val projectDir = File(ws.accountDir, "shopping")
-        val brief = File(projectDir, AgentPrompt.PROJECT_FILE)
+        val brief = AgentPrompt.projectFile(projectDir)
         brief.writeText("Answer in one sentence.")
 
         val door = object : Door {
@@ -2552,7 +2554,7 @@ class AgentTest {
         // ① is shipped as a default but it is the account's file from the first turn on, so a
         // person can correct the app's own instructions — and the next turn is answered under
         // the correction. Anything else would make the file a decoration.
-        val file = File(File(account, Workspace.SYSTEM_PROJECT), AgentPrompt.SYSTEM_FILE)
+        val file = AgentPrompt.systemFile(account)
         file.writeText("You are working inside a phone app. Answer in Latin.")
         val first = ScriptedDoor(Reply("ok"))
         agent(first).burst("go")
@@ -3065,7 +3067,7 @@ class AgentTest {
         // The cache is a prefix match. ① first and ② after it is what makes editing the project's
         // brief cost a re-read of the brief rather than of everything the app was told.
         val dir = File(ws.accountDir, "shopping")
-        val brief = File(dir, AgentPrompt.PROJECT_FILE)
+        val brief = AgentPrompt.projectFile(dir)
         brief.writeText("Old brief.")
         val before = agent(ScriptedDoor()).request().system
 

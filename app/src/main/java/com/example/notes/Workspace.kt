@@ -115,44 +115,75 @@ class Workspace(val accountDir: File) {
         if (!readme.isFile) readme.writeText(README_TEXT)
         // **Beside the readme call, not inside it.** This was written *after* the readme's early
         // return, so on any account that already had a readme — which is every account that has ever
-        // been opened — the presets were never written at all. It only worked on a fresh install,
+        // been opened — the starters were never written at all. It only worked on a fresh install,
         // which is the one case a person testing it would not have.
-        ensurePresets(dir)
+        ensureStarters(dir)
+        ensureSystemData(dir)
     }
 
     /**
-     * The presets, in the system project: **one folder per project type, holding that type's
-     * workflows and the instructions its agent starts with.**
+     * The system project's own `muffycodes_data/`: the core text every project inherits.
      *
-     * ## Why per type, and why in a folder
+     * **The folders exist before anything is put in them, and the folders are the point.** The
+     * system prompt names `dictionary/`, `skills/`, `wiki/` and `mcp/`, and a prompt that names a
+     * folder the app has not made is a prompt telling the agent to look somewhere that is not
+     * there — which reads as "this project has none" rather than "nobody has written one yet".
      *
-     * A flat `workflows/` folder would put the mapping from type to template in code, where a person
-     * cannot see or change it. Here it is the layout: to know what an Android project gets, look in
-     * `project_types/android/`. Adding a type is making a folder, and the app reads the folders that
-     * are there rather than an enum it was compiled with.
+     * An empty folder is a promise, and here the promise is true: these are the places the core
+     * articles go. Unlike a `workflows/` folder under a kind with no workflow, an empty
+     * `dictionary/` says "the operator has not defined any words yet", which is a real state and one
+     * they can change by writing a file.
+     */
+    private fun ensureSystemData(dir: File) {
+        val root = File(dir, AgentPrompt.DATA)
+        try {
+            File(root, AgentPrompt.PROMPTS).mkdirs()
+            for (name in Workspace.SUBJECTS) File(root, name).mkdirs()
+        } catch (t: Throwable) {
+            // As everywhere else in this class: a folder that cannot be made is a phone problem, and
+            // every write that needs it says so on its own.
+        }
+    }
+
+
+    /**
+     * The starters, in the system project: **one folder per kind of project, holding the workflows
+     * and the instructions its agent starts with.**
      *
-     * ## Why these are presets and not lock-ins
+     * ## Why per kind, and why in a folder
      *
-     * A project gets a **copy** of the pair when it is made, and another copy when its type changes.
+     * A flat `workflows/` folder would put the mapping from kind to template in code, where a person
+     * cannot see or change it. Here it is the layout: to know what an Android project starts with,
+     * look in `muffycodes_data/starters/android/`. Adding a kind is making a folder, and the app
+     * reads the folders that are there rather than an enum it was compiled with.
+     *
+     * ## Why these are starters and not lock-ins
+     *
+     * A project gets a **copy** of the pair when it is made, and another copy when its kind changes.
      * The copy is the project's, editable, and an old copy is never removed — a person who has adapted
-     * a workflow to their project would lose it if a type change tidied up after itself.
+     * a workflow to their project would lose it if a kind change tidied up after itself.
+     *
+     * **"Starter" and not "preset" or "type".** The operator's correction: *"no type prompts… the only
+     * place where I remember presets was statistics screen"*. This folder is read once, when the
+     * project is created; after that the copy is the project's own text and nothing consults the
+     * folder again. A name that promised a taxonomy would be a name that lied about when it is read.
      *
      * ## Why the folder is locked
      *
-     * These are the app's own text, held at `system/project_types/…` by a **path** rule rather than a
+     * These are the app's own text, held at `system/muffycodes_data/starters/…` by a **path** rule rather than a
      * name one, because every project with CI has a folder called `workflows` that the agent must be
      * able to read. See [isTemplatePath].
      */
-    private fun ensurePresets(dir: File) {
-        val root = File(dir, TYPES)
+    private fun ensureStarters(dir: File) {
+        val root = File(File(dir, STARTER_DATA), STARTERS)
         try {
             root.mkdirs()
             for (type in AppType.entries) {
                 val one = File(root, type.id)
                 one.mkdirs()
                 // **The prompt is written once and never overwritten**, so a person who has tuned
-                // their preset keeps the tuning.
-                val prompt = File(one, AgentPrompt.PRESET_FILE)
+                // their starter keeps the tuning.
+                val prompt = File(one, AgentPrompt.STARTER_FILE)
                 if (!prompt.isFile) {
                     WorkflowTemplates.promptFor(type)?.let { prompt.writeText(it) }
                 }
@@ -1316,13 +1347,30 @@ class Workspace(val accountDir: File) {
         const val TEMPLATES = "workflows"
 
         /**
-         * The folder of presets, one per project type.
+         * The folder of **starters**, one per kind of project.
          *
-         * **The name is plural and the contents are types**, so `system/project_types/android/` reads
-         * as what it is. The folder is the list: a type the app does not know about but which has a
-         * folder here is a type a person added, and it appears.
+         * **A starter, not a type, and the rename is the correction.** The operator's words: *"no
+         * type prompts. what I mean is just a list of user prompts that can be used by operator"* —
+         * so what this folder holds is the text a *new* project begins with, copied in once and then
+         * the project's own. Nothing reads it again. Calling it `project_types` promised a taxonomy
+         * the app does not have and would have been consulted on every turn if anyone believed it.
+         *
+         * The folder is still the list: a kind the app does not know about but which has a folder
+         * here is one a person added, and it appears.
          */
-        const val TYPES = "project_types"
+        const val STARTERS = "starters"
+
+        /** Where a starter's prompt and workflows sit, inside the system project. */
+        const val STARTER_DATA = AgentPrompt.DATA
+
+        /**
+         * The subject folders inside `muffycodes_data/`, in one list because they are one idea.
+         *
+         * **One list, so adding a folder is one line.** Each is a place a person puts text the agent
+         * reads on demand; none has a mechanism of its own, and that is what makes them affordable.
+         * The system project ships the core of each and a project grows its own.
+         */
+        val SUBJECTS = listOf("dictionary", "skills", "wiki", "mcp")
 
 
         /**
@@ -1330,12 +1378,18 @@ class Workspace(val accountDir: File) {
          *
          * The system project's own name is the first segment, so a project that happens to be called
          * something else cannot match, and a file called `workflows` in a project is never this.
+         *
+         * **Three segments now**, because everything the app ships lives under the system project's
+         * `muffycodes_data/`: `system/muffycodes_data/starters/android/…`. A two-segment rule would
+         * lock the whole of `muffycodes_data/`, including a project's own dictionary and wiki if the
+         * system project were ever given one.
          */
         fun isTemplatePath(path: String): Boolean {
             val parts = path.trim('/').split('/')
-            return parts.size >= 2 &&
+            return parts.size >= 3 &&
                 parts[0].equals(SYSTEM_PROJECT, ignoreCase = true) &&
-                parts[1].equals(TYPES, ignoreCase = true)
+                parts[1].equals(AgentPrompt.DATA, ignoreCase = true) &&
+                parts[2].equals(STARTERS, ignoreCase = true)
         }
 
         /** A project's ignore file, and the two lines the app keeps in it. */

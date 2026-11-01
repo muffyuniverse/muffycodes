@@ -157,12 +157,23 @@ class AppTypeTest {
         // one must not: the folder is called `workflows`, and every project with CI has a
         // `.github/workflows/` the agent has to be able to read. A name rule would lock those too.
         assertTrue(
-            "a preset is the app's",
-            Workspace.isTemplatePath("system/project_types/android/workflows/android.yml"),
+            "a starter is the app's",
+            Workspace.isTemplatePath("system/muffycodes_data/starters/android/workflows/android.yml"),
         )
         assertTrue(
-            "and the preset's own prompt is too",
-            Workspace.isTemplatePath("system/project_types/android/project_prompt.txt"),
+            "and the starter's own prompt is too",
+            Workspace.isTemplatePath("system/muffycodes_data/starters/android/project_prompt.txt"),
+        )
+        // **The system project's own dictionary and wiki are not starters.** A two-segment rule
+        // would have locked the whole of `muffycodes_data/`, and a person could never have written
+        // down what a word means.
+        assertFalse(
+            "the system dictionary is not a starter",
+            Workspace.isTemplatePath("system/muffycodes_data/dictionary/analyze.md"),
+        )
+        assertFalse(
+            "nor is the system wiki",
+            Workspace.isTemplatePath("system/muffycodes_data/wiki/how-retries-work.md"),
         )
         assertFalse(
             "a project's own workflows are the project's",
@@ -204,7 +215,7 @@ class AppTypeTest {
             "the workflow is where GitHub looks for it",
             File(project, ".github/workflows/android.yml").isFile,
         )
-        assertTrue("and so is the prompt", File(project, AgentPrompt.PROJECT_FILE).isFile)
+        assertTrue("and so is the prompt", AgentPrompt.projectFile(project).isFile)
         assertEquals("the type is recorded", AppType.ANDROID, ProjectMeta.read(project).type)
         ws.accountDir.deleteRecursively()
     }
@@ -218,7 +229,7 @@ class AppTypeTest {
         val mine = File(project, ".github/workflows/android.yml")
         mine.parentFile?.mkdirs()
         mine.writeText("# mine, not the preset's")
-        File(project, AgentPrompt.PROJECT_FILE).writeText("# my instructions")
+        AgentPrompt.projectFile(project).writeText("# my instructions")
 
         val copied = Presets.copy(ws.accountDir, project, AppType.ANDROID)
 
@@ -228,7 +239,7 @@ class AppTypeTest {
         assertEquals(
             "and so is the prompt",
             "# my instructions",
-            File(project, AgentPrompt.PROJECT_FILE).readText(),
+            AgentPrompt.projectFile(project).readText(),
         )
         ws.accountDir.deleteRecursively()
     }
@@ -252,7 +263,10 @@ class AppTypeTest {
             File(project, ".github/workflows/android.yml").isFile,
         )
         assertEquals("the record says what it is now", AppType.WEB, ProjectMeta.read(project).type)
-        assertTrue("the prompt was kept, not replaced", second.kept.contains(AgentPrompt.PROJECT_FILE))
+        assertTrue(
+            "the prompt was kept, not replaced",
+            second.kept.contains("${AgentPrompt.DATA}/${AgentPrompt.PROMPTS}/${AgentPrompt.PROJECT_FILE}"),
+        )
         ws.accountDir.deleteRecursively()
     }
 
@@ -272,12 +286,49 @@ class AppTypeTest {
     }
 
     @Test
+    fun `a new project gets its subject folders, because the prompt names them`() {
+        // **A prompt that names a folder the app has not made is a prompt that lies.** The system
+        // prompt tells the agent to look in `dictionary/` before assuming what a word means and in
+        // `wiki/` for what has been learned here. If those folders are absent, the agent reads the
+        // absence as "this project has none" rather than "nobody has written one yet" — and the
+        // second is a state the person can change, which is the whole point of the folder.
+        val ws = account()
+        val project = File(ws.accountDir, "my-app").apply { mkdirs() }
+
+        Presets.copy(ws.accountDir, project, AppType.ANDROID)
+
+        for (name in Workspace.SUBJECTS) {
+            assertTrue(
+                "$name/ is there before anything is put in it",
+                File(File(project, AgentPrompt.DATA), name).isDirectory,
+            )
+        }
+        ws.accountDir.deleteRecursively()
+    }
+
+    @Test
+    fun `the system project ships the core of every subject folder`() {
+        // The other half: the system project is where the core articles live, so its folders exist
+        // even when they are empty. A person opening `system/muffycodes_data/` sees the five places
+        // their text can go rather than an empty directory.
+        val ws = account()
+        val root = File(File(ws.accountDir, "system"), AgentPrompt.DATA)
+
+        assertTrue("the prompts folder", File(root, AgentPrompt.PROMPTS).isDirectory)
+        for (name in Workspace.SUBJECTS) {
+            assertTrue("$name/ is there", File(root, name).isDirectory)
+        }
+        ws.accountDir.deleteRecursively()
+    }
+
+    @Test
     fun `a preset a person deleted is not an error`() {
         // A project that keeps working without a preset is the right outcome; an app that refused
         // because its own template was missing would be an app that cannot be repaired by hand.
         val ws = account()
         val project = File(ws.accountDir, "my-app").apply { mkdirs() }
-        File(File(ws.accountDir, "system"), Workspace.TYPES).deleteRecursively()
+        File(File(File(ws.accountDir, "system"), AgentPrompt.DATA), Workspace.STARTERS)
+            .deleteRecursively()
 
         val copied = Presets.copy(ws.accountDir, project, AppType.ANDROID)
 
@@ -300,10 +351,13 @@ class AppTypeTest {
 
         Presets.copy(ws.accountDir, project, AppType.ANDROID)
 
-        val copied = File(project, AgentPrompt.PROJECT_FILE).readText()
+        val copied = AgentPrompt.projectFile(project).readText()
         val preset = File(
-            File(File(File(ws.accountDir, "system"), Workspace.TYPES), "android"),
-            AgentPrompt.PRESET_FILE,
+            File(
+                File(File(File(ws.accountDir, "system"), AgentPrompt.DATA), Workspace.STARTERS),
+                "android",
+            ),
+            AgentPrompt.STARTER_FILE,
         ).readText()
         assertEquals("the copy is the preset, word for word", preset.trim(), copied.trim())
         assertTrue(
@@ -341,14 +395,17 @@ class AppTypeTest {
         val ws = account()
         val project = File(ws.accountDir, "my-app").apply { mkdirs() }
         Presets.copy(ws.accountDir, project, AppType.ANDROID)
-        val brief = File(project, AgentPrompt.PROJECT_FILE)
+        val brief = AgentPrompt.projectFile(project)
 
         assertNull(
             "unlocked, the agent may edit it",
             ws.agentLockProblem(brief),
         )
 
-        ws.setLocked(setOf(project.name + "/" + AgentPrompt.PROJECT_FILE))
+        // **The lock is a project-relative path**, so it names the folder the prompt really lives in.
+        ws.setLocked(
+            setOf("${project.name}/${AgentPrompt.DATA}/${AgentPrompt.PROMPTS}/${AgentPrompt.PROJECT_FILE}"),
+        )
         assertNotNull(
             "locked, it may not",
             ws.agentLockProblem(brief),

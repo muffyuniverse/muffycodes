@@ -599,7 +599,8 @@ class AgentSessionFeatureTest : FeatureTest() {
         scene.await("the first turn") { door.asked.size == 1 }
         scene.await("the agent to be quiet") { !scene.viewModel.chatWorking }
 
-        File(scene.viewModel.workspace!!.accountDir, "groceries/project_prompt.txt")
+        AgentPrompt.projectFile(File(scene.viewModel.workspace!!.accountDir, "groceries"))
+            .apply { parentFile?.mkdirs() }
             .writeText("Always answer in French.")
         scene.viewModel.sendChat("second")
         scene.await("the second turn") { door.asked.size == 2 }
@@ -917,8 +918,7 @@ class AgentSessionFeatureTest : FeatureTest() {
         // `Workspace.ensure()` on every refresh, so writing into it is right; the project's folder is
         // the person's, so writing into it is how a deleted project comes back. A single shared rule
         // for both would have to pick one of those, and either choice is wrong for the other.
-        val system = File(scene.viewModel.workspace!!.accountDir, Workspace.SYSTEM_PROJECT)
-        val file = File(system, AgentPrompt.SYSTEM_FILE)
+        val file = AgentPrompt.systemFile(scene.viewModel.workspace!!.accountDir)
         file.delete()
 
         val said = AgentPrompt.system(scene.viewModel.workspace!!.accountDir)

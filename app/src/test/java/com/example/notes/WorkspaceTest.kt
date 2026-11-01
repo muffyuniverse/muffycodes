@@ -42,14 +42,14 @@ class WorkspaceTest {
         val dir = File(workspace.accountDir, "shopping")
         val agent = File(dir, AgentLog.DIR)
         agent.mkdirs()
-        File(dir, "project_prompt.txt").writeText("how to work")
+        AgentPrompt.projectFile(dir).apply { parentFile?.mkdirs() }.writeText("how to work")
         return File(agent, AgentLog.SESSION).apply { writeText(FIRST_ROW) }
     }
 
     @Test
     fun `the record is one file, and a file of that name elsewhere is not it`() {
         val session = record()
-        val prompt = File(session.parentFile.parentFile, "project_prompt.txt")
+        val prompt = AgentPrompt.projectFile(session.parentFile.parentFile)
         // Both files are the app's: the evidence and the context written from it. A person cannot
         // edit either one, which is what makes them evidence.
         val context = File(session.parentFile, AgentLog.CONTEXT).apply { writeText(FIRST_ROW) }
