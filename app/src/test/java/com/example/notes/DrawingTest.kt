@@ -103,6 +103,7 @@ class DrawingTest {
         assertEquals("width", 120, picture.width)
         assertEquals("height", 80, picture.height)
         picture.recycle()
+    }
 
     @Test
     fun `a tap with a line tool has nothing to draw`() {
