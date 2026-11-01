@@ -36,6 +36,57 @@ object Look {
      */
     val EXTENSIONS = setOf("png", "jpg", "jpeg", "webp", "gif")
 
+    /**
+     * A size a person can start a drawing at.
+     *
+     * **The default is the phone screenshot shape**, on the operator's instruction, and it is the right
+     * one rather than the cheapest: the thing a person draws on is almost always a screenshot they
+     * took, so the canvas should be the shape they already have in their hand. A square would be
+     * cheaper — 765 tokens against 1,105 — and would fit nothing they own.
+     *
+     * [label] is what the dialogue shows; the numbers are what the file becomes.
+     */
+    data class Canvas(val label: String, val width: Int, val height: Int) {
+        /** What a picture this size costs, once the provider's resize has had it. */
+        val tokens: Long get() = ContextBudget.pictureTokens(width, height)
+    }
+
+    /**
+     * The sizes offered when a picture is made.
+     *
+     * **Four, because a dialogue is not a form.** A5 at 300 dpi or a custom field would be a
+     * settings screen inside a drawing screen; these four are the shapes a phone's own pictures
+     * take, and the first one is the common case.
+     */
+    val CANVASES = listOf(
+        Canvas("Phone screenshot", 1080, 1920),
+        Canvas("Square", 1080, 1080),
+        Canvas("Landscape", 1920, 1080),
+        Canvas("A4 page", 1240, 1754),
+    )
+
+    /** The canvas a new picture starts at, per the operator: the shape already in their hand. */
+    val DEFAULT_CANVAS: Canvas get() = CANVASES.first()
+
+    /**
+     * A blank white picture of [canvas]'s size, as PNG bytes.
+     *
+     * **Written immediately, before anything draws on it.** A person who opens a new picture and backs
+     * out has an empty picture rather than a lost one, and a file that exists is a file the list can
+     * show, the editor can open, and git can record.
+     *
+     * White rather than transparent: a transparent PNG over a dark theme is a black rectangle, and the
+     * person cannot tell whether they are drawing on nothing or the app failed to draw.
+     */
+    fun blank(canvas: Canvas): ByteArray {
+        val bitmap = Bitmap.createBitmap(canvas.width, canvas.height, Bitmap.Config.ARGB_8888)
+        bitmap.eraseColor(android.graphics.Color.WHITE)
+        val bytes = ByteArrayOutputStream()
+        bitmap.compress(Bitmap.CompressFormat.PNG, 100, bytes)
+        bitmap.recycle()
+        return bytes.toByteArray()
+    }
+
     /** What one picture became: the data URL, and the size it was actually sent at. */
     data class Seen(val url: String, val width: Int, val height: Int) {
         /** What it costs, from the size it was sent at. */

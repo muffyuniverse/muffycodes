@@ -153,4 +153,125 @@ class LookTest {
             )
         }
     }
+
+    // ---- a blank picture, which is what `+ New image` writes -------------------------------------
+
+    @Test
+    fun `a blank canvas is a real png at exactly its size`() {
+        // **"Real" is the assertion.** A file with a `.png` name and no decodable body is the one
+        // failure that looks like success until somebody opens it, so the bytes are decoded back and
+        // measured rather than trusted.
+        val canvas = Look.CANVASES.first { it.label == "Square" }
+        val bytes = Look.blank(canvas)
+        assertTrue("it wrote something", bytes.size > 100)
+
+        val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        assertNotNull("and it decodes", decoded)
+        assertEquals("at the width asked for", canvas.width, decoded!!.width)
+        assertEquals("and the height", canvas.height, decoded.height)
+        decoded.recycle()
+    }
+
+    @Test
+    fun `a blank canvas is white, so it can be drawn on in any theme`() {
+        // A transparent PNG over a dark theme is a black rectangle, and a person cannot tell whether
+        // they are drawing on nothing or the app failed to draw.
+        val canvas = Look.CANVASES.first { it.label == "Square" }
+        val decoded = BitmapFactory.decodeByteArray(Look.blank(canvas), 0, Look.blank(canvas).size)!!
+        assertEquals("white, not transparent", android.graphics.Color.WHITE, decoded.getPixel(0, 0))
+        assertEquals("everywhere", android.graphics.Color.WHITE, decoded.getPixel(100, 100))
+        decoded.recycle()
+    }
+
+    @Test
+    fun `the default canvas is the phone screenshot, and it costs what it costs`() {
+        // The operator's choice, and the numbers that make it a decision: the default is the shape
+        // already in the person's hand, and it is 1,105 tokens rather than a square's 765.
+        assertEquals("the default", "Phone screenshot", Look.DEFAULT_CANVAS.label)
+        assertEquals("1080x1920", 1080, Look.DEFAULT_CANVAS.width)
+        assertEquals("and 1,105 tokens, not 765", 1_105L, Look.DEFAULT_CANVAS.tokens)
+        assertEquals(
+            "the square is the cheaper one, which is why the dialogue shows both",
+            765L,
+            Look.CANVASES.first { it.label == "Square" }.tokens,
+        )
+    }
+
+    @Test
+    fun `every offered canvas is one the provider charges a sane amount for`() {
+        // A size that would be refused, or that cost tens of thousands of tokens, must not be offered.
+        for (canvas in Look.CANVASES) {
+            val tokens = canvas.tokens
+            assertTrue(
+                "${canvas.label} costs $tokens, which is not a picture's price",
+                tokens in 200L..2_000L,
+            )
+        }
+    }
+
+    // ---- making a picture, which is what `+ New image` writes -----------------------------------
+    //
+    // **Here rather than in `WorkspaceTest`, because `Look.blank` makes a `Bitmap`.** A plain-JVM test
+    // would throw at the first line of the writer and every assertion would be about an exception
+    // rather than about a picture.
+
+    private fun space(): Workspace {
+        val account = File(folder.root, "account-${System.nanoTime()}")
+        val ws = Workspace(account)
+        ws.ensure()
+        return ws
+    }
+
+    @Test
+    fun `a picture is made with a png extension even when the name has none`() {
+        val ws = space()
+        val made = ws.createImage(ws.accountDir, "sketch", Look.CANVASES.first()).getOrThrow()
+        assertEquals("the extension was added", "sketch.png", made.name)
+    }
+
+    @Test
+    fun `a name that already ends in png is not given a second one`() {
+        val ws = space()
+        val made = ws.createImage(ws.accountDir, "sketch.png", Look.CANVASES.first()).getOrThrow()
+        assertEquals("untouched", "sketch.png", made.name)
+    }
+
+    @Test
+    fun `a picture refuses a name that is taken, in the same words a file does`() {
+        // The refusals are `createFile`'s, asked in the same order, because a person does not think of
+        // "new file" and "new picture" as different permissions.
+        val ws = space()
+        ws.createImage(ws.accountDir, "drawing.png", Look.CANVASES.first()).getOrThrow()
+        val second = ws.createImage(ws.accountDir, "drawing.png", Look.CANVASES.first())
+
+        assertTrue("refused", second.isFailure)
+        assertTrue(
+            "with the same sentence: ${second.exceptionOrNull()?.message}",
+            second.exceptionOrNull()?.message.orEmpty().contains("already"),
+        )
+    }
+
+    @Test
+    fun `a picture refuses a locked folder`() {
+        // **The same lock, whatever kind of file is being made.** `createFile` and `createFolder` both
+        // ask; a new way of adding to a folder that did not would be the door nobody thinks of as a
+        // door, which is exactly how importing files once got past it.
+        val ws = space()
+        val locked = File(ws.accountDir, "locked")
+        locked.mkdirs()
+        // `setLocked` takes the account-relative paths, which is how the flag file stores them.
+        val relative = ws.relative(locked) ?: error("the folder must be inside the account")
+        ws.setLocked(setOf(ws.pathString(relative)))
+
+        assertTrue("refused", ws.createImage(locked, "drawing.png", Look.CANVASES.first()).isFailure)
+    }
+
+    @Test
+    fun `the picture a person makes is one the editor will open`() {
+        // The end of the chain, as one assertion: a new picture is `EntryKind.IMAGE`, which is what
+        // makes the editor show it as a picture rather than refusing it as unknown.
+        val ws = space()
+        val made = ws.createImage(ws.accountDir, "drawing", Look.CANVASES.first()).getOrThrow()
+        assertEquals("shown as a picture", EntryKind.IMAGE, ws.kindOf(made))
+    }
 }

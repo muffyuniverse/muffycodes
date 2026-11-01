@@ -790,6 +790,36 @@ class Workspace(val accountDir: File) {
     }
 
     /**
+     * Makes a **picture** — a blank PNG at [canvas]'s size, with [name] as its name.
+     *
+     * **A separate writer from [createFile], because the body is bytes rather than text.** Routing a
+     * PNG through `write(file, text)` would encode it as a string and produce a file with a `.png` name
+     * that no decoder will open — the one failure that looks exactly like success until somebody tries
+     * to look at it.
+     *
+     * **The refusals are [createFile]'s, asked in the same order**, so a locked folder and a taken name
+     * are refused with the same sentences whichever kind of file is being made. A person does not
+     * think of "new text file" and "new picture" as different permissions.
+     */
+    fun createImage(dir: File, name: String, canvas: Look.Canvas): Result<File> {
+        lockProblem(dir)?.let { return Result.failure(IllegalArgumentException(it)) }
+        val safe = cleanName(if (name.trim().contains('.')) name else "$name.png", "untitled.png")
+        nameProblem(safe)?.let { return Result.failure(IllegalArgumentException(it)) }
+        val target = File(dir, safe)
+        if (target.exists()) {
+            return Result.failure(IllegalArgumentException("There is already a \"$safe\" here"))
+        }
+        return try {
+            // `put`, not `write`: the lock funnel is already asked above, and `write` takes text.
+            put(target, "")
+            target.writeBytes(Look.blank(canvas))
+            Result.success(target)
+        } catch (e: Exception) {
+            Result.failure(IllegalStateException("Could not make the picture"))
+        }
+    }
+
+    /**
      * Renames [file] to [newName] in the same folder.
      *
      * [tidy] is false for a project folder, which is named after its repository: the

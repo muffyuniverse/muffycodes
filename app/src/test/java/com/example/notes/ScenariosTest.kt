@@ -106,6 +106,7 @@ class ScenariosTest {
             onRowDelete = {},
             onCreateFile = {},
             onCreateFolder = {},
+                        onCreateImage = {},
             onUploadFiles = {},
             onUploadFolder = {},
             onRestoreDeleted = {},

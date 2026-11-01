@@ -109,6 +109,8 @@ fun BrowserScreen(
     onRowKeepLocal: (String) -> Unit = {},
     onCreateFile: () -> Unit,
     onCreateFolder: () -> Unit,
+    /** A blank picture, which needs a size as well as a name. */
+    onCreateImage: () -> Unit,
     onUploadFiles: () -> Unit,
     onUploadFolder: () -> Unit,
     onRestoreDeleted: () -> Unit,
@@ -291,6 +293,12 @@ fun BrowserScreen(
                                 }
                                 TextButton(onClick = { adding = false; onCreateFile() }) {
                                     Text("New file")
+                                }
+                                // **A picture is a file, so it is made here** rather than in a
+                                // separate place: to a person "how does a file get here?" has the same
+                                // answer whichever kind it is, and the size is the only difference.
+                                TextButton(onClick = { adding = false; onCreateImage() }) {
+                                    Text("New image")
                                 }
                                 // The one way back for a deleted file: its row is gone,
                                 // so there is nothing left to open a history on.

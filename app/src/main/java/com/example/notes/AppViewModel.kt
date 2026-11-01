@@ -1227,6 +1227,26 @@ class AppViewModel @JvmOverloads constructor(
 
     // ---- creating things ----------------------------------------------------
 
+    /**
+     * Makes a picture: a blank PNG of [canvas]'s size, in the folder being looked at.
+     *
+     * **The same shape as [createFile]**, including the trace line and the "go to it" behaviour,
+     * because to a person it is the same act: something new is in this folder and they want to be
+     * looking at it. The difference is only what the file's body is.
+     */
+    fun createImage(name: String, canvas: Look.Canvas): Boolean {
+        val ws = workspace ?: return false
+        val dir = currentDir ?: return false
+        val asked = if (name.trim().contains('.')) name.trim() else "${name.trim()}.png"
+        val result = ws.createImage(dir, asked, canvas)
+        val made = result.getOrNull()?.name ?: asked
+        return afterChange(
+            result,
+            "Created $made at ${canvas.width}\u00d7${canvas.height}${namedFrom(asked, made)}",
+            File(dir, made),
+        )
+    }
+
     fun createFile(name: String): Boolean {
         val ws = workspace ?: return false
         val dir = currentDir ?: return false

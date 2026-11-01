@@ -123,6 +123,8 @@ private sealed interface Pending {
     data class RenameEntry(val entry: Entry) : Pending
     data class NewFile(val folder: File) : Pending
     data class NewFolder(val folder: File) : Pending
+    /** A blank picture, at a size the person picks. */
+    data class NewImage(val folder: File) : Pending
     data class MoveEntry(val entry: Entry) : Pending
     data class CopyEntry(val entry: Entry) : Pending
     data object CopySelected : Pending
@@ -519,6 +521,7 @@ private fun AppRoot(viewModel: AppViewModel) {
                 },
                 onCreateFile = { tap("new file"); viewModel.currentDir?.let { pending = Pending.NewFile(it) } },
                 onCreateFolder = { tap("new folder"); viewModel.currentDir?.let { pending = Pending.NewFolder(it) } },
+                onCreateImage = { tap("new image"); viewModel.currentDir?.let { pending = Pending.NewImage(it) } },
                 onUploadFiles = { pickingFiles = tap("upload files"); pickFiles.launch(arrayOf("*/*")) },
                 onUploadFolder = { pickingFolder = tap("upload folder"); pickFolder.launch(null) },
                 onRestoreDeleted = {
@@ -770,6 +773,14 @@ private fun Dialogs(
                       Trace.tap("confirm new file", name)
                       viewModel.createFile(name)
                   },
+        )
+
+        is Pending.NewImage -> NewImageDialog(
+            onDismiss = dismiss,
+            onConfirm = { name, canvas ->
+                Trace.tap("confirm new image", "$name ${canvas.width}x${canvas.height}")
+                viewModel.createImage(name, canvas)
+            },
         )
 
         is Pending.NewFolder -> PromptDialog(

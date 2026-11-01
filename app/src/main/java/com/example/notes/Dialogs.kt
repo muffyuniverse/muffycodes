@@ -1,6 +1,7 @@
 package com.example.notes
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -83,6 +84,75 @@ fun PromptDialog(
                     onDismiss()
                 },
             ) { Text(confirm) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/**
+ * Makes a picture: a name, and one of the sizes a phone's own pictures take.
+ *
+ * **The sizes are shown with their cost, because the cost is the reason to pick one.** A phone
+ * screenshot is 1,105 tokens and a square is 765, and a person choosing a canvas has no other way to
+ * know that the shape of the rectangle decides what it costs to show the agent. Showing the number
+ * turns a preference into a decision.
+ *
+ * **The default is first in the list**, per the operator: the shape already in their hand rather than
+ * the cheapest one.
+ */
+@Composable
+fun NewImageDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (String, Look.Canvas) -> Unit,
+) {
+    var name by remember { mutableStateOf("drawing") }
+    var chosen by remember { mutableStateOf(Look.DEFAULT_CANVAS) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("New image") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Name") },
+                    singleLine = true,
+                )
+                Spacer(Modifier.height(12.dp))
+                for (canvas in Look.CANVASES) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { chosen = canvas }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(
+                            selected = chosen == canvas,
+                            onClick = { chosen = canvas },
+                        )
+                        Text(
+                            text = "${canvas.label} · ${canvas.width}×${canvas.height}",
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            text = "about ${canvas.tokens} tokens",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = name.isNotBlank(),
+                onClick = {
+                    onConfirm(name.trim(), chosen)
+                    onDismiss()
+                },
+            ) { Text("Create") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )

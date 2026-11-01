@@ -56,7 +56,7 @@ VOCABULARY = {
     # the chat: turning to another page of a message, and opening one fullscreen
     "message page", "message fullscreen",
     # making things
-    "new file", "new folder", "upload files", "upload folder", "restore deleted",
+    "new file", "new folder", "new image", "upload files", "upload folder", "restore deleted",
     # projects
     "add project", "new local project", "sync", "see changes", "rename project", "delete project",
     # the local<->synced cycle: giving a local project a repository, and taking it back
@@ -71,7 +71,8 @@ VOCABULARY = {
     # how much of it is kept
     "request log limit",
     # dialogs' buttons — the acts above, confirmed
-    "confirm new file", "confirm new folder", "confirm delete", "confirm rename",
+    "confirm new file", "confirm new folder", "confirm new image", "confirm delete",
+    "confirm rename",
     "confirm move", "confirm copy", "confirm restore deleted", "confirm sync",
     "confirm rename project", "confirm delete project", "confirm remove account",
     # settings, which go through the store rather than the view model

@@ -82,6 +82,7 @@ class BrowserChromeTest {
                         onRowDelete = {},
                         onCreateFile = {},
                         onCreateFolder = {},
+                        onCreateImage = {},
                         onUploadFiles = {},
                         onUploadFolder = {},
                         onRestoreDeleted = {},
