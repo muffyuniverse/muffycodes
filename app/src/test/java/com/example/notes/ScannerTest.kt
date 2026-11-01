@@ -120,7 +120,10 @@ class ScannerTest {
         assertTrue(scanned.text.isBlank())
         val said = scanned.said()
         assertTrue(said, said.contains("All $count sections"))
-        assertTrue(said, said.contains("in the log"))
+        // **"in the session log", and the whole phrase.** `"in the log"` is not a substring of it, which is
+        // how this assertion failed the first time — and the message printed only its first line, so the log
+        // showed `1` and nothing about what was wrong.
+        assertTrue(said, said.contains("in the session log"))
     }
 
     // ---- what it says --------------------------------------------------------
