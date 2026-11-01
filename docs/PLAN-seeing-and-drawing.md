@@ -184,15 +184,16 @@ A menu item beside *New file* and *New folder* opens a dialogue with **standard 
 
 | option | size | tokens | why it is offered |
 |---|---|---|---|
-| **Square** (default) | 1080×1080 | **765** | the phone's own width; the shape of a screenshot of a list or a card |
-| Phone | 1080×1920 | 1,105 | a portrait page |
+| **Phone screenshot** (default) | 1080×1920 | **1,105** | the shape a person already has in their hand |
+| Square | 1080×1080 | 765 | the cheapest a picture can be: 768×768 is four tiles |
 | Landscape | 1920×1080 | 1,105 | a wide diagram |
 | A4 at 150 dpi | 1240×1754 | 1,105 | a page to print |
 
-D5 says the dialogue offers sizes; these four are the proposal. The default is **1080×1080**, and it is the
-default for a reason beyond being common: after the provider's resize it is 768×768, which is **four tiles —
-765 tokens, the cheapest a picture can be**. Every other shape is six tiles. A person sketching a layout is not
-spending 40% more of their conversation on it for a rectangle they did not ask for.
+D5 says the dialogue offers sizes; these four are the proposal. **The default is 1080×1920**, per the operator:
+the thing a person draws on is almost always a screenshot they took, so the canvas should be the shape they are
+already used to. It costs 1,105 tokens rather than a square's 765 — 40% more — and that is the honest price of
+matching the shape the work is actually in. The square stays on the list for the case it is genuinely better
+(cost, and a diagram that is not a page).
 
 **The file is written immediately** — a blank white PNG at the chosen size — so the new image is a real file
 before anything draws on it, and a person who backs out has an empty picture rather than a lost one. It appears

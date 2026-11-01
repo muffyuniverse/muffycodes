@@ -112,6 +112,18 @@ data class Msg(
     val calls: List<Call> = emptyList(),
     /** The reasoning that came with this assistant turn, sent back because the provider requires it. */
     val thinking: String = "",
+    /**
+     * Pictures to send **with** this message, as data URLs (`data:image/png;base64,…`).
+     *
+     * **A message carries its pictures; a tool result cannot.** The contract makes a `role: "tool"`
+     * message text-only, so `look` does not answer with a picture — it records one as pending and the
+     * next message carries it. That is why this field lives on a message at all, and why the tool
+     * branch of [messagesOf] ignores it rather than being tempted to put it somewhere.
+     *
+     * Empty for almost every message. When it is empty the content is serialised as a plain string,
+     * which is the shape every provider has always accepted.
+     */
+    val pictures: List<String> = emptyList(),
 ) {
     companion object {
         /** The operator's words. */
@@ -747,11 +759,43 @@ class OpenRouterDoor(
                     one.put("tool_call_id", message.callId)
                 }
 
-                else -> one.put("content", message.text)
+                else -> one.put("content", contentOf(message))
             }
             array.put(one)
         }
         return array
+    }
+
+    /**
+     * One message's `content`: a **string**, or an **array of parts** when it carries pictures.
+     *
+     * **The string is the default and the array is the exception, deliberately.** Every message this
+     * app has ever sent is a string, and every provider accepts it. Turning every message into an
+     * array to serve the rare one would change the shape of the whole conversation to carry a field
+     * almost none of it has — a risk taken for nothing, on the one request path that has to work on a
+     * train.
+     *
+     * When there are pictures the text goes first and the pictures after, in the order they were
+     * named: the model reads what the message is about before it looks at what it is showing, and
+     * `look`'s own result sentence has already said which path is which.
+     */
+    private fun contentOf(message: Msg): Any {
+        if (message.pictures.isEmpty()) return message.text
+        val parts = JSONArray()
+        // An empty text part is not the same as no text part: a message that is only a picture
+        // should be *only* a picture, and a `"text": ""` in front of it is a blank line the model
+        // has to read past.
+        if (message.text.isNotEmpty()) {
+            parts.put(JSONObject().put("type", "text").put("text", message.text))
+        }
+        for (picture in message.pictures) {
+            parts.put(
+                JSONObject()
+                    .put("type", "image_url")
+                    .put("image_url", JSONObject().put("url", picture))
+            )
+        }
+        return parts
     }
 
     private fun toolsOf(tools: List<ToolSpec>): JSONArray {

@@ -296,6 +296,8 @@ undo** — the PNG is the document, and the history of the PNG is git's.
 **Q5 — What does a **new blank image**'s name default to, and what size is it?** A canvas has to have
 dimensions before it has content, and the screen's own size is the wrong answer for a file that outlives the
 phone.
-**Answered: standard size options in the creation dialogue**, defaulting to the most common size for phone image
-editing (1080×1080 is the default candidate — square, the phone's own width, and the shape most screenshots of a
-list or a card take).
+**Answered: standard size options in the creation dialogue**, defaulting to **the phone screenshot shape,
+1080×1920** — the operator's correction, and it is the better default: the thing a person draws on is almost
+always a screenshot they took, so the canvas should be the shape they are already used to rather than a square
+that fits nothing they have. It costs 1,105 tokens instead of a square's 765, which is the honest price of the
+shape the work is actually in.
