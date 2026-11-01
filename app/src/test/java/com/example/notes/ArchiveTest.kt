@@ -89,10 +89,13 @@ class ArchiveTest {
         val names = java.util.zip.ZipFile(File(project(), "agent/out.zip")).use { zip ->
             zip.entries().asSequence().map { it.name }.toList()
         }
+        // **Sorted, because the walk's order is `ws.list`'s and not the call's.** A zip's entry
+        // order is a fact about the walk; what matters is that every file is there at its own path,
+        // and asserting the walk's order would pin a detail the person never sees.
         assertEquals(
             "every file, at its own path",
-            listOf("src/Main.kt", "src/util/Text.kt", "README.md"),
-            names,
+            listOf("README.md", "src/Main.kt", "src/util/Text.kt"),
+            names.sorted(),
         )
     }
 

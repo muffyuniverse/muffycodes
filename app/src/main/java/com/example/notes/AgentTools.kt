@@ -520,8 +520,13 @@ class AgentTools(
                     "the one way a zip can write outside where it was told to. " +
                     "**An unpack answers with the entry names, never the bytes** — a zip in this " +
                     "conversation is binary that costs the whole context to say nothing.",
-                "{\"pack\":[\"src/\",\"README.md\"],\"as\":\"agent/out.zip\"} or " +
-                    "{\"unpack\":\"agent/fetched/lib.zip\",\"into\":\"vendor/lib\"}",
+                // **All four keys in the one example, because the schema is built from it.** A
+                // schema that named only the keys of one mode would refuse the other mode's call
+                // before it ran — the same defect `no tool takes an argument it never describes`
+                // exists to catch, seen from the other side. The description carries the two shapes
+                // in prose; this carries them in the only place the parser reads.
+                "{\"pack\":[\"src/\",\"README.md\"],\"as\":\"agent/out.zip\"," +
+                    "\"unpack\":\"agent/fetched/lib.zip\",\"into\":\"vendor/lib\"}",
             ),
         )
 
@@ -2637,6 +2642,11 @@ class AgentTools(
             return refusal(it.message ?: "that path cannot be written")
         }
         if (into.isFile) return refusal("${rel(into)} is a file, and `into` needs a folder.")
+        // **The one funnel every write asks**, and skipping it was a real hole: `resolve` allows a
+        // single `..` so an agent can READ another project, and an unpack that only resolved would
+        // have written there — the cross-project rule is "read-only", and this is the tool that
+        // would have broken it. The lock and the record rule come from the same call.
+        mayWrite(File(into, "x"))?.let { return refusal(it) }
 
         // **The whole entry list, checked before a single byte is written.** A zip that fails on its
         // twentieth entry must leave nothing behind from its first nineteen.
