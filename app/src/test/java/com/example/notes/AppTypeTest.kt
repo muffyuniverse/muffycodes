@@ -404,8 +404,20 @@ class AppTypeTest {
 
         val copied = Presets.copy(ws.accountDir, project, AppType.ANDROID)
 
-        assertEquals("nothing to copy", emptyList<String>(), copied.written)
-        assertEquals("but the type is recorded", AppType.ANDROID, ProjectMeta.read(project).type)
+        // **Nothing of the preset's to copy — and the app's own folders are still made.** The point of
+        // this test is that a missing template is survivable, not that the copy writes nothing at all:
+        // `dictionary/`, `skills/`, `wiki/` and `mcp/` are the layout rather than the preset, so they
+        // appear whether or not there is a template to read.
+        assertTrue(
+            "no template was copied: ${copied.written}",
+            copied.written.none { it.endsWith("project_prompt.txt") || it.endsWith("android.yml") },
+        )
+        assertEquals(
+            "but the four folders were made",
+            Workspace.SUBJECTS.size,
+            copied.written.size,
+        )
+        assertEquals("and the type is recorded", AppType.ANDROID, ProjectMeta.read(project).type)
         ws.accountDir.deleteRecursively()
     }
 
