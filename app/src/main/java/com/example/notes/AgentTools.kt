@@ -936,6 +936,19 @@ class AgentTools(
     }
 
     /**
+     * A file's path from the **account** folder, with forward slashes.
+     *
+     * **From the account and not the project**, because `search` crosses projects: a hit in another
+     * project has to say which one, and `notes.txt` alone would name a file the agent cannot place.
+     * The result is also what `in` filters are matched against, so the two agree by construction.
+     */
+    private fun relToAccount(file: File): String = try {
+        file.relativeTo(ws.accountDir).invariantSeparatorsPath
+    } catch (e: Throwable) {
+        file.name
+    }
+
+    /**
      * The paths under [dir] that match [name] and [content], walking at most [left] levels.
      *
      * [name] is asked of each entry's **own name** — one short string, so a folder can match it —
