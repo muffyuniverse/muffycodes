@@ -729,6 +729,30 @@ class Workspace(val accountDir: File) {
     }
 
     /**
+     * Writes **bytes** — a picture — through the same funnel [write] uses.
+     *
+     * **The refusals are the text writer's, in the same order**, because they are not about what the
+     * file holds: a locked file, the record, the app's own flags and a secret are all things this app
+     * will not let anybody write, whatever kind of body is going in. A picture save that skipped them
+     * would be a second door into the same room, and the first door would still look shut.
+     *
+     * Returns false when the write was refused, matching [write] — the caller says so rather than
+     * finding out later that the file did not change.
+     */
+    fun writeBytes(file: File, bytes: ByteArray): Boolean {
+        if (isLocked(file)) return false
+        if (isRecord(file)) return false
+        if (isAppFlag(file)) return false
+        if (looksSecret(file.name)) return false
+        return try {
+            Beside.writeBytes(file, bytes)
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
      * Writes without asking about locks.
      *
      * For the app's own bookkeeping and its own markers — the flag files in `.muffy` and

@@ -57,6 +57,8 @@ VOCABULARY = {
     "message page", "message fullscreen",
     # making things
     "new file", "new folder", "new image", "upload files", "upload folder", "restore deleted",
+    # drawing on a picture: the four tools, the two pickers, and the one undo
+    "draw tool", "draw colour", "draw width", "draw undo",
     # projects
     "add project", "new local project", "sync", "see changes", "rename project", "delete project",
     # the local<->synced cycle: giving a local project a repository, and taking it back

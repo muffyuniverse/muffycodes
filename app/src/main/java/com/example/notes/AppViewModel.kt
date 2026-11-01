@@ -2217,6 +2217,65 @@ class AppViewModel @JvmOverloads constructor(
         }
     }
 
+    /**
+     * Saves a picture that was drawn on: the bytes go to the file, and the file is committed.
+     *
+     * **Its own function rather than an overload of [saveEditor], and the reason is the guard at the
+     * top of that one.** `saveEditor` refuses anything that is not `EntryKind.TEXT` — deliberately,
+     * because a save must never be able to turn a `.zip` into text. A picture save is the mirror
+     * image of that rule: it refuses anything that is not `EntryKind.IMAGE`, so a bug in the drawing
+     * screen cannot write bytes over a document.
+     *
+     * **No debounce.** `saveDebounceMs` exists so a person typing does not make a commit per
+     * keystroke. Drawing produces one save when they press the button, so there is nothing to
+     * coalesce and a delay would only make the button feel broken.
+     */
+    fun savePicture(bytes: ByteArray) {
+        val ws = workspace ?: return
+        val file = editingFile ?: return
+        // The mirror of `saveEditor`'s refusal, and held here rather than only on the screen for the
+        // same reason: a guarantee held only by the caller is a convention.
+        if (ws.kindOf(file) != EntryKind.IMAGE) return
+        if (isLocked(file)) return
+
+        val tap = Trace.tap("save", file.name)
+        val g = git
+        val name = file.name
+        val project = ws.projectOf(file)
+        val login = activeLogin
+        onWorker {
+            if (login == null || !accounts.exists(login)) return@onWorker
+            // **Written through the workspace's own funnel**, so the app's locks and the record's
+            // protection are asked here exactly as they are for a text save. A picture is not a
+            // special case that gets to skip them.
+            if (!ws.writeBytes(file, bytes)) {
+                Trace.failed(tap, "That picture could not be written", "save")
+                main.post { message = "That picture could not be written" }
+                return@onWorker
+            }
+            var refused: String? = null
+            if (login != null && accounts.exists(login)) {
+                val outcome = project?.let { g?.commitOutcome(it, CommitMessage.SAVE) }
+                if (outcome != null && !outcome.ok) refused = outcome.error
+            }
+            val answer = if (refused != null) {
+                "Saved the picture, but not to its history: $refused"
+            } else {
+                "Saved $name"
+            }
+            if (refused != null) {
+                Trace.failed(tap, answer, "save")
+            } else {
+                Trace.answered(tap, answer)
+            }
+            main.post {
+                refresh()
+                refreshChanges()
+                message = answer
+            }
+        }
+    }
+
     // ---- the project actions ------------------------------------------------
 
     /**

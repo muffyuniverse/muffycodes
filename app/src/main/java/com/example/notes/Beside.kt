@@ -42,10 +42,22 @@ internal object Beside {
      * rename rather than a copy. The name is [TEMP_PREFIX], which is what keeps a commit from
      * recording a file that is about to disappear.
      */
-    fun write(file: File, text: String) {
+    fun write(file: File, text: String) = replace(file) { it.writeText(text) }
+
+    /**
+     * The same write, for a body that is bytes rather than text.
+     *
+     * **One rename, shared by both**, because the promise is about the *rename* and not about what is
+     * being written: a reader sees the old file or the new one, never a half-written one. A second
+     * implementation of this would be a second place for that promise to be broken.
+     */
+    fun writeBytes(file: File, bytes: ByteArray) = replace(file) { it.writeBytes(bytes) }
+
+    /** Writes to a temp file beside [file], then renames it over — so no reader sees a partial write. */
+    private fun replace(file: File, body: (File) -> Unit) {
         file.parentFile?.mkdirs()
         val fresh = File(file.parentFile, TEMP_PREFIX + file.name)
-        fresh.writeText(text)
+        body(fresh)
         if (!fresh.renameTo(file)) {
             fresh.copyTo(file, overwrite = true)
             fresh.delete()

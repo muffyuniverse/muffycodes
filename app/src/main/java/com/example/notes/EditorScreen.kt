@@ -159,6 +159,7 @@ fun EditorScreen(
                 Mode.VIEW -> "editor view"
                 Mode.EDIT -> "editor edit"
                 Mode.DIFF -> "editor diff"
+                Mode.DRAW -> "editor draw"
             },
             file.name,
         )
@@ -166,6 +167,37 @@ fun EditorScreen(
     }
     var focused by remember { mutableStateOf(false) }
     val focus = LocalFocusManager.current
+
+    /**
+     * What has been drawn on this picture, **while this screen is open and no longer.**
+     *
+     * D4: undo is session-only, and the saved versions are git's job — so the stroke list dies with
+     * the screen. A stack of snapshots that survived a restart would be a second document beside the
+     * PNG, and two documents that can disagree is the thing this codebase spends its time avoiding.
+     */
+    var strokes by remember(session) { mutableStateOf<List<Drawing.Stroke>>(emptyList()) }
+    var tool by remember(session) { mutableStateOf(Drawing.Tool.PEN) }
+    var inkColour by remember(session) { mutableStateOf(Drawing.COLOURS.first()) }
+    var inkWidth by remember(session) { mutableStateOf(Drawing.WIDTHS[1]) }
+    /**
+     * The picture as it was when this screen opened, decoded once.
+     *
+     * `Picture` decodes its own copy for display; this one is what a save flattens the strokes onto.
+     * Decoding twice is the price of not letting a save depend on what the screen happens to be
+     * showing — and a save that drew on the screen's own bitmap would corrupt the preview.
+     */
+    var decoded by remember(session) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    LaunchedEffect(file.path, kind) {
+        if (kind == EntryKind.IMAGE) {
+            decoded = withContext(Dispatchers.IO) {
+                try {
+                    android.graphics.BitmapFactory.decodeFile(file.path)
+                } catch (e: Throwable) {
+                    null
+                }
+            }
+        }
+    }
 
     // The file can be renamed from elsewhere — a move, or the browser's rename — and
     // the field must show the name it has. Only while it is not being typed in,
@@ -307,9 +339,21 @@ fun EditorScreen(
                     .padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // An image or an unreadable file has no modes; Save is then the only thing on the
-                // row and belongs at its end, where it is on every other file.
-                if (kind != EntryKind.TEXT) Spacer(Modifier.weight(1f))
+                // An unreadable file has no modes; Save is then the only thing on the row and
+                // belongs at its end, where it is on every other file.
+                if (kind == EntryKind.UNKNOWN) Spacer(Modifier.weight(1f))
+                // **An image gets its own two modes**, and `Draw` is what makes a picture something
+                // a person can change rather than only look at. The text modes are not offered here
+                // because an image has no text to edit and no diff to read — a picture's history is
+                // its versions, which the History button already shows.
+                if (kind == EntryKind.IMAGE) {
+                    SingleChoiceSegmentedButtonRow(modifier = Modifier.weight(1f)) {
+                        ModeSegment("View", Mode.VIEW, selected = mode) { choose(it) }
+                        ModeSegment("Draw", Mode.DRAW, selected = mode, enabled = !readOnly) {
+                            choose(it)
+                        }
+                    }
+                }
                 if (kind == EntryKind.TEXT) {
                     // **Three modes, named, and one of them is selected.** A single chip that said
                     // "Edit" or "View" was a switch: it told a person what pressing it would do, not
@@ -351,15 +395,33 @@ fun EditorScreen(
 
                 Button(
                     onClick = {
-                        // Saved before the name is committed: the text belongs to this
-                        // file as it is now, and a rename afterwards carries the file —
-                        // with its text — to the new name.
-                        viewModel.saveEditor(text)
-                        saved = text
-                        commitName()
-                        focus.clearFocus()
+                        if (kind == EntryKind.IMAGE) {
+                            // **The strokes are baked into the picture, and the list is cleared.**
+                            // Clearing matters: what is now on disk includes them, so keeping them
+                            // would draw every mark twice on the next save — the same bug in the
+                            // other direction from losing them.
+                            decoded?.let { picture ->
+                                if (strokes.isNotEmpty()) {
+                                    viewModel.savePicture(Drawing.flatten(picture, strokes))
+                                    strokes = emptyList()
+                                }
+                            }
+                        } else {
+                            // Saved before the name is committed: the text belongs to this
+                            // file as it is now, and a rename afterwards carries the file —
+                            // with its text — to the new name.
+                            viewModel.saveEditor(text)
+                            saved = text
+                            commitName()
+                            focus.clearFocus()
+                        }
                     },
-                    enabled = kind == EntryKind.TEXT && !readOnly && text != saved,
+                    enabled = when (kind) {
+                        EntryKind.TEXT -> !readOnly && text != saved
+                        // An image has nothing to save until something is drawn on it.
+                        EntryKind.IMAGE -> !readOnly && strokes.isNotEmpty() && decoded != null
+                        else -> false
+                    },
                 ) { Text("Save") }
             }
             HorizontalDivider()
@@ -369,7 +431,28 @@ fun EditorScreen(
             // the text was the app talking over the thing being written.
             val content = PaddingValues(top = 0.dp)
             when (kind) {
-                EntryKind.IMAGE -> Picture(file = file, padding = content)
+                EntryKind.IMAGE -> if (mode == Mode.DRAW) {
+                    DrawMode(
+                        picture = decoded,
+                        strokes = strokes,
+                        tool = tool,
+                        colour = inkColour,
+                        width = inkWidth,
+                        onTool = { tool = it },
+                        onColour = { inkColour = it },
+                        onWidth = { inkWidth = it },
+                        onUndo = { strokes = Drawing.undo(strokes) },
+                        onAdd = { strokes = strokes + it },
+                        onErase = { index ->
+                            // **A stroke is removed whole.** An eraser that painted white would
+                            // destroy the picture underneath, and a person rubbing out a wrong arrow
+                            // over a screenshot would lose the screenshot.
+                            strokes = strokes.filterIndexed { i, _ -> i != index }
+                        },
+                    )
+                } else {
+                    Picture(file = file, padding = content)
+                }
                 EntryKind.UNKNOWN -> CannotEdit(file = file, padding = content)
 
                 // **Diff, before the text**, because it is a different view of the file rather
@@ -532,6 +615,135 @@ private sealed interface PictureState {
 }
 
 /**
+ * The picture with a pen over it, and the four tools that make one.
+ *
+ * **The tool row is above the canvas and belongs to it**, rather than living in the app's top bar:
+ * these are choices about the drawing, and a person reaches for them with the same hand that is
+ * drawing. The mode row already says *that* this is Draw; this row says what a finger will do.
+ *
+ * **No palette beyond four colours and three widths.** A colour picker and a width slider are a
+ * settings screen inside a drawing screen, and every tool added is a mode inside the canvas — which
+ * is the complexity the file model exists to avoid.
+ */
+@Composable
+private fun DrawMode(
+    picture: android.graphics.Bitmap?,
+    strokes: List<Drawing.Stroke>,
+    tool: Drawing.Tool,
+    colour: Int,
+    width: Float,
+    onTool: (Drawing.Tool) -> Unit,
+    onColour: (Int) -> Unit,
+    onWidth: (Float) -> Unit,
+    onUndo: () -> Unit,
+    onAdd: (Drawing.Stroke) -> Unit,
+    onErase: (Int) -> Unit,
+) {
+    // `null` is a real answer — a picture this phone cannot decode — and it is not the same as
+    // "still loading", so it says which one it is rather than showing an empty canvas.
+    if (picture == null) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                text = "This picture could not be opened, so it cannot be drawn on.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        return
+    }
+    val shown = remember(picture) { picture.asImageBitmap() }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            for (one in Drawing.Tool.entries) {
+                // The eraser is named for what it does to the *strokes*, which is the rule the
+                // drawing object already states — a person rubbing out an arrow over a screenshot
+                // must not lose the screenshot.
+                val label = when (one) {
+                    Drawing.Tool.PEN -> "Pen"
+                    Drawing.Tool.LINE -> "Line"
+                    Drawing.Tool.BOX -> "Box"
+                    Drawing.Tool.ERASER -> "Erase"
+                }
+                FilterChip(
+                    selected = tool == one,
+                    onClick = { Trace.tap("draw tool", label.lowercase()); onTool(one) },
+                    label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            // Undo is a button rather than a gesture: a shake-to-undo is invisible, and the strokes
+            // are session-only so there is nothing else to reach for.
+            TextButton(onClick = { Trace.tap("draw undo"); onUndo() }, enabled = strokes.isNotEmpty()) {
+                Text("Undo")
+            }
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            for (shade in Drawing.COLOURS) {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(Color(shade))
+                        .border(
+                            width = if (shade == colour) 3.dp else 1.dp,
+                            color = if (shade == colour) MaterialTheme.colorScheme.onSurface
+                            else MaterialTheme.colorScheme.outline,
+                            shape = CircleShape,
+                        )
+                        .clickable {
+                            Trace.tap("draw colour", shade.toUInt().toString(16).takeLast(6))
+                            onColour(shade)
+                        },
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            for (thick in Drawing.WIDTHS) {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .clickable { Trace.tap("draw width"); onWidth(thick) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size((thick.coerceAtMost(20f)).dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (thick == width) MaterialTheme.colorScheme.onSurface
+                                else MaterialTheme.colorScheme.outline,
+                            ),
+                    )
+                }
+            }
+        }
+        DrawingSurface(
+            picture = shown,
+            strokes = strokes,
+            tool = tool,
+            colour = colour,
+            width = width,
+            modifier = Modifier.fillMaxSize(),
+            onAdd = onAdd,
+            onErase = onErase,
+        )
+    }
+}
+
+/**
  * The picture itself (§9: "images → shown as the picture, not editable").
  *
  * Three states, and each says which one it is: decoding, the picture, or a plain
@@ -621,7 +833,7 @@ private fun CannotEdit(file: java.io.File, padding: androidx.compose.foundation.
  * where you are. That difference is the whole of report 29's third request, and it is not
  * cosmetic: with a switch there was nowhere to put a third mode, so Diff had no home.
  */
-private enum class Mode { VIEW, EDIT, DIFF }
+private enum class Mode { VIEW, EDIT, DIFF, DRAW }
 
 /**
  * One of the three, selected when it is the mode in force.
