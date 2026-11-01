@@ -674,14 +674,18 @@ class AgentChatScreenTest {
         // that triggered them to show up, and they are removed from chat message list and session log
         // with the next message"*. So it is drawn after the message, in red, and it goes when the next
         // thing is said.
-        // `chat()` opens `groceries`, so the record written here is the one the screen reads.
+        // **`chat()` makes the project and opens it; the rows are written after, and the box is
+        // re-read.** Writing before `chat()` would need a second `project("groceries")`, which makes
+        // a second project with the same name.
         chat(ScriptedDoor(Reply("ok")))
         val log = AgentLog.open(File(scene.workspace!!.accountDir, "groceries"))
         log.told("do the thing")
         log.appNote("stopped", "OpenRouter answered 403")
-
-        scene.viewModel.refresh()
-        compose.waitForIdle()
+        // Re-read, because `chat()` read the record as it stood a moment ago. **And wait for it**:
+        // `openChat` posts the read to the worker, which posts the answer back to the main looper, so
+        // the box is null until both have had their turn.
+        scene.viewModel.openChat("groceries")
+        scene.await("the conversation to be read again") { scene.viewModel.chatBox != null }
 
         val box = scene.viewModel.chatBox!!
         val last = box.messages.last()
@@ -705,14 +709,18 @@ class AgentChatScreenTest {
         val log = AgentLog.open(File(scene.workspace!!.accountDir, "groceries"))
         log.told("do the thing")
         log.appNote("stopped", "OpenRouter answered 403")
-        scene.viewModel.refresh()
+        scene.viewModel.openChat("groceries")
+        scene.await("the conversation to be read") { scene.viewModel.chatBox != null }
         assertTrue(
             "it is there while it is the last word",
             scene.viewModel.chatBox!!.messages.last().notices.isNotEmpty(),
         )
 
         log.told("try again")
-        scene.viewModel.refresh()
+        scene.viewModel.openChat("groceries")
+        scene.await("the conversation to be re-read") {
+            scene.viewModel.chatBox?.messages?.none { it.notices.isNotEmpty() } == true
+        }
 
         assertTrue(
             "and gone the moment the person answers",
