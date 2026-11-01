@@ -70,7 +70,9 @@ class SearchIndex private constructor(
         }
         db.execSQL(
             "INSERT OR REPLACE INTO meta(id, model, dims) VALUES(1, ?, ?)",
-            arrayOf(model, dims),
+            // **`arrayOf<Any>` explicitly**, because a String and an Int in one array infer to
+            // `Comparable<*> & Serializable` and the compiler refuses to reify an intersection.
+            arrayOf<Any>(model, dims),
         )
         return Result.success(Unit)
     }
