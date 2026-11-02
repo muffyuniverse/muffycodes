@@ -152,7 +152,10 @@ object SqlTool {
             // can still attach a *new* file and write to that, because the new file was not opened
             // read-only - it did not exist when the flag was applied.
             db.execSQL("PRAGMA query_only = 1")
-            read(db, sql, cap)
+            // **Wrapped, or the branches do not agree on a type.** `read` answers an [Answer] while
+            // the catch blocks answer a failure, and the common supertype of those two is `Any` -
+            // which is why the error was reported at the signature rather than here.
+            kotlin.Result.success(read(db, sql, cap))
         } catch (e: SQLiteException) {
             // **SQLite's own words, not wrapped.** "no such column: cached" is the sentence that
             // lets the model fix its query; "the query failed" is the sentence that makes it guess.
