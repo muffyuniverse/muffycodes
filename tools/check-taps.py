@@ -176,6 +176,10 @@ VOCABULARY = {
     # the two ways back through a long conversation: the pager's own arrows, and the jump to the end
     # that only appears when the person has scrolled away from it
     "chat to bottom",
+    # **asking the person's request log a question in SQL.** Its own act because it is the one tool
+    # whose effect lands in a file rather than in the conversation, and because a log that could not
+    # say "the agent queried the log" would leave the person unable to tell what produced a CSV.
+    "query",
 }
 
 # Names built from a value, so they cannot be a literal in the list.

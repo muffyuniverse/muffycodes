@@ -341,6 +341,7 @@ class AgentTools(
             "browse" to setOf("url", "wait", "eval", "from", "to"),
             "shot" to setOf("url", "full", "eval"),
             "look" to setOf("paths"),
+            "query" to setOf("sql", "path"),
             "ci" to setOf("workflow", "branch", "limit", "event", "inputs"),
             "runs" to setOf("run", "job", "grep", "from", "to"),
             "artifact" to setOf("run", "name"),
@@ -499,6 +500,19 @@ class AgentTools(
                     "may be copied: a copy reads it and leaves it exactly as it was.",
                 "{\"path\":\"the file\",\"into\":\"the folder\",\"name\":\"the new name\"," +
                     "\"copy\":true}",
+            ),
+            spec(
+                "query",
+                "Ask the person's request log a question in SQL and write the answer to a file. " +
+                    "Use it for what the app cost, how the cache is doing, which model or project " +
+                    "spends most, or any trend over time. " +
+                    "**Read-only**: only SELECT and WITH run, and only the tables below exist. " +
+                    "At most ${SqlTool.MAX_ROWS} rows come back; you are told when there were more. " +
+                    "The conversation gets the columns and a few rows; the file gets everything. " +
+                    "\n\n" + SqlTool.SCHEMA,
+                "{\"sql\":\"SELECT (bucket/3600000)*3600000 AS hour, SUM(cost) AS usd " +
+                    "FROM roll_hour GROUP BY hour ORDER BY hour DESC LIMIT 48\", " +
+                    "\"path\":\"spend-last-two-days.csv\"}",
             ),
             spec(
                 "history",
@@ -791,6 +805,7 @@ class AgentTools(
             "browse" -> browse(args, deadline)
             "shot" -> shot(args, deadline)
             "look" -> look(args)
+            "query" -> query(args, deadline)
             "ci" -> ci(args, deadline)
             "runs" -> runs(args, deadline)
             "artifact" -> artifact(args)
@@ -2898,6 +2913,51 @@ class AgentTools(
      * reach any file on the phone would undo that. And everything, when the app gave no way to write —
      * see the [downloads] constructor parameter.
      */
+    /**
+     * Answers a question about the request log, and writes the rows to a file.
+     *
+     * **The file is the answer and the conversation gets the shape.** A thousand rows in a
+     * conversation would be re-read on every following turn and the tail cut off by the context
+     * budget - so the person would be paying twice for an answer that is also incomplete.
+     */
+    private fun query(args: JSONObject, deadline: Deadline): String {
+        val sql = args.optString("sql").trim()
+        if (sql.isEmpty()) {
+            return refusal("Say what to ask: {\"sql\":\"SELECT …\",\"path\":\"where.csv\"}")
+        }
+        val raw = args.optString("path").trim()
+        if (raw.isEmpty()) {
+            return refusal("Say where the answer should be written: {\"path\":\"spend.csv\"}")
+        }
+        val file = resolveFile(raw).getOrElse { return refusal(it.message ?: "that path cannot be used") }
+        // **A question about the person's spending, written into the person's files** - so the same
+        // rules apply as any other write. A locked path is refused rather than quietly written.
+        mayWrite(file)?.let { return refusal(it) }
+        deadline.check("query")
+
+        val dbFile = RequestDb.fileFor(ws.accountDir)
+        val result = SqlTool.run(dbFile, sql).getOrElse {
+            return refusal(it.message ?: "the query could not run")
+        }
+        if (result.rows.isEmpty()) return SqlTool.emptyMessage()
+
+        deadline.check("query")
+        val parent = file.parentFile ?: return refusal("That path has no folder in it")
+        if (!parent.isDirectory) {
+            val made = makeFolders(parent)
+            if (made.isFailure) {
+                return refusal(made.exceptionOrNull()?.message ?: "the folder could not be made")
+            }
+        }
+        return try {
+            file.writeText(result.csv)
+            Trace.tap("query", "${result.rows.size} rows")
+            SqlTool.summary(result, rel(file))
+        } catch (e: Throwable) {
+            refusal("The query ran but the file could not be written: ${e.message}")
+        }
+    }
+
     private fun downloads(args: JSONObject): String {
         val asked = args.optString("path").trim()
         if (asked.isEmpty()) {
