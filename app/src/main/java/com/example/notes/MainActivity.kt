@@ -597,6 +597,10 @@ private fun Dialogs(
             // on the press turned that refusal into a snackbar at a screen that was already gone, which
             // reads exactly like success.
             var refused by remember { mutableStateOf<String?>(null) }
+            // **This scope's own context.** The one at the top of the screen belongs to a different
+            // composable, and reaching for it compiled into the `context(...)` stdlib call instead —
+            // which is what the compiler's "function invocation expected" was saying.
+            val here = LocalContext.current
             ModelKeyDialog(
                 onDismiss = { refused = null; dismiss() },
                 error = refused,
@@ -614,7 +618,7 @@ private fun Dialogs(
                 onSignIn = {
                     tap("openrouter sign in")
                     val url = viewModel.beginOpenRouterSignIn()
-                    openInBrowser(context, url)
+                    openInBrowser(here, url)
                     url
                 },
                 onCode = { code, answered ->
