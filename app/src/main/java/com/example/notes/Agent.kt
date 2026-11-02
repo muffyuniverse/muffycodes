@@ -902,8 +902,11 @@ class Agent(
         is Scope.Project -> AgentPrompt.readScoped(
             accountDir = accountDir,
             projectDir = tools.projectDir,
+            // **`everything` is the account's list and `has` is the scope's own.** Both come from
+            // `specs`, so a tool added to one and not the other appears in the sentence with no
+            // further edit here — which is the whole reason the sentence is generated.
             everything = AgentTools.specs(fetchAllowed()).map { it.name },
-            has = AgentTools.specs(fetchAllowed()).map { it.name },
+            has = AgentTools.specs(fetchAllowed(), scope).map { it.name },
         )
     }
 

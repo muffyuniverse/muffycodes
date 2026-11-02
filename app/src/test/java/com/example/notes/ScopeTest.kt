@@ -187,6 +187,56 @@ class ScopeTest {
         )
     }
 
+    // ---- what a subagent is offered -----------------------------------------
+
+    @Test
+    fun `a subagent is offered a smaller list, and every name in it is a real tool`() {
+        // **A set of names is a set of strings**, and a typo in it would silently give a subagent
+        // one tool fewer than intended with nothing to say so. The check is against the account's
+        // own list, which is the only definition of what exists.
+        val everything = AgentTools.specs().map { it.name }
+        val subagent = AgentTools.specs(scope = Scope.Project("groceries")).map { it.name }
+
+        assertTrue(
+            "every name a subagent is offered is a tool that exists: " +
+                "${subagent.filter { it !in everything }}",
+            subagent.all { it in everything },
+        )
+        assertTrue("and the list really is smaller", subagent.size < everything.size)
+        assertEquals(
+            "**nothing is silently dropped** — the difference is exactly the tools withheld",
+            everything.filter { it !in subagent }.toSet(),
+            (everything.toSet() - AgentTools.SUBAGENT_TOOLS),
+        )
+    }
+
+    @Test
+    fun `a subagent has the three the operator asked for, and not the ones that reach out`() {
+        // The instruction: *"subagents should still be able to run ci, use background and look"*.
+        // The other half is the reason they are the exception — everything withheld either reaches
+        // outside the project, costs money the subagent cannot see, or is the hiring agent's call.
+        val subagent = AgentTools.specs(scope = Scope.Project("groceries")).map { it.name }
+
+        for (tool in listOf("ci", "background", "look")) {
+            assertTrue("$tool is offered", tool in subagent)
+        }
+        for (tool in listOf("browse", "fetch", "mcp", "subagent", "restore", "history")) {
+            assertFalse("$tool is withheld", tool in subagent)
+        }
+    }
+
+    @Test
+    fun `the chat agent's list is unchanged by any of this`() {
+        // The falsification for the whole step: a filter that leaked into the default would take
+        // tools away from every chat agent, which is a regression nobody would look for here.
+        assertEquals(
+            "the account's list is the full set",
+            AgentTools.specs().map { it.name },
+            AgentTools.specs(scope = Scope.Account).map { it.name },
+        )
+        assertTrue("and it is every tool", AgentTools.specs().size >= 20)
+    }
+
     // ---- the boundary itself ------------------------------------------------
 
     @Test

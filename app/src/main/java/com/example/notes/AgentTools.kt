@@ -412,7 +412,18 @@ class AgentTools(
          * *described* to the model: the tool list is part of every request's cache prefix, and a refusal would
          * also teach it to keep trying.
          */
-        fun specs(fetchAllowed: Boolean = true): List<ToolSpec> = listOf(
+        fun specs(
+            fetchAllowed: Boolean = true,
+            /**
+             * **Which agent is asking.** A subagent gets fewer tools *and* a narrower path scope,
+             * and the two are separate rules: this one is what the model is offered, [Scope] is what
+             * it may reach when it names a path.
+             *
+             * The list is here rather than in `Scope` because it is a fact about the tools, and a
+             * list next to the tools it names is a list somebody will keep in step.
+             */
+            scope: Scope = Scope.Account,
+        ): List<ToolSpec> = listOf(
             spec(
                 "search",
                 "Find files by what they say. **Searches every project in the account, not just " +
@@ -698,6 +709,35 @@ class AgentTools(
                 "{\"server\":\"linear\",\"tool\":\"list_issues\",\"args\":{\"team\":\"ENG\"}}",
             ),
         ).filter { fetchAllowed || it.name != "fetch" }
+            .filter { scope == Scope.Account || it.name in SUBAGENT_TOOLS }
+
+        /**
+         * **What a subagent may use, and why the rest is missing.**
+         *
+         * A subagent produces work in one project. Everything it is not given is either a way to
+         * reach outside that project, a way to spend money it cannot see the bill for, or a decision
+         * that belongs to the agent that hired it.
+         *
+         * | not given | why |
+         * |---|---|
+         * | `history`, `restore` | version archaeology and putting a version back are the chat agent's calls — a subagent restoring one is a change nobody asked for |
+         * | `query`, `artifact`, `downloads`, `archive` | each produces a file the chat agent then has to find; two agents writing results is two answers to one question |
+         * | `browse`, `fetch`, `mcp` | the network is the chat agent's: N agents reaching it is N times the key, the cost and the blast radius |
+         * | `shot`, `runs` | a picture and a CI listing are things to report *about*, not to fetch — and `ci` already answers the question a subagent actually has |
+         * | `subagent` | no recursion: one level, because N agents each spawning N is N² bills for work nobody asked for |
+         *
+         * **`ci`, `background` and `look` are here on the operator's instruction**, and each earns
+         * its place: a subagent checking whether a push is green is the archetypal task, a subagent
+         * that cannot background has to block (which is what the tool exists to avoid), and looking
+         * at a picture is reading — a subagent that could read a project but not a screenshot of it
+         * would be scoped by accident rather than by rule.
+         */
+        val SUBAGENT_TOOLS = setOf(
+            "search", "tree", "read",
+            "edit", "create", "delete", "move",
+            "forget",
+            "background", "look", "ci",
+        )
 
         /**
          * One tool, described to the model.
