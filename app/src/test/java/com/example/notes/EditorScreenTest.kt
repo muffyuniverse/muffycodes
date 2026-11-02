@@ -535,7 +535,7 @@ class EditorScreenTest {
 
         assertEquals("the next file", second.name, scene.viewModel.fileBeside(first, 1)?.name)
         assertNull("nothing before the first", scene.viewModel.fileBeside(first, -1))
-        assertEquals("and back again", first.name, scene.viewModel.fileBeside(second, -1))
+        assertEquals("and back again", first.name, scene.viewModel.fileBeside(second, -1)?.name)
 
         assertNull("nothing past the last", scene.viewModel.fileBeside(third, 1))
         assertNull("a file that is not in this folder", scene.viewModel.fileBeside(File("/nope.txt"), 1))
