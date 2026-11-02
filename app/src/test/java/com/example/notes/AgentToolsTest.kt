@@ -99,6 +99,10 @@ class AgentToolsTest {
                 // difference between them is a default rather than a permission: `tree` answers
                 // about one folder, `search` about a question, and both only read.
                 "search", "tree", "read", "edit", "forget", "create", "delete",
+                // **`subagent` sits beside `delete` because the list is in the order the model reads
+                // it**, and a tool that starts another agent belongs with the tools that act on the
+                // project rather than after the ones that reach outside the phone.
+                "subagent",
                 "move",
                 // **`query` is the agent's own reading of what it cost.** It is the one tool that
                 // answers questions nobody wrote a tool for, and it sits beside the request log's
@@ -124,10 +128,6 @@ class AgentToolsTest {
                 // list is part of every request's cache prefix, so a server's own catalogue is
                 // something the agent reads on demand instead.
                 "mcp",
-                // **`subagent` is the last, because it is the only tool that starts another
-                // agent.** It is a capability like the network is: an agent that can hire agents is
-                // an agent that can spend money in parallel, and the list is where that is granted.
-                "subagent",
             ),
             specs.map { it.name },
         )
