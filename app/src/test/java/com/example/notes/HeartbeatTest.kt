@@ -263,12 +263,14 @@ class HeartbeatTest {
     fun `the card arrives on its own and a burst of refreshes settles on the truth`() {
         val phone = Scenario(app, signIn = true)
         try {
-            // Two hours of history, so the card has a number that a stale read would miss.
-            val hour = 3_600_000L
-            for (h in 0 until 2) {
-                RequestDb.insert(db, System.currentTimeMillis() - h * hour, stats(cost = 1.0))
-            }
             phone.await("the account to be ready") { phone.viewModel.workspace != null }
+            // **Into the scenario's own account, not this test's fixture `db`.** They are different
+            // files: `Scenario` builds its own tree, so writing to `db` here would leave the card
+            // reading an empty log and the failure would look like the read never ran.
+            val account = phone.viewModel.workspace?.accountDir ?: error("signed in, so there is one")
+            // One request in the last hour, so the card has a number and a stale read would show
+            // a dash instead.
+            RequestDb.write(account, System.currentTimeMillis(), stats(cost = 1.0))
 
             // **A burst**, which is what a tap actually produces: the tap's own refresh, then the
             // one the listing triggers. Only one read should run and it should finish.
