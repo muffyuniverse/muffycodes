@@ -141,6 +141,16 @@ class AppViewModel @JvmOverloads constructor(
      * they open the app they already set up.
      */
     var projectNames: List<String> by mutableStateOf(emptyList())
+
+    /**
+     * The four numbers the account screen shows, and their last two days.
+     *
+     * **Empty until the first read**, which is also the answer when there is no history yet - an
+     * account with nothing recorded draws no card rather than four cells of dashes. The card is a
+     * report on work done; before any work there is nothing to report, and four empty cells would
+     * look like a failure.
+     */
+    var heartbeat: List<Heartbeat.Measure> by mutableStateOf(emptyList())
         private set
 
     /** The paths that are pinned, as paths from the account root. */
@@ -697,6 +707,7 @@ class AppViewModel @JvmOverloads constructor(
         lockedPaths = ws.locked()
         unsyncedPaths = ws.unsynced()
         agentSessions = AgentSessions(ws.accountDir).read()
+        heartbeat = readHeartbeat(ws)
         // The first refresh of a new process is where a session that survived a reboot gets its
         // clock back: the answer is read here, but nothing else in a refresh would start it.
         applyService(agentSessions)
@@ -713,6 +724,27 @@ class AppViewModel @JvmOverloads constructor(
         // an answer.
         val after = stateSignature()
         if (after != before) Trace.changed(after)
+    }
+
+    /**
+     * The heartbeat, read on the worker.
+     *
+     * **Only on the account screen.** The four cells describe the account as a whole, and a read
+     * per file listing would be forty-eight window sums to draw nothing. `refresh()` runs on every
+     * change, so this is gated rather than removed - the same read is needed again the moment the
+     * person goes back up.
+     *
+     * **A failure is an empty card**, not a crash and not a stale one: a database that cannot be
+     * read has no numbers, and leaving the last good ones on screen would show a card that disagrees
+     * with the log it came from.
+     */
+    private fun readHeartbeat(ws: Workspace): List<Heartbeat.Measure> {
+        if (path.isNotEmpty()) return heartbeat
+        return try {
+            RequestDb.read(ws.accountDir).use { Heartbeat.of(it, System.currentTimeMillis()) }
+        } catch (t: Throwable) {
+            emptyList()
+        }
     }
 
     /**

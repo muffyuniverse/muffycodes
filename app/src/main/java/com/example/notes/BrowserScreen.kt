@@ -368,6 +368,11 @@ fun BrowserScreen(
                             "their repositories, and the files you keep beside them.",
                     )
                 } else if (projects) {
+                    // **Above the list, and inside this branch rather than inside [ProjectList]** -
+                    // that function returns early when there are no projects, so a card placed
+                    // there would vanish for exactly the person who has just started and has the
+                    // most to learn about what the agent costs.
+                    HeartbeatCard(viewModel.heartbeat)
                     ProjectList(
                         viewModel, onRowChat, onRowSync, onRowRename, onRowDelete,
                         onRowPublish, onRowKeepLocal, onRowExport,

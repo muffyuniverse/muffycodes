@@ -63,8 +63,6 @@ object Heartbeat {
             return (now - base) / base
         }
 
-        /** Whether [badge] should read as an improvement. */
-        val better: Boolean? get() = badge?.let { it >= 0 }
     }
 
     /**
@@ -75,10 +73,10 @@ object Heartbeat {
      * then how much came out; then how much of that was answer rather than thinking.
      */
     enum class Id(val title: String, val additive: Boolean) {
-        SPEND("spend", true),
-        CACHE("cache hit", false),
-        OUTPUT("output", true),
-        SHARE("output share", false),
+        SPEND("spend", additive = true),
+        CACHE("cache hit", additive = false),
+        OUTPUT("output", additive = true),
+        SHARE("output share", additive = false),
     }
 
     /**

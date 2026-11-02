@@ -140,6 +140,20 @@ class ScenariosTest {
 
     /** The cost table, over a real log so the numbers in the picture are numbers. */
     @Composable
+    /**
+     * The account screen's heartbeat card, with the history behind it.
+     *
+     * **A whole screen rather than the card alone**, because the card is only meant to be seen above
+     * the project list - and a picture of it floating on its own would not show the thing the design
+     * is about: that it costs the list one band and no scroll.
+     */
+    private fun heartbeat(accountDir: java.io.File, now: Long) = Screen {
+        val measures = RequestDb.read(accountDir).use { Heartbeat.of(it, now) }
+        androidx.compose.foundation.layout.Column {
+            com.example.notes.HeartbeatCard(measures)
+        }
+    }
+
     private fun stats(accountDir: java.io.File, now: Long) = Screen {
         // **The reader is handed straight through rather than left null.** A null reader means
         // "rows were supplied already", so with none the screen would sit on "reading" for ever and
@@ -854,13 +868,10 @@ class ScenariosTest {
             compose, "24-what-it-cost",
             "Account statistics.",
             "the request history summed over an interval chosen with two pickers.",
-            screen = { stats(account, now) },
+            screen = { heartbeat(account, now) },
         ) {
             before()
-            then(
-                "Nothing is pressed: the table is the history summed over the interval the " +
-                    "pickers already name, and `Generated` shows there is nothing new to ask for.",
-            ) {}
+            then("Nothing is pressed: the card is the history, summed as it already is.") {}
             after()
             result(
                 "Two picks and one column. The interval is stated rather than inferred: From " +
@@ -893,7 +904,7 @@ class ScenariosTest {
             compose, "26-what-it-cost-before-anything",
             "Account statistics, before anything was asked.",
             "an empty history, which has to say so rather than show a grid of zeroes.",
-            screen = { stats(account, now) },
+            screen = { heartbeat(account, now) },
         ) {
             before()
             then("Nothing is pressed: there is nothing to press for.") {}

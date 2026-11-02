@@ -19,7 +19,8 @@
 AppThemeTest        app/src/main/java/com/example/notes/AppTheme.kt
 KeySafetyTest      app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/Secrets.kt app/src/main/java/com/example/notes/GitHub.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/CredentialStore.kt
 RequestDbTest      app/src/main/java/com/example/notes/RequestDb.kt app/src/main/java/com/example/notes/RequestStats.kt app/src/main/java/com/example/notes/RequestLog.kt app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/StatsScreen.kt app/src/main/java/com/example/notes/StatsFormat.kt
-HeartbeatTest      app/src/main/java/com/example/notes/Heartbeat.kt app/src/main/java/com/example/notes/RequestDb.kt app/src/main/java/com/example/notes/RequestStats.kt app/src/main/java/com/example/notes/RequestLog.kt
+HeartbeatTest      app/src/main/java/com/example/notes/Heartbeat.kt
+HeartbeatCardTest  app/src/main/java/com/example/notes/HeartbeatCard.kt app/src/main/java/com/example/notes/Heartbeat.kt app/src/main/java/com/example/notes/RequestDb.kt app/src/main/java/com/example/notes/RequestStats.kt app/src/main/java/com/example/notes/RequestLog.kt
 StatsScreenTest    app/src/main/java/com/example/notes/StatsScreen.kt app/src/main/java/com/example/notes/StatsFormat.kt app/src/main/java/com/example/notes/RequestStats.kt app/src/main/java/com/example/notes/RequestLog.kt app/src/main/java/com/example/notes/Workspace.kt
 StreamTest  app/src/main/java/com/example/notes/Stream.kt
 DoorTest    app/src/main/java/com/example/notes/Door.kt app/src/main/java/com/example/notes/Timeouts.kt
