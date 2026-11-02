@@ -124,17 +124,19 @@ object Heartbeat {
      * which is what "the cache hit rate over two days" actually means.
      */
     fun of(db: RequestDb.History, now: Long): List<Measure> {
-        val at = now - Math.floorMod(now, MINUTE)
+        // **The window ends at the NEXT minute boundary, not the last one.** The minute in progress
+        // has no closed bucket, so a window ending at the floor would drop everything since the
+        // minute began - up to fifty-nine seconds of the newest work, which is the one request a
+        // person opens the card to watch. Ending on the boundary that is still to come includes it,
+        // and keeps every window exactly sixty minutes.
+        val at = ceilToMinute(now)
         val start = at - HOURS * HOUR
 
         // **One read, then summed in memory.** Asking for forty-eight windows would be forty-eight
         // queries, and each would round outward to whole buckets - see [RequestDb.minutes].
         //
-        // **Read to `now`, not to `at`.** The minute in progress is not a bucket yet - it has no
-        // closed minute row - so a read that stopped at the floor would lose whatever happened in
-        // the last few seconds. That is invisible in a test that writes on a minute boundary and
-        // glaring in use: the newest request is the one a person is watching for.
-        val buckets = db.minutes(start, now)
+        // **Read to `at`**, the boundary after now, so the part-minute's raw rows are included.
+        val buckets = db.minutes(start, at)
 
         fun sum(from: Long, to: Long): RequestStats.Stats {
             var out = RequestStats.Stats()
@@ -147,11 +149,9 @@ object Heartbeat {
             return out
         }
 
-        // The windows partition the period exactly, so the last one is the recent window. **Its
-        // end is `now`, not the minute boundary**, for the reason above: the partial minute is
-        // real work and belongs to the hour it is happening in.
+        // The windows partition the period exactly, so the last one is the recent window.
         val windows = (0 until HOURS).map { i ->
-            sum(start + i * HOUR, minOf(start + (i + 1) * HOUR, now))
+            sum(start + i * HOUR, start + (i + 1) * HOUR)
         }
         val whole = windows.fold(RequestStats.Stats()) { a, b -> a + b }
 
@@ -196,6 +196,10 @@ object Heartbeat {
             ),
         )
     }
+
+    /** The first minute boundary strictly after [ms], so an aligned instant stays put. */
+    private fun ceilToMinute(ms: Long): Long =
+        if (ms % MINUTE == 0L) ms else ms - Math.floorMod(ms, MINUTE) + MINUTE
 
     /** The share of all tokens in the request that came out of it. */
     private val RequestStats.Stats.outputShare: Double?
