@@ -138,8 +138,6 @@ class ScenariosTest {
         ObservabilityScreen(report = report, onBack = {}, onShare = {}, onClear = {})
     }
 
-    /** The cost table, over a real log so the numbers in the picture are numbers. */
-    @Composable
     /**
      * The account screen's heartbeat card, with the history behind it.
      *
@@ -147,7 +145,7 @@ class ScenariosTest {
      * the project list - and a picture of it floating on its own would not show the thing the design
      * is about: that it costs the list one band and no scroll.
      */
-    @androidx.compose.runtime.Composable
+    @Composable
     private fun Heartbeat(accountDir: java.io.File, now: Long) {
         // **Read once, not once per frame.** `RequestDb.read` opens a file handle, so reading in the
         // composable body would open one per recomposition and leave all but the last unclosed.
@@ -162,7 +160,10 @@ class ScenariosTest {
         }
     }
 
-    private fun stats(accountDir: java.io.File, now: Long) = Screen {
+    /** The cost table, over a real log so the numbers in the picture are numbers. */
+    @Composable
+    private fun Stats(accountDir: java.io.File, now: Long) {
+      Screen {
         // **The reader is handed straight through rather than left null.** A null reader means
         // "rows were supplied already", so with none the screen would sit on "reading" for ever and
         // the picture would be of a screen that never finished. Reading synchronously here is
@@ -187,6 +188,7 @@ class ScenariosTest {
             // an unclosed handle costs nothing and cannot outlive the run.
             readRows = { onDone -> onDone(RequestDb.read(accountDir)) },
         )
+      }
     }
 
     /**
@@ -950,7 +952,7 @@ class ScenariosTest {
             compose, "28-a-preset-from-the-rolling-row",
             "A preset chosen from the rolling row.",
             "two rows of intervals, one selection across both.",
-            screen = { stats(account, now) },
+            screen = { Stats(account, now) },
         ) {
             before()
             then("`6 hours` is tapped in the rolling row.") {
@@ -998,7 +1000,7 @@ class ScenariosTest {
             compose, "27-the-table-waiting-for-generate",
             "The table waiting for Generate.",
             "the start's picker open, over a table that is still showing the generated interval.",
-            screen = { stats(account, now) },
+            screen = { Stats(account, now) },
         ) {
             before()
             then("`From` is opened and the pick committed with `Show`.") {
@@ -1047,7 +1049,7 @@ class ScenariosTest {
             compose, "25-the-window-that-picks-a-time",
             "The window that picks a time.",
             "a dial for the time, in its own window.",
-            screen = { stats(account, now) },
+            screen = { Stats(account, now) },
         ) {
             before()
             then("the start's **time** is pressed, which opens the dial.") {
