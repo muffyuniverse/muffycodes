@@ -58,6 +58,8 @@ local workspace.
 > dev account talks to *"a GitHub that is a folder on this phone"*, so no test touches the network. Deleting
 > it means every test needs an injected fake GitHub — a large refactor, not a deletion. There are 86
 > references to `provisional` and 41 of them are in tests.
+>
+> **Confirmed by the operator, 2026-11-02:** the machinery stays. What goes is the user-facing state.
 
 **D3. Tokens must be durable; no refresh machinery is wanted.** Verified: **OAuth App tokens do not expire
 by default.** The eight-hour lifetime and the refresh token belong to **GitHub Apps**. So the ordinary OAuth
@@ -88,9 +90,30 @@ What actually alleviates it, in order of what it buys:
 4. **Sharding across several OAuth Apps** multiplies the ceiling and fragments the app's identity in every
    user's authorized-applications list. Noted so it is not reinvented as a clever idea. Do not.
 
+#### Two different budgets, and they are easy to confuse
+
+Worth stating because it was confused once already. **The device-flow limit is not an API rate limit**, and
+the two measure different things:
+
+| | what it counts | the number | what happens when exceeded |
+|---|---|---|---|
+| REST API limits | API **calls** the app makes | 5,000/h per installation token, +50 per repo or user past 20, capped ~12,500 (15,000 on GHEC); a user access token follows the user's 5,000/h | 403/429 — the app is slow |
+| Device-flow limit | people **completing authorization** | 50/h per application | authorization refused — new users cannot get in |
+
+The first is about how much work the app does; the second is about how many people can join. For this app
+the first is almost certainly irrelevant — a session makes dozens of calls, not thousands — while the second
+lands squarely on a launch, because its failure mode is "nobody can sign up for an hour".
+
+The exact wording, from the section headed *"Rate limits for the device flow"* in the OAuth App docs: *"When
+a user submits the verification code on the browser, there is a rate limit of 50 submissions in an hour per
+application."* The **verification code** is the `user_code` the person types at `github.com/login/device` —
+GitHub's own term for it, and nothing to do with Marketplace publisher verification, which is a manual
+review with no rate limit at all.
+
 **One measurement worth making before writing auth code.** The 50/hour figure appears in the **OAuth App**
-docs. The **GitHub App** device-flow docs describe the same `interval`/`slow_down` mechanics and state **no
-submission limit at all**. That may mean the ceiling is OAuth-App-specific, or that it is merely
+docs. Grepping the **GitHub App** device-flow page finds **no occurrence of "submissions" at all** — its only
+rate-limit language is the polling `interval`/`slow_down`. So the ceiling is documented for OAuth Apps only,
+and whether GitHub Apps are exempt or merely undocumented is open. That may mean the ceiling is OAuth-App-specific, or that it is merely
 undocumented for Apps. Register both and drive 51 submissions in an hour; the answer decides the product,
 because a GitHub App costs one extra screen (the installation step — *"The app can only access resources in
 an account where it is installed"*) and, if unconstrained, buys the removal of the ceiling entirely. With
