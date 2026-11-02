@@ -98,6 +98,13 @@ VOCABULARY = {
     # app for a web page, the other makes the app do something. A log that called both "link" could
     # not answer "did the onboarding page get them as far as the sign-in dialog".
     "link", "link action",
+    # **Leaving fullscreen, and going from reading to writing.** Two acts: one returns to the frame,
+    # the other puts a cursor in the text. A log that called both "editor" could not answer "did the
+    # person ever try to edit this page", which is the question an onboarding report asks.
+    "editor exit", "editor edit",
+    # **Putting the text back to what is on disk.** Named for what it does rather than "reset",
+    # because "reset" alone could be resetting the view, the drawing or the name.
+    "editor reset",
     "model", "provider", "effort", "add model", "remove model", "read catalogue",
     # making a project, which is a different act from adding one that is already on GitHub
     "new project", "local project", "confirm add project",

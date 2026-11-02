@@ -115,6 +115,14 @@ fun EditorScreen(
     onBack: () -> Unit,
     onOpenHistory: () -> Unit,
     onReport: () -> Unit = {},
+    /**
+     * **A page that must be read to the end**, so fullscreen has no Exit.
+     *
+     * Onboarding is the only such page today. It is a parameter rather than a check on the file's
+     * path because the rule is about the *reading*, not about where the file lives: the same page
+     * opened later from the browser is an ordinary document and may be left.
+     */
+    mustFinishReading: Boolean = false,
 ) {
     val kind = viewModel.workspace?.kindOf(file) ?: EntryKind.TEXT
     val locked = viewModel.isLocked(file)
@@ -156,6 +164,55 @@ fun EditorScreen(
      * into Diff" look the same on a screen with no log. The name is the mode's own lowercase word,
      * so the trace reads `EDITOR VIEW milk.txt` rather than a sentence about a button.
      */
+    /**
+     * **Whether the page is being read rather than edited** — fullscreen, with nothing on it but the
+     * document and two buttons.
+     *
+     * Reading a page inside an editor is reading through a keyhole: a top bar, a mode row and a name
+     * field are all things the eye has to skip past to reach the words. Fullscreen is the mode for
+     * *reading*, which is why it exists at all — the operator's words: "I want for editor view to
+     * open file render full-screen, not just inside editing container".
+     *
+     * It is a separate state rather than a fourth `Mode` because it is not a different way to edit
+     * a file: it is View with the furniture taken away. Making it a mode would mean every `when
+     * (mode)` in this function had a case that means "View, but also this".
+     */
+    var fullscreen by remember(session) { mutableStateOf(false) }
+    /**
+     * Writes the text if it differs from what is on disk, and does nothing otherwise.
+     *
+     * **"Only if changed" is the whole point, and it is not an optimisation.** Every save is a git
+     * commit — `saveEditor` says so: "every save is its own version, and sync is then only the
+     * push". Without this guard, opening a file to read it, pressing Edit, and pressing View again
+     * would add a commit that records nothing, and a person doing that ten times would have ten
+     * empty versions to scroll past in the history.
+     */
+    fun autosaveIfChanged() {
+        if (readOnly || kind != EntryKind.TEXT) return
+        if (text == saved) return
+        viewModel.saveEditor(text)
+        saved = text
+    }
+
+    /**
+     * What a link in the document does.
+     *
+     * **`app:` is refused outside the system project.** A locked page is written by the app and
+     * cannot be edited, so its links are the app's own. A *cloned* page is ordinary user text, and a
+     * cloned page carrying `app:delete-account` would be a document that can act — the door this
+     * feature must not open.
+     */
+    val onLink: (String) -> Unit = { address ->
+        when {
+            address.startsWith("app:") -> {
+                val inSystem = Workspace.isSystem(file.parentFile?.parentFile?.name.orEmpty())
+                if (inSystem) viewModel.runLinkAction(address.removePrefix("app:"))
+                else Trace.note("link-refused", "app: outside the system project")
+            }
+            address.startsWith("http") -> viewModel.openLink(address)
+            else -> Trace.note("link-ignored", "not a link the editor opens")
+        }
+    }
     var focused by remember { mutableStateOf(false) }
     val focus = LocalFocusManager.current
 
@@ -281,14 +338,20 @@ fun EditorScreen(
         name = moved?.name ?: live.name
     }
 
-    /** Leaves the editor, dropping anything not saved. */
+    /**
+     * Leaves the editor, keeping anything typed.
+     *
+     * **It used to drop what was unsaved, and say so** — "Left without saving". That was honest
+     * while Save was a button: the person had been offered a save and had not taken it. With Save
+     * gone, leaving is the last moment the app can tell that the writing was meant, and a warning
+     * about a loss the person did not choose would be the app blaming them for its own timing.
+     *
+     * The reset is still available, and it is the one way to deliberately throw writing away.
+     */
     fun leave() {
-        // Whether it is showing or writing: text that was typed and not saved is
-        // text that is about to be lost, and the person should be told.
-        val dropped = kind == EntryKind.TEXT && text != saved
+        autosaveIfChanged()
         focus.clearFocus()
         onBack()
-        if (dropped) viewModel.message = "Left without saving"
     }
 
     Scaffold(
@@ -380,6 +443,45 @@ fun EditorScreen(
             )
         },
     ) { padding ->
+        // **Fullscreen replaces the frame, not the contents.** Drawn here rather than as a separate
+        // screen so the document, the scroll position and the link handler are the same ones the
+        // editor was already using — a second screen would be a second reader, and the two would
+        // drift.
+        if (fullscreen) {
+            Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+                ReadOnlyPage(
+                    file = file,
+                    text = text,
+                    onLink = onLink,
+                )
+                // **Two buttons, and only two.** Exit returns to the editor; Edit goes straight to
+                // writing. Anything else on this screen would be furniture, which is the thing
+                // fullscreen exists to remove.
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    TextButton(
+                        // **Disabled while the page must be read to the end.** Onboarding is the
+                        // only such page today, and it is why this is a parameter rather than a
+                        // constant: a page a person cannot leave needs no second way to be left.
+                        enabled = !mustFinishReading,
+                        onClick = { Trace.tap("editor exit"); fullscreen = false },
+                    ) { Text("Exit") }
+                    TextButton(
+                        enabled = !readOnly,
+                        onClick = {
+                            Trace.tap("editor edit")
+                            fullscreen = false
+                            choose(Mode.EDIT)
+                        },
+                    ) { Text("Edit") }
+                }
+            }
+            return@Scaffold
+        }
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             // **One row: the modes on the left, Save on the right.** It was two - modes alone,
             // then History and Save - because three modes and two acts did not fit on a phone. Moving
@@ -420,12 +522,18 @@ fun EditorScreen(
                     // one letter per line. The picture is what caught it; no test would have.
                     SingleChoiceSegmentedButtonRow(modifier = Modifier.weight(1f)) {
                         ModeSegment("View", Mode.VIEW, selected = mode) {
-                            // **Leaving Edit does not throw anything away.** What was typed is still
-                            // in the field and Save is still there; the mode says what the screen is
-                            // doing, not what has been decided.
+                            // **Leaving Edit saves, if anything changed.** This is the moment the
+                            // person says they are done writing, and it is the only signal the app
+                            // has — so the save happens here rather than behind a button they might
+                            // forget. Guarded on a real difference: entering Edit to read something
+                            // and leaving again must not write a commit for nothing.
                             focus.clearFocus()
                             commitName()
-                            choose(it)
+                            autosaveIfChanged()
+                            // **View opens the page, not a mode.** Reading happens fullscreen, so the
+                            // segment is an entry to that surface rather than a third state of the
+                            // editor.
+                            fullscreen = true
                         }
                         ModeSegment("Edit", Mode.EDIT, selected = mode, enabled = !readOnly) {
                             choose(it)
@@ -459,22 +567,28 @@ fun EditorScreen(
                                 }
                             }
                         } else {
-                            // Saved before the name is committed: the text belongs to this
-                            // file as it is now, and a rename afterwards carries the file —
-                            // with its text — to the new name.
-                            viewModel.saveEditor(text)
-                            saved = text
-                            commitName()
+                            // **Reset, not Save.** The text is put back to what is on disk — the
+                            // version the person last agreed to — and nothing is written. Saving is
+                            // no longer an act a person performs: it happens when they leave Edit,
+                            // which is the moment the app can tell they meant it.
+                            //
+                            // The operator's argument, which this follows: a Save button is friction
+                            // that exists because the app could not decide when a save was intended.
+                            // Leaving Edit *is* that decision.
+                            Trace.tap("editor reset", file.name)
+                            text = saved
                             focus.clearFocus()
                         }
                     },
                     enabled = when (kind) {
+                        // **Reset is worth pressing only when there is something to undo**, which
+                        // is exactly when the text differs from what is on disk.
                         EntryKind.TEXT -> !readOnly && text != saved
-                        // An image has nothing to save until something is drawn on it.
+                        // An image has nothing to reset until something has been drawn on it.
                         EntryKind.IMAGE -> !readOnly && strokes.isNotEmpty() && decoded is PictureOpen.Ready
                         else -> false
                     },
-                ) { Text("Save") }
+                ) { Text(if (kind == EntryKind.IMAGE) "Save" else "Reset") }
             }
             HorizontalDivider()
 
@@ -557,28 +671,7 @@ fun EditorScreen(
                                 text = text,
                                 modifier = scrolling,
                                 baseDir = file.parentFile,
-                                // **A link in a document is now a link.** Two kinds are understood:
-                                // an `https://` address opens in the phone's browser, and an
-                                // `app:` address is an action the app performs.
-                                //
-                                // **`app:` is refused outside the system project.** A locked page is
-                                // written by the app and cannot be edited, so its links are the
-                                // app's own. A *cloned* page is ordinary user text, and a cloned page
-                                // carrying `app:delete-account` would be a document that can act —
-                                // which is a door this feature must not open.
-                                onLink = { address ->
-                                    when {
-                                        address.startsWith("app:") -> {
-                                            val inSystem = Workspace.isSystem(
-                                                file.parentFile?.parentFile?.name.orEmpty(),
-                                            )
-                                            if (inSystem) viewModel.runLinkAction(address.removePrefix("app:"))
-                                            else Trace.note("link-refused", "app: outside the system project")
-                                        }
-                                        address.startsWith("http") -> viewModel.openLink(address)
-                                        else -> Trace.note("link-ignored", "not a link the editor opens")
-                                    }
-                                },
+                                onLink = onLink,
                             )
                         } else {
                             Text(
@@ -728,6 +821,46 @@ private sealed interface PictureState {
  * settings screen inside a drawing screen, and every tool added is a mode inside the canvas — which
  * is the complexity the file model exists to avoid.
  */
+/**
+ * A document with nothing around it.
+ *
+ * **The reading surface, and the only place a page is drawn at full size.** The editor's View mode
+ * sits inside a column under a top bar and a mode row; this has neither. The difference is not
+ * decoration — a page read to understand something should not have a name field three lines above
+ * the first sentence.
+ *
+ * **Markdown is rendered; anything else is shown as it is.** The rule is the editor's own, and it is
+ * repeated rather than passed in because the two contexts differ in exactly one way (the furniture)
+ * and nothing about *how* a document is drawn.
+ */
+@Composable
+private fun ReadOnlyPage(
+    file: java.io.File,
+    text: String,
+    onLink: (String) -> Unit,
+) {
+    val scrolling = Modifier
+        .fillMaxSize()
+        .verticalScroll(rememberScrollState())
+        .padding(horizontal = 20.dp, vertical = 16.dp)
+    SelectionContainer {
+        if (isMarkdown(file)) {
+            MarkdownBody(
+                text = text,
+                modifier = scrolling,
+                baseDir = file.parentFile,
+                onLink = onLink,
+            )
+        } else {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodyLarge,
+                modifier = scrolling,
+            )
+        }
+    }
+}
+
 @Composable
 private fun DrawMode(
     picture: PictureOpen,

@@ -102,8 +102,8 @@ class EditorScreenTest {
     }
 
     @Test
-    fun `Save keeps what was typed, and back leaves it as it was`() {
-        // The pair the top row promises. Save is a button because saving is
+    fun `leaving Edit keeps what was typed, and back keeps it too`() {
+        // The pair the top row promises. Leaving Edit is the save, because saving is
         // something a person does, and back is back: what was typed and not saved
         // does not reach the file.
         val file = scene.file("milk.txt", "two litres")
@@ -114,7 +114,9 @@ class EditorScreenTest {
         // check for "nothing is waiting" run too early would pass on a save that never happened.
         val tapsBefore = Trace.report().taps
         val answeredBefore = Trace.report().answered
-        compose.onNodeWithText("Save").performClick()
+        // **Leaving Edit is the save now.** Save is gone; the person says they are done by
+        // switching to View, and that is the signal the app acts on.
+        compose.onNodeWithText("View").performClick()
         // Saving writes on the app's worker, so the file answers a moment later.
         compose.waitUntil(10_000) { file.readText() == "three litres" }
         assertTrue("the save was recorded as a tap", Trace.report().taps > tapsBefore)
@@ -135,11 +137,15 @@ class EditorScreenTest {
 
         assertEquals("saved", "three litres", file.readText())
 
+        // **And leaving the screen keeps it too.** The old contract dropped what was unsaved and
+        // said "Left without saving"; with Save gone, leaving is the last moment the app can tell
+        // the writing was meant, so a warning about a loss nobody chose would be the app blaming
+        // them for its own timing.
         compose.onNodeWithText("three litres").performTextReplacement("four litres")
         compose.onNodeWithContentDescription("Back without saving").performClick()
 
-        assertEquals("and the unsaved change went with it", "three litres", file.readText())
-        assertTrue("with a note saying so", scene.viewModel.message == "Left without saving")
+        compose.waitUntil(10_000) { file.readText() == "four litres" }
+        assertEquals("the writing was kept", "four litres", file.readText())
     }
 
     @Test
@@ -155,7 +161,7 @@ class EditorScreenTest {
         compose.onNodeWithText("shopping list").performImeAction()
 
         compose.onNodeWithText("three litres").assertIsDisplayed()
-        compose.onNodeWithText("Save").performClick()
+        compose.onNodeWithText("View").performClick()
 
         val renamed = File(scene.viewModel.currentDir!!, "shopping_list.txt")
         assertTrue("the file was renamed", renamed.isFile)
@@ -212,8 +218,8 @@ class EditorScreenTest {
         compose.onNodeWithText("milk.txt").assertIsDisplayed()
         compose.onNodeWithContentDescription("This file's history").assertIsDisplayed()
         compose.onNodeWithContentDescription("Report a problem").assertIsDisplayed()
-        // And Save is on the row under it, beside the modes rather than on a line of its own.
-        compose.onNodeWithText("Save").assertIsDisplayed()
+        // And Reset is on the row under it, beside the modes rather than on a line of its own.
+        compose.onNodeWithText("Reset").assertIsDisplayed()
         // **Wider than it is tall, which is the one thing to assert about a word.** When the modes
         // and Save first shared a row, a `weight(1f)` spacer sat between them and reserved every
         // remaining pixel, so Save was laid out thirty wide and rendered as "S a v e" - one letter
@@ -222,10 +228,10 @@ class EditorScreenTest {
         // so the shape is what is pinned here; it is the picture that found it, and this is the line
         // that stops it coming back without costing another CI run to notice.
         // **`DpRect` has edges, not a size**, so the size is the difference between them.
-        val save = compose.onNodeWithText("Save").getUnclippedBoundsInRoot()
-        val wide = save.right - save.left
-        val tall = save.bottom - save.top
-        assertTrue("Save is a word, not a column of letters: $wide wide by $tall tall", wide > tall)
+        val reset = compose.onNodeWithText("Reset").getUnclippedBoundsInRoot()
+        val wide = reset.right - reset.left
+        val tall = reset.bottom - reset.top
+        assertTrue("Reset is a word, not a column of letters: $wide wide by $tall tall", wide > tall)
     }
 
     @Test
@@ -275,7 +281,9 @@ class EditorScreenTest {
         // **The text has to be typed**, not asserted: entering Edit puts the field back with the
         // file's own text, so "three litres" is not on the screen until this line writes it.
         compose.onNodeWithText("two litres").performTextReplacement("three litres")
-        compose.onNodeWithText("Save").performClick()
+        // **Leaving Edit is the save.** Save is gone; the person says they are done by
+        // switching to View, and that is the signal the app acts on.
+        compose.onNodeWithText("View").performClick()
         scene.await("the person's own save to land", 20_000) {
             file.readText() == "three litres"
         }
@@ -294,7 +302,7 @@ class EditorScreenTest {
 
         // The record is readable and not writable, which is the rule that makes it evidence.
         compose.onNodeWithText("something happened", substring = true).assertIsDisplayed()
-        compose.onNodeWithText("Save").assertIsNotEnabled()
+        compose.onNodeWithText("Reset").assertIsNotEnabled()
         compose.onNodeWithText("Edit").assertIsNotEnabled()
         // Diff is still open, because reading a history is not writing.
         compose.onNodeWithText("Diff").assertIsEnabled()
@@ -318,7 +326,9 @@ class EditorScreenTest {
         // One press, and it is.
         compose.onNodeWithText("Edit").performClick()
         compose.onNodeWithText("two litres").performTextReplacement("three litres")
-        compose.onNodeWithText("Save").performClick()
+        // **Leaving Edit is the save.** Save is gone; the person says they are done by
+        // switching to View, and that is the signal the app acts on.
+        compose.onNodeWithText("View").performClick()
         // The write and the commit are one act on the app's worker, so the file on
         // disk answers a moment after the button does — exactly as on a phone.
         compose.waitUntil(10_000) { file.readText() == "three litres" }
@@ -386,7 +396,9 @@ class EditorScreenTest {
         // ...and the words are still in the editor, ready to save.
         compose.onNodeWithText("Edit").performClick()
         compose.onNodeWithText("three litres").assertIsDisplayed()
-        compose.onNodeWithText("Save").performClick()
+        // **Leaving Edit is the save.** Save is gone; the person says they are done by
+        // switching to View, and that is the signal the app acts on.
+        compose.onNodeWithText("View").performClick()
         compose.waitUntil(10_000) { file.readText() == "three litres" }
         assertEquals("and saving them works", "three litres", file.readText())
     }
@@ -503,12 +515,12 @@ class EditorScreenTest {
     }
 
     @Test
-    fun `Save has nothing to do until something is typed`() {
+    fun `Reset has nothing to do until something is typed`() {
         val file = scene.file("milk.txt", "two litres")
 
         editorFor(file)
 
-        compose.onNodeWithText("Save").assertIsNotEnabled()
+        compose.onNodeWithText("Reset").assertIsNotEnabled()
     }
 
     @Test
@@ -544,7 +556,9 @@ class EditorScreenTest {
 
         compose.onNodeWithText("Edit").performClick()
         compose.onNodeWithText("two litres").performTextReplacement("three litres")
-        compose.onNodeWithText("Save").performClick()
+        // **Leaving Edit is the save.** Save is gone; the person says they are done by
+        // switching to View, and that is the signal the app acts on.
+        compose.onNodeWithText("View").performClick()
         compose.waitUntil(10_000) { file.readText() == "three litres" }
         assertEquals("and now it can be written", "three litres", file.readText())
     }
