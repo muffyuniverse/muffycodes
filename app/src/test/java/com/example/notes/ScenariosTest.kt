@@ -549,11 +549,20 @@ class ScenariosTest {
                         .fetchSemanticsNodes()
                         .firstOrNull()
                         ?.let {
+                            // **Relative to the surface's own bounds**, not to the screen. The
+                            // first version used absolute offsets that were valid at 1:1; once the
+                            // canvas opened *fitted* the picture was smaller, the swipe landed
+                            // outside it, and the picture showed an empty canvas — a regression the
+                            // fit introduced and only this picture could catch.
                             compose.onAllNodes(androidx.compose.ui.test.hasContentDescription("drawing canvas"))[0]
                                 .performTouchInput {
-                                    down(androidx.compose.ui.geometry.Offset(40f, 60f))
-                                    moveTo(androidx.compose.ui.geometry.Offset(120f, 140f))
-                                    moveTo(androidx.compose.ui.geometry.Offset(200f, 90f))
+                                    // `center` and `size` are the scope's own, and both are in the
+                                    // node's coordinates — which is what a touch needs.
+                                    val w = size.width
+                                    val h = size.height
+                                    down(androidx.compose.ui.geometry.Offset(w * 0.25f, h * 0.30f))
+                                    moveTo(androidx.compose.ui.geometry.Offset(w * 0.5f, h * 0.5f))
+                                    moveTo(androidx.compose.ui.geometry.Offset(w * 0.7f, h * 0.35f))
                                     up()
                                 }
                             compose.waitForIdle()
