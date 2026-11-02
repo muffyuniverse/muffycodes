@@ -413,13 +413,17 @@ fun DrawingSurface(
     // gesture — see `Drawing.View`.
     // **Null until the surface has measured itself**, because the fit needs a size and a composition
     // has none. The first frame draws nothing; the second draws the picture whole.
-    var view by remember(picture) { mutableStateOf<Drawing.View?>(null) }
-    var surface by remember(picture) { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
-    LaunchedEffect(surface, picture) {
-        if (view == null && surface != androidx.compose.ui.unit.IntSize.Zero) {
-            view = Drawing.View.fittedTo(picture.width, picture.height, surface.width.toFloat(), surface.height.toFloat())
-        }
-    }
+    /**
+     * The view, or **null while the person has not touched it** — in which case the fit is used.
+     *
+     * **Null means "still following the window", not "not measured yet".** The distinction is what
+     * the previous version got wrong: it set `view` once from a `LaunchedEffect`, so the fit computed
+     * from the *first* frame's measurements was kept for ever — and on the frame a screenshot tour
+     * captures, that fit was the wrong one, which is why the picture showed a speck. Leaving it null
+     * until a gesture changes it means every frame recomputes the fit from the window it actually has,
+     * and the first gesture takes over from there.
+     */
+    var touched by remember(picture) { mutableStateOf<Drawing.View?>(null) }
 
     /**
      * **One finger draws, two fingers move the picture.**
@@ -467,7 +471,17 @@ fun DrawingSurface(
         // continuous erase drag after one stroke. `rememberUpdatedState` gives the handler the current
         // value without restarting it, which is what both cases need.
         val liveStrokes by rememberUpdatedState(strokes)
-        val liveView by rememberUpdatedState(view)
+        val liveView by rememberUpdatedState(touched)
+        // **Fitted on the very first frame, not after a `LaunchedEffect` hop.** The effect runs after
+        // the composition, so a capture can land on a frame where it has not — which is exactly what
+        // the tour showed. `touched == null` means "follow the window", so the fit is recomputed from
+        // whatever size the layout actually has, every frame, until a gesture takes over.
+        val shown = touched ?: Drawing.View.fittedTo(
+            picture.width,
+            picture.height,
+            windowSize.width.toFloat(),
+            windowSize.height.toFloat(),
+        )
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
@@ -533,7 +547,7 @@ fun DrawingSurface(
                                     middle.x - lastPan.x,
                                     middle.y - lastPan.y,
                                 )
-                                view = currentView
+                                touched = currentView
                                 lastSpan = span
                                 lastPan = middle
                                 event.changes.forEach { it.consume() }
@@ -545,7 +559,7 @@ fun DrawingSurface(
                                 // panning rather than suddenly drawing.
                                 val at = pressed[0].position
                                 currentView = currentView.pannedBy(at.x - lastPan.x, at.y - lastPan.y)
-                                view = currentView
+                                touched = currentView
                                 lastPan = at
                                 pressed[0].consume()
                                 continue
@@ -579,18 +593,7 @@ fun DrawingSurface(
             // `size` here gave the picture's own width back, so `fittedTo` computed 1:1 every time and
             // the canvas opened unfitted — which is exactly what the tour picture showed: a corner of
             // a page at full size.
-            val window = windowSize
-            if (window != androidx.compose.ui.unit.IntSize.Zero && window != surface) surface = window
-            // **Fitted on the very first frame, not after a `LaunchedEffect` hop.** The effect runs
-            // after the composition, so the first frame drew at 1:1 — and in a screenshot tour the
-            // capture happens on a frame where the effect has not landed, which is why the picture
-            // showed a corner of a page even though `fittedTo` was correct.
-            val shown = view ?: Drawing.View.fittedTo(
-                picture.width,
-                picture.height,
-                windowSize.width.toFloat(),
-                windowSize.height.toFloat(),
-            )
+
             // **Scaled and panned by hand rather than by a modifier**, because the strokes are in the
             // picture's coordinates and must move with it. A `graphicsLayer` would transform the
             // picture and leave the marks where they were.
@@ -614,16 +617,18 @@ fun DrawingSurface(
         // has zoomed to 8× and cannot find their place needs a way to know, and a way back.
         // **The reset returns to the fitted view, not to 1:1** — "reset" means "show me the whole
         // picture again", which is where the person started, not the pixel size of the file.
-        val shownZoom = view?.zoom ?: 1f
-        if (view != null && surface != androidx.compose.ui.unit.IntSize.Zero) {
-            val fitted = Drawing.View.fittedTo(picture.width, picture.height, surface.width.toFloat(), surface.height.toFloat())
-            if (view != fitted) {
-                TextButton(
-                    onClick = { view = fitted },
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp),
-                ) {
-                    Text("${(shownZoom * 100).roundToInt()}% · fit")
-                }
+        val fittedNow = Drawing.View.fittedTo(
+            picture.width,
+            picture.height,
+            windowSize.width.toFloat(),
+            windowSize.height.toFloat(),
+        )
+        if (shown != fittedNow) {
+            TextButton(
+                onClick = { touched = null },
+                modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp),
+            ) {
+                Text("${(shown.zoom * 100).roundToInt()}% · fit")
             }
         }
       }
