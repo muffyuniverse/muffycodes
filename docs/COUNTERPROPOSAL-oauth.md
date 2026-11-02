@@ -69,6 +69,12 @@ revoking, the registration being deleted) arrive as a **401**, which is one path
 
 **D4. `.html` preview is deferred** until the auth block is finished. Cut from this change, as §2.4 argued.
 
+**D5. The plan for now: device flow, with a PAT when rate-limited.** No backend, no facade pool, no Actions.
+This closes every alternative explored below — each was checked and each failed on its own merits, not on
+taste: routing across Apps multiplies a pool the app does not use, a facade pool buys throughput by handing
+users N unfamiliar identities, and Actions is prohibited by the terms for exactly this use. What is left is
+the flow that is free, secretless, and needs nothing running anywhere.
+
 ### When it fails, and what the app says
 
 The operator's decision, 2026-11-02: on a rate limit, tell the person, offer a PAT, and let them wait.
@@ -529,6 +535,45 @@ redirect URI to maintain, register, and get wrong.
 - **`.html` preview**, per §2.4. Right feature, wrong change.
 - **A "registration" screen of our own.** We never register anyone; GitHub and OpenRouter do. Our screen is
   "connect", and calling it "registration" will make someone try to collect a password.
+
+---
+
+## 3a. The build order, now that D5 is settled
+
+Six steps. The first two are the whole user-visible win and neither needs OAuth, so the screen improves even
+if the flow work stalls.
+
+**1. Fill the sign-in from the token.** `GitHub.identity(token)` already exists. Paste a token, get the login,
+the commit name and the email. This is the fallback path for step 4, so it is not throwaway work.
+
+**2. OpenRouter, headless PKCE.** No `callback_url`; the person copies the code back; `POST
+/api/v1/auth/keys` returns the key; store it through `credentials.setModelKey`. Ten-minute expiry, single
+use, no `state` in headless mode — the verifier does that job.
+
+**3. The onboarding screens.** Capability screens first (what the app can do), then GitHub, then OpenRouter,
+then the app. Every step needs a way forward for a person who cannot connect right now, which is where step 1
+becomes the GitHub escape hatch. `openFirstRunReadme` moves after this, or is folded into it.
+
+**4. GitHub device flow.** `POST /login/device/code` with `client_id` and `scope`; show `user_code`; poll
+`/login/oauth/access_token` at `interval`, **foreground only**, **stopping on `expired_token`**, and slower
+than the 5 s floor after the first minute. On success, `identity(token)` → `signIn(...)`.
+
+**5. The failure screen.** Rate limit → "use a token instead" (visible, not tucked away), a retry the person
+controls, and a sentence that promises no timer — because the docs say the status of a secondary limit cannot
+be read.
+
+**6. The mandatory-sign-in switch.** Removing the user-facing provisional state, and sending a person back to
+the sign-in screen when the last account is removed. **The `~local` machinery stays** — it is what makes all
+76 test classes hermetic (D2).
+
+**Two things that must happen outside the repo**, and are easy to forget until step 4 fails: the OAuth App must
+be registered, and **device flow must be ticked in its settings** (`device_flow_disabled` is what a missed
+tick looks like). The `client_id` is then a build constant and is public by design.
+
+**The measurement, before step 4 lands:** 51 submissions in an hour (does the 50/h ceiling exist as
+documented?), and one device flow driven to expiry with no code entered, counting polls (does polling spend
+the 2,000/h budget?). Both are cheap; the second decides whether foreground-only polling is a nicety or a
+requirement.
 
 ---
 
