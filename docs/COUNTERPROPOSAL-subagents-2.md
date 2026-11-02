@@ -232,6 +232,7 @@ reads that way — then a subagent whose keepalive ceiling is reached is **stopp
 cold. That is a defensible rule and it is simpler: one row, one number, and reaching it ends the
 subagent. I would build that, because two clocks with one name is how a person sets a number and gets
 a different behaviour.
+@ as one number
 
 ---
 
@@ -363,9 +364,12 @@ can answer. That is `Deadline`'s lesson: the thing that can hang must say what i
 1. **Does lowering N delete the subagent's folder?** I recommend stopping and marking, leaving the
    record. The operator's word was "removed"; this is the one place I would ask before building,
    because it destroys the only account of what that subagent did.
+   @ folder stays, id inactive
 2. **Is the keepalive ceiling the stop clock, or is the idle timeout a second number?** I read
    "exactly" as *one number* (§5.3) and would build one. Two clocks with one name is how a person
    sets a number and gets different behaviour.
+   @ one number
 3. **Does the `SUB` row carry the subagent's whole report, or a summary plus a pointer?** The log
    already has `forConversation`'s rule for results too big to send — the same rule applies, and I
    would reuse it rather than invent a second.
+   @ whole report
