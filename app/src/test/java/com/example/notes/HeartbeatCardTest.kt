@@ -110,9 +110,11 @@ class HeartbeatCardTest {
      */
     @Test
     fun `only spend declines to judge its own rise`() {
-        val rising = measure(Heartbeat.Id.SPEND, recent = 2.0, baseline = 1.0)
+        // **Half again, not double**: exactly +100% sits on the cap and would print `>+99.99%`,
+        // testing the cap rather than this rule.
+        val rising = measure(Heartbeat.Id.SPEND, recent = 1.5, baseline = 1.0)
         assertEquals("spend rising is a fact, not a verdict", null, rising.better)
-        assertEquals("+100.00%", Heartbeat.badge(rising.badge))
+        assertEquals("+50.00%", Heartbeat.badge(rising.badge))
 
         for (id in listOf(Heartbeat.Id.CACHE, Heartbeat.Id.OUTPUT, Heartbeat.Id.SHARE)) {
             assertEquals("$id rising is good", true, measure(id, recent = 2.0, baseline = 1.0).better)
