@@ -697,8 +697,9 @@ class EditorScreenTest {
         // and committed the file, and a count can be unchanged by a commit that recorded nothing
         // new — so the count answers "did a commit happen", which is not the question. The question is
         // "is the drawn-on picture in the history", and the tree answers that.
-        val file = scene.file("drawing.png")
-        file.writeBytes(ONE_PIXEL_PNG)
+        // **Made the way a person makes one**, through `+ New image`, so the file is in the project
+        // and already committed — which is the state a save starts from.
+        val file = scene.picture("drawn")
         scene.viewModel.openEditor(file)
         scene.await("the picture to open") { scene.viewModel.editingFile == file }
 
@@ -725,7 +726,7 @@ class EditorScreenTest {
         }
         assertTrue(
             "the picture is tracked: ${scene.repo("groceries").tracked()}",
-            "drawing.png" in scene.repo("groceries").tracked(),
+            file.name in scene.repo("groceries").tracked(),
         )
     }
 
