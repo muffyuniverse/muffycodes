@@ -53,7 +53,11 @@ class ProjectGit(
     fun init(project: String): Result<Unit> = try {
         val dir = repoDir(project)
         dir.mkdirs()
-        GitService.initOrOpen(dir, authorProvider()).close()
+        // **Held, because making a repository is a write like any other.** Two agents starting
+        // work in one project at the same moment would otherwise both see "no repository" and both
+        // initialise, and the second `git init` on an existing repository is the least harmful of
+        // the outcomes — the harmful one is a commit landing while the refs are being written.
+        RepoLocks.hold(dir, "init") { GitService.initOrOpen(dir, authorProvider()).close() }
         // After the repository, because the lines live in `.git/info/exclude` — they are the app's
         // own local rule, not a file in the person's repository.
         workspace.ensureIgnore(dir)
@@ -109,7 +113,8 @@ class ProjectGit(
      *
      * Returns the new commit's id, or null when there was nothing to commit.
      */
-    fun commit(project: String, what: String): String? = commitOutcome(project, what).id
+    fun commit(project: String, what: String, who: String = "commit"): String? =
+        commitOutcome(project, what, who).id
 
     /**
      * Commits everything that changed, and says **which of three things happened**.
@@ -122,24 +127,51 @@ class ProjectGit(
      * bug the trace was built to catch, and the shape of the return type is half its
      * cause.
      */
-    fun commitOutcome(project: String, what: String): GitService.CommitOutcome {
-        val repo = open(project) ?: return GitService.CommitOutcome.failed(
-            "This project has no repository yet"
-        )
-        return repo.use {
-            val outcome = GitService.commitEverything(it, what, authorProvider())
-            if (outcome.written) {
-                prune(it)
+    fun commitOutcome(project: String, what: String, who: String = "commit"): GitService.CommitOutcome =
+        // **The whole sequence under one hold, not each JGit call.** `commitAll` stages, asks for
+        // the status, and commits — and the window between those is where another writer used to
+        // slip in and commit *this* writer's staged tree under *its* message. A lock around the
+        // individual calls would leave that window open and look correct.
+        RepoLocks.hold(repoDir(project), who) {
+            val repo = open(project) ?: return@hold GitService.CommitOutcome.failed(
+                "This project has no repository yet"
+            )
+            repo.use {
+                // **`inFlight = true`, because this is inside `RepoLocks.hold`.** That is the
+                // fact `retryingLock` needs: a lock failure here cannot be another writer's, so
+                // clearing it is safe. Passing false — which is what every caller did before this
+                // existed — made `clearStaleLock` delete a live lock belonging to the other worker.
+                val outcome = GitService.commitEverything(it, what, authorProvider(), inFlight = true)
+                if (outcome.written) {
+                    prune(it)
+                }
+                outcome
             }
-            outcome
         }
-    }
 
     @JvmOverloads
-    fun sync(project: String, note: String = ""): GitService.RemoteResult {
-        val repo = open(project) ?: return GitService.RemoteResult(
-            "This project has no repository yet", false
-        )
+    fun sync(project: String, note: String = ""): GitService.RemoteResult =
+        // **The whole sync under one hold.** It commits, prunes, and pushes, and every one of those
+        // reads or writes the same refs — a commit landing between the prune and the push would
+        // push a tree the prune did not describe, and a commit landing during the push would either
+        // be silently left behind or make the push refuse for a reason nobody can act on.
+        //
+        // It is also the longest hold in the app: a push over a phone's network is seconds, and the
+        // lock is what stops an agent's save from landing in the middle of it. That is why a hold
+        // this long is traced (`repo-hold`) rather than merely waited on.
+        RepoLocks.hold(repoDir(project), "sync") {
+            val repo = open(project) ?: return@hold GitService.RemoteResult(
+                "This project has no repository yet", false
+            )
+            syncUnder(repo, project, note)
+        }
+
+    /** [sync]'s body, split out so the lock wraps one statement rather than a lambda's braces. */
+    private fun syncUnder(
+        repo: org.eclipse.jgit.lib.Repository,
+        project: String,
+        note: String,
+    ): GitService.RemoteResult {
         return repo.use {
             try {
                 // Every change is already committed, so this can only be catching
@@ -165,6 +197,8 @@ class ProjectGit(
                         it,
                         note.trim().ifBlank { CommitMessage.sync(changed) },
                         authorProvider(),
+                        // Inside `RepoLocks.hold`, so a lock failure is a corpse, not a rival.
+                        inFlight = true,
                     )
                     // **Nothing is pushed over a commit that did not happen.** Pushing
                     // now would send a tree that is missing exactly the work the person
@@ -436,11 +470,11 @@ class ProjectGit(
         path: String,
         revisionId: String,
         deadline: Deadline? = null,
-    ): Result<Unit> {
-        val repo = open(project) ?: return Result.failure(
+    ): Result<Unit> = RepoLocks.hold(repoDir(project), "restore") {
+        val repo = open(project) ?: return@hold Result.failure(
             IllegalStateException("This project has no repository yet")
         )
-        return repo.use {
+        return@hold repo.use {
             try {
                 GitService.restore(it, path, revisionId, deadline)
                 // The commit is made by the caller, and the row's count comes from the repository

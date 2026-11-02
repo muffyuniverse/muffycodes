@@ -462,15 +462,28 @@ object GitService {
         repo: Repository,
         message: String,
         author: GitAuthor,
+        /**
+         * True when the caller is **holding the repository's lock** ([RepoLocks]).
+         *
+         * **This is what makes `retryingLock`'s promise true instead of hopeful.** A lock failure
+         * with the repository held can only be the corpse of a killed process, so clearing it is
+         * safe. Without the hold, the failure may be another writer's *live* `index.lock` — and
+         * deleting it is how a commit ends up writing a tree that does not match its message.
+         *
+         * It defaults to false so a caller that has not thought about it gets the cautious
+         * behaviour, and [ProjectGit] passes true because it holds the lock around the whole
+         * sequence.
+         */
+        inFlight: Boolean = false,
     ): String? {
         return Git(repo).use { git ->
             // A lock left by a killed process is cleared, not reported.
-            retryingLock(repo) { stageEverything(git) }
-            val status = retryingLock(repo) { git.status().call() }
+            retryingLock(repo, inFlight) { stageEverything(git) }
+            val status = retryingLock(repo, inFlight) { git.status().call() }
             if (status.isClean) {
                 null
             } else {
-                val commit = retryingLock(repo) {
+                val commit = retryingLock(repo, inFlight) {
                     git.commit()
                         .setMessage(message.trim().ifEmpty { "Update files" })
                         .setAuthor(author.ident())
@@ -491,8 +504,9 @@ object GitService {
         repo: Repository,
         message: String,
         author: GitAuthor,
+        inFlight: Boolean = false,
     ): CommitOutcome = try {
-        val id = commitAll(repo, message, author)
+        val id = commitAll(repo, message, author, inFlight)
         if (id == null) CommitOutcome.nothing else CommitOutcome.wrote(id)
     } catch (e: Throwable) {
         CommitOutcome.failed(Secrets.explain(e, "That change could not be saved"))
