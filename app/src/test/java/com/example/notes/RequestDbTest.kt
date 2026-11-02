@@ -99,11 +99,14 @@ class RequestDbTest {
     @Test
     fun `minutes are pruned at the fixed window while hours and days follow the setting`() {
         val day = 86_400_000L
+        val hour = 3_600_000L
         val now = 1_767_000_000_000L
-        // A week of one response a day, written and rolled so every level exists.
-        for (d in 6 downTo 0) {
-            write(now - d * day, response(now - d * day))
-            RequestDb.compact(db, now - d * day)
+        // **One response every six hours for a week**, which is enough rows for the difference
+        // between the two cutoffs to be visible: four an hour would be too slow to write and one a
+        // day would give the fine tier almost nothing to prune.
+        for (h in (7 * 24 / 6) downTo 0) {
+            val at = now - h * 6 * hour
+            write(at, response(at))
         }
         RequestDb.compact(db, now, keepDays = 30)
 
@@ -111,7 +114,10 @@ class RequestDbTest {
         val hours = count("roll_hour")
         val days = count("roll_day")
 
+        // A minute row per response, all inside the two-day window.
         assertTrue("minutes are held only for the heartbeat's window, got $minutes", minutes <= RequestDb.FINE_DAYS * 24)
+        // Hours are a week's worth, because the setting keeps them - which is more than the fine
+        // tier would have allowed.
         assertTrue("but hours follow the setting, got $hours", hours > RequestDb.FINE_DAYS * 24)
         assertEquals("and days are kept whole", 7, days)
     }
@@ -125,18 +131,20 @@ class RequestDbTest {
      */
     @Test
     fun `a stingy retention setting cannot starve the heartbeat`() {
-        val day = 86_400_000L
+        val hour = 3_600_000L
         val now = 1_767_000_000_000L
-        for (d in 2 downTo 0) {
-            write(now - d * day, response(now - d * day))
-            RequestDb.compact(db, now - d * day)
+        // **One response an hour for two days**, so the fine tier has exactly the window's worth.
+        for (h in (RequestDb.FINE_DAYS * 24) downTo 0) {
+            val at = now - h * hour
+            write(at, response(at))
         }
+        // A one-day setting, which is *shorter* than the card's window.
         RequestDb.compact(db, now, keepDays = 1)
 
-        val hours = count("roll_hour")
+        val minutes = count("roll_minute")
         assertTrue(
-            "the fine window survives a one-day setting, got $hours hours",
-            hours >= RequestDb.FINE_DAYS * 24 - 1,
+            "the fine window survives a one-day setting, got $minutes minutes",
+            minutes >= RequestDb.FINE_DAYS * 24 - 1,
         )
     }
 
