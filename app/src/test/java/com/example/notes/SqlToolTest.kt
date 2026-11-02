@@ -98,13 +98,24 @@ class SqlToolTest {
             // **The two that a naive `startsWith("SELECT")` would let through.**
             "/* a comment */ DROP TABLE requests",
             "-- a comment\nDROP TABLE requests",
-            "WITH x AS (SELECT 1) DELETE FROM requests",
             "  ",
         )) {
-            val why = run(sql).exceptionOrNull()?.message ?: "accepted"
             assertFalse("refused: $sql", run(sql).isSuccess)
-            assertTrue("says why: $sql — $why", why.contains("not a read") || why.contains("cannot"))
+            assertTrue(
+                "and the allowlist is what refused it, not SQLite: $sql",
+                run(sql).exceptionOrNull()?.message?.contains("not a read") == true,
+            )
         }
+
+        // **`WITH … DELETE` is a write that begins with a read keyword**, so no allowlist can catch
+        // it by looking at the first word. The database refuses it instead - which is the whole
+        // reason the guards are layered rather than one string test.
+        val sneaky = run("WITH x AS (SELECT 1) DELETE FROM requests")
+        assertTrue("refused at the database", sneaky.isFailure)
+        assertTrue(
+            "because it is read-only: ${sneaky.exceptionOrNull()?.message}",
+            sneaky.exceptionOrNull()?.message?.contains("readonly", ignoreCase = true) == true,
+        )
     }
 
     /** The rows are still there afterwards, which is the only proof that nothing ran. */
