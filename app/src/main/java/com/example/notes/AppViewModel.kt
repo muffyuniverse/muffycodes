@@ -481,7 +481,7 @@ class AppViewModel @JvmOverloads constructor(
         // project in view mode so that the operator can read how to use the app and what is possible
         // here"*.
         //
-        // **The introduction is opened by `openFirstRunReadme` and not here.** A property declared
+        // **The introduction is opened by `openOnboarding` and not here.** A property declared
         // below this block is not initialised yet when `init` runs, and `editorSession` is one of
         // them - writing to it from here is a compile error, which is the compiler saying the same
         // thing. The call is posted instead, so it happens once everything above and below has been
@@ -1260,20 +1260,12 @@ class AppViewModel @JvmOverloads constructor(
                     onDone(result.exceptionOrNull()?.message ?: "That code did not work.")
                 } else {
                     Trace.note("openrouter-pkce", "key minted")
-                    onDone(keySaveVerdictFor(key))
+                    onDone(saveModelKey(key))
                 }
             }
         }
     }
 
-    /**
-     * Saves a key that arrived by PKCE, answering what to tell the person.
-     *
-     * Separate from [finishOpenRouterSignIn] only so the verdict is reachable from a test without a
-     * network: the exchange is the part that cannot be tested here, and the save is the part that
-     * matters to the phone.
-     */
-    internal fun keySaveVerdictFor(key: String): String? = saveModelKey(key)
 
     /**
      * The build, in one line, for a report to carry.

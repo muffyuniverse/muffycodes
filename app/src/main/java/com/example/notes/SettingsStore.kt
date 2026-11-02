@@ -35,26 +35,6 @@ class SettingsStore(context: Context, name: String = "settings") {
         private set
 
     /**
-     * Whether the README has been opened by itself, once, on the app's first screen.
-     *
-     * **Once for the life of the install**, not once per launch: the report was *"on first open move
-     * operator to readme.md file from system project in view mode"*, and a screen that reopened it
-     * every time would be a screen that will not stay where a person puts it.
-     *
-     * **Remembered here rather than inferred from "is there anything in the workspace"**, because a
-     * person who deletes everything and starts again should not be shown the introduction a second
-     * time - they have read it.
-     */
-    var readmeShown: Boolean by mutableStateOf(prefs.getBoolean(KEY_README_SHOWN, false))
-        private set
-
-    /** Records that the introduction has been shown, so it is not shown again. */
-    fun markReadmeShown() {
-        prefs.edit().putBoolean(KEY_README_SHOWN, true).apply()
-        readmeShown = true
-    }
-
-    /**
      * **How far through onboarding a person got** — the index of the page they were on.
      *
      * A number rather than a boolean, because the pages are a folder a person swipes through and a
@@ -64,7 +44,7 @@ class SettingsStore(context: Context, name: String = "settings") {
      * will not.
      *
      * **It is not a preference and is not reset by "reset settings".** It records where a person got
-     * to, in the same way `readmeShown` records that they read the introduction.
+     * to, which is not a setting they chose.
      */
     var onboardingAt: Int by mutableStateOf(prefs.getInt(KEY_ONBOARDING_AT, 0))
         private set
@@ -736,9 +716,9 @@ class SettingsStore(context: Context, name: String = "settings") {
      * nothing would say so. Every value here is the same `DEFAULT_*` constant its reader uses, so
      * there is exactly one statement of each number in the app.
      *
-     * **`readmeShown` is deliberately NOT reset.** It is not a preference; it records that the app
-     * has already shown its own introduction, and resetting it would open the README again on the
-     * next launch - which is a side effect nobody asking for "restore defaults" expects.
+     * **`onboardingAt` is deliberately NOT reset.** It is not a preference; it records how far
+     * through the introduction a person got, and resetting it would make them read it again - a
+     * side effect nobody asking for "restore defaults" expects.
      *
      * The theme IS reset, to the one the app starts with, because it is the most visible setting on
      * the screen and a reset that left it alone would look like it had not worked.
@@ -789,9 +769,6 @@ class SettingsStore(context: Context, name: String = "settings") {
         const val KEY_DARK = "use_dark"
         const val KEY_LIVE = "live_trace"
         const val KEY_HISTORY = "history_length"
-
-        /** Whether the system project's README has been shown by itself. */
-        const val KEY_README_SHOWN = "readme_shown"
 
         /** Which onboarding page a person reached. Absent means they have not started. */
         const val KEY_ONBOARDING_AT = "onboarding_at"

@@ -117,16 +117,20 @@ fun EditorScreen(
     onBack: () -> Unit,
     onOpenHistory: () -> Unit,
     onReport: () -> Unit = {},
+) {
     /**
      * **A page that must be read to the end**, so fullscreen has no Exit.
      *
-     * **Read from the view model rather than taken as a parameter**, because the rule is the app's
-     * and not the caller's: onboarding is a state the whole app is in, and a screen that had to be
-     * *told* about it could be told wrong. The same page opened later from the browser is an
-     * ordinary document and may be left, which is exactly why this is not a check on the path.
+     * **Read from the view model, not taken as a parameter**, because the rule is the app's and not
+     * the caller's: onboarding is a state the whole app is in, and a screen that had to be *told*
+     * about it could be told wrong. No caller ever passed one — the parameter was written with a
+     * default and then never used, which is a second way to state the same fact and therefore a
+     * second thing to keep in step.
+     *
+     * The same page opened later from the browser is an ordinary document and may be left, which is
+     * exactly why this is not a check on the path.
      */
-    mustFinishReading: Boolean = viewModel.onboarding,
-) {
+    val mustFinishReading = viewModel.onboarding
     val kind = viewModel.workspace?.kindOf(file) ?: EntryKind.TEXT
     val locked = viewModel.isLocked(file)
     // **The agent's record is the app's, and this screen says so rather than showing a Save that
