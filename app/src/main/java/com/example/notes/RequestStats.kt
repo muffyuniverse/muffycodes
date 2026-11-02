@@ -154,5 +154,14 @@ object RequestStats {
 
         /** The share of the answer that was thinking rather than text. */
         val thinkingShare: Double? get() = if (completionTokens == 0L) null else reasoningTokens.toDouble() / completionTokens
+
+        /**
+         * What one request cost, averaged over the responses that reported a cost.
+         *
+         * **Over `costReported`, not over `requests`.** A stalled answer is billed but reports no
+         * usage, so dividing by the request count would make an average that is neither the price of
+         * a request nor the price of a billed one - and a stall would silently deflate it.
+         */
+        val perRequest: Double? get() = if (costReported == 0) null else cost / costReported
     }
 }
