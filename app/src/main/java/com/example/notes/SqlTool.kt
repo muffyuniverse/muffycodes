@@ -88,7 +88,7 @@ object SqlTool {
     """.trimIndent()
 
     /** What one query produced. */
-    data class Result(
+    data class Answer(
         val columns: List<String>,
         val rows: List<List<String>>,
         /** How many rows the query would have returned without the cap. */
@@ -128,7 +128,7 @@ object SqlTool {
      * **Opened read-only, then made query-only, then run.** See the class note for why the order and
      * the redundancy are both deliberate.
      */
-    fun run(dbFile: File, sql: String, cap: Int = MAX_ROWS): kotlin.Result<Result> {
+    fun run(dbFile: File, sql: String, cap: Int = MAX_ROWS): kotlin.Result<Answer> {
         if (!isRead(sql)) {
             return kotlin.Result.failure(
                 IllegalArgumentException(
@@ -163,7 +163,7 @@ object SqlTool {
         }
     }
 
-    private fun read(db: SQLiteDatabase, sql: String, cap: Int): Result {
+    private fun read(db: SQLiteDatabase, sql: String, cap: Int): Answer {
         db.rawQuery(sql, null).use { c ->
             val columns = c.columnNames.toList()
             val rows = mutableListOf<List<String>>()
@@ -176,7 +176,7 @@ object SqlTool {
                     rows += columns.indices.map { i -> cell(c, i) }
                 }
             }
-            return Result(columns = columns, rows = rows, total = total, csv = csv(columns, rows))
+            return Answer(columns = columns, rows = rows, total = total, csv = csv(columns, rows))
         }
     }
 
@@ -225,7 +225,7 @@ object SqlTool {
      * **Not the rows themselves.** The file holds all of them; a handful here lets the agent answer
      * immediately without spending the conversation on data it can read again if it needs to.
      */
-    fun summary(result: Result, path: String): String = buildString {
+    fun summary(result: Answer, path: String): String = buildString {
         append(result.columns.joinToString(" | ")).append('\n')
         append("— ").append(result.rows.size).append(" rows")
         if (!result.complete) append(" of ${result.total} (capped at $MAX_ROWS)")
