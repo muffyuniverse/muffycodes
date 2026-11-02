@@ -105,7 +105,16 @@ object SqlTool {
      * Skipping comments and whitespace first, because `/* hello */ DROP TABLE` is a write and a
      * naive `startsWith("SELECT")` would not see it.
      */
-    fun isRead(sql: String): Boolean = lead(sql) in setOf("SELECT", "WITH")
+    fun isRead(sql: String): Boolean = lead(sql) in READ_KEYWORDS
+
+    /**
+     * The two words that begin a read, **lowercase to match [lead]**.
+     *
+     * It compared against `SELECT` and `WITH` while `lead` lowercases, so nothing matched and every
+     * query was refused - including the ones that were fine. Eight tests failed with the same
+     * sentence, which is what a single comparison against the wrong case looks like.
+     */
+    private val READ_KEYWORDS = setOf("select", "with")
 
     /** The first word, lowercased, with comments and leading whitespace removed. */
     private fun lead(sql: String): String {
