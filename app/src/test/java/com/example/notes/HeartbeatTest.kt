@@ -257,11 +257,17 @@ class HeartbeatTest {
         assertEquals("99.9B", Heartbeat.compact(99_900_000_000.0))
     }
 
+    /**
+     * **The last plain number is 999, and the first with a letter is 1.00K.**
+     *
+     * The boundary the operator's own list implies: `999` has no suffix and `1.00K` does, so a
+     * thousand crosses over rather than reading as a bare integer. Asserted at the seam because
+     * that is the only place the two branches can disagree.
+     */
     @Test
-    fun `a thousand does not read as one hundred percent of nothing`() {
-        // Below a thousand is the integer, because 1.00K for exactly a thousand reads as a rounder
-        // number than it is.
-        assertEquals("1000", Heartbeat.compact(1_000.0))
+    fun `the plain numbers stop at nine hundred and ninety-nine`() {
+        assertEquals("999", Heartbeat.compact(999.0))
+        assertEquals("1.00K", Heartbeat.compact(1_000.0))
         assertEquals("0", Heartbeat.compact(0.0))
     }
 
