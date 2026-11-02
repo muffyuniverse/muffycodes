@@ -486,32 +486,89 @@ class AppViewModel @JvmOverloads constructor(
         // them - writing to it from here is a compile error, which is the compiler saying the same
         // thing. The call is posted instead, so it happens once everything above and below has been
         // built.
-        main.post { openFirstRunReadme() }
+        main.post { openOnboarding() }
     }
 
     /**
-     * Opens the system project's README, **once for the life of the install**.
+     * **True while a person is reading the pages they must read before the app opens.**
      *
-     * The report that asked for it: *"remove this sign in to begin text box. Instead I want on
-     * first open to move operator to readme.md file from system project in view mode so that the
-     * operator can read how to use the app and what is possible here"*.
+     * Onboarding replaces the first-run README, which was a wall of text where a page with one idea
+     * would do — the operator's own correction: *"onboarding screens just show one capability set at
+     * a time instead of a wall of text"*. It is a folder of Markdown pages in the system project, so
+     * it is read with the same renderer, the same swipe gesture and the same `app:` links as any
+     * other document.
      *
-     * **VIEW mode, not the editor's default for a new file**, because the point is to read it. The
-     * editor already opens in view; this only chooses the file.
-     *
-     * **`refresh()` has already run**, so the system folder and its README exist by the time this
-     * is posted. If they somehow do not, nothing is marked as shown and the next launch tries
-     * again - the failure is "the introduction is late", never "the introduction is skipped".
+     * **A state rather than a screen**, because it changes what the app will let a person do, and
+     * that is the view model's business: the editor hides Exit while this is true, and the browser
+     * refuses to navigate away.
      */
-    private fun openFirstRunReadme() {
-        if (settings.readmeShown) return
+    var onboarding: Boolean by mutableStateOf(false)
+        private set
+
+    /**
+     * Opens the onboarding pages, **wherever the person got to**.
+     *
+     * **Resuming rather than restarting.** A person who quit on page four should not swipe past three
+     * they have read; the position is a number in settings, and finishing is that number reaching
+     * the count. There is no separate "done" flag, because two records that must agree are two
+     * records that eventually will not.
+     *
+     * **`refresh()` has already run**, so the folder and its pages exist by the time this is posted.
+     * If they somehow do not, nothing is recorded and the next launch tries again — the failure is
+     * "onboarding is late", never "onboarding is skipped".
+     */
+    private fun openOnboarding() {
         val ws = workspace ?: return
-        val readme = File(ws.projectDir(Workspace.SYSTEM_PROJECT), Workspace.README)
-        if (!readme.isFile) return
-        settings.markReadmeShown()
-        Trace.note("first-run-readme", Workspace.SYSTEM_PROJECT)
-        editingPath = ws.relative(readme)
+        val pages = Onboarding.pages()
+        if (pages.isEmpty()) return
+        if (settings.onboardingDone(pages.size)) return
+        val dir = File(ws.projectDir(Workspace.SYSTEM_PROJECT), Onboarding.DIR)
+        val at = settings.onboardingAt.coerceIn(0, pages.lastIndex)
+        val page = File(dir, pages[at].name)
+        if (!page.isFile) return
+        onboarding = true
+        Trace.note("onboarding", "page ${at + 1} of ${pages.size}")
+        editingPath = ws.relative(page)
         editorSession++
+    }
+
+    /**
+     * Records that the person has read the page they are on, and opens the next one.
+     *
+     * **Called by the swipe**, which is why it takes no argument: the page being left is the one that
+     * was reached, so reaching page *n* means pages 0..*n* have been seen. That is also why a person
+     * who swipes back and forth does not lose ground — the record only moves forward.
+     */
+    fun onboardingReached(index: Int) {
+        if (!onboarding) return
+        val pages = Onboarding.pages()
+        val bounded = index.coerceIn(0, pages.lastIndex)
+        if (bounded > settings.onboardingAt) settings.markOnboardingAt(bounded)
+        Trace.note("onboarding", "reached ${bounded + 1} of ${pages.size}")
+    }
+
+    /**
+     * Finishes onboarding, **only from the last page**.
+     *
+     * The refusal is the point: onboarding cannot be left early, so the only way to stop seeing it is
+     * to reach the end. The last page is where the connections are offered, and it is the only page
+     * that can fail — which is why [Connection.Token] exists as a way past a sign-in that cannot
+     * succeed.
+     */
+    fun finishOnboarding() {
+        val pages = Onboarding.pages()
+        if (!onboarding) return
+        if (settings.onboardingAt < pages.lastIndex) return
+        settings.markOnboardingAt(pages.size)
+        onboarding = false
+        Trace.note("onboarding", "finished")
+    }
+
+    /** The index of the page the editor is showing, or -1 when it is not an onboarding page. */
+    fun onboardingIndexOf(file: File): Int {
+        if (!onboarding) return -1
+        val pages = Onboarding.pages()
+        return pages.indexOfFirst { it.name == file.name }
     }
 
     /**
@@ -2134,6 +2191,15 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     fun closeEditor() {
+        // **Onboarding cannot be closed early, and this is where that is enforced.** The editor's
+        // Exit button is disabled while onboarding runs, and a disabled button is not a rule — the
+        // system's own back gesture, or a caller this screen does not know about, would close the
+        // page anyway. The refusal is silent because the screen already shows no way out: a message
+        // per attempt would be the app explaining a wall the person can feel.
+        if (onboarding) {
+            Trace.note("onboarding", "close refused")
+            return
+        }
         Trace.tap("close editor")
         editingPath = null
         // **The editor's own report does not follow you out.** The operator's report: "why do I get

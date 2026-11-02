@@ -256,6 +256,67 @@ class AccountsFeatureTest : FeatureTest() {
         assertTrue("names the ten minutes: $said", said!!.contains("ten minutes"))
     }
 
+    // ---- onboarding's own rules ----------------------------------------------
+
+    @Test
+    fun `onboarding cannot be closed before the last page`() {
+        val scene = Scenario(org.robolectric.RuntimeEnvironment.getApplication(), signIn = true)
+        try {
+            // **Onboarding is opened by the app itself on first run**, so this asserts it started
+            // rather than starting it by hand — the mechanism under test is the one a person meets.
+            scene.await("onboarding to open") { scene.viewModel.onboarding }
+            scene.viewModel.closeEditor()
+            assertTrue("still reading", scene.viewModel.onboarding)
+        } finally {
+            scene.close()
+        }
+    }
+
+    @Test
+    fun `the pages are reached in order and the position only moves forward`() {
+        val scene = Scenario(org.robolectric.RuntimeEnvironment.getApplication(), signIn = true)
+        try {
+            scene.await("onboarding to open") { scene.viewModel.onboarding }
+            val pages = Onboarding.pages()
+
+            scene.viewModel.onboardingReached(2)
+            assertEquals("moved to page three", 2, scene.settings.onboardingAt)
+            scene.viewModel.onboardingReached(0)
+            assertEquals("swiping back does not lose ground", 2, scene.settings.onboardingAt)
+            // And finishing is refused from anywhere but the end.
+            scene.viewModel.finishOnboarding()
+            assertTrue("not finished from page three", scene.viewModel.onboarding)
+            assertEquals("and nothing was recorded", 2, scene.settings.onboardingAt)
+
+            scene.viewModel.onboardingReached(pages.lastIndex)
+            scene.viewModel.finishOnboarding()
+            assertFalse("finished from the last page", scene.viewModel.onboarding)
+            assertEquals("recorded past the end", pages.size, scene.settings.onboardingAt)
+        } finally {
+            scene.close()
+        }
+    }
+
+    @Test
+    fun `onboarding does not open again once it has been read`() {
+        val scene = Scenario(org.robolectric.RuntimeEnvironment.getApplication(), signIn = true)
+        try {
+            scene.await("onboarding to open") { scene.viewModel.onboarding }
+            scene.viewModel.onboardingReached(Onboarding.pages().lastIndex)
+            scene.viewModel.finishOnboarding()
+            scene.close()
+
+            // **The same phone, opened again** — which is what a second launch is. The open is
+            // posted, so it is awaited rather than assumed: a `assertFalse` straight after
+            // construction would pass on a launch that had simply not got there yet.
+            val again = scene.reopen()
+            scene.await("the reopened app to settle") { again.workspace != null }
+            assertFalse("not shown twice", again.onboarding)
+        } finally {
+            scene.close()
+        }
+    }
+
     @Test
     fun `an account with no identity still writes commits under its login`() {
         scene.viewModel.signIn("bare", "a-key", "", "")

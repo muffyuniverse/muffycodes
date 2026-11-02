@@ -120,11 +120,12 @@ fun EditorScreen(
     /**
      * **A page that must be read to the end**, so fullscreen has no Exit.
      *
-     * Onboarding is the only such page today. It is a parameter rather than a check on the file's
-     * path because the rule is about the *reading*, not about where the file lives: the same page
-     * opened later from the browser is an ordinary document and may be left.
+     * **Read from the view model rather than taken as a parameter**, because the rule is the app's
+     * and not the caller's: onboarding is a state the whole app is in, and a screen that had to be
+     * *told* about it could be told wrong. The same page opened later from the browser is an
+     * ordinary document and may be left, which is exactly why this is not a check on the path.
      */
-    mustFinishReading: Boolean = false,
+    mustFinishReading: Boolean = viewModel.onboarding,
 ) {
     val kind = viewModel.workspace?.kindOf(file) ?: EntryKind.TEXT
     val locked = viewModel.isLocked(file)
@@ -204,6 +205,18 @@ fun EditorScreen(
      * cloned page carrying `app:delete-account` would be a document that can act — the door this
      * feature must not open.
      */
+    /**
+     * **Records how far the person has got, as they get there.**
+     *
+     * Keyed on the session, so it runs once per page rather than on every recomposition. The record
+     * only moves forward — [AppViewModel.onboardingReached] does the comparison — so swiping back to
+     * re-read a page does not lose the ground that was gained.
+     */
+    LaunchedEffect(session, viewModel.onboarding) {
+        val at = viewModel.onboardingIndexOf(file)
+        if (at >= 0) viewModel.onboardingReached(at)
+    }
+
     val onLink: (String) -> Unit = { address ->
         when {
             address.startsWith("app:") -> {
@@ -465,8 +478,19 @@ fun EditorScreen(
                     // at rest at the top of whatever they land on, because the new file is a new
                     // `remember(file)` — nothing is inherited.
                     onStep = { steps ->
+                        val at = viewModel.onboardingIndexOf(file)
                         val beside = viewModel.fileBeside(file, steps)
-                        if (beside != null) {
+                        // **Swiping past the last page finishes onboarding.** A bounce there would
+                        // be a wall with no door: Exit is disabled, so the last page would be a
+                        // place a person could never leave. The gesture that brought them through
+                        // the pages is the gesture that ends them.
+                        val finishing = beside == null && at >= 0 && steps > 0 &&
+                            at == Onboarding.pages().lastIndex
+                        if (finishing) {
+                            Trace.tap("onboarding finish")
+                            viewModel.finishOnboarding()
+                            onBack()
+                        } else if (beside != null) {
                             Trace.tap("swipe file", beside.name)
                             // **Saved first, and only if it changed.** A swipe out of Edit would
                             // otherwise be the one way to lose writing, since leaving is a save

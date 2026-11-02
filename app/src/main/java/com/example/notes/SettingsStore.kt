@@ -55,6 +55,36 @@ class SettingsStore(context: Context, name: String = "settings") {
     }
 
     /**
+     * **How far through onboarding a person got** — the index of the page they were on.
+     *
+     * A number rather than a boolean, because the pages are a folder a person swipes through and a
+     * person who quits on page four should not have to swipe past three they have read. It is also
+     * the *only* record of progress: there is no separate "done" flag, because finishing is
+     * `onboardingAt >= pages.size`, and two records that must agree are two records that eventually
+     * will not.
+     *
+     * **It is not a preference and is not reset by "reset settings".** It records where a person got
+     * to, in the same way `readmeShown` records that they read the introduction.
+     */
+    var onboardingAt: Int by mutableStateOf(prefs.getInt(KEY_ONBOARDING_AT, 0))
+        private set
+
+    /** Records the page a person is on, so the next launch resumes there. */
+    fun markOnboardingAt(index: Int) {
+        prefs.edit().putInt(KEY_ONBOARDING_AT, index).apply()
+        onboardingAt = index
+    }
+
+    /**
+     * True when onboarding is finished.
+     *
+     * **A property rather than a stored flag**, so "finished" cannot disagree with "where they got
+     * to". The count is passed in because the pages live in [Onboarding] and this class has no
+     * business knowing how many there are.
+     */
+    fun onboardingDone(count: Int): Boolean = onboardingAt >= count
+
+    /**
      * How many changes — local commits — are kept on this phone. 0 keeps all.
      *
      * Applies to the phone's own change history and to each project's individual
@@ -762,6 +792,9 @@ class SettingsStore(context: Context, name: String = "settings") {
 
         /** Whether the system project's README has been shown by itself. */
         const val KEY_README_SHOWN = "readme_shown"
+
+        /** Which onboarding page a person reached. Absent means they have not started. */
+        const val KEY_ONBOARDING_AT = "onboarding_at"
 
         /** Days of request log kept. 0 (the default) keeps every response ever written. */
         const val KEY_REQUEST_DAYS = "request_days"
