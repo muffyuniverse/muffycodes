@@ -372,28 +372,13 @@ object Markdown {
                             // which one was pressed. The annotation belongs to a range of characters,
                             // so the character under the finger decides the target.
 
-                            // **`pushLink` answers the index that `pop` needs.** The pair is
-                            // index-based rather than a bare push/pop, which is what the compiler
-                            // said when `pop()` alone was written here.
-                            val linkIndex = pushLink(
-                                LinkAnnotation.Clickable(
-                                    tag = address,
-                                    // **The listener lives on the annotation**, so the tap is
-                                    // resolved by Compose from the character under the finger. A
-                                    // clickable box around the paragraph could not tell which of
-                                    // several links was pressed.
-                                    //
-                                    // `styles` is left null: the underline and the colour are
-                                    // already applied by the `SpanStyle` below, and a link style
-                                    // here would be a second opinion about how a link looks.
-                                    linkInteractionListener = object :
-                                        androidx.compose.ui.text.LinkInteractionListener {
-                                        override fun onClick(link: LinkAnnotation) {
-                                            onLink(address)
-                                        }
-                                    },
-                                ),
-                            )
+                            // **`addLink` takes the range, so the words are appended first and
+                            // the link is attached to what they occupy.** `pushLink`/`pop` would
+                            // read more naturally, but it is not on this version's builder — and a
+                            // range is the honest shape anyway: the link belongs to a span of
+                            // characters, which is exactly what makes the character under the
+                            // finger decide the target.
+                            val start = length
                             out.withStyle(
                                 SpanStyle(
                                     textDecoration = TextDecoration.Underline,
@@ -401,7 +386,27 @@ object Markdown {
                                     else linkColour,
                                 ),
                             ) { appendInline(this, words, linkColour, onLink) }
-                            pop(linkIndex)
+                            addLink(
+                                LinkAnnotation.Clickable(
+                                    tag = address,
+                                    // **The listener lives on the annotation**, so Compose resolves
+                                    // the tap from the character under the finger. A clickable box
+                                    // around the paragraph could not tell which of several links was
+                                    // pressed.
+                                    //
+                                    // `styles` is left null: the underline and the colour come from
+                                    // the `SpanStyle` above, and a link style here would be a second
+                                    // opinion about how a link looks.
+                                    linkInteractionListener = object :
+                                        androidx.compose.ui.text.LinkInteractionListener {
+                                        override fun onClick(link: LinkAnnotation) {
+                                            onLink(address)
+                                        }
+                                    },
+                                ),
+                                start = start,
+                                end = length,
+                            )
                         } else {
                             out.withStyle(
                                 SpanStyle(

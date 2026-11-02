@@ -614,6 +614,10 @@ private fun Dialogs(
     newLocalProject: () -> Unit,
     askReplace: (String) -> Unit,
 ) {
+    // **This composable's own context**, for the two places that leave the app: the OpenRouter
+    // sign-in and a link in a document. The parent has one too, and they are different scopes —
+    // reaching across was what compiled into the `context(...)` stdlib call the first time.
+    val here = LocalContext.current
     when (pending) {
         Pending.None -> Unit
 
