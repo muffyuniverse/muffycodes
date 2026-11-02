@@ -181,7 +181,14 @@ class HeartbeatTest {
     fun `an empty period has a zero baseline and no badge`() {
         val measures = measures(t0 + hour)
         for (m in measures) {
-            assertEquals("${m.id} was measured and found empty", 0.0, m.baseline ?: Double.NaN, 1e-9)
+            // **A total over an empty period is a measured zero; a rate has no denominator at all.**
+            // The two differ because `0/0` has no answer while `sum of nothing` is zero - and a card
+            // that treated them alike would either hide a real zero or invent a percentage.
+            if (m.id.additive) {
+                assertEquals("${m.id} was measured and found empty", 0.0, m.baseline!!, 1e-9)
+            } else {
+                assertNull("${m.id} has no denominator, so no baseline", m.baseline)
+            }
             assertNull("${m.id} has no recent value", m.recent)
             assertNull("${m.id} has no badge", m.badge)
             assertEquals("and says so", "—", Heartbeat.badge(m.badge))
