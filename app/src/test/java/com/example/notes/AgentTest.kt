@@ -2506,8 +2506,20 @@ class AgentTest {
         assertTrue("refused: ${got.body}", got.body.startsWith(AgentLog.FAILURE))
     }
 
+    /**
+     * **The `reason` tool is gone, and the app still reads the rows it left behind.**
+     *
+     * It wrote a paragraph into the model's own context, which counted against the context budget —
+     * so a model that thought in the open made its own compaction arrive sooner. The provider's
+     * reasoning is already kept (`AgentLog.thinking`, `ctx=app`, replayed as `reasoning_content`),
+     * which is what a thinking-mode endpoint actually requires, so the tool was a second way to say
+     * the same thing at a price.
+     *
+     * **The reader is kept on purpose.** Every log written before this change has `reason` rows in
+     * it, and a log the app can no longer parse is worse than a command nobody can call.
+     */
     @Test
-    fun `a reason is written into the record and stays out of the person's files`() {
+    fun `the reason tool is gone, and an old reason row is still read as the reply's own paragraph`() {
         val door = ScriptedDoor(
             Reply("", listOf(call("reason", """{"text":"milk.txt is the only file"}"""))),
             Reply("noted"),
@@ -2515,17 +2527,31 @@ class AgentTest {
 
         agent(door).burst("think about it")
 
-        assertTrue("in the record", rows().any {
-            it.name == "reason" && it.body.contains("only file")
-        })
         assertFalse(
-            "and nowhere in the project's files",
-            File(ws.accountDir, "shopping").walkTopDown()
-                // **Both record files, not just the evidence.** `reason` enters the context, so the
-                // sentence is in `context.log` as well — and the point of the test is that it is in
-                // neither of the agent's files *as a project file*.
-                .filter { it.isFile && it.parentFile?.name != AgentLog.DIR }
-                .any { it.readText().contains("only file") },
+            "the model cannot call it: " + AgentTools.specs().map { it.name },
+            AgentTools.specs().any { it.name == "reason" },
+        )
+        val got = gotRows().first()
+        assertTrue(
+            "and the call is refused as an unknown tool rather than silently ignored: ${got.body}",
+            got.body.startsWith(AgentLog.FAILURE),
+        )
+    }
+
+    @Test
+    fun `a reason row already in a log is still merged into the reply it belonged to`() {
+        // **The reader, kept for the logs already on people's phones.** A `reason` row is a NOTE
+        // named `reason` in `ctx=in`, and `Agent.messages` appends its body to the assistant
+        // paragraph being accumulated — which is what makes an old conversation still parse.
+        val log = AgentLog.open(File(ws.accountDir, "shopping"))
+        val reply = log.note("agent", "I looked at the folder.")
+        log.note("reason", "milk.txt is the only file")
+
+        val messages = agent(ScriptedDoor()).messages(log.contextRows())
+
+        assertTrue(
+            "the old reason is part of the assistant's own paragraph: $messages",
+            messages.any { it.role == "assistant" && it.content.contains("only file") },
         )
     }
 

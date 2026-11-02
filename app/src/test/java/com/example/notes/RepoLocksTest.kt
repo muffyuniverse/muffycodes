@@ -142,20 +142,37 @@ class RepoLocksTest {
 
         File(ws.projectDir("groceries"), "note.txt").writeText("milk")
 
-        // **The lock is held during the commit, and not before or after.** Asked from inside the
-        // write, because "was it held" is only true while it is true.
-        var heldDuringCommit: String? = null
-        val outcome = RepoLocks.hold(git.repoDir("groceries"), "test") {
-            // A nested hold: `commitOutcome` takes it again, which `ReentrantLock` allows on the
-            // same thread — the reason the lock is reentrant rather than a `synchronized` monitor
-            // would have been equally reentrant, but this proves the nesting is safe.
-            heldDuringCommit = RepoLocks.holderOf(git.repoDir("groceries"))
-            git.commitOutcome("groceries", "Saved note.txt", who = "save")
-        }
+        // **No outer hold here, because `commitOutcome` takes the lock itself.** The question is
+        // whether the *commit's own* hold is visible and whether it survives the nesting inside
+        // `commitEverything`; wrapping it in a second hold would test the wrapper instead.
+        val outcome = git.commitOutcome("groceries", "Saved note.txt", who = "save")
 
         assertTrue("the commit was written: ${outcome.id}", outcome.written)
-        assertEquals("the lock was held while it ran", "save", heldDuringCommit)
-        assertNull("and released after", RepoLocks.holderOf(git.repoDir("groceries")))
+        assertNull(
+            "**and the lock is released, with the holder forgotten** — a stale name would make " +
+                "every later stall report blame a commit that finished",
+            RepoLocks.holderOf(git.repoDir("groceries")),
+        )
+        assertFalse("and it is not held", RepoLocks.isHeld(git.repoDir("groceries")))
+    }
+
+    @Test
+    fun `a nested hold keeps naming the outer holder when it ends`() {
+        // **The bug this catches.** `commitOutcome` holds the lock, and `commitEverything` nests
+        // inside it. A `remove` on the inner exit leaves the outer hold unnamed — so work that
+        // stalls *after* the inner block finishes would report nobody holding the repository, and a
+        // stall report that says nobody is there is worse than no report.
+        RepoLocks.hold(dir, "outer") {
+            RepoLocks.hold(dir, "inner") {
+                assertEquals("the inner name is current", "inner", RepoLocks.holderOf(dir))
+            }
+            assertEquals(
+                "**and the outer name comes back**",
+                "outer",
+                RepoLocks.holderOf(dir),
+            )
+        }
+        assertNull("and the last exit clears it", RepoLocks.holderOf(dir))
     }
 
     @Test

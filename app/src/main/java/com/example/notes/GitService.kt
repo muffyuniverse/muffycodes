@@ -412,16 +412,27 @@ object GitService {
     /**
      * Runs [block], clearing a lock a killed process left behind and trying once more.
      *
-     * **Why this is safe without asking.** Every write in this app is made on one
-     * worker thread, in order, so when a command fails on a lock there is no command of
-     * ours holding one: what is on disk is the corpse of a process Android killed
-     * mid-write. git tells a person to delete that file and try again, which is
-     * reasonable in a terminal and unreasonable on a phone — nobody can reach
-     * `/data/user/0/…` to do it. Until it is deleted *every* write in that project
-     * fails, forever, and a save says nothing.
+     * **Why this is safe without asking.** A lock failure in this app is, in the ordinary case, the
+     * corpse of a process Android killed mid-write: nobody can reach `/data/user/0/…` to delete it,
+     * and until it is deleted *every* write in that project fails for ever while a save says
+     * nothing. git tells a person to delete the file and try again, which is reasonable in a
+     * terminal and unreasonable on a phone.
      *
-     * [inFlight] is what keeps this honest if writes ever do run concurrently: a lock
-     * is only cleared when the app is not in the middle of using it.
+     * **This used to say the corpse was the only possibility, because "every write is made on one
+     * worker thread". That was false** — there are two, the view model's and the agent runner's —
+     * so a failure could equally be *another writer's live lock*, and clearing it corrupted the
+     * other writer's commit.
+     *
+     * [inFlight] is the answer, and **its sense is the opposite of what it sounds like**: `true`
+     * means *somebody in this process is holding the repository right now*, so a lock failure is
+     * **not** a corpse and must be left alone. `false` means the app is not writing, so the lock
+     * can only be a corpse and clearing it is what keeps the project usable.
+     *
+     * **So a caller that holds [RepoLocks] must pass `false`.** Holding the lock means no other
+     * writer of ours can be inside — which is precisely the condition that makes a lock failure a
+     * corpse again. Passing `true` from inside the hold would disable the recovery the project
+     * depends on, and did: it turned "a killed app leaves a lock that blocks every future save"
+     * back into a real bug.
      */
     fun <T> retryingLock(
         repo: Repository,

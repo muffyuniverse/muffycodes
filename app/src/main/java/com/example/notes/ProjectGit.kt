@@ -137,11 +137,18 @@ class ProjectGit(
                 "This project has no repository yet"
             )
             repo.use {
-                // **`inFlight = true`, because this is inside `RepoLocks.hold`.** That is the
-                // fact `retryingLock` needs: a lock failure here cannot be another writer's, so
-                // clearing it is safe. Passing false — which is what every caller did before this
-                // existed — made `clearStaleLock` delete a live lock belonging to the other worker.
-                val outcome = GitService.commitEverything(it, what, authorProvider(), inFlight = true)
+                // **`inFlight = false`, because this is inside `RepoLocks.hold`.**
+                //
+                // The argument's sense is the opposite of what it sounds like: `true` means "a
+                // writer of ours is in the middle of using this repository, so a lock failure is
+                // NOT a corpse — leave it alone". Holding `RepoLocks` is the proof that no other
+                // writer of ours is inside, which makes a lock failure a corpse again, which makes
+                // clearing it both safe and necessary.
+                //
+                // Getting this backwards is not a subtle bug: it disables recovery from the corpse
+                // of a killed process, and `a lock left by a killed app does not lose the change`
+                // fails with the project refusing every save for ever.
+                val outcome = GitService.commitEverything(it, what, authorProvider(), inFlight = false)
                 if (outcome.written) {
                     prune(it)
                 }
@@ -198,7 +205,7 @@ class ProjectGit(
                         note.trim().ifBlank { CommitMessage.sync(changed) },
                         authorProvider(),
                         // Inside `RepoLocks.hold`, so a lock failure is a corpse, not a rival.
-                        inFlight = true,
+                        inFlight = false,
                     )
                     // **Nothing is pushed over a commit that did not happen.** Pushing
                     // now would send a tree that is missing exactly the work the person

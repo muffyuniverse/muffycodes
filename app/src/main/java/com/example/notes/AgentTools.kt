@@ -337,7 +337,6 @@ class AgentTools(
             "history" to setOf("path", "grep", "from", "to"),
             "restore" to setOf("path", "revision"),
             "background" to setOf("tool", "args"),
-            "reason" to setOf("text"),
             "browse" to setOf("url", "wait", "eval", "from", "to"),
             "shot" to setOf("url", "full", "eval"),
             "look" to setOf("paths"),
@@ -534,12 +533,6 @@ class AgentTools(
                     "whether the command has finished. Use it for slow work on a big file. A " +
                     "command that changes files will change them while this turn carries on.",
                 "{\"tool\":\"read\",\"args\":{\"path\":\"a big file\"}}",
-            ),
-            spec(
-                "reason",
-                "Write down what you are thinking, so the person can read it later. It goes in " +
-                    "your record, not in their files.",
-                """{"text":"your reasoning"}""",
             ),
             spec(
                 "browse",
@@ -801,7 +794,6 @@ class AgentTools(
             "history" -> history(args, deadline)
             "restore" -> restore(args, deadline)
             "background" -> background(call, args)
-            "reason" -> reason(args)
             "browse" -> browse(args, deadline)
             "shot" -> shot(args, deadline)
             "look" -> look(args)
@@ -2261,13 +2253,6 @@ class AgentTools(
             onSuccess = { commit("Restored ${file.name}", "put ${rel(file)} back") },
             onFailure = { refusal(it.message ?: "it could not be restored") },
         )
-    }
-
-    private fun reason(args: JSONObject): String {
-        val text = args.optString("text").trim()
-        if (text.isEmpty()) return refusal("Say what you are thinking")
-        log.note("reason", text)
-        return success("written into your record")
     }
 
     // ---- the web ------------------------------------------------------------

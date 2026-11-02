@@ -91,11 +91,16 @@ object RepoLocks {
             // like the culprit.
             Trace.note("repo-wait", "${dir.name} · $who waited $waited ms for ${holders[key] ?: "?"}")
         }
-        holders[key] = who
+        // **The previous holder, restored on the way out.** `commitOutcome` takes this lock again
+        // from inside a caller that already holds it (a reentrant hold on the same thread), and
+        // `remove` on the inner exit would leave the *outer* hold unnamed — so a stall in the
+        // remaining work would say nobody was holding the repository, which is the one thing a
+        // stall report must not say.
+        val was = holders.put(key, who)
         try {
             return block()
         } finally {
-            holders.remove(key)
+            if (was == null) holders.remove(key) else holders[key] = was
             lock.unlock()
             val held = System.currentTimeMillis() - began - waited
             if (held >= SLOW_MS) {
@@ -127,12 +132,12 @@ object RepoLocks {
         val key = keyFor(dir)
         val lock = locks.computeIfAbsent(key) { ReentrantLock() }
         if (!lock.tryLock(waitMs, TimeUnit.MILLISECONDS)) return false
-        holders[key] = who
+        val was = holders.put(key, who)
         try {
             block()
             return true
         } finally {
-            holders.remove(key)
+            if (was == null) holders.remove(key) else holders[key] = was
             lock.unlock()
         }
     }

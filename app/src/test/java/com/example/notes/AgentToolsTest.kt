@@ -93,7 +93,7 @@ class AgentToolsTest {
         // read-only**: a tool that starts a run is a different grant, and it waits on the workflow
         // guard (a run the agent dispatches must not be able to reach repository secrets).
         assertEquals(
-            "and the twenty-three that are",
+            "and the twenty-two that are",
             listOf(
                 // **`search` is the account-wide reader**, and it sits beside `tree` because the
                 // difference between them is a default rather than a permission: `tree` answers
@@ -104,7 +104,7 @@ class AgentToolsTest {
                 // answers questions nobody wrote a tool for, and it sits beside the request log's
                 // own card: both read the same database, one for a glance and one for a question.
                 "query",
-                "history", "restore", "background", "reason", "browse", "shot",
+                "history", "restore", "background", "browse", "shot",
                 // **`look` sits beside `shot`**, because they are the two halves of one loop:
                 // `shot` makes a picture and nothing could consume one until `look` existed.
                 "look",
