@@ -121,7 +121,10 @@ class RequestDbTest {
         assertEquals("every hour is kept", 28, hours)
         assertTrue("but the minutes are cut to the card's window, got $minutes", minutes <= RequestDb.FINE_DAYS * 24)
         assertTrue("so the fine tier is the smaller one", minutes < hours)
-        assertEquals("and days are kept whole", 7, days)
+        // **Eight days, not seven**, and the count is the point rather than an incidental: the loop
+        // starts at `now` and walks back 28 six-hour steps, which spans the day it started in *and*
+        // the seven behind it. Asserting 7 was asserting a subtraction I had not done.
+        assertEquals("and days are kept whole", 8, days)
     }
 
     /**
