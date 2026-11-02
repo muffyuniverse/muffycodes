@@ -99,7 +99,12 @@ class AgentToolsTest {
                 // difference between them is a default rather than a permission: `tree` answers
                 // about one folder, `search` about a question, and both only read.
                 "search", "tree", "read", "edit", "forget", "create", "delete",
-                "move", "history", "restore", "background", "reason", "browse", "shot",
+                "move",
+                // **`query` is the agent's own reading of what it cost.** It is the one tool that
+                // answers questions nobody wrote a tool for, and it sits beside the request log's
+                // own card: both read the same database, one for a glance and one for a question.
+                "query",
+                "history", "restore", "background", "reason", "browse", "shot",
                 // **`look` sits beside `shot`**, because they are the two halves of one loop:
                 // `shot` makes a picture and nothing could consume one until `look` existed.
                 "look",
@@ -119,10 +124,6 @@ class AgentToolsTest {
                 // list is part of every request's cache prefix, so a server's own catalogue is
                 // something the agent reads on demand instead.
                 "mcp",
-                // **`query` is the agent's own reading of what it cost.** It is the one tool that
-                // answers questions nobody wrote a tool for, and it sits beside the request log's
-                // own card: both read the same database, one for a glance and one for a question.
-                "query",
             ),
             specs.map { it.name },
         )

@@ -151,8 +151,8 @@ class SqlToolTest {
 
     @Test
     fun `the columns are the query's own names`() {
-        val rows = run("SELECT utc AS when, cost AS usd FROM requests").getOrThrow()
-        assertEquals(listOf("when", "usd"), rows.columns)
+        val rows = run("SELECT utc AS at_ms, cost AS usd FROM requests").getOrThrow()
+        assertEquals(listOf("at_ms", "usd"), rows.columns)
     }
 
     // ---- the file -------------------------------------------------------------
