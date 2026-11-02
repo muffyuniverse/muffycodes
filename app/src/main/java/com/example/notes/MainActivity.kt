@@ -605,6 +605,22 @@ private fun Dialogs(
                     tap("save key", viewModel.account?.login.orEmpty())
                     refused = keySaveVerdict(viewModel.saveModelKey(key)) { dismiss() }
                 },
+                // **A real browser, not this app's WebView.** RFC 8252 is explicit that a sign-in
+                // belongs in an external user agent, and the reason is visible to the person: the
+                // address bar is there, so they can see whose page is asking for their password.
+                // The app's own WebView is one-shot and headless by design — the opposite of what a
+                // login needs — and an embedded page for a sign-in is indistinguishable from a
+                // phishing screen.
+                onSignIn = {
+                    tap("openrouter sign in")
+                    val url = viewModel.beginOpenRouterSignIn()
+                    openInBrowser(context, url)
+                    url
+                },
+                onCode = { code, answered ->
+                    tap("openrouter code")
+                    viewModel.finishOpenRouterSignIn(code, answered)
+                },
             )
         }
 
@@ -1052,6 +1068,30 @@ private fun shareTrace(context: android.content.Context) {
     }
 }
 
+
+/**
+ * Opens [url] in whatever the phone uses for web pages.
+ *
+ * **Deliberately not this app's WebView.** A sign-in is the one page where the person must be able to
+ * see the address and the certificate, and an embedded view cannot show either — which is why RFC
+ * 8252 says authorisation happens in an external user agent, and why Google and GitHub both refuse
+ * OAuth in embedded views. Opening it externally also means the person's existing browser session is
+ * used, so a phone already signed in to OpenRouter is one press away from done.
+ *
+ * A phone with no browser is a sentence rather than a crash: the paste box in the same dialog still
+ * works, and a key made by hand is the same key.
+ */
+private fun openInBrowser(context: android.content.Context, url: String) {
+    try {
+        context.startActivity(
+            android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    } catch (t: Throwable) {
+        // Nothing on this phone can open a web page. The dialog says nothing, because the paste box
+        // is right there and a person who cannot open a browser already knows it.
+    }
+}
 
 /** The activity behind a compose context, however it is wrapped. */
 private tailrec fun Context.findActivity(): Activity? = when (this) {

@@ -90,6 +90,10 @@ VOCABULARY = {
     # the agent's model: the three lists, the two ways to change the list of models, and the
     # catalogue the numbers come from. A list opened and closed is not here — it changed nothing.
     "reset model config", "set model key", "save key",
+    # **Signing in to OpenRouter instead of pasting a key.** Two names because they are two acts:
+    # opening the page and spending a code. A log that called both "sign in" could not answer
+    # "did the person get as far as OpenRouter", which is the question a failed sign-in asks.
+    "openrouter sign in", "openrouter code",
     "model", "provider", "effort", "add model", "remove model", "read catalogue",
     # making a project, which is a different act from adding one that is already on GitHub
     "new project", "local project", "confirm add project",

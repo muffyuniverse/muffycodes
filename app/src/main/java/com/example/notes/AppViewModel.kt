@@ -1076,6 +1076,87 @@ class AppViewModel @JvmOverloads constructor(
     var modelKeySaved: Int by mutableStateOf(0)
         private set
 
+    // ---- OpenRouter sign-in -------------------------------------------------
+
+    /**
+     * The attempt in progress, if any.
+     *
+     * **Held in memory and nowhere else.** It is a verifier that is worth something for ten minutes
+     * and nothing after that; writing it to disk would create a secret to keep for a secret that
+     * expires on its own. If the app dies, the attempt dies with it and the person starts again —
+     * which costs one press.
+     */
+    private var openRouterAttempt: OpenRouterAuth.Attempt? = null
+
+    /** When [openRouterAttempt] stops being worth keeping, on the same clock as everything else. */
+    private var openRouterExpires: Long = 0L
+
+    /**
+     * Begins an OpenRouter sign-in and answers the address to open.
+     *
+     * The exchange happens when the person comes back with a code; this only makes the attempt.
+     */
+    fun beginOpenRouterSignIn(): String {
+        val attempt = OpenRouterAuth.begin()
+        openRouterAttempt = attempt
+        openRouterExpires = System.currentTimeMillis() + OpenRouterAuth.LIFETIME_MS
+        Trace.note("openrouter-pkce", "begun")
+        return attempt.url()
+    }
+
+    /**
+     * Exchanges the code the person pasted for a key, and keeps it.
+     *
+     * **The same [saveModelKey] as the paste path**, deliberately: a key that arrived by PKCE and a
+     * key that was typed are the same key, and two save paths would be two chances for one of them
+     * to forget the read-back that makes a kept key trustworthy.
+     *
+     * @return null when the key is kept, or the sentence to show when it is not.
+     */
+    fun finishOpenRouterSignIn(
+        code: String,
+        // **The clock is a parameter so the expiry is testable without waiting ten minutes.** A
+        // test that slept would be a test nobody runs; a test that could not reach the expiry would
+        // leave the one branch that protects a stale verifier unexercised.
+        now: Long = System.currentTimeMillis(),
+        onDone: (String?) -> Unit,
+    ) {
+        val attempt = openRouterAttempt
+        if (attempt == null || now > openRouterExpires) {
+            openRouterAttempt = null
+            onDone(
+                "That sign-in has expired. A code lasts ten minutes — start again to get a new one.",
+            )
+            return
+        }
+        onWorker {
+            val result = OpenRouterAuth.exchange(code, attempt.verifier)
+            main.post {
+                // **Spent either way.** A code is single use, so a failure means this attempt can
+                // never succeed; keeping the verifier would only let a person retry a dead code and
+                // read the same refusal twice.
+                openRouterAttempt = null
+                val key = result.getOrNull()
+                if (key == null) {
+                    Trace.note("openrouter-pkce", "refused")
+                    onDone(result.exceptionOrNull()?.message ?: "That code did not work.")
+                } else {
+                    Trace.note("openrouter-pkce", "key minted")
+                    onDone(keySaveVerdictFor(key))
+                }
+            }
+        }
+    }
+
+    /**
+     * Saves a key that arrived by PKCE, answering what to tell the person.
+     *
+     * Separate from [finishOpenRouterSignIn] only so the verdict is reachable from a test without a
+     * network: the exchange is the part that cannot be tested here, and the save is the part that
+     * matters to the phone.
+     */
+    internal fun keySaveVerdictFor(key: String): String? = saveModelKey(key)
+
     /**
      * The build, in one line, for a report to carry.
      *

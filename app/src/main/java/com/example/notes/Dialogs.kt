@@ -1471,13 +1471,59 @@ fun ModelKeyDialog(
     onDismiss: () -> Unit,
     error: String? = null,
     onSave: (String) -> Unit,
+    /**
+     * Begins the OpenRouter sign-in and answers the address to open, or null when this build has no
+     * way to open one.
+     *
+     * **Offered first, and the paste box kept.** Signing in mints a key the person never sees and
+     * never has to copy, which is the easier path — but a key someone already has must still work,
+     * and the sign-in can fail for reasons outside the app (a rate limit, no browser, an OpenRouter
+     * outage). Two doors, one of them always open.
+     */
+    onSignIn: (() -> String?)? = null,
+    /** Exchanges the pasted code, answering null when the key was kept. */
+    onCode: ((String, (String?) -> Unit) -> Unit)? = null,
 ) {
     var key by remember { mutableStateOf("") }
+    // **The sign-in is a second stage of the same window**, not a second dialog: a person who
+    // pressed "Sign in" should not have to find where the app put them.
+    var signIn by remember { mutableStateOf(false) }
+    var code by remember { mutableStateOf("") }
+    var refused by remember { mutableStateOf<String?>(null) }
+    var working by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("OpenRouter key") },
+        title = { Text(if (signIn) "Sign in to OpenRouter" else "OpenRouter key") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (signIn) {
+                    Text(
+                        "Open OpenRouter, sign in, and it will show you a code. Paste that code " +
+                            "here and the app will keep the key OpenRouter makes for you — you " +
+                            "never see or copy the key itself.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedTextField(
+                        value = code,
+                        onValueChange = { code = it; refused = null },
+                        placeholder = { Text("the code OpenRouter showed") },
+                        singleLine = true,
+                    )
+                    if (refused != null) {
+                        Text(
+                            refused!!,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    Text(
+                        "A code can only be used once and expires after ten minutes.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TextButton(onClick = { onSignIn?.invoke() }) { Text("Open OpenRouter again") }
+                } else {
                 OutlinedTextField(
                     value = key,
                     onValueChange = { key = it },
@@ -1504,14 +1550,44 @@ fun ModelKeyDialog(
                         color = MaterialTheme.colorScheme.error,
                     )
                 }
+                // **The sign-in offered first**, because it is the shorter path for anyone who has
+                // not already made a key by hand.
+                if (onSignIn != null && onCode != null) {
+                    TextButton(
+                        onClick = {
+                            signIn = true
+                            refused = null
+                            onSignIn.invoke()
+                        },
+                    ) { Text("Sign in to OpenRouter instead") }
+                }
+                }
             }
         },
         confirmButton = {
-            TextButton(
-                enabled = key.isNotBlank(),
-                onClick = { onSave(key.trim()) },
-            ) { Text("Keep it") }
+            if (signIn) {
+                TextButton(
+                    enabled = code.isNotBlank() && !working && onCode != null,
+                    onClick = {
+                        working = true
+                        refused = null
+                        onCode!!.invoke(code.trim()) { said ->
+                            working = false
+                            if (said == null) onDismiss() else refused = said
+                        }
+                    },
+                ) { Text(if (working) "Checking…" else "Use this code") }
+            } else {
+                TextButton(
+                    enabled = key.isNotBlank(),
+                    onClick = { onSave(key.trim()) },
+                ) { Text("Keep it") }
+            }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = {
+            TextButton(onClick = { if (signIn) signIn = false else onDismiss() }) {
+                Text(if (signIn) "Back" else "Cancel")
+            }
+        },
     )
 }
