@@ -903,9 +903,26 @@ class AgentLog private constructor(
      * A write that stops halfway leaves half a line at the end; [parse] refuses a last line without
      * its newline, so a half row is never shown as an event, and the next append lands after it
      * rather than on top of it.
+     *
+     * **The `mkdirs` is conditional on the project still being there**, and that condition is the
+     * last reader that could resurrect a deleted project. [open] stopped making the folder, but this
+     * writer still did — so a warm ping that arrived after a person deleted a project recreated it
+     * through `agent/`, with `.git` beside it once anything touched the repository. That is the
+     * failure that read as `folder=true, contents=.git/ .git/info/exclude .git/index` on the
+     * scratchpad for two days: not the tick, not JGit, this line.
+     *
+     * **A row for a project nobody has is a row with nowhere to live**, and inventing the folder to
+     * hold it is the app overruling a deletion. The record is dropped instead: a note about work in a
+     * project that no longer exists is not something a person can go and read.
      */
     private fun append(target: File, line: String) {
         try {
+            // **The project's own folder, not just the file's parent.** `agent/` is made when a
+            // project is legitimately written to, so the test is on the project above it: a missing
+            // project means the person removed it, and a missing `agent/` inside a present project
+            // means this is the first write.
+            val project = target.parentFile?.parentFile
+            if (project != null && !project.isDirectory) return
             target.parentFile?.mkdirs()
             target.appendText(line + "\n")
         } catch (t: Throwable) {

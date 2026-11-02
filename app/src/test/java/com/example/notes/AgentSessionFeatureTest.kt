@@ -912,6 +912,36 @@ class AgentSessionFeatureTest : FeatureTest() {
         )
     }
 
+    /**
+     * **A record written after a project is deleted does not recreate it.**
+     *
+     * The last writer, and the one that explains the `.git` in the failure message for two days. The
+     * reader was fixed to stop making the folder, but the *writer* still did: a warm ping that landed
+     * after a person deleted a project appended a row, `append` made `agent/`, and the project came
+     * back — with `.git` beside it the moment anything touched the repository, which is why the
+     * symptom named JGit.
+     *
+     * Driven directly, with no clock and no threads, because that is the only way to know which
+     * writer is under test.
+     */
+    @Test
+    fun `a log row for a deleted project does not bring the project back`() {
+        val project = File(scene.viewModel.workspace!!.accountDir, "groceries")
+        project.deleteRecursively()
+        assertFalse("the project is not there to begin with", project.exists())
+
+        // **The log is opened while the folder is missing**, which is the order a warm ping has: the
+        // session exists, the person deletes the folder, then a ping files its rows.
+        val log = AgentLog.open(project)
+        log.bookkeeping(AgentLog.TURN, "turn", "ping")
+        log.bookkeeping(AgentLog.NOTE, "ping", "kept warm")
+
+        assertFalse(
+            "a row with nowhere to live does not create the place: ${project.walkTopDown().drop(1).toList()}",
+            project.exists(),
+        )
+    }
+
     @Test
     fun `the system prompt is still written on first use, because its folder is the app's`() {
         // **The two layers differ here on purpose.** The system prompt's folder is made by
