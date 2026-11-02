@@ -707,7 +707,7 @@ class AppViewModel @JvmOverloads constructor(
         lockedPaths = ws.locked()
         unsyncedPaths = ws.unsynced()
         agentSessions = AgentSessions(ws.accountDir).read()
-        heartbeat = readHeartbeat(ws)
+        refreshHeartbeat(ws)
         // The first refresh of a new process is where a session that survived a reboot gets its
         // clock back: the answer is read here, but nothing else in a refresh would start it.
         applyService(agentSessions)
@@ -727,25 +727,62 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /**
-     * The heartbeat, read on the worker.
+     * The heartbeat, **read on the worker and published when it arrives**.
      *
-     * **Only on the account screen.** The four cells describe the account as a whole, and a read
-     * per file listing would be forty-eight window sums to draw nothing. `refresh()` runs on every
-     * change, so this is gated rather than removed - the same read is needed again the moment the
-     * person goes back up.
+     * **On the worker because this opens a database.** Three queries, an open, and a close - and
+     * `refresh()` is called from thirty places, every one of them on the main thread. Reading here
+     * directly would put a file open inside a frame, which is the exact mistake the screens it
+     * replaced went out of their way to avoid.
      *
-     * **A failure is an empty card**, not a crash and not a stale one: a database that cannot be
-     * read has no numbers, and leaving the last good ones on screen would show a card that disagrees
-     * with the log it came from.
+     * **The last good card stays until the new one is ready**, rather than being cleared first: an
+     * empty card is the "nothing has happened yet" state, and flashing it between two reads would
+     * make a working account look like it had lost its history.
+     *
+     * **Only on the account screen**, because the four cells describe the account as a whole - and
+     * `refresh()` runs on every change, including inside a project where the card is not drawn.
+     *
+     * **A failure leaves the card as it is**, not blanked: a database that cannot be read has no new
+     * numbers, and replacing a real card with nothing would report a failure as an absence.
      */
-    private fun readHeartbeat(ws: Workspace): List<Heartbeat.Measure> {
-        if (path.isNotEmpty()) return heartbeat
-        return try {
-            RequestDb.read(ws.accountDir).use { Heartbeat.of(it, System.currentTimeMillis()) }
-        } catch (t: Throwable) {
-            emptyList()
+    private fun refreshHeartbeat(ws: Workspace) {
+        if (path.isNotEmpty()) return
+        // **One read at a time, and the newest request wins.** `refresh()` is called in bursts - a
+        // tap, then the refresh it triggers, then the one the file listing triggers - so a queue of
+        // reads would each open the database to compute nearly the same answer.
+        //
+        // **The pending flag is what makes dropping safe.** A request that arrives mid-read is
+        // remembered rather than discarded, and the read that finishes runs one more. Without it a
+        // refresh landing during a read would be lost, and the card would sit on numbers that no
+        // longer match the log - which is the one thing it must never do.
+        if (heartbeatReading) {
+            heartbeatPending = true
+            return
+        }
+        heartbeatReading = true
+        onWorker {
+            val measures = try {
+                RequestDb.read(ws.accountDir).use { Heartbeat.of(it, System.currentTimeMillis()) }
+            } catch (t: Throwable) {
+                heartbeat
+            }
+            main.post {
+                heartbeat = measures
+                heartbeatReading = false
+                if (heartbeatPending) {
+                    heartbeatPending = false
+                    // Re-asked on the main thread, which is where `refresh()` asks it from, so the
+                    // state it reads is the state the worker just published.
+                    refreshHeartbeat(ws)
+                }
+            }
         }
     }
+
+    /** Whether a heartbeat read is in flight, so a burst of refreshes asks once. */
+    private var heartbeatReading = false
+
+    /** Whether a refresh arrived mid-read and needs one more pass. */
+    private var heartbeatPending = false
 
     /**
      * What the screen looks like, in one line.

@@ -244,6 +244,49 @@ class HeartbeatTest {
         assertTrue("but not hidden", spend.recent != null)
     }
 
+    // ---- the view model, and the thread it reads on --------------------------
+
+    /**
+     * **The card is filled by a read that does not block the main thread.**
+     *
+     * The claim in the code is that `refreshHeartbeat` goes to the worker, because `refresh()` is
+     * called from thirty places on the main thread and this opens a database. That claim cannot be
+     * checked by reading the source: `onWorker` is asynchronous, so a version that read inline would
+     * produce the same card and the same tests, only slower and with a frame dropped.
+     *
+     * What *is* checkable is the observable contract around it, and it is the part that would break:
+     * the card arrives **without the caller having to wait for it**, it is not blanked while the
+     * read is in flight, and a burst of refreshes settles on the right numbers rather than on
+     * whichever read finished last.
+     */
+    @Test
+    fun `the card arrives on its own and a burst of refreshes settles on the truth`() {
+        val phone = Scenario(app, signIn = true)
+        try {
+            // Two hours of history, so the card has a number that a stale read would miss.
+            val hour = 3_600_000L
+            for (h in 0 until 2) {
+                RequestDb.insert(db, System.currentTimeMillis() - h * hour, stats(cost = 1.0))
+            }
+            phone.await("the account to be ready") { phone.viewModel.workspace != null }
+
+            // **A burst**, which is what a tap actually produces: the tap's own refresh, then the
+            // one the listing triggers. Only one read should run and it should finish.
+            repeat(5) { phone.viewModel.refresh() }
+            phone.await("the card to fill") { phone.viewModel.heartbeat.isNotEmpty() }
+
+            val spend = phone.viewModel.heartbeat.first { it.id == Heartbeat.Id.SPEND }
+            assertEquals(
+                "the newest read won, not the one that finished last",
+                1.0,
+                spend.recent!!,
+                1e-9,
+            )
+        } finally {
+            phone.close()
+        }
+    }
+
     // ---- formatting -------------------------------------------------------------------------
 
     @Test
