@@ -93,11 +93,6 @@ object RequestStats {
         .truncatedTo(java.time.temporal.ChronoUnit.MINUTES)
         .toInstant().toEpochMilli()
 
-        .plusMinutes(1).toInstant().toEpochMilli()
-
-        .truncatedTo(java.time.temporal.ChronoUnit.HOURS)
-        .toInstant().toEpochMilli()
-
     /**
      * **The one column.** Everything the log holds for one interval, as one set of numbers.
      *
@@ -160,3 +155,4 @@ object RequestStats {
         /** The share of the answer that was thinking rather than text. */
         val thinkingShare: Double? get() = if (completionTokens == 0L) null else reasoningTokens.toDouble() / completionTokens
     }
+}
