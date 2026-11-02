@@ -765,6 +765,11 @@ class AppViewModel @JvmOverloads constructor(
         }
         heartbeatReading = true
         onWorker {
+            // **Started and finished, both recorded.** This is the one read that opens a database
+            // from thirty call sites, so the question "did the card stall" has to be answerable from
+            // a log written by a person holding the phone. A duration is what tells a slow device
+            // from a slow database, and neither is visible in a card that simply looks old.
+            val began = System.currentTimeMillis()
             val measures = try {
                 // **Checked again on the worker**, because the removal can happen between this read
                 // being queued and it running - which is the whole race: the queue does not care
@@ -780,6 +785,12 @@ class AppViewModel @JvmOverloads constructor(
             main.post {
                 heartbeat = measures
                 heartbeatReading = false
+                // **Only when something was actually read**, so a card that is empty because the
+                // person is inside a project - or has no history - does not fill the log with rows
+                // about a read that was never going to happen.
+                if (measures.isNotEmpty()) {
+                    Trace.note("heartbeat", "${System.currentTimeMillis() - began} ms")
+                }
                 if (heartbeatPending) {
                     heartbeatPending = false
                     // Re-asked on the main thread, which is where `refresh()` asks it from, so the

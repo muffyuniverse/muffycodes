@@ -21,7 +21,8 @@ KeySafetyTest app/src/main/java/com/example/notes/GitService.kt app/src/main/jav
 RequestDbTest app/src/main/java/com/example/notes/RequestDb.kt app/src/main/java/com/example/notes/RequestStats.kt app/src/main/java/com/example/notes/RequestLog.kt app/src/main/java/com/example/notes/Workspace.kt
 HeartbeatTest app/src/main/java/com/example/notes/Heartbeat.kt
 HeartbeatCardTest app/src/main/java/com/example/notes/HeartbeatCard.kt app/src/main/java/com/example/notes/Heartbeat.kt
-SqlToolTest app/src/main/java/com/example/notes/SqlTool.kt app/src/main/java/com/example/notes/RequestDb.kt app/src/main/java/com/example/notes/RequestLog.kt app/src/main/java/com/example/notes/RequestDb.kt app/src/main/java/com/example/notes/RequestStats.kt app/src/main/java/com/example/notes/RequestLog.kt
+TraceCoverageTest app/src/main/java/com/example/notes/Trace.kt app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Heartbeat.kt app/src/main/java/com/example/notes/AppViewModel.kt
+SqlToolTest app/src/main/java/com/example/notes/SqlTool.kt app/src/main/java/com/example/notes/RequestDb.kt app/src/main/java/com/example/notes/RequestLog.kt app/src/main/java/com/example/notes/RequestStats.kt
 StreamTest app/src/main/java/com/example/notes/Stream.kt
 DoorTest app/src/main/java/com/example/notes/Door.kt app/src/main/java/com/example/notes/Timeouts.kt
 PicturesInDoorTest app/src/main/java/com/example/notes/Door.kt

@@ -288,6 +288,38 @@ class AccountsFeatureTest : FeatureTest() {
     }
 
     /**
+     * **A queued save cannot bring a deleted account back — on its own, with no other read running.**
+     *
+     * The test above covers this too, but it cannot say *which* writer was responsible: my heartbeat
+     * read was recreating the account through `RequestDb.open`, and while that was true the save's
+     * own guard was untested and could have been deleted without the suite noticing.
+     *
+     * So this drives the save alone. It waits for the removal to settle first, which is the only way
+     * to be sure the save is the writer under test rather than the read.
+     */
+    @Test
+    fun `a queued save alone does not bring a deleted account back`() {
+        scene.signedIn()
+        scene.folder("go_away")
+        val project = File(scene.workspace!!.accountDir, "go_away")
+
+        scene.viewModel.saveEditor("anything")
+        scene.viewModel.removeAccount(scene.login, deleteCopies = true)
+        scene.await("the account's folder to be gone") {
+            !scene.viewModel.accounts.dirOf(scene.login).exists()
+        }
+        assertFalse("the folder is gone", project.exists())
+
+        // The save is queued with a zero debounce, so it runs almost at once. A wait is the only
+        // way to tell "the guard refused it" from "it has not run yet".
+        Thread.sleep(500)
+        assertFalse(
+            "and the save did not recreate it",
+            scene.viewModel.accounts.dirOf(scene.login).exists(),
+        )
+    }
+
+    /**
      * **A cloned page cannot act.**
      *
      * The security boundary of the whole link feature, and the reason `app:` is scoped by project
