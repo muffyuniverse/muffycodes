@@ -460,6 +460,11 @@ fun DrawingSurface(
     val windowSize = androidx.compose.ui.unit.IntSize(side(maxWidth), side(maxHeight))
       Box(
         modifier = Modifier
+            // **`fillMaxSize`, or the wrapper is the picture's size rather than the window's.** Without
+            // it the inner Box wraps its content, the Canvas inside it becomes the picture's natural
+            // size, and the surface a person draws on is a canvas bigger than the screen — which pushed
+            // the tool row off and left the fitted picture as a speck in the corner.
+            .fillMaxSize()
             .shadow(2.dp)
             .border(1.dp, MaterialTheme.colorScheme.outline)
             .clipToBounds(),
