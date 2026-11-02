@@ -110,11 +110,54 @@ application."* The **verification code** is the `user_code` the person types at 
 GitHub's own term for it, and nothing to do with Marketplace publisher verification, which is a manual
 review with no rate limit at all.
 
+#### The 2,000/hour limit, and why it is the sharper one
+
+**The claim is true.** Verified verbatim in the REST API docs, under secondary rate limits:
+
+> *"Make too many OAuth access token requests in a short period of time. No more than **2,000 OAuth access
+> token requests per hour** are allowed for **GitHub Apps and OAuth apps**."*
+
+It appears in neither the device-flow section nor the OAuth App rate-limits page. It is a *secondary* limit,
+and the docs say secondary limits are *"subject to change without notice"*.
+
+**Why it is sharper than the 50/hour figure.** The device flow polls
+`POST /login/oauth/access_token` — which is, literally, an OAuth access token request. So **every poll spends
+this budget**, and one authorization attempt spends it many times:
+
+| | polls spent |
+|---|---|
+| a person who types the code in ~30 s, polling every 5 s | ~6 |
+| a person who types it in ~60 s | ~12 |
+| **an abandoned attempt** (opens the flow, never enters a code) | **up to 180** — the full 15-minute expiry at 5 s |
+
+That last row is the finding. **Abandoned attempts are nearly free on the 50/hour budget and ruinous on this
+one.** 50 successful sign-ins cost roughly 500 polls; 2,000 ÷ 180 ≈ **11 abandoned attempts per hour would
+exhaust the budget on their own** — and an abandoned attempt submits no verification code, so it is invisible
+to the 50/hour limit entirely. A launch where people open the sign-in screen and wander off is the case that
+breaks, and nothing in the 50/hour analysis would have predicted it.
+
+> **Stated as inference, not fact.** GitHub does not explicitly say that device-flow polling counts against
+> the 2,000. It says "OAuth access token requests", and the polled endpoint is exactly that. The inference is
+> strong but it is an inference, and it is one of the things worth measuring rather than assuming.
+
+**Three mitigations, all free:**
+
+1. **Poll only while the app is in the foreground.** A person typing a code is in the foreground by
+   definition. Backgrounding the app should stop the poll, which turns an abandoned attempt from 180 polls
+   into however many seconds they actually looked at it.
+2. **Stop immediately on `expired_token`.** The flow's own expiry is the signal to stop, and continuing to
+   poll past it is pure waste.
+3. **Poll slower than the minimum, and back off.** GitHub states 5 s as the *minimum* interval, not a
+   requirement to poll that often. Polling every 10 s halves consumption for a delay a person typing an
+   8-character code will not notice; 5 s for the first minute then 15 s is better still.
+
 **One measurement worth making before writing auth code.** The 50/hour figure appears in the **OAuth App**
 docs. Grepping the **GitHub App** device-flow page finds **no occurrence of "submissions" at all** — its only
 rate-limit language is the polling `interval`/`slow_down`. So the ceiling is documented for OAuth Apps only,
 and whether GitHub Apps are exempt or merely undocumented is open. That may mean the ceiling is OAuth-App-specific, or that it is merely
-undocumented for Apps. Register both and drive 51 submissions in an hour; the answer decides the product,
+undocumented for Apps. Register both and drive 51 submissions in an hour — **and, separately, run one device flow to expiry with no
+code entered and count the polls it costs**, which settles the inference above. The answers decide the
+product,
 because a GitHub App costs one extra screen (the installation step — *"The app can only access resources in
 an account where it is installed"*) and, if unconstrained, buys the removal of the ceiling entirely. With
 both providers mandatory, **every** new user passes through this flow, so the ceiling applies to the whole
