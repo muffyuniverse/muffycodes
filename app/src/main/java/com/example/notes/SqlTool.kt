@@ -140,9 +140,14 @@ object SqlTool {
         if (!dbFile.exists()) {
             return kotlin.Result.failure(IllegalStateException("There is no request log yet."))
         }
-        var db: SQLiteDatabase? = null
+        // **A local, not a `var` captured by the closure.** As a nullable `var` the compiler cannot
+        // smart-cast it at the call, and the whole `try` then infers a common supertype - which is
+        // how a `kotlin.Result<Answer>` becomes `Any` and the error points at the return type rather
+        // than at anything wrong.
+        var opened: SQLiteDatabase? = null
         return try {
-            db = SQLiteDatabase.openDatabase(dbFile.path, null, SQLiteDatabase.OPEN_READONLY)
+            val db = SQLiteDatabase.openDatabase(dbFile.path, null, SQLiteDatabase.OPEN_READONLY)
+            opened = db
             // **The second guard, and the one that covers `ATTACH`.** A database opened read-only
             // can still attach a *new* file and write to that, because the new file was not opened
             // read-only - it did not exist when the flag was applied.
@@ -156,7 +161,7 @@ object SqlTool {
             kotlin.Result.failure(e)
         } finally {
             try {
-                db?.close()
+                opened?.close()
             } catch (t: Throwable) {
                 // A close that fails leaves nothing to do; the result is already decided.
             }
