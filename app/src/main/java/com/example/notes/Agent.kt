@@ -221,6 +221,14 @@ class Agent(
      * a courtesy that stops a blind model wasting a turn, never a gate on the capability itself.
      */
     private val modelSees: (() -> Boolean)? = null,
+    /**
+     * **How far this agent may reach.** The account for a chat agent, one project for a subagent.
+     *
+     * Carried here rather than only in [tools], because the prompt has to say what the scope takes
+     * away — and the sentence listing what an agent lacks is generated from the two tool lists, so
+     * the scope has to be visible where the layers are built.
+     */
+    private val scope: Scope = Scope.Account,
 ) {
 
     private val tools = AgentTools(
@@ -231,6 +239,7 @@ class Agent(
         fetchAllowed = fetchAllowed,
         github = github, githubToken = githubToken, downloads = downloads,
         modelSees = modelSees,
+        scope = scope,
     )
 
     /**
@@ -483,7 +492,7 @@ class Agent(
      * turn would: a limit the app enforces only when somebody is talking is not a limit.
      */
     fun warm(): Warm {
-        val layers = AgentPrompt.read(accountDir, tools.projectDir)
+        val layers = layers()
         val request = try {
             // **The instruction is appended, never written down.** It is a message on the wire and
             // not a row in the record: a `TOLD` row here would enter the conversation the ping
@@ -558,7 +567,7 @@ class Agent(
      * "working" for ever.
      */
     private fun turn(operator: String?, progress: () -> Unit): End {
-        val layers = AgentPrompt.read(accountDir, tools.projectDir)
+        val layers = layers()
         // **Measured once, at the start of the turn.** The warning names a size, and a size that
         // changed with every request would change the *system* message — the first thing in the
         // array — and a provider's cache matches the longest common prefix, so the warning would
@@ -880,6 +889,24 @@ class Agent(
      * limit in tokens would be two numbers a model has to convert before it can act, and it would
      * convert wrong. The exact bytes are what a *person* is shown, where they can check it.
      */
+    /**
+     * **The prompt for this agent's scope**, built fresh each turn so a scope change is seen.
+     *
+     * The two tool lists are the whole point: `specs()` for the account is everything, `specs()` for
+     * a project is what a subagent has, and the difference is what the system layer says it lacks.
+     * Computed here rather than in `AgentPrompt` because only the agent knows both its scope and
+     * which tools the operator has switched off.
+     */
+    private fun layers(): AgentPrompt.Layers = when (scope) {
+        Scope.Account -> AgentPrompt.read(accountDir, tools.projectDir)
+        is Scope.Project -> AgentPrompt.readScoped(
+            accountDir = accountDir,
+            projectDir = tools.projectDir,
+            everything = AgentTools.specs(fetchAllowed()).map { it.name },
+            has = AgentTools.specs(fetchAllowed()).map { it.name },
+        )
+    }
+
     private fun readOpening(layers: AgentPrompt.Layers, log: AgentLog, tools: List<ToolSpec>): Opening {
         // **The line numbers are the context file's, and they cost nothing to know.**
         // `context.log` holds the `in` rows in the order they entered it, so the nth one is its nth
@@ -1173,14 +1200,14 @@ class Agent(
         // the memo exists to avoid. The instructions and the tool specs are counted as usual: they
         // change rarely and are cheap, and a second memo for them would be a second thing to
         // invalidate.
-        ContextBudget.tokens(AgentPrompt.read(accountDir, tools.projectDir).message) +
+        ContextBudget.tokens(layers().message) +
             log.contextTokens() +
             AgentTools.specs(fetchAllowed()).sumOf {
                 ContextBudget.tokens(it.description, it.parameters.toString())
             }
 
     fun request(): Request {
-        val layers = AgentPrompt.read(accountDir, tools.projectDir)
+        val layers = layers()
         return build(layers, readOpening(layers, log, AgentTools.specs(fetchAllowed())))
     }
 

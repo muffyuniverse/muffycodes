@@ -190,10 +190,13 @@ class RepoLocksTest {
         // which this does by sleeping just past it. It is the one wait in this file, and it is here
         // because the alternative is not testing the line at all.
         RepoLocks.hold(dir, "slow") { Thread.sleep(RepoLocks.SLOW_MS + 120) }
-        val lines = Trace.report().lines
+        // **`lines` is newest first**, so the rows this hold wrote are at the *front*, not the end.
+        // `drop(quiet)` took the oldest ones away and asserted about the rows from before the hold —
+        // which passed only while the log was empty at the start of the test.
+        val fresh = Trace.report().lines.take(Trace.report().lines.size - quiet)
         assertTrue(
-            "the slow hold is named: ${lines.takeLast(3)}",
-            lines.drop(quiet).any { it.contains("repo-hold") && it.contains("slow") },
+            "the slow hold is named: $fresh",
+            fresh.any { it.contains("repo-hold") && it.contains("slow") },
         )
     }
 }

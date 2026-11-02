@@ -2507,6 +2507,59 @@ class AgentTest {
     }
 
     /**
+     * **A scoped agent is told what it does not have, and the sentence is generated.**
+     *
+     * A model that does not know a command is unavailable tries it, gets a refusal, and spends a
+     * turn learning what a sentence could have told it. But a hand-written list of what is missing
+     * drifts: a tool added later is silently absent from the sentence that promises it is absent.
+     *
+     * So this asserts the *generation* rather than the wording — hand it two lists and the sentence
+     * follows, whatever they contain.
+     */
+    @Test
+    fun `what an agent lacks is generated from the two tool lists, so it cannot drift`() {
+        val everything = listOf("read", "tree", "edit", "browse", "fetch", "mcp")
+        val has = listOf("read", "tree", "edit")
+
+        val said = AgentPrompt.missingFrom(everything, has)
+
+        assertTrue("the missing ones are named: $said", said.contains("`browse`"))
+        assertTrue("all of them: $said", said.contains("`fetch`") && said.contains("`mcp`"))
+        assertFalse(
+            "**and the ones it has are not** — a sentence listing everything would be a sentence " +
+                "that says nothing: $said",
+            said.contains("`read`"),
+        )
+        assertTrue("and it says what to do instead: $said", said.contains("report"))
+    }
+
+    @Test
+    fun `an agent with every tool is told nothing, rather than told it lacks nothing`() {
+        // The chat agent's case. A paragraph saying "you have everything" is tokens spent to say
+        // nothing, and it would appear in every request's cache prefix.
+        val all = listOf("read", "tree", "edit")
+        assertEquals("no paragraph at all", "", AgentPrompt.missingFrom(all, all))
+    }
+
+    @Test
+    fun `the missing-commands paragraph is in the system layer, before the project's own heading`() {
+        // **Where it sits matters.** After `# This project` it would read as a rule the person
+        // wrote; before it, it is a property of the agent, which is what it is.
+        val layers = AgentPrompt.Layers(
+            system = "You are working inside a phone app.",
+            project = "# How to work in this project",
+            unavailable = AgentPrompt.missingFrom(listOf("read", "browse"), listOf("read")),
+        )
+
+        val said = layers.message
+        assertTrue("it is there: $said", said.contains("no `browse`"))
+        assertTrue(
+            "and before the project heading: $said",
+            said.indexOf("no `browse`") < said.indexOf("# This project"),
+        )
+    }
+
+    /**
      * **The `reason` tool is gone, and the app still reads the rows it left behind.**
      *
      * It wrote a paragraph into the model's own context, which counted against the context budget —
