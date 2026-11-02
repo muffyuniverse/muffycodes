@@ -2551,7 +2551,7 @@ class AgentTest {
 
         assertTrue(
             "the old reason is part of the assistant's own paragraph: $messages",
-            messages.any { it.role == "assistant" && it.content.contains("only file") },
+            messages.any { it.role == "assistant" && it.text.contains("only file") },
         )
     }
 
