@@ -8,6 +8,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import java.io.File
 
@@ -24,6 +26,7 @@ import java.io.File
  * which reads as "compaction did not happen". [SQLiteDatabase] here is the same handle the reader
  * gets, and [RequestDb.insert] and [RequestDb.compact] are the two steps `write` takes.
  */
+@RunWith(RobolectricTestRunner::class)
 class HeartbeatTest {
 
     private val app = RuntimeEnvironment.getApplication()
