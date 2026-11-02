@@ -166,9 +166,51 @@ is a rotating cast of unfamiliar app names asking for access — which is precis
 the reason the `unverified` / third-party-app warnings exist. It also concentrates a single point of failure:
 one registration suspended and a fraction of your users cannot sign in.
 
-**The honest conclusion:** routing is not a mitigation for *this* limit, and it would be a suspicious-looking
-one to ship. If the 50/hour or the 2,000/hour ceiling ever binds, the levers are the free ones already listed
-(poll less, stop on expiry, do not re-authorize needlessly) and then a backend — not more Apps.
+**The honest conclusion:** routing is not a mitigation for the API limit, and it would be a suspicious-looking
+one to ship.
+
+#### But the device-flow limit *is* app-keyed, and a facade pool would work
+
+Worth separating, because the two limits behave differently under sharding and only one of them is a real
+option:
+
+| limit | keyed on | does sharding multiply it? |
+|---|---|---|
+| 5,000/h primary API (user token) | the **person** | **no** — one person's pool |
+| 2,000/h OAuth token requests | the **app** | yes, in principle |
+| 50/h device-flow submissions | the **application** | **yes** — "50 submissions in an hour **per application**" |
+
+So a pool of N OAuth App registrations would genuinely yield N × 50 submissions/hour, and N × 2,000 polls if
+the secondary limit is app-scoped too. The engineering is trivial — the app already has a `GitHub` interface,
+so a pool is a list of client ids and a rotation.
+
+**It should still not be built.** What device flow makes visible is worse than "unfamiliar names": the person
+enters the code at `github.com/login/device` and GitHub answers *"«App #37» is requesting access to your
+account"* — with that registration's name, icon and permissions. `github.com/settings/applications` then
+lists **N separate entries**, so revoking access means finding and revoking each one. That is a privacy
+problem rather than a cosmetic one. Add that one owner must maintain N registrations, that each is an
+independent point of failure, that the 100-app cap forces multiple GitHub accounts beyond that, and that
+GitHub's secondary limits exist *"to prevent abuse"* and are *"subject to change without notice"* — the pool
+is hard to defend and is not even a guaranteed escape.
+
+**A backend on the web flow dominates it on every axis**, for the same operational burden of running one
+thing:
+
+| | facade pool | backend + web flow |
+|---|---|---|
+| device-flow 50/h | N × 50 | **not used at all** |
+| 2,000/h token requests | N × 2,000 polls | 1 request per sign-in |
+| identities the user sees | N | **1** |
+| registrations to maintain | N | 1 |
+| looks like circumvention | yes | no |
+
+The web flow's own limit is 10 tokens per hour *per user*, revoking the oldest, which is irrelevant at this
+scale.
+
+**So the ceiling is a signal, not a problem to engineer around.** 50/hour is 1,200 new users a day, and
+because tokens do not expire, returning users cost nothing. Build one app, poll politely, and if the ceiling
+ever binds, that is the evidence that a backend is justified — and the backend is better than the pool
+anyway.
 
 #### Two different budgets, and they are easy to confuse
 
