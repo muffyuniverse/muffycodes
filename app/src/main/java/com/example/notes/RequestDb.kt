@@ -444,16 +444,16 @@ object RequestDb {
         return out
     }
 
-    private fun android.database.Cursor.readStats() = RequestStats.Stats(
-        requests = getInt(0),
-        promptTokens = getLong(1),
-        cachedTokens = getLong(2),
-        completionTokens = getLong(3),
-        reasoningTokens = getLong(4),
-        cost = getDouble(5),
-        costReported = getInt(6),
-        saidChars = getLong(7),
-        thinkingChars = getLong(8),
+    private fun android.database.Cursor.readStats(at: Int = 0) = RequestStats.Stats(
+        requests = getInt(at),
+        promptTokens = getLong(at + 1),
+        cachedTokens = getLong(at + 2),
+        completionTokens = getLong(at + 3),
+        reasoningTokens = getLong(at + 4),
+        cost = getDouble(at + 5),
+        costReported = getInt(at + 6),
+        saidChars = getLong(at + 7),
+        thinkingChars = getLong(at + 8),
     )
 
     private fun floorTo(ms: Long, bucket: Long): Long = Math.floorDiv(ms, bucket) * bucket
@@ -551,6 +551,22 @@ object RequestDb {
         }
 
         /**
+         * Minute buckets over `[fromMs, toMs)`, exactly. Empty when there is no history.
+         *
+         * Same contract as [totals]: a closed history reads as empty rather than throwing, because
+         * a late recomposition must not be able to crash the screen.
+         */
+        fun minutes(fromMs: Long, toMs: Long): Map<Long, RequestStats.Stats> {
+            val open = db
+            if (open == null || closed) return emptyMap()
+            return try {
+                minutes(open, fromMs, toMs)
+            } catch (t: Throwable) {
+                emptyMap()
+            }
+        }
+
+        /**
          * **Closing twice is allowed and does nothing the second time.**
          *
          * Two owners will both try: the view model releases the handle when a new read replaces it,
@@ -568,6 +584,60 @@ object RequestDb {
         /** Whether [close] has run, so a second one is a no-op rather than a surprise. */
         @Volatile
         private var closed = false
+    }
+
+    /**
+     * **Minute buckets over `[fromMs, toMs)`, exactly, for a graph that slides.**
+     *
+     * The rest of this class answers "what happened between two instants", and answers it by
+     * widening outward to whole buckets - the safe direction for a total, since a figure that
+     * excluded the ends of a chosen period would look like lost requests.
+     *
+     * That widening is **wrong for the heartbeat**, which asks a different question: 48 windows of
+     * sixty minutes each, one minute apart. Widened, every window would cover 120 minutes and the
+     * graph would be a smoothed version of the truth. So this reads the minute buckets once and
+     * lets the caller sum the windows itself, which is both exact and one query instead of 48.
+     *
+     * **Raw rows are added on top of the minutes.** [compact] rolls a minute only once it has
+     * closed, so the current minute is raw and the graph must not lose it - the most recent window
+     * is the one a person is looking at.
+     */
+    fun minutes(db: SQLiteDatabase, fromMs: Long, toMs: Long): Map<Long, RequestStats.Stats> {
+        if (toMs <= fromMs) return emptyMap()
+        val out = HashMap<Long, RequestStats.Stats>()
+        val lo = floorTo(fromMs, MINUTE)
+        val hi = ceilTo(toMs, MINUTE)
+
+        db.rawQuery(
+            "SELECT bucket, $SUMS FROM roll_minute WHERE bucket >= ? AND bucket < ? GROUP BY bucket",
+            arrayOf(lo.toString(), hi.toString()),
+        ).use { c ->
+            while (c.moveToNext()) out[c.getLong(0)] = c.readStats(1)
+        }
+        // **The raw tail starts where rolling stopped, not where the window starts.** A raw row is
+        // deleted once its minute is rolled, so the oldest surviving raw instant *is* the boundary -
+        // reading from `lo` instead would re-count every minute that is still raw *and* already
+        // summarised, which is exactly the overlap this function exists to avoid. (The same
+        // reasoning as `totals`, which takes its boundary from `MIN(utc)` over the rows compaction
+        // actually rolls rather than assuming.)
+        val rawFrom = db.rawQuery(
+            "SELECT MIN(utc) FROM requests WHERE kind <> $STALL_KIND",
+            null,
+        ).use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else Long.MAX_VALUE }
+        val tailFrom = maxOf(lo, rawFrom)
+        if (tailFrom < hi) {
+            db.rawQuery(
+                "SELECT (utc / $MINUTE) * $MINUTE AS b, $RAW_SUMS FROM requests " +
+                    "WHERE utc >= ? AND utc < ? AND kind <> $STALL_KIND GROUP BY b",
+                arrayOf(tailFrom.toString(), hi.toString()),
+            ).use { c ->
+                while (c.moveToNext()) {
+                    val at = c.getLong(0)
+                    out[at] = (out[at] ?: RequestStats.Stats()) + c.readStats(1)
+                }
+            }
+        }
+        return out
     }
 
     fun oldest(db: SQLiteDatabase): Long? {
