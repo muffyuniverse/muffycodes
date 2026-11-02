@@ -746,6 +746,11 @@ class AppViewModel @JvmOverloads constructor(
      */
     private fun refreshHeartbeat(ws: Workspace) {
         if (path.isNotEmpty()) return
+        // **Not for an account whose folder is gone.** `RequestDb.open` makes the folder it writes
+        // into, so a read queued before a removal would recreate the account a moment after the
+        // person deleted it - restored by a read nobody asked for. The removal refreshes on its way
+        // out, which is exactly when this is true.
+        if (!ws.accountDir.exists()) return
         // **One read at a time, and the newest request wins.** `refresh()` is called in bursts - a
         // tap, then the refresh it triggers, then the one the file listing triggers - so a queue of
         // reads would each open the database to compute nearly the same answer.
@@ -761,7 +766,14 @@ class AppViewModel @JvmOverloads constructor(
         heartbeatReading = true
         onWorker {
             val measures = try {
-                RequestDb.read(ws.accountDir).use { Heartbeat.of(it, System.currentTimeMillis()) }
+                // **Checked again on the worker**, because the removal can happen between this read
+                // being queued and it running - which is the whole race: the queue does not care
+                // what the state was when the request was made.
+                if (!ws.accountDir.exists()) {
+                    heartbeat
+                } else {
+                    RequestDb.read(ws.accountDir).use { Heartbeat.of(it, System.currentTimeMillis()) }
+                }
             } catch (t: Throwable) {
                 heartbeat
             }
