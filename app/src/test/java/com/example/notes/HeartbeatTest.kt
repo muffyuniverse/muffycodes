@@ -244,6 +244,24 @@ class HeartbeatTest {
         assertTrue("but not hidden", spend.recent != null)
     }
 
+    /**
+     * **A request made a second ago is in the card.**
+     *
+     * The window used to end at the last whole minute, so anything in the minute in progress was
+     * invisible - up to fifty-nine seconds of the newest work, and the one request a person is
+     * actually watching for. It is the kind of bug that reads as correct: every window is a tidy
+     * sixty minutes and the totals agree with each other, all of them missing the same slice.
+     */
+    @Test
+    fun `a request in the minute that has not closed yet is counted`() {
+        val now = t0 + 10 * hour + 30 * minute + 42_000L // forty-two seconds into a minute
+        RequestDb.insert(db, now - 5_000L, stats(cost = 2.0))
+
+        val spend = measure(now, Heartbeat.Id.SPEND)
+        assertEquals("the newest request is in the last hour", 2.0, spend.recent!!, 1e-9)
+        assertEquals("and in the last bar", 2.0, spend.points.last()!!, 1e-9)
+    }
+
     // ---- the view model, and the thread it reads on --------------------------
 
     /**

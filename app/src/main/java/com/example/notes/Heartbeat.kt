@@ -129,7 +129,12 @@ object Heartbeat {
 
         // **One read, then summed in memory.** Asking for forty-eight windows would be forty-eight
         // queries, and each would round outward to whole buckets - see [RequestDb.minutes].
-        val buckets = db.minutes(start, at)
+        //
+        // **Read to `now`, not to `at`.** The minute in progress is not a bucket yet - it has no
+        // closed minute row - so a read that stopped at the floor would lose whatever happened in
+        // the last few seconds. That is invisible in a test that writes on a minute boundary and
+        // glaring in use: the newest request is the one a person is watching for.
+        val buckets = db.minutes(start, now)
 
         fun sum(from: Long, to: Long): RequestStats.Stats {
             var out = RequestStats.Stats()
@@ -142,9 +147,11 @@ object Heartbeat {
             return out
         }
 
-        // The windows partition the period exactly, so the last one is the recent window.
+        // The windows partition the period exactly, so the last one is the recent window. **Its
+        // end is `now`, not the minute boundary**, for the reason above: the partial minute is
+        // real work and belongs to the hour it is happening in.
         val windows = (0 until HOURS).map { i ->
-            sum(start + i * HOUR, start + (i + 1) * HOUR)
+            sum(start + i * HOUR, minOf(start + (i + 1) * HOUR, now))
         }
         val whole = windows.fold(RequestStats.Stats()) { a, b -> a + b }
 
