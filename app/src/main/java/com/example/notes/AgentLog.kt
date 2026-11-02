@@ -154,6 +154,28 @@ class AgentLog private constructor(
         const val GOT = "GOT"
         const val NOTE = "NOTE"
 
+        /**
+         * **A subagent's report, arriving in the chat agent's own conversation.**
+         *
+         * The operator's decision, and the shape of it matters: *"good idea, to take the shape of
+         * told and make its own kind 'sub'". So it is a row that enters the context like a `NOTE`,
+         * but it is its own kind rather than a note, for three reasons that all come from
+         * [Agent.forget] and the compaction rules needing to treat it precisely:
+         *
+         * 1. **It is not the person speaking.** A `NOTE` in the context is the app talking — a
+         *    wake, a clear-up line — and a model that read a subagent's report as a person's message
+         *    would answer the wrong party.
+         * 2. **It is not the model's own writing either.** A `reason` row merges into the assistant
+         *    paragraph; a report must not, because the chat agent did not write it.
+         * 3. **It has an author.** The `name` column carries `#2`, which is what makes a
+         *    conversation with three subagents readable and what a `forget` can be aimed past.
+         *
+         * **Born `in`, not `app`.** It is the conversation's content — the thing the model must act
+         * on — and the operator's rule for `app` is *"app errors … should go into session log only"*,
+         * which this is not. A report is closer to a background completion than to an error.
+         */
+        const val SUB = "SUB"
+
         /** A result's first line: the call worked. */
         const val SUCCESS = "0"
 
@@ -675,6 +697,32 @@ class AgentLog private constructor(
         record(GOT, tool, body, answers = answers)
 
     /** The terminating question, and the terminating statement. */
+
+    /**
+     * **A subagent's report, written into this agent's conversation.**
+     *
+     * [from] is the subagent's id, and it becomes the row's `name` as `#2` — which is what makes a
+     * conversation with three subagents readable, and what a refusal can name when the chat agent
+     * tries to write back to one that has been retired.
+     *
+     * **The body is written result-shaped** (`0\n…` / `1\n…`) even though this is not a tool
+     * result: it is what makes the model read a report as *an outcome it can act on* rather than as
+     * prose from a person. The row kind is what keeps it honest — the model is told a `SUB` row is a
+     * subagent's report, so the shape is a convention and not a claim that a call is open.
+     *
+     * **The size is named in the first line when it is large.** A `SUB` row does not pass through
+     * [AgentTools.forConversation], which is the one place the result limit applies, so a report can
+     * be bigger than any row the app has written — and one bigger than the model's window would fail
+     * at the endpoint rather than in the app, which is the worst shape a failure can take here. The
+     * clear-up line already names the biggest rows by id, so a row that says its own size is the
+     * part that turns "the endpoint refused a request" into "the app told the model what it was
+     * carrying".
+     */
+    fun report(from: Int, body: String, big: Long = 0): Int = record(
+        SUB,
+        "#$from",
+        if (big > 0) "[this report is about ${ContextBudget.short(big)} tokens]\n$body" else body,
+    )
 
     /** A row the agent or the app wants on the record without it being a tool. */
     fun note(name: String, detail: String, cost: Long? = null): Int =

@@ -161,6 +161,14 @@ class AgentTools(
      * that looks right and is not.
      */
     private val scope: Scope = Scope.Account,
+    /**
+     * How many subagents may run at once — **a ceiling, not an identity.**
+     *
+     * Read per call like every other limit here, so the operator moving the number applies to the
+     * next request rather than to the runner that was built before it. Zero means none, which is
+     * how a person turns subagents off without a separate switch.
+     */
+    private val subagentLimit: () -> Int = { 0 },
 ) {
 
     /** The project's own folder: what the agent stands in. */
@@ -348,6 +356,7 @@ class AgentTools(
             "forget" to setOf("ids"),
             "create" to setOf("path", "text"),
             "delete" to setOf("path"),
+            "subagent" to setOf("do", "task", "id"),
             "move" to setOf("path", "into", "name", "copy"),
             "history" to setOf("path", "grep", "from", "to"),
             "restore" to setOf("path", "revision"),
@@ -517,6 +526,19 @@ class AgentTools(
                 """{"path":"the file","text":"its contents"}""",
             ),
             spec("delete", "Delete a file, or a folder and everything in it.", """{"path":"what to delete"}"""),
+            spec(
+                "subagent",
+                "Start a subagent on a task, write to one, or list them. **A subagent is another " +
+                    "agent working in this project beside you**: it has its own record, its own " +
+                    "clock and its own context, and it keeps that context between tasks. " +
+                    "`start` answers at once with its id - the work has begun, not finished, and its " +
+                    "report will arrive in this conversation as a row you did not ask for. " +
+                    "`write` sends it another task; a subagent that has been retired by the " +
+                    "operator's limit cannot be woken and the answer says so. `list` says which " +
+                    "ones exist and what each was last given. " +
+                    "**Do not wait for a report**: carry on, and read it when it arrives.",
+                """{"do":"start","task":"what it should do"}""",
+            ),
             spec(
                 "move",
                 "Move a file into a folder, or rename it inside its own folder. With `copy` the " +
@@ -853,6 +875,7 @@ class AgentTools(
             "shot" -> shot(args, deadline)
             "look" -> look(args)
             "query" -> query(args, deadline)
+            "subagent" -> subagent(args)
             "ci" -> ci(args, deadline)
             "runs" -> runs(args, deadline)
             "artifact" -> artifact(args)
@@ -2320,6 +2343,94 @@ class AgentTools(
             onSuccess = { commit("Restored ${file.name}", "put ${rel(file)} back") },
             onFailure = { refusal(it.message ?: "it could not be restored") },
         )
+    }
+
+    // ---- subagents ----------------------------------------------------------
+
+    /**
+     * **Start a subagent, write to one, or list them.**
+     *
+     * The tool returns **at once**, and that is the design rather than an optimisation: the model
+     * asked for the work to start, not for its result. A subagent runs its own turns on its own
+     * clock, so a result is minutes away and may arrive while the chat agent is idle or while the
+     * app is closed — which is why its report arrives as a [AgentLog.SUB] row rather than as this
+     * call's answer.
+     *
+     * **The three refusals are the interesting part**, because a subagent that has gone is not a
+     * subagent that is asleep:
+     *
+     * | state | `write` does |
+     * |---|---|
+     * | live | sends the task |
+     * | **stopped** (reached its warm ceiling) | wakes it, same id, context intact |
+     * | **retired** (the count was lowered) | **refuses**, naming its folder, because waking it would put the count back over the limit |
+     */
+    private fun subagent(args: JSONObject): String {
+        val what = args.optString("do", "start").trim().lowercase()
+        val registry = AgentSubagents(ws.accountDir)
+        return when (what) {
+            "list" -> {
+                val all = registry.read(project)
+                if (all.isEmpty()) {
+                    success("no subagents in $project yet. Start one with subagent {\"task\":\"...\"}")
+                } else {
+                    success(
+                        all.joinToString("\n") { sub ->
+                            val state = when {
+                                sub.retired -> "retired"
+                                else -> "live"
+                            }
+                            "#${sub.id} · $state · " + sub.task.ifBlank { "(no task yet)" }
+                        },
+                    )
+                }
+            }
+            "write", "start" -> {
+                val task = args.optString("task", "").trim()
+                if (task.isEmpty()) return refusal("A subagent needs a `task`: what it should do")
+                if (what == "write") {
+                    val id = args.optInt("id", 0)
+                    if (id <= 0) return refusal("`write` needs the subagent's `id`")
+                    val sub = registry.find(project, id)
+                        ?: return refusal(
+                            "No subagent #$id in this project. `list` says which ones exist.",
+                        )
+                    if (sub.retired) {
+                        // **Named, with its folder**, because the record is the only account of what
+                        // it did and a person looking for it needs somewhere to look.
+                        return refusal(
+                            "No subagent #$id: it was retired when the operator lowered the limit. " +
+                                "Its record is at ${AgentLog.DIR}/$id/. Start a new one with " +
+                                "subagent {\"task\":\"...\"}.",
+                        )
+                    }
+                    registry.touched(project, id)
+                    Trace.tap("subagent write", "$project #$id")
+                    success("written to #$id; its report will arrive here when it has one")
+                } else {
+                    // **The ceiling, asked before minting.** A new id would be one more than the
+                    // operator allowed, and the count is a promise rather than a suggestion.
+                    val live = registry.read(project).count { !it.retired }
+                    val limit = subagentLimit()
+                    if (live >= limit) {
+                        return refusal(
+                            "All $limit subagents are running. Wait for one to report, or the " +
+                                "operator can raise the number in Settings.",
+                        )
+                    }
+                    val sub = registry.mint(project, task)
+                    Trace.tap("subagent start", "$project #${sub.id}")
+                    success(
+                        "Started subagent #${sub.id} on it. **Do not wait** - carry on, and its " +
+                            "report will arrive in this conversation as a row you did not ask for.",
+                    )
+                }
+            }
+            else -> refusal(
+                "`do` is `start`, `write` or `list`. A subagent is another agent working beside " +
+                    "you in this project.",
+            )
+        }
     }
 
     // ---- the web ------------------------------------------------------------

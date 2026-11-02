@@ -1297,6 +1297,26 @@ class Agent(
                 // user message because that is the only role every endpoint lets a conversation
                 // carry mid-array — and it is at the end of the array, where changing it costs one
                 // message rather than the whole prompt.
+                // **A subagent's report is a message of its own, and never the assistant's.**
+                //
+                // It cannot be a `tool` message: the contract requires every `tool` message to
+                // answer a call the model made, and the chat agent did not make one — it started
+                // the subagent turns ago, and the endpoint would refuse the request. It cannot be
+                // merged into the assistant's paragraph either, which is what a `reason` row does:
+                // the chat agent did not write this.
+                //
+                // So it is a `user` message, which is the only role every endpoint lets a
+                // conversation carry mid-array, and it says what it is in its own first line —
+                // "a subagent's report" — so a model cannot mistake it for the person speaking.
+                AgentLog.SUB -> {
+                    flush()
+                    out.add(
+                        Msg.user(
+                            "A subagent's report (${row.name}):\n" + row.body,
+                        ),
+                    )
+                }
+
                 AgentLog.NOTE -> when (row.name) {
                     // **The reasoning, attached to the turn it belongs to.** It is `app` in the
                     // context file, so it is never in `rows` here as prose; this branch exists for
