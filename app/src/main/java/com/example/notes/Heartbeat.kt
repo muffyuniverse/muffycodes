@@ -63,6 +63,15 @@ object Heartbeat {
             return (now - base) / base
         }
 
+        /**
+         * Whether [badge] should read as good news.
+         *
+         * **Meaningless for a [Id.neutral] measure**, which is drawn in the brand colour precisely
+         * because the app declines to say whether its rise is good - so this returns null there and
+         * the card never asks.
+         */
+        val better: Boolean? get() = if (id.neutral) null else badge?.let { it >= 0 }
+
     }
 
     /**
@@ -72,8 +81,22 @@ object Heartbeat {
      * a person checks first; then how well the cache is working, which is what the cost depends on;
      * then how much came out; then how much of that was answer rather than thinking.
      */
-    enum class Id(val title: String, val additive: Boolean) {
-        SPEND("spend", additive = true),
+    enum class Id(
+        val title: String,
+        val additive: Boolean,
+        /**
+         * Whether this measure's badge is drawn in the brand's caramel instead of green or red.
+         *
+         * **Spend alone.** Deciding whether more spending is good is not the app's call - a busy
+         * hour costs more and also gets more done, and which of those matters depends on what the
+         * person is doing. So for spend the badge states the comparison and stops: the colour marks
+         * it as a comparison rather than judging it. The other three keep green above and red below,
+         * because a cache hit rising and a share of output rising are plainly the better direction
+         * and calling them bad would be wrong rather than modest.
+         */
+        val neutral: Boolean = false,
+    ) {
+        SPEND("spend", additive = true, neutral = true),
         CACHE("cache hit", additive = false),
         OUTPUT("output", additive = true),
         SHARE("output share", additive = false),

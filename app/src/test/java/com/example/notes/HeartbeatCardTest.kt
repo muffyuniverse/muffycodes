@@ -102,22 +102,26 @@ class HeartbeatCardTest {
     }
 
     /**
-     * **The badge states the comparison and passes no judgement.**
+     * **Spend's badge passes no judgement; the other three do.**
      *
-     * It used to be green above zero and red below, which made the app hold an opinion it has no
-     * basis for - a busy hour costs more *and* gets more done, and which matters depends on what the
-     * person is doing. So the sign carries the meaning and the colour is the brand's accent: this
-     * test pins the sign, which is the only thing the number claims.
+     * The distinction is the app declining to have an opinion where it has no basis for one: a busy
+     * hour costs more *and* gets more done. A cache hit rising, a share of output rising and more
+     * output are plainly better directions, so those keep their green.
      */
     @Test
-    fun `the badge states the direction and nothing more`() {
+    fun `only spend declines to judge its own rise`() {
         val rising = measure(Heartbeat.Id.SPEND, recent = 2.0, baseline = 1.0)
+        assertEquals("spend rising is a fact, not a verdict", null, rising.better)
         assertEquals("+100.00%", Heartbeat.badge(rising.badge))
 
-        val falling = measure(Heartbeat.Id.CACHE, recent = 0.5, baseline = 1.0)
-        assertEquals("-50.00%", Heartbeat.badge(falling.badge))
+        for (id in listOf(Heartbeat.Id.CACHE, Heartbeat.Id.OUTPUT, Heartbeat.Id.SHARE)) {
+            assertEquals("$id rising is good", true, measure(id, recent = 2.0, baseline = 1.0).better)
+            assertEquals("$id falling is not", false, measure(id, recent = 1.0, baseline = 2.0).better)
+        }
+    }
 
-        // No comparison at all is a dash rather than a number, in every measure.
+    @Test
+    fun `an absent comparison is a dash in every measure`() {
         for (id in Heartbeat.Id.entries) {
             assertEquals("—", Heartbeat.badge(measure(id, recent = 1.0, baseline = null).badge))
         }

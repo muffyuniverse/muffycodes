@@ -111,19 +111,22 @@ private fun Cell(measure: Heartbeat.Measure, modifier: Modifier = Modifier) {
 }
 
 /**
- * **The badge is caramel, which is the brand's accent, and it says nothing about good or bad.**
+ * Green above, red below - **except spend, which is the brand's caramel and passes no judgement.**
  *
- * It used to be green above zero and red below, which made the app hold an opinion it has no basis
- * for: a busy hour costs more and also gets more done, and which of those matters depends on what
- * the person is doing. The colour is therefore the accent - a marker that says "this is a
- * comparison" - and the *sign* carries the meaning, which is the one thing the number itself states
- * without interpretation.
+ * Deciding whether more spending is good is not the app's call: a busy hour costs more and also gets
+ * more done, and which of those matters depends on what the person is doing. So spend's badge states
+ * the comparison and stops. The other three keep green and red, because a cache hit rising and a
+ * share of output rising are plainly better and calling them bad would be wrong rather than modest.
  *
- * **The dash stays muted**, because an absent comparison is not a value at all.
+ * **The dash stays muted** in every cell, because an absent comparison is not a value at all.
  */
 @Composable
-private fun badgeColour(measure: Heartbeat.Measure): Color =
-    if (measure.badge == null) MaterialTheme.colorScheme.onSurfaceVariant else AppTheme.CARAMEL.swatch
+private fun badgeColour(measure: Heartbeat.Measure): Color = when {
+    measure.badge == null -> MaterialTheme.colorScheme.onSurfaceVariant
+    measure.id.neutral -> AppTheme.CARAMEL.swatch
+    measure.better == true -> Color(0xFF2E7D32)
+    else -> MaterialTheme.colorScheme.error
+}
 
 /**
  * Forty-eight windows as forty-eight bars.
