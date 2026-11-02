@@ -2117,7 +2117,13 @@ class AppViewModel @JvmOverloads constructor(
      * seen everything.
      */
     fun fileBeside(file: File, steps: Int): File? {
-        val siblings = entries.filter { it.kind != EntryKind.FOLDER }.map { it.file }
+        // **The folder is read, not the screen's list.** `entries` is a snapshot taken for drawing,
+        // and a swipe that consulted it would depend on whether a redraw had landed — a file made a
+        // moment ago could be invisible to the gesture that was about to reach it. `list` is the
+        // same order the browser shows, computed from the disk.
+        val ws = workspace ?: return null
+        val dir = file.parentFile ?: return null
+        val siblings = ws.list(dir).filter { it.kind != EntryKind.FOLDER }.map { it.file }
         val at = siblings.indexOfFirst { it.path == file.path }
         if (at < 0) return null
         val wanted = siblings.getOrNull(at + steps) ?: return null

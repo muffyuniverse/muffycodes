@@ -142,6 +142,11 @@ class EditorScreenTest {
         // said "Left without saving"; with Save gone, leaving is the last moment the app can tell
         // the writing was meant, so a warning about a loss nobody chose would be the app blaming
         // them for its own timing.
+        //
+        // **Back into Edit first, because View is now fullscreen** — the page has no text field to
+        // type into, which is the whole point of it. The Edit button on the fullscreen page is what
+        // returns to writing.
+        compose.onNodeWithText("Edit").performClick()
         compose.onNodeWithText("three litres").performTextReplacement("four litres")
         compose.onNodeWithContentDescription("Back without saving").performClick()
 
@@ -381,10 +386,11 @@ class EditorScreenTest {
     }
 
     @Test
-    fun `a mode change away from Edit keeps what was typed, and does not save it`() {
-        // **Falsification of the opposite claim**: that switching mode is a commit. It is not — the
-        // mode says what the screen is doing, not what has been decided — so a person who types and
-        // then looks at the diff has not saved, and going back finds their words.
+    fun `a mode change away from Edit saves what was typed`() {
+        // **The contract this pins is the reverse of the one it was written for.** It used to say
+        // "switching mode is not a commit"; with Save gone, leaving Edit *is* the save, and a test
+        // asserting otherwise would now be asserting the bug. What is still true is that the words
+        // survive the round trip.
         val file = scene.file("milk.txt", "two litres")
         editorWriting(file)
         compose.onNodeWithText("two litres").performTextReplacement("three litres")
@@ -392,16 +398,12 @@ class EditorScreenTest {
         compose.onNodeWithText("View").performClick()
         compose.waitForIdle()
 
-        // The file on disk is untouched...
-        assertEquals("nothing was written", "two litres", file.readText())
-        // ...and the words are still in the editor, ready to save.
+        // **Written on the way out**, which is the signal the app acts on.
+        compose.waitUntil(10_000) { file.readText() == "three litres" }
+        assertEquals("the words were saved by leaving Edit", "three litres", file.readText())
+        // ...and they are still on the page, not only on disk.
         compose.onNodeWithText("Edit").performClick()
         compose.onNodeWithText("three litres").assertIsDisplayed()
-        // **Leaving Edit is the save.** Save is gone; the person says they are done by
-        // switching to View, and that is the signal the app acts on.
-        compose.onNodeWithText("View").performClick()
-        compose.waitUntil(10_000) { file.readText() == "three litres" }
-        assertEquals("and saving them works", "three litres", file.readText())
     }
 
     @Test
