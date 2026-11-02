@@ -33,6 +33,80 @@ class WorkspaceTest {
         root.deleteRecursively()
     }
 
+    // ---- onboarding: written, versioned, and locked ---------------------------
+
+    /** The folder the pages go in. */
+    private fun onboardingDir() = File(File(workspace.accountDir, Workspace.SYSTEM_PROJECT), Onboarding.DIR)
+
+    @Test
+    fun `the onboarding pages are written into the system project`() {
+        workspace.ensure()
+
+        val dir = onboardingDir()
+        assertTrue("the folder exists", dir.isDirectory)
+        assertEquals(
+            "every page is there",
+            Onboarding.pages().map { it.name }.toSet(),
+            dir.listFiles()!!.filter { it.isFile }.map { it.name }.toSet(),
+        )
+        // **The numbers in the names are the order**, which is what the swipe gesture follows.
+        val sorted = dir.listFiles()!!.filter { it.isFile }.map { it.name }.sorted()
+        assertEquals("numbered in reading order", Onboarding.pages().map { it.name }, sorted)
+    }
+
+    @Test
+    fun `an onboarding page is locked, and its clone is not`() {
+        workspace.ensure()
+        val page = File(onboardingDir(), Onboarding.pages().first().name)
+
+        assertTrue("the page cannot be edited in place", workspace.isLocked(page))
+        assertTrue("and the agent cannot edit it either", workspace.isAgentLocked(page))
+
+        // **The clone is the point of the lock being acceptable.** A copy in the person's own
+        // project is an ordinary file: the pages are the app's, the copy is theirs.
+        val clone = File(File(workspace.accountDir, "groceries"), "my-notes.md")
+        clone.parentFile!!.mkdirs()
+        clone.writeText("mine")
+        assertFalse("a copy is editable", workspace.isLocked(clone))
+    }
+
+    @Test
+    fun `a folder a person happens to call onboarding is not locked`() {
+        workspace.ensure()
+        // **By path, not by name**, which is the trap the templates lock already documented: a name
+        // rule would lock any folder called `onboarding` anywhere, including one in a project.
+        val theirs = File(File(workspace.accountDir, "groceries"), Onboarding.DIR)
+        theirs.mkdirs()
+        val page = File(theirs, "01-what-this-is.md")
+        page.writeText("mine, actually")
+
+        assertFalse("their own folder is theirs", workspace.isLocked(page))
+    }
+
+    @Test
+    fun `a newer revision replaces the pages, and an old one does not`() {
+        workspace.ensure()
+        val dir = onboardingDir()
+        val page = File(dir, Onboarding.pages().first().name)
+        page.writeText("edited by hand")
+
+        // **The same revision leaves it alone**, so the pages are not rewritten on every launch.
+        workspace.ensure()
+        assertEquals("not rewritten at the same revision", "edited by hand", page.readText())
+
+        // **A newer revision replaces it**, because the point of a revision is that the words
+        // changed — and a confusing sentence has to reach the people who installed before it was
+        // fixed.
+        val stamp = File(workspace.stateDir, Workspace.ONBOARDING_STAMP)
+        stamp.writeText("0")
+        workspace.ensure()
+        assertEquals(
+            "rewritten when the revision is newer",
+            Onboarding.pages().first().text,
+            page.readText(),
+        )
+    }
+
     // ---- the agent's record is kept, not editable -----------------------------
 
     /** One row of the record, in the columns the app writes. */

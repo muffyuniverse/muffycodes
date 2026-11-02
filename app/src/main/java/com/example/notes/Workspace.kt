@@ -119,6 +119,51 @@ class Workspace(val accountDir: File) {
         // which is the one case a person testing it would not have.
         ensureStarters(dir)
         ensureSystemData(dir)
+        ensureOnboarding(dir)
+    }
+
+    /**
+     * Puts the onboarding pages in the system project, **and replaces them when their wording
+     * changes**.
+     *
+     * **Not write-once, and that is the opposite of the README's rule on purpose.** The README is a
+     * document a person edits, so overwriting it would undo their notes. Onboarding is the app
+     * explaining itself, and a sentence that turned out to be confusing has to reach people who
+     * installed before it was fixed — which is everybody who most needs it.
+     *
+     * **The revision is the guard.** [Onboarding.REVISION] is compared with the number recorded in
+     * `.muffy/`, so the pages are rewritten once per change rather than on every launch, and a
+     * person's own notes live in their own files where nothing touches them.
+     *
+     * **A person's copy is a clone.** The pages are locked, so editing one in place is refused — but
+     * the editor's clone is an ordinary file, which is the whole reason the lock is acceptable.
+     */
+    private fun ensureOnboarding(dir: File) {
+        val root = File(dir, Onboarding.DIR)
+        try {
+            // **The account's state folder, not the system project's** — `stateDir` is where the
+            // app keeps its own flags, and `dir` here is the system project.
+            val stamp = File(File(accountDir, STATE_DIR), ONBOARDING_STAMP)
+            val written = stamp.takeIf { it.isFile }?.readText()?.trim()?.toIntOrNull() ?: 0
+            if (written >= Onboarding.REVISION && root.isDirectory) return
+            root.mkdirs()
+            for (page in Onboarding.pages()) {
+                // **Written unconditionally inside a new revision**, because the point of a revision
+                // is that the words changed. A page added since the last revision appears; one
+                // removed is deleted, so a stale page cannot sit in the folder for ever.
+                File(root, page.name).writeText(page.text)
+            }
+            val keep = Onboarding.pages().map { it.name }.toSet()
+            root.listFiles()?.forEach { existing ->
+                if (existing.isFile && existing.name !in keep && existing.name.endsWith(".md")) {
+                    existing.delete()
+                }
+            }
+            stamp.parentFile?.mkdirs()
+            stamp.writeText(Onboarding.REVISION.toString())
+        } catch (t: Throwable) {
+            // A folder that cannot be made is a phone problem; every write that needs it says so.
+        }
     }
 
     /**
@@ -588,7 +633,12 @@ class Workspace(val accountDir: File) {
         val names = relative(file) ?: return Hold.NONE
         // **The templates are held by path, not by name** — see [isTemplatePath]. A project's own
         // `.github/workflows/` must stay readable, and it is called `workflows` too.
-        if (isTemplatePath(names.joinToString("/"))) return Hold.APP
+        val joined = names.joinToString("/")
+        if (isTemplatePath(joined)) return Hold.APP
+        // **The onboarding pages are read-only, which is what "system locked" means here**: a person
+        // opens them in the editor whenever they like and cannot change them, and the way to keep a
+        // copy is to clone the file — which is an ordinary file and an ordinary edit.
+        if (isOnboardingPath(joined)) return Hold.APP
         return if (names.any { isSystemLocked(it) }) Hold.APP else Hold.NONE
     }
 
@@ -1519,6 +1569,28 @@ class Workspace(val accountDir: File) {
                 parts[1].equals(AgentPrompt.DATA, ignoreCase = true) &&
                 parts[2].equals(STARTERS, ignoreCase = true)
         }
+
+        /**
+         * True when [path] is one of the onboarding pages.
+         *
+         * **By path, like the templates**, and for the same reason: the folder is called
+         * `onboarding`, and a name rule would lock any folder a person happened to call that. The
+         * pages are the app's own writing — a person reads them, clones them, and edits the clone.
+         */
+        fun isOnboardingPath(path: String): Boolean {
+            val parts = path.trim('/').split('/')
+            return parts.size >= 3 &&
+                parts[0].equals(SYSTEM_PROJECT, ignoreCase = true) &&
+                parts[1].equals(Onboarding.DIR, ignoreCase = true)
+        }
+
+        /**
+         * Where the onboarding revision is recorded.
+         *
+         * In `.muffy/` beside the app's other flags, because it is the app's own bookkeeping rather
+         * than anything a person reads — and because that folder is already locked.
+         */
+        const val ONBOARDING_STAMP = "onboarding_revision"
 
         /** A project's ignore file, and the two lines the app keeps in it. */
         const val IGNORE = ".gitignore"
