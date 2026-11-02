@@ -64,7 +64,16 @@ class EditorScreenTest {
      * live in. The test account is the one that needs no key.
      */
     private val scene: Scenario by lazy {
-        Scenario(RuntimeEnvironment.getApplication(), signIn = true)
+        val made = Scenario(RuntimeEnvironment.getApplication(), signIn = true)
+        // **Onboarding opens on first run, and it disables Exit** — which would make every test in
+        // this file a test of an editor a person cannot leave. It is finished here, deliberately:
+        // these tests are about the editor, and the onboarding rule has its own tests in
+        // `AccountsFeatureTest`. A test that wanted the onboarding behaviour would have to build its
+        // own scene rather than borrow this one.
+        made.await("onboarding to open") { made.viewModel.onboarding }
+        made.viewModel.onboardingReached(Onboarding.pages().lastIndex)
+        made.viewModel.finishOnboarding()
+        made
     }
 
     @Composable
@@ -383,6 +392,41 @@ class EditorScreenTest {
             "and it says which mode: newest ${report.lines.take(3)}",
             report.lines.take(3).any { it.contains("TAP") && it.contains("editor-edit") },
         )
+    }
+
+    /**
+     * **Onboarding's Exit is disabled**, which is the only thing stopping a person leaving.
+     *
+     * A scene of its own rather than the shared one, because the shared scene finishes onboarding
+     * precisely so the other tests are about the editor. The rule is asserted on the *enabled state*
+     * rather than by pressing: a press on a disabled button does nothing, so a press would pass
+     * whether or not the rule existed.
+     */
+    @Test
+    fun `an onboarding page offers no way out`() {
+        val phone = Scenario(RuntimeEnvironment.getApplication(), signIn = true)
+        try {
+            phone.await("onboarding to open") { phone.viewModel.onboarding }
+            val dir = File(phone.viewModel.workspace!!.projectDir(Workspace.SYSTEM_PROJECT), Onboarding.DIR)
+            val page = File(dir, Onboarding.pages().first().name)
+            phone.viewModel.openEditor(page)
+            compose.setContent {
+                Frame {
+                    EditorScreen(
+                        viewModel = phone.viewModel,
+                        file = page,
+                        onBack = {},
+                        onOpenHistory = {},
+                    )
+                }
+            }
+            compose.waitForIdle()
+            compose.onNodeWithText("View").performClick()
+            compose.waitForIdle()
+            compose.onNodeWithText("Exit").assertIsNotEnabled()
+        } finally {
+            phone.close()
+        }
     }
 
     /**
