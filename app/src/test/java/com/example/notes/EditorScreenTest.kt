@@ -648,10 +648,11 @@ class EditorScreenTest {
 
     @Test
     fun `saving a picture writes its bytes and the file is a picture afterwards`() {
-        // **Inside a project, because that is where a version can exist.** Without this the file
-        // lands at the account root, `projectOf` answers null, and the commit has nowhere to go —
-        // which is what the first version of this test discovered.
-        scene.open("groceries")
+        // **A project has to be made, not only opened.** `open` navigates; `project` creates the
+        // folder and its repository. Without it the file lands at the account root, `projectOf`
+        // answers null and the commit has nowhere to go — which is what the first three versions of
+        // this test discovered, one at a time.
+        scene.project("groceries").open("groceries")
         val file = scene.file("drawing.png")
         file.writeBytes(ONE_PIXEL_PNG)
         val before = file.readBytes()
@@ -667,10 +668,11 @@ class EditorScreenTest {
 
     @Test
     fun `saving a picture refuses to write over a text file`() {
-        // **Inside a project, because that is where a version can exist.** Without this the file
-        // lands at the account root, `projectOf` answers null, and the commit has nowhere to go —
-        // which is what the first version of this test discovered.
-        scene.open("groceries")
+        // **A project has to be made, not only opened.** `open` navigates; `project` creates the
+        // folder and its repository. Without it the file lands at the account root, `projectOf`
+        // answers null and the commit has nowhere to go — which is what the first three versions of
+        // this test discovered, one at a time.
+        scene.project("groceries").open("groceries")
         // **The mirror of `saveEditor`'s refusal.** A bug in the drawing screen must not be able to
         // turn a document into bytes — and the guard is in the view model, not only on the screen,
         // because a guarantee held only by the caller is a convention.
@@ -686,10 +688,11 @@ class EditorScreenTest {
 
     @Test
     fun `a drawn picture is committed, so it is in the history`() {
-        // **Inside a project, because that is where a version can exist.** Without this the file
-        // lands at the account root, `projectOf` answers null, and the commit has nowhere to go —
-        // which is what the first version of this test discovered.
-        scene.open("groceries")
+        // **A project has to be made, not only opened.** `open` navigates; `project` creates the
+        // folder and its repository. Without it the file lands at the account root, `projectOf`
+        // answers null and the commit has nowhere to go — which is what the first three versions of
+        // this test discovered, one at a time.
+        scene.project("groceries").open("groceries")
         // A picture that existed only on the phone would be the one kind of work this app does not
         // record — and the whole point of the app is that every change is a version.
         //
