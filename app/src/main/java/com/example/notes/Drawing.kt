@@ -523,7 +523,7 @@ fun DrawingSurface(
                             // gesture that brings it back. It sits above the branches for exactly that
                             // reason: two of them skip to the next frame.
                             currentView = currentView.bounded(picture.width, picture.height)
-                            view = currentView
+                            touched = currentView
                             if (pressed.size >= 2) {
                                 // **Two fingers: scale about their midpoint, and move with it.** Any
                                 // stroke in progress is dropped, because the person has changed what
