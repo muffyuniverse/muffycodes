@@ -1157,6 +1157,35 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /**
+     * **What a link in [file] does when it is pressed.**
+     *
+     * Pulled out of the editor's composable so the rule is testable without a screen — and because
+     * the rule is the app's, not the screen's. The editor calls this and nothing else.
+     *
+     * **`app:` is refused outside the system project.** A locked page is written by the app and
+     * cannot be edited, so its links are the app's own. A *cloned* page is ordinary user text, and a
+     * cloned page carrying `app:delete-account` would be a document that can act — the door this
+     * feature must not open.
+     */
+    fun followLink(address: String, file: File) {
+        when {
+            address.startsWith("app:") -> {
+                // **The file's own project**, which is the folder two levels up: accounts/<login>/
+                // <project>/<file>. A page at the account root has no project and is therefore not
+                // the system one.
+                val project = file.parentFile?.parentFile?.name.orEmpty()
+                if (Workspace.isSystem(project)) {
+                    runLinkAction(address.removePrefix("app:"))
+                } else {
+                    Trace.note("link-refused", "app: outside the system project")
+                }
+            }
+            address.startsWith("http") -> openLink(address)
+            else -> Trace.note("link-ignored", "not a link the editor opens")
+        }
+    }
+
+    /**
      * An `app:` link: an action a document asks the app to perform.
      *
      * **A small closed set, and that is the point.** A document that could name an arbitrary

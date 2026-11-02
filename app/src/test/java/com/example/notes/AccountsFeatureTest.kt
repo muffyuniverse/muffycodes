@@ -256,6 +256,88 @@ class AccountsFeatureTest : FeatureTest() {
         assertTrue("names the ten minutes: $said", said!!.contains("ten minutes"))
     }
 
+    // ---- the links a document may use ----------------------------------------
+
+    /**
+     * **A locked page's `app:` link opens the real dialog.**
+     *
+     * The mechanism exists so that the last onboarding page is a *form* rather than a description —
+     * the operator's own framing. Asserted through the view model's published state, which is what
+     * the screen acts on, so this pins the wiring rather than the rendering.
+     */
+    @Test
+    fun `an app link opens the connection it names`() {
+        scene.viewModel.runLinkAction("connect-github")
+        assertEquals(
+            "GitHub",
+            AppViewModel.Connection.GitHub,
+            scene.viewModel.pendingConnection,
+        )
+        scene.viewModel.connectionShown()
+        assertNull("answered once", scene.viewModel.pendingConnection)
+
+        scene.viewModel.runLinkAction("connect-openrouter")
+        assertEquals(AppViewModel.Connection.OpenRouter, scene.viewModel.pendingConnection)
+        scene.viewModel.connectionShown()
+
+        // **The way past a sign-in that cannot succeed.** Onboarding cannot be left, so a page that
+        // offered only OAuth would trap anyone whose provider is rate-limited or whose phone has no
+        // browser.
+        scene.viewModel.runLinkAction("use-token")
+        assertEquals(AppViewModel.Connection.Token, scene.viewModel.pendingConnection)
+    }
+
+    /**
+     * **A cloned page cannot act.**
+     *
+     * The security boundary of the whole link feature, and the reason `app:` is scoped by project
+     * rather than allowed everywhere: onboarding pages are locked and written by the app, so their
+     * links are the app's own. A person can clone one — that is the point of the lock being
+     * acceptable — and a clone is ordinary text in an ordinary project. If `app:` worked there, a
+     * document could run the app, and a page that says `[Delete everything](app:delete-account)`
+     * would be a button.
+     */
+    @Test
+    fun `an app link in a cloned page is refused`() {
+        val clone = File(scene.viewModel.currentDir ?: scene.root, "my-copy.md")
+        scene.viewModel.followLink("app:connect-github", clone)
+
+        assertNull("a copy cannot act", scene.viewModel.pendingConnection)
+    }
+
+    @Test
+    fun `an app link in a locked onboarding page is followed`() {
+        val dir = File(
+            scene.viewModel.workspace!!.projectDir(Workspace.SYSTEM_PROJECT),
+            Onboarding.DIR,
+        )
+        val page = File(dir, Onboarding.pages().last().name)
+        scene.viewModel.followLink("app:use-token", page)
+
+        assertEquals(
+            "the app's own page may ask for the token door",
+            AppViewModel.Connection.Token,
+            scene.viewModel.pendingConnection,
+        )
+    }
+
+    @Test
+    fun `an unknown app link is ignored rather than crashing`() {
+        scene.viewModel.runLinkAction("delete-everything")
+        assertNull(
+            "a page written for a newer app must not break an older one",
+            scene.viewModel.pendingConnection,
+        )
+    }
+
+    @Test
+    fun `a web link is published for the screen to open`() {
+        scene.viewModel.openLink("https://example.com/page")
+        assertEquals("https://example.com/page", scene.viewModel.linkToOpen)
+        scene.viewModel.linkOpened()
+        assertNull("opened once", scene.viewModel.linkToOpen)
+    }
+
     // ---- onboarding's own rules ----------------------------------------------
 
     @Test

@@ -541,6 +541,33 @@ class EditorScreenTest {
         assertNull("a file that is not in this folder", scene.viewModel.fileBeside(File("/nope.txt"), 1))
     }
 
+    /**
+     * **Entering Edit and leaving again writes nothing.**
+     *
+     * This is the guard the autosave rule exists for, and it is not an optimisation: every save is a
+     * git commit, so a person who opens a file to *look* at it, presses Edit, and presses View again
+     * would otherwise add a version that records nothing — and doing that ten times would leave ten
+     * empty commits to scroll past in the history.
+     */
+    @Test
+    fun `leaving Edit without changing anything writes no version`() {
+        val file = scene.file("milk.txt", "two litres")
+        editorFor(file)
+        val before = scene.repo("groceries").head()
+
+        compose.onNodeWithText("Edit").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("View").performClick()
+        compose.waitForIdle()
+
+        assertEquals("the file is unchanged", "two litres", file.readText())
+        assertEquals(
+            "and no version was written for nothing",
+            before,
+            scene.repo("groceries").head(),
+        )
+    }
+
     @Test
     fun `Reset has nothing to do until something is typed`() {
         val file = scene.file("milk.txt", "two litres")

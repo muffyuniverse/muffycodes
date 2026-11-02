@@ -221,17 +221,7 @@ fun EditorScreen(
         if (at >= 0) viewModel.onboardingReached(at)
     }
 
-    val onLink: (String) -> Unit = { address ->
-        when {
-            address.startsWith("app:") -> {
-                val inSystem = Workspace.isSystem(file.parentFile?.parentFile?.name.orEmpty())
-                if (inSystem) viewModel.runLinkAction(address.removePrefix("app:"))
-                else Trace.note("link-refused", "app: outside the system project")
-            }
-            address.startsWith("http") -> viewModel.openLink(address)
-            else -> Trace.note("link-ignored", "not a link the editor opens")
-        }
-    }
+    val onLink: (String) -> Unit = { address -> viewModel.followLink(address, file) }
     var focused by remember { mutableStateOf(false) }
     val focus = LocalFocusManager.current
 
