@@ -118,7 +118,9 @@ What actually alleviates it, in order of what it buys:
    being avoided. The real trade is **"no secret, app-wide ceiling"** against **"a secret, no ceiling"**.
 3. **A small backend would dissolve the ceiling** — it holds the secret and does the exchange. Rejected for
    now: a server, a domain, an uptime promise and a new way for sign-in to fail, all in exchange for a limit
-   that is probably never reached. Reconsider only if it is actually hit.
+   that is probably never reached. Reconsider only if it is actually hit — and when that day comes it is a
+   **real** server: GitHub Actions is explicitly not an option for this, for the reasons in
+   §"GitHub Actions cannot be the backend".
 4. **Sharding across several OAuth Apps** multiplies the ceiling and fragments the app's identity in every
    user's authorized-applications list. Noted so it is not reinvented as a clever idea. Do not.
 
@@ -193,8 +195,9 @@ independent point of failure, that the 100-app cap forces multiple GitHub accoun
 GitHub's secondary limits exist *"to prevent abuse"* and are *"subject to change without notice"* — the pool
 is hard to defend and is not even a guaranteed escape.
 
-**A backend on the web flow dominates it on every axis**, for the same operational burden of running one
-thing:
+**A backend on the web flow dominates it on every axis** — *if* you are willing to run one. Note the "if":
+GitHub Actions is **not** an available substitute, and §"GitHub Actions cannot be the backend" below explains
+why. For the same operational burden of running one thing:
 
 | | facade pool | backend + web flow |
 |---|---|---|
@@ -206,6 +209,38 @@ thing:
 
 The web flow's own limit is 10 tokens per hour *per user*, revoking the oldest, which is irrelevant at this
 scale.
+
+#### GitHub Actions cannot be the backend
+
+It is tempting, because the repository already runs Actions with a signing key and it would cost nothing.
+Three reasons it does not work, and the last is the one that matters.
+
+**1. It is not a server.** A job on a GitHub-hosted runner is capped at **6 hours** of execution and has
+**no** time limit only on self-hosted runners (5 days per job). A workflow *run* is capped at 35 days. So
+there is no "run it indefinitely" — there is a chain of restarts, each with a queueing gap, which is a server
+you are pretending not to run.
+
+**2. Scheduled workflows stop on their own.** GitHub disables scheduled workflows in a public repository after
+**60 days without repository activity**, and the workflow's own runs do not count as activity. A service that
+switches itself off after two quiet months is not a service.
+
+**3. The terms forbid it, in as many words.** GitHub's Terms for Additional Products and Features, under
+*Actions*:
+
+> *"regardless of whether an Action is using self-hosted runners, Actions should not be used for: … The
+> provision of a stand-alone or integrated application or service offering the Actions product or service, or
+> any elements of the Actions product or service, for commercial purposes; … Any activity that places a
+> burden on our servers, where that burden is disproportionate to the benefits provided to users (for
+> example, **don't use Actions as a content delivery network or as part of a serverless application**…)"*
+
+An OAuth token-exchange endpoint is a serverless application. It is also an element of the product being
+offered, used for the app's own commercial purposes. That is three of the prohibited categories at once, and
+the remedy for it is account suspension — which for this app would mean **the release pipeline stops**, not
+merely the auth endpoint.
+
+**The honest position:** if a backend is ever needed it is a real one, on infrastructure you control and pay
+for. That is a much larger commitment than the ceiling currently justifies, which is precisely why the answer
+today is "one app, poll politely, and measure."
 
 **So the ceiling is a signal, not a problem to engineer around.** 50/hour is 1,200 new users a day, and
 because tokens do not expire, returning users cost nothing. Build one app, poll politely, and if the ceiling
