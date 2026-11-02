@@ -69,6 +69,38 @@ revoking, the registration being deleted) arrive as a **401**, which is one path
 
 **D4. `.html` preview is deferred** until the auth block is finished. Cut from this change, as §2.4 argued.
 
+### When it fails, and what the app says
+
+The operator's decision, 2026-11-02: on a rate limit, tell the person, offer a PAT, and let them wait.
+
+This is the right shape, and it makes the PAT a **permanent part of the design** rather than a leftover to be
+retired. It is also the only honest fallback: the app cannot raise the limit, cannot see it, and cannot make
+it reset sooner.
+
+**What the app may and may not claim.** Two facts from the docs decide the wording:
+
+- *"There is not a way to check the status of your secondary rate limit."* So the app **cannot say when the
+  limit resets** — a countdown would be invented. The only defensible message is "wait and try again",
+  with a retry button and no timer.
+- The device flow's error codes are a closed list: `authorization_pending`, `slow_down`, `expired_token`,
+  `unsupported_grant_type`, `incorrect_client_credentials`, `incorrect_device_code`, `access_denied`,
+  `device_flow_disabled`. **There is no code for "too many submissions."** So a rate-limit refusal may
+  arrive as an undocumented secondary-limit error, or as a plain HTTP 403/429 with a `retry-after` header,
+  and the app has to recognise it by status and headers rather than by a name.
+
+So the failure screen offers three things and promises nothing it cannot deliver:
+
+1. **Use a personal access token instead** — the escape hatch, always present, never hidden behind a
+   disclosure for this case specifically.
+2. **Try again** — with the person in control of when, because the app does not know when it would work.
+3. **What is happening, in plain words** — "GitHub is limiting how many new sign-ins the app may make right
+   now. This is temporary and is not a problem with your account."
+
+**The asymmetry worth stating:** a person who has signed in before is **unaffected**. Tokens do not expire,
+so this limit only ever touches *new* sign-ins. The person hitting this screen is, by definition, someone who
+has not connected yet — which is the worst possible time to fail and the reason the PAT must be offered
+without friction rather than as an advanced option.
+
 ### The rate-limit question, answered
 
 The device flow's limit is **50 verification-code submissions per hour, per application**. A submission is a
