@@ -94,6 +94,10 @@ VOCABULARY = {
     # opening the page and spending a code. A log that called both "sign in" could not answer
     # "did the person get as far as OpenRouter", which is the question a failed sign-in asks.
     "openrouter sign in", "openrouter code",
+    # **A link pressed in a document.** Two names, because they are different acts: one leaves the
+    # app for a web page, the other makes the app do something. A log that called both "link" could
+    # not answer "did the onboarding page get them as far as the sign-in dialog".
+    "link", "link action",
     "model", "provider", "effort", "add model", "remove model", "read catalogue",
     # making a project, which is a different act from adding one that is already on GitHub
     "new project", "local project", "confirm add project",

@@ -19,6 +19,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -238,8 +239,27 @@ object Markdown {
      * written with its asterisks. Everything else is matched in one pass, which is
      * why the nesting people actually write (`**bold with `code`**`) resolves.
      */
-    fun inline(text: String, linkColour: Color = Color.Unspecified): AnnotatedString =
-        buildAnnotatedString { appendInline(this, text, linkColour) }
+    /**
+     * The annotation a tappable link carries, so the tap can find its destination.
+     *
+     * A name rather than a bare string because the renderer and the click handler are in different
+     * files of this one object, and two literals that must agree are two literals that eventually
+     * will not.
+     */
+    const val TAG_LINK = "markdown-link"
+
+    fun inline(
+        text: String,
+        linkColour: Color = Color.Unspecified,
+        /**
+         * What a tap on a `[words](address)` does, or null to print the address instead.
+         *
+         * **A link is only a link when something can happen.** Null keeps the old behaviour exactly —
+         * the words, then the address in parentheses — so a page whose caller has no destinations
+         * says where the link would have gone rather than offering a tap that does nothing.
+         */
+        onLink: ((String) -> Unit)? = null,
+    ): AnnotatedString = buildAnnotatedString { appendInline(this, text, linkColour, onLink) }
 
     /**
      * Whether a delimiter at [at] can *open* emphasis.
@@ -256,7 +276,12 @@ object Markdown {
     private fun closes(text: String, at: Int): Boolean =
         at > 0 && !text[at - 1].isWhitespace()
 
-    private fun appendInline(out: AnnotatedString.Builder, text: String, linkColour: Color) {
+    private fun appendInline(
+        out: AnnotatedString.Builder,
+        text: String,
+        linkColour: Color,
+        onLink: ((String) -> Unit)? = null,
+    ) {
         var i = 0
         val plain = StringBuilder()
 
@@ -288,7 +313,7 @@ object Markdown {
                     if (end > i + 1 && opens(text, i, 2) && closes(text, end)) {
                         flushPlain()
                         out.withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                            appendInline(this, text.substring(i + 2, end), linkColour)
+                            appendInline(this, text.substring(i + 2, end), linkColour, onLink)
                         }
                         i = end + 2
                     } else {
@@ -314,7 +339,7 @@ object Markdown {
                     if (end > i + 1 && opens(text, i, 1) && closes(text, end)) {
                         flushPlain()
                         out.withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
-                            appendInline(this, text.substring(i + 1, end), linkColour)
+                            appendInline(this, text.substring(i + 1, end), linkColour, onLink)
                         }
                         i = end + 1
                     } else {
@@ -337,20 +362,59 @@ object Markdown {
                         flushPlain()
                         val words = text.substring(i + 1, close)
                         val address = text.substring(close + 2, open)
-                        out.withStyle(
-                            SpanStyle(
-                                textDecoration = TextDecoration.Underline,
-                                color = if (linkColour == Color.Unspecified) Color(0xFF1565C0)
-                                else linkColour,
-                            ),
-                        ) { appendInline(this, words, linkColour) }
-                        out.withStyle(
-                            SpanStyle(
-                                fontFamily = FontFamily.Monospace,
-                                color = if (linkColour == Color.Unspecified) Color(0xFF1565C0)
-                                else linkColour,
-                            ),
-                        ) { append(" ($address)") }
+                        if (onLink != null) {
+                            // **A real link, attached to the words themselves.** The address is not
+                            // printed, because the words are now the thing to press — printing both
+                            // would offer two targets for one act.
+                            //
+                            // `LinkAnnotation.Clickable` rather than a clickable box around the
+                            // paragraph: a paragraph can hold several links, and a box cannot tell
+                            // which one was pressed. The annotation belongs to a range of characters,
+                            // so the character under the finger decides the target.
+
+                            pushLink(
+                                LinkAnnotation.Clickable(
+                                    tag = address,
+                                    // **The listener lives on the annotation**, so the tap is
+                                    // resolved by Compose from the character under the finger. A
+                                    // clickable box around the paragraph could not tell which of
+                                    // several links was pressed.
+                                    //
+                                    // `styles` is left null: the underline and the colour are
+                                    // already applied by the `SpanStyle` below, and a link style
+                                    // here would be a second opinion about how a link looks.
+                                    linkInteractionListener = object :
+                                        androidx.compose.ui.text.LinkInteractionListener {
+                                        override fun onClick(link: LinkAnnotation) {
+                                            onLink(address)
+                                        }
+                                    },
+                                ),
+                            )
+                            out.withStyle(
+                                SpanStyle(
+                                    textDecoration = TextDecoration.Underline,
+                                    color = if (linkColour == Color.Unspecified) Color(0xFF1565C0)
+                                    else linkColour,
+                                ),
+                            ) { appendInline(this, words, linkColour, onLink) }
+                            pop()
+                        } else {
+                            out.withStyle(
+                                SpanStyle(
+                                    textDecoration = TextDecoration.Underline,
+                                    color = if (linkColour == Color.Unspecified) Color(0xFF1565C0)
+                                    else linkColour,
+                                ),
+                            ) { appendInline(this, words, linkColour, onLink) }
+                            out.withStyle(
+                                SpanStyle(
+                                    fontFamily = FontFamily.Monospace,
+                                    color = if (linkColour == Color.Unspecified) Color(0xFF1565C0)
+                                    else linkColour,
+                                ),
+                            ) { append(" ($address)") }
+                        }
                         i = open + 1
                     } else {
                         plain.append(ch); i++
@@ -384,6 +448,17 @@ fun MarkdownBody(
      * says so instead of drawing an empty frame.
      */
     baseDir: File? = null,
+    /**
+     * What a `[words](address)` does when it is tapped, or null to keep the old behaviour.
+     *
+     * **Null is the honest default and stays that way for a document nobody has wired up.** The
+     * comment this replaces said "there is no browser here, and a link that looks tappable and does
+     * nothing is worse than one that says where it would have gone" — which was true, and is why the
+     * address is printed in parentheses. Now there *is* somewhere for a link to go, but only when a
+     * caller says where, so a page read in a context with no destinations still tells the truth
+     * instead of pretending.
+     */
+    onLink: ((String) -> Unit)? = null,
 ) {
     val blocks = Markdown.parse(text)
     val link = MaterialTheme.colorScheme.primary
@@ -400,8 +475,12 @@ fun MarkdownBody(
             // to it and sit where the words are. **The cost is real and worth stating: a selection
             // cannot cross a paragraph break.** Copying one paragraph at a time is the trade, and the
             // fullscreen view is where a whole page is one block for the cases that need more.
+            // **`LinkAnnotation.Clickable`, not a clickable box around the paragraph.** A paragraph
+            // can hold several links, and a box around it cannot tell which one was pressed — the
+            // tap would fire whichever link came first. A link annotation belongs to a range of
+            // characters, so Compose resolves the target from the character under the finger.
             SelectionContainer {
-                OneBlock(block, link, baseDir)
+                OneBlock(block, link, baseDir, onLink)
             }
         }
     }
@@ -416,10 +495,11 @@ private fun OneBlock(
     block: Markdown.Block,
     link: androidx.compose.ui.graphics.Color,
     baseDir: File?,
+    onLink: ((String) -> Unit)?,
 ) {
             when (block) {
                 is Markdown.Block.Heading -> Text(
-                    text = Markdown.inline(block.text, link),
+                    text = Markdown.inline(block.text, link, onLink),
                     style = when (block.level) {
                         1 -> MaterialTheme.typography.headlineSmall
                         2 -> MaterialTheme.typography.titleLarge
@@ -430,19 +510,19 @@ private fun OneBlock(
                 )
 
                 is Markdown.Block.Paragraph -> Text(
-                    text = Markdown.inline(block.text, link),
+                    text = Markdown.inline(block.text, link, onLink),
                     style = MaterialTheme.typography.bodyLarge,
                     modifier = Modifier.padding(vertical = 4.dp),
                 )
 
                 is Markdown.Block.Item -> Text(
-                    text = Markdown.inline("${block.marker}  ${block.text}", link),
+                    text = Markdown.inline("${block.marker}  ${block.text}", link, onLink),
                     style = MaterialTheme.typography.bodyLarge,
                     modifier = Modifier.padding(start = (block.depth * 16).dp, top = 2.dp, bottom = 2.dp),
                 )
 
                 is Markdown.Block.Quote -> Text(
-                    text = Markdown.inline(block.text, link),
+                    text = Markdown.inline(block.text, link, onLink),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier

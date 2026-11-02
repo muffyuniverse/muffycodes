@@ -557,6 +557,28 @@ fun EditorScreen(
                                 text = text,
                                 modifier = scrolling,
                                 baseDir = file.parentFile,
+                                // **A link in a document is now a link.** Two kinds are understood:
+                                // an `https://` address opens in the phone's browser, and an
+                                // `app:` address is an action the app performs.
+                                //
+                                // **`app:` is refused outside the system project.** A locked page is
+                                // written by the app and cannot be edited, so its links are the
+                                // app's own. A *cloned* page is ordinary user text, and a cloned page
+                                // carrying `app:delete-account` would be a document that can act —
+                                // which is a door this feature must not open.
+                                onLink = { address ->
+                                    when {
+                                        address.startsWith("app:") -> {
+                                            val inSystem = Workspace.isSystem(
+                                                file.parentFile?.parentFile?.name.orEmpty(),
+                                            )
+                                            if (inSystem) viewModel.runLinkAction(address.removePrefix("app:"))
+                                            else Trace.note("link-refused", "app: outside the system project")
+                                        }
+                                        address.startsWith("http") -> viewModel.openLink(address)
+                                        else -> Trace.note("link-ignored", "not a link the editor opens")
+                                    }
+                                },
                             )
                         } else {
                             Text(

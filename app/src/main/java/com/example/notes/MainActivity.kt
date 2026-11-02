@@ -588,6 +588,28 @@ private fun Dialogs(
     newLocalProject: () -> Unit,
     askReplace: (String) -> Unit,
 ) {
+    // **A link in a document, and what it asked for.** Two effects rather than one `when`, because
+    // a link can ask for either and the two land in different places: an address leaves the app, a
+    // verb makes it do something. Both are cleared as soon as they are answered, so a recomposition
+    // cannot fire them twice.
+    val here = LocalContext.current
+    LaunchedEffect(viewModel.linkToOpen) {
+        val address = viewModel.linkToOpen ?: return@LaunchedEffect
+        openInBrowser(here, address)
+        viewModel.linkOpened()
+    }
+    LaunchedEffect(viewModel.pendingConnection) {
+        val asked = viewModel.pendingConnection ?: return@LaunchedEffect
+        viewModel.connectionShown()
+        pending = when (asked) {
+            AppViewModel.Connection.GitHub -> Pending.SignIn
+            AppViewModel.Connection.OpenRouter -> Pending.ModelKey
+            // **The token door is the same dialog**, because a pasted token *is* a GitHub key. A
+            // separate screen would be a second implementation of the thing that already works.
+            AppViewModel.Connection.Token -> Pending.SignIn
+        }
+    }
+
     when (pending) {
         Pending.None -> Unit
 
@@ -597,10 +619,6 @@ private fun Dialogs(
             // on the press turned that refusal into a snackbar at a screen that was already gone, which
             // reads exactly like success.
             var refused by remember { mutableStateOf<String?>(null) }
-            // **This scope's own context.** The one at the top of the screen belongs to a different
-            // composable, and reaching for it compiled into the `context(...)` stdlib call instead —
-            // which is what the compiler's "function invocation expected" was saying.
-            val here = LocalContext.current
             ModelKeyDialog(
                 onDismiss = { refused = null; dismiss() },
                 error = refused,

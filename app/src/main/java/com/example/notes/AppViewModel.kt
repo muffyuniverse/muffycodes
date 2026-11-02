@@ -1076,6 +1076,67 @@ class AppViewModel @JvmOverloads constructor(
     var modelKeySaved: Int by mutableStateOf(0)
         private set
 
+    // ---- links in a document ------------------------------------------------
+
+    /**
+     * A link a person pressed in a document, for the screen to act on.
+     *
+     * **The view model does not open a browser**, because it has no activity — and because the
+     * screen is where "show this elsewhere" already happens. It publishes the address and lets
+     * `MainActivity` do what it does for every other external address.
+     */
+    var linkToOpen: String? by mutableStateOf(null)
+        private set
+
+    /** Asks the screen to open [address] outside the app. */
+    fun openLink(address: String) {
+        Trace.tap("link", address.take(40))
+        linkToOpen = address
+    }
+
+    /** Called by the screen once it has opened [linkToOpen], so it does not open twice. */
+    fun linkOpened() {
+        linkToOpen = null
+    }
+
+    /**
+     * An `app:` link: an action a document asks the app to perform.
+     *
+     * **A small closed set, and that is the point.** A document that could name an arbitrary
+     * function would be a document that can run the app — which is why this is a `when` over known
+     * verbs rather than a registry. Unknown verbs are recorded and ignored, because a page written
+     * for a newer app version must not break an older one.
+     *
+     * The caller has already checked that the document is one the app wrote (see
+     * `EditorScreen`'s `onLink`): a cloned page is ordinary user text and must not be able to act.
+     */
+    fun runLinkAction(verb: String) {
+        Trace.tap("link action", verb)
+        when (verb) {
+            // **The two connections onboarding ends on.** They open the same dialogs the settings
+            // screen does, so a page is a way in rather than a second implementation.
+            "connect-github" -> pendingConnection = Connection.GitHub
+            "connect-openrouter" -> pendingConnection = Connection.OpenRouter
+            // **The way past a sign-in that cannot succeed**, which is the reason this verb exists
+            // at all: onboarding cannot be left, so a page that offers only OAuth would trap a
+            // person whose provider is rate-limited or whose phone has no browser.
+            "use-token" -> pendingConnection = Connection.Token
+            else -> Trace.note("link-action-unknown", verb)
+        }
+    }
+
+    /** A connection dialog a document asked for. */
+    enum class Connection { GitHub, OpenRouter, Token }
+
+    /** The connection dialog to show, or null. Cleared by the screen when it is answered. */
+    var pendingConnection: Connection? by mutableStateOf(null)
+        private set
+
+    /** Called by the screen once the dialog has been shown. */
+    fun connectionShown() {
+        pendingConnection = null
+    }
+
     // ---- OpenRouter sign-in -------------------------------------------------
 
     /**
