@@ -114,11 +114,13 @@ class RequestDbTest {
         val hours = count("roll_hour")
         val days = count("roll_day")
 
-        // A minute row per response, all inside the two-day window.
-        assertTrue("minutes are held only for the heartbeat's window, got $minutes", minutes <= RequestDb.FINE_DAYS * 24)
-        // Hours are a week's worth, because the setting keeps them - which is more than the fine
-        // tier would have allowed.
-        assertTrue("but hours follow the setting, got $hours", hours > RequestDb.FINE_DAYS * 24)
+        // **The claim is a comparison, not an absolute count.** A week of six-hourly responses is
+        // 28 rows, so asserting "more than 48 hours" would be asserting the fixture rather than the
+        // rule. What the rule says is that the *same* data is held longer at the coarse tier than at
+        // the fine one: every hour survives, and only the recent days of minutes do.
+        assertEquals("every hour is kept", 28, hours)
+        assertTrue("but the minutes are cut to the card's window, got $minutes", minutes <= RequestDb.FINE_DAYS * 24)
+        assertTrue("so the fine tier is the smaller one", minutes < hours)
         assertEquals("and days are kept whole", 7, days)
     }
 
