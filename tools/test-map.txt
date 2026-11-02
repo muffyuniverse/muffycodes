@@ -8,7 +8,7 @@
 # at all: everything runs. Unknown means full, never "nothing affected", so a
 # file added tomorrow cannot slip through a gap in this table.
 #
-# Format:  <test class>   <space separated list of sources>
+# Format: <test class> <space separated list of sources>
 #
 # Add a line when a new test class appears, and extend a line when a test starts
 # covering another file. Getting this wrong is not dangerous in the direction
@@ -16,47 +16,46 @@
 # few if a source is named here that the test does not really exercise, so name
 # dependencies honestly.
 
-AppThemeTest        app/src/main/java/com/example/notes/AppTheme.kt
-KeySafetyTest      app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/Secrets.kt app/src/main/java/com/example/notes/GitHub.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/CredentialStore.kt
-RequestDbTest      app/src/main/java/com/example/notes/RequestDb.kt app/src/main/java/com/example/notes/RequestStats.kt app/src/main/java/com/example/notes/RequestLog.kt app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/StatsScreen.kt app/src/main/java/com/example/notes/StatsFormat.kt
-HeartbeatTest      app/src/main/java/com/example/notes/Heartbeat.kt
-HeartbeatCardTest  app/src/main/java/com/example/notes/HeartbeatCard.kt app/src/main/java/com/example/notes/Heartbeat.kt
-SqlToolTest        app/src/main/java/com/example/notes/SqlTool.kt app/src/main/java/com/example/notes/RequestDb.kt app/src/main/java/com/example/notes/RequestLog.kt app/src/main/java/com/example/notes/RequestDb.kt app/src/main/java/com/example/notes/RequestStats.kt app/src/main/java/com/example/notes/RequestLog.kt
-StatsScreenTest    app/src/main/java/com/example/notes/StatsScreen.kt app/src/main/java/com/example/notes/StatsFormat.kt app/src/main/java/com/example/notes/RequestStats.kt app/src/main/java/com/example/notes/RequestLog.kt app/src/main/java/com/example/notes/Workspace.kt
-StreamTest  app/src/main/java/com/example/notes/Stream.kt
-DoorTest    app/src/main/java/com/example/notes/Door.kt app/src/main/java/com/example/notes/Timeouts.kt
-PicturesInDoorTest  app/src/main/java/com/example/notes/Door.kt
-LookTest  app/src/main/java/com/example/notes/Look.kt app/src/main/java/com/example/notes/ContextBudget.kt
-LookToolTest  app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Look.kt app/src/main/java/com/example/notes/Agent.kt
-DrawingTest  app/src/main/java/com/example/notes/Drawing.kt app/src/main/java/com/example/notes/EditorScreen.kt
-PhotoTest  app/src/main/java/com/example/notes/Photo.kt app/src/main/java/com/example/notes/Markdown.kt
-WorkspaceTest       app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AgentLog.kt app/src/main/java/com/example/notes/Onboarding.kt
-RequestStatsTest    app/src/main/java/com/example/notes/RequestStats.kt app/src/main/java/com/example/notes/RequestLog.kt app/src/main/java/com/example/notes/StatsFormat.kt app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/StatsScreen.kt
-ModelConfigTest     app/src/main/java/com/example/notes/ModelConfig.kt
-ModelCatalogueTest  app/src/main/java/com/example/notes/ModelCatalogue.kt app/src/main/java/com/example/notes/Secrets.kt
-OpenRouterAuthTest  app/src/main/java/com/example/notes/OpenRouterAuth.kt
-ProjectGitTest      app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitService.kt
-AccountStoreTest    app/src/main/java/com/example/notes/AccountStore.kt
-VisibilityFeatureTest  app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AppViewModel.kt
-FilesFeatureTest   app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/CommitMessage.kt
-TraceTest          app/src/main/java/com/example/notes/Trace.kt app/src/main/java/com/example/notes/LogFormat.kt
-ReportTest         app/src/main/java/com/example/notes/DownloadsSink.kt app/src/main/java/com/example/notes/Trace.kt app/src/main/java/com/example/notes/Dialogs.kt
-ObservabilityScreenTest  app/src/main/java/com/example/notes/ObservabilityScreen.kt app/src/main/java/com/example/notes/Trace.kt
-HistoryScreenTest  app/src/main/java/com/example/notes/HistoryScreen.kt
-EditorScreenTest   app/src/main/java/com/example/notes/EditorScreen.kt app/src/main/java/com/example/notes/Markdown.kt app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/BrowserScreen.kt
-BrowserChromeTest  app/src/main/java/com/example/notes/BrowserScreen.kt app/src/main/java/com/example/notes/Dialogs.kt app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AppViewModel.kt
-AccountsFeatureTest  app/src/main/java/com/example/notes/AccountStore.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/CredentialStore.kt app/src/main/java/com/example/notes/GitHub.kt
-ProjectsFeatureTest  app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitHub.kt app/src/main/java/com/example/notes/Workspace.kt
-SyncFeatureTest    app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/GitHub.kt
+AppThemeTest app/src/main/java/com/example/notes/AppTheme.kt
+KeySafetyTest app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/Secrets.kt app/src/main/java/com/example/notes/GitHub.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/CredentialStore.kt
+RequestDbTest app/src/main/java/com/example/notes/RequestDb.kt app/src/main/java/com/example/notes/RequestStats.kt app/src/main/java/com/example/notes/RequestLog.kt app/src/main/java/com/example/notes/Workspace.kt
+HeartbeatTest app/src/main/java/com/example/notes/Heartbeat.kt
+HeartbeatCardTest app/src/main/java/com/example/notes/HeartbeatCard.kt app/src/main/java/com/example/notes/Heartbeat.kt
+SqlToolTest app/src/main/java/com/example/notes/SqlTool.kt app/src/main/java/com/example/notes/RequestDb.kt app/src/main/java/com/example/notes/RequestLog.kt app/src/main/java/com/example/notes/RequestDb.kt app/src/main/java/com/example/notes/RequestStats.kt app/src/main/java/com/example/notes/RequestLog.kt
+StreamTest app/src/main/java/com/example/notes/Stream.kt
+DoorTest app/src/main/java/com/example/notes/Door.kt app/src/main/java/com/example/notes/Timeouts.kt
+PicturesInDoorTest app/src/main/java/com/example/notes/Door.kt
+LookTest app/src/main/java/com/example/notes/Look.kt app/src/main/java/com/example/notes/ContextBudget.kt
+LookToolTest app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Look.kt app/src/main/java/com/example/notes/Agent.kt
+DrawingTest app/src/main/java/com/example/notes/Drawing.kt app/src/main/java/com/example/notes/EditorScreen.kt
+PhotoTest app/src/main/java/com/example/notes/Photo.kt app/src/main/java/com/example/notes/Markdown.kt
+WorkspaceTest app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AgentLog.kt app/src/main/java/com/example/notes/Onboarding.kt
+RequestStatsTest app/src/main/java/com/example/notes/RequestStats.kt app/src/main/java/com/example/notes/RequestLog.kt app/src/main/java/com/example/notes/Workspace.kt
+ModelConfigTest app/src/main/java/com/example/notes/ModelConfig.kt
+ModelCatalogueTest app/src/main/java/com/example/notes/ModelCatalogue.kt app/src/main/java/com/example/notes/Secrets.kt
+OpenRouterAuthTest app/src/main/java/com/example/notes/OpenRouterAuth.kt
+ProjectGitTest app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitService.kt
+AccountStoreTest app/src/main/java/com/example/notes/AccountStore.kt
+VisibilityFeatureTest app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AppViewModel.kt
+FilesFeatureTest app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/CommitMessage.kt
+TraceTest app/src/main/java/com/example/notes/Trace.kt app/src/main/java/com/example/notes/LogFormat.kt
+ReportTest app/src/main/java/com/example/notes/DownloadsSink.kt app/src/main/java/com/example/notes/Trace.kt app/src/main/java/com/example/notes/Dialogs.kt
+ObservabilityScreenTest app/src/main/java/com/example/notes/ObservabilityScreen.kt app/src/main/java/com/example/notes/Trace.kt
+HistoryScreenTest app/src/main/java/com/example/notes/HistoryScreen.kt
+EditorScreenTest app/src/main/java/com/example/notes/EditorScreen.kt app/src/main/java/com/example/notes/Markdown.kt app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/BrowserScreen.kt
+BrowserChromeTest app/src/main/java/com/example/notes/BrowserScreen.kt app/src/main/java/com/example/notes/Dialogs.kt app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AppViewModel.kt
+AccountsFeatureTest app/src/main/java/com/example/notes/AccountStore.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/CredentialStore.kt app/src/main/java/com/example/notes/GitHub.kt
+ProjectsFeatureTest app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitHub.kt app/src/main/java/com/example/notes/Workspace.kt
+SyncFeatureTest app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/GitHub.kt
 HistoryFeatureTest app/src/main/java/com/example/notes/HistoryPrune.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/GitService.kt
-RetentionFeatureTest  app/src/main/java/com/example/notes/SettingsStore.kt app/src/main/java/com/example/notes/HistoryPrune.kt app/src/main/java/com/example/notes/ProjectGit.kt
+RetentionFeatureTest app/src/main/java/com/example/notes/SettingsStore.kt app/src/main/java/com/example/notes/HistoryPrune.kt app/src/main/java/com/example/notes/ProjectGit.kt
 ImportsFeatureTest app/src/main/java/com/example/notes/Imports.kt
-MarkdownTest        app/src/main/java/com/example/notes/Markdown.kt
-SelectionFeatureTest  app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/ProjectGit.kt
-NamingFeatureTest   app/src/main/java/com/example/notes/Workspace.kt
-SettingsScreenTest  app/src/main/java/com/example/notes/SettingsScreen.kt app/src/main/java/com/example/notes/SettingsStore.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/Battery.kt app/src/main/java/com/example/notes/Notices.kt
-ScenariosTest      app/src/main/java/com/example/notes/BrowserScreen.kt app/src/main/java/com/example/notes/HistoryScreen.kt app/src/main/java/com/example/notes/SettingsScreen.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/AppTheme.kt app/src/main/java/com/example/notes/Workspace.kt
-KeySafetyFeatureTest  app/src/main/java/com/example/notes/GitHub.kt app/src/main/java/com/example/notes/Secrets.kt app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/AccountStore.kt
+MarkdownTest app/src/main/java/com/example/notes/Markdown.kt
+SelectionFeatureTest app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/ProjectGit.kt
+NamingFeatureTest app/src/main/java/com/example/notes/Workspace.kt
+SettingsScreenTest app/src/main/java/com/example/notes/SettingsScreen.kt app/src/main/java/com/example/notes/SettingsStore.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/Battery.kt app/src/main/java/com/example/notes/Notices.kt
+ScenariosTest app/src/main/java/com/example/notes/BrowserScreen.kt app/src/main/java/com/example/notes/HistoryScreen.kt app/src/main/java/com/example/notes/SettingsScreen.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/AppTheme.kt app/src/main/java/com/example/notes/Workspace.kt
+KeySafetyFeatureTest app/src/main/java/com/example/notes/GitHub.kt app/src/main/java/com/example/notes/Secrets.kt app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/AccountStore.kt
 
 # Sources that no test exercises, so any change to them runs the whole suite.
 #
@@ -73,45 +72,45 @@ KeySafetyFeatureTest  app/src/main/java/com/example/notes/GitHub.kt app/src/main
 # run too few tests rather than too many.
 # always-full app/src/main/java/com/example/notes/MainActivity.kt
 # always-full app/src/main/java/com/example/notes/MainActivity.kt
-BesideTest  app/src/main/java/com/example/notes/Beside.kt
-DownloadsSinkTest  app/src/main/java/com/example/notes/DownloadsSink.kt
-BrowserChromeTest  app/src/main/java/com/example/notes/BrowserScreen.kt
-CopyFeatureTest  app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/Imports.kt
-ModelSectionTest    app/src/main/java/com/example/notes/ModelSection.kt app/src/main/java/com/example/notes/AppViewModel.kt
-ModelKeyTest        app/src/main/java/com/example/notes/ModelSection.kt app/src/main/java/com/example/notes/Dialogs.kt app/src/main/java/com/example/notes/CredentialStore.kt
-AgentLogTest  app/src/main/java/com/example/notes/AgentLog.kt app/src/main/java/com/example/notes/LogFormat.kt
-AgentToolsTest  app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Door.kt
-CiToolsTest    app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/GitHub.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/Secrets.kt
-WorkflowsTest  app/src/main/java/com/example/notes/Workflows.kt
-SigningTest  app/src/main/java/com/example/notes/Signing.kt app/src/main/java/com/example/notes/ReleaseKey.kt app/src/main/java/com/example/notes/Workflows.kt app/src/main/java/com/example/notes/GitHub.kt
-AppTypeTest  app/src/main/java/com/example/notes/AppType.kt app/src/main/java/com/example/notes/WorkflowTemplates.kt app/src/main/java/com/example/notes/Workspace.kt
-SealedBoxTest  app/src/main/java/com/example/notes/SealedBox.kt app/src/main/java/com/example/notes/Secrets.kt
-ReleaseKeyTest  app/src/main/java/com/example/notes/ReleaseKey.kt app/src/main/java/com/example/notes/SealedBox.kt app/src/main/java/com/example/notes/GitHub.kt
-SigningFeatureTest  app/src/main/java/com/example/notes/ReleaseKey.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/BrowserScreen.kt
-ReleaseTest  app/src/main/java/com/example/notes/Release.kt app/src/main/java/com/example/notes/GitHub.kt
-ExportTest  app/src/main/java/com/example/notes/Export.kt
-BrowseToolsTest     app/src/main/java/com/example/notes/AgentTools.kt
-SearchTest    app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Workspace.kt
-ArchiveTest    app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Workspace.kt
-FetchTest    app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Fetcher.kt app/src/main/java/com/example/notes/Workspace.kt
-ChunkerTest    app/src/main/java/com/example/notes/Chunker.kt
-SearchIndexTest    app/src/main/java/com/example/notes/SearchIndex.kt app/src/main/java/com/example/notes/Chunker.kt app/src/main/java/com/example/notes/Embedder.kt
-McpTest    app/src/main/java/com/example/notes/Mcp.kt app/src/main/java/com/example/notes/CredentialStore.kt
-McpTestTools    app/src/main/java/com/example/notes/Mcp.kt app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/CredentialStore.kt app/src/main/java/com/example/notes/Workspace.kt
-ScannerTest    app/src/main/java/com/example/notes/Scanner.kt app/src/main/java/com/example/notes/Chunker.kt
-ScannerTestTools    app/src/main/java/com/example/notes/Scanner.kt app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/SettingsStore.kt
-BrowserTest         browser/src/main/java/com/example/notes/browser/Browser.kt browser/src/main/java/com/example/notes/browser/WebViewBrowser.kt
-AgentTest  app/src/main/java/com/example/notes/Agent.kt app/src/main/java/com/example/notes/AgentPrompt.kt app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Door.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitService.kt
-AgentChatTest  app/src/main/java/com/example/notes/AgentChat.kt app/src/main/java/com/example/notes/AgentLog.kt
-AgentChatScreenTest  app/src/main/java/com/example/notes/AgentChatScreen.kt app/src/main/java/com/example/notes/AgentChat.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/BrowserScreen.kt
-AgentSessionTest  app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentSessions.kt
-BackgroundTest  app/src/main/java/com/example/notes/Background.kt app/src/main/java/com/example/notes/Timeouts.kt app/src/main/java/com/example/notes/AgentTools.kt
-TimeoutsTest  app/src/main/java/com/example/notes/Timeouts.kt app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Workspace.kt
-AgentSessionsTest  app/src/main/java/com/example/notes/AgentSessions.kt app/src/main/java/com/example/notes/AgentSession.kt
-AgentSessionFeatureTest  app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentSessions.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/Agent.kt app/src/main/java/com/example/notes/SettingsStore.kt app/src/main/java/com/example/notes/AgentRunner.kt
-ContextBudgetTest  app/src/main/java/com/example/notes/ContextBudget.kt
-AgentRunnerTest  app/src/main/java/com/example/notes/AgentRunner.kt app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentSessions.kt app/src/main/java/com/example/notes/Background.kt
-AgentServiceTest  app/src/main/java/com/example/notes/AgentService.kt app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentWiring.kt
-NoticesTest  app/src/main/java/com/example/notes/Notices.kt
-ChatNoticesTest  app/src/main/java/com/example/notes/ChatNotices.kt
-SaidTest  app/src/main/java/com/example/notes/Said.kt app/src/main/java/com/example/notes/MainActivity.kt
+BesideTest app/src/main/java/com/example/notes/Beside.kt
+DownloadsSinkTest app/src/main/java/com/example/notes/DownloadsSink.kt
+BrowserChromeTest app/src/main/java/com/example/notes/BrowserScreen.kt
+CopyFeatureTest app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/Imports.kt
+ModelSectionTest app/src/main/java/com/example/notes/ModelSection.kt app/src/main/java/com/example/notes/AppViewModel.kt
+ModelKeyTest app/src/main/java/com/example/notes/ModelSection.kt app/src/main/java/com/example/notes/Dialogs.kt app/src/main/java/com/example/notes/CredentialStore.kt
+AgentLogTest app/src/main/java/com/example/notes/AgentLog.kt app/src/main/java/com/example/notes/LogFormat.kt
+AgentToolsTest app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Door.kt
+CiToolsTest app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/GitHub.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/Secrets.kt
+WorkflowsTest app/src/main/java/com/example/notes/Workflows.kt
+SigningTest app/src/main/java/com/example/notes/Signing.kt app/src/main/java/com/example/notes/ReleaseKey.kt app/src/main/java/com/example/notes/Workflows.kt app/src/main/java/com/example/notes/GitHub.kt
+AppTypeTest app/src/main/java/com/example/notes/AppType.kt app/src/main/java/com/example/notes/WorkflowTemplates.kt app/src/main/java/com/example/notes/Workspace.kt
+SealedBoxTest app/src/main/java/com/example/notes/SealedBox.kt app/src/main/java/com/example/notes/Secrets.kt
+ReleaseKeyTest app/src/main/java/com/example/notes/ReleaseKey.kt app/src/main/java/com/example/notes/SealedBox.kt app/src/main/java/com/example/notes/GitHub.kt
+SigningFeatureTest app/src/main/java/com/example/notes/ReleaseKey.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/BrowserScreen.kt
+ReleaseTest app/src/main/java/com/example/notes/Release.kt app/src/main/java/com/example/notes/GitHub.kt
+ExportTest app/src/main/java/com/example/notes/Export.kt
+BrowseToolsTest app/src/main/java/com/example/notes/AgentTools.kt
+SearchTest app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Workspace.kt
+ArchiveTest app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Workspace.kt
+FetchTest app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Fetcher.kt app/src/main/java/com/example/notes/Workspace.kt
+ChunkerTest app/src/main/java/com/example/notes/Chunker.kt
+SearchIndexTest app/src/main/java/com/example/notes/SearchIndex.kt app/src/main/java/com/example/notes/Chunker.kt app/src/main/java/com/example/notes/Embedder.kt
+McpTest app/src/main/java/com/example/notes/Mcp.kt app/src/main/java/com/example/notes/CredentialStore.kt
+McpTestTools app/src/main/java/com/example/notes/Mcp.kt app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/CredentialStore.kt app/src/main/java/com/example/notes/Workspace.kt
+ScannerTest app/src/main/java/com/example/notes/Scanner.kt app/src/main/java/com/example/notes/Chunker.kt
+ScannerTestTools app/src/main/java/com/example/notes/Scanner.kt app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/SettingsStore.kt
+BrowserTest browser/src/main/java/com/example/notes/browser/Browser.kt browser/src/main/java/com/example/notes/browser/WebViewBrowser.kt
+AgentTest app/src/main/java/com/example/notes/Agent.kt app/src/main/java/com/example/notes/AgentPrompt.kt app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Door.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitService.kt
+AgentChatTest app/src/main/java/com/example/notes/AgentChat.kt app/src/main/java/com/example/notes/AgentLog.kt
+AgentChatScreenTest app/src/main/java/com/example/notes/AgentChatScreen.kt app/src/main/java/com/example/notes/AgentChat.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/BrowserScreen.kt
+AgentSessionTest app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentSessions.kt
+BackgroundTest app/src/main/java/com/example/notes/Background.kt app/src/main/java/com/example/notes/Timeouts.kt app/src/main/java/com/example/notes/AgentTools.kt
+TimeoutsTest app/src/main/java/com/example/notes/Timeouts.kt app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Workspace.kt
+AgentSessionsTest app/src/main/java/com/example/notes/AgentSessions.kt app/src/main/java/com/example/notes/AgentSession.kt
+AgentSessionFeatureTest app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentSessions.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/Agent.kt app/src/main/java/com/example/notes/SettingsStore.kt app/src/main/java/com/example/notes/AgentRunner.kt
+ContextBudgetTest app/src/main/java/com/example/notes/ContextBudget.kt
+AgentRunnerTest app/src/main/java/com/example/notes/AgentRunner.kt app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentSessions.kt app/src/main/java/com/example/notes/Background.kt
+AgentServiceTest app/src/main/java/com/example/notes/AgentService.kt app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentWiring.kt
+NoticesTest app/src/main/java/com/example/notes/Notices.kt
+ChatNoticesTest app/src/main/java/com/example/notes/ChatNotices.kt
+SaidTest app/src/main/java/com/example/notes/Said.kt app/src/main/java/com/example/notes/MainActivity.kt

@@ -4407,47 +4407,6 @@ class AppViewModel @JvmOverloads constructor(
      * commit the save queued a moment ago. Reading synchronously on the UI thread
      * raced the commit and showed the version before the one that was just saved.
      */
-    /**
-     * Reads the request log on the worker and hands the rows back on the main thread.
-     *
-     * **Why this cannot stay in the screen.** The stats table used to call `RequestStats.read` from
-     * inside a `remember`, which runs during composition — so the whole log was parsed on the main
-     * thread before the first frame drew. At a few hundred rows nobody notices; at ten thousand
-     * requests a day a year of history is millions of lines, and the screen would be a frozen
-     * window for as long as the disk took. This is the same arrangement `requestVersions` and
-     * every other disk read here uses: the work goes to the one worker, and the result is posted
-     * back.
-     *
-     * [onDone] is called on the main thread, so the caller may assign Compose state in it.
-     */
-    /** The open history, so the one this view model opened is the one it closes. */
-    private var openHistory: RequestDb.History? = null
-
-    fun readRequestStats(onDone: (RequestDb.History) -> Unit) {
-        val dir = workspace?.accountDir ?: return
-        onWorker {
-            // **Opened on the worker and handed back open.** The screen computes a total per
-            // interval and the pickers move, so opening per draw would be a database open per pick.
-            //
-            // **This is the owner, so this is what closes it.** The previous handle is closed here
-            // rather than in the screen: a screen can be re-composed, previewed, or drawn twice in
-            // one test, and a handle closed by the wrong owner surfaces as an exception from an
-            // unrelated query. Closing is idempotent, so a handle already closed elsewhere is fine.
-            val history = RequestDb.read(dir)
-            val previous = openHistory
-            openHistory = history
-            previous?.close()
-            main.post { onDone(history) }
-        }
-    }
-
-    /** Releases the history when the app is done with it - on sign-out, or when the screen goes. */
-    fun closeRequestStats() {
-        val previous = openHistory
-        openHistory = null
-        previous?.close()
-    }
-
     fun requestVersions(onDone: (List<Pair<GitService.CommitInfo, String?>>) -> Unit) {
         onWorker {
             val found = versions()

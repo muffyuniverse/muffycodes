@@ -118,14 +118,6 @@ fun BrowserScreen(
     onCopySelected: () -> Unit,
     onDeleteSelected: () -> Unit,
     onReport: () -> Unit = {},
-    /**
-     * Opens the cost table.
-     *
-     * **In the projects screen's bar, and only there.** The question it answers — "what has the
-     * model cost me" — is about the whole account rather than one folder, so it belongs where the
-     * account's own list is and not inside a project where the answer would be a subset.
-     */
-    onOpenStats: () -> Unit = {},
     /** Opens the picker for the open project's type. One word, in the bar, tap to change. */
     onChangeType: () -> Unit = {},
 ) {
@@ -217,16 +209,6 @@ fun BrowserScreen(
                         IconButton(onClick = { viewModel.showSearch = !viewModel.showSearch }) {
                             Icon(Icons.Filled.Search, contentDescription = "Search this project")
                         }
-                    }
-                    if (projects) {
-                        // **Only at the account root, where the bar is about the account.**
-                        // Inside a project the same button would answer a narrower question
-                        // than the one it asks, which is worse than not offering it.
-                        // **A drawn chart, not `Info`.** `Info` said "about this app"; the screen
-                        // says what this account has spent. `QueryStats` and `BarChart` are in
-                        // material-icons-extended, which this app does not carry for one glyph, so
-                        // the icon is drawn - the same answer `ReportButton` and `ChatButton` use.
-                        StatsButton(onClick = { adding = false; onOpenStats() })
                     }
                     IconButton(onClick = {
                         // An outside action runs *after* the add menu has closed, so
