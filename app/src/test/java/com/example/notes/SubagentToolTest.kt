@@ -266,7 +266,10 @@ class SubagentToolTest {
         log.report(from = 3, body = "0\n" + "x".repeat(200), big = 40_000)
 
         val body = log.rows().last().body
-        assertTrue("the size is named: $body", body.contains("40.0k") || body.contains("40000"))
+        assertTrue(
+            "the size is named: $body",
+            Regex("""\[this report is about [0-9.]+k? tokens]""").containsMatchIn(body),
+        )
         assertTrue("before the report itself", body.indexOf("tokens]") < body.indexOf("xxxx"))
     }
 

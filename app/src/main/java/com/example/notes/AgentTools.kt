@@ -533,11 +533,11 @@ class AgentTools(
                     "clock and its own context, and it keeps that context between tasks. " +
                     "`start` answers at once with its id - the work has begun, not finished, and its " +
                     "report will arrive in this conversation as a row you did not ask for. " +
-                    "`write` sends it another task; a subagent that has been retired by the " +
-                    "operator's limit cannot be woken and the answer says so. `list` says which " +
-                    "ones exist and what each was last given. " +
+                    "`write` sends it another task, and it needs the subagent's `id`; a subagent " +
+                    "that has been retired by the operator's limit cannot be woken and the answer " +
+                    "says so. `list` says which ones exist and what each was last given. " +
                     "**Do not wait for a report**: carry on, and read it when it arrives.",
-                """{"do":"start","task":"what it should do"}""",
+                """{"do":"start","task":"what it should do","id":1}""",
             ),
             spec(
                 "move",

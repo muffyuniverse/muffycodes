@@ -2910,8 +2910,17 @@ class AgentTest {
         Agent(account, "shopping", ws, git, log, door, model(), limits = limits).burst("go")
 
         assertEquals("three requests, and the context grew between them", 3, door.asked.size)
-        val systems = door.asked.map { it.system }.toSet()
-        assertEquals("one system message for the whole turn", 1, systems.size)
+        // **The instructions, not the whole system message.** The clear-up line is appended after
+        // the instructions on purpose (it is the cheapest place for it) and it is rebuilt per
+        // request from the context as it is *now* — so it may legitimately differ between two
+        // requests of one turn. Asserting the whole string was one byte too strict: it passed only
+        // while the line happened to be identical, and adding a tool to the list moved the measured
+        // size enough to make it differ.
+        //
+        // What the cache actually needs is that everything *before* that line is byte-identical,
+        // which is the claim worth holding.
+        val stable = door.asked.map { it.system.substringBeforeLast("\n\n") }.toSet()
+        assertEquals("one set of instructions for the whole turn", 1, stable.size)
         assertTrue(
             "while the conversation below it did grow",
             door.asked[2].messages.size > door.asked[0].messages.size,

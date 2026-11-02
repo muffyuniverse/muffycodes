@@ -93,7 +93,7 @@ class AgentToolsTest {
         // read-only**: a tool that starts a run is a different grant, and it waits on the workflow
         // guard (a run the agent dispatches must not be able to reach repository secrets).
         assertEquals(
-            "and the twenty-two that are",
+            "and the twenty-three that are",
             listOf(
                 // **`search` is the account-wide reader**, and it sits beside `tree` because the
                 // difference between them is a default rather than a permission: `tree` answers
@@ -124,6 +124,10 @@ class AgentToolsTest {
                 // list is part of every request's cache prefix, so a server's own catalogue is
                 // something the agent reads on demand instead.
                 "mcp",
+                // **`subagent` is the last, because it is the only tool that starts another
+                // agent.** It is a capability like the network is: an agent that can hire agents is
+                // an agent that can spend money in parallel, and the list is where that is granted.
+                "subagent",
             ),
             specs.map { it.name },
         )
