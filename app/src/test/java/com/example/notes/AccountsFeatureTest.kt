@@ -234,6 +234,28 @@ class AccountsFeatureTest : FeatureTest() {
         }
     }
 
+    /**
+     * An expired attempt is refused **before** any exchange, and says why.
+     *
+     * It lives here rather than in `OpenRouterAuthTest` because it needs a view model, and a view
+     * model needs an application — `RuntimeEnvironment.getApplication()` answers null in a test
+     * class that is not a Robolectric one, which is how the first version of this failed.
+     *
+     * The alternative to refusing early is sending a code whose verifier has gone stale, which
+     * produces OpenRouter's "invalid code" refusal — blaming the person's code for the app's
+     * forgotten state.
+     */
+    @Test
+    fun `an OpenRouter attempt older than ten minutes is refused without a request`() {
+        scene.viewModel.beginOpenRouterSignIn()
+        var said: String? = null
+        // **Ten minutes and a second later**, given as the clock rather than waited for.
+        val later = System.currentTimeMillis() + OpenRouterAuth.LIFETIME_MS + 1_000
+        scene.viewModel.finishOpenRouterSignIn("a-code", now = later) { said = it }
+        scene.await("the answer") { said != null }
+        assertTrue("names the ten minutes: $said", said!!.contains("ten minutes"))
+    }
+
     @Test
     fun `an account with no identity still writes commits under its login`() {
         scene.viewModel.signIn("bare", "a-key", "", "")

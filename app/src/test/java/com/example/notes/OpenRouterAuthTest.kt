@@ -132,28 +132,6 @@ class OpenRouterAuthTest {
     }
 
     /**
-     * An expired attempt is refused **before** any exchange, and says why.
-     *
-     * The alternative — sending a code whose verifier has gone stale — produces OpenRouter's
-     * "invalid code" refusal, which blames the person's code for the app's forgotten state.
-     */
-    @Test
-    fun `an attempt older than ten minutes is refused without a request`() {
-        val scene = Scenario(org.robolectric.RuntimeEnvironment.getApplication(), signIn = true)
-        try {
-            scene.viewModel.beginOpenRouterSignIn()
-            var said: String? = null
-            // **Ten minutes and a second later**, given as the clock rather than waited for.
-            val later = System.currentTimeMillis() + OpenRouterAuth.LIFETIME_MS + 1_000
-            scene.viewModel.finishOpenRouterSignIn("a-code", now = later) { said = it }
-            scene.await("the answer") { said != null }
-            assertTrue("names the ten minutes: $said", said!!.contains("ten minutes"))
-        } finally {
-            scene.close()
-        }
-    }
-
-    /**
      * The verifier is what makes a *displayed* code safe.
      *
      * Worth asserting as its own claim rather than leaving implicit: the whole reason the headless
