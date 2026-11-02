@@ -378,7 +378,7 @@ object Markdown {
                             // range is the honest shape anyway: the link belongs to a span of
                             // characters, which is exactly what makes the character under the
                             // finger decide the target.
-                            val start = length
+                            val start = out.length
                             out.withStyle(
                                 SpanStyle(
                                     textDecoration = TextDecoration.Underline,
@@ -386,7 +386,7 @@ object Markdown {
                                     else linkColour,
                                 ),
                             ) { appendInline(this, words, linkColour, onLink) }
-                            addLink(
+                            out.addLink(
                                 LinkAnnotation.Clickable(
                                     tag = address,
                                     // **The listener lives on the annotation**, so Compose resolves
@@ -405,7 +405,7 @@ object Markdown {
                                     },
                                 ),
                                 start = start,
-                                end = length,
+                                end = out.length,
                             )
                         } else {
                             out.withStyle(
