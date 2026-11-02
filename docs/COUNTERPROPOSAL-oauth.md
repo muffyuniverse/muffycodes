@@ -122,6 +122,38 @@ What actually alleviates it, in order of what it buys:
 4. **Sharding across several OAuth Apps** multiplies the ceiling and fragments the app's identity in every
    user's authorized-applications list. Noted so it is not reinvented as a clever idea. Do not.
 
+#### Why routing across Apps cannot solve this
+
+A proposal worth recording because it is plausible, was seriously considered, and is wrong for a reason
+that is easy to miss. Register 100 GitHub Apps (the per-account cap is real: *"A user, organization, or
+enterprise can register up to 100 GitHub Apps"*), rotate requests between them, and multiply the budget.
+Community libraries do exactly this — `octokit-load-balancer` exists to spread requests across several Apps.
+
+**It multiplies the wrong pool.** There are two independent budgets, and the proposal only touches one:
+
+| budget | owned by | who pays |
+|---|---|---|
+| **Installation access token** | the **installation** (an org or a repo) | the account that installed it |
+| **User access token** | the **person** who authorized it | that person |
+
+A load balancer works on the first: N Apps installed on the same org give N installation tokens, each with
+its own 5,000/h. But this app does not use installation tokens — it acts **on behalf of a person**, which is
+the whole point of the sign-in. And a user access token's limit is documented as *"combined with any requests
+that another GitHub App or OAuth App makes on that user's behalf and any requests that the user makes with a
+personal access token."* **The pool belongs to the user, not to the App.** Registering 100 Apps and rotating
+them yields one 5,000/h budget, because all 100 are spending the same person's quota.
+
+**And "several accounts" changes the product rather than the limit.** Each account would need its own
+authorization, so a person signing in through App #37 would see *that* name in their authorized-applications
+list, with that App's permissions and that App's identity in the audit log. At scale the user-visible effect
+is a rotating cast of unfamiliar app names asking for access — which is precisely the shape of an attack, and
+the reason the `unverified` / third-party-app warnings exist. It also concentrates a single point of failure:
+one registration suspended and a fraction of your users cannot sign in.
+
+**The honest conclusion:** routing is not a mitigation for *this* limit, and it would be a suspicious-looking
+one to ship. If the 50/hour or the 2,000/hour ceiling ever binds, the levers are the free ones already listed
+(poll less, stop on expiry, do not re-authorize needlessly) and then a backend — not more Apps.
+
 #### Two different budgets, and they are easy to confuse
 
 Worth stating because it was confused once already. **The device-flow limit is not an API rate limit**, and
