@@ -172,7 +172,7 @@ class ScopeTest {
         // on `write` would miss.
         File(ws.projectDir("notes"), "secret.txt").writeText("changed\n")
         git.commit("notes", "changed")
-        val revision = git.history("notes", "secret.txt").first().id
+        val revision = git.log("notes", "secret.txt").first().id
 
         val answer = scoped().call(
             "restore",
