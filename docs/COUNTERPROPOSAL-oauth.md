@@ -36,6 +36,69 @@ Worth saying plainly, because the rest of this document is disagreement:
 
 ---
 
+## 1a. Decisions taken since (2026-11-02, from the operator)
+
+Recorded here so the rest of this document is read in their light. These supersede the open questions they
+answer.
+
+**D1. GitHub and OpenRouter are activated together, and both are mandatory.** The app does not work with
+one and not the other: GitHub is identity and storage, OpenRouter is inference. So onboarding is a single
+path — capabilities screens, then GitHub, then OpenRouter, then the app. There is no "either", and no
+working state without both.
+
+**D2. Sign-in is mandatory; the app has an account on arrival.** The user-facing provisional state goes
+away, and the last attached account being removed returns the person to the sign-in screen rather than to a
+local workspace.
+
+> **What this does *not* mean, and the distinction is load-bearing.** The *machinery* stays. `AccountStore`
+> states that the test account is *"a test account of a debug build… a release build can never make one,
+> and no account stored by a release build ever has this set"* — so `~local` already cannot exist for a
+> real user. What is removed is the **user-facing** provisional state. The dev account itself is what makes
+> every one of the 76 test classes hermetic: `Scenario.init` calls `signedIn()` for every scenario, and the
+> dev account talks to *"a GitHub that is a folder on this phone"*, so no test touches the network. Deleting
+> it means every test needs an injected fake GitHub — a large refactor, not a deletion. There are 86
+> references to `provisional` and 41 of them are in tests.
+
+**D3. Tokens must be durable; no refresh machinery is wanted.** Verified: **OAuth App tokens do not expire
+by default.** The eight-hour lifetime and the refresh token belong to **GitHub Apps**. So the ordinary OAuth
+App token is as durable as the PAT it replaces, and "the agent runs for days in the background" needs no new
+work. What kills a token is revocation, not time — and all three causes (the person revoking, GitHub
+revoking, the registration being deleted) arrive as a **401**, which is one path: say so, offer to reconnect.
+
+**D4. `.html` preview is deferred** until the auth block is finished. Cut from this change, as §2.4 argued.
+
+### The rate-limit question, answered
+
+The device flow's limit is **50 verification-code submissions per hour, per application**. A submission is a
+*new authorization*, not an API call and not a use — so because tokens do not expire, **a person authorizes
+once and never again**, and the ceiling applies to new users only. 50/hour is 1,200/day.
+
+What actually alleviates it, in order of what it buys:
+
+1. **Do not burn slots on re-authorization.** A 401 is not proof the token is dead — it can be a scope
+   problem — so test the token's capability before asking anyone to authorize again. Never offer sign-out
+   as a casual action; it costs a fresh authorization. Cache the identity so a returning person is never
+   re-prompted. This is free and it is the largest lever.
+2. **The web flow has no app-wide ceiling.** Its limit is 10 tokens per hour *per user*, revoking the
+   oldest — so a launch is unconstrained. But its exchange requires `client_secret`, which is the thing
+   being avoided. The real trade is **"no secret, app-wide ceiling"** against **"a secret, no ceiling"**.
+3. **A small backend would dissolve the ceiling** — it holds the secret and does the exchange. Rejected for
+   now: a server, a domain, an uptime promise and a new way for sign-in to fail, all in exchange for a limit
+   that is probably never reached. Reconsider only if it is actually hit.
+4. **Sharding across several OAuth Apps** multiplies the ceiling and fragments the app's identity in every
+   user's authorized-applications list. Noted so it is not reinvented as a clever idea. Do not.
+
+**One measurement worth making before writing auth code.** The 50/hour figure appears in the **OAuth App**
+docs. The **GitHub App** device-flow docs describe the same `interval`/`slow_down` mechanics and state **no
+submission limit at all**. That may mean the ceiling is OAuth-App-specific, or that it is merely
+undocumented for Apps. Register both and drive 51 submissions in an hour; the answer decides the product,
+because a GitHub App costs one extra screen (the installation step — *"The app can only access resources in
+an account where it is installed"*) and, if unconstrained, buys the removal of the ceiling entirely. With
+both providers mandatory, **every** new user passes through this flow, so the ceiling applies to the whole
+funnel rather than a subset.
+
+---
+
 ## 2. Where it breaks
 
 ### 2.1 GitHub PKCE does not remove the client secret — verified, not assumed
