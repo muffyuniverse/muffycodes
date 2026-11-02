@@ -619,7 +619,11 @@ private fun Dialogs(
                 },
                 onCode = { code, answered ->
                     tap("openrouter code")
-                    viewModel.finishOpenRouterSignIn(code, answered)
+                    // **Named, because the clock sits between the code and the answer.** With
+                    // `now` defaulted in the middle, a trailing lambda lands on the wrong
+                    // parameter — which the compiler caught, and which is worth a comment so
+                    // nobody "simplifies" it back.
+                    viewModel.finishOpenRouterSignIn(code = code, onDone = answered)
                 },
             )
         }
