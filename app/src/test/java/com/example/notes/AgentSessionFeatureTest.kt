@@ -91,6 +91,10 @@ class AgentSessionFeatureTest : FeatureTest() {
      * app cannot reach.
      */
     private fun openChat(project: String, door: Door) {
+        // **The project folder, because a log row no longer invents one.** These tests used to work
+        // only because the writer made whatever folder it wrote into — which is exactly the writer
+        // that was bringing deleted projects back. A fixture has to build the state the app would.
+        scene.viewModel.workspace!!.projectDir(project).mkdirs()
         scene.viewModel.chatDoor = { door }
         scene.viewModel.openChat(project)
     }
