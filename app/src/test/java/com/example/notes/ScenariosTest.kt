@@ -147,10 +147,18 @@ class ScenariosTest {
      * the project list - and a picture of it floating on its own would not show the thing the design
      * is about: that it costs the list one band and no scroll.
      */
-    private fun heartbeat(accountDir: java.io.File, now: Long) = Screen {
-        val measures = RequestDb.read(accountDir).use { Heartbeat.of(it, now) }
-        androidx.compose.foundation.layout.Column {
-            com.example.notes.HeartbeatCard(measures)
+    @androidx.compose.runtime.Composable
+    private fun Heartbeat(accountDir: java.io.File, now: Long) {
+        // **Read once, not once per frame.** `RequestDb.read` opens a file handle, so reading in the
+        // composable body would open one per recomposition and leave all but the last unclosed.
+        // `remember` is keyed on the inputs, which are fixed for a scenario.
+        val measures = androidx.compose.runtime.remember(accountDir, now) {
+            RequestDb.read(accountDir).use { db -> Heartbeat.of(db, now) }
+        }
+        Screen {
+            androidx.compose.foundation.layout.Column {
+                HeartbeatCard(measures)
+            }
         }
     }
 
@@ -868,7 +876,7 @@ class ScenariosTest {
             compose, "24-what-it-cost",
             "Account statistics.",
             "the request history summed over an interval chosen with two pickers.",
-            screen = { heartbeat(account, now) },
+            screen = { Heartbeat(account, now) },
         ) {
             before()
             then("Nothing is pressed: the card is the history, summed as it already is.") {}
@@ -904,7 +912,7 @@ class ScenariosTest {
             compose, "26-what-it-cost-before-anything",
             "Account statistics, before anything was asked.",
             "an empty history, which has to say so rather than show a grid of zeroes.",
-            screen = { heartbeat(account, now) },
+            screen = { Heartbeat(account, now) },
         ) {
             before()
             then("Nothing is pressed: there is nothing to press for.") {}
