@@ -10,6 +10,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import org.robolectric.RuntimeEnvironment
 import java.io.File
 
@@ -27,6 +28,7 @@ import java.io.File
  * gets, and [RequestDb.insert] and [RequestDb.compact] are the two steps `write` takes.
  */
 @RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class HeartbeatTest {
 
     private val app = RuntimeEnvironment.getApplication()
