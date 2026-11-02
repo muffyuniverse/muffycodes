@@ -293,7 +293,14 @@ class HeartbeatTest {
             // **A burst**, which is what a tap actually produces: the tap's own refresh, then the
             // one the listing triggers. Only one read should run and it should finish.
             repeat(5) { phone.viewModel.refresh() }
-            phone.await("the card to fill") { phone.viewModel.heartbeat.isNotEmpty() }
+
+            // **Awaited on the value, not on "the card is not empty".** The app reads once on
+            // startup, so a card drawn before the write above is already non-empty and waiting for
+            // that returns immediately with the old numbers — which is what this test did first,
+            // and it reported a null `recent` rather than the stale card it actually had.
+            phone.await("the card to show the request") {
+                phone.viewModel.heartbeat.firstOrNull { it.id == Heartbeat.Id.SPEND }?.recent != null
+            }
 
             val spend = phone.viewModel.heartbeat.first { it.id == Heartbeat.Id.SPEND }
             assertEquals(
