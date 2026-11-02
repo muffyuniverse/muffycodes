@@ -453,6 +453,31 @@ fun EditorScreen(
                     file = file,
                     text = text,
                     onLink = onLink,
+                    // **The page follows the finger, and the next one opens at its top.** A swipe is
+                    // a move through a folder in the order it is listed, which is the order the
+                    // person was reading in.
+                    //
+                    // **No arbitration with the scroll, and none is needed**: a vertical scroll
+                    // consumes vertical deltas and a horizontal detector consumes horizontal ones,
+                    // so a page being scrolled can still be swiped. What a person sees is the page
+                    // at rest at the top of whatever they land on, because the new file is a new
+                    // `remember(file)` — nothing is inherited.
+                    onStep = { steps ->
+                        val beside = viewModel.fileBeside(file, steps)
+                        if (beside != null) {
+                            Trace.tap("swipe file", beside.name)
+                            // **Saved first, and only if it changed.** A swipe out of Edit would
+                            // otherwise be the one way to lose writing, since leaving is a save
+                            // everywhere else.
+                            autosaveIfChanged()
+                            viewModel.openEditor(beside)
+                        } else {
+                            // **The bounce is the answer at either end**, so nothing is done and
+                            // nothing is said: a message per swipe would be the app explaining a
+                            // wall the person can feel.
+                            Trace.note("swipe file", if (steps > 0) "past the last" else "before the first")
+                        }
+                    },
                 )
                 // **Two buttons, and only two.** Exit returns to the editor; Edit goes straight to
                 // writing. Anything else on this screen would be furniture, which is the thing
@@ -530,6 +555,11 @@ fun EditorScreen(
                             focus.clearFocus()
                             commitName()
                             autosaveIfChanged()
+                            // **The mode is set as well as the surface opened.** Leaving it out
+                            // was a bug worth naming: the segment reads `selected = mode`, so a
+                            // person who pressed View from Edit would have opened the page and
+                            // found the Edit segment still highlighted behind it.
+                            mode = Mode.VIEW
                             // **View opens the page, not a mode.** Reading happens fullscreen, so the
                             // segment is an entry to that surface rather than a third state of the
                             // editor.
@@ -838,9 +868,35 @@ private fun ReadOnlyPage(
     file: java.io.File,
     text: String,
     onLink: (String) -> Unit,
+    onStep: (Int) -> Unit = {},
 ) {
+    /**
+     * **The horizontal drag, and the only gesture this page owns.**
+     *
+     * It is a separate `pointerInput` from the scroll above and the two do not compete: Compose's
+     * scroll consumes vertical deltas and this consumes horizontal ones, so a page can be scrolled
+     * with one finger and swiped with the same finger in a different direction.
+     *
+     * **`detectHorizontalDragGestures` rather than a velocity tracker**: a swipe is a deliberate
+     * sideways move, and the detector fires once per gesture with its own slop, so a diagonal drag
+     * that was meant as a scroll is not read as a page change.
+     */
+    val stepping = Modifier.pointerInput(file.path) {
+        var travelled = 0f
+        detectHorizontalDragGestures(
+            onDragStart = { travelled = 0f },
+            onDragEnd = {
+                // **A third of the width is the bar.** Lower than a fling threshold on purpose: a
+                // person reading does not fling, and a threshold that needed one would make the
+                // gesture feel like it was ignoring them.
+                if (travelled <= -size.width / 3f) onStep(1)
+                else if (travelled >= size.width / 3f) onStep(-1)
+            },
+        ) { _, dragAmount -> travelled += dragAmount }
+    }
     val scrolling = Modifier
         .fillMaxSize()
+        .then(stepping)
         .verticalScroll(rememberScrollState())
         .padding(horizontal = 20.dp, vertical = 16.dp)
     SelectionContainer {

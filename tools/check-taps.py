@@ -105,6 +105,10 @@ VOCABULARY = {
     # **Putting the text back to what is on disk.** Named for what it does rather than "reset",
     # because "reset" alone could be resetting the view, the drawing or the name.
     "editor reset",
+    # **Moving to the next file by swiping.** Its own name rather than "open file", because a swipe
+    # and a press are different ways of arriving: a log that called both "open file" could not answer
+    # "did the person browse the folder or jump straight to one".
+    "swipe file",
     "model", "provider", "effort", "add model", "remove model", "read catalogue",
     # making a project, which is a different act from adding one that is already on GitHub
     "new project", "local project", "confirm add project",

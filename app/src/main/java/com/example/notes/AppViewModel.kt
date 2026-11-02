@@ -2105,6 +2105,28 @@ class AppViewModel @JvmOverloads constructor(
         editorSession++
     }
 
+    /**
+     * The file [steps] places from [file] in the folder it lives in, or null at either end.
+     *
+     * **Files only, and in the folder's own order** — the order the person sees in the browser, which
+     * is the order they were reading in. A folder is the unit: swiping out of one into another would
+     * be a navigation the screen has no title for.
+     *
+     * **Null rather than wrapping.** A swipe past the last file bounces, which says "this is the
+     * end" — wrapping would make a folder feel circular and leave a person unsure whether they had
+     * seen everything.
+     */
+    fun fileBeside(file: File, steps: Int): File? {
+        val siblings = entries.filter { it.kind != EntryKind.FOLDER }.map { it.file }
+        val at = siblings.indexOfFirst { it.path == file.path }
+        if (at < 0) return null
+        val wanted = siblings.getOrNull(at + steps) ?: return null
+        // **A locked or binary sibling is still a destination.** The editor can show a picture or a
+        // read-only record perfectly well; refusing to move there would make a folder with one
+        // image in it feel broken.
+        return wanted
+    }
+
     fun closeEditor() {
         Trace.tap("close editor")
         editingPath = null

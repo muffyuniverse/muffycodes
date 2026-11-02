@@ -21,6 +21,7 @@ import androidx.compose.ui.test.performTextReplacement
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -512,6 +513,30 @@ class EditorScreenTest {
         }
         compose.onNodeWithText("a cat", substring = true).assertIsDisplayed()
         compose.onNodeWithText("missing.png", substring = true).assertIsDisplayed()
+    }
+
+    /**
+     * Swiping moves through the folder's files, and stops at both ends.
+     *
+     * Asserted on the view model rather than through a gesture: what a gesture test would pin is
+     * Compose's own drag detection, and what this feature can get wrong is *which file is beside
+     * this one* — the folder's order, folders skipped, and the ends refusing rather than wrapping.
+     */
+    @Test
+    fun `a file knows which files are beside it, and stops at the ends`() {
+        scene.open("groceries")
+        val first = scene.file("a.txt", "a")
+        val second = scene.file("b.txt", "b")
+        val third = scene.file("c.txt", "c")
+        // A folder in the same directory, which is not a file to swipe to.
+        scene.viewModel.createFolder("inner")
+
+        assertEquals("the next file", second.name, scene.viewModel.fileBeside(first, 1)?.name)
+        assertNull("nothing before the first", scene.viewModel.fileBeside(first, -1))
+        assertEquals("and back again", first.name, scene.viewModel.fileBeside(second, -1))
+
+        assertNull("nothing past the last", scene.viewModel.fileBeside(third, 1))
+        assertNull("a file that is not in this folder", scene.viewModel.fileBeside(File("/nope.txt"), 1))
     }
 
     @Test
