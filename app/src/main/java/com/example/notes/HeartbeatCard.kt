@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -21,6 +22,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
 /**
@@ -64,6 +66,14 @@ fun HeartbeatCard(measures: List<Heartbeat.Measure>, modifier: Modifier = Modifi
 }
 
 /**
+ * The width the value column is given, the same in all four cells.
+ *
+ * Wide enough for `9.99M` and `>+99.99%` at `titleMedium`, and narrow enough that the graph still
+ * gets most of the cell. A value that outgrows it is elided rather than pushing the graph to nothing.
+ */
+private val VALUE_WIDTH = 64.dp
+
+/**
  * One cell: title and badge on top, graph and value beneath.
  *
  * The layout the operator asked for by position - *"value to the right of the graph, relative change
@@ -78,33 +88,47 @@ private fun Cell(measure: Heartbeat.Measure, modifier: Modifier = Modifier) {
                 measure.id.title,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                // **One line, cut rather than wrapped.** "output share" beside a badge is already
+                // tight at this width, and a title that wrapped would push the badge onto a row of
+                // its own - so the two would stop reading as a pair.
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
             Text(
                 Heartbeat.badge(measure.badge),
                 style = MaterialTheme.typography.labelMedium,
                 color = badgeColour(measure),
+                maxLines = 1,
+                // The badge must not wrap or clip: it is the one number in the cell that is read
+                // first, and `-98.96%` broken across two lines reads as two numbers.
+                modifier = Modifier.padding(start = 4.dp),
             )
         }
         Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Bars(
                 points = measure.points,
-                modifier = Modifier.weight(1f).height(28.dp),
+                modifier = Modifier.weight(1f).height(32.dp),
                 colour = MaterialTheme.colorScheme.primary,
             )
             Text(
                 Heartbeat.format(measure.id, measure.recent),
                 style = MaterialTheme.typography.titleMedium,
                 textAlign = TextAlign.End,
-                // **The number keeps its own width** so a long one like `9.99M` does not squeeze the
-                // graph - and so the four numbers line up down the card rather than each sitting at
-                // the end of a graph of a different length.
-                modifier = Modifier.padding(start = 8.dp).semantics {
-                    contentDescription = "${measure.id.title}: ${Heartbeat.format(measure.id, measure.recent)}"
-                },
+                maxLines = 1,
+                // **A fixed width, so the four numbers line up down the card.** With `wrapContent`
+                // each sits wherever its own digits end, which turns four readings into four ragged
+                // edges - the one thing a grid of numbers must not have.
+                modifier = Modifier
+                    .width(VALUE_WIDTH)
+                    .padding(start = 8.dp)
+                    .semantics {
+                        contentDescription =
+                            "${measure.id.title}: ${Heartbeat.format(measure.id, measure.recent)}"
+                    },
             )
         }
     }
@@ -147,10 +171,13 @@ private fun Bars(points: List<Double?>, colour: Color, modifier: Modifier = Modi
         val top = points.filterNotNull().maxOrNull() ?: return@Canvas
         if (top <= 0.0) return@Canvas
 
-        // **Bars are separated by a gap rather than touching**, so the count of windows is readable
-        // and a missing one is visible as a wider break.
-        val width = size.width / points.size
-        val barWidth = (width * 0.7f).coerceAtLeast(1f)
+        // **The gap is a fraction of the slot, floored at no gap at all.** Forty-eight windows in a
+        // cell this wide gives about one and a half dp each; asking for a 30% gap there would spend
+        // a third of every bar on nothing and the shape would blur into a smear. So the gap scales
+        // down with the slot and disappears rather than eating the bar.
+        val slot = size.width / points.size
+        val gap = if (slot >= 4f) slot * 0.25f else 0f
+        val barWidth = (slot - gap).coerceAtLeast(1f)
         points.forEachIndexed { i, value ->
             if (value == null) return@forEachIndexed
             // A value of zero draws nothing rather than a hairline, because a hairline at the floor
@@ -159,7 +186,7 @@ private fun Bars(points: List<Double?>, colour: Color, modifier: Modifier = Modi
             if (h <= 0f) return@forEachIndexed
             drawRect(
                 color = colour,
-                topLeft = Offset(i * width, size.height - h),
+                topLeft = Offset(i * slot, size.height - h),
                 size = Size(barWidth, h),
             )
         }

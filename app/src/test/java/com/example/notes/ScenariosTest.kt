@@ -843,27 +843,30 @@ class ScenariosTest {
                     "completion_tokens_details":{"reasoning_tokens":$thinking}}""",
             )
 
-        // A morning of turns, each with a warm cache, then the keepalive alone for the afternoon -
-        // which is the shape a real day has and the one the two blocks exist to show apart.
-        var at = now - 5 * 3_600_000L
-        repeat(4) {
-            RequestDb.write(account, at, RequestLog.Stats(
-                kind = RequestLog.Stats.Kind.TURN, ms = 4_100,
-                provider = "deepinfra/fp8/flex", model = "deepseek/deepseek-v4.1-flash",
-                usage = usage(prompt = 6_000, cached = 5_500, completion = 600, thinking = 90, cost = 0.00071),
-                finish = "stop",
-            ))
-            at += 12 * 60_000L
-        }
-        at = now - 2 * 3_600_000L
-        repeat(18) {
-            RequestDb.write(account, at, RequestLog.Stats(
-                kind = RequestLog.Stats.Kind.PING, ms = 1_840,
-                provider = "deepinfra/fp8/flex", model = "deepseek/deepseek-v4.1-flash",
-                usage = usage(prompt = 3_691, cached = 3_584, completion = 1, thinking = 1, cost = 0.0000241),
-                finish = "length",
-            ))
-            at += 4 * 60_000L
+        // **Two days, not one afternoon**, because the card draws the last forty-eight hours and a
+        // picture of a graph with one bar in it cannot show whether the graph works. The shape is
+        // what a real fortnight looks like: quiet nights, two busy mornings, one long afternoon of
+        // keepalives - so the five cells have something to be different from.
+        for (hourBack in 47 downTo 1) {
+            // Nothing between midnight and seven, which is the gap the card has to draw as a gap.
+            val dayHour = ((now - hourBack * 3_600_000L) / 3_600_000L % 24).toInt()
+            if (dayHour < 7) continue
+            // Busier towards the end, so the graph has a direction rather than a flat line.
+            val perHour = if (hourBack < 6) 9 else if (hourBack < 14) 4 else 2
+            var at = now - hourBack * 3_600_000L + 3 * 60_000L
+            repeat(perHour) {
+                RequestDb.write(account, at, RequestLog.Stats(
+                    kind = if (it == 0) RequestLog.Stats.Kind.TURN else RequestLog.Stats.Kind.PING,
+                    ms = 2_400,
+                    provider = "deepinfra/fp8/flex", model = "deepseek/deepseek-v4.1-flash",
+                    usage = usage(
+                        prompt = 6_000, cached = 5_500, completion = if (it == 0) 600 else 1,
+                        thinking = 90, cost = 0.00031,
+                    ),
+                    finish = "stop",
+                ))
+                at += 7 * 60_000L
+            }
         }
         // One answer that began and died, so the third block is in the picture rather than only in
         // the code path.
@@ -876,21 +879,21 @@ class ScenariosTest {
 
         scenario(
             compose, "24-what-it-cost",
-            "Account statistics.",
-            "the request history summed over an interval chosen with two pickers.",
+            "The account's heartbeat.",
+            "four measures over two windows: the last hour as a number, the last two days as a graph.",
             screen = { Heartbeat(account, now) },
         ) {
             before()
             then("Nothing is pressed: the card is the history, summed as it already is.") {}
             after()
             result(
-                "Two picks and one column. The interval is stated rather than inferred: From " +
-                    "and To sit above the table, and every number below is that interval summed. " +
-                    "One figure per metric, which is what a person asks for - not five nested " +
-                    "views of one instant that each need a rule for where they start. " +
-                    "The 22 requests are read from three SQLite tables - minutes, hours, days - " +
-                    "cut into disjoint slices so nothing is counted twice, which is the whole " +
-                    "reason the levels are separate tables rather than lines in one file.",
+                "Four measures, each a graph of forty-eight sixty-minute windows with the last " +
+                    "hour beside it and the difference as a badge. The graphs are not clock hours: " +
+                    "every bar is a full sixty minutes, so the rightmost bar and the number above " +
+                    "it cover the same span. An hour with no requests is a gap rather than a bar at " +
+                    "the floor, which is why the quiet nights are visibly empty. Spend's badge is " +
+                    "the brand's caramel because whether more spending is good is not the app's " +
+                    "call; the other three are green or red because their direction is not in doubt.",
             )
         }
     }
