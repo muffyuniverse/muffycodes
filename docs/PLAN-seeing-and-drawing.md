@@ -303,3 +303,44 @@ uploading something.
 - **Vector drawing.** A PNG is the document, and an SVG would be a second format to keep in step with it.
 - **Scanning an image.** The scanner's scope is `browse` and `mcp`; a drawing the person made is not foreign
   text.
+
+---
+
+# What the audit found, 2026-11-02
+
+The plan above was carried out in full — steps 1–11 — and then read back. Twelve defects, each found by
+looking at the work rather than by a test that was already passing. They are listed because the pattern
+matters more than the count: **every one was a shape the code could not have told me about itself.**
+
+| # | defect | how it was found |
+|---|---|---|
+| 1 | `Msg.user` dropped `pictures` — a field with no way in | CI compile |
+| 2 | `Look` charged 77,000 tokens for a 765-token picture, by measuring base64 | reading the row cost |
+| 3 | A `see` row did not name its file, so three pictures were three identical sentences | reading the message |
+| 4 | `flatten` was tested against a decode Robolectric cannot do | a test that passed on `-1` |
+| 5 | `Canvas` rasterises nothing in Robolectric, so "a stroke appears" is unaskable there | a test that passed on white |
+| 6 | A truncated-PNG fixture decoded fine, so the refusal test proved nothing | CI |
+| 7 | `Paint.measureText` returns 0, so nothing wraps and a height test passed for the wrong reason | CI, 198 vs 198 |
+| 8 | The canvas had no edge — a white picture on a white page | **the tour picture** |
+| 9 | The fit measured `DrawScope.size` (the picture) instead of the window | **the tour picture** |
+| 10 | `fittedTo` clamped at 0.25, so a page could not fit | a test that failed on 305 > 300 |
+| 11 | The framed Box wrapped the picture instead of filling the window — pushing the tool row off | **the tour picture** |
+| 12 | The eraser read a stale stroke list, so a drag erased the wrong stroke | reading the gesture |
+
+**Four of the twelve were found by a screenshot**, and three of those were things no unit test in this
+container could ask. The tour is not decoration on this feature; it is the only instrument that can see
+whether a canvas paints.
+
+**Three shadows, recorded once so they are not rediscovered:** Robolectric's `BitmapFactory` encodes
+nothing and decodes anything; its `Canvas` accepts draw calls and rasterises nothing; its `Paint.measureText`
+returns zero. Every test that appears to cross one of those lines is testing the shadow.
+
+## What is still not proven
+
+- **The stroke lands in the saved PNG on a real device.** The tour shows the stroke on screen and
+  `flatten` is tested for size and PNG magic, but the pixels of a *saved* file are not read back anywhere.
+- **`AgentSessionFeatureTest`'s folder-deletion flake.** Pre-existing (last touched 2026-10-31), failed
+  three times during this work with `.git/info/exclude` in the recreated folder. Something opens a
+  repository on a path that no longer exists; not found.
+- **Wrapping at a real text width.** `measureText` is zero here, so the wrap arithmetic is only exercised
+  by the tour's rendered page.
