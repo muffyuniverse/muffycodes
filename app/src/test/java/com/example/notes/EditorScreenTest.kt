@@ -385,6 +385,54 @@ class EditorScreenTest {
         )
     }
 
+    /**
+     * **The fullscreen exit is recorded**, so a log can answer "did they ever leave the page".
+     *
+     * Falsification: without the tap this passes with no line, so the assertion is on the *name*
+     * appearing in the newest rows rather than on the counter alone.
+     */
+    @Test
+    fun `leaving fullscreen is traced`() {
+        val file = scene.file("milk.txt", "two litres")
+        editorFor(file)
+
+        compose.onNodeWithText("View").performClick()
+        compose.waitForIdle()
+        val before = Trace.report().taps
+        compose.onNodeWithText("Exit").performClick()
+        compose.waitForIdle()
+
+        val report = Trace.report()
+        assertTrue("the press was recorded", report.taps > before)
+        assertTrue(
+            "and it is named: newest ${report.lines.take(3)}",
+            report.lines.take(3).any { it.contains("TAP") && it.contains("editor-exit") },
+        )
+    }
+
+    /**
+     * **Reset is recorded under its own name**, which is what makes it distinguishable from a save
+     * in a log — the two write different things and mean opposite ones.
+     */
+    @Test
+    fun `Reset is traced under its own name`() {
+        val file = scene.file("milk.txt", "two litres")
+        editorFor(file)
+        compose.onNodeWithText("Edit").performClick()
+        compose.onNodeWithText("two litres").performTextReplacement("three litres")
+
+        val before = Trace.report().taps
+        compose.onNodeWithText("Reset").performClick()
+        compose.waitForIdle()
+
+        val report = Trace.report()
+        assertTrue("the press was recorded", report.taps > before)
+        assertTrue(
+            "and it is named: newest ${report.lines.take(3)}",
+            report.lines.take(3).any { it.contains("TAP") && it.contains("editor-reset") },
+        )
+    }
+
     @Test
     fun `a mode change away from Edit saves what was typed`() {
         // **The contract this pins is the reverse of the one it was written for.** It used to say

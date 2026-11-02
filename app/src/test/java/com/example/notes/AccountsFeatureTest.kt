@@ -330,6 +330,55 @@ class AccountsFeatureTest : FeatureTest() {
         )
     }
 
+    /**
+     * **A link press is traced**, and the two kinds are named differently — one leaves the app, the
+     * other makes it act. A log that called both "link" could not answer "did the onboarding page
+     * get them as far as the sign-in dialog".
+     */
+    @Test
+    fun `a link press is traced under the name that says which kind it was`() {
+        val before = Trace.report().taps
+        scene.viewModel.openLink("https://example.com")
+        assertTrue("the press was recorded", Trace.report().taps > before)
+        assertTrue(
+            "named: newest ${Trace.report().lines.take(3)}",
+            Trace.report().lines.take(3).any { it.contains("TAP") && it.contains("link") },
+        )
+
+        val beforeAction = Trace.report().taps
+        val page = File(
+            File(
+                scene.viewModel.workspace!!.projectDir(Workspace.SYSTEM_PROJECT),
+                Onboarding.DIR,
+            ),
+            Onboarding.pages().last().name,
+        )
+        scene.viewModel.followLink("app:connect-github", page)
+        assertTrue("the action was recorded", Trace.report().taps > beforeAction)
+        assertTrue(
+            "named as an action: newest ${Trace.report().lines.take(3)}",
+            Trace.report().lines.take(3).any { it.contains("TAP") && it.contains("link-action") },
+        )
+    }
+
+    /**
+     * **A refused link says so in the log.**
+     *
+     * The refusal is silent on screen — a message per attempt would be the app explaining a wall —
+     * so the log is the only place the attempt is visible, and a security boundary nobody can see
+     * being tested is a boundary nobody can check.
+     */
+    @Test
+    fun `a refused app link is recorded`() {
+        val clone = File(scene.viewModel.currentDir ?: scene.root, "my-copy.md")
+        scene.viewModel.followLink("app:delete-account", clone)
+
+        assertTrue(
+            "the refusal is in the log: ${Trace.report().lines.take(3)}",
+            Trace.report().lines.take(3).any { it.contains("link-refused") },
+        )
+    }
+
     @Test
     fun `a web link is published for the screen to open`() {
         scene.viewModel.openLink("https://example.com/page")
