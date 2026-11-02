@@ -146,6 +146,21 @@ class AgentTools(
      * a conversation that goes nowhere for no visible reason. So this refuses in words instead.
      */
     private val modelSees: (() -> Boolean)? = null,
+    /**
+     * **How far this agent may reach, which is not the same as what it may do.**
+     *
+     * The chat agent works for the account: `tree ../other` is deliberate and its own description
+     * says so, because a thing worth finding may live in another project. A subagent works on **one
+     * project**, and the boundary has to be enforced here rather than by handing it a shorter tool
+     * list — `{read, tree, edit}` is not a sandbox while `tree` accepts `../` and `search` walks the
+     * whole account.
+     *
+     * It is checked in [resolve] and [mayWrite], which is the one funnel every path already goes
+     * through, so a tool added later inherits the rule without being told about it. A filter on
+     * `specs()` would be a filter on the *description* of the tools, which is the version of this
+     * that looks right and is not.
+     */
+    private val scope: Scope = Scope.Account,
 ) {
 
     /** The project's own folder: what the agent stands in. */
@@ -1044,7 +1059,12 @@ class AgentTools(
         // to search - 'history' so that results show not just filepaths but also version hashes"*,
         // and the flag is enough because a version is a file at a commit.
         val history = args.optBoolean("history", false)
-        walkForSearch(ws.accountDir, SEARCH_DEPTH, query, inFolders, state, found, deadline)
+        // **A scoped search starts at its own project, not at the account.** `search` is the one
+        // tool that never asks [resolve] for a path — it walks a folder — so the scope has to be
+        // applied here or this is the tool that makes every other refusal a formality. Its own
+        // description says it searches *"every project in the account"*, which is true for the chat
+        // agent and is exactly what a subagent must not be able to do.
+        walkForSearch(searchRoot(), SEARCH_DEPTH, query, inFolders, state, found, deadline)
         if (history) {
             // **Even when nothing current matches, and that is the whole point.** A line that was
             // deleted is unreachable by any current-file search, and it is exactly what a person
@@ -1052,7 +1072,14 @@ class AgentTools(
             searchVersions(query, inFolders, state, found, deadline)
         }
         if (found.isEmpty()) {
-            val where = if (inFolders.isEmpty()) "this account" else inFolders.joinToString(", ")
+            val where = when {
+                inFolders.isNotEmpty() -> inFolders.joinToString(", ")
+                // **"this account" is a claim, and a scoped agent would make it falsely.** It
+                // searched one project, so saying the account was searched would teach it that the
+                // text is nowhere in an account it never looked at.
+                scope is Scope.Project -> "this project"
+                else -> "this account"
+            }
             // **"and not in any version" when history was asked for**, because a person told only
             // "nothing matches" cannot tell whether their history was searched at all.
             val also = if (history) ", in any version of it" else ""
@@ -3723,6 +3750,16 @@ class AgentTools(
                 ),
             )
         }
+        // **The scope, checked in the funnel rather than in each tool.** A subagent works on one
+        // project; the account is what a chat agent may reach. Both bounds are the same shape — a
+        // path that resolves outside a folder — so the second one belongs here, beside the first,
+        // and not in fifteen tools that would each have to remember it.
+        //
+        // **After the account check, not before.** A path outside the account is a different
+        // refusal with a different sentence, and telling a scoped agent "that is outside
+        // groceries" about a path that is outside the account entirely would name the wrong
+        // boundary and send it looking for a way around the one that is not there.
+        scoped(target)?.let { return Result.failure(IllegalArgumentException(it)) }
         return Result.success(target)
     }
 
@@ -3745,6 +3782,29 @@ class AgentTools(
     /** True when [file] is inside the project the agent is working in. */
     fun isMine(file: File): Boolean = projectOf(file) == project
 
+    /** Where `search` begins: the account for a chat agent, its own project for a scoped one. */
+    private fun searchRoot(): File = when (val s = scope) {
+        Scope.Account -> ws.accountDir
+        is Scope.Project -> ws.projectDir(s.project)
+    }
+
+    /**
+     * The sentence that says [file] is outside this agent's scope, or null when it is inside it.
+     *
+     * **The account's own folder is inside an `Account` scope and outside a `Project` one**, which
+     * is the one asymmetry worth naming: the account root is where the projects live, so a scoped
+     * agent that could list it could enumerate every project it is not allowed to read.
+     */
+    private fun scoped(file: File): String? = when (val s = scope) {
+        Scope.Account -> null
+        is Scope.Project -> {
+            // The project's own folder is the scope; anything whose first segment is another name
+            // is not. `projectOf` already answers "which project is this", and a file at the
+            // account's root answers null — outside a project, so outside a project's scope.
+            if (projectOf(file) == s.project) null else s.refusal()
+        }
+    }
+
     /**
      * Why [file] may not be written, or null when it may.
      *
@@ -3758,6 +3818,11 @@ class AgentTools(
      * has, and a lock that behaves differently from every other lock is one nobody can reason about.
      */
     private fun mayWrite(file: File): String? {
+        // **The scope first, because it is the boundary and not a rule about the file.** A path
+        // outside a subagent's project is refused whatever else is true of it — the owner rule
+        // below says "read it, and changing it needs that project open", which is a true sentence
+        // about a chat agent and an invitation a scoped one must not be given.
+        scoped(file)?.let { return it }
         val path = rel(file)
         // **The record is not yours to change.** `forget` is the one thing you may do to the
         // context, and it is a column and not a text edit; the evidence itself is the app's, so an
