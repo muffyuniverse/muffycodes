@@ -1,0 +1,4 @@
+I am going afk. After finishing with that proceed with implementing
+oauth and oauth pkce for github and openrouter, so that we use github
+access tokent instead on pat and pkce to setup openrouter key. both on
+starting screen - so that first use doesnt start with readme but with onboarding and registration screen for those services. And about the registration, we already integrate web viewer, can we render webpages inside the app, and can we add .html file editor view support with this as well? I want to render registration/signup pages for this services right inside the app and its own screens so that users never have to leave it, is it complicated to do?

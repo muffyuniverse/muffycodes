@@ -20,6 +20,14 @@ name: Build and release
 on:
   push:
     branches: [main, development]
+    # **A change that touches nothing the build reads costs a full pipeline.** Documentation,
+    # and the note files that describe work rather than perform it, cannot break a compile or a
+    # test — but they used to start the whole suite, which is the most expensive thing a run can
+    # do for no information. Skipped here, before the run exists, rather than judged after.
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - 'LICENSE'
   pull_request:
     branches: [main]
   workflow_dispatch:
