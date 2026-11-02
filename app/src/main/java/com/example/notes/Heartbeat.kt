@@ -98,7 +98,7 @@ object Heartbeat {
      * the same as a busy hour with a thousand; those compare against the ratio of the period's sums,
      * which is what "the cache hit rate over two days" actually means.
      */
-    fun of(db: RequestDb.Reader, now: Long): List<Measure> {
+    fun of(db: RequestDb.History, now: Long): List<Measure> {
         val at = now - Math.floorMod(now, MINUTE)
         val start = at - HOURS * HOUR
 
@@ -110,7 +110,8 @@ object Heartbeat {
             var out = RequestStats.Stats()
             var b = from - Math.floorMod(from, MINUTE)
             while (b < to) {
-                buckets[b]?.let { out += it }
+                val bucket = buckets[b]
+                if (bucket != null) out += bucket
                 b += MINUTE
             }
             return out
@@ -136,9 +137,9 @@ object Heartbeat {
         return listOf(
             measure(
                 Id.SPEND,
-                windows.map { it.cost.takeIf { w -> w.requests > 0 } },
+                windows.map { w -> w.cost.takeIf { w.requests > 0 } },
                 whole = whole.cost,
-                recent = windows.last().cost.takeIf { w -> w.requests > 0 },
+                recent = windows.last().let { w -> w.cost.takeIf { w.requests > 0 } },
             ),
             measure(
                 Id.CACHE,
@@ -153,7 +154,7 @@ object Heartbeat {
                 // answered; the thinking is a separate cost the fourth cell is about. Adding them
                 // here would make the third cell and the fourth disagree about the same number.
                 whole = whole.completionTokens.toDouble(),
-                recent = windows.last().completionTokens.toDouble().takeIf { w -> w.requests > 0 },
+                recent = windows.last().let { w -> w.completionTokens.toDouble().takeIf { w.requests > 0 } },
             ),
             measure(
                 Id.SHARE,

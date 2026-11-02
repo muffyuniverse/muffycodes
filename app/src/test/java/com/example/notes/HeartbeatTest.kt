@@ -1,8 +1,12 @@
 package com.example.notes
 
+import android.database.sqlite.SQLiteDatabase
+import org.json.JSONObject
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import org.robolectric.RuntimeEnvironment
 import java.io.File
@@ -14,58 +18,78 @@ import java.io.File
  * graph cannot show you are wrong: a bar that covers the wrong hour looks exactly like a bar that
  * covers the right one, and a bar drawn for an hour with no data looks exactly like a bar for an
  * hour that spent nothing.
+ *
+ * **The database is driven directly rather than through `RequestDb.write`**, which opens a
+ * connection of its own - so a test that used it would roll on one handle and assert on another,
+ * which reads as "compaction did not happen". [SQLiteDatabase] here is the same handle the reader
+ * gets, and [RequestDb.insert] and [RequestDb.compact] are the two steps `write` takes.
  */
 class HeartbeatTest {
 
     private val app = RuntimeEnvironment.getApplication()
+    private lateinit var account: File
+    private lateinit var db: SQLiteDatabase
 
-    private fun dir() = File(app.cacheDir, "heartbeat-${System.nanoTime()}").also { it.mkdirs() }
+    private val t0 = 1_767_000_000_000L // an arbitrary instant; only differences matter here
+    private val hour = 3_600_000L
+    private val minute = 60_000L
 
-    /** One request at [at], costing [cost], with the token counts a share needs. */
-    private fun RequestDb.Reader.record(
-        at: Long,
+    @Before
+    fun open() {
+        account = File(app.cacheDir, "heartbeat-${System.nanoTime()}")
+        account.mkdirs()
+        db = RequestDb.open(account)
+    }
+
+    @After
+    fun close() {
+        db.close()
+        account.deleteRecursively()
+    }
+
+    /** One request, priced at a round number so a total can be checked by arithmetic. */
+    private fun stats(
         cost: Double = 0.01,
         prompt: Int = 1_000,
         cached: Int = 500,
         completion: Int = 250,
         reasoning: Int = 0,
-    ) = record(
-        at,
-        RequestLog.Stats(
-            kind = RequestLog.Stats.Kind.TURN,
-            ms = 100,
-            costUsd = cost,
-            costReported = true,
-            usage = org.json.JSONObject(
-                """{"prompt_tokens":$prompt,"cached_tokens":$cached,
-                   "completion_tokens":$completion,"reasoning_tokens":$reasoning}""",
-            ),
-            finish = "stop",
-            provider = "test",
-            model = "test/model",
+    ) = RequestLog.Stats(
+        kind = RequestLog.Stats.Kind.TURN,
+        ms = 100,
+        provider = "test",
+        model = "test/model",
+        // **Cost and the cached/reasoning counts live inside the usage JSON**, which is where the
+        // provider puts them - `RequestDb.insert` reads them from there rather than taking separate
+        // fields. A helper that invented its own shape would be testing the helper.
+        usage = JSONObject(
+            """{"prompt_tokens":$prompt,"completion_tokens":$completion,"cost":$cost,
+               "prompt_tokens_details":{"cached_tokens":$cached},
+               "completion_tokens_details":{"reasoning_tokens":$reasoning}}""",
         ),
+        finish = "stop",
     )
 
-    private val t0 = 1_767_000_000_000L // an arbitrary instant; only differences matter here
+    /** The four measures, read the way the card reads them. */
+    private fun measures(now: Long): List<Heartbeat.Measure> =
+        RequestDb.read(account).use { Heartbeat.of(it, now) }
+
+    private fun measure(now: Long, id: Heartbeat.Id): Heartbeat.Measure =
+        measures(now).first { it.id == id }
 
     @Test
     fun `there are forty-eight points, and every one is a real sixty minutes`() {
-        val d = dir()
-        RequestDb.open(d).use { db ->
-            // **One request an hour for two days**, which makes each window's expected total
-            // exactly one request - so a window that covered the wrong span would show two or none.
-            for (h in 0 until Heartbeat.HOURS) {
-                val at = t0 + h * 3_600_000L
-                db.record(at)
-            }
-            val now = t0 + (Heartbeat.HOURS - 1) * 3_600_000L + 1_800_000L
-            val spend = Heartbeat.of(db, now).first { it.id == Heartbeat.Id.SPEND }
+        // **One request an hour for two days**, which makes each window's expected total exactly
+        // one request - so a window that covered the wrong span would show two or none.
+        for (h in 0 until Heartbeat.HOURS) RequestDb.insert(db, t0 + h * hour, stats())
 
-            assertEquals("forty-eight windows", Heartbeat.HOURS, spend.points.size)
-            // Each window is sixty minutes wide and the requests are an hour apart, so exactly one
-            // lands in each - a window twice as wide would catch two.
-            assertEquals("one request per window", 1.0, spend.points.count { it != null }.toDouble())
-        }
+        val now = t0 + (Heartbeat.HOURS - 1) * hour + 30 * minute
+        val spend = measure(now, Heartbeat.Id.SPEND)
+
+        assertEquals("forty-eight windows", Heartbeat.HOURS, spend.points.size)
+        // The requests are an hour apart and each window is an hour wide, so exactly one lands in
+        // each. A window twice as wide would catch two; a clock-hour graph would lose one at the end.
+        assertEquals("one request per window", Heartbeat.HOURS.toDouble(), spend.points.count { it != null }.toDouble())
     }
 
     /**
@@ -78,21 +102,13 @@ class HeartbeatTest {
      */
     @Test
     fun `the newest point covers the same sixty minutes as the number`() {
-        val d = dir()
-        RequestDb.open(d).use { db ->
-            val now = t0 + 10 * 3_600_000L + 1_800_000L // half past the hour, deliberately
-            // One request just inside the window, one just outside it.
-            db.record(now - 59 * 60_000L, cost = 0.25)
-            db.record(now - 61 * 60_000L, cost = 9.99)
+        val now = t0 + 10 * hour + 30 * minute // half past the hour, deliberately
+        RequestDb.insert(db, now - 59 * minute, stats(cost = 0.25))
+        RequestDb.insert(db, now - 61 * minute, stats(cost = 9.99))
 
-            val spend = Heartbeat.of(db, now).first { it.id == Heartbeat.Id.SPEND }
-            assertEquals("the number is the last hour only", 0.25, spend.recent!!, 1e-9)
-            assertEquals(
-                "and the bar over it agrees",
-                spend.recent,
-                spend.points.last(),
-            )
-        }
+        val spend = measure(now, Heartbeat.Id.SPEND)
+        assertEquals("the number is the last hour only", 0.25, spend.recent!!, 1e-9)
+        assertEquals("and the bar over it agrees", spend.recent, spend.points.last())
     }
 
     /**
@@ -104,15 +120,12 @@ class HeartbeatTest {
      */
     @Test
     fun `an hour with nothing recorded is absent rather than zero`() {
-        val d = dir()
-        RequestDb.open(d).use { db ->
-            val now = t0 + 10 * 3_600_000L
-            db.record(now - 30 * 60_000L, cost = 0.5)
+        val now = t0 + 10 * hour
+        RequestDb.insert(db, now - 30 * minute, stats(cost = 0.5))
 
-            val spend = Heartbeat.of(db, now).first { it.id == Heartbeat.Id.SPEND }
-            assertNull("the quiet hours are absent", spend.points.first())
-            assertEquals("the busy one is present", 0.5, spend.points.last()!!, 1e-9)
-        }
+        val spend = measure(now, Heartbeat.Id.SPEND)
+        assertNull("the quiet hours are absent", spend.points.first())
+        assertEquals("the busy one is present", 0.5, spend.points.last()!!, 1e-9)
     }
 
     /**
@@ -124,52 +137,40 @@ class HeartbeatTest {
      */
     @Test
     fun `a rate is compared against the rate, not against a rate per hour`() {
-        val d = dir()
-        RequestDb.open(d).use { db ->
-            // Two days of the same request: half the prompt cached, so every window's share is 50%.
-            for (h in 0 until Heartbeat.HOURS) {
-                db.record(t0 + h * 3_600_000L + 60_000L, cost = 0.01, prompt = 1_000, cached = 500)
-            }
-            val now = t0 + (Heartbeat.HOURS - 1) * 3_600_000L + 30 * 60_000L
-            val measures = Heartbeat.of(db, now)
-
-            val cache = measures.first { it.id == Heartbeat.Id.CACHE }
-            assertEquals("the share is half", 0.5, cache.baseline!!, 1e-9)
-            assertEquals("so an ordinary hour is no change", 0.0, cache.badge!!, 1e-9)
-
-            // And the total does get divided, or the badge would read -97.9% for a normal hour.
-            val spend = measures.first { it.id == Heartbeat.Id.SPEND }
-            assertEquals("the average hour", 0.01, spend.baseline!!, 1e-9)
-            assertEquals("a normal hour is no change", 0.0, spend.badge!!, 1e-9)
+        for (h in 0 until Heartbeat.HOURS) {
+            RequestDb.insert(db, t0 + h * hour + minute, stats(cost = 0.01, prompt = 1_000, cached = 500))
         }
+        val now = t0 + (Heartbeat.HOURS - 1) * hour + 30 * minute
+
+        val cache = measure(now, Heartbeat.Id.CACHE)
+        assertEquals("the share is half", 0.5, cache.baseline!!, 1e-9)
+        assertEquals("so an ordinary hour is no change", 0.0, cache.badge!!, 1e-9)
+
+        // And a total does get divided, or the badge would read -97.9% for a normal hour.
+        val spend = measure(now, Heartbeat.Id.SPEND)
+        assertEquals("the average hour", 0.01, spend.baseline!!, 1e-9)
+        assertEquals("a normal hour is no change", 0.0, spend.badge!!, 1e-9)
     }
 
     /** The operator's definition, verbatim: `completion / (prompt + completion)`. */
     @Test
     fun `output share is completion over prompt plus completion`() {
-        val d = dir()
-        RequestDb.open(d).use { db ->
-            val now = t0 + 3_600_000L
-            db.record(now - 60_000L, prompt = 3_000, cached = 1_000, completion = 1_000, reasoning = 500)
+        val now = t0 + hour
+        RequestDb.insert(db, now - minute, stats(prompt = 3_000, cached = 1_000, completion = 1_000, reasoning = 500))
 
-            val share = Heartbeat.of(db, now).first { it.id == Heartbeat.Id.SHARE }
-            // 1000 / (3000 + 1000) = 0.25. Reasoning is not in the denominator, and neither is
-            // cached - cached is part of prompt and would be counted twice.
-            assertEquals(0.25, share.recent!!, 1e-9)
-        }
+        val share = measure(now, Heartbeat.Id.SHARE)
+        // 1000 / (3000 + 1000) = 0.25. Reasoning is not in the denominator, and neither is cached -
+        // cached is part of prompt and would be counted twice.
+        assertEquals(0.25, share.recent!!, 1e-9)
     }
 
     @Test
     fun `a badge with no baseline says nothing rather than dividing by zero`() {
-        val d = dir()
-        RequestDb.open(d).use { db ->
-            val now = t0 + 3_600_000L
-            val measures = Heartbeat.of(db, now)
-            for (m in measures) {
-                assertNull("${m.id} has no baseline", m.baseline)
-                assertNull("${m.id} has no badge", m.badge)
-                assertEquals("and says so", "—", Heartbeat.badge(m.badge))
-            }
+        val measures = measures(t0 + hour)
+        for (m in measures) {
+            assertNull("${m.id} has no baseline", m.baseline)
+            assertNull("${m.id} has no badge", m.badge)
+            assertEquals("and says so", "—", Heartbeat.badge(m.badge))
         }
     }
 
@@ -184,16 +185,11 @@ class HeartbeatTest {
      */
     @Test
     fun `a minute is not counted twice when it is both raw and rolled`() {
-        val d = dir()
-        RequestDb.open(d).use { db ->
-            val now = t0 + 3_600_000L
-            db.record(now - 30 * 60_000L, cost = 1.0)
-            // Roll that minute into roll_minute and delete its raw row.
-            RequestDb.compact(db, now)
+        val now = t0 + hour
+        RequestDb.insert(db, now - 30 * minute, stats(cost = 1.0))
+        RequestDb.compact(db, now) // rolls that minute and deletes its raw row
 
-            val spend = Heartbeat.of(db, now).first { it.id == Heartbeat.Id.SPEND }
-            assertEquals("counted once, not twice", 1.0, spend.recent!!, 1e-9)
-        }
+        assertEquals("counted once, not twice", 1.0, measure(now, Heartbeat.Id.SPEND).recent!!, 1e-9)
     }
 
     /**
@@ -205,16 +201,26 @@ class HeartbeatTest {
      */
     @Test
     fun `the minute that has not been rolled yet is still counted`() {
-        val d = dir()
-        RequestDb.open(d).use { db ->
-            val now = t0 + 3_600_000L
-            db.record(now - 10 * 60_000L, cost = 0.25)
-            db.record(now - 60_000L, cost = 0.75)
-            RequestDb.compact(db, now)
+        val now = t0 + hour
+        RequestDb.insert(db, now - 10 * minute, stats(cost = 0.25))
+        RequestDb.insert(db, now - minute, stats(cost = 0.75))
+        RequestDb.compact(db, now)
 
-            val spend = Heartbeat.of(db, now).first { it.id == Heartbeat.Id.SPEND }
-            assertEquals("both minutes", 1.0, spend.recent!!, 1e-9)
-        }
+        assertEquals("both minutes", 1.0, measure(now, Heartbeat.Id.SPEND).recent!!, 1e-9)
+    }
+
+    @Test
+    fun `a quiet hour still gets a badge, because it is a real comparison`() {
+        // The operator's choice: show `—` only when the hour is *entirely* empty. One request
+        // against a busy baseline is a genuine -99.5%, not noise to be hidden.
+        for (h in 0 until Heartbeat.HOURS - 1) RequestDb.insert(db, t0 + h * hour, stats(cost = 0.05))
+        val now = t0 + (Heartbeat.HOURS - 1) * hour + 30 * minute
+        RequestDb.insert(db, now - minute, stats(cost = 0.0002))
+
+        val spend = measure(now, Heartbeat.Id.SPEND)
+        assertTrue("there is a badge", spend.badge != null)
+        assertTrue("and it is a fall", spend.badge!! < 0)
+        assertTrue("but not hidden", spend.recent != null)
     }
 
     // ---- formatting -------------------------------------------------------------------------
@@ -259,22 +265,5 @@ class HeartbeatTest {
         assertEquals("16.67%", Heartbeat.format(Heartbeat.Id.SHARE, 1.0 / 6))
         // An absent value is a dash in every unit, never a zero in that unit's clothes.
         for (id in Heartbeat.Id.entries) assertEquals("—", Heartbeat.format(id, null))
-    }
-
-    @Test
-    fun `a quiet hour still gets a badge, because it is a real comparison`() {
-        val d = dir()
-        RequestDb.open(d).use { db ->
-            // The operator's choice: show `—` only when the hour is *entirely* empty. One request
-            // against a busy baseline is a genuine -99.5%, not noise to be hidden.
-            for (h in 0 until Heartbeat.HOURS - 1) db.record(t0 + h * 3_600_000L, cost = 0.05)
-            val now = t0 + (Heartbeat.HOURS - 1) * 3_600_000L + 30 * 60_000L
-            db.record(now - 60_000L, cost = 0.0002)
-
-            val spend = Heartbeat.of(db, now).first { it.id == Heartbeat.Id.SPEND }
-            assertTrue("there is a badge", spend.badge != null)
-            assertTrue("and it is a fall", spend.badge!! < 0)
-            assertTrue("but not hidden", spend.recent != null)
-        }
     }
 }
