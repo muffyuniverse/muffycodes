@@ -568,6 +568,32 @@ private fun AppRoot(viewModel: AppViewModel) {
         )
     }
 
+    // **A link in a document, and what it asked for.** Two effects rather than one `when`, because
+    // a link can ask for either and the two land in different places: an address leaves the app, a
+    // verb makes it do something. Both are cleared as soon as they are answered, so a recomposition
+    // cannot fire them twice.
+    //
+    // **Here rather than inside `Dialogs`**, because `Dialogs` receives `pending` read-only — it is
+    // a function of what to show, not the owner of what is shown, and a link that changes what is
+    // shown has to sit where that is writable.
+    val linkContext = LocalContext.current
+    LaunchedEffect(viewModel.linkToOpen) {
+        val address = viewModel.linkToOpen ?: return@LaunchedEffect
+        openInBrowser(linkContext, address)
+        viewModel.linkOpened()
+    }
+    LaunchedEffect(viewModel.pendingConnection) {
+        val asked = viewModel.pendingConnection ?: return@LaunchedEffect
+        viewModel.connectionShown()
+        pending = when (asked) {
+            AppViewModel.Connection.GitHub -> Pending.SignIn
+            AppViewModel.Connection.OpenRouter -> Pending.ModelKey
+            // **The token door is the same dialog**, because a pasted token *is* a GitHub key. A
+            // separate screen would be a second implementation of the thing that already works.
+            AppViewModel.Connection.Token -> Pending.SignIn
+        }
+    }
+
     Dialogs(
         viewModel = viewModel,
         pending = pending,
@@ -588,28 +614,6 @@ private fun Dialogs(
     newLocalProject: () -> Unit,
     askReplace: (String) -> Unit,
 ) {
-    // **A link in a document, and what it asked for.** Two effects rather than one `when`, because
-    // a link can ask for either and the two land in different places: an address leaves the app, a
-    // verb makes it do something. Both are cleared as soon as they are answered, so a recomposition
-    // cannot fire them twice.
-    val here = LocalContext.current
-    LaunchedEffect(viewModel.linkToOpen) {
-        val address = viewModel.linkToOpen ?: return@LaunchedEffect
-        openInBrowser(here, address)
-        viewModel.linkOpened()
-    }
-    LaunchedEffect(viewModel.pendingConnection) {
-        val asked = viewModel.pendingConnection ?: return@LaunchedEffect
-        viewModel.connectionShown()
-        pending = when (asked) {
-            AppViewModel.Connection.GitHub -> Pending.SignIn
-            AppViewModel.Connection.OpenRouter -> Pending.ModelKey
-            // **The token door is the same dialog**, because a pasted token *is* a GitHub key. A
-            // separate screen would be a second implementation of the thing that already works.
-            AppViewModel.Connection.Token -> Pending.SignIn
-        }
-    }
-
     when (pending) {
         Pending.None -> Unit
 

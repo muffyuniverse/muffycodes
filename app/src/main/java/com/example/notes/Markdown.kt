@@ -372,7 +372,10 @@ object Markdown {
                             // which one was pressed. The annotation belongs to a range of characters,
                             // so the character under the finger decides the target.
 
-                            pushLink(
+                            // **`pushLink` answers the index that `pop` needs.** The pair is
+                            // index-based rather than a bare push/pop, which is what the compiler
+                            // said when `pop()` alone was written here.
+                            val linkIndex = pushLink(
                                 LinkAnnotation.Clickable(
                                     tag = address,
                                     // **The listener lives on the annotation**, so the tap is
@@ -398,7 +401,7 @@ object Markdown {
                                     else linkColour,
                                 ),
                             ) { appendInline(this, words, linkColour, onLink) }
-                            pop()
+                            pop(linkIndex)
                         } else {
                             out.withStyle(
                                 SpanStyle(
