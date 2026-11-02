@@ -556,10 +556,10 @@ class ScenariosTest {
                             // fit introduced and only this picture could catch.
                             compose.onAllNodes(androidx.compose.ui.test.hasContentDescription("drawing canvas"))[0]
                                 .performTouchInput {
-                                    // `center` and `size` are the scope's own, and both are in the
-                                    // node's coordinates — which is what a touch needs.
-                                    val w = size.width
-                                    val h = size.height
+                                    // `width` and `height` are the scope's own, in the node's
+                                    // coordinates — which is what a touch needs.
+                                    val w = width
+                                    val h = height
                                     down(androidx.compose.ui.geometry.Offset(w * 0.25f, h * 0.30f))
                                     moveTo(androidx.compose.ui.geometry.Offset(w * 0.5f, h * 0.5f))
                                     moveTo(androidx.compose.ui.geometry.Offset(w * 0.7f, h * 0.35f))
