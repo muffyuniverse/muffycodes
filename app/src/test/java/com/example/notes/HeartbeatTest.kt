@@ -94,7 +94,7 @@ class HeartbeatTest {
         assertEquals("forty-eight windows", Heartbeat.HOURS, spend.points.size)
         // The requests are an hour apart and each window is an hour wide, so exactly one lands in
         // each. A window twice as wide would catch two; a clock-hour graph would lose one at the end.
-        assertEquals("one request per window", Heartbeat.HOURS.toDouble(), spend.points.count { it != null }.toDouble())
+        assertEquals("one request per window", Heartbeat.HOURS, spend.points.count { it != null })
     }
 
     /**
@@ -169,11 +169,20 @@ class HeartbeatTest {
         assertEquals(0.25, share.recent!!, 1e-9)
     }
 
+    /**
+     * **An empty period has a baseline of zero, and no badge.**
+     *
+     * The two are different facts and the distinction is the whole point: `0.0` says the period was
+     * measured and nothing happened, which is true and worth drawing. A *badge* needs a denominator,
+     * and dividing by that zero has no answer - so the badge is absent while the baseline is not.
+     * Collapsing them would either hide a real zero or invent a percentage.
+     */
     @Test
-    fun `a badge with no baseline says nothing rather than dividing by zero`() {
+    fun `an empty period has a zero baseline and no badge`() {
         val measures = measures(t0 + hour)
         for (m in measures) {
-            assertNull("${m.id} has no baseline", m.baseline)
+            assertEquals("${m.id} was measured and found empty", 0.0, m.baseline ?: Double.NaN, 1e-9)
+            assertNull("${m.id} has no recent value", m.recent)
             assertNull("${m.id} has no badge", m.badge)
             assertEquals("and says so", "—", Heartbeat.badge(m.badge))
         }

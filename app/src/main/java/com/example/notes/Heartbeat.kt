@@ -55,6 +55,10 @@ object Heartbeat {
         val badge: Double? get() {
             val now = recent ?: return null
             val base = baseline ?: return null
+            // **A zero baseline is a real measurement with no percentage.** `baseline` is `0.0` for
+            // a total over a period that spent nothing, and null for a rate with no denominator -
+            // two different facts, and only the badge treats them alike, because dividing by either
+            // has no answer.
             if (base == 0.0) return null
             return (now - base) / base
         }
