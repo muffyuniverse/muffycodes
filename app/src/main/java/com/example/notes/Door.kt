@@ -291,6 +291,14 @@ class OpenRouterDoor(
      */
     private val fallbacks: List<String> = emptyList(),
     private val effort: String,
+    /**
+     * The project these requests belong to, so the log can say who spent the money.
+     *
+     * **Empty by default**, which keeps every existing caller and test working and is the honest
+     * answer for a door built without one - a keepalive, or a test. It is not a permission: nothing
+     * is scoped by this, it is only recorded.
+     */
+    private val project: String = "",
     private val timeoutMs: Int = 120_000,
     /**
      * How long after sending, until **anything at all** comes back, and how long a gap inside an
@@ -401,6 +409,7 @@ class OpenRouterDoor(
                 ms = System.currentTimeMillis() - began,
                 provider = provider,
                 model = model,
+                project = project,
                 usage = stream.usage,
                 finish = stream.finish.ifBlank { null },
             ),
@@ -433,6 +442,7 @@ class OpenRouterDoor(
                     ms = System.currentTimeMillis() - began,
                     provider = provider,
                     model = model,
+                    project = project,
                     usage = null,
                     finish = null,
                     received = RequestLog.Stats.Received(
@@ -468,6 +478,7 @@ class OpenRouterDoor(
                 ms = System.currentTimeMillis() - began,
                 provider = provider,
                 model = model,
+                project = project,
                 usage = usageOf(said),
                 finish = finishOf(said),
             ),

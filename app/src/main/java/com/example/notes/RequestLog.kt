@@ -38,6 +38,14 @@ object RequestLog {
         val ms: Long,
         val provider: String,
         val model: String,
+        /**
+         * Which project the request belonged to, or empty when it is not known.
+         *
+         * **Empty rather than null**, so every row can be grouped and compared without a special
+         * case - and because "no project" is a real answer for a keepalive or a test, not a missing
+         * value to be distinguished from one.
+         */
+        val project: String = "",
         val usage: JSONObject?,
         val finish: String?,
         /**

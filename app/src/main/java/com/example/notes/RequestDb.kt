@@ -60,6 +60,20 @@ object RequestDb {
     /** The three rollup tables, coarsest last. `minute` is the finest thing stored. */
     private val ROLL_TABLES = listOf("roll_minute", "roll_hour", "roll_day")
 
+    /**
+     * **How long the fine levels are kept, whatever the person sets.** Two days, because that is
+     * exactly what the heartbeat card draws.
+     *
+     * A constant rather than a setting on purpose. If the fine cutoff were configurable, someone
+     * could set retention to one day, the card would silently lose the left half of its graph, and
+     * nothing would say why - the numbers would simply be smaller. The card is a fixed window, so
+     * the data behind it is a fixed window too.
+     *
+     * **A floor, not a replacement.** Retention still governs the fine levels, but never below
+     * this, so a generous setting keeps minutes for longer and a stingy one cannot starve the card.
+     */
+    const val FINE_DAYS = 2
+
     /** Milliseconds in the units a bucket can be. */
     private const val MINUTE = 60_000L
     private const val HOUR = 3_600_000L
@@ -82,6 +96,15 @@ object RequestDb {
      * `peel` needs no filter, and only the raw table is ever summed by kind.
      */
     private val STALL_KIND = RequestLog.Stats.Kind.STALL.ordinal
+
+    /**
+     * The dimensions a bucket is grouped by, in one place because three statements depend on them.
+     *
+     * **A rollup is now one row per provider, model and project per bucket.** That multiplies the
+     * row count by however many combinations were used - which is why the retention split landed
+     * first: multiplying the table that is kept for a year would have been the wrong order.
+     */
+    private const val DIMENSIONS = "provider, model, project"
 
     private const val AGGREGATE_COLUMNS =
         "n, prompt, cached, completion, reasoning, cost, reported, said, thinking"
@@ -162,7 +185,11 @@ object RequestDb {
               thinking  INTEGER NOT NULL DEFAULT 0,
               finish    TEXT,
               provider  TEXT,
-              model     TEXT
+              model     TEXT,
+              -- **Which project the request belonged to.** Empty when unknown, which is the honest
+              -- answer for a keepalive sent outside a project or a row written before this column
+              -- existed - and it keeps the column addressable in a GROUP BY, which a NULL would not.
+              project   TEXT    NOT NULL DEFAULT ''
             )
             """.trimIndent(),
         )
@@ -174,7 +201,13 @@ object RequestDb {
             db.execSQL(
                 """
                 CREATE TABLE IF NOT EXISTS $table(
-                  bucket    INTEGER PRIMARY KEY,
+                  bucket    INTEGER NOT NULL,
+                  -- **Who the bucket is about.** Empty rather than null, so a row is still
+                  -- addressable when the provider or model was not recorded - which happens for a
+                  -- stall, and for anything written before this column existed.
+                  provider  TEXT    NOT NULL DEFAULT '',
+                  model     TEXT    NOT NULL DEFAULT '',
+                  project   TEXT    NOT NULL DEFAULT '',
                   n         INTEGER NOT NULL DEFAULT 0,
                   prompt    INTEGER NOT NULL DEFAULT 0,
                   cached    INTEGER NOT NULL DEFAULT 0,
@@ -183,7 +216,12 @@ object RequestDb {
                   cost      REAL    NOT NULL DEFAULT 0,
                   reported  INTEGER NOT NULL DEFAULT 0,
                   said      INTEGER NOT NULL DEFAULT 0,
-                  thinking  INTEGER NOT NULL DEFAULT 0
+                  thinking  INTEGER NOT NULL DEFAULT 0,
+                  -- **The tuple, not the instant.** A bucket now holds one row per provider, model
+                  -- and project, so the instant alone is no longer unique. Without this the second
+                  -- INSERT for an hour would replace the first and the hour would silently keep only
+                  -- one model's spend.
+                  PRIMARY KEY(bucket, provider, model, project)
                 )
                 """.trimIndent(),
             )
@@ -237,7 +275,13 @@ object RequestDb {
                 // change within a day: running four DELETEs on every hour and minute boundary would
                 // be 1,439 provable no-ops a day.
                 val crossed = crossed(previous, now)
-                if (crossed != 0L) compact(db, now, if (crossed == DAY) keepDays else 0)
+                if (crossed != 0L) {
+                    // **Retention rides the day boundary only**, and the flag says so rather than
+                    // encoding it in `keepDays`: a cutoff is day-aligned, so it cannot have moved
+                    // between two instants in the same day.
+                    val day = crossed == DAY
+                    compact(db, now, if (day) keepDays else 0, prune = day)
+                }
             }
         } catch (t: Throwable) {
             // Deliberately silent. A record is evidence about the work, never a reason for the work
@@ -273,6 +317,7 @@ object RequestDb {
             put("finish", stats.finish)
             put("provider", stats.provider)
             put("model", stats.model)
+            put("project", stats.project)
         }
         db.insert("requests", null, values)
     }
@@ -438,6 +483,10 @@ object RequestDb {
         val sums = if (table == "requests") RAW_SUMS else SUMS
         var out = RequestStats.Stats()
         db.rawQuery(
+            // **No GROUP BY, deliberately.** A bucket may now hold several rows - one per
+            // provider, model and project - and every reader here wants the bucket summed across
+            // all of them. Grouping would return one row per dimension and `readStats` would keep
+            // only the first, silently reporting one model's spend as the hour's.
             "SELECT $sums FROM $table WHERE $column >= ? AND $column < ?$and",
             arrayOf(lo.toString(), hi.toString()),
         ).use { c -> if (c.moveToFirst()) out = c.readStats() }
@@ -609,6 +658,8 @@ object RequestDb {
         val hi = ceilTo(toMs, MINUTE)
 
         db.rawQuery(
+            // **Grouped by bucket, not by bucket and dimensions**: the heartbeat draws the whole
+            // account, so a minute's rows for three models are one point on the graph.
             "SELECT bucket, $SUMS FROM roll_minute WHERE bucket >= ? AND bucket < ? GROUP BY bucket",
             arrayOf(lo.toString(), hi.toString()),
         ).use { c ->
@@ -670,7 +721,24 @@ object RequestDb {
      *
      * Returns how many raw rows were rolled away, so a test can tell "did nothing" from "worked".
      */
-    fun compact(db: SQLiteDatabase, now: Long, keepDays: Int = 0): Int = db.inTransaction {
+    fun compact(
+        db: SQLiteDatabase,
+        now: Long,
+        keepDays: Int = 0,
+        /**
+         * Whether to apply retention in this pass.
+         *
+         * **Separate from `keepDays`, because the two are not the same question.** `keepDays = 0`
+         * means "keep everything" to the person, yet the *fine* tier still has to be pruned at
+         * [FINE_DAYS] or minutes accumulate for ever with nothing reading them. And the pruning must
+         * run on the day boundary only - a day-aligned cutoff cannot move within a day, so running
+         * four DELETEs on every hour and minute boundary would be 1,439 provable no-ops a day.
+         *
+         * [write] therefore passes the day boundary's answer, and the catch-up path in the view
+         * model passes `true` because it runs once per open.
+         */
+        prune: Boolean = true,
+    ): Int = db.inTransaction {
         // 1. Closed minutes, from raw. The current minute is left alone: its row would be
         //    contradicted by the next request.
         val currentMinute = floorTo(now, MINUTE)
@@ -691,10 +759,10 @@ object RequestDb {
                 -- Replacing is also the right semantics rather than a workaround: a minute row is
                 -- recomputed from the raw rows for that minute in full, so there is no column to
                 -- preserve from a previous version.
-                INSERT OR REPLACE INTO roll_minute(bucket, $AGGREGATE_COLUMNS)
-                SELECT (utc / $MINUTE) * $MINUTE, $RAW_SUMS
+                INSERT OR REPLACE INTO roll_minute(bucket, $DIMENSIONS, $AGGREGATE_COLUMNS)
+                SELECT (utc / $MINUTE) * $MINUTE, provider, model, project, $RAW_SUMS
                 FROM requests WHERE utc < ? AND kind <> $STALL_KIND
-                GROUP BY (utc / $MINUTE)
+                GROUP BY (utc / $MINUTE), provider, model, project
                 """.trimIndent(),
                 arrayOf(currentMinute),
             )
@@ -705,29 +773,71 @@ object RequestDb {
             // **Stalls are left where they are** (see STALL_KIND). Deleting them would fold their
             // kind into a bucket that has no column to hold it, and the split the screen draws would
             // then be silently wrong - a stall's zero cost indistinguishable from a free turn.
-            db.delete("requests", "utc < ? AND kind <> $STALL_KIND", arrayOf(currentMinute.toString()))
+            //
+            // **A raw row is deleted only once a minute row covers it**, which is the guard the
+            // whole pyramid rests on: every level above is rebuilt from the level below, so a row
+            // removed before it was summarised is data that no longer exists anywhere. The insert
+            // above covers every row with `utc < currentMinute` in this same transaction, so this
+            // is belt and braces - but it is the belt, and the failure it prevents (a day silently
+            // missing an hour because the app was closed mid-roll) leaves no trace to notice.
+            db.delete(
+                "requests",
+                "utc < ? AND kind <> $STALL_KIND AND EXISTS " +
+                    "(SELECT 1 FROM roll_minute WHERE roll_minute.bucket = (requests.utc / $MINUTE) * $MINUTE)",
+                arrayOf(currentMinute.toString()),
+            )
 
-            // 2. Hours covering the minutes just rolled, then days covering those hours.
+            // 2. Hours covering the minutes just rolled.
             val firstHour = floorTo(first, HOUR)
             val lastHour = floorTo(last, HOUR) + HOUR
             rollUp(db, "roll_hour", "roll_minute", firstHour, lastHour)
+
+            // 3. **Days straight from the minute table**, which is a day of minutes at most and so
+            //    is one pass. It used to be built from the hours, which meant a day could only be
+            //    as complete as the hours still present - and the hours are pruned on a *different*
+            //    cutoff now, so building one level from the other would make a day's total depend
+            //    on a retention setting it has nothing to do with.
+            //
+            //    Rebuilding from the finest level that still exists is the rule: a total is only
+            //    ever derived from data that has not been subject to a shorter cutoff.
             val firstDay = floorTo(first, DAY)
             val lastDay = floorTo(last, DAY) + DAY
-            rollUp(db, "roll_day", "roll_hour", firstDay, lastDay)
+            rollUp(db, "roll_day", "roll_minute", firstDay, lastDay)
         }
 
-        // 3. Retention. **Every level, from the finest up**, so nothing survives that describes a
-        //    period whose detail was dropped - which is the bug the file version had, where a
-        //    one-hour pick over pruned data reported a whole day.
-        if (keepDays > 0) {
-            val cutoff = floorTo(now - keepDays.toLong() * DAY, DAY)
-            for ((table, column) in listOf(
-                "requests" to "utc",
-                "roll_minute" to "bucket",
-                "roll_hour" to "bucket",
-                "roll_day" to "bucket",
-            )) {
-                db.delete(table, "$column < ?", arrayOf(cutoff.toString()))
+        // 3. Retention, **in two tiers**, because the two answer different questions.
+        //
+        //    The fine tier (raw rows and the minutes rolled from them) exists to draw the heartbeat:
+        //    forty-eight sliding windows. Nothing reads a minute older than that, so keeping weeks
+        //    of them is a table nobody queries - about 1,440 rows a day of pure weight.
+        //
+        //    The coarse tier (hours and days) is what an agent asks for: "what did last week cost",
+        //    "compare this Tuesday to that one". Those are cheap per row and valuable for as long as
+        //    the person keeps anything, so they follow the setting.
+        //
+        //    **Both cutoffs are day-aligned**, so a cutoff cannot move within a day and the whole
+        //    pass is a provable no-op on every boundary but the day's - which is why [write] only
+        //    runs it then.
+        if (prune) {
+            // **The fine tier is a fixed window, not a setting.** Minutes are not history the
+            // person asked to keep - they are the cache one card reads, and that card draws exactly
+            // [FINE_DAYS]. Making this follow `keepDays` would either hold weeks of rows nobody
+            // queries or starve the card, depending on which way the person set it.
+            //
+            // `requests` is pruned here too, and it is a **stall** delete rather than a raw-row one:
+            // step 1 already removes every rolled raw row at the current minute, so the only rows
+            // that ever reach this cutoff are the stalls that compaction deliberately leaves behind.
+            val fine = floorTo(now - FINE_DAYS.toLong() * DAY, DAY)
+            for ((table, column) in listOf("requests" to "utc", "roll_minute" to "bucket")) {
+                db.delete(table, "$column < ?", arrayOf(fine.toString()))
+            }
+            // **The coarse tier is what the setting is for**, and zero means keep all of it - so no
+            // cutoff at all rather than a cutoff at zero, which would delete the whole history.
+            if (keepDays > 0) {
+                val coarse = floorTo(now - keepDays.toLong() * DAY, DAY)
+                for ((table, column) in listOf("roll_hour" to "bucket", "roll_day" to "bucket")) {
+                    db.delete(table, "$column < ?", arrayOf(coarse.toString()))
+                }
             }
         }
         removed
@@ -742,14 +852,16 @@ object RequestDb {
      * size of the history.
      */
     private fun rollUp(db: SQLiteDatabase, target: String, source: String, from: Long, to: Long) {
+        // **The width of the target's bucket**, which is what the rows are grouped into. The range
+        // is in the same units because every bucket edge is a multiple of the day.
         val width = if (target == "roll_day") DAY else HOUR
         db.delete(target, "bucket >= ? AND bucket < ?", arrayOf(from.toString(), to.toString()))
         db.execSQL(
             """
-            INSERT INTO $target(bucket, $AGGREGATE_COLUMNS)
-            SELECT (bucket / $width) * $width, $SUMS
+            INSERT INTO $target(bucket, $DIMENSIONS, $AGGREGATE_COLUMNS)
+            SELECT (bucket / $width) * $width, provider, model, project, $SUMS
             FROM $source WHERE bucket >= ? AND bucket < ?
-            GROUP BY (bucket / $width)
+            GROUP BY (bucket / $width), provider, model, project
             """.trimIndent(),
             arrayOf(from.toString(), to.toString()),
         )

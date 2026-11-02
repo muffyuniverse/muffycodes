@@ -3680,7 +3680,7 @@ class AppViewModel @JvmOverloads constructor(
         val ws = workspace ?: return
         val g = git ?: return
         val model = modelConfig.active
-        val door = doorFor(model)
+        val door = doorFor(model, project)
         // The two limits, with this pin's ceiling — read once per turn, because the pin does not
         // change mid-turn and a settings read per request would be the same number twice.
         //
@@ -4078,12 +4078,16 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /** The door for [model]: the test's, when one is set, and the pinned endpoint otherwise. */
-    private fun doorFor(model: ActiveModel): Door = (chatDoor ?: { active ->
+    private fun doorFor(model: ActiveModel, project: String = ""): Door = (chatDoor ?: { active ->
         OpenRouterDoor(
             key = { activeLogin?.let { credentials.modelKey(it) } },
             keyState = { activeLogin?.let { credentials.modelKeyState(it) } ?: KeyState.NONE },
             model = active.model,
             provider = active.provider,
+            // **Recorded, never enforced.** Nothing is scoped by this - it is what lets the log
+            // answer "which project costs me most", and a door built without one writes an empty
+            // project rather than failing.
+            project = project,
             // **The model's own endpoints, in the order the person arranged them.** This is the
             // fallback list and nothing else uses it: `provider` above is still the pin, so the
             // first attempt is always the endpoint they selected. A failure the account owns -

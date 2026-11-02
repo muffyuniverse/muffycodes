@@ -68,16 +68,171 @@ class RequestDbTest {
         cost: Double = 1.0,
         prompt: Int = 100,
         completion: Int = 10,
+        model: String = "m",
+        project: String = "",
     ) = RequestLog.Stats(
         kind = RequestLog.Stats.Kind.TURN,
         ms = 1_000,
         provider = "p",
-        model = "m",
+        model = model,
+        project = project,
         usage = JSONObject(
             """{"prompt_tokens":$prompt,"completion_tokens":$completion,"cost":$cost}""",
         ),
         finish = "stop",
     )
+
+    // ---- two cutoffs, and what each one is for --------------------------------
+
+    /**
+     * **Minutes are pruned at a fixed window; hours and days follow the setting.**
+     *
+     * The operator's split: the fine tier exists to draw the heartbeat's forty-eight sliding
+     * windows and nothing reads a minute older than that, while the coarse tier is what an agent
+     * asks for - "what did last week cost" - and is worth keeping as long as the person keeps
+     * anything.
+     *
+     * **Falsification:** if both tiers shared one cutoff, the minute rows would survive for the
+     * whole retention and this would find them; if the coarse tier followed the fine one, the hours
+     * would be gone and the second assertion would fail.
+     */
+    @Test
+    fun `minutes are pruned at the fixed window while hours and days follow the setting`() {
+        val day = 86_400_000L
+        val now = 1_767_000_000_000L
+        // A week of one response a day, written and rolled so every level exists.
+        for (d in 6 downTo 0) {
+            write(now - d * day, response(now - d * day))
+            RequestDb.compact(db, now - d * day)
+        }
+        RequestDb.compact(db, now, keepDays = 30)
+
+        val minutes = count("roll_minute")
+        val hours = count("roll_hour")
+        val days = count("roll_day")
+
+        assertTrue("minutes are held only for the heartbeat's window, got $minutes", minutes <= RequestDb.FINE_DAYS * 24)
+        assertTrue("but hours follow the setting, got $hours", hours > RequestDb.FINE_DAYS * 24)
+        assertEquals("and days are kept whole", 7, days)
+    }
+
+    /**
+     * **A generous setting never shortens the fine tier below the card's window.**
+     *
+     * The reverse direction of the same rule, and the one that would break the heartbeat silently:
+     * a person who keeps one day of history must still get two days of minutes, because the card
+     * draws forty-eight hours and would otherwise lose half its graph with no error to explain it.
+     */
+    @Test
+    fun `a stingy retention setting cannot starve the heartbeat`() {
+        val day = 86_400_000L
+        val now = 1_767_000_000_000L
+        for (d in 2 downTo 0) {
+            write(now - d * day, response(now - d * day))
+            RequestDb.compact(db, now - d * day)
+        }
+        RequestDb.compact(db, now, keepDays = 1)
+
+        val hours = count("roll_hour")
+        assertTrue(
+            "the fine window survives a one-day setting, got $hours hours",
+            hours >= RequestDb.FINE_DAYS * 24 - 1,
+        )
+    }
+
+    /**
+     * **Days are built from minutes, so a day's total does not depend on the hours still present.**
+     *
+     * This is the bug the two cutoffs would otherwise create: when days were rolled from hours, and
+     * hours are pruned on a *different* cutoff than minutes, a day could be rebuilt smaller simply
+     * because its hours had gone. A total must only ever be derived from data that has not been
+     * subject to a shorter cutoff.
+     */
+    @Test
+    fun `a day is complete even when its hours have been pruned`() {
+        val day = 86_400_000L
+        val base = 1_767_000_000_000L - (1_767_000_000_000L % day)
+        // Three responses spread across one day, at hours 1, 12 and 23.
+        for (h in listOf(1, 12, 23)) {
+            val at = base + h * 3_600_000L
+            write(at, response(at, cost = 1.0))
+        }
+        RequestDb.compact(db, base + day)
+
+        assertEquals("the day holds all three", 3.0, costOf("roll_day"), 1e-9)
+    }
+
+    /**
+     * **A raw row is never deleted before a minute row covers it.**
+     *
+     * The guard the whole pyramid rests on, and the failure it prevents leaves no trace: if a raw
+     * row were removed before being summarised, the fact would not exist at any level, and the only
+     * symptom would be a total that is quietly too small. Compaction inserts before it deletes, and
+     * the delete names the condition explicitly, so this asserts the invariant rather than the
+     * ordering - which is the thing that must stay true however the pass is rewritten.
+     */
+    @Test
+    fun `no raw row is deleted without a minute row covering it`() {
+        val base = 1_767_000_000_000L
+        for (m in 0 until 10) {
+            val at = base + m * 60_000L
+            write(at, response(at, cost = 1.0))
+        }
+        RequestDb.compact(db, base + 10 * 60_000L)
+
+        // The kind is spelled from the enum rather than as its ordinal: a literal `2` here would
+        // keep compiling if a kind were ever inserted before STALL, and would then be asking about
+        // the wrong rows.
+        val stall = RequestLog.Stats.Kind.STALL.ordinal
+        val uncovered = db.rawQuery(
+            "SELECT COUNT(*) FROM requests WHERE kind <> $stall AND NOT EXISTS " +
+                "(SELECT 1 FROM roll_minute WHERE roll_minute.bucket = (requests.utc / 60000) * 60000)",
+            null,
+        ).use { c -> if (c.moveToFirst()) c.getInt(0) else -1 }
+        assertEquals("every surviving raw row is summarised", 0, uncovered)
+    }
+
+    /**
+     * **A bucket keeps every model, not only the last one written.**
+     *
+     * The bug the composite primary key prevents, and it is silent in the worst way: with `bucket`
+     * alone as the key, `INSERT OR REPLACE` would let the second model's row *replace* the first,
+     * so an hour in which two models ran would report one model's spend as the hour's. Nothing
+     * would fail - the number would simply be too small, and there is no error that says so.
+     */
+    @Test
+    fun `a bucket holds one row per model rather than replacing the last`() {
+        val base = 1_767_000_000_000L
+        val at = base - (base % 3_600_000L) + 60_000L // inside one hour
+        write(at, response(at, cost = 1.0, model = "a/one"))
+        write(at + 1_000L, response(at + 1_000L, cost = 2.0, model = "b/two"))
+        RequestDb.compact(db, at + 3_600_000L)
+
+        assertEquals("both models are present", 2, count("roll_minute"))
+        assertEquals("and the hour holds both", 3.0, costOf("roll_hour"), 1e-9)
+    }
+
+    /**
+     * **A reader sums across the dimensions.** The heartbeat draws the whole account, so an hour in
+     * which three models ran is one point on the graph rather than three.
+     */
+    @Test
+    fun `a total across a bucket adds every model up`() {
+        val base = 1_767_000_000_000L
+        val at = base - (base % 3_600_000L) + 60_000L
+        write(at, response(at, cost = 1.0, model = "a/one"))
+        write(at + 1_000L, response(at + 1_000L, cost = 2.0, model = "b/two"))
+        RequestDb.compact(db, at + 3_600_000L)
+
+        val totals = RequestDb.totals(db, at - 60_000L, at + 3_000_000L)
+        assertEquals("one number, not the first model's", 3.0, totals.total.cost, 1e-9)
+    }
+
+    private fun count(table: String): Int =
+        db.rawQuery("SELECT COUNT(*) FROM $table", null).use { c -> if (c.moveToFirst()) c.getInt(0) else 0 }
+
+    private fun costOf(table: String): Double =
+        db.rawQuery("SELECT SUM(cost) FROM $table", null).use { c -> if (c.moveToFirst()) c.getDouble(0) else 0.0 }
 
     /**
      * A response written **through the real path**, on this test's own connection.
