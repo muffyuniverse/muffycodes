@@ -69,7 +69,11 @@ revoking, the registration being deleted) arrive as a **401**, which is one path
 
 **D4. `.html` preview is deferred** until the auth block is finished. Cut from this change, as §2.4 argued.
 
-**D5. The plan for now: device flow, with a PAT when rate-limited.** No backend, no facade pool, no Actions.
+**D5. The plan for now: device flow, with the PAT as the primary fallback.** No backend, no facade pool, no
+Actions. The PAT is not merely a rate-limit remedy — it is the **standing second door**, always available,
+because it is the only path that cannot be refused by a limit, a registration mistake, or a provider outage.
+A backend is a **growth story for later**, not a plan: it becomes worth building when the ceiling binds, and
+that day will be visible.
 This closes every alternative explored below — each was checked and each failed on its own merits, not on
 taste: routing across Apps multiplies a pool the app does not use, a facade pool buys throughput by handing
 users N unfamiliar identities, and Actions is prohibited by the terms for exactly this use. What is left is
