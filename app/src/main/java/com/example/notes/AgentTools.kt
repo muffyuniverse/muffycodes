@@ -169,6 +169,14 @@ class AgentTools(
      * how a person turns subagents off without a separate switch.
      */
     private val subagentLimit: () -> Int = { 0 },
+    /**
+     * **Cuts a subagent's turn and clears its working context**, keeping its id, folder and record.
+     *
+     * Supplied by the runner because it owns both the in-flight set and the log; `AgentTools` has
+     * neither, and giving it a runner would let one tool reach every session in the account. The
+     * default does nothing, so a tool set built without a runner cannot half-reset anything.
+     */
+    private val onSubagentReset: ((project: String, id: Int) -> Unit)? = null,
 ) {
 
     /**
@@ -562,9 +570,13 @@ class AgentTools(
                     "report will arrive in this conversation as a row you did not ask for. " +
                     "`write` sends it another task, and it needs the subagent's `id`; a subagent " +
                     "that has been retired by the operator's limit cannot be woken and the answer " +
-                    "says so. `list` says which ones exist, which are working, and what each was last " +
-                    "given - call it before starting one, and read the first line for how many of " +
-                    "how many allowed are in use. " +
+                    "says so, and one that is **working** refuses a second task - wait for its " +
+                    "report, or `reset` it first. " +
+                    "`reset` cuts the turn it is running and clears its working context, keeping " +
+                    "its id and its record: use it when the work is no longer wanted or was " +
+                    "misunderstood, then `write` the corrected task. `list` says which ones exist, " +
+                    "which are working, and what each was last given - call it before starting " +
+                    "one, and read the first line for how many of how many allowed are in use. " +
                     "**Do not wait for a report**: carry on, and read it when it arrives.",
                 """{"do":"start","task":"what it should do","id":1}""",
             ),
@@ -2449,6 +2461,18 @@ class AgentTools(
         else -> "live"
     }
 
+    /**
+     * **What cutting a subagent's turn and clearing its context actually does**, supplied by the
+     * runner because it owns the in-flight set and the log.
+     *
+     * A hook rather than a direct call: `AgentTools` has no runner, and giving it one would let a
+     * tool reach every session in the account. The default does nothing, so a tool set built without
+     * a runner — a test, or a chat agent — cannot half-reset anything.
+     */
+    private fun resetSubagent(project: String, id: Int) {
+        onSubagentReset?.invoke(project, id)
+    }
+
     private fun subagent(args: JSONObject): String {
         val what = args.optString("do", "start").trim().lowercase()
         val registry = AgentSubagents(ws.accountDir)
@@ -2482,6 +2506,34 @@ class AgentTools(
                     )
                 }
             }
+            "reset" -> {
+                val id = args.optInt("id", 0)
+                if (id <= 0) return refusal("`reset` needs the subagent's `id`")
+                val sub = registry.find(project, id)
+                    ?: return refusal("No subagent #$id in this project. `list` says which ones exist.")
+                if (sub.retired) {
+                    return refusal(
+                        "No subagent #$id: it was retired when the operator lowered the limit. " +
+                            "Its record is at ${AgentLog.DIR}/$id/. Start a new one with " +
+                            "subagent {\"task\":\"...\"}.",
+                    )
+                }
+                // **The turn in flight is cut, and the context goes with it.** The runner reads
+                // `cutFor` between requests, so the next thing this subagent does is not a
+                // continuation of work nobody wants.
+                //
+                // **The id, the folder and the log all stay**, which is the operator's rule: the
+                // record is the only account of what it did, and `agent/2/` means "subagent 2,
+                // across its whole life" — so a reset is visibly the same agent, not a new one
+                // wearing its number.
+                resetSubagent(project, id)
+                Trace.tap("subagent reset", "$project #$id")
+                success(
+                    "Reset #$id. Its working context is cleared and any turn in flight is cut; " +
+                        "its record at ${AgentLog.DIR}/$id/ is untouched. Give it a task with " +
+                        "`write`.",
+                )
+            }
             "write", "start" -> {
                 val task = args.optString("task", "").trim()
                 if (task.isEmpty()) return refusal("A subagent needs a `task`: what it should do")
@@ -2499,6 +2551,19 @@ class AgentTools(
                             "No subagent #$id: it was retired when the operator lowered the limit. " +
                                 "Its record is at ${AgentLog.DIR}/$id/. Start a new one with " +
                                 "subagent {\"task\":\"...\"}.",
+                        )
+                    }
+                    // **A subagent that is working cannot be silently re-tasked.** The runner
+                    // *claims* a task by blanking it, so a message sent mid-turn would land on a
+                    // field the running turn never reads: the turn would finish on the old
+                    // instruction, report on the old instruction, and only then run the new one.
+                    // The chat agent would get a report about work it no longer wanted, with
+                    // nothing in it saying the task had changed. So it is refused, and the refusal
+                    // names the two things that actually work.
+                    if (!sub.idle) {
+                        return refusal(
+                            "#$id is working on what it was already given. Wait for its report, " +
+                                "or `reset` it to cut that turn and clear its context first.",
                         )
                     }
                     // **Writing to a stopped subagent wakes it.** Its context is intact, which is
@@ -2529,8 +2594,8 @@ class AgentTools(
                 }
             }
             else -> refusal(
-                "`do` is `start`, `write` or `list`. A subagent is another agent working beside " +
-                    "you in this project.",
+                "`do` is `start`, `write`, `reset` or `list`. A subagent is another agent " +
+                    "working beside you in this project.",
             )
         }
     }

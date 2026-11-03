@@ -537,6 +537,69 @@ class AgentRunnerTest {
     }
 
     @Test
+    fun `stopping a session clears its working context, and the record keeps everything`() {
+        // **The operator's rule**: *"reset is automatic whenever agent is stopped (whether by button
+        // or timeout or any other trigger)"* — for his reason: *"to get rid of stale cache and allow
+        // an agent to read what is important from the session log instead of dumping stale context
+        // of questionable utility."*
+        on("shopping", now = 1_000)
+        val log = AgentLog.open(ws.projectDir("shopping"))
+        log.told("find the milk")
+        log.appNote("note", "something it did")
+        val before = log.contextRows().size
+        assertTrue("there is a context to lose: $before rows", before > 0)
+
+        runner().stop("shopping")
+
+        val after = AgentLog.open(ws.projectDir("shopping"))
+        assertEquals("**the context is empty**", 0, after.contextRows().size)
+        assertTrue(
+            "**and nothing was deleted** — every row is still in the record, marked `app`",
+            after.rows().size > before,
+        )
+        assertTrue(
+            "**the log names what it did**, so the agent can read it back and re-forget deliberately",
+            after.rows().any { it.text.contains("agent/session.log") },
+        )
+    }
+
+    @Test
+    fun `the reset row says why the agent stopped, because the reasons differ`() {
+        // A row that said only "cleared" would leave an agent reading its own log with no idea
+        // whether it was an outage or its own failure — and the two call for different behaviour
+        // when it comes back.
+        on("shopping", now = 1_000)
+        runner().stop("shopping")
+
+        val said = AgentLog.open(ws.projectDir("shopping")).rows()
+            .filter { it.text.contains("the agent was stopped") }
+            .joinToString(" ") { it.text }
+
+        assertTrue("the reason is in the row: $said", said.contains("you stopped it"))
+    }
+
+    @Test
+    fun `a session that is already stopped is not reset again`() {
+        // **A second write of the same state is not a second stop.** The tick writes a stopped
+        // session every few minutes to update its clock, and resetting each time would throw away
+        // whatever the agent had read back since — turning a clean slate into a loop.
+        on("shopping", now = 1_000)
+        val runner = runner()
+        runner.stop("shopping")
+        AgentLog.open(ws.projectDir("shopping")).told("what I found in the log")
+        val kept = AgentLog.open(ws.projectDir("shopping")).contextRows().size
+        assertTrue("there is something to keep", kept > 0)
+
+        runner.stop("shopping")
+
+        assertEquals(
+            "**the second stop left it alone**",
+            kept,
+            AgentLog.open(ws.projectDir("shopping")).contextRows().size,
+        )
+    }
+
+    @Test
     fun `the service's tick drops a session whose folder is gone, and says why`() {
         on("shopping", now = 1_000)
         val runner = runner()

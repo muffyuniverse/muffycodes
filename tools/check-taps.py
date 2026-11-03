@@ -114,6 +114,10 @@ VOCABULARY = {
     # **The count taking a subagent's place away.** Different from `subagent-stop`, which is the
     # warm ceiling putting one to sleep: this one cannot be woken, and the refusal names its folder.
     "subagent-retired",
+    # **The chat agent cutting a subagent's turn.** Different from `subagent-retired` (the count
+    # took its place) and from a stop (which is the warm ceiling): this one keeps the id, and the
+    # context it clears is the point.
+    "subagent reset",
     # **Leaving fullscreen, and going from reading to writing.** Two acts: one returns to the frame,
     # the other puts a cursor in the text. A log that called both "editor" could not answer "did the
     # person ever try to edit this page", which is the question an onboarding report asks.

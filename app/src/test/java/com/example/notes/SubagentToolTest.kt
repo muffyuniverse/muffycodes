@@ -3,6 +3,7 @@ package com.example.notes
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -249,7 +250,73 @@ class SubagentToolTest {
     }
 
     @Test
-    fun `an unknown do is refused with the three that exist`() {
+    fun `writing to a subagent that is working is refused, not silently queued`() {
+        // **The bug this refusal exists for.** The runner claims a task by blanking it, so a message
+        // sent mid-turn would land on a field the running turn never reads: the turn would finish on
+        // the old instruction, report on the old instruction, and only then run the new one. The chat
+        // agent would get a report about work it no longer wanted, with nothing saying so.
+        val registry = AgentSubagents(ws.accountDir)
+        val one = registry.mint("groceries", "the first task")
+        registry.busy("groceries", one.id, working = true)
+
+        val said = call("""{"do":"write","id":${one.id},"task":"something else"}""")
+
+        assertTrue("refused: $said", said.startsWith("1\n"))
+        assertTrue("it says it is working: $said", said.contains("is working on"))
+        assertTrue("and names both things that work: $said", said.contains("Wait for its report"))
+        assertTrue("**including reset**", said.contains("`reset` it"))
+    }
+
+    @Test
+    fun `reset cuts the turn and clears the context, and the id stays`() {
+        // The operator's rule: *"we can keep old id, it still allows to distinguish between
+        // subagents and even after reset session log is inherited."*
+        val registry = AgentSubagents(ws.accountDir)
+        val one = registry.mint("groceries", "the task nobody wants")
+        registry.busy("groceries", one.id, working = true)
+        val resets = mutableListOf<String>()
+        val tools = AgentTools(
+            ws = ws,
+            project = "groceries",
+            git = git,
+            log = log,
+            subagentLimit = { limit },
+            onSubagentReset = { p, id -> resets += "$p#$id" },
+        )
+
+        val said = tools.run(
+            Call(id = "1", tool = "subagent", args = """{"do":"reset","id":${one.id}}"""),
+            Deadline.none(),
+        )
+
+        assertEquals("the runner was told, once", listOf("groceries#${one.id}"), resets)
+        assertTrue("it worked: $said", said.startsWith("0\n"))
+        assertTrue("**and the id is not taken away: $said**", said.contains("Reset #${one.id}"))
+        assertTrue("it says the record survives: $said", said.contains("untouched"))
+        assertTrue("**and says it is idle again**", said.contains("`write`"))
+        assertNotNull("**the id still exists**", registry.find("groceries", one.id))
+    }
+
+    @Test
+    fun `reset without an id is refused, and resetting a retired one names its folder`() {
+        val registry = AgentSubagents(ws.accountDir)
+        val one = registry.mint("groceries", "gone")
+        registry.fitTo("groceries", limit = 0, busy = emptySet())
+
+        val noId = call("""{"do":"reset"}""")
+        assertTrue("refused: $noId", noId.startsWith("1\n"))
+        assertTrue("and says what it needs: $noId", noId.contains("needs the subagent's `id`"))
+
+        val retired = call("""{"do":"reset","id":${one.id}}""")
+        assertTrue("refused: $retired", retired.startsWith("1\n"))
+        assertTrue(
+            "**and names the folder**, so the record can be found: $retired",
+            retired.contains("agent/${one.id}/"),
+        )
+    }
+
+    @Test
+    fun `an unknown do is refused with the four that exist`() {
         val answer = call("""{"do":"explode"}""")
         assertTrue("refused: $answer", answer.startsWith("1"))
         assertTrue("naming them: $answer", answer.contains("start") && answer.contains("write") && answer.contains("list"))

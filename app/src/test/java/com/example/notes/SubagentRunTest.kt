@@ -190,6 +190,36 @@ class SubagentRunTest {
     }
 
     @Test
+    fun `a cut stops the turn at its next boundary, and the work it did is still in the record`() {
+        // **A cut is never a kill.** `Agent.cut` is checked between requests and again before a reply
+        // is acted on, so the request in flight finishes and the next boundary stops — the same rule
+        // `Stop all agents` follows. Without it, a reset would clear a context the running turn then
+        // wrote back into, which is worse than not resetting at all.
+        var turns = 0
+        // **The cut flips *during* the first request**, which is what a reset arriving mid-turn looks
+        // like — and it is the only way to prove the loop reads it at the boundary rather than once
+        // at the start.
+        var cut = false
+        val door = object : Door {
+            override fun turn(request: Request): Result<Reply> {
+                turns++
+                cut = true
+                return Result.success(Reply("looking at it"))
+            }
+            override fun ping(request: Request): Result<Unit> = Result.success(Unit)
+        }
+        val said = mutableListOf<String>()
+
+        val done = run(door, report = { _, _, body -> said += body })
+            .run("groceries", 1, "count the lines", cut = { cut })
+
+        // **One request, not a loop**: the second boundary saw the cut and stopped.
+        assertEquals("**the turn stopped after the request in flight**", 1, turns)
+        assertTrue("**and it stopped instead of looping**", done is SubagentRun.Done.Reported)
+        assertTrue("**and it still reported**, or the chat agent waits for ever: $said", said.isNotEmpty())
+    }
+
+    @Test
     fun `a project that is gone does not run, and says so rather than making the folder`() {
         // **The bug this codebase spent a day fixing, in a new place.** A subagent for a deleted
         // project must not recreate it — `AgentLog.open` no longer makes a folder, and the guard

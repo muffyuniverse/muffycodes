@@ -610,9 +610,22 @@ class AgentLog private constructor(
      * and nothing else. `context.log` is emptied by the same write, which is what the model finds
      * when it looks at its own memory afterwards.
      */
-    fun reset(): Int = synchronized(guard) {
+    fun reset(): Int = reset("the working context was cleared")
+
+    /**
+     * **The same act, with the reason it happened.**
+     *
+     * The operator's rule is that a stopped agent's context is reset — *"to get rid of stale cache
+     * and allow an agent to read what is important from the session log instead of dumping stale
+     * context of questionable utility"*. A row that said only "cleared" would leave the agent
+     * reading its own log with no idea whether it was an outage or its own failure, and the two call
+     * for different behaviour when it comes back.
+     *
+     * **The log's path is in the sentence**, because reading it back is the whole recovery: the
+     * record is where the work still is, and a cleared context with no pointer to it is a dead end.
+     */
+    fun reset(said: String): Int = synchronized(guard) {
         val id = nextId()
-        val said = "the working context was cleared"
         val marker = LogFormat.recordRow(System.currentTimeMillis(), id, ContextBudget.tokens(said), NOTE, APP, 0, "reset", said)
         // **Marked, not erased.** Every row that was in stays in the record and reads `app`: the
         // person's act is not the agent's judgement, and it is not a way to make history disappear

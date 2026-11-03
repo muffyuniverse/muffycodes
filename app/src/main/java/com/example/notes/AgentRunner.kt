@@ -576,7 +576,11 @@ class AgentRunner(
                         }
                     },
                 )
-                when (val done = run.run(project, sub.id, task)) {
+                // **The cut is read per turn, and cleared when the turn ends** — a reset applies to
+                // the work in flight, not to whatever the chat agent asks for next.
+                val key = subagentId(project, sub.id)
+                val cut = { synchronized(cutSubagents) { key in cutSubagents } }
+                when (val done = run.run(project, sub.id, task, cut)) {
                     is SubagentRun.Done.Reported ->
                         Trace.note("subagent-done", "$project #${sub.id} · ${done.said.take(60)}")
                     is SubagentRun.Done.Failed ->
@@ -584,6 +588,10 @@ class AgentRunner(
                 }
                 registry.touched(project, sub.id, at = System.currentTimeMillis())
             } finally {
+                // **The cut is cleared with the turn it applied to.** Left behind, it would stop the
+                // *next* task the chat agent gives — a reset that keeps working long after it was
+                // asked for, which is the opposite of what a reset is.
+                synchronized(cutSubagents) { cutSubagents -= key }
                 // **Cleared in a `finally`, so a turn that throws still ends.** A subagent left
                 // looking busy would be one the model never gives anything else to.
                 registry.busy(project, sub.id, working = false)
@@ -601,6 +609,15 @@ class AgentRunner(
      * other.
      */
     private fun subagentId(project: String, id: Int): String = "$project#sub$id"
+
+    /**
+     * **Subagents whose turn the chat agent has cut**, cleared when the turn ends.
+     *
+     * A set rather than a flag on the registry entry, because it is about *this turn* rather than
+     * about the subagent: the reset has already cleared the task, so nothing new will start; what
+     * this answers is whether the turn already running should stop at its next boundary.
+     */
+    private val cutSubagents = mutableSetOf<String>()
 
     /** What the agent is told, in the conversation, about the command that landed. */
     private fun woke(finished: List<Background.Done>): String = buildString {
@@ -709,6 +726,10 @@ class AgentRunner(
                     // number while an agent is idle means the next `subagent` call is refused —
                     // not that the runner keeps offering what was allowed when it was built.
                     subagentLimit = { settings.subagentCount },
+                    // **The one thing `AgentTools` may do to a subagent's turn**, supplied here
+                    // because the runner owns the in-flight set and the log. A tool set built
+                    // without a runner gets the do-nothing default, so a test cannot half-reset.
+                    onSubagentReset = { p, id -> resetSubagent(p, id) },
                 )
                 if (waking == null) {
                     agent.warm() to log.rows()
@@ -802,11 +823,105 @@ class AgentRunner(
      * counted them as its own.
      */
     private fun put(session: AgentSession, speak: Boolean = true) {
+        // **A stopped session's context is reset, and this is the one place every stop goes
+        // through.** The operator's rule: *"reset is automatic whenever agent is stopped (whether by
+        // button or timeout or any other trigger)"* — and the reason is his too: *"to get rid of
+        // stale cache and allow an agent to read what is important from the session log instead of
+        // dumping stale context of questionable utility."*
+        //
+        // **`STOPPED` already means finished**, which is why there is no reason to carve out. A
+        // transient failure never reaches here: `End.Stopped(retryable = true)` goes to `failed()`
+        // and stays `RECONNECTING` on the keepalive, retrying. `PIN_REFUSED` is only reached when
+        // that ladder is spent — an ending the app arrived at by exhaustion. So every reason a
+        // session is `STOPPED` for is an ending, and every ending gets the same treatment.
+        //
+        // **Nothing standing is lost.** The instructions are read from disk per turn (`Agent.turn`
+        // → `layers()`), so this drops the conversation and not the brief; and `agent/` is readable,
+        // so the agent can read back what mattered and re-forget deliberately. That is the whole
+        // argument: a stop is not a judgement, and `forget` is.
+        val wasStopped = session.state == AgentSession.State.STOPPED &&
+            sessionOf(session.project)?.state != AgentSession.State.STOPPED
+        if (wasStopped) resetOnStop(session)
         sessions.put(session)
         Trace.note("agent-state", "${session.project} · ${session.label()}")
         // **Only a session that just started needing somebody speaks.** Otherwise every reminder
         // tick would also post here, and the reminder count would never leave the first one.
         if (speak && session.needsYou && session.reminders == 0) notify(session)
+    }
+
+    /**
+     * **A subagent the chat agent has asked to reset: its turn is cut, and its context cleared.**
+     *
+     * The id, the folder and the record all stay. The operator's rule, and the reason: `agent/2/`
+     * means "subagent 2, across its whole life", so a reset is visibly the same agent rather than a
+     * new one wearing its number — and the record is the only account of what it did.
+     *
+     * **The turn is cut, not killed.** `Agent.cut` is checked between requests and again before a
+     * reply is acted on, so the request in flight finishes and the next boundary stops — the same
+     * rule `Stop all agents` follows. A cut is recorded in the mark so a turn that has not yet
+     * started does not run at all.
+     */
+    fun resetSubagent(project: String, id: Int) {
+        // **Marked before the log is touched**, so a turn that starts between these two lines still
+        // sees it and stops at its first boundary.
+        synchronized(cutSubagents) { cutSubagents += subagentId(project, id) }
+        Trace.tap("subagent reset", "$project #$id")
+        try {
+            val log = AgentLog.openAt(File(ws.projectDir(project), "${AgentLog.DIR}/$id"))
+            val row = log.reset(
+                "the chat agent reset this subagent — its working context was cleared. " +
+                    "What it did is still in ${AgentLog.DIR}/$id/${AgentLog.SESSION}",
+            )
+            Trace.note("subagent-reset", "$project #$id · row $row")
+        } catch (t: Throwable) {
+            // **The cut still stands**, because the cut is the part that stops work nobody wants.
+            // The context survives, which is the safe half to lose: a subagent that keeps stale
+            // context and stops is better than one that keeps running because its log would not open.
+            Trace.note(
+                "subagent-reset-failed",
+                "$project #$id · ${Secrets.explain(t, "the context was kept")}",
+            )
+        }
+        // **Idle again, and with nothing outstanding** — a reset subagent is one you may give a task
+        // to, which is the whole point of resetting rather than retiring it.
+        AgentSubagents(ws.accountDir).apply {
+            touchTask(project, id, "")
+            busy(project, id, working = false)
+        }
+    }
+
+    /**
+     * **Clears a stopped session's working context, and says why in the row it leaves behind.**
+     *
+     * The row is what the agent finds when it looks at its own memory afterwards, so it carries the
+     * reason and the log's path: the record is where the work still is, and a cleared context with
+     * no pointer to it is a dead end.
+     *
+     * **A failure here must not stop the stop.** The session write is the thing that matters — an
+     * agent that is off with a stale context is better than an agent that is on because its log
+     * would not open — so the trace records it and the stop goes ahead.
+     */
+    private fun resetOnStop(session: AgentSession) {
+        val project = session.project
+        try {
+            val log = AgentLog.open(ws.projectDir(project))
+            val why = session.lastWords.ifBlank { session.reason?.let { whyStopped(it) } ?: "it stopped" }
+            val id = log.reset(
+                "the agent was stopped ($why) — the working context was cleared. " +
+                    "What it did is still in ${AgentLog.DIR}/${AgentLog.SESSION}",
+            )
+            Trace.note("agent-reset", "$project · stopped · row $id")
+        } catch (t: Throwable) {
+            Trace.note("agent-reset-failed", "$project · ${Secrets.explain(t, "the context was kept")}")
+        }
+    }
+
+    /** Why a session stopped, in the words the row will carry. */
+    private fun whyStopped(reason: AgentSession.StopReason): String = when (reason) {
+        AgentSession.StopReason.BY_OPERATOR -> "you stopped it"
+        AgentSession.StopReason.PIN_REFUSED -> "the provider kept refusing"
+        AgentSession.StopReason.LOOP -> "it was going in circles"
+        AgentSession.StopReason.ERROR -> "something went wrong"
     }
 
     /** The record's one line when an outage ends, and the rows it leaves behind. */

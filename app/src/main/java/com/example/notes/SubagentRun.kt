@@ -94,6 +94,7 @@ class SubagentRun(
         log: AgentLog,
         active: ActiveModel = model(),
         limits: ContextBudget.Limits = limitsFor(active),
+        cut: () -> Boolean = { false },
     ): Agent = Agent(
         accountDir = ws.accountDir,
         project = project,
@@ -126,6 +127,12 @@ class SubagentRun(
         // `../` on purpose and `search` walks the account, so a subagent handed `{read, tree, edit}`
         // could still reach everything.
         scope = Scope.Project(project),
+        // **The chat agent can cut this turn, and a cut is never a kill.** `Agent.cut` is checked
+        // between requests and again before a reply is acted on, so the request in flight finishes
+        // and the next boundary stops — the same rule `Stop all agents` follows. Without this a
+        // reset could clear a context that the running turn then wrote back into, which is worse
+        // than not resetting at all.
+        cut = { if (cut()) Agent.BY_OPERATOR else null },
     )
 
     /** The two context limits, from the operator's numbers and the pinned endpoint's window. */
@@ -144,7 +151,7 @@ class SubagentRun(
      * `agent/` itself: that is the chat agent's record, and two agents writing one file is the
      * lost-update shape the whole app avoids.
      */
-    fun run(project: String, id: Int, task: String): Done {
+    fun run(project: String, id: Int, task: String, cut: () -> Boolean = { false }): Done {
         val dir = ws.projectDir(project)
         // **A subagent for a project that is gone does not run.** The same rule the tick applies:
         // a folder that is not there is not a place to write a record, and a reader that made it
@@ -159,7 +166,7 @@ class SubagentRun(
             // the record at `agent/2/agent/` — a folder nobody would think to look in, made by a
             // reader, which is the exact shape of the bug that brought a deleted project back.
             val log = AgentLog.openAt(File(dir, "${AgentLog.DIR}/$id"))
-            val agent = agentFor(project, log, active, limits)
+            val agent = agentFor(project, log, active, limits, cut)
             // **`wake`, not `burst`.** A subagent's task is a thing that happened and that it must
             // act on, which is exactly what a wake says — the same shape a finished background
             // command has. `burst` would make it look like the person speaking to it.
