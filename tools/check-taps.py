@@ -53,6 +53,10 @@ VOCABULARY = {
     # `unsync` / `sync again` are the pair that replaced `add to gitignore`: the act is not an
     # ignore (which would untrack the file) but keeping it off GitHub while it stays tracked here.
     "move", "copy", "delete", "rename", "add to gitignore", "unsync", "sync again",
+    # **Taking a copy out of a folder the app keeps.** A different name from `copy` because
+    # it is a different button: the one item a system-locked row offers, and the trace
+    # should name what the person pressed rather than the code path behind it.
+    "clone",
     # the chat: turning to another page of a message, and opening one fullscreen
     "message page", "message fullscreen",
     # making things
@@ -62,7 +66,7 @@ VOCABULARY = {
     # a text file's view, rendered to a picture so it can be drawn on
     "photo",
     # projects
-    "add project", "new local project", "sync", "see changes", "rename project", "delete project",
+    "add project", "sync", "see changes", "rename project", "delete project",
     # the local<->synced cycle: giving a local project a repository, and taking it back
     "publish", "keep local", "confirm publish", "confirm keep local",
     # a project's newest artifact out to the phone, through the same function the agent's tool uses
@@ -125,7 +129,7 @@ VOCABULARY = {
     # suggest a page was opened.
     "model", "provider", "effort", "add model", "remove model", "read catalogue",
     # making a project, which is a different act from adding one that is already on GitHub
-    "new project", "local project", "confirm add project",
+    "new project", "confirm add project",
     # **What a project is.** Its own name rather than "new project", because the two are different
     # questions: one makes a project and the other changes what an existing one is, and a log that
     # called both "project" could not answer "when did this project stop being an Android app".

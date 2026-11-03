@@ -321,32 +321,26 @@ fun AddProjectDialog(
     onDismiss: () -> Unit,
     onNewProject: () -> Unit,
     onPick: (Repo) -> Unit,
-    onNewLocalProject: () -> Unit = {},
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Add a project") },
         text = {
             Column(modifier = Modifier.heightIn(max = 420.dp)) {
+                // **One kind of project, and the name says so.** The operator: "remove new local
+                // project option and rename new project on GitHub into new project — all our
+                // projects will be on GitHub (except system...)". A project that stays on this
+                // phone is a project with no remote, which is a *state* a project can be in, not a
+                // second kind of thing to make — and offering both at the moment of creation asked
+                // the person to decide, before they had written anything, whether their work would
+                // ever be shared.
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable(onClick = onNewProject)
                         .padding(vertical = 12.dp),
                 ) {
-                    Text("＋ New project on GitHub…", style = MaterialTheme.typography.bodyLarge)
-                }
-                // **The second kind of project, and the first one a person may want.** Work that
-                // does not belong to any repository still deserves versions and an agent; this is
-                // the folder that stays on the phone. It is offered above the list of GitHub
-                // repositories because it needs nothing from GitHub — not even a connection.
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(onClick = onNewLocalProject)
-                        .padding(vertical = 12.dp),
-                ) {
-                    Text("＋ New local project…", style = MaterialTheme.typography.bodyLarge)
+                    Text("＋ New project…", style = MaterialTheme.typography.bodyLarge)
                 }
                 HorizontalDivider()
                 when {
@@ -495,15 +489,13 @@ fun NewProjectDialog(
     licences: List<Licence>,
     onDismiss: () -> Unit,
     onCreate: (name: String, licence: String) -> Unit,
-    /** **Local**: no repository on GitHub, no licence to seed, nothing to push to. */
-    local: Boolean = false,
 ) {
     var name by remember { mutableStateOf("") }
     var licence by remember { mutableStateOf("gpl-3.0") }
     var showLicences by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (local) "New local project" else "New project") },
+        title = { Text("New project") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
@@ -512,19 +504,7 @@ fun NewProjectDialog(
                     label = { Text("Name") },
                     singleLine = true,
                 )
-                // **No licence row for a local project**, because the licence is a file the
-                // repository on GitHub is seeded with. A folder that never leaves the phone has
-                // nothing to seed, and offering the choice would be asking a question whose answer
-                // changes nothing.
-                if (local) {
-                    Text(
-                        "This project stays on this phone. Its files keep their versions and the " +
-                            "agent can work in it, and nothing is ever sent to GitHub.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (!local) Row(
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { showLicences = !showLicences },
@@ -532,7 +512,7 @@ fun NewProjectDialog(
                 ) {
                     Text("Licence: ${licence.ifBlank { "none" }}")
                 }
-                if (!local && showLicences && licences.isNotEmpty()) {
+                if (showLicences && licences.isNotEmpty()) {
                     Column(modifier = Modifier.heightIn(max = 200.dp)) {
                         LazyColumn {
                             items(licences) { item ->

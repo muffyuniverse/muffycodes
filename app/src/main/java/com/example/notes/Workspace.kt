@@ -576,10 +576,19 @@ class Workspace(val accountDir: File) {
         // because `.muffy/`'s own files are the flags and there is nothing beneath them.
         val names = relative(file) ?: return Hold.NONE
         val joined = names.joinToString("/")
-        // **The onboarding pages are read-only, which is what "system locked" means here**: a person
-        // opens them in the editor whenever they like and cannot change them, and the way to keep a
-        // copy is to clone the file — which is an ordinary file and an ordinary edit.
-        if (isOnboardingPath(joined)) return Hold.APP
+        // **The whole system project is read-only, and this is the rule that says so.** The
+        // operator: "make sure that all system project subtree is system locked — it is a readonly
+        // folder that is updated by the app itself, there is no place for user generated content
+        // there."
+        //
+        // The two name rules above were written for *places* — `.muffy/` wherever it appears, and
+        // `agent/` in every project. Neither could say "everything under one project", because
+        // `muffycodes_data` is a name that legitimately appears in every project too. So this is a
+        // whole-path rule, the same shape [isOnboardingPath] has and for the same reason.
+        //
+        // A person still reads every file here, and the way to keep a copy is to clone the file —
+        // which lands in a project of their own, where it is an ordinary file and an ordinary edit.
+        if (isSystemPath(joined)) return Hold.APP
         return if (names.any { isSystemLocked(it) }) Hold.APP else Hold.NONE
     }
 
@@ -1509,6 +1518,24 @@ class Workspace(val accountDir: File) {
          * `onboarding`, and a name rule would lock any folder a person happened to call that. The
          * pages are the app's own writing — a person reads them, clones them, and edits the clone.
          */
+        /**
+         * True for **anything inside the system project**, which the app writes and nobody else does.
+         *
+         * The operator, twice: the system project "is a readonly folder that is updated by the app
+         * itself, there is no place for user generated content there", and its whole subtree is
+         * "system locked".
+         *
+         * **Why a path and not a name.** `muffycodes_data` is the system project's data folder and
+         * every other project has one too — it is the scaffold the app lays down, which the person
+         * and the agent both write in. A name rule would lock the agent out of the very folder it is
+         * asked to keep notes in. So the rule is the first segment: `system/` at the account root,
+         * and everything under it.
+         */
+        fun isSystemPath(path: String): Boolean {
+            val parts = path.trim('/').split('/')
+            return parts.isNotEmpty() && parts[0].equals(SYSTEM_PROJECT, ignoreCase = true)
+        }
+
         fun isOnboardingPath(path: String): Boolean {
             val parts = path.trim('/').split('/')
             return parts.size >= 3 &&

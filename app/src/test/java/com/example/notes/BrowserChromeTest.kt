@@ -412,14 +412,22 @@ class BrowserChromeTest {
     }
 
     @Test
-    fun `a folder the app keeps has no menu, and neither does what is inside it`() {
-        // The other half, and the one report 10 actually asked for: "locked files should hide and
-        // forbid 3dot options", filed while looking at `agent/`. Its menu goes - and it goes for its
-        // contents too, because a log inside it is as much the app's as the folder is.
+    fun `a folder the app keeps has a menu with one item, and it is the clone`() {
+        // **The operator changed this one, so both halves are asserted here.**
+        //
+        // Report 10 asked for the menu to go: "locked files should hide and forbid 3dot options",
+        // filed while looking at `agent/`. That produced no menu at all. Then the correction, which
+        // is the rule now: "add 3dot icon for system locked files but leave only clone option there
+        // for them."
+        //
+        // **Why the clone is the exception and nothing else is.** Every other item is about a file
+        // this app keeps — rename it, move it, delete it, pin it, stop syncing it — and all of them
+        // would be a promise the lock breaks. A copy is not a write to *this* file: it lands in a
+        // project of the person's own, where it is ordinary text.
         //
         // **Inside the folder, because that is where the inheritance shows.** At the project root
-        // the folder has no menu and so does nothing else, which would pass even if the rule were
-        // about the folder alone.
+        // the folder and everything else would answer the same way, which would pass even if the
+        // rule were about the folder alone.
         scene.signedIn()
         scene.project("groceries")
         scene.open("groceries")
@@ -432,10 +440,36 @@ class BrowserChromeTest {
         browser()
 
         compose.waitUntil(20_000) { there("context.log") }
-        // **No menu on either log**, and the absence is about the rule rather than about a screen
-        // that never drew: the files themselves are asserted first.
+        // **The file is asserted first**, so a screen that never drew cannot be mistaken for a
+        // menu rule that worked.
+        assertTrue("context.log is drawn", there("context.log"))
         assertTrue("session.log is drawn", there("session.log"))
-        compose.onAllNodesWithContentDescription("More").assertCountEquals(0)
+        // One menu per row, and both rows are the app's.
+        compose.onAllNodesWithContentDescription("More").assertCountEquals(2)
+    }
+
+    @Test
+    fun `a file the app keeps offers the clone and nothing else`() {
+        // The contents of that menu, which is the half the count above cannot see. Opening it is the
+        // only way to tell "one item, and it is Clone" from "one item, and it is something the lock
+        // will refuse".
+        scene.signedIn()
+        scene.project("groceries")
+        scene.open("groceries")
+        val project = scene.viewModel.workspace!!.projectDir("groceries")
+        AgentLog.open(project).told("make me a folder")
+        scene.openIn("agent")
+        browser()
+
+        compose.waitUntil(20_000) { there("context.log") }
+        compose.onAllNodesWithContentDescription("More")[0].performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Clone…").assertExists()
+        // **And the ones that would be lies.** Named rather than counted, because "one item" would
+        // also pass if the one item were Rename.
+        for (refused in listOf("Rename…", "Move…", "Delete", "Pin", "Copy…")) {
+            compose.onAllNodesWithText(refused).assertCountEquals(0)
+        }
     }
 
     @Test
@@ -545,6 +579,39 @@ class BrowserChromeTest {
         // Wait for the row to be painted before reading the absence as a decision.
         compose.waitForIdle()
         assertFalse("no Add at the account root", thereIcon("Add"))
+    }
+
+    @Test
+    fun `the system project's row has no menu, and its folder has no Add`() {
+        // **Two reports, one place, because they are the same fact seen twice.** The operator:
+        // "system project should have no 3dot menue (no rename, delete, put on github etc)" and
+        // "+ button should be hidden in system project".
+        //
+        // **The reason is the same for both.** Every item in that menu and every thing the add
+        // menu makes is about a repository the person owns — Sync, Publish, Keep local, Rename,
+        // Delete, Export, and a new file or folder. The system project is the app's own folder: its
+        // name is fixed, its contents are written by the app, and it has no remote. A control whose
+        // only possible outcome is a refusal teaches the person the app is broken.
+        //
+        // **Both absences are asserted against a drawn screen.** The row and its contents are
+        // asserted first, so "no menu" cannot be the silence of a screen that never loaded.
+        scene.signedIn()
+        scene.project("groceries")
+        scene.open()
+        browser()
+
+        awaitText(Workspace.SYSTEM_PROJECT)
+        compose.waitForIdle()
+        // The row is drawn and offers nothing.
+        compose.onAllNodesWithContentDescription("More").assertCountEquals(0)
+
+        // **And inside it, the folder has no Add.** It is the second door into the same rule: the
+        // menu is about the project, the Add button is about what goes in it.
+        scene.open(Workspace.SYSTEM_PROJECT)
+        browser()
+        compose.waitUntil(20_000) { there(AgentPrompt.DATA) }
+        assertTrue("the folder's contents are drawn", there(AgentPrompt.DATA))
+        assertFalse("no Add inside the system project", thereIcon("Add"))
     }
 
     @Test

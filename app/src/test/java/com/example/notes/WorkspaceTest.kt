@@ -614,6 +614,51 @@ class WorkspaceTest {
     }
 
     @Test
+    fun `the whole system project is held, and a project's own muffycodes_data is not`() {
+        // **The operator, twice**: the system project "is a readonly folder that is updated by the
+        // app itself, there is no place for user generated content there", and "make sure that all
+        // system project subtree is system locked".
+        //
+        // **The reason this needed a new rule rather than a new name.** The app already held
+        // `agent/` and `.muffy/` by *name*, wherever they appear. Neither can say "everything under
+        // one project", and the obvious candidate — the folder `muffycodes_data` — is exactly the
+        // one that must NOT be locked, because every project has one and the agent writes its notes
+        // there. So the rule is the first path segment, which is the project.
+        val system = File(workspace.accountDir, Workspace.SYSTEM_PROJECT).apply { mkdirs() }
+        val deep = File(File(File(system, "muffycodes_data"), "prompts"), "system_prompt.txt").apply {
+            parentFile.mkdirs()
+            writeText("you are an agent\n")
+        }
+
+        assertEquals("the project folder itself", Workspace.Hold.APP, workspace.hold(system, emptySet()))
+        assertEquals(
+            "a file three folders down, whose every name is ordinary",
+            Workspace.Hold.APP,
+            workspace.hold(deep, emptySet()),
+        )
+        assertEquals(
+            "and it is not written, which is what the mark promises",
+            false,
+            workspace.write(deep, "something else"),
+        )
+
+        // **The other half, and the half that would break if the rule were written as a name.** A
+        // project's own `muffycodes_data/prompts/` is the person's and the agent's, and locking it
+        // would take away the very folder the app asks them to write their instructions in.
+        val mine = project()
+        val prompts = File(File(File(mine, AgentPrompt.DATA), "prompts"), "project_prompt.txt").apply {
+            parentFile.mkdirs()
+            writeText("# how to work here\n")
+        }
+        assertEquals(
+            "a project's own data folder is nobody's lock",
+            Workspace.Hold.NONE,
+            workspace.hold(prompts, emptySet()),
+        )
+        assertEquals("and it can be written", true, workspace.write(prompts, "# changed\n"))
+    }
+
+    @Test
     fun `nothing can be added to, renamed in, or removed from a locked branch`() {
         // **The operator's rule, in their words**: "check that it should be impossible to add
         // (upload, move, clone, create etc) remove rename etc elements of a locked folder

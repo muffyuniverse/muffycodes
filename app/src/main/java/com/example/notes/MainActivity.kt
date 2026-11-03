@@ -112,7 +112,6 @@ private sealed interface Pending {
     data object ModelKey : Pending
     data object AddProject : Pending
     data object NewProject : Pending
-    data object NewLocalProject : Pending
     data object RemoveAccount : Pending
     data class RenameProject(val project: String) : Pending
     data class DeleteProject(val project: String) : Pending
@@ -383,6 +382,10 @@ private fun AppRoot(viewModel: AppViewModel) {
         // `move` / `confirm move`, and the detail says which file.
         onMove = { entry -> tap("move", entry.name); pending = Pending.MoveEntry(entry) },
         onCopy = { entry -> tap("copy", entry.name); pending = Pending.CopyEntry(entry) },
+        // **The same window, under the name the row gave it.** A file the app keeps offers
+        // "Clone…", and a trace that said `copy` would be describing a button the person did not
+        // press.
+        onClone = { entry -> tap("clone", entry.name); pending = Pending.CopyEntry(entry) },
         onRename = { entry -> tap("rename", entry.name); pending = Pending.RenameEntry(entry) },
         onDelete = { entry -> tap("delete", entry.name); pending = Pending.DeleteEntry(entry) },
         onTogglePin = { entry -> viewModel.togglePinned(entry.file) },
@@ -567,7 +570,6 @@ private fun AppRoot(viewModel: AppViewModel) {
         pending = pending,
         dismiss = { pending = Pending.None },
         newProject = { pending = Pending.NewProject },
-        newLocalProject = { pending = Pending.NewLocalProject },
         askReplace = { project -> pending = Pending.ReplaceProject(project) },
     )
 }
@@ -579,7 +581,6 @@ private fun Dialogs(
     pending: Pending,
     dismiss: () -> Unit,
     newProject: () -> Unit,
-    newLocalProject: () -> Unit,
     askReplace: (String) -> Unit,
 ) {
     // **This composable's own context**, for the two places that leave the app: the OpenRouter
@@ -729,10 +730,6 @@ private fun Dialogs(
                     dismiss()
                     newProject()
                 },
-                onNewLocalProject = {
-                    dismiss()
-                    newLocalProject()
-                },
                 onPick = { repo ->
                     dismiss()
                     if (repo.name in viewModel.projectNames) {
@@ -749,17 +746,6 @@ private fun Dialogs(
         }
 
         Pending.NewProject -> NewProjectUI(viewModel, dismiss)
-
-        Pending.NewLocalProject -> NewProjectDialog(
-            // No licence list is asked for: a local project has no repository to seed.
-            licences = emptyList(),
-            local = true,
-            onDismiss = dismiss,
-            onCreate = { name, _ ->
-                tap("local project", name)
-                viewModel.createLocalProject(name)
-            },
-        )
 
         is Pending.RenameProject -> PromptDialog(
             title = "Rename ${pending.project}",

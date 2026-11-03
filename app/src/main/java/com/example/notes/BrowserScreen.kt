@@ -66,6 +66,14 @@ class BrowserActions(
     val onRename: (Entry) -> Unit,
     val onMove: (Entry) -> Unit,
     val onCopy: (Entry) -> Unit,
+    /**
+     * **The same act as [onCopy], under the name the row gives it.**
+     *
+     * A file the app keeps offers "Clone…" rather than "Copy…", because what the person is doing is
+     * taking a copy *out* of a read-only place — and the trace should say what the button said. It
+     * defaults to [onCopy] so a caller that does not care about the distinction needs no change.
+     */
+    val onClone: (Entry) -> Unit = onCopy,
     val onDelete: (Entry) -> Unit,
     val onTogglePin: (Entry) -> Unit,
     val onToggleLock: (Entry) -> Unit,
@@ -209,6 +217,14 @@ fun BrowserScreen(
                 FloatingActionButton(onClick = onAddProject) {
                     Icon(Icons.Filled.Add, contentDescription = "New project or pull one in")
                 }
+            } else if (Workspace.isSystem(viewModel.currentProject.orEmpty())) {
+                // **Nothing can be added to the system project**, so the button is not offered.
+                // The operator: "+ button should be hidden in system project." It is the app's own
+                // folder — a person reads it and clones from it, and every write there comes from
+                // the app. A button whose only possible outcome is a refusal is worse than no
+                // button: it teaches the person the app is broken rather than that the folder is
+                // the app's.
+                Spacer(Modifier.size(0.dp))
             } else {
                 // A folder gets the two things a folder gets (§3).
                 Column(horizontalAlignment = Alignment.End) {
@@ -667,7 +683,13 @@ private fun ProjectList(
                             )
                         }
                     }
-                    Box {
+                    // **The system project has no menu**, and this is the operator's list of why:
+                    // "no 3dot menue (no rename, delete, put on github etc)". Every item here is
+                    // about a repository the person owns — Chat, Sync, Publish, Keep local,
+                    // Rename, Delete, Export — and the system project is none of those: its name
+                    // is fixed, its contents are the app's, and it has no remote to sync with or
+                    // publish to. The row still opens, which is how a person reads it.
+                    if (!Workspace.isSystem(name)) Box {
                         IconButton(onClick = { menu = true }) {
                             Icon(Icons.Filled.MoreVert, contentDescription = "More")
                         }
@@ -1001,24 +1023,39 @@ private fun EntryRow(
                 }
             }
         }
-        // **No menu on a file the app keeps, and the menu stays on one the person locked.**
-        // The operator's ruling, twice: "3dots are hidden only on system locked branches", and
-        // earlier "system locks restrict both users and agents, and user locks restrict agents (not
-        // users themselves!)".
+        // **The menu is on every row; what is in it depends on who holds the file.**
         //
-        // This gated on `hold == NONE`, so a folder the person had locked hid the menu from the
-        // person who locked it - the app taking away a lever from its own operator. Report 10 asked
-        // for the menu to go and it was filed while looking at `agent/`, which is an *app* lock, so
-        // it never meant the person's.
+        // The operator's rulings, in order: "3dots are hidden only on system locked branches";
+        // "system locks restrict both users and agents, and user locks restrict agents (not users
+        // themselves!)"; and then the correction that produced this shape — "add 3dot icon for
+        // system locked files but leave only clone option there for them".
         //
-        // Every item in the menu still works on a person-locked row, because `Workspace` asks
-        // `isLocked` (the app's locks) and `isAgentLocked` (both) as different questions - so the
-        // menu is not a lie there, and hiding it was.
-        if (!choosing && !system && hold != Workspace.Hold.APP) Box {
+        // So an app-held row gets a menu with **one** item. It used to get no menu at all, which
+        // was right while the only alternative was a menu of things the lock would refuse; the
+        // clone is the exception, because a copy is not a write to this file. A person-locked row
+        // keeps the whole menu, because every item in it works there: `Workspace` asks `isLocked`
+        // (the app's locks) and `isAgentLocked` (both) as different questions, so the person's lock
+        // never stopped the person.
+        if (!choosing && !system) Box {
             IconButton(onClick = { menu = true }) {
                 Icon(Icons.Filled.MoreVert, contentDescription = "More")
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                // **A system-locked row gets one item, and it is the one act the lock was never
+                // about.** The operator: "add 3dot icon for system locked files but leave only
+                // clone option there for them." Reading a file and making a copy changes nothing
+                // here — the copy lands in a project of the person's own, where it is ordinary text
+                // they may edit. Rename, Move, Delete, Pin and the sync toggle are all about a file
+                // this app keeps, so none of them is offered.
+                if (hold == Workspace.Hold.APP) {
+                    DropdownMenuItem(
+                        text = { Text("Clone…") },
+                        onClick = {
+                            menu = false
+                            actions.onClone(entry)
+                        },
+                    )
+                } else {
                 // **Two things, because they are the two that need a menu.** Lock has its
                 // own button on the row and History has one in the editor, so listing them
                 // here made the menu a set of shortcuts to what is already on screen. Pin
@@ -1063,6 +1100,7 @@ private fun EntryRow(
                         actions.onDelete(entry)
                     },
                 )
+                }
             }
         }
     }

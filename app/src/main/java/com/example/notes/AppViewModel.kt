@@ -695,6 +695,12 @@ class AppViewModel @JvmOverloads constructor(
         // stopped being hidden. The command refuses it too — `coreProblem` names it — so this is the
         // picker agreeing with the command rather than being the only guard.
         if (Workspace.isSystemLocked(dir.name)) return false
+        // **Nothing lands inside the system project**, which is a whole-path question rather than a
+        // name one: `system/wiki/` and `system/muffycodes_data/prompts/` are folders the app writes
+        // and a person does not, and every one of them is named something ordinary. Report: "all
+        // system project subtree is system locked — it is a readonly folder that is updated by the
+        // app itself, there is no place for user generated content there."
+        ws.relative(dir)?.let { if (Workspace.isSystemPath(ws.pathString(it))) return false }
         // The record's folder is the one the app owns inside a project; everything else — the
         // repository itself included, now that a project *is* the repository — is the person's.
         return !ws.isStructural(dir)
