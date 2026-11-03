@@ -606,6 +606,12 @@ class AppViewModel @JvmOverloads constructor(
             Trace.note("onboarding", "finish refused, not connected")
             return
         }
+        // **Read before the flag is cleared**, and that ordering is the whole subtlety:
+        // `onboardingIndexOf` answers -1 once `onboarding` is false, so asking it afterwards said
+        // "not an onboarding page" about the page it was on. The first version of this fix cleared
+        // the flag first and closed nothing, and the test caught it.
+        val shown = editingPath?.let { workspace?.fileAt(it) }
+        val wasOnPage = shown != null && onboardingIndexOf(shown) >= 0
         settings.markOnboardingAt(Onboarding.pages().size)
         onboarding = false
         Trace.note("onboarding", "finished")
@@ -624,10 +630,7 @@ class AppViewModel @JvmOverloads constructor(
         // moment onboarding ends, so it is the one place that has to tidy up after it.
         // **Only the page it was actually on**, not any file: a person who opened an ordinary file
         // during onboarding is not owed a closed editor when the connections land.
-        val shown = editingPath?.let { workspace?.fileAt(it) }
-        if (shown != null && onboardingIndexOf(shown) >= 0) {
-            closeEditor()
-        }
+        if (wasOnPage) closeEditor()
     }
 
     /** The index of the page the editor is showing, or -1 when it is not an onboarding page. */
