@@ -657,14 +657,13 @@ class EditorScreenTest {
      */
     @Test
     fun `the page beside this one is rendered before it is swiped to`() {
-        // **Into the folder first**, because `scene.file` makes a file in the folder that is open —
-        // a helper that took a path would be a second way to say where a file goes.
-        scene.folder("reading")
-        scene.open("reading")
+        // **In the project's own folder**, the same way `a file knows which files are beside it`
+        // does — a subfolder here would be testing two things at once, and the one that failed was
+        // the folder listing rather than the renderer.
+        scene.open("groceries")
         scene.file("a.txt", "FIRSTPAGE")
-        scene.file("b.txt", "SECONDPAGE")
+        val middle = scene.file("b.txt", "SECONDPAGE")
         scene.file("c.txt", "THIRDPAGE")
-        val middle = File(scene.workspace!!.projectDir("groceries"), "reading/b.txt")
         scene.viewModel.openEditor(middle)
         compose.setContent {
             Frame {
