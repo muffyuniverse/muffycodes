@@ -257,11 +257,12 @@ class ScopeTest {
         file.writeText("milk\neggs\nbread\nbutter\ncheese\n")
 
         val before = Trace.report().lines.size
-        mine.call("edit", """{"path":"list.txt","at":3,"text":"butter"}""")
+        val edited = mine.call("edit", """{"path":"list.txt","at":3,"text":"butter"}""")
 
         val fresh = Trace.report().lines.take(Trace.report().lines.size - before)
         assertTrue(
-            "**the stale read is named**: $fresh",
+            "**the stale read is named**: edit said $edited; trace $fresh; file now " +
+                "${file.readText()}",
             fresh.any { it.contains("stale-read") && it.contains("list.txt") },
         )
     }
