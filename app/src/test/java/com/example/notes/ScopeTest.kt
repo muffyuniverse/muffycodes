@@ -246,14 +246,18 @@ class ScopeTest {
         // would be a second source of truth about who is editing what, so the mitigation is that it
         // stops being invisible.
         val file = File(ws.projectDir("groceries"), "list.txt")
-        scoped().call("read", """{"path":"list.txt"}""")
+        // **One tool set, as one agent has.** The memory of what was read is per-agent, which is the
+        // right scope: another agent's reads are not this agent's knowledge. A test that built a
+        // fresh set per call would prove nothing, because nothing would remember the read.
+        val mine = scoped()
+        mine.call("read", """{"path":"list.txt"}""")
 
         // Another agent writes, and the content is a different length — which is what makes this
         // detectable on a filesystem that stamps modification times to the second.
         file.writeText("milk\neggs\nbread\nbutter\ncheese\n")
 
         val before = Trace.report().lines.size
-        scoped().call("edit", """{"path":"list.txt","at":3,"text":"butter"}""")
+        mine.call("edit", """{"path":"list.txt","at":3,"text":"butter"}""")
 
         val fresh = Trace.report().lines.take(Trace.report().lines.size - before)
         assertTrue(
@@ -282,10 +286,11 @@ class ScopeTest {
     fun `a write after a read of an unchanged file is not called stale`() {
         // The other half: the ordinary case must be silent, or the line means nothing.
         File(ws.projectDir("groceries"), "same.txt").writeText("a\nb\n")
-        scoped().call("read", """{"path":"same.txt"}""")
+        val mine = scoped()
+        mine.call("read", """{"path":"same.txt"}""")
 
         val before = Trace.report().lines.size
-        scoped().call("edit", """{"path":"same.txt","at":1,"text":"A"}""")
+        mine.call("edit", """{"path":"same.txt","at":1,"text":"A"}""")
 
         val fresh = Trace.report().lines.take(Trace.report().lines.size - before)
         assertFalse("no claim: $fresh", fresh.any { it.contains("stale-read") })
