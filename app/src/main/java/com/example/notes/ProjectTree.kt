@@ -58,7 +58,12 @@ object ProjectTree {
         val dir = promptsDir(projectDir)
         if (!dir.isDirectory) return ""
         val files = dir.listFiles()
-            ?.filter { it.isFile }
+            // **The marker is not a document.** An empty folder is invisible to git, so the folder
+            // holds a hidden marker — and every file in here is read as part of the prompt, so
+            // without this the brief would open with an empty section called `.gitkeep`. The rule
+            // that a marker is not content lives here, where the reading happens, rather than in the
+            // marker's name.
+            ?.filter { it.isFile && it.name != Workspace.KEEPER }
             ?.sortedBy { it.name.lowercase() }
             .orEmpty()
         if (files.isEmpty()) return ""

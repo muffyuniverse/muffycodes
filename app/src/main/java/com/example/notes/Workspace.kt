@@ -1451,10 +1451,17 @@ class Workspace(val accountDir: File) {
                 // demand. It belongs in this list of folders a project needs and not in the list of
                 // things a person browses.
                 //
-                // No marker for it: an empty prompts folder means "the agent gets the default
-                // brief", which is a real state and needs no file to say so. A marker here would
-                // put a file in the folder that becomes part of the prompt's own text.
+                // **It gets a marker like the rest, and the first version of this did not.** An
+                // empty folder is invisible to git, so an unmarked `prompts/` is a folder that exists
+                // on this phone and nowhere else: a project pushed to GitHub and pulled onto a second
+                // phone would have no prompts folder there, and the agent's brief would come from the
+                // default with nothing saying why. The marker is what makes the folder travel.
+                //
+                // The cost, stated: the marker is a document in the folder, and every document in
+                // the folder is read as part of the prompt. So the prompt assembly skips the marker
+                // by name — see `ProjectTree.prompt` — which is the one place that rule belongs.
                 File(root, AgentPrompt.PROMPTS).mkdirs()
+                markTrackable(File(root, AgentPrompt.PROMPTS))
                 for (name in SUBJECTS) {
                     val one = File(root, name)
                     one.mkdirs()

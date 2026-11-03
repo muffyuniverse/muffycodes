@@ -43,10 +43,22 @@ class ProjectTreeTest {
         }
         assertTrue("the markers are reported: $wrote", wrote.isNotEmpty())
         assertEquals(
-            "and prompts/ has none",
-            emptyList<String>(),
+            "and prompts/ holds only the marker",
+            listOf(Workspace.KEEPER),
             ProjectTree.promptsDir(dir).listFiles()?.map { it.name }.orEmpty(),
         )
+    }
+
+    @Test
+    fun `the marker in the folder is not part of the prompt`() {
+        // **The one rule that lets the folder be both trackable and content.** An empty folder is
+        // invisible to git, so `prompts/` holds a hidden marker — and every file in there is read as
+        // part of the brief, so without this the prompt would open with an empty section called
+        // `.gitkeep`. A person would see it in their own instructions.
+        val dir = project()
+        ProjectTree.create(dir)
+        assertTrue("the marker is there", File(ProjectTree.promptsDir(dir), Workspace.KEEPER).isFile)
+        assertEquals("and it is not read", "", ProjectTree.prompt(dir))
     }
 
     @Test

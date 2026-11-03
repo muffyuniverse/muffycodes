@@ -802,12 +802,26 @@ class WorkspaceTest {
                 one.list()?.toList(),
             )
         }
-        // **Nothing else appeared.** The folders are the whole of what this makes; a stray
-        // `prompts/` would be a second place the project prompt could live.
+        // **`prompts/` is made as well, and it is the one that is not a subject.** The subject
+        // folders are what a person browses; `prompts/` is what the brief is assembled *from*, read on
+        // every turn rather than on demand. It used to be made incidentally by the single
+        // `project_prompt.txt` write, so removing that file left nothing making it — and a project
+        // whose prompt folder does not exist is a project with nowhere to put a document the operator
+        // asked the agent to write.
+        assertTrue("prompts/ is made", File(data, AgentPrompt.PROMPTS).isDirectory)
         assertEquals(
-            "only the four",
-            Workspace.SUBJECTS.toSet(),
+            "and nothing else appeared: the four subjects plus prompts",
+            (Workspace.SUBJECTS + AgentPrompt.PROMPTS).toSet(),
             data.list()?.toSet(),
+        )
+        // **`prompts/` has a marker like the rest**, so the folder travels: an empty folder is
+        // invisible to git, and an unmarked one would exist on this phone and nowhere else. The
+        // marker is kept out of the prompt by `ProjectTree.prompt`, which is where the rule that a
+        // marker is not content belongs.
+        assertEquals(
+            "prompts/ holds only the marker",
+            listOf(Workspace.KEEPER),
+            File(data, AgentPrompt.PROMPTS).list()?.toList(),
         )
     }
 

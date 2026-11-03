@@ -313,8 +313,8 @@ class ProjectsFeatureTest : FeatureTest() {
         val dir = scene.workspace!!.projectDir("scratch")
         assertTrue("the prompts folder is there", ProjectTree.promptsDir(dir).isDirectory)
         assertEquals(
-            "and it is empty, so nothing was prescribed",
-            emptyList<String>(),
+            "and it holds only the marker, so nothing was prescribed",
+            listOf(Workspace.KEEPER),
             ProjectTree.promptsDir(dir).listFiles()?.map { it.name }.orEmpty(),
         )
         assertFalse(
