@@ -473,7 +473,13 @@ class AccountsFeatureTest : FeatureTest() {
         val scene = Scenario(org.robolectric.RuntimeEnvironment.getApplication(), signIn = true)
         try {
             scene.await("onboarding to open") { scene.viewModel.onboarding }
-            val connect = Onboarding.pages().last()
+            // **The page as a File**, because that is what the editor opens: `pages()` returns
+            // name-and-text pairs, and the file lives in the system project's onboarding folder.
+            val connect = File(
+                File(scene.viewModel.workspace!!.projectDir(Workspace.SYSTEM_PROJECT), Onboarding.DIR),
+                Onboarding.pages().last().name,
+            )
+            assertTrue("the page is on disk: $connect", connect.isFile)
             scene.viewModel.onboardingReached(Onboarding.pages().lastIndex)
             scene.viewModel.openEditor(connect)
             assertNotNull("the page is open", scene.viewModel.editingPath)
