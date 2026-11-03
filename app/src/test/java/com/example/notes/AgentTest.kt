@@ -560,6 +560,28 @@ class AgentTest {
     // ---- the instructions, and the default that changed ----------------------
 
     @Test
+    fun `the system text says subagents exist and how to tell them apart`() {
+        // **A tool the model does not know about is a tool it will not use.** Nothing told the chat
+        // agent that subagents were a possibility, so the operator's setting could be on and the
+        // feature simply never reached for. The four words are the ones `list` prints, so the
+        // prompt and the tool cannot drift into naming different states.
+        val text = AgentPrompt.SYSTEM_DEFAULT
+        assertTrue("the section exists", text.contains("SUBAGENTS"))
+        for (state in listOf("live", "working", "asleep", "retired")) {
+            assertTrue("**`$state` is named in the prompt as `list` prints it**", text.contains(state))
+        }
+        assertTrue(
+            "**and it says not to wait for a report** — the failure mode is a model that starts a " +
+                "subagent and then polls or stalls",
+            text.contains("do not wait for it"),
+        )
+        assertTrue(
+            "**and it says what to do when none are allowed**, so a refusal is not a fault",
+            text.contains("carry on and do the work yourself"),
+        )
+    }
+
+    @Test
     fun `an instructions file that exists is the person's, word for word`() {
         // **No list of the texts the app used to ship.** The app is being developed, not released,
         // so a file on the phone was written by this build or by a person — and comparing it

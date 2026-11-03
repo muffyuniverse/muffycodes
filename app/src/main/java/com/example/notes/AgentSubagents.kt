@@ -67,6 +67,19 @@ class AgentSubagents(private val accountDir: File) {
          * | retired | no | no |
          */
         val stopped: Boolean = false,
+        /**
+         * **A turn is running on the worker right now, so it cannot be given anything else.**
+         *
+         * Not `task.isNotBlank()`: the runner *claims* a task by blanking it before the work goes
+         * out, so a blank task means "nothing outstanding" — which is equally true of a subagent
+         * mid-turn and of one that finished an hour ago. A model asking `list` cannot tell those
+         * apart, and the difference is the whole question it is asking.
+         *
+         * It lives on the registry rather than only in the runner's in-flight set because the
+         * registry is the only thing the `subagent` tool can see. The runner writes it and always
+         * clears it in a `finally`.
+         */
+        val idle: Boolean = true,
         /** When it last did anything, for the count's "first idle" and for a list. */
         val lastAt: Long = 0,
     )
@@ -91,6 +104,9 @@ class AgentSubagents(private val accountDir: File) {
             task = json.optString(TASK, ""),
             retired = json.optBoolean(RETIRED, false),
             stopped = json.optBoolean(STOPPED, false),
+            // **Absent means idle.** A file written before this flag existed describes subagents
+            // that are not running, and a missing key is not a turn in progress.
+            idle = json.optBoolean(IDLE, true),
             lastAt = json.optLong(LAST_AT, 0),
         )
     } catch (t: Throwable) {
@@ -119,6 +135,7 @@ class AgentSubagents(private val accountDir: File) {
             put(TASK, sub.task)
             put(RETIRED, false)
             put(STOPPED, false)
+            put(IDLE, true)
             put(LAST_AT, sub.lastAt)
         })
         bucket.put(NEXT, next + 1)
@@ -181,6 +198,29 @@ class AgentSubagents(private val accountDir: File) {
                 if (one.optInt(ID, 0) != id) continue
                 if (one.optBoolean(STOPPED, false) == asleep) return
                 one.put(STOPPED, asleep)
+                writeRoot(root)
+                return
+            }
+        }
+    }
+
+    /**
+     * **Says whether [id] is mid-turn, so `list` can tell "working" from "waiting".**
+     *
+     * The runner writes `false` when the work goes out and `true` in a `finally`, so a turn that
+     * throws still ends. Nothing else writes it: a person cannot make a subagent look busy, and a
+     * crash leaves `false` behind — which is the safe direction, because the runner's own in-flight
+     * set is what actually prevents a double run, and this flag is only what the model is told.
+     */
+    fun busy(project: String, id: Int, working: Boolean) {
+        synchronized(guard) {
+            val root = readRoot()
+            val list = root.optJSONObject(project)?.optJSONArray(LIST) ?: return
+            for (i in 0 until list.length()) {
+                val one = list.optJSONObject(i) ?: continue
+                if (one.optInt(ID, 0) != id) continue
+                if (one.optBoolean(IDLE, true) == !working) return
+                one.put(IDLE, !working)
                 writeRoot(root)
                 return
             }
@@ -276,6 +316,7 @@ class AgentSubagents(private val accountDir: File) {
         private const val TASK = "task"
         private const val RETIRED = "retired"
         private const val STOPPED = "stopped"
+        private const val IDLE = "idle"
         private const val LAST_AT = "lastAt"
 
         /** One lock per file, shared by every instance over the same account. */

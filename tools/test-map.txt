@@ -115,7 +115,7 @@ TimeoutsTest app/src/main/java/com/example/notes/Timeouts.kt app/src/main/java/c
 AgentSessionsTest app/src/main/java/com/example/notes/AgentSessions.kt app/src/main/java/com/example/notes/AgentSession.kt
 AgentSessionFeatureTest app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentSessions.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/Agent.kt app/src/main/java/com/example/notes/SettingsStore.kt app/src/main/java/com/example/notes/AgentRunner.kt
 ContextBudgetTest app/src/main/java/com/example/notes/ContextBudget.kt
-AgentRunnerTest app/src/main/java/com/example/notes/AgentRunner.kt app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentSessions.kt app/src/main/java/com/example/notes/Background.kt
+AgentRunnerTest app/src/main/java/com/example/notes/AgentRunner.kt app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentSessions.kt app/src/main/java/com/example/notes/AgentSubagents.kt app/src/main/java/com/example/notes/Background.kt
 AgentServiceTest app/src/main/java/com/example/notes/AgentService.kt app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentWiring.kt
 NoticesTest app/src/main/java/com/example/notes/Notices.kt
 ChatNoticesTest app/src/main/java/com/example/notes/ChatNotices.kt

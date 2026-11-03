@@ -562,7 +562,9 @@ class AgentTools(
                     "report will arrive in this conversation as a row you did not ask for. " +
                     "`write` sends it another task, and it needs the subagent's `id`; a subagent " +
                     "that has been retired by the operator's limit cannot be woken and the answer " +
-                    "says so. `list` says which ones exist and what each was last given. " +
+                    "says so. `list` says which ones exist, which are working, and what each was last " +
+                    "given - call it before starting one, and read the first line for how many of " +
+                    "how many allowed are in use. " +
                     "**Do not wait for a report**: carry on, and read it when it arrives.",
                 """{"do":"start","task":"what it should do","id":1}""",
             ),
@@ -2433,6 +2435,20 @@ class AgentTools(
      * | **stopped** (reached its warm ceiling) | wakes it, same id, context intact |
      * | **retired** (the count was lowered) | **refuses**, naming its folder, because waking it would put the count back over the limit |
      */
+    /**
+     * **What [sub] is, in one word**, which is the word the model asked for.
+     *
+     * `working` outranks `asleep` because a subagent cannot be both — a task wakes it — and outranks
+     * `live` because "you can write to it" is true of a working subagent and useless, since the
+     * runner refuses a second task while one is running.
+     */
+    private fun stateOf(sub: AgentSubagents.Sub): String = when {
+        sub.retired -> "retired"
+        !sub.idle -> "working"
+        sub.stopped -> "asleep"
+        else -> "live"
+    }
+
     private fun subagent(args: JSONObject): String {
         val what = args.optString("do", "start").trim().lowercase()
         val registry = AgentSubagents(ws.accountDir)
@@ -2442,14 +2458,27 @@ class AgentTools(
                 if (all.isEmpty()) {
                     success("no subagents in $project yet. Start one with subagent {\"task\":\"...\"}")
                 } else {
+                    // **Four states, because "live" answered none of the questions a model asks.**
+                    // `stopped` and `idle` were both being reported as `live`, so a model reading
+                    // the list could not tell a subagent it could give work to from one that would
+                    // wake for it from one that is already working — and the last of those is the
+                    // one where a second task is simply refused by the runner's claim.
+                    //
+                    // **The ceiling is in the first line**, because "may I start another" is the
+                    // question that follows "what exists", and the answer is a number the model
+                    // cannot see anywhere else.
+                    val live = all.count { !it.retired }
                     success(
-                        all.joinToString("\n") { sub ->
-                            val state = when {
-                                sub.retired -> "retired"
-                                else -> "live"
+                        buildString {
+                            append("$live of ${subagentLimit()} allowed in $project\n")
+                            for (sub in all) {
+                                append("#${sub.id} · ${stateOf(sub)} · ")
+                                append(sub.task.ifBlank {
+                                    if (sub.idle) "(nothing outstanding)" else "(working now)"
+                                })
+                                append("\n")
                             }
-                            "#${sub.id} · $state · " + sub.task.ifBlank { "(no task yet)" }
-                        },
+                        }.trimEnd(),
                     )
                 }
             }

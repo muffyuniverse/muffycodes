@@ -540,6 +540,11 @@ class AgentRunner(
         // difference between asleep and retired.
         registry.sleep(project, sub.id, asleep = false)
         synchronized(inFlight) { inFlight += subagentId(project, sub.id) }
+        // **Said on the registry too**, because the registry is the only thing the `subagent` tool
+        // can see: a blank task means "nothing outstanding" for a subagent mid-turn and for one that
+        // finished an hour ago alike, so without this a model asking `list` cannot tell working from
+        // waiting — which is the whole question it is asking.
+        registry.busy(project, sub.id, working = true)
         Trace.note("subagent-run", "$project #${sub.id} · ${task.take(40)}")
         worker.execute {
             try {
@@ -579,6 +584,9 @@ class AgentRunner(
                 }
                 registry.touched(project, sub.id, at = System.currentTimeMillis())
             } finally {
+                // **Cleared in a `finally`, so a turn that throws still ends.** A subagent left
+                // looking busy would be one the model never gives anything else to.
+                registry.busy(project, sub.id, working = false)
                 synchronized(inFlight) { inFlight -= subagentId(project, sub.id) }
             }
         }

@@ -57,12 +57,14 @@ class AgentRunnerTest {
         }
     }
 
-    private class PingDoor(private val answer: () -> Result<Unit> = { Result.success(Unit) }) : Door {
+    private open class PingDoor(
+        private val answer: () -> Result<Unit> = { Result.success(Unit) },
+    ) : Door {
         val pings = mutableListOf<Request>()
         /** **Every turn's request**, so a wake can be asked what it actually said. */
         val requests = mutableListOf<Request>()
         var turns = 0
-        override fun turn(request: Request): Result<Reply> {
+        open override fun turn(request: Request): Result<Reply> {
             turns++
             requests.add(request)
             return Result.success(Reply("nothing to do"))
@@ -331,6 +333,46 @@ class AgentRunnerTest {
         assertFalse(
             "**no subagent ping** — it ran its task instead: turns=${door.turns}; $fresh",
             fresh.any { it.contains("subagent-warm") },
+        )
+    }
+
+    @Test
+    fun `a subagent says it is working while its turn runs, and idle afterwards`() {
+        // **The flag `list` reads has to have a writer, and the writer has to clear it.** A subagent
+        // left looking busy is one the chat agent never gives anything else to — and the clearing
+        // is in a `finally` so a turn that throws still ends.
+        on("shopping", now = 1_000)
+        val registry = AgentSubagents(ws.accountDir)
+        val one = registry.mint("shopping", "do a thing")
+        settings.keepSubagents(2)
+
+        // **The door holds the turn open**, so the state during the turn can be read rather than
+        // guessed: without this the turn finishes before the assertion and the test proves nothing.
+        val held = java.util.concurrent.CountDownLatch(1)
+        val runner = runner(
+            object : PingDoor() {
+                override fun turn(request: Request): Result<Reply> {
+                    held.await(2, java.util.concurrent.TimeUnit.SECONDS)
+                    return super.turn(request)
+                }
+            },
+        )
+        runner.tick(now = 2_000)
+        // **Waited for, not assumed.** The claim is written on the tick's thread but the turn runs on
+        // the worker, so reading straight after `tick` is a race the test would lose sometimes —
+        // and a flake here would say "the flag is broken" about a flag that works.
+        val deadline = System.currentTimeMillis() + 5_000
+        while (registry.find("shopping", one.id)!!.idle && System.currentTimeMillis() < deadline) {
+            Thread.sleep(2)
+        }
+        val during = registry.find("shopping", one.id)!!
+        held.countDown()
+        settle(runner)
+
+        assertFalse("**it said it was working while the turn ran**", during.idle)
+        assertTrue(
+            "**and idle once it ended** — cleared in a `finally`, so a failure ends it too",
+            registry.find("shopping", one.id)!!.idle,
         )
     }
 

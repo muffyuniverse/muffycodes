@@ -191,6 +191,62 @@ class SubagentToolTest {
     }
 
     @Test
+    fun `list says working, asleep and live apart, because live answered none of them`() {
+        // **The question a model actually asks.** A blank task means "nothing outstanding" for a
+        // subagent mid-turn and for one that finished an hour ago alike, so `live` was being said
+        // about three different situations — and one of them refuses the next task.
+        val registry = AgentSubagents(ws.accountDir)
+        val live = registry.mint("groceries", "waiting for work")
+        registry.touchTask("groceries", live.id, "")
+        val working = registry.mint("groceries", "mid-turn")
+        registry.touchTask("groceries", working.id, "")
+        registry.busy("groceries", working.id, working = true)
+        val asleep = registry.mint("groceries", "reached its ceiling")
+        registry.touchTask("groceries", asleep.id, "")
+        registry.sleep("groceries", asleep.id, asleep = true)
+
+        val said = call("""{"do":"list"}""")
+
+        assertTrue("the waiting one is live: $said", said.contains("#${live.id} · live"))
+        assertTrue(
+            "**the running one says working** — a second task would be refused: $said",
+            said.contains("#${working.id} · working"),
+        )
+        assertTrue(
+            "**the sleeping one says asleep** — a task wakes it: $said",
+            said.contains("#${asleep.id} · asleep"),
+        )
+    }
+
+    @Test
+    fun `list says how many of how many allowed are in use`() {
+        // "May I start another" is the question that follows "what exists", and the answer is a
+        // number the model cannot see anywhere else.
+        limit = 3
+        val registry = AgentSubagents(ws.accountDir)
+        registry.mint("groceries", "one")
+        registry.mint("groceries", "two")
+
+        val said = call("""{"do":"list"}""")
+
+        assertTrue("the count is in the first line: $said", said.startsWith("2 of 3 allowed"))
+    }
+
+    @Test
+    fun `a retired subagent does not count against the ceiling in the list`() {
+        // It kept its place in the file, so counting it would tell the model it is full when it is
+        // not — and a model that believes it is full stops asking.
+        limit = 1
+        val registry = AgentSubagents(ws.accountDir)
+        registry.mint("groceries", "the one that was retired")
+        registry.fitTo("groceries", limit = 0, busy = emptySet())
+
+        val said = call("""{"do":"list"}""")
+
+        assertTrue("nothing live of one allowed: $said", said.startsWith("0 of 1 allowed"))
+    }
+
+    @Test
     fun `an unknown do is refused with the three that exist`() {
         val answer = call("""{"do":"explode"}""")
         assertTrue("refused: $answer", answer.startsWith("1"))
