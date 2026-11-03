@@ -101,6 +101,13 @@ def main() -> int:
     # Gradle writes its profile to `build/reports/profile/` at the root of the *invocation*, so the
     # first pattern below is the one that matches. The second is kept because a project built from a
     # subdirectory puts it one level down, and it is cheap: it only looks at direct children.
+    # **Where Gradle actually writes it**: `build/reports/profile/` at the root of the invocation.
+    # The first pattern is that, and it is the one that matches in CI — measured on run 41677640195,
+    # where the narrowed version found nothing and printed "No build profile was found" while a
+    # profile was sitting at `build/reports/profile/profile-*.html`.
+    #
+    # The second covers a build run from a subdirectory, and is bounded to one level so it cannot
+    # walk the generated sources again.
     root = Path(args.results)
     found = sorted(glob.glob(str(root / "build/reports/profile/*.html")))
     for child in sorted(root.glob("*/build/reports/profile/*.html")):

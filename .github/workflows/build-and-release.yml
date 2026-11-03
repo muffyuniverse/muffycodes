@@ -1311,10 +1311,14 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: build-bundle
-          path: |
-            bundle/app-release.apk
-            bundle/changes.md
-            bundle/scenarios/**
+          # **`bundle/**`, not a list of files.** The list named `app-release.apk`, which a
+          # development branch does not build — so the upload took the change list and the pictures
+          # and left the APK behind, and the delivery then said "the bundle has no APK in it". The
+          # list also missed `version`, which is what the APK is named from.
+          #
+          # `if-no-files-found: error` stays: it is the check that would have caught this, if the
+          # path had been allowed to be wrong.
+          path: bundle/**
           # Seven days: this is the thing a development push is for, and a week
           # is long enough to install and look at it.
           retention-days: 7

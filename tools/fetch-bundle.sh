@@ -161,9 +161,13 @@ case "$MODE" in
             fi
         fi
 
+        # **The error is shown, not swallowed.** `2>/dev/null` here meant a failed download was
+        # reported as "this run made no bundle (nothing in the app changed)" — a confident, wrong
+        # explanation, which is the same fault as the silent sink one layer down. A download that
+        # fails should say why it failed.
         if ! gh run download "$RUN_ID" --repo "$REPO" --name build-bundle \
-                --dir "$TMP" 2>/dev/null; then
-            echo "this run made no bundle (nothing in the app changed)" >&2
+                --dir "$TMP"; then
+            echo "this run's bundle could not be downloaded (see above)" >&2
             exit 1
         fi
 
