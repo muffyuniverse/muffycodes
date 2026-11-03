@@ -320,8 +320,11 @@ class EditorScreenTest {
         compose.onNodeWithText("something happened", substring = true).assertIsDisplayed()
         compose.onNodeWithText("Reset").assertIsNotEnabled()
         compose.onNodeWithText("Edit").assertIsNotEnabled()
-        // Diff is still open, because reading a history is not writing.
-        compose.onNodeWithText("Diff").assertIsEnabled()
+        // **Diff is not**, and this test used to say the opposite. The record is in `agent/`, which
+        // `APP_IGNORES` keeps out of the repository, so it has no versions to compare — the mode
+        // could only ever say "nothing to compare", for ever. Reading a history is not writing, but
+        // this file has no history to read.
+        compose.onNodeWithText("Diff").assertIsNotEnabled()
     }
 
     @Test
