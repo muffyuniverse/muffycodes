@@ -48,12 +48,20 @@ object DeviceFlow {
      * lives here rather than in the keystore. What must never be in an APK is the *client secret*,
      * which is exactly why this flow exists instead of the PKCE one.
      *
-     * **Empty until the app is registered**, and the flow refuses with a sentence saying so rather
-     * than showing a key box and pretending. Registering it is two things outside this repo: make the
-     * OAuth App, and tick *Enable Device Flow* in its settings — the second is what `device_flow_disabled`
-     * looks like when it is missed.
+     * **A client ID is public by design.** It travels in the URL of every authorize request and in
+     * the body of every code request, so it is not a secret and does not need to be one.
+     *
+     * **The client secret is the opposite, and this file must never hold it.** The whole reason this
+     * flow exists is that GitHub's docs make `client_secret` *"required unless the token was
+     * generated using the device flow"* — the device flow is the one path that does not need it. So
+     * putting the secret here would add the exact liability the flow was chosen to avoid, in a
+     * public repository. It stays out.
+     *
+     * Registering the app is two things outside this repo: make the OAuth App, and tick *Enable
+     * Device Flow* in its settings — the second is what `device_flow_disabled` looks like when it is
+     * missed.
      */
-    const val CLIENT_ID = ""
+    const val CLIENT_ID = "Ov23liZESbfofQicTsBC"
 
     /** The two addresses, and the scope. `repo` because the app writes to repositories. */
     const val CODE_URL = "https://github.com/login/device/code"
@@ -183,16 +191,34 @@ object DeviceFlow {
                 "This app is not allowed to use the device flow. That is a setting on the OAuth App, " +
                     "not something this phone can fix.",
             )
-            "incorrect_client_credentials" -> Poll.Failed(NOT_REGISTERED)
+            "incorrect_client_credentials" -> Poll.Failed(ID_REFUSED)
             "" -> Poll.Failed("GitHub answered without a token and without a reason.")
             else -> Poll.Failed(refusal(error, json.optString("error_description")))
         }
     }
 
-    /** The sentence for a person when the app was never registered, which is the state today. */
+    /**
+     * The sentence for a build that carries no client ID at all.
+     *
+     * **Still reachable, and still tested**, even though the shipped app has one: it is what a fork
+     * or a stripped build shows, and the alternative — an empty request GitHub answers with
+     * `incorrect_client_credentials` — would read as a bug in the app rather than as a build that
+     * was never configured.
+     */
     const val NOT_REGISTERED =
         "Signing in with GitHub is not set up in this build yet — the app has no OAuth App registered. " +
             "Paste a personal access key instead: github.com/settings/tokens"
+
+    /**
+     * **The client ID was refused**, which after registration means the wrong ID or a deleted app.
+     *
+     * Its own sentence rather than [NOT_REGISTERED]: "not set up in this build" would be false here —
+     * the build *does* name an app — and a person reading it would go looking for a build problem
+     * when the thing to check is the app's settings.
+     */
+    const val ID_REFUSED =
+        "GitHub did not recognise this app's client ID. Check the OAuth App is still there, then " +
+            "paste a personal access key instead: github.com/settings/tokens"
 
     /** One error name turned into something a person can act on. */
     private fun refusal(error: String, description: String): String {

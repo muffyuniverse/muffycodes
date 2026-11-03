@@ -178,6 +178,39 @@ class DeviceFlowTest {
     }
 
     @Test
+    fun `the shipped build names a registered app, and refuses to name a secret`() {
+        // **The bug this prevents is the one that shipped**: the link said "Connect GitHub", the flow
+        // was never built, and the person got a key box. A build with an empty client ID is that
+        // state again, and it fails *silently* — `NOT_REGISTERED` reads like a build problem rather
+        // than the app being unregistered, so nobody notices for a release.
+        assertTrue(
+            "the build carries a client ID: ${DeviceFlow.CLIENT_ID}",
+            DeviceFlow.CLIENT_ID.isNotBlank(),
+        )
+        // **A client ID is public by design** — it is in the URL of every authorize request. A
+        // client *secret* is the opposite, and this repository is public: the device flow exists
+        // precisely because GitHub makes the secret unnecessary for it.
+        assertTrue(
+            "and it is a client ID, not something secret: ${DeviceFlow.CLIENT_ID}",
+            DeviceFlow.CLIENT_ID.startsWith("Iv1.") || DeviceFlow.CLIENT_ID.startsWith("Ov"),
+        )
+    }
+
+    @Test
+    fun `a refused client id is not reported as an unconfigured build`() {
+        // **Two different sentences for two different things.** "Not set up in this build" is false
+        // when the build names an app, and it sends a person looking for a build problem instead of
+        // checking the app's settings.
+        val poll = DeviceFlow.poll("d", "Ov23liwrong") { _, _ ->
+            Result.success(json("error" to "incorrect_client_credentials"))
+        }
+
+        val why = (poll as DeviceFlow.Poll.Failed).why
+        assertEquals("its own sentence", DeviceFlow.ID_REFUSED, why)
+        assertTrue("which points at the app, not the build: $why", why.contains("OAuth App is still there"))
+    }
+
+    @Test
     fun `the poll sends the grant type GitHub requires`() {
         // The three fields are the whole request, and a wrong `grant_type` is
         // `unsupported_grant_type` — a refusal that looks like a bug in the app.
