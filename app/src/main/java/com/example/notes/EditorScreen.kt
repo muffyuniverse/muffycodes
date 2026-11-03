@@ -559,7 +559,16 @@ fun EditorScreen(
                         // **Diff is offered on any file with a history**, which is every file in a
                         // project: the picker's default is HEAD against the last synced commit, and
                         // a file with nothing between them says so rather than hiding the mode.
-                        ModeSegment("Diff", Mode.DIFF, selected = mode) {
+                        // **Diff is offered on any file with a history**, which is every file in a
+                        // project — the picker's default is HEAD against the last synced commit, and
+                        // a file with nothing between them says so rather than hiding the mode.
+                        //
+                        // **Except a file git does not keep**, which is the same set the History
+                        // button is hidden for: an onboarding page, the agent's record, a request
+                        // log, a secret. Their Diff could only ever say "nothing to compare", for
+                        // ever, because there is nothing to compare — so the mode is disabled for
+                        // the same reason the button is absent.
+                        ModeSegment("Diff", Mode.DIFF, selected = mode, enabled = !readOnly) {
                             focus.clearFocus()
                             commitName()
                             choose(it)
