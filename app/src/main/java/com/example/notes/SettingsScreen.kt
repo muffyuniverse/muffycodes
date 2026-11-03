@@ -71,7 +71,12 @@ private fun traceWhere(): String {
     return when {
         where == null -> "Nothing written yet. One line per thing that happened, appended."
         !where.contains(DownloadsSink.FOLDER) ->
-            "Writing to $where instead — Downloads refused, so other apps cannot see it."
+            // **The reason, when the sink knows one.** "Downloads refused" was the whole story the
+            // screen could tell, and it was the question that needed answering for a week: refused
+            // *why*? A SecurityException and a full volume need different things done about them.
+            "Writing to $where instead — " +
+                ((Trace.sinkNow() as? DownloadsSink)?.refused ?: "Downloads refused") +
+                ", so other apps cannot see it."
         else -> "Appended as it happens, at $where."
     }
 }

@@ -45,6 +45,20 @@ class DownloadsSink(context: Context) : Trace.Sink {
     /** Where it landed, in words a person can find. */
     private var path: String? = null
 
+    /**
+     * **Why the last write did not land where it promised**, or null when it did.
+     *
+     * This exists because the sink used to swallow every exception in silence: twelve `catch
+     * (t: Throwable)` blocks, seven of which said nothing at all. When Downloads refused, the text
+     * went to the private folder and the reason was discarded — so the one question worth asking
+     * ("why is my log not in Downloads?") had no answer anywhere, on the phone or off it.
+     *
+     * **A failure must say what happened.** The report screen reads this, so a person who is already
+     * looking at the log to report a bug gets the reason for the log being short in the same place.
+     */
+    var refused: String? = null
+        private set
+
     override fun append(lines: List<String>) {
         if (lines.isEmpty()) return
         val text = lines.joinToString("") { it + "\n" }
@@ -66,6 +80,15 @@ class DownloadsSink(context: Context) : Trace.Sink {
                 uri = made
                 path = "Download/$FOLDER/${name(made)}"
                 return
+            }
+        }
+        // **Named rather than silent.** Every route here means Downloads did not take the line, and
+        // the person is about to be told the log is shorter than their session.
+        if (refused == null) {
+            refused = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                "Downloads did not accept the file."
+            } else {
+                "This Android is too old for Downloads; writing beside the app."
             }
         }
         intoPrivate(text)
@@ -193,10 +216,17 @@ class DownloadsSink(context: Context) : Trace.Sink {
             }
             app.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
         } catch (t: Throwable) {
+            // **The message, not just the null.** A SecurityException here is the most likely reason
+            // a phone's Downloads refuses, and "null" would have hidden it for another week.
+            refused = "Downloads refused the file: " + (t.message ?: t.javaClass.simpleName)
             null
-        } ?: return null
+        } ?: run {
+            refused = refused ?: "Downloads returned no entry for the file."
+            return null
+        }
 
         if (!write(made, text, first = true)) {
+            refused = "Downloads made the entry but would not open it for writing."
             try {
                 app.contentResolver.delete(made, null, null)
             } catch (t: Throwable) {
@@ -294,8 +324,10 @@ class DownloadsSink(context: Context) : Trace.Sink {
             file.parentFile?.mkdirs()
             file.appendText(text)
         } catch (t: Throwable) {
-            // Nowhere to write. The screen still shows the ring, which is why the ring
-            // exists as well as the file.
+            // **Nowhere at all**, which is the worst case and used to be the quietest: the ring
+            // still shows the session, so the app looked like it was working while nothing at all
+            // reached the disk.
+            refused = "Nothing could be written: " + (t.message ?: t.javaClass.simpleName)
         }
     }
 

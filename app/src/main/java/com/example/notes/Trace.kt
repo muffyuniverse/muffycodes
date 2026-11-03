@@ -227,6 +227,9 @@ object Trace {
     /** Where the log is being written, for the screen to say. */
     val where: String? get() = sink?.where()
 
+    /** The sink in use, for the one screen that has to explain why it is not where it promised. */
+    fun sinkNow(): Sink? = sink
+
     // ---- recording ----------------------------------------------------------
 
     /**
@@ -471,6 +474,20 @@ object Trace {
         return buildString {
             appendLine("Muffy Codes — what the app did")
             appendLine(r.summary)
+            appendLine()
+            // **Said when the ring is all there is**, because a paste with no "also at" line was the
+            // only clue that nothing had reached the disk — and it took a week to notice. Now the
+            // paste says it, in the place a person is already looking.
+            appendLine(
+                if (sink == null) {
+                    "**Not written to a file**: the log is turned off, so this is only what is in memory."
+                } else {
+                    "**Not written to a file**: " + (
+                        (sink as? DownloadsSink)?.refused
+                            ?: "the log could not be read back from it."
+                        )
+                },
+            )
             appendLine()
             r.lines.forEach { appendLine(it) }
         }

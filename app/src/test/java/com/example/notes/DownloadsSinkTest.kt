@@ -72,6 +72,48 @@ class DownloadsSinkTest {
     }
 
     @Test
+    fun `a fallback says why it fell back`() {
+        // **The week this cost.** `dump()` printed no "also at" line when it had no file, and the
+        // sink swallowed twelve exceptions in silence — seven of them saying nothing at all. So a
+        // paste from a phone whose Downloads was refusing looked exactly like a paste from a phone
+        // where everything worked, and the reason was discarded at the point it was known.
+        //
+        // sdk 28 takes the private route on purpose, so this asserts the reason exists on the path
+        // that always falls back.
+        val sink = DownloadsSink(app)
+        sink.append(listOf("12:00:00.000    0 NOTE    app-opened  hi"))
+
+        assertEquals(
+            "**the fallback names its cause**: ${sink.refused}",
+            "This Android is too old for Downloads; writing beside the app.",
+            sink.refused,
+        )
+    }
+
+    @Test
+    fun `the report says when the log never reached a file`() {
+        // A paste with no "also at" line was the only clue, and it took a week to notice. The paste
+        // says it now, where a person reporting a bug is already reading.
+        val sink = DownloadsSink(app)
+        Trace.attach(sink)
+        try {
+            sink.append(listOf("12:00:00.000    0 NOTE    app-opened  hi"))
+            val pasted = Trace.dump()
+
+            assertTrue(
+                "**the paste admits it is only memory**: ${pasted.lines().take(4)}",
+                pasted.contains("**Not written to a file**"),
+            )
+            assertTrue(
+                "and gives the reason: $pasted",
+                pasted.contains("too old for Downloads"),
+            )
+        } finally {
+            Trace.attach(null as Trace.Sink?)
+        }
+    }
+
+    @Test
     fun `the first line makes the file`() {
         DownloadsSink(app).append(listOf("12:00:00.000    0 NOTE    app-opened  hi"))
 
