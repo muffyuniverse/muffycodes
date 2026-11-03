@@ -221,6 +221,8 @@ class Agent(
      * a courtesy that stops a blind model wasting a turn, never a gate on the capability itself.
      */
     private val modelSees: (() -> Boolean)? = null,
+) {
+
     /** **The prompt for this agent**, built fresh each turn so an edit is seen next turn. */
     private fun layers(): AgentPrompt.Layers = AgentPrompt.read(accountDir, tools.projectDir)
 
