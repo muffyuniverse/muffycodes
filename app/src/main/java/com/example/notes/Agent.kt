@@ -236,6 +236,14 @@ class Agent(
      * browser and the fetcher follow, and the reason a test acquires no subagents by accident.
      */
     private val subagentLimit: () -> Int = { 0 },
+    /**
+     * **Cuts a subagent's turn and clears its context**, forwarded to the tool set.
+     *
+     * Supplied by the runner, which owns the in-flight set and the logs; the default does nothing, so
+     * an agent built without a runner cannot half-reset a subagent — the same shape [subagentLimit]
+     * has, and for the same reason.
+     */
+    private val onSubagentReset: ((project: String, id: Int) -> Unit)? = null,
 ) {
 
     private val tools = AgentTools(
@@ -248,6 +256,7 @@ class Agent(
         modelSees = modelSees,
         scope = scope,
         subagentLimit = subagentLimit,
+        onSubagentReset = onSubagentReset,
     )
 
     /**

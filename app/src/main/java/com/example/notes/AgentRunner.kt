@@ -545,6 +545,9 @@ class AgentRunner(
         // finished an hour ago alike, so without this a model asking `list` cannot tell working from
         // waiting — which is the whole question it is asking.
         registry.busy(project, sub.id, working = true)
+        // **Outside the `try`**, because the `finally` that clears it is outside too — and a cut mark
+        // that outlived its turn would stop the next task the chat agent gives.
+        val key = subagentId(project, sub.id)
         Trace.note("subagent-run", "$project #${sub.id} · ${task.take(40)}")
         worker.execute {
             try {
@@ -578,7 +581,6 @@ class AgentRunner(
                 )
                 // **The cut is read per turn, and cleared when the turn ends** — a reset applies to
                 // the work in flight, not to whatever the chat agent asks for next.
-                val key = subagentId(project, sub.id)
                 val cut = { synchronized(cutSubagents) { key in cutSubagents } }
                 when (val done = run.run(project, sub.id, task, cut)) {
                     is SubagentRun.Done.Reported ->
@@ -726,9 +728,9 @@ class AgentRunner(
                     // number while an agent is idle means the next `subagent` call is refused —
                     // not that the runner keeps offering what was allowed when it was built.
                     subagentLimit = { settings.subagentCount },
-                    // **The one thing `AgentTools` may do to a subagent's turn**, supplied here
-                    // because the runner owns the in-flight set and the log. A tool set built
-                    // without a runner gets the do-nothing default, so a test cannot half-reset.
+                    // **The one thing the agent may do to a subagent's turn**, supplied here
+                    // because the runner owns the in-flight set and the log. An agent built without
+                    // a runner gets the do-nothing default, so a test cannot half-reset.
                     onSubagentReset = { p, id -> resetSubagent(p, id) },
                 )
                 if (waking == null) {
