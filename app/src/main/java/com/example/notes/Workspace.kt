@@ -1445,6 +1445,16 @@ class Workspace(val accountDir: File) {
             val root = File(projectDir, AgentPrompt.DATA)
             val written = mutableListOf<String>()
             try {
+                // **`prompts/` is made here too, and it is not in `SUBJECTS`.** The subject folders
+                // are places a person puts text the agent reads on demand; `prompts/` is the one the
+                // *prompt itself* is assembled from, so it is read on every turn rather than on
+                // demand. It belongs in this list of folders a project needs and not in the list of
+                // things a person browses.
+                //
+                // No marker for it: an empty prompts folder means "the agent gets the default
+                // brief", which is a real state and needs no file to say so. A marker here would
+                // put a file in the folder that becomes part of the prompt's own text.
+                File(root, AgentPrompt.PROMPTS).mkdirs()
                 for (name in SUBJECTS) {
                     val one = File(root, name)
                     one.mkdirs()

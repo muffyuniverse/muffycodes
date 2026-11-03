@@ -25,11 +25,28 @@ class ProjectTreeTest {
     private fun project(): File = tmp.newFolder("a-project")
 
     @Test
-    fun `a new project gets an empty prompts folder`() {
+    fun `a new project gets a prompts folder`() {
         val dir = project()
-        val failed = ProjectTree.create(dir)
-        assertTrue("nothing failed: $failed", failed.isEmpty())
+        ProjectTree.create(dir)
         assertTrue("the folder is there", ProjectTree.promptsDir(dir).isDirectory)
+    }
+
+    @Test
+    fun `the other subject folders are made too, with their markers`() {
+        // `prompts/` is where the brief is assembled from; the subject folders are what a person
+        // browses. Both belong to "the folders a project needs", and only the subjects get markers —
+        // a marker in `prompts/` would become part of the prompt's own text.
+        val dir = project()
+        val wrote = ProjectTree.create(dir)
+        for (name in listOf("dictionary", "skills", "wiki", "mcp")) {
+            assertTrue("$name was made", File(File(dir, AgentPrompt.DATA), name).isDirectory)
+        }
+        assertTrue("the markers are reported: $wrote", wrote.isNotEmpty())
+        assertEquals(
+            "and prompts/ has none",
+            emptyList<String>(),
+            ProjectTree.promptsDir(dir).listFiles()?.map { it.name }.orEmpty(),
+        )
     }
 
     @Test
@@ -77,30 +94,38 @@ class ProjectTreeTest {
     }
 
     @Test
-    fun `a project with the old single file still gets its prompt`() {
-        // **The one case that would lose work.** Every project made before this change has a single
-        // `project_prompt.txt`. It is read as one more document rather than being moved, because
-        // relocating a person's text to tidy up after a feature removal is how work goes missing.
+    fun `the old single file is read, because it was always in this folder`() {
+        // **There is no migration, and this is why.** The `project_prompt.txt` this replaced lived at
+        // `muffycodes_data/prompts/project_prompt.txt` — inside the very folder the read walks. So
+        // every existing project's brief is picked up as one more document, and a migration step
+        // would have been a second path to the same text.
         val dir = project()
         val old = AgentPrompt.projectFile(dir)
         old.parentFile?.mkdirs()
         old.writeText("The old brief, still true.")
-        assertEquals("the old file is read", "The old brief, still true.", ProjectTree.prompt(dir))
+        assertTrue(
+            "the old file is in the prompt: ${ProjectTree.prompt(dir)}",
+            ProjectTree.prompt(dir).contains("The old brief, still true."),
+        )
     }
 
     @Test
-    fun `the folder wins over the old file when both are there`() {
-        // Somebody who has started using the folder means it. Reading both would put a stale brief
-        // in front of the agent for ever, and nothing would ever say why.
+    fun `an old file and a new document are both in the prompt, in name order`() {
+        // **No precedence rule, because there is nothing to arbitrate.** The old file is a document
+        // in the folder like any other, so a project that kept it and added to it gets both — which
+        // is the flexible behaviour the folder was chosen for. A "folder wins" rule would silently
+        // drop text a person had written and never said which.
         val dir = project()
-        ProjectTree.create(dir)
         val old = AgentPrompt.projectFile(dir)
         old.parentFile?.mkdirs()
-        old.writeText("STALE")
-        File(ProjectTree.promptsDir(dir), "now.md").writeText("CURRENT")
+        old.writeText("OLD")
+        File(ProjectTree.promptsDir(dir), "zz-later.md").writeText("NEW")
         val prompt = ProjectTree.prompt(dir)
-        assertTrue("the current text is there", prompt.contains("CURRENT"))
-        assertTrue("and the stale one is not", !prompt.contains("STALE"))
+        assertTrue("both are there: $prompt", prompt.contains("OLD") && prompt.contains("NEW"))
+        assertTrue(
+            "and the old one comes first, because p sorts before z",
+            prompt.indexOf("OLD") < prompt.indexOf("NEW"),
+        )
     }
 
     @Test

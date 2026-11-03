@@ -325,9 +325,10 @@ class ProjectsFeatureTest : FeatureTest() {
 
     @Test
     fun `a new project opens with nothing waiting to be sent`() {
-        // **Empty folders are not in git**, so unlike the preset copy this replaces there is no
-        // commit to make. A project made a second ago that opens with two changed files is showing
-        // work nobody did — the row counts what is not committed.
+        // **The markers are files, so they DO need committing.** An empty folder is invisible to
+        // git, so each subject folder holds a marker — and a marker left uncommitted is a project
+        // that opens showing four changes nobody made. That is the same fault the preset copy had,
+        // one layer down, and this is the assertion that catches it.
         scene.viewModel.createLocalProject("scratch")
         scene.await("the local project", 30_000) {
             scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy

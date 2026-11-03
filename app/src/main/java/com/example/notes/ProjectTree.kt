@@ -48,17 +48,20 @@ object ProjectTree {
      * first" that needs no setting, no metadata and no explaining — and it survives being copied,
      * renamed and committed by tools that know nothing about this app.
      *
-     * A folder that is not there is empty, not an error: a project made before this change has a
-     * single `project_prompt.txt` beside it, and [migrated] handles that one case.
+     * **There is nothing to migrate, and that is worth stating.** The single `project_prompt.txt` this
+     * replaced lived at `muffycodes_data/prompts/project_prompt.txt` — *inside this very folder*. So
+     * every project made before the change already has its brief where the folder read looks, and
+     * this function picks it up as one more document. A migration step would have been a second path
+     * to the same text, which is the thing this file's own rules keep refusing.
      */
     fun prompt(projectDir: File): String {
         val dir = promptsDir(projectDir)
-        if (!dir.isDirectory) return migrated(projectDir)
+        if (!dir.isDirectory) return ""
         val files = dir.listFiles()
             ?.filter { it.isFile }
             ?.sortedBy { it.name.lowercase() }
             .orEmpty()
-        if (files.isEmpty()) return migrated(projectDir)
+        if (files.isEmpty()) return ""
         return files.joinToString("\n\n") { file ->
             // **The name is in the text**, because the agent is told to read these and a person
             // reading the prompt back needs to know which document said what.
@@ -69,23 +72,6 @@ object ProjectTree {
             }
             if (body.isBlank()) "" else "# ${file.name}\n\n$body"
         }.trim()
-    }
-
-    /**
-     * The single file this app used before the folder, if it is still there.
-     *
-     * **Read, never moved.** A project holding `project_prompt.txt` keeps it exactly where it is —
-     * deleting or relocating a person's text to tidy up after a feature removal is the kind of
-     * helpfulness that loses work. It is read as one more document, which is what it is.
-     */
-    private fun migrated(projectDir: File): String {
-        val old = AgentPrompt.projectFile(projectDir)
-        if (!old.isFile) return ""
-        return try {
-            old.readText().trim()
-        } catch (t: Throwable) {
-            ""
-        }
     }
 
     /**
