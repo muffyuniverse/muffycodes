@@ -263,8 +263,10 @@ class ScopeTest {
 
         val fresh = Trace.report().lines.take(Trace.report().lines.size - before)
         assertTrue(
-            "**the stale read is named**: edit said $edited; trace $fresh; file now " +
-                "${file.readText()}",
+            // **The whole answer, on one line**, because JUnit prints only the first line of a
+            // multi-line message and a refusal's reason is on its second.
+            "**the stale read is named**: edit said " + edited.replace("\n", " | ") +
+                "; trace $fresh",
             fresh.any { it.contains("stale-read") && it.contains("list.txt") },
         )
     }
