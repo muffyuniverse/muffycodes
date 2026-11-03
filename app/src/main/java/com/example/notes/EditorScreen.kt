@@ -83,6 +83,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.height
+import androidx.compose.runtime.mutableFloatStateOf
 
 /**
  * The editor: the file's name in the top row, and its text below.
@@ -904,7 +905,19 @@ private fun Reader(
 
     // **The offset the finger has dragged**, in pixels. Positive is the page moving right, which is
     // a move to the *previous* page.
-    val offset = remember(file.path) { Animatable(0f) }
+    //
+    // **A plain `Float` during the drag, not an `Animatable`.** This is the fix for the gesture that
+    // felt like it had to be overpowered: the drag used to `snapTo` an `Animatable` from inside a
+    // coroutine, so the page only moved once the main thread got around to running that coroutine —
+    // a frame or two behind the finger, and losing deltas in between. Worse, the `coerceIn` below
+    // capped the *offset* at a third of the width, so the page stopped dead at exactly the bar and
+    // the rest of the gesture did nothing. The finger had to push past a wall to cross it.
+    //
+    // Now the offset is written synchronously on every delta, so the page is under the finger the
+    // whole way, and the *release* decides. `Animatable` is created only when settling, which is the
+    // one time an animation is wanted.
+    var offset by remember(file.path) { mutableFloatStateOf(0f) }
+    val settle = remember(file.path) { Animatable(0f) }
     val scope = rememberCoroutineScope()
     var width by remember { mutableStateOf(1f) }
 
@@ -915,40 +928,38 @@ private fun Reader(
      * the gesture ends, which is precisely what made the old swipe a redraw. This one reports every
      * pixel, so the page can move with the hand.
      *
-     * **A third of the width is the bar**, the old threshold kept: a person reading does not fling,
-     * and a bar that needed a fling would feel like the gesture was being ignored.
+     * **The page tracks the finger all the way.** Nothing is clamped while dragging — a person who
+     * pulls half a screen gets half a screen of travel — and the decision about whether that was far
+     * enough is made on release. The only exception is an end, where there is nowhere to go and the
+     * movement is resisted so the wall is felt rather than explained.
+     *
+     * **Release decides on distance OR speed.** A short flick should turn the page: a person reading
+     * on a phone does not drag a third of the screen, they flick. Distance alone made a flick look
+     * like the gesture had been ignored.
      */
     val dragging = Modifier.draggable(
         orientation = Orientation.Horizontal,
         state = rememberDraggableState { delta ->
-            scope.launch {
-                // **Resisted at the ends.** With no page to move to, the content still moves a
-                // little and springs back — the wall is felt rather than explained.
-                val limit = width / 3f
-                val wanted = offset.value + delta
-                val bounded = when {
-                    wanted > 0 && previous == null -> wanted / 4f
-                    wanted < 0 && next == null -> wanted / 4f
-                    else -> wanted.coerceIn(-limit, limit)
-                }
-                offset.snapTo(bounded)
-            }
+            // **Synchronous, so the page is under the finger.** A `scope.launch` here would put the
+            // move behind the frame being drawn — which is half of why the gesture felt laggy.
+            offset = Swipe.offsetFor(offset, delta, previous != null, next != null)
         },
-        onDragStopped = {
+        onDragStopped = { velocity ->
             scope.launch {
-                val travelled = offset.value
-                val steps = when {
-                    travelled <= -width / 3f -> 1
-                    travelled >= width / 3f -> -1
-                    else -> 0
-                }
+                val travelled = offset
+                // **The decision is `Swipe.steps`, where it can be tested.** Distance or speed, and
+                // the arithmetic is not a thing to bury in a gesture lambda twice.
+                val steps = Swipe.steps(travelled, width, velocity)
+                settle.snapTo(travelled)
                 if (steps == 0) {
-                    offset.animateTo(0f, tween(180))
+                    settle.animateTo(0f, tween(180))
+                    offset = settle.value
                 } else {
-                    // **Off the screen, then the step.** The page leaves in the direction the
-                    // finger went and the new one arrives already drawn, so what the eye follows is
-                    // one continuous movement rather than a cut.
-                    offset.animateTo(if (steps > 0) -width else width, tween(180))
+                    // **Off the screen, then the step.** The page leaves in the direction the finger
+                    // went and the new one arrives already drawn, so what the eye follows is one
+                    // continuous movement rather than a cut.
+                    settle.animateTo(if (steps > 0) -width else width, tween(180))
+                    offset = settle.value
                     onStep(steps)
                 }
             }
@@ -967,14 +978,14 @@ private fun Reader(
             PagedPage(
                 page = page,
                 onLink = onLink,
-                modifier = Modifier.offset { IntOffset((offset.value - width).roundToInt(), 0) },
+                modifier = Modifier.offset { IntOffset((offset - width).roundToInt(), 0) },
             )
         }
         next?.let { page ->
             PagedPage(
                 page = page,
                 onLink = onLink,
-                modifier = Modifier.offset { IntOffset((offset.value + width).roundToInt(), 0) },
+                modifier = Modifier.offset { IntOffset((offset + width).roundToInt(), 0) },
             )
         }
         PagedPage(
@@ -993,7 +1004,7 @@ private fun Reader(
             } else {
                 null
             },
-            modifier = Modifier.offset { IntOffset(offset.value.roundToInt(), 0) },
+            modifier = Modifier.offset { IntOffset(offset.roundToInt(), 0) },
         )
     }
 }

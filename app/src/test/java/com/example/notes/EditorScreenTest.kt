@@ -648,18 +648,6 @@ class EditorScreenTest {
         compose.onNodeWithText("missing.png", substring = true).assertIsDisplayed()
     }
 
-    /**
-     * **The page beside this one is drawn before the swipe**, which is what makes the gesture move
-     * rather than redraw.
-     *
-     * The operator's question: *"is it possible to render screen you are swiping to and make a
-     * fluent moving transition and not just a redrawn screen?"* It is, and this is the part that
-     * makes it possible: the neighbour is read when the page settles, so a finger moving toward it
-     * has text to drag in rather than a blank frame.
-     *
-     * Falsification: with the prefetch removed, the neighbour's text is not in the tree — and the
-     * swipe would have nothing to show but empty space.
-     */
     @Test
     fun `the page beside this one is rendered before it is swiped to`() {
         // **In the project's own folder**, the same way `a file knows which files are beside it`

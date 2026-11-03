@@ -121,3 +121,4 @@ NoticesTest app/src/main/java/com/example/notes/Notices.kt
 ChatNoticesTest app/src/main/java/com/example/notes/ChatNotices.kt
 SaidTest app/src/main/java/com/example/notes/Said.kt app/src/main/java/com/example/notes/MainActivity.kt
 DeviceFlowTest app/src/main/java/com/example/notes/DeviceFlow.kt
+SwipeTest app/src/main/java/com/example/notes/Swipe.kt
