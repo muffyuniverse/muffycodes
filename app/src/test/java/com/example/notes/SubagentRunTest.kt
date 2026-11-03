@@ -15,7 +15,7 @@ import java.io.File
  * call: it writes its record **somewhere else** (`agent/<id>/`, not `agent/`), it **cannot reach**
  * outside its project, and its answer arrives as a `SUB` row in the conversation that hired it.
  */
-@RunWith(org.robolectric.RobolectricTestRunner::class)
+@org.junit.runner.RunWith(org.robolectric.RobolectricTestRunner::class)
 @org.robolectric.annotation.Config(sdk = [34])
 class SubagentRunTest {
 
@@ -137,9 +137,12 @@ class SubagentRunTest {
     @Test
     fun `what it says becomes a report, and a report is result-shaped`() {
         var said: Triple<String, Int, String>? = null
-        run(ScriptedDoor(Reply("counted 41 tests"))).run("groceries", 3) { p, id, body ->
+        // **The report sink is named, not trailing.** `run`'s last parameter is the *task*, so a
+        // trailing lambda binds to that and the report silently keeps its default — which is a test
+        // that passes while asserting nothing.
+        run(ScriptedDoor(Reply("counted 41 tests")), report = { p, id, body ->
             said = Triple(p, id, body)
-        }
+        }).run("groceries", 3, "count the tests")
 
         val (project, id, body) = said ?: error("a report was expected")
         assertEquals("for the project", "groceries", project)
@@ -156,7 +159,7 @@ class SubagentRunTest {
         // The app's rule is that everything that exists is reachable. A subagent that finished and
         // wrote nothing would be a task the chat agent believes is still running.
         var body: String? = null
-        run(ScriptedDoor(Reply(""))).run("groceries", 1) { _, _, b -> body = b }
+        run(ScriptedDoor(Reply("")), report = { _, _, b -> body = b }).run("groceries", 1, "look")
 
         assertTrue("a report was made: $body", body != null)
         assertTrue("and it says the subagent finished: $body", body!!.contains("nothing to report"))
@@ -172,7 +175,7 @@ class SubagentRunTest {
         }
 
         var body: String? = null
-        run(door).run("groceries", 4) { _, _, b -> body = b }
+        run(door, report = { _, _, b -> body = b }).run("groceries", 4, "look")
 
         assertTrue("reported: $body", body != null)
         assertTrue(
@@ -190,7 +193,8 @@ class SubagentRunTest {
         val gone = ws.projectDir("gone")
 
         var reported = false
-        val done = run(ScriptedDoor(Reply("x"))).run("gone", 1) { _, _, _ -> reported = true }
+        val done = run(ScriptedDoor(Reply("x")), report = { _, _, _ -> reported = true })
+            .run("gone", 1, "look")
 
         assertTrue("it did not run: $done", done is SubagentRun.Done.Failed)
         assertFalse("and nothing was created", gone.exists())
