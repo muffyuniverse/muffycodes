@@ -978,7 +978,12 @@ class AgentLog private constructor(
             // project is legitimately written to, so the test is on the project above it: a missing
             // project means the person removed it, and a missing `agent/` inside a present project
             // means this is the first write.
-            val project = target.parentFile?.parentFile
+            //
+            // **Walked up to the project rather than assumed one level.** A project's record is
+            // `agent/session.log` and a subagent's is `agent/2/session.log`, so "the folder above
+            // the file's parent" is the project for one and `agent/` for the other — which refused
+            // every subagent row, silently, because `append`'s failure is deliberately quiet.
+            val project = projectFolderOf(target)
             if (project != null && !project.isDirectory) return
             target.parentFile?.mkdirs()
             target.appendText(line + "\n")
@@ -987,6 +992,31 @@ class AgentLog private constructor(
             // the turn goes on, and the person still has the app. Recorded nowhere, because
             // there is nowhere to record it — the file is the failure.
         }
+    }
+
+    /**
+     * **The project a record file belongs to, however deep the record is.**
+     *
+     * A project's record is `<project>/agent/session.log`; a subagent's is
+     * `<project>/agent/<id>/session.log`. Both are "somewhere under a project's `agent/`", so the
+     * answer is found by walking up to the folder that contains `agent/` rather than by counting
+     * levels — a count is what broke when the subagent records arrived, and it failed *quietly*,
+     * because a row that cannot be written is deliberately not an error.
+     *
+     * Returns null when the file is not under an `agent/` folder at all, which means the caller is
+     * not writing a record and this rule does not apply.
+     */
+    private fun projectFolderOf(target: File): File? {
+        var dir = target.parentFile
+        // **Bounded, because a broken path must not walk to the root.** Four is more than any
+        // record is deep and few enough that a mistake stops immediately.
+        var steps = 0
+        while (dir != null && steps < 4) {
+            if (dir.name == DIR) return dir.parentFile
+            dir = dir.parentFile
+            steps++
+        }
+        return null
     }
 
     // ---- reading ------------------------------------------------------------

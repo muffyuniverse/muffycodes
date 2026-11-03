@@ -162,7 +162,11 @@ class SubagentRunTest {
         run(ScriptedDoor(Reply("")), report = { _, _, b -> body = b }).run("groceries", 1, "look")
 
         assertTrue("a report was made: $body", body != null)
-        assertTrue("and it says the subagent finished: $body", body!!.contains("nothing to report"))
+        assertTrue(
+            "**and it says so rather than sending a bare `0`** — a status with nothing after it is " +
+                "an outcome the model cannot act on: $body",
+            body!!.contains("nothing to report"),
+        )
     }
 
     @Test

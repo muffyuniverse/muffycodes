@@ -123,7 +123,12 @@ class SubagentRun(
                     // **A subagent that says nothing still reports.** A silent finish would be work
                     // with no trace, and the app's rule is that everything that exists is
                     // reachable — so "nothing to report" is a report.
-                    val body = if (said.isEmpty()) {
+                    //
+                    // **The test is on what the agent actually produces, not on emptiness.**
+                    // `wordsWithoutCalls` substitutes `(the model said nothing)` for a reply with no
+                    // text, so `said` is never blank — a check for `isEmpty()` would be a branch
+                    // that can never run, which is a guard that looks like one and is not.
+                    val body = if (said == Agent.EMPTY_REPLY) {
                         "0\nsubagent #$id finished with nothing to report"
                     } else {
                         "0\n$said"
