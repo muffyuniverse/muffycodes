@@ -66,10 +66,18 @@ import androidx.compose.ui.text.style.TextAlign
  * person looks.
  */
 @Composable
-private fun traceWhere(): String {
+/**
+ * What the switch is doing, in a sentence that distinguishes the three ways it can be doing nothing.
+ *
+ * **"Turned off" and "writes nowhere" are different answers**, and the old sentence gave the first for
+ * both — so a person who had not touched the switch was told they had turned it off. That is the app
+ * blaming them for its own silence, the same mistake as the silent fallback one screen over.
+ */
+private fun traceWhere(on: Boolean): String {
     val where = Trace.where
     return when {
-        where == null -> "Nothing written yet. One line per thing that happened, appended."
+        !on -> "Off: nothing is written. The switch above turns it on."
+        where == null -> "On, but nothing has been written yet. One line per thing that happened."
         !where.contains(DownloadsSink.FOLDER) ->
             // **The reason, when the sink knows one.** "Downloads refused" was the whole story the
             // screen could tell, and it was the question that needed answering for a week: refused
@@ -912,7 +920,7 @@ fun SettingsScreen(
                         // to the app's own folder. A line naming where the file really is
                         // turns "I cannot find the log" into a path.
                         Text(
-                            traceWhere(),
+                            traceWhere(viewModel.settings.liveTrace),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

@@ -121,6 +121,25 @@ class DownloadsSinkTest {
     }
 
     @Test
+    fun `a paste says which of the three silences it is`() {
+        // **Three different reasons for an empty file**, and the app used to give one sentence for
+        // all of them: "the log is turned off". The operator's paste said exactly that while they had
+        // not touched the switch — the app blaming them for its own silence.
+        //
+        // This pins the two states a sink can be in; the third (on, nothing yet) is the `where ==
+        // null` branch and needs a fresh sink, which the next test covers.
+        val off = Trace.dump()
+        assertTrue(
+            "**with no sink at all, it says so**: ${off.lines().take(3)}",
+            off.contains("**Not written to a file**"),
+        )
+        assertTrue(
+            "and does not claim a file it never wrote: $off",
+            !off.contains("also at"),
+        )
+    }
+
+    @Test
     fun `the first line makes the file`() {
         DownloadsSink(app).append(listOf("12:00:00.000    0 NOTE    app-opened  hi"))
 
