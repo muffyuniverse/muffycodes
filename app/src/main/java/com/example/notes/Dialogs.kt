@@ -51,6 +51,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextDecoration
 
 /** Asks for one line of text. */
 @Composable
@@ -693,6 +694,13 @@ fun SignInDialog(
      */
     device: AppViewModel.Device? = null,
     onStartDevice: () -> Unit = {},
+    /**
+     * **Opens the address the code is typed at**, in a real browser.
+     *
+     * A callback rather than an `Intent` here, so this file stays drawable and testable: the screen
+     * that owns the context is the thing that knows how to leave the app.
+     */
+    onOpenWhere: (String) -> Unit = {},
     onSignIn: (token: String) -> Unit,
 ) {
     var token by remember { mutableStateOf("") }
@@ -706,12 +714,36 @@ fun SignInDialog(
                 // eye rather than by finger.
                 val shown = device
                 if (shown != null && shown.code.isNotEmpty()) {
-                    Text("Type this code at ${shown.where}", style = MaterialTheme.typography.bodySmall)
-                    Text(
-                        shown.code,
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontFamily = FontFamily.Monospace,
-                    )
+                    // **Both the code and the address are selectable**, because the code is read off
+                    // this screen and typed into another one — the operator's report was *"it gives
+                    // the code but I cant copy it"*, which is the one string in the app that is
+                    // copied by eye rather than by finger. Selecting is what makes copying possible.
+                    SelectionContainer {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                "Type this code at the address below:",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            Text(
+                                shown.code,
+                                style = MaterialTheme.typography.headlineMedium,
+                                fontFamily = FontFamily.Monospace,
+                            )
+                            // **The address is a link, not a caption.** It used to be a plain string
+                            // glued into the sentence above, so it was neither tappable nor
+                            // selectable — "it gives a link to open but it is not interactive".
+                            Text(
+                                shown.where,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                textDecoration = TextDecoration.Underline,
+                                modifier = Modifier.clickable {
+                                    tap("open github device")
+                                    onOpenWhere(shown.where)
+                                },
+                            )
+                        }
+                    }
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp),

@@ -101,6 +101,10 @@ VOCABULARY = {
     # **A GitHub device-flow sign-in.** Its own name because it is a different act from `save key`
     # and from `sign in`: no credential is typed, and the person is on github.com while it runs.
     "github device",
+    # **Opening github.com/login/device from the dialog.** Its own name because it is a departure
+    # from the app, like `openrouter sign in`, and the trace should show a person left to finish the
+    # flow somewhere else.
+    "open github device",
     # **Starting a subagent, and writing to one.** Two names because they are two decisions: one
     # spends a new id against the operator's ceiling, the other reuses one that already exists. A log
     # that called both "subagent" could not answer "did it run out of subagents, or did it just keep

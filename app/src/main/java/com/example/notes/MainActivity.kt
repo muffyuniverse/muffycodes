@@ -654,6 +654,16 @@ private fun Dialogs(
                 error = error,
                 device = viewModel.device,
                 onStartDevice = { viewModel.startDeviceSignIn() },
+                // **A real browser, and the same reason as OpenRouter's**: RFC 8252 says a sign-in
+                // belongs in an external user agent, and the address bar is what lets a person see
+                // whose page is asking. `https://` is added if GitHub ever answers a bare host, so
+                // the intent is always a web page rather than something else that parses as a URI.
+                onOpenWhere = { where ->
+                    openInBrowser(
+                        here,
+                        if (where.startsWith("http")) where else "https://$where",
+                    )
+                },
                 // The login is whatever GitHub says it is, not what was typed, and
                 // the question goes to GitHub off the main thread.
                 onSignIn = { token ->

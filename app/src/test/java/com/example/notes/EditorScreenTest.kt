@@ -15,6 +15,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
@@ -684,10 +685,13 @@ class EditorScreenTest {
         }
 
         val page = compose.onNodeWithText("SECONDPAGE")
-        val before = page.fetchSemanticsNode().boundsInRoot.left
+        val bounds = page.fetchSemanticsNode().boundsInRoot
+        val before = bounds.left
+        val pageWidth = bounds.width
         page.performTouchInput {
             down(center)
-            moveBy(Offset(x = -width * 0.5f, y = 0f))
+            // **Half a width of travel**, so the release commits and the settle runs.
+            moveBy(Offset(x = -pageWidth * 0.5f, y = 0f))
             up()
         }
 
@@ -700,7 +704,7 @@ class EditorScreenTest {
 
         assertTrue(
             "**the page moved on during the settle**: released at $before, at $midway after 45ms",
-            midway < before - width * 0.05f,
+            midway < before - pageWidth * 0.05f,
         )
     }
 

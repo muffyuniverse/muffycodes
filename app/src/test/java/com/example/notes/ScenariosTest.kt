@@ -1244,6 +1244,47 @@ class ScenariosTest {
     }
 
     @Test
+    fun `the window showing the device-flow code`() {
+        // **The operator's report, twice**: *"it gives the code but I cant copy it"* and *"it gives a
+        // link to open but it is not interactive and also not selectable"*. Both were true — the code
+        // was a plain `Text` with no selection container, and the address was a fragment of a
+        // sentence rather than a link.
+        //
+        // This scenario is the picture of the fixed window, and the assertions are the two defects.
+        scenario(
+            compose, "35-a-window-with-a-code-to-type",
+            "A window showing a code to type on github.com.",
+            "the code is selectable, and the address is a link that opens a browser.",
+            screen = {
+                window {
+                    SignInDialog(
+                        onDismiss = {},
+                        device = AppViewModel.Device(
+                            code = "ABCD-1234",
+                            where = "https://github.com/login/device",
+                        ),
+                        onSignIn = {},
+                    )
+                }
+            },
+        ) {
+            before()
+            assertTrue("the code is shown", there("ABCD-1234"))
+            assertTrue("the address is shown", there("github.com/login/device"))
+            assertTrue("and it is offered as a way to finish", there("Waiting for you to approve"))
+            // **The key field is still here**, which is the backup the operator asked for: a person
+            // whose browser will not cooperate is not stuck on a code they cannot use.
+            assertTrue("the backup is present", there("Personal access key"))
+            then("The code and the address are both selectable, and the address is a link.") {}
+            after()
+            result(
+                "The code is monospaced and selectable so it can be copied, and the address is " +
+                    "underlined and tappable - a link that only looked like one was the bug.",
+            )
+        }
+    }
+
+    @Test
     fun `the window that picks where a thing goes`() {
         // **A browser, not a list of paths.** The reported defect was a flat list of every folder,
         // whose shape was invisible; this is one layer at a time, with the folder being moved shown
