@@ -1223,7 +1223,15 @@ class ScenariosTest {
             // **All three, because a token missing one fails in a way that does not name it.** A
             // token without `workflow` pushes every file except a workflow, and GitHub answers with
             // the same "Resource not accessible" that a dozen other refusals produce.
-            assertTrue("and names the scopes it needs", there("repo, workflow and delete_repo"))
+            //
+            // **They are a list now, not a sentence**, because the operator asked for the requirements
+            // "to the point. It should say what type of token to supply and what access scopes it
+            // needs." One bullet each, read from the same rule the refusal reads — so the screen
+            // cannot promise a scope the check does not demand.
+            assertTrue("it says which kind of key", there("A classic token, with these three scopes ticked:"))
+            for (scope in TokenScopes.REQUIRED) {
+                assertTrue("and names $scope", there("•  $scope"))
+            }
             // **And says which kind of token.** One token type means one instruction; a fine-grained
             // token fails the same way with different words, so the dialog names the supported path
             // rather than leaving a person to discover it from a 403.
