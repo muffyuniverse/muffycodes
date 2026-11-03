@@ -58,14 +58,30 @@ object Swipe {
      * screen, they flick it; distance alone made a flick look like the gesture had been ignored. A
      * slow careful drag still has to reach the bar, so a nudge while reading cannot turn the page.
      */
-    fun steps(offset: Float, width: Float, velocity: Float): Int {
+    fun steps(
+        offset: Float,
+        width: Float,
+        velocity: Float,
+        hasPrevious: Boolean = true,
+        hasNext: Boolean = true,
+    ): Int {
         val bar = width / 3f
         // 1000 px/s is about a deliberate flick: fast enough that a person meant it, slow enough
         // that a hand settling on the glass does not.
         val flicked = velocity <= -FLICK || velocity >= FLICK
+        val forward = offset <= -bar || (flicked && velocity < 0f)
+        val back = offset >= bar || (flicked && velocity > 0f)
         return when {
-            offset <= -bar || (flicked && velocity < 0f) -> 1
-            offset >= bar || (flicked && velocity > 0f) -> -1
+            // **A direction with no page is not a step**, even when the flick says so.
+            //
+            // This is what a flick at the end used to do: `steps` answered 1 from velocity alone,
+            // the settle animated the page the whole way off the screen, and `onStep` found no file
+            // beside it and did nothing — leaving an empty screen with no way back except the
+            // gesture in reverse. The bounce is the answer at an end, so the answer is 0.
+            forward && !hasNext -> 0
+            back && !hasPrevious -> 0
+            forward -> 1
+            back -> -1
             else -> 0
         }
     }

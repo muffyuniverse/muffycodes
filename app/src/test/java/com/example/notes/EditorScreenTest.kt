@@ -13,6 +13,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -646,6 +647,61 @@ class EditorScreenTest {
         }
         compose.onNodeWithText("a cat", substring = true).assertIsDisplayed()
         compose.onNodeWithText("missing.png", substring = true).assertIsDisplayed()
+    }
+
+    /**
+     * **The page moves during the settle, rather than waiting for it and then jumping.**
+     *
+     * This shipped as *"only first half is animated, then it teleports"*: the settle animated an
+     * `Animatable` and copied its value into the offset **after** the animation finished, so the drag
+     * was smooth, the page then froze for 180ms, and everything moved at once. A value being animated
+     * is not a value being drawn unless the draw reads it.
+     *
+     * Falsification: animate an `Animatable` and assign `offset = it.value` after `animateTo`
+     * returns — the position sampled mid-flight is the released position, and this fails.
+     */
+    @Test
+    fun `the page travels during the settle instead of teleporting at the end`() {
+        scene.open("groceries")
+        scene.file("a.txt", "FIRSTPAGE")
+        val middle = scene.file("b.txt", "SECONDPAGE")
+        scene.file("c.txt", "THIRDPAGE")
+        scene.viewModel.openEditor(middle)
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            Frame {
+                EditorScreen(
+                    viewModel = scene.viewModel,
+                    file = middle,
+                    onBack = {},
+                    onOpenHistory = {},
+                )
+            }
+        }
+        compose.mainClock.advanceTimeBy(1_000)
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("THIRDPAGE").fetchSemanticsNodes().isNotEmpty()
+        }
+
+        val page = compose.onNodeWithText("SECONDPAGE")
+        val before = page.fetchSemanticsNode().boundsInRoot.left
+        page.performTouchInput {
+            down(center)
+            moveBy(Offset(x = -width * 0.5f, y = 0f))
+            up()
+        }
+
+        // **Sampled a quarter of the way into a 180ms settle.** If the page only moves when the
+        // animation is over, this position is still the released one — half a width across — and the
+        // assertion that it has moved further fails.
+        compose.mainClock.advanceTimeBy(45)
+        val midway = page.fetchSemanticsNode().boundsInRoot.left
+        compose.mainClock.autoAdvance = true
+
+        assertTrue(
+            "**the page moved on during the settle**: released at $before, at $midway after 45ms",
+            midway < before - width * 0.05f,
+        )
     }
 
     @Test

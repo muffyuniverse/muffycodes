@@ -102,6 +102,35 @@ class SwipeTest {
     }
 
     @Test
+    fun `a flick at the end bounces instead of committing to a page that is not there`() {
+        // **This shipped as a blank screen.** `steps` answered from velocity alone, so a flick on the
+        // last page animated it the whole way off the edge; `onStep` then found no file beside it and
+        // did nothing, leaving an empty page with nothing on it and no way back except the gesture in
+        // reverse. The bounce is the answer at an end, so the answer is 0.
+        assertEquals(
+            "**a flick past the last page stays**",
+            0,
+            Swipe.steps(-200f, width, velocity = -1_800f, hasPrevious = true, hasNext = false),
+        )
+        assertEquals(
+            "and a flick before the first stays",
+            0,
+            Swipe.steps(200f, width, velocity = 1_800f, hasPrevious = false, hasNext = true),
+        )
+    }
+
+    @Test
+    fun `dragging past a third at an end still does not commit`() {
+        // The same rule by distance rather than speed: a long drag at the end is a person finding the
+        // wall, not a request for a page.
+        assertEquals(
+            "dragged far, nowhere to go",
+            0,
+            Swipe.steps(-900f, width, velocity = 0f, hasPrevious = true, hasNext = false),
+        )
+    }
+
+    @Test
     fun `a flick backwards while already pulled forwards turns back, not on`() {
         // **The offset and the velocity can disagree**, and the gesture is the newer information: a
         // person who pulled halfway and then flicked the other way changed their mind. Reading the

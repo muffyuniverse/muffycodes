@@ -84,6 +84,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.animation.core.animate
 
 /**
  * The editor: the file's name in the top row, and its text below.
@@ -917,7 +918,6 @@ private fun Reader(
     // whole way, and the *release* decides. `Animatable` is created only when settling, which is the
     // one time an animation is wanted.
     var offset by remember(file.path) { mutableFloatStateOf(0f) }
-    val settle = remember(file.path) { Animatable(0f) }
     val scope = rememberCoroutineScope()
     var width by remember { mutableStateOf(1f) }
 
@@ -949,19 +949,28 @@ private fun Reader(
                 val travelled = offset
                 // **The decision is `Swipe.steps`, where it can be tested.** Distance or speed, and
                 // the arithmetic is not a thing to bury in a gesture lambda twice.
-                val steps = Swipe.steps(travelled, width, velocity)
-                settle.snapTo(travelled)
-                if (steps == 0) {
-                    settle.animateTo(0f, tween(180))
-                    offset = settle.value
-                } else {
-                    // **Off the screen, then the step.** The page leaves in the direction the finger
-                    // went and the new one arrives already drawn, so what the eye follows is one
-                    // continuous movement rather than a cut.
-                    settle.animateTo(if (steps > 0) -width else width, tween(180))
-                    offset = settle.value
-                    onStep(steps)
-                }
+                // **The ends are passed in**, so a flick with nowhere to go answers 0 and bounces
+                // rather than animating the page off the screen and finding no file to replace it.
+                val steps = Swipe.steps(travelled, width, velocity, previous != null, next != null)
+                // **The animation drives the offset the page is actually drawn from.**
+                //
+                // This was the "first half is animated, then it teleports" bug: the settle animated
+                // an `Animatable` and copied its value into `offset` *after* the animation finished,
+                // so nothing moved for 180ms and then everything moved at once. A value being
+                // animated is not a value being drawn unless the draw reads it — and `offset` is
+                // what the three `Modifier.offset` calls read.
+                //
+                // `animate` writes through the lambda on every frame, so the page follows it.
+                val target = if (steps == 0) 0f else if (steps > 0) -width else width
+                animate(
+                    initialValue = travelled,
+                    targetValue = target,
+                    animationSpec = tween(180),
+                ) { value, _ -> offset = value }
+                // **The step happens after the page is off the screen**, not before: the new page is
+                // already drawn beside this one, so what the eye follows is one continuous movement
+                // rather than a cut.
+                if (steps != 0) onStep(steps)
             }
         },
     )
