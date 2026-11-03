@@ -37,10 +37,6 @@ ModelCatalogueTest app/src/main/java/com/example/notes/ModelCatalogue.kt app/src
 OpenRouterAuthTest app/src/main/java/com/example/notes/OpenRouterAuth.kt
 ProjectGitTest app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitService.kt
 RepoLocksTest app/src/main/java/com/example/notes/RepoLocks.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitService.kt
-ScopeTest app/src/main/java/com/example/notes/Scope.kt app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Workspace.kt
-AgentSubagentsTest app/src/main/java/com/example/notes/AgentSubagents.kt app/src/main/java/com/example/notes/AgentLog.kt app/src/main/java/com/example/notes/Workspace.kt
-SubagentToolTest app/src/main/java/com/example/notes/AgentSubagents.kt app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/AgentLog.kt
-SubagentRunTest app/src/main/java/com/example/notes/SubagentRun.kt app/src/main/java/com/example/notes/AgentSubagents.kt app/src/main/java/com/example/notes/AgentRunner.kt
 AccountStoreTest app/src/main/java/com/example/notes/AccountStore.kt
 VisibilityFeatureTest app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AppViewModel.kt
 FilesFeatureTest app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/CommitMessage.kt
@@ -114,7 +110,7 @@ TimeoutsTest app/src/main/java/com/example/notes/Timeouts.kt app/src/main/java/c
 AgentSessionsTest app/src/main/java/com/example/notes/AgentSessions.kt app/src/main/java/com/example/notes/AgentSession.kt
 AgentSessionFeatureTest app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentSessions.kt app/src/main/java/com/example/notes/AgentStops.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/Agent.kt app/src/main/java/com/example/notes/SettingsStore.kt app/src/main/java/com/example/notes/AgentRunner.kt
 ContextBudgetTest app/src/main/java/com/example/notes/ContextBudget.kt
-AgentRunnerTest app/src/main/java/com/example/notes/AgentRunner.kt app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentSessions.kt app/src/main/java/com/example/notes/AgentStops.kt app/src/main/java/com/example/notes/AgentSubagents.kt app/src/main/java/com/example/notes/Background.kt
+AgentRunnerTest app/src/main/java/com/example/notes/AgentRunner.kt app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentSessions.kt app/src/main/java/com/example/notes/AgentStops.kt app/src/main/java/com/example/notes/Background.kt
 AgentServiceTest app/src/main/java/com/example/notes/AgentService.kt app/src/main/java/com/example/notes/AgentSession.kt app/src/main/java/com/example/notes/AgentWiring.kt
 NoticesTest app/src/main/java/com/example/notes/Notices.kt
 ChatNoticesTest app/src/main/java/com/example/notes/ChatNotices.kt

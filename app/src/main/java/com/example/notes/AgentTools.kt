@@ -146,37 +146,6 @@ class AgentTools(
      * a conversation that goes nowhere for no visible reason. So this refuses in words instead.
      */
     private val modelSees: (() -> Boolean)? = null,
-    /**
-     * **How far this agent may reach, which is not the same as what it may do.**
-     *
-     * The chat agent works for the account: `tree ../other` is deliberate and its own description
-     * says so, because a thing worth finding may live in another project. A subagent works on **one
-     * project**, and the boundary has to be enforced here rather than by handing it a shorter tool
-     * list — `{read, tree, edit}` is not a sandbox while `tree` accepts `../` and `search` walks the
-     * whole account.
-     *
-     * It is checked in [resolve] and [mayWrite], which is the one funnel every path already goes
-     * through, so a tool added later inherits the rule without being told about it. A filter on
-     * `specs()` would be a filter on the *description* of the tools, which is the version of this
-     * that looks right and is not.
-     */
-    private val scope: Scope = Scope.Account,
-    /**
-     * How many subagents may run at once — **a ceiling, not an identity.**
-     *
-     * Read per call like every other limit here, so the operator moving the number applies to the
-     * next request rather than to the runner that was built before it. Zero means none, which is
-     * how a person turns subagents off without a separate switch.
-     */
-    private val subagentLimit: () -> Int = { 0 },
-    /**
-     * **Cuts a subagent's turn and clears its working context**, keeping its id, folder and record.
-     *
-     * Supplied by the runner because it owns both the in-flight set and the log; `AgentTools` has
-     * neither, and giving it a runner would let one tool reach every session in the account. The
-     * default does nothing, so a tool set built without a runner cannot half-reset anything.
-     */
-    private val onSubagentReset: ((project: String, id: Int) -> Unit)? = null,
 ) {
 
     /**
@@ -391,7 +360,6 @@ class AgentTools(
             "forget" to setOf("ids"),
             "create" to setOf("path", "text"),
             "delete" to setOf("path"),
-            "subagent" to setOf("do", "task", "id"),
             "move" to setOf("path", "into", "name", "copy"),
             "history" to setOf("path", "grep", "from", "to"),
             "restore" to setOf("path", "revision"),
@@ -458,15 +426,6 @@ class AgentTools(
          */
         fun specs(
             fetchAllowed: Boolean = true,
-            /**
-             * **Which agent is asking.** A subagent gets fewer tools *and* a narrower path scope,
-             * and the two are separate rules: this one is what the model is offered, [Scope] is what
-             * it may reach when it names a path.
-             *
-             * The list is here rather than in `Scope` because it is a fact about the tools, and a
-             * list next to the tools it names is a list somebody will keep in step.
-             */
-            scope: Scope = Scope.Account,
         ): List<ToolSpec> = listOf(
             spec(
                 "search",
@@ -561,25 +520,6 @@ class AgentTools(
                 """{"path":"the file","text":"its contents"}""",
             ),
             spec("delete", "Delete a file, or a folder and everything in it.", """{"path":"what to delete"}"""),
-            spec(
-                "subagent",
-                "Start a subagent on a task, write to one, or list them. **A subagent is another " +
-                    "agent working in this project beside you**: it has its own record, its own " +
-                    "clock and its own context, and it keeps that context between tasks. " +
-                    "`start` answers at once with its id - the work has begun, not finished, and its " +
-                    "report will arrive in this conversation as a row you did not ask for. " +
-                    "`write` sends it another task, and it needs the subagent's `id`; a subagent " +
-                    "that has been retired by the operator's limit cannot be woken and the answer " +
-                    "says so, and one that is **working** refuses a second task - wait for its " +
-                    "report, or `reset` it first. " +
-                    "`reset` cuts the turn it is running and clears its working context, keeping " +
-                    "its id and its record: use it when the work is no longer wanted or was " +
-                    "misunderstood, then `write` the corrected task. `list` says which ones exist, " +
-                    "which are working, and what each was last given - call it before starting " +
-                    "one, and read the first line for how many of how many allowed are in use. " +
-                    "**Do not wait for a report**: carry on, and read it when it arrives.",
-                """{"do":"start","task":"what it should do","id":1}""",
-            ),
             spec(
                 "move",
                 "Move a file into a folder, or rename it inside its own folder. With `copy` the " +
@@ -772,35 +712,6 @@ class AgentTools(
                 "{\"server\":\"linear\",\"tool\":\"list_issues\",\"args\":{\"team\":\"ENG\"}}",
             ),
         ).filter { fetchAllowed || it.name != "fetch" }
-            .filter { scope == Scope.Account || it.name in SUBAGENT_TOOLS }
-
-        /**
-         * **What a subagent may use, and why the rest is missing.**
-         *
-         * A subagent produces work in one project. Everything it is not given is either a way to
-         * reach outside that project, a way to spend money it cannot see the bill for, or a decision
-         * that belongs to the agent that hired it.
-         *
-         * | not given | why |
-         * |---|---|
-         * | `history`, `restore` | version archaeology and putting a version back are the chat agent's calls — a subagent restoring one is a change nobody asked for |
-         * | `query`, `artifact`, `downloads`, `archive` | each produces a file the chat agent then has to find; two agents writing results is two answers to one question |
-         * | `browse`, `fetch`, `mcp` | the network is the chat agent's: N agents reaching it is N times the key, the cost and the blast radius |
-         * | `shot`, `runs` | a picture and a CI listing are things to report *about*, not to fetch — and `ci` already answers the question a subagent actually has |
-         * | `subagent` | no recursion: one level, because N agents each spawning N is N² bills for work nobody asked for |
-         *
-         * **`ci`, `background` and `look` are here on the operator's instruction**, and each earns
-         * its place: a subagent checking whether a push is green is the archetypal task, a subagent
-         * that cannot background has to block (which is what the tool exists to avoid), and looking
-         * at a picture is reading — a subagent that could read a project but not a screenshot of it
-         * would be scoped by accident rather than by rule.
-         */
-        val SUBAGENT_TOOLS = setOf(
-            "search", "tree", "read",
-            "edit", "create", "delete", "move",
-            "forget",
-            "background", "look", "ci",
-        )
 
         /**
          * One tool, described to the model.
@@ -916,7 +827,6 @@ class AgentTools(
             "shot" -> shot(args, deadline)
             "look" -> look(args)
             "query" -> query(args, deadline)
-            "subagent" -> subagent(args)
             "ci" -> ci(args, deadline)
             "runs" -> runs(args, deadline)
             "artifact" -> artifact(args)
@@ -1163,12 +1073,7 @@ class AgentTools(
         // to search - 'history' so that results show not just filepaths but also version hashes"*,
         // and the flag is enough because a version is a file at a commit.
         val history = args.optBoolean("history", false)
-        // **A scoped search starts at its own project, not at the account.** `search` is the one
-        // tool that never asks [resolve] for a path — it walks a folder — so the scope has to be
-        // applied here or this is the tool that makes every other refusal a formality. Its own
-        // description says it searches *"every project in the account"*, which is true for the chat
-        // agent and is exactly what a subagent must not be able to do.
-        walkForSearch(searchRoot(), SEARCH_DEPTH, query, inFolders, state, found, deadline)
+        walkForSearch(ws.accountDir, SEARCH_DEPTH, query, inFolders, state, found, deadline)
         if (history) {
             // **Even when nothing current matches, and that is the whole point.** A line that was
             // deleted is unreachable by any current-file search, and it is exactly what a person
@@ -1178,10 +1083,6 @@ class AgentTools(
         if (found.isEmpty()) {
             val where = when {
                 inFolders.isNotEmpty() -> inFolders.joinToString(", ")
-                // **"this account" is a claim, and a scoped agent would make it falsely.** It
-                // searched one project, so saying the account was searched would teach it that the
-                // text is nowhere in an account it never looked at.
-                scope is Scope.Project -> "this project"
                 else -> "this account"
             }
             // **"and not in any version" when history was asked for**, because a person told only
@@ -2425,179 +2326,6 @@ class AgentTools(
             onSuccess = { commit("Restored ${file.name}", "put ${rel(file)} back") },
             onFailure = { refusal(it.message ?: "it could not be restored") },
         )
-    }
-
-    // ---- subagents ----------------------------------------------------------
-
-    /**
-     * **Start a subagent, write to one, or list them.**
-     *
-     * The tool returns **at once**, and that is the design rather than an optimisation: the model
-     * asked for the work to start, not for its result. A subagent runs its own turns on its own
-     * clock, so a result is minutes away and may arrive while the chat agent is idle or while the
-     * app is closed — which is why its report arrives as a [AgentLog.SUB] row rather than as this
-     * call's answer.
-     *
-     * **The three refusals are the interesting part**, because a subagent that has gone is not a
-     * subagent that is asleep:
-     *
-     * | state | `write` does |
-     * |---|---|
-     * | live | sends the task |
-     * | **stopped** (reached its warm ceiling) | wakes it, same id, context intact |
-     * | **retired** (the count was lowered) | **refuses**, naming its folder, because waking it would put the count back over the limit |
-     */
-    /**
-     * **What [sub] is, in one word**, which is the word the model asked for.
-     *
-     * `working` outranks `asleep` because a subagent cannot be both — a task wakes it — and outranks
-     * `live` because "you can write to it" is true of a working subagent and useless, since the
-     * runner refuses a second task while one is running.
-     */
-    private fun stateOf(sub: AgentSubagents.Sub): String = when {
-        sub.retired -> "retired"
-        !sub.idle -> "working"
-        sub.stopped -> "asleep"
-        else -> "live"
-    }
-
-    /**
-     * **What cutting a subagent's turn and clearing its context actually does**, supplied by the
-     * runner because it owns the in-flight set and the log.
-     *
-     * A hook rather than a direct call: `AgentTools` has no runner, and giving it one would let a
-     * tool reach every session in the account. The default does nothing, so a tool set built without
-     * a runner — a test, or a chat agent — cannot half-reset anything.
-     */
-    private fun resetSubagent(project: String, id: Int) {
-        onSubagentReset?.invoke(project, id)
-    }
-
-    private fun subagent(args: JSONObject): String {
-        val what = args.optString("do", "start").trim().lowercase()
-        val registry = AgentSubagents(ws.accountDir)
-        return when (what) {
-            "list" -> {
-                val all = registry.read(project)
-                if (all.isEmpty()) {
-                    success("no subagents in $project yet. Start one with subagent {\"task\":\"...\"}")
-                } else {
-                    // **Four states, because "live" answered none of the questions a model asks.**
-                    // `stopped` and `idle` were both being reported as `live`, so a model reading
-                    // the list could not tell a subagent it could give work to from one that would
-                    // wake for it from one that is already working — and the last of those is the
-                    // one where a second task is simply refused by the runner's claim.
-                    //
-                    // **The ceiling is in the first line**, because "may I start another" is the
-                    // question that follows "what exists", and the answer is a number the model
-                    // cannot see anywhere else.
-                    val live = all.count { !it.retired }
-                    success(
-                        buildString {
-                            append("$live of ${subagentLimit()} allowed in $project\n")
-                            for (sub in all) {
-                                append("#${sub.id} · ${stateOf(sub)} · ")
-                                append(sub.task.ifBlank {
-                                    if (sub.idle) "(nothing outstanding)" else "(working now)"
-                                })
-                                append("\n")
-                            }
-                        }.trimEnd(),
-                    )
-                }
-            }
-            "reset" -> {
-                val id = args.optInt("id", 0)
-                if (id <= 0) return refusal("`reset` needs the subagent's `id`")
-                val sub = registry.find(project, id)
-                    ?: return refusal("No subagent #$id in this project. `list` says which ones exist.")
-                if (sub.retired) {
-                    return refusal(
-                        "No subagent #$id: it was retired when the operator lowered the limit. " +
-                            "Its record is at ${AgentLog.DIR}/$id/. Start a new one with " +
-                            "subagent {\"task\":\"...\"}.",
-                    )
-                }
-                // **The turn in flight is cut, and the context goes with it.** The runner reads
-                // `cutFor` between requests, so the next thing this subagent does is not a
-                // continuation of work nobody wants.
-                //
-                // **The id, the folder and the log all stay**, which is the operator's rule: the
-                // record is the only account of what it did, and `agent/2/` means "subagent 2,
-                // across its whole life" — so a reset is visibly the same agent, not a new one
-                // wearing its number.
-                resetSubagent(project, id)
-                Trace.tap("subagent reset", "$project #$id")
-                success(
-                    "Reset #$id. Its working context is cleared and any turn in flight is cut; " +
-                        "its record at ${AgentLog.DIR}/$id/ is untouched. Give it a task with " +
-                        "`write`.",
-                )
-            }
-            "write", "start" -> {
-                val task = args.optString("task", "").trim()
-                if (task.isEmpty()) return refusal("A subagent needs a `task`: what it should do")
-                if (what == "write") {
-                    val id = args.optInt("id", 0)
-                    if (id <= 0) return refusal("`write` needs the subagent's `id`")
-                    val sub = registry.find(project, id)
-                        ?: return refusal(
-                            "No subagent #$id in this project. `list` says which ones exist.",
-                        )
-                    if (sub.retired) {
-                        // **Named, with its folder**, because the record is the only account of what
-                        // it did and a person looking for it needs somewhere to look.
-                        return refusal(
-                            "No subagent #$id: it was retired when the operator lowered the limit. " +
-                                "Its record is at ${AgentLog.DIR}/$id/. Start a new one with " +
-                                "subagent {\"task\":\"...\"}.",
-                        )
-                    }
-                    // **A subagent that is working cannot be silently re-tasked.** The runner
-                    // *claims* a task by blanking it, so a message sent mid-turn would land on a
-                    // field the running turn never reads: the turn would finish on the old
-                    // instruction, report on the old instruction, and only then run the new one.
-                    // The chat agent would get a report about work it no longer wanted, with
-                    // nothing in it saying the task had changed. So it is refused, and the refusal
-                    // names the two things that actually work.
-                    if (!sub.idle) {
-                        return refusal(
-                            "#$id is working on what it was already given. Wait for its report, " +
-                                "or `reset` it to cut that turn and clear its context first.",
-                        )
-                    }
-                    // **Writing to a stopped subagent wakes it.** Its context is intact, which is
-                    // what "keeps its context between tasks" is for; a retired one never reaches
-                    // here, because the refusal above catches it first.
-                    registry.touchTask(project, id, task)
-                    registry.sleep(project, id, asleep = false)
-                    registry.touched(project, id)
-                    Trace.tap("subagent write", "$project #$id")
-                    success("written to #$id; its report will arrive here when it has one")
-                } else {
-                    // **The ceiling, asked before minting.** A new id would be one more than the
-                    // operator allowed, and the count is a promise rather than a suggestion.
-                    val live = registry.read(project).count { !it.retired }
-                    val limit = subagentLimit()
-                    if (live >= limit) {
-                        return refusal(
-                            "All $limit subagents are running. Wait for one to report, or the " +
-                                "operator can raise the number in Settings.",
-                        )
-                    }
-                    val sub = registry.mint(project, task)
-                    Trace.tap("subagent start", "$project #${sub.id}")
-                    success(
-                        "Started subagent #${sub.id} on it. **Do not wait** - carry on, and its " +
-                            "report will arrive in this conversation as a row you did not ask for.",
-                    )
-                }
-            }
-            else -> refusal(
-                "`do` is `start`, `write`, `reset` or `list`. A subagent is another agent " +
-                    "working beside you in this project.",
-            )
-        }
     }
 
     // ---- the web ------------------------------------------------------------
@@ -4068,16 +3796,6 @@ class AgentTools(
                 ),
             )
         }
-        // **The scope, checked in the funnel rather than in each tool.** A subagent works on one
-        // project; the account is what a chat agent may reach. Both bounds are the same shape — a
-        // path that resolves outside a folder — so the second one belongs here, beside the first,
-        // and not in fifteen tools that would each have to remember it.
-        //
-        // **After the account check, not before.** A path outside the account is a different
-        // refusal with a different sentence, and telling a scoped agent "that is outside
-        // groceries" about a path that is outside the account entirely would name the wrong
-        // boundary and send it looking for a way around the one that is not there.
-        scoped(target)?.let { return Result.failure(IllegalArgumentException(it)) }
         return Result.success(target)
     }
 
@@ -4098,30 +3816,14 @@ class AgentTools(
     }
 
     /** True when [file] is inside the project the agent is working in. */
+    /** True when [file] is inside the project the agent is working in. */
     fun isMine(file: File): Boolean = projectOf(file) == project
 
-    /** Where `search` begins: the account for a chat agent, its own project for a scoped one. */
-    private fun searchRoot(): File = when (val s = scope) {
-        Scope.Account -> ws.accountDir
-        is Scope.Project -> ws.projectDir(s.project)
-    }
+    /** True when [file] is inside the project the agent is working in. */
+    fun isMine(file: File): Boolean = projectOf(file) == project
 
-    /**
-     * The sentence that says [file] is outside this agent's scope, or null when it is inside it.
-     *
-     * **The account's own folder is inside an `Account` scope and outside a `Project` one**, which
-     * is the one asymmetry worth naming: the account root is where the projects live, so a scoped
-     * agent that could list it could enumerate every project it is not allowed to read.
-     */
-    private fun scoped(file: File): String? = when (val s = scope) {
-        Scope.Account -> null
-        is Scope.Project -> {
-            // The project's own folder is the scope; anything whose first segment is another name
-            // is not. `projectOf` already answers "which project is this", and a file at the
-            // account's root answers null — outside a project, so outside a project's scope.
-            if (projectOf(file) == s.project) null else s.refusal()
-        }
-    }
+    /** True when [file] is inside the project the agent is working in. */
+    fun isMine(file: File): Boolean = projectOf(file) == project
 
     /**
      * Why [file] may not be written, or null when it may.
@@ -4136,11 +3838,6 @@ class AgentTools(
      * has, and a lock that behaves differently from every other lock is one nobody can reason about.
      */
     private fun mayWrite(file: File): String? {
-        // **The scope first, because it is the boundary and not a rule about the file.** A path
-        // outside a subagent's project is refused whatever else is true of it — the owner rule
-        // below says "read it, and changing it needs that project open", which is a true sentence
-        // about a chat agent and an invitation a scoped one must not be given.
-        scoped(file)?.let { return it }
         val path = rel(file)
         // **The record is not yours to change.** `forget` is the one thing you may do to the
         // context, and it is a column and not a text edit; the evidence itself is the app's, so an

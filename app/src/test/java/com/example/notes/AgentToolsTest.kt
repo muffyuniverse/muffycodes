@@ -93,16 +93,12 @@ class AgentToolsTest {
         // read-only**: a tool that starts a run is a different grant, and it waits on the workflow
         // guard (a run the agent dispatches must not be able to reach repository secrets).
         assertEquals(
-            "and the twenty-three that are",
+            "and the twenty-two that are",
             listOf(
                 // **`search` is the account-wide reader**, and it sits beside `tree` because the
                 // difference between them is a default rather than a permission: `tree` answers
                 // about one folder, `search` about a question, and both only read.
                 "search", "tree", "read", "edit", "forget", "create", "delete",
-                // **`subagent` sits beside `delete` because the list is in the order the model reads
-                // it**, and a tool that starts another agent belongs with the tools that act on the
-                // project rather than after the ones that reach outside the phone.
-                "subagent",
                 "move",
                 // **`query` is the agent's own reading of what it cost.** It is the one tool that
                 // answers questions nobody wrote a tool for, and it sits beside the request log's

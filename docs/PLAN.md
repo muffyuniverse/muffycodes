@@ -274,14 +274,19 @@ final `usage` block, so a per-chunk token count would be an estimate dressed as 
 
 **Not a progress bar.** Elapsed and produced, never a percentage — there is no denominator.
 
-### Not a bug report: serial now, and what subagents would need
+### Not a bug report: what is serial, and what parallelism is worth now
 
 **The operator's rule (2026-10-27):** *an agent's own commands are serial with each other; different
 agents work independently.* Agent 1's `read` waits for agent 1's `edit`; it never waits for agent 2.
 
-**What the code does today.** There are three single-threaded executors — `AgentRunner.worker`
-(pings and wakes), `AppViewModel.worker` (screen turns and file work), `Trace.writer` — and one
-place with real concurrency, `Background`, which starts a thread per call. So:
+**Subagents were removed on 2026-11-03** — *"they introduce too much complexity. It will be better if
+we focus on improving efficiency and speed and multitasking of the chat agent."* So there is one kind
+of agent, and the interesting question is no longer *how do two agents share a project* but **how does
+one agent do more at once**.
+
+**What the code does today.** Three single-threaded executors — `AgentRunner.worker` (pings and wakes),
+`AppViewModel.worker` (screen turns and file work), `Trace.writer` — and one place with real
+concurrency, `Background`, which starts a thread per call.
 
 | Work | Serial with | Parallel with |
 |---|---|---|
@@ -289,50 +294,45 @@ place with real concurrency, `Background`, which starts a thread per call. So:
 | A ping/wake | other pings and wakes (one thread) | a screen turn on another project |
 | A `background` command | nothing | everything |
 
-The app is therefore *mostly* serial, and **the rule is already half in force by accident**: a
-screen turn on project A really does overlap a ping on project B, on two different threads.
+**So the chat agent already has one way to do two things at once, and it is the wrong shape for the
+common case.** `background {tool, args}` starts *one* call and writes its result to a file; the model
+must then poll the file to find out whether it finished. Three consequences, in order of cost:
 
-**Why serial is kept for now, in the operator's words:** *easier to manage, predictable and simple.*
-And the honest reason it costs nothing yet: **only one agent can be active at a time.** There is one
-`chatProject`, so two screen turns cannot happen, and a project's own pings are already excluded by
-`hold`. A pool would buy parallelism for a situation the UI cannot produce.
+1. **A slow read blocks the turn that asked for it.** `background` exists to avoid this, but it is a
+   choice the model has to remember to make, and it is not offered for `browse`, `shot` or `ci`.
+2. **The result arrives as a file, not as an answer.** A model that has to remember to read a path is
+   a model that forgets, and the file it forgot is invisible.
+3. **Nothing wakes it.** A `background` command that finishes while the turn is over does wake the
+   agent (see `wake`), but that is a *new turn* — the conversation, the prompt and the cache prefix
+   are all paid again.
 
-**Why it is not a corner, and why the plumbing was adjusted anyway.** The lock is already per
-**file**, not per app:
+**What is worth doing instead, in the order I would do it:**
+
+- **Say which tools are slow, and background the ones that are.** `browse`, `shot`, `fetch` and `ci`
+  are seconds to minutes; `read` and `edit` are milliseconds. A model told "these four are slow" uses
+  `background` where it matters instead of guessing.
+- **Let one turn issue several `background` calls and be woken once when all of them land.** This is
+  already half-built: `woke(finished)` names a list, and `finishedSince` takes a watermark. What is
+  missing is a join — "wake me when these three are done", rather than "wake me when any is".
+- **Then, and only then, a pool.** `AgentRunner.worker` is one `newSingleThreadExecutor()`. A pool
+  buys parallelism for a situation the UI cannot yet produce — there is one `chatProject` — so it is
+  last, and it is one line when it is wanted.
+
+**What the per-file gate already gives us, and it is most of the safety.** The lock is per **file**,
+not per app:
 
 ```kotlin
 private fun gateFor(session: File): Gate = gates.computeIfAbsent(session.absolutePath) { Gate() }
 ```
 
-Two agents writing two records take two gates and never contend. So the concurrency-safety work that
-normally makes parallelism hard **is already done** — the only thing that serialises agents today is
-one `newSingleThreadExecutor()` line.
+So two writers of two different records never contend, and the file tools already go through one
+funnel with a stale-read check. Parallelism inside one agent is therefore a threading change, not a
+correctness rewrite.
 
-Three small changes were made now, while they are free, so the day a subagent exists nothing has to
-be re-reasoned:
-
-1. **`inFlight` and `held` hold *agent ids*, not project names.** They are the same string today
-   (`agentId(project) = project`), and the comment says so.
-2. **`AgentRunner.agentId(project)`** is the one place that will change — `"<project>/<name>"`.
-   Claims, releases and the tick's guard all go through it, so no caller knows a subagent is
-   possible.
-3. **`AgentRunner.isBusy(project)` / `AppViewModel.agentBusy(project)`** — the comparison lives with
-   the ids rather than at each call site. `project in polling()` would have been silently wrong the
-   day the two differ, and the screen would have thought a working agent was idle.
-
-**What subagents would still need, and none of it is threading:**
-
-- **A scope rule.** `AgentTools` gets the whole project today. A subagent that may write anywhere is
-  not a subagent. Which paths it may touch is a design decision.
-- **A file-conflict rule.** Two agents on one project can `edit` one path. The record gate protects
-  the log, not the filesystem — so this needs either disjoint subtrees or a per-path lock. **This is
-  the only genuinely hard part**, and it costs the same whether parallelism lands now or later.
-- **A way to see two agents.** One `chatProject` is the real blocker for *using* two agents, and it
-  is a UI change.
-- **One line:** `newSingleThreadExecutor()` → a pool, when two agents can actually work at once.
-
-**The rule for later, written down so it is not rediscovered:** *serial within an agent, parallel
-across agents.* The unit of concurrency is the agent id, and it is already the key.
+**One thing to keep from the removed design:** `inFlight` and `held` hold *agent ids* rather than
+project names, and `agentId(project)` is the single place that maps one to the other. It costs one
+function and it means a future "two conversations for one project" is a change in one line rather than
+a search for every place a project name was used as a key.
 
 ### Known and not yet fixed
 

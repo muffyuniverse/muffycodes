@@ -138,15 +138,13 @@ class AgentRunner(
     /**
      * **The unit of concurrency is the agent, and today an agent is its project.**
      *
-     * These are agent ids, not project names — they only look the same because one project has one
-     * agent. A subagent will be `"<project>/<name>"`, and everything below keeps working unchanged:
-     * two agents of one project are two ids, so neither blocks the other, and two agents writing the
-     * same file is a *scope* rule rather than a threading one (see `docs/PLAN.md`).
+     * These are agent ids, and an id is a project's name.
      *
-     * **Keyed this way on purpose, before there was a second kind of agent.** The alternative was to
-     * write "project" everywhere and rename later, which is the change that goes wrong: a guard whose
-     * name says project will be *reasoned about* as a project, and a subagent added under it would be
-     * serialised by a set that was never meant to hold two.
+     * **Kept as an id rather than written as "project" everywhere**, because the two are different
+     * questions: what a conversation is called, and which project it belongs to. They are the same
+     * string today. The indirection costs one function ([agentId]) and keeps every caller from
+     * assuming the two can never diverge — which is the assumption that would have to be unpicked
+     * across this file if they ever did.
      */
     private val inFlight = mutableSetOf<String>()
 
@@ -165,8 +163,8 @@ class AgentRunner(
     /** Whether [project]'s agent is busy — **the comparison, in one place.**
      *
      * `polling()` holds agent ids, and a caller holding a project name must not compare the two
-     * directly: they are equal today and will not be the day a project has a subagent, and the
-     * mistake would be silent (the screen would think an agent was idle while it worked).
+     * directly: the mistake would be silent, and the screen would think an agent was idle while it
+     * worked.
      */
     fun isBusy(project: String): Boolean = agentId(project) in polling()
 
@@ -184,10 +182,9 @@ class AgentRunner(
     /**
      * The id of the agent that owns a project's conversation.
      *
-     * **A function, not a string concatenation at each call site**, because it is the one place that
-     * will change when a project has more than one agent. Everything that claims, releases or checks
-     * work asks this — so `inFlight` holds ids rather than project names without any caller knowing
-     * that a subagent is possible at all.
+     * **A function, not a string concatenation at each call site.** Everything that claims, releases
+     * or checks work asks this, so the answer is one line to change rather than a search for every
+     * place a project name was used as a key.
      */
     fun agentId(project: String): String = project
 
@@ -264,30 +261,8 @@ class AgentRunner(
             // **The setting decides, not the session's copy of it.** The person may have changed
             // the interval, the switch or the ceiling since this session was written, and a tick is
             // when that matters.
-            // **A subagent's report outranks a finished command**, because the report is already in
-            // the conversation: the agent will read it on the next request whether it is woken or
-            // not, so a wake that is one tick late costs nothing, while a command's result is a file
-            // nothing reads until the agent is told about it.
-            val reports = if (current.state == AgentSession.State.STOPPED) {
-                emptyList<AgentLog.Row>()
-            } else {
-                AgentLog.open(ws.projectDir(current.project)).reportsSince(current.reportedThrough)
-            }
-            if (reports.isNotEmpty() && agentId(current.project) !in polling()) {
-                wakeForReports(current, now, reports)
-            } else if (finished.isNotEmpty() && agentId(current.project) !in polling()) {
+            if (finished.isNotEmpty() && agentId(current.project) !in polling()) {
                 wake(current, now, finished)
-            } else if (subagentsDue(current, now)) {
-                // **A subagent's task outranks a ping, and does not wait for the interval** — for
-                // the same reason a finished background command does not: the chat agent asked for
-                // work to start, and the work starting is the thing worth a turn.
-                //
-                // It is checked *after* a finished command because that is the chat agent's own work
-                // coming back, which it is waiting on; a subagent is work it asked to happen
-                // elsewhere.
-                runSubagent(current, now)
-            } else if (warmSubagentDue(current, now)) {
-                warmSubagent(current, now)
             } else if (
                 current.warmDue(now, keepAlive, pollMs, warmMs) &&
                 agentId(current.project) !in polling()
@@ -308,318 +283,6 @@ class AgentRunner(
      */
     private fun wake(session: AgentSession, now: Long, finished: List<Background.Done>) =
         dispatch(session, now, woke(finished))
-
-    /**
-     * **A subagent reported: one real turn, and the sentence says only that it happened.**
-     *
-     * **The body is not repeated.** A background completion is a *file* the wake sentence points
-     * at; a report is a *row* the agent will read anyway, because it is in its own context. Sending
-     * the words as well would put them in the conversation twice and charge for both.
-     *
-     * **Two reports arriving together are one wake**, the same rule `woke` follows for finished
-     * commands — three subagents finishing in a minute must not cost three turns.
-     */
-    private fun wakeForReports(session: AgentSession, now: Long, reports: List<AgentLog.Row>) {
-        val project = session.project
-        val through = reports.maxOf { it.id }
-        Trace.note(
-            "agent-wake",
-            "$project · ${reports.size} subagent report" + (if (reports.size == 1) "" else "s"),
-        )
-        // **The watermark moves before the turn goes out**, so a report cannot wake the agent twice
-        // if the turn fails. It is written with the session, which is what makes it survive a
-        // restart — a report the app already acted on must not be acted on again after a reboot.
-        put(session.reported(through), speak = false)
-        dispatch(session.reported(through), now, toldReports(reports))
-    }
-
-    /**
-     * What the agent is told, in the conversation, about the reports that landed.
-     *
-     * **A sentence about the event, not the event.** The rows themselves are in the context; this
-     * only says that they are new and that something is expected of the agent, which is what makes
-     * the difference between reading a report in passing and acting on it.
-     */
-    private fun toldReports(reports: List<AgentLog.Row>): String = buildString {
-        append(
-            if (reports.size == 1) {
-                "A subagent has reported: ${reports.first().name}. "
-            } else {
-                "${reports.size} subagents have reported: " +
-                    reports.joinToString(", ") { it.name } + ". "
-            },
-        )
-        append("Its report is in your context. Read it and carry on, or conclude if there is nothing to do.")
-    }
-
-    // ---- subagents ----------------------------------------------------------
-
-    /**
-     * **Whether any subagent has a task waiting, and the answer is read from the registry.**
-     *
-     * The queue is the registry itself rather than a second list: a subagent whose `task` has not
-     * been run yet *is* a pending task, and a separate queue would be two places saying what is
-     * outstanding. `subagentPending` is the marker, and it is cleared when the turn starts — so a
-     * subagent that fails to run is not retried for ever on every tick.
-     */
-    private fun subagentsDue(session: AgentSession, now: Long): Boolean {
-        if (session.state == AgentSession.State.STOPPED) return false
-        if (agentId(session.project) in polling()) return false
-        // **The count first, then the ceiling.** A person who lowered the number wants the excess
-        // gone now, not when a warm ceiling happens to pass — and a subagent retired by the count
-        // must not also be stopped by the ceiling, or the trace says two things about one act.
-        fitToCount(session.project)
-        retireOverdue(session.project, now)
-        return nextSubagent(session.project) != null
-    }
-
-    /**
-     * **Whether any subagent is due a keepalive ping, on the chat agent's own interval and ceiling.**
-     *
-     * The operator's rule: *"subagents do need keepalive because they keep context between tasks"* —
-     * and *"idle timeout is exactly keepalive timeout"*. So the interval and the ceiling are the
-     * **chat agent's** settings, not a second pair: one number with two jobs means one clock, and two
-     * clocks with one name is how a person sets a number and gets different behaviour.
-     *
-     * **A stopped subagent is not pinged.** Reaching the ceiling is what stops it, so pinging it
-     * afterwards would be spending the money the ceiling exists to save.
-     */
-    private fun warmSubagentDue(session: AgentSession, now: Long): Boolean {
-        if (session.state == AgentSession.State.STOPPED) return false
-        if (!settings.keepAlive) return false
-        if (agentId(session.project) in polling()) return false
-        val warmMs = settings.subagentWarmMs
-        if (warmMs <= 0) return false
-        return AgentSubagents(ws.accountDir).read(session.project).any { sub ->
-            !sub.retired && !sub.stopped &&
-                // Only an idle one: a subagent with a task is about to run, and one on the worker is
-                // running now. A ping during a turn would be a second request against a conversation
-                // in use.
-                sub.task.isBlank() &&
-                subagentId(session.project, sub.id) !in synchronized(inFlight) { inFlight.toSet() } &&
-                now - sub.lastAt >= settings.pollMs
-        }
-    }
-
-    /**
-     * **Keeps one subagent's cache warm**, and touches its clock so the next ping is an interval
-     * away rather than immediately.
-     *
-     * The ping is on this runner's worker, like every other request, so two never go out at once.
-     */
-    private fun warmSubagent(session: AgentSession, now: Long) {
-        val project = session.project
-        val registry = AgentSubagents(ws.accountDir)
-        val running = synchronized(inFlight) { inFlight.toSet() }
-        val sub = registry.read(project).firstOrNull { s ->
-            !s.retired && !s.stopped && s.task.isBlank() &&
-                subagentId(project, s.id) !in running &&
-                now - s.lastAt >= settings.pollMs
-        } ?: return
-        // **Touched before the work goes out**, so a slow ping cannot make the next tick think the
-        // same subagent is due again — the same rule `dispatch` follows for the session's clock.
-        registry.touched(project, sub.id, at = now)
-        synchronized(inFlight) { inFlight += subagentId(project, sub.id) }
-        Trace.note("subagent-warm", "$project #${sub.id}")
-        worker.execute {
-            try {
-                val run = SubagentRun(
-                    ws = ws, git = git, settings = settings, door = door, model = model,
-                    onPage = onPage, browser = browser, fetcher = fetcher, mcp = mcp,
-                    credentials = credentials, scanner = scanner, fetchAllowed = fetchAllowed,
-                    github = github, githubToken = githubToken, downloads = downloads,
-                    report = { _, _, _ -> },
-                )
-                val why = run.warm(project, sub.id)
-                if (why != null) Trace.note("subagent-warm-failed", "$project #${sub.id} · $why")
-            } finally {
-                synchronized(inFlight) { inFlight -= subagentId(project, sub.id) }
-            }
-        }
-    }
-
-    /**
-     * **Retires the first idle subagents until the live count fits the operator's number.**
-     *
-     * The operator's rule: *"when amount of running subagents is above the limit then the first idle
-     * subagent is removed, and if chat agent tries to write to an agent (by id) who has been removed
-     * then he gets exception."*
-     *
-     * **Idle only, oldest first**, and the busy set is the runner's own in-flight marks — a turn on
-     * the worker is not a subagent the count can take away, because that would kill work in progress.
-     * If there are not enough idle ones the count stays over until one finishes, which is the same
-     * rule a stop follows.
-     *
-     * **The folder stays.** The operator's answer: *"folder stays, id inactive"*. The record is the
-     * only account of what that subagent did, and the `SUB` rows already in the chat quote it.
-     */
-    private fun fitToCount(project: String) {
-        val limit = settings.subagentCount
-        val registry = AgentSubagents(ws.accountDir)
-        val busy = synchronized(inFlight) {
-            registry.read(project).map { it.id }.filter { subagentId(project, it) in inFlight }.toSet()
-        }
-        val retired = registry.fitTo(project, limit, busy)
-        if (retired.isEmpty()) return
-        Trace.note(
-            "subagent-retired",
-            "$project · ${retired.joinToString(", ") { "#$it" }} over $limit",
-        )
-    }
-
-    /**
-     * **Stops the subagents whose warm ceiling has passed — after the turn, never during one.**
-     *
-     * The operator's rule is one number with two jobs: *"idle timeout is exactly keepalive timeout
-     * (as we have for chat agent already), just for subagents."* So reaching the ceiling while a
-     * subagent is idle stops it; reaching it while a turn is running lets the turn finish and stops
-     * it afterwards.
-     *
-     * **A stop is never a kill**, which is the same rule `Stop all agents` follows and the reason
-     * the busy set is asked first: a turn killed mid-write is the half-file the app spends effort
-     * preventing, and the ceiling is a cost bound rather than an emergency.
-     *
-     * **What "stopped" means here is a blank task**, not a retired id: the id stays live, its
-     * record stays where it is, and the next task wakes it with its context intact — which is what
-     * "keeps its context between tasks" bought.
-     */
-    private fun retireOverdue(project: String, now: Long) {
-        val warmMs = settings.subagentWarmMs
-        if (warmMs <= 0) return
-        val running = synchronized(inFlight) { inFlight.toSet() }
-        for (sub in AgentSubagents(ws.accountDir).read(project)) {
-            if (sub.retired) continue
-            // **Only an idle one is stopped.** A subagent with a task outstanding is about to run,
-            // and one whose turn is on the worker is running now.
-            if (sub.task.isNotBlank()) continue
-            if (subagentId(project, sub.id) in running) continue
-            val idle = now - sub.lastAt
-            if (idle < warmMs) continue
-            // **Asleep, not retired.** Its id, its record and its context all stay; the next task
-            // wakes it where it left off, which is what "keeps its context between tasks" bought.
-            AgentSubagents(ws.accountDir).sleep(project, sub.id, asleep = true)
-            Trace.note("subagent-stop", "$project #${sub.id} · idle ${idle / 60_000} min")
-        }
-    }
-
-    /**
-     * The subagent with a task to run, oldest first — **and `busy` is asked of the runner, not of
-     * the registry.**
-     *
-     * A subagent is busy while its turn is on the worker, and the registry has no way to know that:
-     * it holds ids and tasks, not threads. So the in-flight set is the authority, and the registry is
-     * the list of what to do next.
-     */
-    private fun nextSubagent(project: String): AgentSubagents.Sub? {
-        val registry = AgentSubagents(ws.accountDir)
-        val running = synchronized(inFlight) { inFlight.toSet() }
-        return registry.read(project)
-            // **`stopped` is not a filter here**, and that is deliberate: a stopped subagent with a
-            // task has been given work, and the work is what wakes it. Only a retired one is
-            // permanently out.
-            .filter { !it.retired && it.task.isNotBlank() }
-            .firstOrNull { subagentId(project, it.id) !in running }
-    }
-
-    /**
-     * **Runs one subagent's task, on this runner's worker, and reports into the chat agent's log.**
-     *
-     * The task is claimed before the work goes out — by putting a blank task on the registry entry —
-     * so a second tick while this one is running does not start it twice. That is the same shape as
-     * `dispatch`'s session claim, for the same reason.
-     */
-    private fun runSubagent(session: AgentSession, now: Long) {
-        val project = session.project
-        val registry = AgentSubagents(ws.accountDir)
-        val sub = nextSubagent(project) ?: return
-        val task = sub.task
-        // **Claimed, before the work.** A blank task is "nothing outstanding"; the id stays live so
-        // the count is unchanged and a report still names the right agent.
-        registry.touchTask(project, sub.id, "")
-        // **A task wakes a sleeping subagent**, and its context is still there — which is the whole
-        // difference between asleep and retired.
-        registry.sleep(project, sub.id, asleep = false)
-        synchronized(inFlight) { inFlight += subagentId(project, sub.id) }
-        // **Said on the registry too**, because the registry is the only thing the `subagent` tool
-        // can see: a blank task means "nothing outstanding" for a subagent mid-turn and for one that
-        // finished an hour ago alike, so without this a model asking `list` cannot tell working from
-        // waiting — which is the whole question it is asking.
-        registry.busy(project, sub.id, working = true)
-        // **Outside the `try`**, because the `finally` that clears it is outside too — and a cut mark
-        // that outlived its turn would stop the next task the chat agent gives.
-        val key = subagentId(project, sub.id)
-        Trace.note("subagent-run", "$project #${sub.id} · ${task.take(40)}")
-        worker.execute {
-            try {
-                val run = SubagentRun(
-                    ws = ws,
-                    git = git,
-                    settings = settings,
-                    door = door,
-                    model = model,
-                    onPage = onPage,
-                    browser = browser,
-                    fetcher = fetcher,
-                    mcp = mcp,
-                    credentials = credentials,
-                    scanner = scanner,
-                    fetchAllowed = fetchAllowed,
-                    github = github,
-                    githubToken = githubToken,
-                    downloads = downloads,
-                    // **The report lands in the chat agent's own record**, which is what makes it
-                    // arrive in the conversation it belongs to rather than in a file nobody reads.
-                    report = { p, from, body ->
-                        try {
-                            AgentLog.open(ws.projectDir(p)).report(from, body)
-                        } catch (t: Throwable) {
-                            // A report that cannot be written is worth less than the work it
-                            // describes: the trace still says the subagent ran.
-                            Trace.note("subagent-report-failed", "$p #$from · ${Secrets.explain(t, "no record")}")
-                        }
-                    },
-                )
-                // **The cut is read per turn, and cleared when the turn ends** — a reset applies to
-                // the work in flight, not to whatever the chat agent asks for next.
-                val cut = { synchronized(cutSubagents) { key in cutSubagents } }
-                when (val done = run.run(project, sub.id, task, cut)) {
-                    is SubagentRun.Done.Reported ->
-                        Trace.note("subagent-done", "$project #${sub.id} · ${done.said.take(60)}")
-                    is SubagentRun.Done.Failed ->
-                        Trace.note("subagent-failed", "$project #${sub.id} · ${done.why}")
-                }
-                registry.touched(project, sub.id, at = System.currentTimeMillis())
-            } finally {
-                // **The cut is cleared with the turn it applied to.** Left behind, it would stop the
-                // *next* task the chat agent gives — a reset that keeps working long after it was
-                // asked for, which is the opposite of what a reset is.
-                synchronized(cutSubagents) { cutSubagents -= key }
-                // **Cleared in a `finally`, so a turn that throws still ends.** A subagent left
-                // looking busy would be one the model never gives anything else to.
-                registry.busy(project, sub.id, working = false)
-                synchronized(inFlight) { inFlight -= subagentId(project, sub.id) }
-            }
-        }
-    }
-
-    /**
-     * **A subagent's claim key, which is not the project's.**
-     *
-     * The project's key is its name, because a session is one per project. A subagent shares its
-     * project's name and is a different worker, so its key has to carry the id — otherwise a
-     * subagent running would block its own project's keepalive, and two subagents would block each
-     * other.
-     */
-    private fun subagentId(project: String, id: Int): String = "$project#sub$id"
-
-    /**
-     * **Subagents whose turn the chat agent has cut**, cleared when the turn ends.
-     *
-     * A set rather than a flag on the registry entry, because it is about *this turn* rather than
-     * about the subagent: the reset has already cleared the task, so nothing new will start; what
-     * this answers is whether the turn already running should stop at its next boundary.
-     */
-    private val cutSubagents = mutableSetOf<String>()
 
     /** What the agent is told, in the conversation, about the command that landed. */
     private fun woke(finished: List<Background.Done>): String = buildString {
@@ -724,14 +387,6 @@ class AgentRunner(
                     github = github,
                     githubToken = githubToken,
                     downloads = downloads,
-                    // **The ceiling, read at the moment of the call.** A person who lowers the
-                    // number while an agent is idle means the next `subagent` call is refused —
-                    // not that the runner keeps offering what was allowed when it was built.
-                    subagentLimit = { settings.subagentCount },
-                    // **The one thing the agent may do to a subagent's turn**, supplied here
-                    // because the runner owns the in-flight set and the log. An agent built without
-                    // a runner gets the do-nothing default, so a test cannot half-reset.
-                    onSubagentReset = { p, id -> resetSubagent(p, id) },
                 )
                 if (waking == null) {
                     agent.warm() to log.rows()
@@ -851,47 +506,6 @@ class AgentRunner(
         // **Only a session that just started needing somebody speaks.** Otherwise every reminder
         // tick would also post here, and the reminder count would never leave the first one.
         if (speak && session.needsYou && session.reminders == 0) notify(session)
-    }
-
-    /**
-     * **A subagent the chat agent has asked to reset: its turn is cut, and its context cleared.**
-     *
-     * The id, the folder and the record all stay. The operator's rule, and the reason: `agent/2/`
-     * means "subagent 2, across its whole life", so a reset is visibly the same agent rather than a
-     * new one wearing its number — and the record is the only account of what it did.
-     *
-     * **The turn is cut, not killed.** `Agent.cut` is checked between requests and again before a
-     * reply is acted on, so the request in flight finishes and the next boundary stops — the same
-     * rule `Stop all agents` follows. A cut is recorded in the mark so a turn that has not yet
-     * started does not run at all.
-     */
-    fun resetSubagent(project: String, id: Int) {
-        // **Marked before the log is touched**, so a turn that starts between these two lines still
-        // sees it and stops at its first boundary.
-        synchronized(cutSubagents) { cutSubagents += subagentId(project, id) }
-        Trace.tap("subagent reset", "$project #$id")
-        try {
-            val log = AgentLog.openAt(File(ws.projectDir(project), "${AgentLog.DIR}/$id"))
-            val row = log.reset(
-                "the chat agent reset this subagent — its working context was cleared. " +
-                    "What it did is still in ${AgentLog.DIR}/$id/${AgentLog.SESSION}",
-            )
-            Trace.note("subagent-reset", "$project #$id · row $row")
-        } catch (t: Throwable) {
-            // **The cut still stands**, because the cut is the part that stops work nobody wants.
-            // The context survives, which is the safe half to lose: a subagent that keeps stale
-            // context and stops is better than one that keeps running because its log would not open.
-            Trace.note(
-                "subagent-reset-failed",
-                "$project #$id · ${Secrets.explain(t, "the context was kept")}",
-            )
-        }
-        // **Idle again, and with nothing outstanding** — a reset subagent is one you may give a task
-        // to, which is the whole point of resetting rather than retiring it.
-        AgentSubagents(ws.accountDir).apply {
-            touchTask(project, id, "")
-            busy(project, id, working = false)
-        }
     }
 
     /**

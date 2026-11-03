@@ -174,24 +174,6 @@ object AgentPrompt {
           Anything in the project. The two exceptions: names that start with a dot (the app's, and
           `.git` above all), and `agent/`, which is the record and is yours to read, not to write.
           `forget` is the one thing you may do to your context, and it names ids.
-
-        SUBAGENTS
-          The operator may allow you other agents, working in this project beside you. Each has its
-          own record and its own context, and it keeps that context between tasks.
-          - `subagent {"do":"list"}` says what exists: `live` (waiting, and you may give it work),
-            `working` (a turn is running right now, so a second task is refused), `asleep` (it
-            reached its warm ceiling; a task wakes it, context intact), `retired` (the operator
-            lowered the limit and it does not come back - start a new one instead). The first line
-            says how many of how many allowed are in use.
-          - `start` answers at once with an id. The work has begun, not finished: do not wait for
-            it, and do not poll. Its report arrives in this conversation as a row you did not ask
-            for, and that is when you read it.
-          - **Do not start a subagent to do the next thing you were going to do yourself.** It is
-            for work that runs while you are doing something else, or that is worth a separate
-            context - a long check, a survey of many files. Work you can finish in a call or two is
-            yours.
-          - If the operator allows none, `start` is refused with a sentence saying so. That is a
-            setting, not a fault: carry on and do the work yourself.
     """.trimIndent()
 
     /** ② — the project's own instructions, empty until somebody writes them. */
@@ -264,23 +246,6 @@ object AgentPrompt {
         layer(systemFile(accountDir), SYSTEM_DEFAULT)
 
     /**
-     * The layers for a **subagent**: the shared system and project layers, plus what it lacks.
-     *
-     * [has] and [everything] are the two tool lists — `specs()` for each scope — so the sentence is
-     * generated at the moment the prompt is built and cannot drift from the tools that exist.
-     */
-    fun readScoped(
-        accountDir: File,
-        projectDir: File,
-        everything: List<String>,
-        has: List<String>,
-    ): Layers = Layers(
-        system(accountDir),
-        project(projectDir),
-        unavailable = missingFrom(everything, has),
-    )
-
-    /**
      * ② for the project in [projectDir].
      *
      * **`mayCreate = false`, because a project that is not there is not a project to write to.** See
@@ -302,32 +267,6 @@ object AgentPrompt {
     }
 
     /**
-     * **What [scoped] cannot do, computed from the two tool lists.**
-     *
-     * The whole reason this is a function rather than a paragraph: a list written by hand drifts.
-     * A tool added to [AgentTools.specs] later would be missing from a hand-written sentence, and
-     * the failure is invisible — the model simply never learns, and tries the command.
-     *
-     * Takes the two lists rather than reading them, so the sentence can be tested with two strings
-     * and so the caller decides which sets are being compared.
-     */
-    fun missingFrom(everything: List<String>, has: List<String>): String {
-        val missing = everything.filter { it !in has }.sorted()
-        if (missing.isEmpty()) return ""
-        return buildString {
-            append("WHAT YOU DO NOT HAVE\n")
-            append("  This agent has no ")
-            append(missing.joinToString(", ") { "`$it`" })
-            append(". Asking for one is refused, so do not spend a turn on it: ")
-            append(
-                if (missing.size == 1) "it is the chat agent's to do"
-                else "they are the chat agent's to do",
-            )
-            append(", and asking in your report is how the work gets done.\n")
-        }
-    }
-
-    /**
      * The two layers as they were at one moment, and the message they make together.
      *
      * **[read] is called at the start of a turn, never once at startup and never per request.**
@@ -343,19 +282,6 @@ object AgentPrompt {
     data class Layers(
         val system: String,
         val project: String,
-        /**
-         * What this agent cannot do, in one sentence — **generated, never written by hand.**
-         *
-         * A model that does not know a command is unavailable tries it, gets a refusal, and spends
-         * a turn learning what a sentence could have told it. But a hand-written list of what is
-         * missing is a list that drifts: a tool added later is silently absent from the sentence
-         * that promises it is absent, and the drift is invisible until a model asks for something
-         * the prompt said it could not have.
-         *
-         * So it is computed from the two tool lists — see [missingFrom] — and empty for an agent
-         * with everything, which is every chat agent.
-         */
-        val unavailable: String = "",
     ) {
         /** What the model is told: ①, then ②, and then nothing. */
         val message: String get() = withLine(null)
@@ -370,13 +296,6 @@ object AgentPrompt {
          */
         fun withLine(line: String?): String = buildString {
             append(system.trim())
-            // **Before the separator, so it is part of the instructions rather than a fact about
-            // the project.** What an agent cannot do is a property of the agent, and putting it
-            // after the project heading would make it read as a rule the person wrote.
-            if (unavailable.isNotBlank()) {
-                append("\n\n")
-                append(unavailable.trim())
-            }
             append(SEPARATOR)
             append("# This project\n\n")
             append(project.trim())

@@ -440,63 +440,6 @@ class SettingsStore(context: Context, name: String = "settings") {
     /** [warmMinutes] in milliseconds; zero is no ceiling. */
     val warmMs: Long get() = warmMinutes * 60_000L
 
-    // ---- subagents ---------------------------------------------------------
-
-    /**
-     * **How many subagents may run at once.** Zero turns them off.
-     *
-     * A ceiling on *live* subagents, not an identity: lowering it retires the first idle ones and
-     * leaves every record where it is, and raising it creates nothing. That is why this is one
-     * number and not a list — a list would be a second place saying which subagents exist, and the
-     * registry already says that.
-     */
-    var subagentCount: Int by mutableStateOf(prefs.getInt(KEY_SUBAGENT_COUNT, DEFAULT_SUBAGENT_COUNT))
-        private set
-
-    /** Sets the ceiling, clamped. */
-    fun keepSubagents(count: Int) {
-        val clean = count.coerceIn(0, MAX_SUBAGENTS)
-        Trace.tap("subagents", if (clean == 0) "off" else "$clean")
-        subagentCount = clean
-        prefs.edit().putInt(KEY_SUBAGENT_COUNT, clean).apply()
-        Trace.said(if (clean == 0) "no subagents" else "up to $clean subagents")
-    }
-
-    /**
-     * **How long a subagent is kept warm — which is also when it stops.**
-     *
-     * One number with two jobs, because the operator said so: *"idle timeout is exactly keepalive
-     * timeout (as we have for chat agent already), just for subagents. And subagents do need
-     * keepalive because they keep context between tasks."*
-     *
-     * Reaching it **stops** the subagent rather than leaving it cold, and that is the difference
-     * from the chat agent's ceiling: a chat agent waiting for a person should stay available; a
-     * subagent waiting for a task has nothing to be available *for* except the task, and the next
-     * one wakes it with its context intact.
-     *
-     * **The cost is N times the chat agent's**, and it belongs where the number is typed: at the
-     * defaults (3 subagents, 60 minutes) three idle subagents cost up to 45 pings an hour, each
-     * reading a full prompt at cache price.
-     */
-    var subagentWarmMinutes: Int by
-        mutableStateOf(prefs.getInt(KEY_SUBAGENT_WARM, DEFAULT_SUBAGENT_WARM))
-        private set
-
-    /** Sets a subagent's warm ceiling, clamped. Zero means no ceiling. */
-    fun keepSubagentWarm(minutes: Int) {
-        val clean = minutes.coerceIn(0, MAX_WARM_MINUTES)
-        Trace.tap("subagent warm", if (clean == 0) "until its next task" else "$clean min")
-        subagentWarmMinutes = clean
-        prefs.edit().putInt(KEY_SUBAGENT_WARM, clean).apply()
-        Trace.said(
-            if (clean == 0) "a subagent waits until its next task"
-            else "a subagent stops after $clean min idle",
-        )
-    }
-
-    /** A subagent's ceiling in milliseconds; zero is no ceiling. */
-    val subagentWarmMs: Long get() = subagentWarmMinutes * 60_000L
-
     /** The interval in milliseconds, with the design's own when the person set none. */
     val pollMs: Long
         get() = if (pollSeconds <= 0) {
@@ -902,17 +845,6 @@ class SettingsStore(context: Context, name: String = "settings") {
     const val KEY_WARM_MINUTES = "agent_warm_minutes"
 
     /**
-     * **The subagents block, kept apart from the chat agent's.**
-     *
-     * The operator's correction: *"we dont copy subagents from chat agents - we select and set up
-     * them separately (but they do share model and provider list)."* So these are their own keys
-     * rather than a copy of the ones above, and what is shared is the catalogue the rows choose
-     * from, not the choice.
-     */
-    const val KEY_SUBAGENT_COUNT = "subagent_count"
-    const val KEY_SUBAGENT_WARM = "subagent_warm_minutes"
-
-    /**
      * **Whether the agent may reach this phone and the private network**, and how long a page may
      * take.
      *
@@ -977,19 +909,6 @@ class SettingsStore(context: Context, name: String = "settings") {
      */
     const val DEFAULT_WARM_MINUTES = 60
 
-    /** **Off until somebody asks**, like every other capability that spends money in parallel. */
-    const val DEFAULT_SUBAGENT_COUNT = 0
-
-    /**
-     * **Eight**, which is a number a phone can run without the bill being a surprise.
-     *
-     * Not a technical limit: each subagent is a session, a log and a turn at a time, and the app has
-     * one worker per runner. Eight is where the arithmetic stops being comfortable — eight idle
-     * subagents at the default ceiling is 120 pings an hour.
-     */
-    const val MAX_SUBAGENTS = 8
-
-    const val DEFAULT_SUBAGENT_WARM = 60
     const val MAX_WARM_MINUTES = 1_440
 
     /**

@@ -77,7 +77,6 @@ class AgentSessions(private val accountDir: File) {
             idleMs = json.optLong("idleMs", 0).coerceAtLeast(0),
             warmFrom = json.optLong("warmFrom", 0).coerceAtLeast(0),
             wokenThrough = json.optLong("wokenThrough", 0).coerceAtLeast(0),
-            reportedThrough = json.optInt("reportedThrough", 0).coerceAtLeast(0),
             lastWords = json.optString("lastWords"),
         )
     } catch (t: Throwable) {
@@ -135,7 +134,6 @@ class AgentSessions(private val accountDir: File) {
         .put("idleMs", s.idleMs)
         .put("warmFrom", s.warmFrom)
         .put("wokenThrough", s.wokenThrough)
-        .put("reportedThrough", s.reportedThrough)
         .put("lastWords", s.lastWords)
 
     /** An enum by name, and [fallback] rather than a crash when the file holds something else. */
