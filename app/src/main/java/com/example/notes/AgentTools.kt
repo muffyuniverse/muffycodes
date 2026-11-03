@@ -182,7 +182,7 @@ class AgentTools(
      * Keyed by canonical path, and only ever consulted on a write. Bounded, because a long turn
      * reads many files and a map that grew for ever would be a leak in a session that never ends.
      */
-    private val readAt = java.util.concurrent.ConcurrentHashMap<String, Seen>()
+    private val readAt = java.util.concurrent.ConcurrentHashMap<String, ReadMark>()
 
     /** How many reads are remembered; past this the oldest is forgotten. */
     private val READ_MEMORY = 256
@@ -196,7 +196,7 @@ class AgentTools(
      * edited to exactly the same length inside the same second is the one case this misses, and it
      * is a case no cheap check can see.
      */
-    private data class Seen(val size: Long, val at: Long)
+    private data class ReadMark(val size: Long, val at: Long)
 
     /** The project's own folder: what the agent stands in. */
     val projectDir: File get() = ws.projectDir(project)
@@ -1722,7 +1722,7 @@ class AgentTools(
         val file = resolve(raw).getOrNull() ?: return
         if (!file.isFile) return
         if (readAt.size >= READ_MEMORY) readAt.clear()
-        readAt[file.absolutePath] = Seen(file.length(), file.lastModified())
+        readAt[file.absolutePath] = ReadMark(file.length(), file.lastModified())
     }
 
     /**
