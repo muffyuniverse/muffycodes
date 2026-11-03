@@ -1070,8 +1070,12 @@ jobs:
                         printf "::warning title=Shard balance::the deal is %ds apart. A time-aware split would recover it, and would reshuffle every shard whenever a class is added.\n", worst - min
                 }' || echo "shard timings unavailable; not a failure"
 
+      # **A release branch only**, because there is no release APK anywhere else — and the checks below
+      # are about the artifact that gets published, which a branch never does. Found by CI: the step
+      # ran on `development` and `apksigner` answered "could not read the APK's certificates", which is
+      # true and unhelpful.
       - name: Check the signature of the APK
-        if: steps.decision.outputs.changed == 'yes'
+        if: steps.decision.outputs.changed == 'yes' && github.ref_name == 'main'
         env:
           EXPECTED_CERT: ${{ vars.EXPECTED_CERT }}
         run: |
@@ -1268,7 +1272,12 @@ jobs:
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
         run: |
           mkdir -p bundle
-          cp apk/app-release.apk bundle/
+          # **Either APK, never a failure for the one this branch does not build.** `debug for dev,
+          # release for main` means a development bundle has no release APK, and an unconditional
+          # `cp` here would fail the delivery for being correct.
+          if [ -f apk/app-release.apk ]; then
+            cp apk/app-release.apk bundle/
+          fi
           # The dev copy, when one was built. In the artifact, never in the release:
           # anything published is the shipping app and is attested.
           if [ -f dev/app-debug.apk ]; then
