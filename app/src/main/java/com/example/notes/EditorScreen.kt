@@ -81,6 +81,7 @@ import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.layout.offset
 
 /**
  * The editor: the file's name in the top row, and its text below.
