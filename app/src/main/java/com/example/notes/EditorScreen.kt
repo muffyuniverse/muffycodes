@@ -434,10 +434,27 @@ fun EditorScreen(
                     // that can only say it has no versions, which reads as a broken feature rather
                     // than as a file that is deliberately not versioned.
                     //
-                    // The rule is the file's own, not the folder's: a record or a request log has no
-                    // history to offer, so the act is not offered. Everything else in the project
-                    // keeps it, including files the person has not saved yet.
-                    if (!record) {
+                    // **A locked file has no history either, and for the same reason.** The
+                    // operator's rule: *"dont render history icon in system locked files as well -
+                    // they never have history"*. It is true of all four kinds, and each is kept out
+                    // of git by a different rule — which is why the test is `readOnly` rather than a
+                    // second list of paths to keep in step:
+                    //
+                    // | locked because | kept out by |
+                    // |---|---|
+                    // | an onboarding page | the system project has no `.git` at all |
+                    // | the agent's record | `APP_IGNORES` |
+                    // | a request log | `APP_IGNORES` |
+                    // | a secret (`.env`, `id_rsa`, `*.pem`) | `SECRET_PATTERNS` |
+                    //
+                    // **`readOnly`, and not `locked`.** The two differ by the agent's record, and a
+                    // record is the one locked file a person opens on purpose — so the rule that
+                    // hides this button has to be the one the editor already uses to mean "this
+                    // cannot be written", or the record would keep a button that lies.
+                    //
+                    // Everything else in the project keeps it, including files the person has not
+                    // saved yet.
+                    if (!readOnly) {
                         HistoryButton {
                             // The name is committed first: a version list is a list of this
                             // file's versions, and the file may just have been given another

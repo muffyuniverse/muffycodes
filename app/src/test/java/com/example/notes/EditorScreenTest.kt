@@ -433,6 +433,9 @@ class EditorScreenTest {
             // **And no back arrow**, because onboarding is the sequence that signs the account in:
             // a door out of it is a door out of the thing that has to happen first.
             compose.onNodeWithContentDescription("Back without saving").assertDoesNotExist()
+            // **And no history**, because the system project has no repository at all — so a page
+            // in it has never been committed and never can be.
+            compose.onNodeWithContentDescription("This file's history").assertDoesNotExist()
         } finally {
             phone.close()
         }
@@ -533,11 +536,15 @@ class EditorScreenTest {
     }
 
     @Test
-    fun `a record cannot reach Edit, and Diff still opens`() {
-        // **Falsification of the obvious guard**: that a read-only file blocks the whole row. The
-        // record is about writing, and reading a file's history is not writing it, so Diff has to
-        // stay open - a rule that greyed the row out would take away something the record never
-        // forbade.
+    fun `a record cannot reach Edit, and is not offered a history it does not have`() {
+        // **This test used to assert the opposite**, and the correction is the operator's: *"dont
+        // render history icon in system locked files as well - they never have history"*.
+        //
+        // The old reasoning was "reading a file's history is not writing it, so Diff stays open" —
+        // which is true of *reading* and false of this file. The record lives in `agent/`, and
+        // `APP_IGNORES` keeps that whole folder out of the repository, so there is no history to
+        // read: the Diff screen could only ever say "nothing to compare", for ever. A mode that
+        // cannot succeed is the same lie as a button that cannot succeed.
         //
         // A *record*, not a user-locked file: the person may still edit what they locked themselves.
         val file = File(scene.workspace!!.projectDir("groceries"), "${AgentLog.DIR}/${AgentLog.CONTEXT}")
@@ -546,17 +553,10 @@ class EditorScreenTest {
         editorFor(file)
 
         compose.onNodeWithText("Edit").assertIsNotEnabled()
-        compose.onNodeWithText("Diff").assertIsEnabled()
-        compose.onNodeWithText("Diff").performClick()
-        compose.waitForIdle()
-        // **Diff was actually reached**, which is a fact about the screen rather than about the
-        // chip: a mode that was entered shows the mode's own content, and this file has one commit,
-        // so the honest answer is that there is nothing to compare it against.
-        compose.waitUntil(10_000) {
-            compose.onAllNodesWithText("nothing to compare", substring = true)
-                .fetchSemanticsNodes().isNotEmpty()
-        }
-        compose.onNodeWithText("nothing to compare", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Diff").assertIsNotEnabled()
+        compose.onNodeWithContentDescription("This file's history").assertDoesNotExist()
+        // **And it is still readable**, which is the whole point of the record existing.
+        compose.onNodeWithText("something happened", substring = true).assertIsDisplayed()
     }
 
     @Test
