@@ -405,16 +405,6 @@ class Agent(
         data class Failed(val why: String, val stopping: Boolean = false) : Warm()
 
         companion object {
-        /**
-         * **What a reply with no text is called**, in one place.
-         *
-         * It used to be a string literal inside `wordsWithoutCalls`, which meant anything asking "did
-         * it actually say anything" had to spell the sentence itself — and a caller that tested for
-         * emptiness got a branch that could never run. A subagent's report is the first caller that
-         * needed to tell the difference.
-         */
-        const val EMPTY_REPLY = "(the model said nothing)"
-
             /**
              * What a ping that could not be built says, **in the one place it can be changed.**
              *
@@ -426,6 +416,16 @@ class Agent(
     }
 
     companion object {
+        /**
+         * **What a reply with no text is called**, in one place.
+         *
+         * It used to be a string literal inside `wordsWithoutCalls`, which meant anything asking "did
+         * it actually say anything" had to spell the sentence itself — and a caller that tested for
+         * emptiness got a branch that could never run. A subagent's report is the first caller that
+         * needed to tell the difference.
+         */
+        const val EMPTY_REPLY = "(the model said nothing)"
+
         /**
          * The most requests one turn may make — **and it is a backstop, not a budget.**
          *
