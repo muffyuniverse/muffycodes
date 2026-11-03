@@ -266,6 +266,15 @@ class AgentRunner(
             // when that matters.
             if (finished.isNotEmpty() && agentId(current.project) !in polling()) {
                 wake(current, now, finished)
+            } else if (subagentsDue(current, now)) {
+                // **A subagent's task outranks a ping, and does not wait for the interval** — for
+                // the same reason a finished background command does not: the chat agent asked for
+                // work to start, and the work starting is the thing worth a turn.
+                //
+                // It is checked *after* a finished command because that is the chat agent's own work
+                // coming back, which it is waiting on; a subagent is work it asked to happen
+                // elsewhere.
+                runSubagent(current, now)
             } else if (
                 current.warmDue(now, keepAlive, pollMs, warmMs) &&
                 agentId(current.project) !in polling()
@@ -286,6 +295,108 @@ class AgentRunner(
      */
     private fun wake(session: AgentSession, now: Long, finished: List<Background.Done>) =
         dispatch(session, now, woke(finished))
+
+    // ---- subagents ----------------------------------------------------------
+
+    /**
+     * **Whether any subagent has a task waiting, and the answer is read from the registry.**
+     *
+     * The queue is the registry itself rather than a second list: a subagent whose `task` has not
+     * been run yet *is* a pending task, and a separate queue would be two places saying what is
+     * outstanding. `subagentPending` is the marker, and it is cleared when the turn starts — so a
+     * subagent that fails to run is not retried for ever on every tick.
+     */
+    private fun subagentsDue(session: AgentSession, now: Long): Boolean {
+        if (session.state == AgentSession.State.STOPPED) return false
+        if (agentId(session.project) in polling()) return false
+        return nextSubagent(session.project) != null
+    }
+
+    /**
+     * The subagent with a task to run, oldest first — **and `busy` is asked of the runner, not of
+     * the registry.**
+     *
+     * A subagent is busy while its turn is on the worker, and the registry has no way to know that:
+     * it holds ids and tasks, not threads. So the in-flight set is the authority, and the registry is
+     * the list of what to do next.
+     */
+    private fun nextSubagent(project: String): AgentSubagents.Sub? {
+        val registry = AgentSubagents(ws.accountDir)
+        val running = synchronized(inFlight) { inFlight.toSet() }
+        return registry.read(project)
+            .filter { !it.retired && it.task.isNotBlank() }
+            .firstOrNull { subagentId(project, it.id) !in running }
+    }
+
+    /**
+     * **Runs one subagent's task, on this runner's worker, and reports into the chat agent's log.**
+     *
+     * The task is claimed before the work goes out — by putting a blank task on the registry entry —
+     * so a second tick while this one is running does not start it twice. That is the same shape as
+     * `dispatch`'s session claim, for the same reason.
+     */
+    private fun runSubagent(session: AgentSession, now: Long) {
+        val project = session.project
+        val registry = AgentSubagents(ws.accountDir)
+        val sub = nextSubagent(project) ?: return
+        val task = sub.task
+        // **Claimed, before the work.** A blank task is "nothing outstanding"; the id stays live so
+        // the count is unchanged and a report still names the right agent.
+        registry.touchTask(project, sub.id, "")
+        synchronized(inFlight) { inFlight += subagentId(project, sub.id) }
+        Trace.note("subagent-run", "$project #${sub.id} · ${task.take(40)}")
+        worker.execute {
+            try {
+                val run = SubagentRun(
+                    ws = ws,
+                    git = git,
+                    settings = settings,
+                    door = door,
+                    model = model,
+                    onPage = onPage,
+                    browser = browser,
+                    fetcher = fetcher,
+                    mcp = mcp,
+                    credentials = credentials,
+                    scanner = scanner,
+                    fetchAllowed = fetchAllowed,
+                    github = github,
+                    githubToken = githubToken,
+                    downloads = downloads,
+                    // **The report lands in the chat agent's own record**, which is what makes it
+                    // arrive in the conversation it belongs to rather than in a file nobody reads.
+                    report = { p, from, body ->
+                        try {
+                            AgentLog.open(ws.projectDir(p)).report(from, body)
+                        } catch (t: Throwable) {
+                            // A report that cannot be written is worth less than the work it
+                            // describes: the trace still says the subagent ran.
+                            Trace.note("subagent-report-failed", "$p #$from · ${Secrets.explain(t, "no record")}")
+                        }
+                    },
+                )
+                when (val done = run.run(project, sub.id, task)) {
+                    is SubagentRun.Done.Reported ->
+                        Trace.note("subagent-done", "$project #${sub.id} · ${done.said.take(60)}")
+                    is SubagentRun.Done.Failed ->
+                        Trace.note("subagent-failed", "$project #${sub.id} · ${done.why}")
+                }
+                registry.touched(project, sub.id, at = System.currentTimeMillis())
+            } finally {
+                synchronized(inFlight) { inFlight -= subagentId(project, sub.id) }
+            }
+        }
+    }
+
+    /**
+     * **A subagent's claim key, which is not the project's.**
+     *
+     * The project's key is its name, because a session is one per project. A subagent shares its
+     * project's name and is a different worker, so its key has to carry the id — otherwise a
+     * subagent running would block its own project's keepalive, and two subagents would block each
+     * other.
+     */
+    private fun subagentId(project: String, id: Int): String = "$project#sub$id"
 
     /** What the agent is told, in the conversation, about the command that landed. */
     private fun woke(finished: List<Background.Done>): String = buildString {

@@ -124,6 +124,31 @@ class AgentSubagents(private val accountDir: File) {
         false
     }
 
+    /**
+     * **Sets what [id] is owed next — and a blank task is the claim that clears it.**
+     *
+     * The registry is the queue, rather than a second list beside it: a subagent whose `task` has not
+     * run yet *is* a pending task, and two places saying what is outstanding is two answers to one
+     * question. The runner claims by writing `""` before the work goes out, so a tick during the turn
+     * does not start it twice.
+     *
+     * **It does not clear `retired`.** A retired subagent keeps its place and its record; only
+     * `fitTo` and `retire` write that flag.
+     */
+    fun touchTask(project: String, id: Int, task: String) {
+        synchronized(guard) {
+            val root = readRoot()
+            val list = root.optJSONObject(project)?.optJSONArray(LIST) ?: return
+            for (i in 0 until list.length()) {
+                val one = list.optJSONObject(i) ?: continue
+                if (one.optInt(ID, 0) != id) continue
+                one.put(TASK, task)
+                writeRoot(root)
+                return
+            }
+        }
+    }
+
     /** Records that [id] did something, so the count knows which is the first idle one. */
     fun touched(project: String, id: Int, at: Long = System.currentTimeMillis()) {
         synchronized(guard) {

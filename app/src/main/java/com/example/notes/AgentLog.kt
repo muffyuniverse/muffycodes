@@ -232,8 +232,17 @@ class AgentLog private constructor(
          * remove. Reported as an intermittent test failure: "the folder is really gone before the
          * tick", where the folder had been recreated between the delete and the assert.
          */
-        fun open(projectDir: File): AgentLog {
-            val dir = File(projectDir, DIR)
+        fun open(projectDir: File): AgentLog = openAt(File(projectDir, DIR))
+
+        /**
+         * **A record at an arbitrary folder, which is how a subagent gets its own.**
+         *
+         * [open] is this plus the `agent/` suffix, because a project's record is always there. A
+         * subagent's is `agent/<id>/`, and passing that to [open] would give `agent/<id>/agent/` —
+         * a folder nobody would think to look in, created by a reader, which is the exact shape of
+         * the bug that made a deleted project come back.
+         */
+        fun openAt(dir: File): AgentLog {
             val log = AgentLog(File(dir, SESSION), File(dir, CONTEXT))
             // **Read and sized under one hold of the lock.** Parsing outside it and then asking the
             // file's length inside is the race this class exists to prevent: another writer appends

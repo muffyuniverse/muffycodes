@@ -40,6 +40,7 @@ RepoLocksTest app/src/main/java/com/example/notes/RepoLocks.kt app/src/main/java
 ScopeTest app/src/main/java/com/example/notes/Scope.kt app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Workspace.kt
 AgentSubagentsTest app/src/main/java/com/example/notes/AgentSubagents.kt app/src/main/java/com/example/notes/AgentLog.kt app/src/main/java/com/example/notes/Workspace.kt
 SubagentToolTest app/src/main/java/com/example/notes/AgentSubagents.kt app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/AgentLog.kt
+SubagentRunTest app/src/main/java/com/example/notes/SubagentRun.kt app/src/main/java/com/example/notes/AgentSubagents.kt app/src/main/java/com/example/notes/AgentRunner.kt
 AccountStoreTest app/src/main/java/com/example/notes/AccountStore.kt
 VisibilityFeatureTest app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AppViewModel.kt
 FilesFeatureTest app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/CommitMessage.kt
