@@ -1069,6 +1069,51 @@ fun ReportButton(onReport: () -> Unit) {
 }
 
 /**
+ * **Photograph this page**, as an icon rather than the word it used to be.
+ *
+ * The operator's report: *"make sure that "photo" is an icon button"*. It sits beside the report
+ * icon, and a word there took a third of the top bar from the file's own name.
+ *
+ * **Drawn, not imported**, for the same reason as [ReportButton]: `Icons.Filled.PhotoCamera` lives in
+ * material-icons-extended, and this app does not carry that whole set for one glyph.
+ *
+ * A camera is a body and a lens, and the body has the little raised shoulder that says "viewfinder"
+ * without a second stroke.
+ */
+@Composable
+fun PhotoButton(onPhoto: () -> Unit) {
+    val ink = MaterialTheme.colorScheme.onSurfaceVariant
+    IconButton(onClick = onPhoto) {
+        Canvas(
+            modifier = Modifier
+                .size(22.dp)
+                .semantics { contentDescription = "Photograph this page" },
+        ) {
+            val w = size.width
+            val h = size.height
+            val stroke = w * 0.075f
+            // The body, with the raised shoulder on the left of the top edge.
+            drawRoundRect(
+                color = ink,
+                topLeft = Offset(w * 0.06f, h * 0.30f),
+                size = Size(w * 0.88f, h * 0.56f),
+                cornerRadius = CornerRadius(w * 0.10f, w * 0.10f),
+                style = Stroke(width = stroke),
+            )
+            drawLine(ink, Offset(w * 0.22f, h * 0.30f), Offset(w * 0.30f, h * 0.18f), stroke)
+            drawLine(ink, Offset(w * 0.30f, h * 0.18f), Offset(w * 0.46f, h * 0.18f), stroke)
+            // The lens.
+            drawCircle(
+                color = ink,
+                radius = w * 0.16f,
+                center = Offset(w * 0.5f, h * 0.58f),
+                style = Stroke(width = stroke),
+            )
+        }
+    }
+}
+
+/**
  * **The other half of each pair: a whole chain, and an open padlock.**
  *
  * The operator's report: "dont use just one icon for two states for lock and sync. tell me if it is

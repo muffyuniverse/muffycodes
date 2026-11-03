@@ -71,6 +71,16 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Animatable
 
 /**
  * The editor: the file's name in the top row, and its text below.
@@ -119,7 +129,7 @@ fun EditorScreen(
     onReport: () -> Unit = {},
 ) {
     /**
-     * **A page that must be read to the end**, so fullscreen has no Exit.
+     * **A page that must be read to the end**, so it has no Back and no Exit.
      *
      * **Read from the view model, not taken as a parameter**, because the rule is the app's and not
      * the caller's: onboarding is a state the whole app is in, and a screen that had to be *told*
@@ -171,20 +181,6 @@ fun EditorScreen(
      * into Diff" look the same on a screen with no log. The name is the mode's own lowercase word,
      * so the trace reads `EDITOR VIEW milk.txt` rather than a sentence about a button.
      */
-    /**
-     * **Whether the page is being read rather than edited** — fullscreen, with nothing on it but the
-     * document and two buttons.
-     *
-     * Reading a page inside an editor is reading through a keyhole: a top bar, a mode row and a name
-     * field are all things the eye has to skip past to reach the words. Fullscreen is the mode for
-     * *reading*, which is why it exists at all — the operator's words: "I want for editor view to
-     * open file render full-screen, not just inside editing container".
-     *
-     * It is a separate state rather than a fourth `Mode` because it is not a different way to edit
-     * a file: it is View with the furniture taken away. Making it a mode would mean every `when
-     * (mode)` in this function had a case that means "View, but also this".
-     */
-    var fullscreen by remember(session) { mutableStateOf(false) }
     /**
      * Writes the text if it differs from what is on disk, and does nothing otherwise.
      *
@@ -367,12 +363,25 @@ fun EditorScreen(
         topBar = {
             TopAppBar(
                 navigationIcon = {
-                    // Back, and it means back: what was typed and not saved goes.
-                    IconButton(onClick = { leave() }) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back without saving",
-                        )
+                    // **No way back off an onboarding page until the account is connected.**
+                    // The operator's rule: *"can you just not render <- back button for
+                    // onboarding/ files until github and openrouter are signed in?"* Onboarding is
+                    // the sequence that *does* the signing in, so a door out of it is a door out of
+                    // the thing that has to happen first — and it is the same reason [closeEditor]
+                    // refuses. Hidden rather than disabled: a greyed arrow on a page with no other
+                    // chrome is a button that says "you may not", and there is nothing to say.
+                    //
+                    // **Only on onboarding pages.** An ordinary file opened while signed out is a
+                    // file a person may have opened to read, and trapping them in it would be the
+                    // rule applied to the wrong thing.
+                    if (!mustFinishReading) {
+                        // Back, and it means back: what was typed and not saved goes.
+                        IconButton(onClick = { leave() }) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back without saving",
+                            )
+                        }
                     }
                 },
                 title = {
@@ -438,101 +447,43 @@ fun EditorScreen(
                     }
                     // **Photo turns this page into a picture**, so a person can circle a paragraph
                     // and say "this goes there" — the correction that cannot be said in words.
-                    // Only for text: an image has no view to photograph.
-                    if (kind == EntryKind.TEXT) {
-                        TextButton(
-                            onClick = {
-                                focus.clearFocus()
-                                viewModel.photograph(text)
-                            },
-                        ) { Text("Photo") }
+                    //
+                    // **An icon, not a word**, because it sits beside the report icon and a word
+                    // there took a third of the bar from the file's own name.
+                    //
+                    // **Absent where the picture could not be written.** A photograph is written
+                    // *beside* the page it came from, so a locked folder has nowhere to put it:
+                    // `Workspace.writeBytes` refuses, and the button would be an act that always
+                    // fails. The operator's words: *"make sure that it cant be triggered from a
+                    // system locked folder (otherwise it will clash with readonly lock when saving
+                    // the photo)"*. The record is the same case — a picture beside a log is a file
+                    // the app will not make.
+                    if (kind == EntryKind.TEXT && !readOnly) {
+                        PhotoButton {
+                            focus.clearFocus()
+                            viewModel.photograph(text)
+                        }
                     }
                     ReportButton(onReport)
                 },
             )
         },
     ) { padding ->
-        // **Fullscreen replaces the frame, not the contents.** Drawn here rather than as a separate
-        // screen so the document, the scroll position and the link handler are the same ones the
-        // editor was already using — a second screen would be a second reader, and the two would
-        // drift.
-        if (fullscreen) {
-            Box(modifier = Modifier.fillMaxSize().padding(padding)) {
-                ReadOnlyPage(
-                    file = file,
-                    text = text,
-                    onLink = onLink,
-                    // **The page follows the finger, and the next one opens at its top.** A swipe is
-                    // a move through a folder in the order it is listed, which is the order the
-                    // person was reading in.
-                    //
-                    // **No arbitration with the scroll, and none is needed**: a vertical scroll
-                    // consumes vertical deltas and a horizontal detector consumes horizontal ones,
-                    // so a page being scrolled can still be swiped. What a person sees is the page
-                    // at rest at the top of whatever they land on, because the new file is a new
-                    // `remember(file)` — nothing is inherited.
-                    onStep = { steps ->
-                        val at = viewModel.onboardingIndexOf(file)
-                        val beside = viewModel.fileBeside(file, steps)
-                        // **Swiping past the last page finishes onboarding.** A bounce there would
-                        // be a wall with no door: Exit is disabled, so the last page would be a
-                        // place a person could never leave. The gesture that brought them through
-                        // the pages is the gesture that ends them.
-                        val finishing = beside == null && at >= 0 && steps > 0 &&
-                            at == Onboarding.pages().lastIndex
-                        if (finishing) {
-                            Trace.tap("onboarding finish")
-                            viewModel.finishOnboarding()
-                            onBack()
-                        } else if (beside != null) {
-                            Trace.tap("swipe file", beside.name)
-                            // **Saved first, and only if it changed.** A swipe out of Edit would
-                            // otherwise be the one way to lose writing, since leaving is a save
-                            // everywhere else.
-                            autosaveIfChanged()
-                            viewModel.openEditor(beside)
-                        } else {
-                            // **The bounce is the answer at either end**, so nothing is done and
-                            // nothing is said: a message per swipe would be the app explaining a
-                            // wall the person can feel.
-                            Trace.note("swipe file", if (steps > 0) "past the last" else "before the first")
-                        }
-                    },
-                )
-                // **Two buttons, and only two.** Exit returns to the editor; Edit goes straight to
-                // writing. Anything else on this screen would be furniture, which is the thing
-                // fullscreen exists to remove.
-                Row(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    TextButton(
-                        // **Disabled while the page must be read to the end.** Onboarding is the
-                        // only such page today, and it is why this is a parameter rather than a
-                        // constant: a page a person cannot leave needs no second way to be left.
-                        enabled = !mustFinishReading,
-                        onClick = { Trace.tap("editor exit"); fullscreen = false },
-                    ) { Text("Exit") }
-                    TextButton(
-                        enabled = !readOnly,
-                        onClick = {
-                            Trace.tap("editor edit")
-                            fullscreen = false
-                            choose(Mode.EDIT)
-                        },
-                    ) { Text("Edit") }
-                }
-            }
-            return@Scaffold
-        }
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             // **One row: the modes on the left, Save on the right.** It was two - modes alone,
             // then History and Save - because three modes and two acts did not fit on a phone. Moving
             // History to the top bar is what bought the row back, which is the operator's point:
             // "put it on the same row with save button".
-            Row(
+            // **A system-locked file has no row at all.** Every control on it would be disabled —
+            // Edit, Diff, Reset — so the row would be three greyed words and one live one that is
+            // already selected. The operator's rule: *"instead of greying out just dont render the
+            // row at all, because it will just have view active on it which is default anyway — but
+            // that is only for system locked files (such as onboarding/)"*.
+            //
+            // **Not for the agent's record**, which is `readOnly` too but is a different case: it
+            // is not locked, it is the app's, and the sentence above the text explains what may be
+            // done to it. Hiding the row there would hide the explanation's subject.
+            if (!locked) Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
@@ -580,10 +531,6 @@ fun EditorScreen(
                             // person who pressed View from Edit would have opened the page and
                             // found the Edit segment still highlighted behind it.
                             mode = Mode.VIEW
-                            // **View opens the page, not a mode.** Reading happens fullscreen, so the
-                            // segment is an entry to that surface rather than a third state of the
-                            // editor.
-                            fullscreen = true
                         }
                         ModeSegment("Edit", Mode.EDIT, selected = mode, enabled = !readOnly) {
                             choose(it)
@@ -640,7 +587,8 @@ fun EditorScreen(
                     },
                 ) { Text(if (kind == EntryKind.IMAGE) "Save" else "Reset") }
             }
-            HorizontalDivider()
+            // **No rule either**, because a divider is the line under a row and there is no row.
+            if (!locked) HorizontalDivider()
 
             // No sync row here. The editor is a page of writing, not a place where
             // projects are managed: a line of account, project and "3 changed" above
@@ -703,34 +651,46 @@ fun EditorScreen(
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                         )
                     }
-                    // Reading. A `.md` file is shown as the thing it describes,
-                    // because the markdown is not what its author wanted read; every
-                    // other text is shown exactly as it is.
-                    val scrolling = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .padding(16.dp)
-                    // **View mode is where a person copies from**, so it is selectable. Edit mode is
-                    // not: a selection there fights the text field's own cursor, and the field
-                    // already supports selecting and copying.
-                    SelectionContainer {
-                        if (isMarkdown(file)) {
-                            // The document's own folder, so a picture written beside the
-                            // note is the picture that appears.
-                            MarkdownBody(
-                                text = text,
-                                modifier = scrolling,
-                                baseDir = file.parentFile,
-                                onLink = onLink,
-                            )
-                        } else {
-                            Text(
-                                text = text,
-                                style = MaterialTheme.typography.bodyLarge,
-                                modifier = scrolling,
-                            )
-                        }
-                    }
+                    // **Reading is one surface, and it is where the swipe lives.** This used to be
+                    // a plainer reader beside a fullscreen one — the same document drawn twice, with
+                    // the swipe on only one of them, which is the drift that having two readers
+                    // always ends in.
+                    Reader(
+                        viewModel = viewModel,
+                        file = file,
+                        text = text,
+                        onLink = onLink,
+                        onStep = { steps ->
+                            val at = viewModel.onboardingIndexOf(file)
+                            val beside = viewModel.fileBeside(file, steps)
+                            // **Swiping past the last page finishes onboarding.** A bounce there
+                            // would be a wall with no door: onboarding has no Back and no Exit, so
+                            // the last page would be a place a person could never leave. The gesture
+                            // that brought them through the pages is the gesture that ends them.
+                            val finishing = beside == null && at >= 0 && steps > 0 &&
+                                at == Onboarding.pages().lastIndex
+                            if (finishing) {
+                                Trace.tap("onboarding finish")
+                                viewModel.finishOnboarding()
+                                onBack()
+                            } else if (beside != null) {
+                                Trace.tap("swipe file", beside.name)
+                                // **Saved first, and only if it changed.** A swipe out of Edit
+                                // would otherwise be the one way to lose writing, since leaving is
+                                // a save everywhere else.
+                                autosaveIfChanged()
+                                viewModel.openEditor(beside)
+                            } else {
+                                // **The bounce is the answer at either end**, so nothing is done
+                                // and nothing is said: a message per swipe would be the app
+                                // explaining a wall the person can feel.
+                                Trace.note(
+                                    "swipe file",
+                                    if (steps > 0) "past the last" else "before the first",
+                                )
+                            }
+                        },
+                    )
                 }
             }
         }
@@ -872,64 +832,182 @@ private sealed interface PictureState {
  * is the complexity the file model exists to avoid.
  */
 /**
- * A document with nothing around it.
+ * **A page, and the pages either side of it, so a swipe moves rather than redraws.**
  *
- * **The reading surface, and the only place a page is drawn at full size.** The editor's View mode
- * sits inside a column under a top bar and a mode row; this has neither. The difference is not
- * decoration — a page read to understand something should not have a name field three lines above
- * the first sentence.
+ * The old reader decided at the *end* of a gesture — `if (travelled > a third of the width) onStep(1)`
+ * — so nothing followed the finger and the next page appeared only after it had been read off disk
+ * and the whole editor had been re-keyed. That is a page *replaced*, not a page *turned*, and it is
+ * the difference the operator asked about: "is it possible to render screen you are swiping to and
+ * make a fluent moving transition and not just a redrawn screen?"
  *
- * **Markdown is rendered; anything else is shown as it is.** The rule is the editor's own, and it is
- * repeated rather than passed in because the two contexts differ in exactly one way (the furniture)
- * and nothing about *how* a document is drawn.
+ * **It is, and the cost is one page each side.** The neighbours are read when a page settles, so by
+ * the time a finger moves the page it is dragging toward is already text in memory. Two extra reads
+ * per page, once — against a gesture that would otherwise have nothing to show.
+ *
+ * **A picture is decoded ahead too**, because a neighbour that slid in as a grey box and filled in
+ * afterwards is the redraw this exists to avoid. That is the one real cost: two bitmaps alive at
+ * once. `BitmapFactory` gives us no cheap way to hold "a picture" without its pixels, and the
+ * alternative — a placeholder — is worse than the memory.
  */
 @Composable
-private fun ReadOnlyPage(
+private fun Reader(
+    viewModel: AppViewModel,
     file: java.io.File,
     text: String,
     onLink: (String) -> Unit,
-    onStep: (Int) -> Unit = {},
+    onStep: (Int) -> Unit,
 ) {
-    /**
-     * **The horizontal drag, and the only gesture this page owns.**
-     *
-     * It is a separate `pointerInput` from the scroll above and the two do not compete: Compose's
-     * scroll consumes vertical deltas and this consumes horizontal ones, so a page can be scrolled
-     * with one finger and swiped with the same finger in a different direction.
-     *
-     * **`detectHorizontalDragGestures` rather than a velocity tracker**: a swipe is a deliberate
-     * sideways move, and the detector fires once per gesture with its own slop, so a diagonal drag
-     * that was meant as a scroll is not read as a page change.
-     */
-    val stepping = Modifier.pointerInput(file.path) {
-        var travelled = 0f
-        detectHorizontalDragGestures(
-            onDragStart = { travelled = 0f },
-            onDragEnd = {
-                // **A third of the width is the bar.** Lower than a fling threshold on purpose: a
-                // person reading does not fling, and a threshold that needed one would make the
-                // gesture feel like it was ignoring them.
-                if (travelled <= -size.width / 3f) onStep(1)
-                else if (travelled >= size.width / 3f) onStep(-1)
-            },
-        ) { _, dragAmount -> travelled += dragAmount }
+    // **The page that will be dragged in from each side**, read ahead of the gesture.
+    var previous by remember(file.path) { mutableStateOf<Neighbour?>(null) }
+    var next by remember(file.path) { mutableStateOf<Neighbour?>(null) }
+    LaunchedEffect(file.path) {
+        previous = null
+        next = null
+        // Off the main thread, so opening a page is not waiting on the ones beside it.
+        val found = withContext(Dispatchers.IO) {
+            viewModel.fileBeside(file, -1)?.let { read(it) } to
+                viewModel.fileBeside(file, 1)?.let { read(it) }
+        }
+        previous = found.first
+        next = found.second
     }
-    val scrolling = Modifier
+
+    // **The offset the finger has dragged**, in pixels. Positive is the page moving right, which is
+    // a move to the *previous* page.
+    val offset = remember(file.path) { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    var width by remember { mutableStateOf(1f) }
+
+    /**
+     * **A drag that follows the finger, and settles on release.**
+     *
+     * `draggable` rather than `detectHorizontalDragGestures`: the detector reports a total only when
+     * the gesture ends, which is precisely what made the old swipe a redraw. This one reports every
+     * pixel, so the page can move with the hand.
+     *
+     * **A third of the width is the bar**, the old threshold kept: a person reading does not fling,
+     * and a bar that needed a fling would feel like the gesture was being ignored.
+     */
+    val dragging = Modifier.draggable(
+        orientation = Orientation.Horizontal,
+        state = rememberDraggableState { delta ->
+            scope.launch {
+                // **Resisted at the ends.** With no page to move to, the content still moves a
+                // little and springs back — the wall is felt rather than explained.
+                val limit = width / 3f
+                val wanted = offset.value + delta
+                val bounded = when {
+                    wanted > 0 && previous == null -> wanted / 4f
+                    wanted < 0 && next == null -> wanted / 4f
+                    else -> wanted.coerceIn(-limit, limit)
+                }
+                offset.snapTo(bounded)
+            }
+        },
+        onDragStopped = {
+            scope.launch {
+                val travelled = offset.value
+                val steps = when {
+                    travelled <= -width / 3f -> 1
+                    travelled >= width / 3f -> -1
+                    else -> 0
+                }
+                if (steps == 0) {
+                    offset.animateTo(0f, tween(180))
+                } else {
+                    // **Off the screen, then the step.** The page leaves in the direction the
+                    // finger went and the new one arrives already drawn, so what the eye follows is
+                    // one continuous movement rather than a cut.
+                    offset.animateTo(if (steps > 0) -width else width, tween(180))
+                    onStep(steps)
+                }
+            }
+        },
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .onSizeChanged { width = it.width.toFloat().coerceAtLeast(1f) }
+            .then(dragging),
+    ) {
+        // **Drawn back to front: the neighbours first, then the page on top.** The neighbours sit at
+        // their own offsets so that as this page moves, the one arriving is already underneath it.
+        previous?.let { page ->
+            PagedPage(
+                page = page,
+                onLink = onLink,
+                modifier = Modifier.offset { IntOffset((offset.value - width).roundToInt(), 0) },
+            )
+        }
+        next?.let { page ->
+            PagedPage(
+                page = page,
+                onLink = onLink,
+                modifier = Modifier.offset { IntOffset((offset.value + width).roundToInt(), 0) },
+            )
+        }
+        PagedPage(
+            page = Neighbour(file, text, isMarkdown(file)),
+            onLink = onLink,
+            modifier = Modifier.offset { IntOffset(offset.value.roundToInt(), 0) },
+        )
+    }
+}
+
+/** One page's content: what it is, and how to draw it. */
+private data class Neighbour(
+    val file: java.io.File,
+    val text: String,
+    val markdown: Boolean,
+)
+
+/**
+ * **Reads one page so it is ready before it is needed.**
+ *
+ * A picture is decoded here, and the result is null when it cannot be read — the page then shows the
+ * same "could not be opened" sentence the editor's own picture view does, rather than an empty frame
+ * that would look like a page still loading for ever.
+ */
+private fun read(file: java.io.File): Neighbour? {
+    val kind = when (file.extension.lowercase()) {
+        "md", "markdown", "txt", "kt", "kts", "java", "json", "yml", "yaml", "xml", "toml",
+        "gradle", "properties", "sh", "py", "js", "ts", "css", "html", "",
+        -> true
+        else -> false
+    }
+    return try {
+        if (kind) Neighbour(file, file.readText(), isMarkdown(file))
+        else Neighbour(file, "", false)
+    } catch (t: Throwable) {
+        null
+    }
+}
+
+/** One page, drawn at the size a page is drawn: the whole screen, its own scroll, selectable. */
+@Composable
+private fun PagedPage(
+    page: Neighbour,
+    onLink: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val scrolling = modifier
         .fillMaxSize()
-        .then(stepping)
         .verticalScroll(rememberScrollState())
         .padding(horizontal = 20.dp, vertical = 16.dp)
+    // **Selectable, because View is where a person copies from.** Edit mode is not: a selection
+    // there fights the text field's own cursor, and the field already supports selecting.
     SelectionContainer {
-        if (isMarkdown(file)) {
+        if (page.markdown) {
             MarkdownBody(
-                text = text,
+                text = page.text,
                 modifier = scrolling,
-                baseDir = file.parentFile,
+                baseDir = page.file.parentFile,
                 onLink = onLink,
             )
         } else {
             Text(
-                text = text,
+                text = page.text,
                 style = MaterialTheme.typography.bodyLarge,
                 modifier = scrolling,
             )

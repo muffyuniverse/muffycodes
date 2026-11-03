@@ -421,37 +421,56 @@ class EditorScreenTest {
                 }
             }
             compose.waitForIdle()
-            compose.onNodeWithText("View").performClick()
-            compose.waitForIdle()
-            compose.onNodeWithText("Exit").assertIsNotEnabled()
+            // **No row, no modes, no Exit** — the operator's rule: *"instead of greying out just
+            // dont render the row at all, because it will just have view active on it which is
+            // default anyway"*. So the proof is not a disabled button, it is that the button is not
+            // there: a greyed one is still a control saying "you may not", and a reading page has
+            // nothing to say.
+            compose.onNodeWithText("Edit").assertDoesNotExist()
+            compose.onNodeWithText("Diff").assertDoesNotExist()
+            compose.onNodeWithText("Reset").assertDoesNotExist()
+            // **And no back arrow**, because onboarding is the sequence that signs the account in:
+            // a door out of it is a door out of the thing that has to happen first.
+            compose.onNodeWithContentDescription("Back without saving").assertDoesNotExist()
         } finally {
             phone.close()
         }
     }
 
     /**
-     * **The fullscreen exit is recorded**, so a log can answer "did they ever leave the page".
+     * **A locked file offers no Photograph**, because there is nowhere to put the picture.
      *
-     * Falsification: without the tap this passes with no line, so the assertion is on the *name*
-     * appearing in the newest rows rather than on the counter alone.
+     * The operator's rule: *"make sure that it cant be triggered from a system locked folder
+     * (otherwise it will clash with readonly lock when saving the photo)"*. `Workspace.writeBytes`
+     * already refuses — a photograph is written *beside* the page it came from, and a locked folder
+     * will not take it — so the button was an act that could only ever fail.
+     *
+     * Falsification: with the button drawn, the first assertion fails; with it hidden on every file,
+     * the second does.
      */
     @Test
-    fun `leaving fullscreen is traced`() {
-        val file = scene.file("milk.txt", "two litres")
-        editorFor(file)
+    fun `photograph is offered on a writable page and absent on a locked one`() {
+        val mine = scene.file("milk.txt", "two litres")
+        editorFor(mine)
+        compose.onNodeWithContentDescription("Photograph this page").assertExists()
 
-        compose.onNodeWithText("View").performClick()
-        compose.waitForIdle()
-        val before = Trace.report().taps
-        compose.onNodeWithText("Exit").performClick()
-        compose.waitForIdle()
+        val phone = Scenario(RuntimeEnvironment.getApplication(), signIn = true)
+        try {
+            phone.await("onboarding to open") { phone.viewModel.onboarding }
+            val dir = File(phone.viewModel.workspace!!.projectDir(Workspace.SYSTEM_PROJECT), Onboarding.DIR)
+            val page = File(dir, Onboarding.pages().first().name)
+            phone.viewModel.openEditor(page)
+            compose.setContent {
+                Frame {
+                    EditorScreen(viewModel = phone.viewModel, file = page, onBack = {}, onOpenHistory = {})
+                }
+            }
+            compose.waitForIdle()
 
-        val report = Trace.report()
-        assertTrue("the press was recorded", report.taps > before)
-        assertTrue(
-            "and it is named: newest ${report.lines.take(3)}",
-            report.lines.take(3).any { it.contains("TAP") && it.contains("editor-exit") },
-        )
+            compose.onNodeWithContentDescription("Photograph this page").assertDoesNotExist()
+        } finally {
+            phone.close()
+        }
     }
 
     /**
@@ -607,6 +626,63 @@ class EditorScreenTest {
         }
         compose.onNodeWithText("a cat", substring = true).assertIsDisplayed()
         compose.onNodeWithText("missing.png", substring = true).assertIsDisplayed()
+    }
+
+    /**
+     * **The page beside this one is drawn before the swipe**, which is what makes the gesture move
+     * rather than redraw.
+     *
+     * The operator's question: *"is it possible to render screen you are swiping to and make a
+     * fluent moving transition and not just a redrawn screen?"* It is, and this is the part that
+     * makes it possible: the neighbour is read when the page settles, so a finger moving toward it
+     * has text to drag in rather than a blank frame.
+     *
+     * Falsification: with the prefetch removed, the neighbour's text is not in the tree — and the
+     * swipe would have nothing to show but empty space.
+     */
+    @Test
+    fun `the page beside this one is rendered before it is swiped to`() {
+        // **Into the folder first**, because `scene.file` makes a file in the folder that is open —
+        // a helper that took a path would be a second way to say where a file goes.
+        scene.folder("reading")
+        scene.open("reading")
+        scene.file("a.md", "# first page")
+        scene.file("b.md", "# second page")
+        scene.file("c.md", "# third page")
+        val middle = File(scene.workspace!!.projectDir("groceries"), "reading/b.md")
+        scene.viewModel.openEditor(middle)
+        compose.setContent {
+            Frame {
+                EditorScreen(
+                    viewModel = scene.viewModel,
+                    file = middle,
+                    onBack = {},
+                    onOpenHistory = {},
+                )
+            }
+        }
+
+        // **Both neighbours, not just one**, because a swipe goes both ways.
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("first page", substring = true)
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        assertTrue(
+            "the page before is drawn",
+            compose.onAllNodesWithText("first page", substring = true)
+                .fetchSemanticsNodes().isNotEmpty(),
+        )
+        assertTrue(
+            "and the page after",
+            compose.onAllNodesWithText("third page", substring = true)
+                .fetchSemanticsNodes().isNotEmpty(),
+        )
+        // **And this page is still the one on screen**, so the prefetch did not replace it.
+        assertTrue(
+            "this page too",
+            compose.onAllNodesWithText("second page", substring = true)
+                .fetchSemanticsNodes().isNotEmpty(),
+        )
     }
 
     /**
