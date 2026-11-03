@@ -54,8 +54,10 @@ class SwipeTest {
             0.01f,
         )
         assertEquals(
+            // **The sign stays with the direction of the pull.** Resisted means a quarter of the
+            // movement, not a movement the other way.
             "and pulling past the end is resisted",
-            100f,
+            -100f,
             Swipe.offsetFor(0f, -400f, hasPrevious = true, hasNext = false),
             0.01f,
         )
