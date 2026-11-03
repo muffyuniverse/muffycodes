@@ -257,7 +257,9 @@ class ScopeTest {
         file.writeText("milk\neggs\nbread\nbutter\ncheese\n")
 
         val before = Trace.report().lines.size
-        val edited = mine.call("edit", """{"path":"list.txt","at":3,"text":"butter"}""")
+        // **An edit that is valid against what this agent read** — `at` is checked against the
+        // lines *it* loaded, which is the point: it is working from a stale view.
+        val edited = mine.call("edit", """{"path":"list.txt","at":2,"text":"butter"}""")
 
         val fresh = Trace.report().lines.take(Trace.report().lines.size - before)
         assertTrue(
