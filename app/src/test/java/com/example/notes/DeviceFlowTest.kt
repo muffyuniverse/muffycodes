@@ -240,7 +240,7 @@ class DeviceFlowTest {
         DeviceFlow.pollThrough(
             code = code(),
             cancelled = { false },
-            poll = { answers.removeFirst() },
+            poll = { answers.removeAt(0) },
             wait = {},
         ) { ended += it }
 
@@ -295,7 +295,7 @@ class DeviceFlowTest {
         DeviceFlow.pollThrough(
             code = code(),
             cancelled = { false },
-            poll = { answers.removeFirst() },
+            poll = { answers.removeAt(0) },
             wait = { waits += it },
         ) {}
 
