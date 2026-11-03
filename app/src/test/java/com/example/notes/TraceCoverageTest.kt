@@ -12,8 +12,8 @@ import java.io.File
  * **The acts that are traced, proven to reach the log.**
  *
  * The tap-vocabulary check proves a name is in the standard. It does not prove the log records the
- * act, and until this file existed four of this stretch's acts had no test at all: `query`,
- * `onboarding finish` and `swipe file` were written with confident comments and no evidence, and the
+ * act, and until this file existed four of this stretch's acts had no test at all: `query`
+ * and `swipe file` were written with confident comments and no evidence, and the
  * heartbeat read was not traced at all.
  *
  * Each test asserts the *name* appears in the newest rows rather than only that the counter moved,

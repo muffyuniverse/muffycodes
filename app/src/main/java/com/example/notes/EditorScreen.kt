@@ -691,19 +691,18 @@ fun EditorScreen(
                         text = text,
                         onLink = onLink,
                         onStep = { steps ->
-                            val at = viewModel.onboardingIndexOf(file)
                             val beside = viewModel.fileBeside(file, steps)
-                            // **Swiping past the last page finishes onboarding.** A bounce there
-                            // would be a wall with no door: onboarding has no Back and no Exit, so
-                            // the last page would be a place a person could never leave. The gesture
-                            // that brought them through the pages is the gesture that ends them.
-                            val finishing = beside == null && at >= 0 && steps > 0 &&
-                                at == Onboarding.pages().lastIndex
-                            if (finishing) {
-                                Trace.tap("onboarding finish")
-                                viewModel.finishOnboarding()
-                                onBack()
-                            } else if (beside != null) {
+                            // **A swipe past the end bounces, and that is the whole rule.**
+                            // `fileBeside` returns null there on purpose — "wrapping would make a
+                            // folder feel circular" — and onboarding used to make that same null
+                            // mean "finish", which is one gesture with two meanings and a special
+                            // case bolted onto a rule that says the opposite.
+                            //
+                            // **Onboarding does not end by swiping any more.** It ends when both
+                            // connections are made (`closeOnboardingIfConnected`), which is the
+                            // thing it exists to do; a person who read every page without connecting
+                            // uses the last page's own way out.
+                            if (beside != null) {
                                 Trace.tap("swipe file", beside.name)
                                 // **Saved first, and only if it changed.** A swipe out of Edit
                                 // would otherwise be the one way to lose writing, since leaving is

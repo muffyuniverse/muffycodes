@@ -148,6 +148,10 @@ Both are your own accounts. Neither is ours.
 If GitHub is busy or will not answer, [use a token instead](app:use-token) — it does the same job and
 it never depends on a limit.
 
+When both are connected this page closes on its own. If you would rather read the app first and connect
+later, [carry on without connecting](app:finish-onboarding) — everything is here, and Settings has the
+same two buttons.
+
 ---
 
 **You can read all of this again at any time.** These pages are a folder in your system project, and

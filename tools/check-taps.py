@@ -132,7 +132,6 @@ VOCABULARY = {
     # **Swiping past the last onboarding page.** Its own name because it is the only swipe that ends
     # something rather than moving to another file, and a log that called it "swipe file" would
     # suggest a page was opened.
-    "onboarding finish",
     "model", "provider", "effort", "add model", "remove model", "read catalogue",
     # making a project, which is a different act from adding one that is already on GitHub
     "new project", "local project", "confirm add project",

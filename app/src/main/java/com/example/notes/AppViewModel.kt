@@ -558,12 +558,46 @@ class AppViewModel @JvmOverloads constructor(
     }
 
     /**
-     * Finishes onboarding, **only from the last page**.
+     * **Whether onboarding has done the thing it exists to do**: the account connected to GitHub and
+     * to a model.
      *
-     * The refusal is the point: onboarding cannot be left early, so the only way to stop seeing it is
-     * to reach the end. The last page is where the connections are offered, and it is the only page
-     * that can fail — which is why [Connection.Token] exists as a way past a sign-in that cannot
-     * succeed.
+     * This is the question, and it replaces "has the person reached the last page" — the operator's
+     * correction: *"after providing both signins onboarding should close on its own"*. Reading six
+     * pages is not the goal; connecting is. A person who connected on page three should not have to
+     * swipe through three more to be let out.
+     *
+     * **GitHub is [signedIn]**, not "an account exists": the provisional `~local` workspace is an
+     * account and is signed in to nothing.
+     *
+     * **The model key is [hasModelKey]**, which is `READABLE` — a key that is stored but locked
+     * behind the phone's own lock is not a key the app can use, and closing onboarding on it would
+     * leave a person on a chat screen that cannot answer.
+     */
+    val onboardingConnected: Boolean get() = signedIn && hasModelKey
+
+    /**
+     * **Closes onboarding once both connections are made.**
+     *
+     * Called from wherever a connection lands, and idempotent: a second call after onboarding has
+     * already ended does nothing. It does **not** require having reached the last page, because the
+     * last page is where the connections are *offered*, not where they must be made.
+     */
+    fun closeOnboardingIfConnected() {
+        if (!onboarding) return
+        if (!onboardingConnected) return
+        settings.markOnboardingAt(Onboarding.pages().size)
+        onboarding = false
+        Trace.note("onboarding", "closed by connecting")
+    }
+
+    /**
+     * Finishes onboarding from the last page, **for a person who read to the end without
+     * connecting**.
+     *
+     * **The refusal is the point here**: it only works from the last page, so the gesture cannot be
+     * used to skip the reading. But it is no longer the only way out — [closeOnboardingIfConnected]
+     * is the one that matters, and this is the fallback for someone whose provider would not
+     * cooperate, which is what [Connection.Token] exists for.
      */
     fun finishOnboarding() {
         val pages = Onboarding.pages()
@@ -1198,6 +1232,10 @@ class AppViewModel @JvmOverloads constructor(
             KeyState.READABLE -> {
                 Trace.note("key-kept", "the OpenRouter key reads back")
                 Trace.said("The OpenRouter key is kept on this phone")
+                // **The second half of the way out.** If GitHub was already connected, this is the
+                // connection that finishes onboarding — and the person is on a page offering the
+                // sign-in, so they should not have to swipe anywhere to be let out.
+                closeOnboardingIfConnected()
                 null
             }
 
@@ -1299,6 +1337,11 @@ class AppViewModel @JvmOverloads constructor(
             // at all: onboarding cannot be left, so a page that offers only OAuth would trap a
             // person whose provider is rate-limited or whose phone has no browser.
             "use-token" -> pendingConnection = Connection.Token
+            // **The way out for someone who read every page and could not connect.** Without it the
+            // last page is a room with no door: onboarding only closes when both connections are
+            // made, and a person whose provider is down can make neither. This is the page's own
+            // link rather than a button on the chrome, so the screen stays furniture-free.
+            "finish-onboarding" -> finishOnboarding()
             else -> Trace.note("link-action-unknown", verb)
         }
     }
@@ -4381,6 +4424,9 @@ class AppViewModel @JvmOverloads constructor(
             Trace.note("adopted-provisional", login)
         }
         refresh()
+        // **The first half of the way out.** A key may already be on this phone from before the
+        // sign-in, or the person may connect the model next; either order finishes onboarding.
+        closeOnboardingIfConnected()
     }
 
     /** Makes a stored account active. */

@@ -461,6 +461,76 @@ class AccountsFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `onboarding closes on its own once both connections are made`() {
+        // **The operator's rule**: *"after providing both signins onboarding should close on its
+        // own"*. Reading six pages is not the goal; connecting is. A person who connected on page
+        // three should not have to swipe through three more to be let out.
+        val scene = Scenario(org.robolectric.RuntimeEnvironment.getApplication(), signIn = true)
+        try {
+            scene.await("onboarding to open") { scene.viewModel.onboarding }
+            val pages = Onboarding.pages()
+            // **Still on page one**, which is the point: the pages read have nothing to do with it.
+            assertEquals("nothing read yet", 0, scene.settings.onboardingAt)
+            assertFalse("and not connected to a model yet", scene.viewModel.hasModelKey)
+
+            scene.viewModel.keepModelKey("sk-or-v1-a-key")
+            scene.await("the key to be kept") { scene.viewModel.hasModelKey }
+
+            assertFalse("**closed by connecting**, from page one", scene.viewModel.onboarding)
+            assertEquals("and recorded past the end", pages.size, scene.settings.onboardingAt)
+        } finally {
+            scene.close()
+        }
+    }
+
+    @Test
+    fun `a model key alone does not close onboarding, because GitHub is not connected`() {
+        // The rule is **both**, because one connection is an app that cannot do its job: a model
+        // with no GitHub is a chat that cannot save, and GitHub with no model is a place to keep
+        // files nobody writes. Closing on either would drop a person into a half-working app.
+        val scene = Scenario(org.robolectric.RuntimeEnvironment.getApplication(), signIn = false)
+        try {
+            scene.await("onboarding to open") { scene.viewModel.onboarding }
+            assertFalse("nobody is signed in", scene.viewModel.signedIn)
+
+            // A key on the provisional workspace. It is kept, and it is not a connection to GitHub.
+            scene.viewModel.keepModelKey("sk-or-v1-a-key")
+
+            assertTrue(
+                "**onboarding stays open** — half of what it is for is done, and the other half is " +
+                    "the one that keeps the files",
+                scene.viewModel.onboarding,
+            )
+        } finally {
+            scene.close()
+        }
+    }
+
+    @Test
+    fun `the last page offers a way past a connection that cannot be made`() {
+        // **A room with no door is the bug this prevents.** Onboarding only closes when both
+        // connections are made, so a person whose provider is down could make neither — and the
+        // page's own link is the way out. It is a link rather than a button so the reading screen
+        // keeps no chrome, which is the same reason the mode row is hidden here.
+        val scene = Scenario(org.robolectric.RuntimeEnvironment.getApplication(), signIn = true)
+        try {
+            scene.await("onboarding to open") { scene.viewModel.onboarding }
+            scene.viewModel.onboardingReached(Onboarding.pages().lastIndex)
+
+            scene.viewModel.runLinkAction("finish-onboarding")
+
+            assertFalse("the link closes it", scene.viewModel.onboarding)
+            assertEquals(
+                "recorded past the end",
+                Onboarding.pages().size,
+                scene.settings.onboardingAt,
+            )
+        } finally {
+            scene.close()
+        }
+    }
+
+    @Test
     fun `onboarding does not open again once it has been read`() {
         val scene = Scenario(org.robolectric.RuntimeEnvironment.getApplication(), signIn = true)
         try {
