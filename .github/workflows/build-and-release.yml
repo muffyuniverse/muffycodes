@@ -894,7 +894,16 @@ jobs:
       # the shipping app and is attested, and this is neither. It travels in the run's
       # own artifact instead.
       - name: Build a dev copy
-        if: github.event_name == 'workflow_dispatch' && inputs.dev_build
+        # **A development push always builds the debug copy.** This is the fix for the whole tangle:
+        # the dev build only ever existed on a manual dispatch, so every build delivered to the phone
+        # from a push to `development` was the *release* APK — the one that keeps no trace. The
+        # operator's confusion was exact: *"why then release version has trace logging at all"*. It
+        # did not; it drew a report screen and wrote nothing, and it was the only thing on offer.
+        #
+        # A build that is not a release has no reason to withhold the build that can be reported on.
+        if: >-
+          (github.event_name == 'workflow_dispatch' && inputs.dev_build) ||
+          (github.event_name == 'push' && github.ref_name != 'main')
         env:
           MUFFY_KEYSTORE_BASE64: ${{ secrets.MUFFY_KEYSTORE_BASE64 }}
           MUFFY_KEYSTORE_PASSWORD: ${{ secrets.MUFFY_KEYSTORE_PASSWORD }}
@@ -1146,7 +1155,9 @@ jobs:
       # The dev copy rides in its own artifact, and only when one was built. It is never
       # part of the release: anything published is the shipping app and is attested.
       - name: Hand the dev copy onward
-        if: github.event_name == 'workflow_dispatch' && inputs.dev_build
+        if: >-
+          (github.event_name == 'workflow_dispatch' && inputs.dev_build) ||
+          (github.event_name == 'push' && github.ref_name != 'main')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dev-apk
@@ -1238,6 +1249,7 @@ jobs:
       - name: Put the bundle together
         env:
           VERSION_NAME: ${{ needs.build-release.outputs.version_name }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
         run: |
           mkdir -p bundle
           cp apk/app-release.apk bundle/
@@ -1253,7 +1265,10 @@ jobs:
           # app — so a file called `muffycodes-dev-41669824765.apk` contained an app reporting `190`.
           # Nothing said they were the same build, and the operator's report was exactly that: *"when
           # I update the app its version doesnt change"*.
-          printf '%s\n' "$VERSION_NAME" > bundle/version
+          # **Falls back to the run number rather than writing an empty file**, because an empty
+          # `version` would make the delivery name the APK `muffycodes-.apk` — a worse failure than a
+          # name nobody expected, and one that only shows up on the phone.
+          printf '%s\n' "${VERSION_NAME:-$GITHUB_RUN_NUMBER}" > bundle/version
           # The scenarios keep their folders: the report refers to the pictures
           # beside it, so flattening them would break every link.
           cp -r scenarios bundle/scenarios
