@@ -183,7 +183,11 @@ case "$MODE" in
         ;;
 esac
 
-if [ ! -f "$TMP/app-release.apk" ]; then
+# **One APK or the other, never both.** *"debug for dev, release for main"* — so a development
+# bundle carries `app-debug.apk` and nothing else, and the check is for an APK rather than for the
+# release one specifically. It used to demand `app-release.apk`, which would have made every
+# development delivery fail the moment the release stopped being built there.
+if [ ! -f "$TMP/app-release.apk" ] && [ ! -f "$TMP/app-debug.apk" ]; then
     echo "the bundle has no APK in it" >&2
     exit 1
 fi
@@ -240,13 +244,18 @@ rm -f "$DEST/app-release.apk" "$DEST/app-debug.apk"
 
 # **The names say which is which**, and the dev one says what it is for. A person tapping a file
 # called `muffycodes-190.apk` has no way to know it keeps no log.
-mv "$TMP/app-release.apk" "$DEST/muffycodes-$LABEL.apk"
-echo "  + muffycodes-$LABEL.apk (the shipped app)"
+if [ -f "$TMP/app-release.apk" ]; then
+    mv "$TMP/app-release.apk" "$DEST/muffycodes-$LABEL.apk"
+    echo "  + muffycodes-$LABEL.apk (the shipped app, no log file)"
+fi
 if [ -f "$TMP/app-debug.apk" ]; then
   # A debug build signed with the release key, so it installs over the release APK on the same phone
   # without uninstalling — which is the whole point: live tracing without losing what is in the app.
+  # **`-dev` says what the build is, not that it is a spare.** On a development branch it is the
+  # only APK, so the suffix is the label rather than a second choice beside a release — and it is the
+  # one fact a person needs at the phone, because this is the build that writes a log.
   mv "$TMP/app-debug.apk" "$DEST/muffycodes-$LABEL-dev.apk"
-  echo "  + muffycodes-$LABEL-dev.apk (writes the trace to Downloads)"
+  echo "  + muffycodes-$LABEL-dev.apk (the debug build: writes the trace to Downloads)"
 else
   echo "  ! no dev build in this run, so there is no build that writes a trace"
 fi

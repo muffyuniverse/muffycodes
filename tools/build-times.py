@@ -89,16 +89,32 @@ def main() -> int:
                         help="print the table without judging it against a budget")
     args = parser.parse_args()
 
-    reports = sorted(
-        glob.glob(str(Path(args.results) / "**/build/reports/profile/*.html"), recursive=True)
-        + glob.glob(str(Path(args.results) / "**/reports/profile/*.html"), recursive=True)
-    )
+    # **One glob, not two, and only where a profile can be.**
+    #
+    # This used to walk the whole results tree twice with two patterns, and after an `assembleRelease`
+    # plus an `assembleDebug` that tree holds tens of thousands of files — generated sources,
+    # intermediates, caches, merged resources. Measured on run 41673254774 it took **135 seconds**, on a
+    # job whose build is 161: the report about where the time went was the second-largest thing in the
+    # build. The operator noticed before any dashboard did: *"now it takes so long. is something broken
+    # with ci?"*
+    #
+    # Gradle writes its profile to `build/reports/profile/` at the root of the *invocation*, so the
+    # first pattern below is the one that matches. The second is kept because a project built from a
+    # subdirectory puts it one level down, and it is cheap: it only looks at direct children.
+    root = Path(args.results)
+    found = sorted(glob.glob(str(root / "build/reports/profile/*.html")))
+    for child in sorted(root.glob("*/build/reports/profile/*.html")):
+        found.append(str(child))
+    reports = found
     if not reports:
         print("No build profile was found, so this build cannot say where its time went.")
         return 0
     if len(reports) > 1:
-        print(f"Found {len(reports)} profiles; reading the newest.")
+        # **Both builds in one job write a profile**, so this is the normal case rather than an
+        # oddity: `assembleDebug` and `assembleRelease` each leave one, and reading the older of the
+        # two describes a build that is not the one being reported on. Newest, and named.
         reports.sort(key=lambda p: Path(p).stat().st_mtime, reverse=True)
+        print(f"{len(reports)} profiles in this job; reading the newest, {Path(reports[0]).name}.")
 
     total, tasks = read_report(Path(reports[0]))
     if not tasks:
