@@ -717,6 +717,15 @@ fun SignInDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                // **Kept, and it survived the tightening on purpose.** Cutting the requirements down
+                // to a checklist also cut this, and the scenario caught it: a person pasting a key has
+                // one question the scopes do not answer — *whose name goes on the commits* — and the
+                // answer is not obvious, because it is the key's owner and not this phone's user.
+                Text(
+                    "Your commits are written as the GitHub account this key belongs to.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 // A sign-in is a network round trip, and the dialog used to close
                 // the instant it was asked — so a refusal arrived at a screen that
                 // was already gone, as a snackbar nobody was looking for, and the
