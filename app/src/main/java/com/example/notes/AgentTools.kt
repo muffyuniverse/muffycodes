@@ -171,6 +171,22 @@ class AgentTools(
     private val subagentLimit: () -> Int = { 0 },
 ) {
 
+    /**
+     * **When this agent last read each file, and what the file looked like then.**
+     *
+     * A write that follows a read of a file that has changed since is the one lost-update this app
+     * cannot prevent: there is no merge and no conflict, so one write simply lands last and the
+     * history shows two commits with the second winning. A claim file would be a second source of
+     * truth about who is editing what; this is the cheap honest version — **notice, and say so**.
+     *
+     * Keyed by canonical path, and only ever consulted on a write. Bounded, because a long turn
+     * reads many files and a map that grew for ever would be a leak in a session that never ends.
+     */
+    private val readAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /** How many reads are remembered; past this the oldest is forgotten. */
+    private val READ_MEMORY = 256
+
     /** The project's own folder: what the agent stands in. */
     val projectDir: File get() = ws.projectDir(project)
 
@@ -1675,9 +1691,47 @@ class AgentTools(
 
     private fun read(args: JSONObject, deadline: Deadline): String =
         readInto(args, deadline).fold(
-            onSuccess = { success(it) },
+            onSuccess = {
+                // **Remembered only when the read worked**, and only the file's own state — a read
+                // that failed says nothing about what the file holds.
+                rememberRead(args.optString("path"))
+                success(it)
+            },
             onFailure = { refusal(it.message ?: "that file cannot be read") },
         )
+
+    /**
+     * **Notes the moment this agent last saw [raw], so a later write can say it was stale.**
+     *
+     * A version read (`revision`) is deliberately not recorded: it is history, and treating it as a
+     * fresh look at the current file would make every restore-then-edit look stale.
+     */
+    private fun rememberRead(raw: String) {
+        if (raw.isBlank()) return
+        val file = resolve(raw).getOrNull() ?: return
+        if (!file.isFile) return
+        if (readAt.size >= READ_MEMORY) readAt.clear()
+        readAt[file.absolutePath] = file.lastModified()
+    }
+
+    /**
+     * **Says so when a write follows a read of a file that changed in between.**
+     *
+     * The one lost-update this app cannot prevent — there is no merge, so the second write wins — and
+     * the whole mitigation is that it stops being invisible. One trace line, naming the file, so
+     * "my change vanished" becomes something a person can check rather than something they
+     * remember.
+     *
+     * **Not a refusal.** The write is legitimate: the agent read the file, the other agent changed
+     * it, and refusing would strand work the person asked for. What it must not do is happen
+     * silently, because a lost write with no record is the bug report nobody can answer.
+     */
+    private fun noticeStale(file: File) {
+        val seen = readAt[file.absolutePath] ?: return
+        val now = file.lastModified()
+        if (now <= seen) return
+        Trace.note("stale-read", "${rel(file)} changed since it was read")
+    }
 
     /**
      * The text a `read` selects — **the body with no `0` or `1` on the front.**
@@ -1978,6 +2032,7 @@ class AgentTools(
         // whole-row rule, a final-newline rule, and a line-by-line comparison to prove the edit was
         // removal. It is not a file any more: the context is a column, and `forget` is the only way
         // to change it, so none of that has to be checked.
+        noticeStale(file)
         if (!ws.write(file, text)) return refusal("${rel(file)} cannot be changed")
         return commit("Edited ${file.name}", "${rel(file)} changed")
     }

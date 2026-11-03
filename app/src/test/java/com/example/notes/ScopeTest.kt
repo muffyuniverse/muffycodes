@@ -237,6 +237,60 @@ class ScopeTest {
         assertTrue("and it is every tool", AgentTools.specs().size >= 20)
     }
 
+    // ---- two agents, one file ------------------------------------------------
+
+    @Test
+    fun `a write after a read of a file another agent changed is noticed`() {
+        // **The lost-update this app cannot prevent.** There is no merge and no conflict: one write
+        // simply lands last and the history shows two commits with the second winning. A claim file
+        // would be a second source of truth about who is editing what, so the mitigation is that it
+        // stops being invisible.
+        val file = File(ws.projectDir("groceries"), "list.txt")
+        scoped().call("read", """{"path":"list.txt"}""")
+
+        // Another agent writes, a moment later.
+        Thread.sleep(20)
+        file.writeText("milk\neggs\nbread\n")
+
+        val before = Trace.report().lines.size
+        scoped().call("edit", """{"path":"list.txt","at":3,"text":"butter"}""")
+
+        val fresh = Trace.report().lines.take(Trace.report().lines.size - before)
+        assertTrue(
+            "**the stale read is named**: $fresh",
+            fresh.any { it.contains("stale-read") && it.contains("list.txt") },
+        )
+    }
+
+    @Test
+    fun `a write with no read before it is not called stale, because there is nothing to compare`() {
+        // The falsification: a guard that fired on every write would be noise, and noise in a trace
+        // is the same as no trace — a person stops reading it.
+        File(ws.projectDir("groceries"), "fresh.txt").writeText("a\n")
+
+        val before = Trace.report().lines.size
+        scoped().call("edit", """{"path":"fresh.txt","at":1,"text":"b"}""")
+
+        val fresh = Trace.report().lines.take(Trace.report().lines.size - before)
+        assertFalse(
+            "nothing is claimed about a file this agent never read: $fresh",
+            fresh.any { it.contains("stale-read") },
+        )
+    }
+
+    @Test
+    fun `a write after a read of an unchanged file is not called stale`() {
+        // The other half: the ordinary case must be silent, or the line means nothing.
+        File(ws.projectDir("groceries"), "same.txt").writeText("a\nb\n")
+        scoped().call("read", """{"path":"same.txt"}""")
+
+        val before = Trace.report().lines.size
+        scoped().call("edit", """{"path":"same.txt","at":1,"text":"A"}""")
+
+        val fresh = Trace.report().lines.take(Trace.report().lines.size - before)
+        assertFalse("no claim: $fresh", fresh.any { it.contains("stale-read") })
+    }
+
     // ---- the boundary itself ------------------------------------------------
 
     @Test

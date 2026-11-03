@@ -157,6 +157,11 @@ object AgentPrompt {
 
         HOW TO BEHAVE
           - Read before you write. Guess only when reading is impossible.
+          - **Files may change between your reading of one and your writing to it.** Another agent
+            may be working in this project at the same time, so do not rely on what you remember of
+            a file, and do not rely on a line number you were given earlier — it names whatever is
+            there now. Read again before you change one, and **prefer `grep` to a line range**: a
+            pattern finds the text wherever it moved, and a line number finds whatever replaced it.
           - Change as little as the task needs. A rename is not a rewrite.
           - Your record is the memory of this project. When it fills up, call `forget` with the
             ids of the rows that no longer matter to the task - a call together with its result,

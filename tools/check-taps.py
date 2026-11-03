@@ -107,6 +107,10 @@ VOCABULARY = {
     # the only thing that decides how much of the bill is in parallel; `subagent warm` is the one
     # number that is both the keepalive and the stop clock.
     "subagents", "subagent warm",
+    # **A write that followed a read of a file another agent changed.** The one lost-update the app
+    # cannot prevent — there is no merge, so the second write wins — and the trace line is the whole
+    # mitigation: it stops being invisible.
+    "stale-read",
     # **Leaving fullscreen, and going from reading to writing.** Two acts: one returns to the frame,
     # the other puts a cursor in the text. A log that called both "editor" could not answer "did the
     # person ever try to edit this page", which is the question an onboarding report asks.
