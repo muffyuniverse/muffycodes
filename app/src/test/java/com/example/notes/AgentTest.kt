@@ -565,7 +565,10 @@ class AgentTest {
         // agent that subagents were a possibility, so the operator's setting could be on and the
         // feature simply never reached for. The four words are the ones `list` prints, so the
         // prompt and the tool cannot drift into naming different states.
-        val text = AgentPrompt.SYSTEM_DEFAULT
+        // **Whitespace-collapsed once**, because the prompt is a wrapped triple-quoted string: a
+        // sentence a reader sees whole is split across lines in the source, so an assertion on the
+        // raw text fails on a rewrap and says nothing about whether the instruction is still there.
+        val text = AgentPrompt.SYSTEM_DEFAULT.replace(Regex("\\s+"), " ")
         assertTrue("the section exists", text.contains("SUBAGENTS"))
         for (state in listOf("live", "working", "asleep", "retired")) {
             assertTrue("**`$state` is named in the prompt as `list` prints it**", text.contains(state))
