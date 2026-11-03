@@ -4394,16 +4394,21 @@ class AppViewModel @JvmOverloads constructor(
      * time, with the interval GitHub set and `slow_down` respected.
      */
     private fun pollDevice(code: DeviceFlow.Code) {
-        val deadline = System.currentTimeMillis() + code.expiresInMs
-        var wait = code.intervalMs
-        while (System.currentTimeMillis() < deadline) {
-            // **Stopped when the person leaves**, which is what "foreground only" means.
-            if (device == null) return
-            Thread.sleep(wait)
-            // **Read per poll, so a cancelled flow stops even mid-sleep** — the loop checks the
-            // object it was given rather than a copy taken at the start.
-            val held = device ?: return
-            when (val answer = DeviceFlow.poll(held.deviceCode)) {
+        // **The loop is `DeviceFlow.pollThrough`, not a copy here.**
+        //
+        // The copy that used to be here **killed itself on its first iteration**: it asked `device`
+        // whether the flow had been cancelled, and `device` was set by a `main.post { }` that had not
+        // run yet — so the first check read null, took it for "cancelled", and returned. The dialog
+        // then showed the code and "Waiting for you to approve it…" for ever while nothing polled,
+        // and GitHub reported the device as connected. That is the bug the operator hit.
+        //
+        // The loop needs the *code* it was handed, not the display state, and the two are separate
+        // arguments now.
+        DeviceFlow.pollThrough(
+            code = code,
+            cancelled = { device == null },
+        ) { answer ->
+            when (answer) {
                 is DeviceFlow.Poll.Done -> {
                     main.post { device = null }
                     // **The same door the token uses**, so there is one way in rather than two.
@@ -4415,19 +4420,15 @@ class AppViewModel @JvmOverloads constructor(
                             signIn(who.login, answer.token, who.name, who.email)
                         }
                     }
-                    return
                 }
-                is DeviceFlow.Poll.Waiting -> wait = answer.intervalMs
-                is DeviceFlow.Poll.Slow -> wait = answer.intervalMs
                 is DeviceFlow.Poll.Failed -> {
-                    main.post { device = device?.copy(failed = answer.why) }
                     Trace.note("github-device", "ended · ${answer.why.take(60)}")
-                    return
+                    main.post { device = device?.copy(failed = answer.why) }
                 }
+                // **Not reachable**: `pollThrough` only ever ends with Done or Failed, which is the
+                // point of it being a loop rather than a step. Exhaustive rather than an `else`.
+                is DeviceFlow.Poll.Waiting, is DeviceFlow.Poll.Slow -> Unit
             }
-        }
-        main.post {
-            device = device?.copy(failed = "The code expired before it was entered. Start again.")
         }
     }
 

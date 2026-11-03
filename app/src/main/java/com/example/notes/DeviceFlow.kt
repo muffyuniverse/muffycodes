@@ -150,6 +150,56 @@ object DeviceFlow {
     }
 
     /**
+     * **Drives the poll to its end, and is the only thing that decides when it stops.**
+     *
+     * This exists because the loop that used to live in the view model **killed itself on its first
+     * iteration**. It asked the view model's `device` state whether it had been cancelled — and that
+     * state was set by a `main.post { }` that had not run yet, because the poll started on the worker
+     * thread immediately after posting it. So the first check read `null`, took it for "cancelled",
+     * and returned. The dialog then showed the code and *"Waiting for you to approve it…"* for ever
+     * while nothing polled, and GitHub said the device was connected.
+     *
+     * **The lesson is in the signature**: the code and the cancellation are separate arguments. The
+     * loop needs the code — it was handed it — and it must not ask a piece of *display* state whether
+     * it may run. Coupling those is what made a race that only appears on a slow main thread.
+     *
+     * Every dependency is a parameter, so a test drives the whole loop without a network or a clock.
+     */
+    fun pollThrough(
+        code: Code,
+        /** True once the person has left, which is the only thing that stops a live poll. */
+        cancelled: () -> Boolean,
+        /** One poll. Defaults to the real request. */
+        poll: (String) -> Poll = { poll(it) },
+        /** The wait between polls. Defaults to sleeping the thread this runs on. */
+        wait: (Long) -> Unit = { Thread.sleep(it) },
+        clock: () -> Long = { System.currentTimeMillis() },
+        /** Called exactly once, with the answer that ended the flow. */
+        onEnd: (Poll) -> Unit,
+    ) {
+        val deadline = clock() + code.expiresInMs
+        var interval = code.intervalMs
+        while (clock() < deadline) {
+            // **Checked before the wait and after it**, so leaving stops the flow even mid-sleep
+            // rather than up to a full interval later.
+            if (cancelled()) return
+            wait(interval)
+            if (cancelled()) return
+            when (val answer = poll(code.device)) {
+                is Poll.Done, is Poll.Failed -> {
+                    onEnd(answer)
+                    return
+                }
+                is Poll.Waiting -> interval = answer.intervalMs
+                is Poll.Slow -> interval = answer.intervalMs
+            }
+        }
+        // **Out of time rather than refused.** The code's own lifetime is the bound, and it is
+        // GitHub's number, not ours.
+        onEnd(Poll.Failed("The code expired before it was entered. Start again to get a new one."))
+    }
+
+    /**
      * **One poll.** Called repeatedly by the caller, which owns the waiting.
      *
      * The caller waits [Poll.Waiting.intervalMs] between calls; this function does not sleep, so it is

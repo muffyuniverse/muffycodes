@@ -210,6 +210,118 @@ class DeviceFlowTest {
         assertTrue("which points at the app, not the build: $why", why.contains("OAuth App is still there"))
     }
 
+    // ---- the loop ------------------------------------------------------------
+
+    private fun code(expiresInMs: Long = 900_000L) = DeviceFlow.Code(
+        code = "ABCD-1234",
+        url = "https://github.com/login/device",
+        device = "dev-1",
+        intervalMs = 5_000L,
+        expiresInMs = expiresInMs,
+    )
+
+    @Test
+    fun `the loop polls until the code is approved, and says so once`() {
+        // **The bug that shipped**: the loop in the view model asked the *display* state whether it
+        // had been cancelled, and that state was set by a post that had not run yet — so the first
+        // check read null, took it for cancelled, and returned. Nothing polled; the dialog said
+        // "Waiting for you to approve it…" for ever; GitHub said the device was connected.
+        //
+        // This is that loop with the dependency it actually needs. Three `Waiting` answers then a
+        // token, and the loop must reach the token rather than stopping at the first ask.
+        val answers = mutableListOf<DeviceFlow.Poll>(
+            DeviceFlow.Poll.Waiting(5_000L),
+            DeviceFlow.Poll.Waiting(5_000L),
+            DeviceFlow.Poll.Waiting(5_000L),
+            DeviceFlow.Poll.Done("gho_token"),
+        )
+        val ended = mutableListOf<DeviceFlow.Poll>()
+
+        DeviceFlow.pollThrough(
+            code = code(),
+            cancelled = { false },
+            poll = { answers.removeFirst() },
+            wait = {},
+        ) { ended += it }
+
+        assertEquals("**it kept going until the token**", 1, ended.size)
+        assertEquals("and the answer is the token", "gho_token", (ended.single() as DeviceFlow.Poll.Done).token)
+    }
+
+    @Test
+    fun `a cancelled flow stops without asking GitHub again`() {
+        // **Leaving is the only thing that stops a live poll**, and it must stop it before spending
+        // another token-request on a person who has walked away.
+        var asks = 0
+        var ended: DeviceFlow.Poll? = null
+
+        DeviceFlow.pollThrough(
+            code = code(),
+            cancelled = { true },
+            poll = { asks++; DeviceFlow.Poll.Waiting(5_000L) },
+            wait = {},
+        ) { ended = it }
+
+        assertEquals("no question was asked", 0, asks)
+        assertTrue("and nothing was reported, because nothing ended", ended == null)
+    }
+
+    @Test
+    fun `a refusal ends the flow and is reported once`() {
+        val ended = mutableListOf<DeviceFlow.Poll>()
+
+        DeviceFlow.pollThrough(
+            code = code(),
+            cancelled = { false },
+            poll = { DeviceFlow.Poll.Failed("You declined the request on GitHub.") },
+            wait = {},
+        ) { ended += it }
+
+        assertEquals("one ending", 1, ended.size)
+        assertTrue("and it is the refusal", ended.single() is DeviceFlow.Poll.Failed)
+    }
+
+    @Test
+    fun `slow down lengthens the wait instead of polling at the same rate`() {
+        // **The interval is the loop's own state**, so `Slow` has to change it. A loop that read the
+        // interval from the code each time would answer `slow_down` by waiting the same five seconds
+        // again, which is the rate that caused the complaint.
+        val waits = mutableListOf<Long>()
+        val answers = mutableListOf<DeviceFlow.Poll>(
+            DeviceFlow.Poll.Slow(10_000L),
+            DeviceFlow.Poll.Done("gho_token"),
+        )
+
+        DeviceFlow.pollThrough(
+            code = code(),
+            cancelled = { false },
+            poll = { answers.removeFirst() },
+            wait = { waits += it },
+        ) {}
+
+        assertEquals("**it waited ten seconds after slow_down**", listOf(5_000L, 10_000L), waits)
+    }
+
+    @Test
+    fun `a code that runs out ends with an instruction rather than silence`() {
+        // **The lifetime is GitHub's number**, and running out of it is a state the person has to be
+        // told about — a dialog that waits for ever on a dead code is the bug being fixed here.
+        var now = 0L
+        val ended = mutableListOf<DeviceFlow.Poll>()
+
+        DeviceFlow.pollThrough(
+            code = code(expiresInMs = 10_000L),
+            cancelled = { false },
+            poll = { DeviceFlow.Poll.Waiting(5_000L) },
+            wait = { now += it },
+            clock = { now },
+        ) { ended += it }
+
+        assertEquals("one ending", 1, ended.size)
+        val why = (ended.single() as DeviceFlow.Poll.Failed).why
+        assertTrue("which says to start again: $why", why.contains("Start again"))
+    }
+
     @Test
     fun `the poll sends the grant type GitHub requires`() {
         // The three fields are the whole request, and a wrong `grant_type` is
