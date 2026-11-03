@@ -697,14 +697,6 @@ class AgentLog private constructor(
     fun got(tool: String, body: String, answers: Int): Int =
         record(GOT, tool, body, answers = answers)
 
-    /** The terminating question, and the terminating statement. */
-
-: Int = record(
-        SUB,
-        "#$from",
-        if (big > 0) "[this report is about ${ContextBudget.short(big)} tokens]\n$body" else body,
-    )
-
     /** A row the agent or the app wants on the record without it being a tool. */
     fun note(name: String, detail: String, cost: Long? = null): Int =
         record(NOTE, name, detail, cost = cost)
