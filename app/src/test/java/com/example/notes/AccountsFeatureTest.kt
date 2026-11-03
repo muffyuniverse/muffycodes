@@ -473,7 +473,7 @@ class AccountsFeatureTest : FeatureTest() {
             assertEquals("nothing read yet", 0, scene.settings.onboardingAt)
             assertFalse("and not connected to a model yet", scene.viewModel.hasModelKey)
 
-            scene.viewModel.keepModelKey("sk-or-v1-a-key")
+            scene.viewModel.saveModelKey("sk-or-v1-a-key")
             scene.await("the key to be kept") { scene.viewModel.hasModelKey }
 
             assertFalse("**closed by connecting**, from page one", scene.viewModel.onboarding)
@@ -494,7 +494,7 @@ class AccountsFeatureTest : FeatureTest() {
             assertFalse("nobody is signed in", scene.viewModel.signedIn)
 
             // A key on the provisional workspace. It is kept, and it is not a connection to GitHub.
-            scene.viewModel.keepModelKey("sk-or-v1-a-key")
+            scene.viewModel.saveModelKey("sk-or-v1-a-key")
 
             assertTrue(
                 "**onboarding stays open** — half of what it is for is done, and the other half is " +
