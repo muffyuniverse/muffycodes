@@ -1283,16 +1283,18 @@ class ScenariosTest {
             // whose browser will not cooperate is not stuck on a code they cannot use.
             assertTrue("the backup is present", there("Personal access key"))
 
-            then("The address is tapped.") {
-                // **The link, pressed.** A `Text` with a `clickable` modifier is what makes it
-                // interactive; before this the address was a fragment of a sentence and the press
-                // could not reach anything.
-                compose.onNodeWithText("https://github.com/login/device").performClick()
-            }
+            // **The press is checked, and the picture is of the window unchanged.**
+            //
+            // The link opens a *browser* — it leaves this app — so there is no second screen here to
+            // photograph, and pretending otherwise made the two pictures identical while the
+            // scenario claimed an act. What the picture can show is the address underlined and
+            // tappable; what the assertion shows is that the tap arrives with the right URL.
+            compose.onNodeWithText("https://github.com/login/device").performClick()
             assertTrue(
-                "**and the press asked to open it**: ${opened.value}",
+                "**the press asked to open the address**: ${opened.value}",
                 opened.value == "https://github.com/login/device",
             )
+            then("Nothing is typed and nothing opens here: the link leaves this app.") {}
             after()
             result(
                 "The code is monospaced and selectable so it can be copied, and the address is " +
