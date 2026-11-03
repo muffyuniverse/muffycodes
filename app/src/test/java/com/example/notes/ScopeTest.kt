@@ -259,7 +259,7 @@ class ScopeTest {
         val before = Trace.report().lines.size
         // **An edit that is valid against what this agent read** — `at` is checked against the
         // lines *it* loaded, which is the point: it is working from a stale view.
-        val edited = mine.call("edit", """{"path":"list.txt","at":2,"text":"butter"}""")
+        val edited = mine.call("edit", """{"path":"list.txt","at":2,"replace":"butter"}""")
 
         val fresh = Trace.report().lines.take(Trace.report().lines.size - before)
         assertTrue(
@@ -278,7 +278,7 @@ class ScopeTest {
         File(ws.projectDir("groceries"), "fresh.txt").writeText("a\n")
 
         val before = Trace.report().lines.size
-        scoped().call("edit", """{"path":"fresh.txt","at":1,"text":"b"}""")
+        scoped().call("edit", """{"path":"fresh.txt","at":1,"replace":"b"}""")
 
         val fresh = Trace.report().lines.take(Trace.report().lines.size - before)
         assertFalse(
@@ -295,7 +295,7 @@ class ScopeTest {
         mine.call("read", """{"path":"same.txt"}""")
 
         val before = Trace.report().lines.size
-        mine.call("edit", """{"path":"same.txt","at":1,"text":"A"}""")
+        mine.call("edit", """{"path":"same.txt","at":1,"replace":"A"}""")
 
         val fresh = Trace.report().lines.take(Trace.report().lines.size - before)
         assertFalse("no claim: $fresh", fresh.any { it.contains("stale-read") })
