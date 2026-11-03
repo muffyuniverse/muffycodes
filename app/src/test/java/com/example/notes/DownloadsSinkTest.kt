@@ -91,22 +91,29 @@ class DownloadsSinkTest {
     }
 
     @Test
-    fun `the report says when the log never reached a file`() {
-        // A paste with no "also at" line was the only clue, and it took a week to notice. The paste
-        // says it now, where a person reporting a bug is already reading.
-        val sink = DownloadsSink(app)
-        Trace.attach(sink)
+    fun `a sink that writes nowhere makes the paste say so`() {
+        // **The case the operator hit**: nothing reached the disk, so `dump()` fell back to the
+        // in-memory ring — and the paste looked exactly like a healthy session. A week went by on
+        // that ambiguity.
+        //
+        // **The private fallback is not this case**, which is why this uses a sink that refuses
+        // everything: on sdk 28 `DownloadsSink` writes the private file perfectly well and `dump()`
+        // reads it back, printing "also at". That is a working log in an awkward place, and it must
+        // not be dressed up as a failure.
+        val dead = object : Trace.Sink {
+            override fun append(lines: List<String>) = Unit
+            override fun read(): String? = null
+            override fun where(): String? = null
+            override fun clear() = Unit
+        }
+        Trace.attach(dead)
         try {
-            sink.append(listOf("12:00:00.000    0 NOTE    app-opened  hi"))
+            Trace.note("app-opened", "hi")
             val pasted = Trace.dump()
 
             assertTrue(
                 "**the paste admits it is only memory**: ${pasted.lines().take(4)}",
                 pasted.contains("**Not written to a file**"),
-            )
-            assertTrue(
-                "and gives the reason: $pasted",
-                pasted.contains("too old for Downloads"),
             )
         } finally {
             Trace.attach(null as Trace.Sink?)
