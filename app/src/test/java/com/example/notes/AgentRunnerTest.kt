@@ -218,6 +218,38 @@ class AgentRunnerTest {
         assertEquals("woken anyway", 1, door.turns)
     }
 
+    @Test
+    fun `lowering the count retires the excess, and the folder stays`() {
+        // **The operator's rule**: *"when amount of running subagents is above the limit then the
+        // first idle subagent is removed"*, and *"folder stays, id inactive"*. The record is the only
+        // account of what that subagent did.
+        on("shopping", now = 1_000)
+        val registry = AgentSubagents(ws.accountDir)
+        val one = registry.mint("shopping", "the first task")
+        val two = registry.mint("shopping", "the second task")
+        // Both claimed, so neither has outstanding work and both are idle.
+        registry.touchTask("shopping", one.id, "")
+        registry.touchTask("shopping", two.id, "")
+        registry.touched("shopping", one.id, at = 100)
+        registry.touched("shopping", two.id, at = 200)
+        // A record on disk, so "the folder stays" is a claim about a real folder.
+        val folder = File(ws.projectDir("shopping"), "${AgentLog.DIR}/${one.id}").apply { mkdirs() }
+        File(folder, "session.log").writeText("a row")
+
+        settings.keepSubagents(1)
+        val runner = runner(PingDoor())
+        runner.tick(now = 2_000)
+        settle(runner)
+
+        assertTrue("the oldest was retired", registry.find("shopping", one.id)!!.retired)
+        assertFalse("and the newer one was not", registry.find("shopping", two.id)!!.retired)
+        assertTrue(
+            "**and the record is still there** — deleting it would destroy the only account of " +
+                "what it did",
+            File(folder, "session.log").isFile,
+        )
+    }
+
     // ---- which session is due ----------------------------------------------
 
     @Test

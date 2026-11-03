@@ -363,8 +363,41 @@ class AgentRunner(
     private fun subagentsDue(session: AgentSession, now: Long): Boolean {
         if (session.state == AgentSession.State.STOPPED) return false
         if (agentId(session.project) in polling()) return false
+        // **The count first, then the ceiling.** A person who lowered the number wants the excess
+        // gone now, not when a warm ceiling happens to pass — and a subagent retired by the count
+        // must not also be stopped by the ceiling, or the trace says two things about one act.
+        fitToCount(session.project)
         retireOverdue(session.project, now)
         return nextSubagent(session.project) != null
+    }
+
+    /**
+     * **Retires the first idle subagents until the live count fits the operator's number.**
+     *
+     * The operator's rule: *"when amount of running subagents is above the limit then the first idle
+     * subagent is removed, and if chat agent tries to write to an agent (by id) who has been removed
+     * then he gets exception."*
+     *
+     * **Idle only, oldest first**, and the busy set is the runner's own in-flight marks — a turn on
+     * the worker is not a subagent the count can take away, because that would kill work in progress.
+     * If there are not enough idle ones the count stays over until one finishes, which is the same
+     * rule a stop follows.
+     *
+     * **The folder stays.** The operator's answer: *"folder stays, id inactive"*. The record is the
+     * only account of what that subagent did, and the `SUB` rows already in the chat quote it.
+     */
+    private fun fitToCount(project: String) {
+        val limit = settings.subagentCount
+        val registry = AgentSubagents(ws.accountDir)
+        val busy = synchronized(inFlight) {
+            registry.read(project).map { it.id }.filter { subagentId(project, it) in inFlight }.toSet()
+        }
+        val retired = registry.fitTo(project, limit, busy)
+        if (retired.isEmpty()) return
+        Trace.note(
+            "subagent-retired",
+            "$project · ${retired.joinToString(", ") { "#$it" }} over $limit",
+        )
     }
 
     /**
