@@ -191,12 +191,12 @@ These are the useful part, because each was invisible until something asked.
 ## 4. What is NOT covered, stated plainly
 
 1. **`OpenRouterDoor` / the network.** Unchanged by this work, and still the one path no test drives.
-2. **A subagent's own keepalive.** The ceiling **stops** a subagent (`retireOverdue`); nothing pings
-   it. The operator said subagents *are* kept warm because they keep context between tasks — so a
-   subagent's context goes cold between tasks and the next task pays a cache write. **This is the one
-   place the built behaviour is narrower than the decision**, and it should be either implemented or
-   the decision revisited. It is not a silent omission: `subagent-stop` fires when the ceiling is
-   reached, and nothing fires for a ping that never happens.
+2. ~~A subagent's own keepalive.~~ **FIXED** (`1fea119`). The audit found that the decision — *"subagents
+   do need keepalive because they keep context between tasks"* — had no code behind it: the ceiling
+   stopped a subagent and nothing pinged it. `SubagentRun.warm` reuses `Agent.warm`, the interval and
+   ceiling are the chat agent's own settings (one number, two jobs, one clock), and the tests assert
+   on `subagent-warm` rather than on a count of pings, because a count cannot tell the two kinds
+   apart.
 3. **The `subagent` tool cannot see a subagent's live state.** `list` shows live/retired from the
    registry; whether a turn is running right now is the runner's in-flight set, which the tool does
    not have. So `list` can say `live` about a subagent whose turn is on the worker.
@@ -211,12 +211,26 @@ These are the useful part, because each was invisible until something asked.
 
 ---
 
-## 5. The three things I would do next, in order
+## 5. The things I would do next, in order
 
-1. **A subagent's keepalive** (§4.2) — the one place the build is narrower than the decision.
-2. **`SUB` in `AgentChat`** (§4.5) — a row that says what it is, on the screen as well as in the log.
-3. **`list` showing live turns** (§4.3) — it needs the runner's in-flight set, which means the tool
+1. **`SUB` in `AgentChat`** (§4.5) — a row that says what it is, on the screen as well as in the log.
+2. **`list` showing live turns** (§4.3) — it needs the runner's in-flight set, which means the tool
    needs a way to ask it.
+3. **Bound a report on the way in** (§4.4) — by the operator's decision the whole report goes in, so
+   this is the one place the app can still be surprised by a size it cannot send.
 
 None of the three is a defect in what exists; each is a piece of the decision that has no
-implementation yet.
+implementation yet. The first is the most visible: a person reading the chat sees a paragraph with no
+heading saying where it came from.
+
+## 6. What the audit method found, so it can be used again
+
+Two questions, asked of every new symbol:
+
+1. **How many call sites does it have outside its own tests?** `fitTo` had zero. A rule that is
+   implemented, tested, and wired to nothing is a rule the app does not have.
+2. **What does the decision list say that has no code?** The subagent keepalive was a decision in
+   round 2 §5.2 and nothing implemented it. Reading the decisions back against the diff is what found
+   it, and it is not a thing any test can find — a test can only prove what exists.
+
+Both are cheap, and both found something a green suite did not.
