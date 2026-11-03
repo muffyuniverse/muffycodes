@@ -249,6 +249,55 @@ class DeviceFlowTest {
     }
 
     @Test
+    fun `a flag the worker has not seen yet is not a cancellation`() {
+        // **The test above could not have caught the bug it describes.** It passes
+        // `cancelled = { false }` — a predicate that is a constant — so the fault it exists to prevent
+        // (the predicate reading a value the main thread has not posted yet) was invisible to it. The
+        // operator hit it twice: *"connect to github again stuck in waiting"*.
+        //
+        // This drives the predicate the app actually builds: an `AtomicBoolean` that the caller sets
+        // **before** the worker starts. The loop must reach the token. The assertion that matters is
+        // the second one — the predicate was asked, and the answer was "keep going".
+        val alive = java.util.concurrent.atomic.AtomicBoolean(true)
+        val answers = mutableListOf<DeviceFlow.Poll>(
+            DeviceFlow.Poll.Waiting(5_000L),
+            DeviceFlow.Poll.Done("gho_token"),
+        )
+        var asked = 0
+        val ended = mutableListOf<DeviceFlow.Poll>()
+
+        DeviceFlow.pollThrough(
+            code = code(),
+            cancelled = { asked++; !alive.get() },
+            poll = { answers.removeAt(0) },
+            wait = {},
+        ) { ended += it }
+
+        assertEquals("**it polled rather than deciding it was cancelled**", 1, ended.size)
+        assertTrue("the predicate was consulted", asked > 0)
+        assertEquals("and the answer is the token", "gho_token", (ended.single() as DeviceFlow.Poll.Done).token)
+    }
+
+    @Test
+    fun `a flag cleared before the loop starts stops it without asking GitHub`() {
+        // The other half: a flow cancelled before it began must not spend a request. Without this the
+        // fix above would be "ignore the flag", which is the opposite fault.
+        val alive = java.util.concurrent.atomic.AtomicBoolean(false)
+        var polls = 0
+        val ended = mutableListOf<DeviceFlow.Poll>()
+
+        DeviceFlow.pollThrough(
+            code = code(),
+            cancelled = { !alive.get() },
+            poll = { polls++; DeviceFlow.Poll.Done("never") },
+            wait = {},
+        ) { ended += it }
+
+        assertEquals("**nothing was asked of GitHub**", 0, polls)
+        assertEquals("and nothing ended, because nothing began", 0, ended.size)
+    }
+
+    @Test
     fun `a cancelled flow stops without asking GitHub again`() {
         // **Leaving is the only thing that stops a live poll**, and it must stop it before spending
         // another token-request on a person who has walked away.

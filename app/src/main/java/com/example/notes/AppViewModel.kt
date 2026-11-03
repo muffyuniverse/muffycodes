@@ -4372,6 +4372,10 @@ class AppViewModel @JvmOverloads constructor(
     fun startDeviceSignIn() {
         if (device != null) return
         Trace.tap("github device", "start")
+        // **Set on the calling thread, before the worker exists.** The worker's first cancellation
+        // check can run before the main thread has posted the dialog state, and a flag set *inside*
+        // the worker's task would still be later than that check.
+        polling.set(true)
         onWorker {
             DeviceFlow.requestCode().fold(
                 onSuccess = { code ->
@@ -4382,6 +4386,7 @@ class AppViewModel @JvmOverloads constructor(
                     pollDevice(code)
                 },
                 onFailure = { t ->
+                    polling.set(false)
                     val said = Secrets.explain(t, "GitHub sign-in could not start")
                     main.post {
                         // **Said in the dialog, not as a toast.** The dialog is where the person is
@@ -4397,6 +4402,24 @@ class AppViewModel @JvmOverloads constructor(
      * **Polls until the code is approved, refused, or out of time.** On the worker, one sleep at a
      * time, with the interval GitHub set and `slow_down` respected.
      */
+    /**
+     * **Set by the worker the moment a flow starts, cleared by whatever ends it.**
+     *
+     * The cancellation check used to read [device] — the *display* state — and that is the same bug
+     * the loop was extracted to kill, one layer down. `startDeviceSignIn` sets `device` on the main
+     * thread and then calls `pollDevice` **on the worker**, so the worker's first `cancelled()` can
+     * run before the main thread has posted anything: it reads null, takes null for "cancelled", and
+     * returns without ever asking GitHub. The dialog sits on "Waiting for you to approve it…" for
+     * ever, and GitHub — which does not know any of this — reports the device as connected.
+     *
+     * The operator's report says exactly that, and it is the second time: *"connect to github again
+     * stuck in waiting"*.
+     *
+     * So the flag is its own thing, owned by the worker, and it is `AtomicBoolean` because two
+     * threads touch it and a plain `Boolean` field is a data race rather than a shared answer.
+     */
+    private val polling = java.util.concurrent.atomic.AtomicBoolean(false)
+
     private fun pollDevice(code: DeviceFlow.Code) {
         // **The loop is `DeviceFlow.pollThrough`, not a copy here.**
         //
@@ -4408,12 +4431,20 @@ class AppViewModel @JvmOverloads constructor(
         //
         // The loop needs the *code* it was handed, not the display state, and the two are separate
         // arguments now.
+        // **The end of a flow was recorded; its start was not.** A report saying "stuck in waiting"
+        // could not distinguish *polling, and GitHub saying no* from *nothing polling at all* — the
+        // two states this bug lives between — because only the ending left a mark. This line is the
+        // fact that says the loop is alive, and it is what would have made the operator's report a
+        // diagnosis instead of a description.
+        Trace.note("github-device", "polling")
         DeviceFlow.pollThrough(
             code = code,
-            cancelled = { device == null },
+            // **The worker's own flag, not the screen's.** See [polling].
+            cancelled = { !polling.get() },
         ) { answer ->
             when (answer) {
                 is DeviceFlow.Poll.Done -> {
+                    polling.set(false)
                     main.post { device = null }
                     // **The same door the token uses**, so there is one way in rather than two.
                     val who = signInGitHub().identity(answer.token).value
@@ -4426,6 +4457,7 @@ class AppViewModel @JvmOverloads constructor(
                     }
                 }
                 is DeviceFlow.Poll.Failed -> {
+                    polling.set(false)
                     Trace.note("github-device", "ended · ${answer.why.take(60)}")
                     main.post { device = device?.copy(failed = answer.why) }
                 }
@@ -4440,6 +4472,8 @@ class AppViewModel @JvmOverloads constructor(
     fun cancelDevice() {
         if (device == null) return
         Trace.note("github-device", "cancelled")
+        // **Before the state, so the worker cannot wake between the two and find the flow alive.**
+        polling.set(false)
         device = null
     }
 
