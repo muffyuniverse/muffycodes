@@ -44,6 +44,35 @@ class SubagentRun(
     private val downloads: ((File) -> Result<Export.Done>)? = null,
 ) {
 
+    /**
+     * **Keeps a subagent's cache warm, the way the chat agent's own keepalive does.**
+     *
+     * The operator's rule: *"subagents do need keepalive because they keep context between tasks."*
+     * That is the whole reason a subagent has a log of its own — and it is *more* justified than for
+     * a chat agent, because a subagent's context is a body of work rather than a conversation, so
+     * paying a full prompt again on every task is the cost the keepalive exists to avoid.
+     *
+     * **A ping is not a turn and cannot end one.** Nothing is written into the conversation, nothing
+     * is parsed, and the subagent's task is untouched — which is the same contract `Agent.warm` has
+     * for the chat agent, and the reason this reuses it rather than inventing a second one.
+     *
+     * Returns null on success, or the sentence a person would read.
+     */
+    fun warm(project: String, id: Int): String? {
+        val dir = ws.projectDir(project)
+        if (!dir.isDirectory) return "$project is gone"
+        return try {
+            val log = AgentLog.openAt(File(dir, "${AgentLog.DIR}/$id"))
+            val agent = agentFor(project, log)
+            when (val warm = agent.warm()) {
+                is Agent.Warm.Sent -> null
+                is Agent.Warm.Failed -> warm.why
+            }
+        } catch (t: Throwable) {
+            Secrets.explain(t, "subagent #$id could not be kept warm")
+        }
+    }
+
     /** What one turn did, so the caller can decide whether the subagent keeps its place. */
     sealed interface Done {
         /** It said something. [said] is the report, already result-shaped. */
@@ -52,6 +81,60 @@ class SubagentRun(
         /** It could not run, and [why] is the sentence a person reads. */
         data class Failed(val why: String) : Done
     }
+
+    /**
+     * **The agent a subagent turn runs**, built in one place so a ping and a task cannot disagree.
+     *
+     * A keepalive that was built from a different model, a different window or a different scope
+     * would warm the wrong cache — and the difference would be invisible until a task's first
+     * request paid for a prompt the ping had not warmed.
+     */
+    private fun agentFor(
+        project: String,
+        log: AgentLog,
+        active: ActiveModel = model(),
+        limits: ContextBudget.Limits = limitsFor(active),
+    ): Agent = Agent(
+        accountDir = ws.accountDir,
+        project = project,
+        ws = ws,
+        git = git,
+        log = log,
+        door = door(active),
+        model = active,
+        maxResult = ContextBudget.resultLimit(settings.maxResult, active.contextLength)
+            .inForce.toInt(),
+        limits = limits,
+        bg = Background.inline(),
+        foregroundMs = settings.foregroundMs,
+        backgroundMs = { settings.backgroundMs },
+        triggerTokens = { limits.triggerAt },
+        sessionTokens = settings.sessionLimit,
+        onPage = { live -> onPage(project, live) },
+        browser = browser,
+        fetcher = fetcher,
+        mcp = mcp,
+        credentials = credentials,
+        scanner = scanner,
+        fetchAllowed = fetchAllowed,
+        privateAllowed = { settings.browsePrivate },
+        browseMs = { settings.browseMs },
+        github = github,
+        githubToken = githubToken,
+        downloads = downloads,
+        // **The boundary, and the reason a shorter tool list was not enough.** `tree` accepts
+        // `../` on purpose and `search` walks the account, so a subagent handed `{read, tree, edit}`
+        // could still reach everything.
+        scope = Scope.Project(project),
+    )
+
+    /** The two context limits, from the operator's numbers and the pinned endpoint's window. */
+    private fun limitsFor(active: ActiveModel) = ContextBudget.Limits.of(
+        triggerAsked = settings.triggerTokens.toLong(),
+        hardAsked = settings.hardTokens.toLong(),
+        targetAsked = settings.targetTokens.toLong(),
+        ceiling = ContextBudget.ceiling(active.provider, active.contextLength, active.maxOutput),
+    )
 
     /**
      * **Runs one task for subagent [id], in [project].**
@@ -70,50 +153,13 @@ class SubagentRun(
             return Done.Failed("$project is gone, so subagent #$id did not run")
         }
         val active = model()
-        val limits = ContextBudget.Limits.of(
-            triggerAsked = settings.triggerTokens.toLong(),
-            hardAsked = settings.hardTokens.toLong(),
-            targetAsked = settings.targetTokens.toLong(),
-            ceiling = ContextBudget.ceiling(active.provider, active.contextLength, active.maxOutput),
-        )
+        val limits = limitsFor(active)
         return try {
             // **`openAt`, not `open`.** `open` appends `agent/`, so passing it `agent/2` would put
             // the record at `agent/2/agent/` — a folder nobody would think to look in, made by a
             // reader, which is the exact shape of the bug that brought a deleted project back.
             val log = AgentLog.openAt(File(dir, "${AgentLog.DIR}/$id"))
-            val agent = Agent(
-                accountDir = ws.accountDir,
-                project = project,
-                ws = ws,
-                git = git,
-                log = log,
-                door = door(active),
-                model = active,
-                maxResult = ContextBudget.resultLimit(settings.maxResult, active.contextLength)
-                    .inForce.toInt(),
-                limits = limits,
-                bg = Background.inline(),
-                foregroundMs = settings.foregroundMs,
-                backgroundMs = { settings.backgroundMs },
-                triggerTokens = { limits.triggerAt },
-                sessionTokens = settings.sessionLimit,
-                onPage = { live -> onPage(project, live) },
-                browser = browser,
-                fetcher = fetcher,
-                mcp = mcp,
-                credentials = credentials,
-                scanner = scanner,
-                fetchAllowed = fetchAllowed,
-                privateAllowed = { settings.browsePrivate },
-                browseMs = { settings.browseMs },
-                github = github,
-                githubToken = githubToken,
-                downloads = downloads,
-                // **The boundary, and the reason a shorter tool list was not enough.** `tree`
-                // accepts `../` on purpose and `search` walks the account, so a subagent handed
-                // `{read, tree, edit}` could still reach everything.
-                scope = Scope.Project(project),
-            )
+            val agent = agentFor(project, log, active, limits)
             // **`wake`, not `burst`.** A subagent's task is a thing that happened and that it must
             // act on, which is exactly what a wake says — the same shape a finished background
             // command has. `burst` would make it look like the person speaking to it.

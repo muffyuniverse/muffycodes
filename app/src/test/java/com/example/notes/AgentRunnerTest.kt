@@ -250,6 +250,74 @@ class AgentRunnerTest {
         )
     }
 
+    @Test
+    fun `an idle subagent is kept warm, on the chat agent's interval`() {
+        // **The operator's rule**: *"subagents do need keepalive because they keep context between
+        // tasks."* A subagent's context is a body of work rather than a conversation, so paying a
+        // full prompt again on every task is exactly the cost the keepalive exists to avoid.
+        on("shopping", now = 1_000)
+        val registry = AgentSubagents(ws.accountDir)
+        val one = registry.mint("shopping", "the task it finished")
+        // Idle: the task has been claimed and run.
+        registry.touchTask("shopping", one.id, "")
+        registry.touched("shopping", one.id, at = 1_000)
+        settings.keepSubagents(2)
+        settings.keepSubagentWarm(60)
+        settings.keepWarm(true)
+
+        val door = PingDoor()
+        val runner = runner(door)
+        // One interval after it last did anything.
+        runner.tick(now = 1_000 + settings.pollMs + 1)
+        settle(runner)
+
+        assertTrue(
+            "**a ping went out** — that is the whole point of keeping a subagent's context warm",
+            door.pings.isNotEmpty(),
+        )
+    }
+
+    @Test
+    fun `a stopped subagent is not pinged, because that is the money the ceiling saves`() {
+        on("shopping", now = 1_000)
+        val registry = AgentSubagents(ws.accountDir)
+        val one = registry.mint("shopping", "done")
+        registry.touchTask("shopping", one.id, "")
+        registry.touched("shopping", one.id, at = 1_000)
+        registry.sleep("shopping", one.id, asleep = true)
+        settings.keepSubagents(2)
+        settings.keepSubagentWarm(60)
+        settings.keepWarm(true)
+
+        val door = PingDoor()
+        val runner = runner(door)
+        runner.tick(now = 1_000 + settings.pollMs + 1)
+        settle(runner)
+
+        assertTrue("nothing was pinged", door.pings.isEmpty())
+    }
+
+    @Test
+    fun `a subagent with a task outstanding is not pinged, because it is about to run`() {
+        // A ping during work in progress would be a second request against a conversation in use.
+        on("shopping", now = 1_000)
+        val registry = AgentSubagents(ws.accountDir)
+        registry.mint("shopping", "work to do")
+        settings.keepSubagents(2)
+        settings.keepSubagentWarm(60)
+        settings.keepWarm(true)
+
+        val door = PingDoor()
+        val runner = runner(door)
+        runner.tick(now = 1_000 + settings.pollMs + 1)
+        settle(runner)
+
+        assertTrue(
+            "**no ping** — the subagent ran its task instead: turns=${door.turns}, pings=${door.pings.size}",
+            door.pings.isEmpty(),
+        )
+    }
+
     // ---- which session is due ----------------------------------------------
 
     @Test

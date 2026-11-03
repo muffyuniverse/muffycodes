@@ -286,6 +286,8 @@ class AgentRunner(
                 // coming back, which it is waiting on; a subagent is work it asked to happen
                 // elsewhere.
                 runSubagent(current, now)
+            } else if (warmSubagentDue(current, now)) {
+                warmSubagent(current, now)
             } else if (
                 current.warmDue(now, keepAlive, pollMs, warmMs) &&
                 agentId(current.project) !in polling()
@@ -369,6 +371,71 @@ class AgentRunner(
         fitToCount(session.project)
         retireOverdue(session.project, now)
         return nextSubagent(session.project) != null
+    }
+
+    /**
+     * **Whether any subagent is due a keepalive ping, on the chat agent's own interval and ceiling.**
+     *
+     * The operator's rule: *"subagents do need keepalive because they keep context between tasks"* —
+     * and *"idle timeout is exactly keepalive timeout"*. So the interval and the ceiling are the
+     * **chat agent's** settings, not a second pair: one number with two jobs means one clock, and two
+     * clocks with one name is how a person sets a number and gets different behaviour.
+     *
+     * **A stopped subagent is not pinged.** Reaching the ceiling is what stops it, so pinging it
+     * afterwards would be spending the money the ceiling exists to save.
+     */
+    private fun warmSubagentDue(session: AgentSession, now: Long): Boolean {
+        if (session.state == AgentSession.State.STOPPED) return false
+        if (!settings.keepAlive) return false
+        if (agentId(session.project) in polling()) return false
+        val warmMs = settings.subagentWarmMs
+        if (warmMs <= 0) return false
+        return AgentSubagents(ws.accountDir).read(session.project).any { sub ->
+            !sub.retired && !sub.stopped &&
+                // Only an idle one: a subagent with a task is about to run, and one on the worker is
+                // running now. A ping during a turn would be a second request against a conversation
+                // in use.
+                sub.task.isBlank() &&
+                subagentId(session.project, sub.id) !in synchronized(inFlight) { inFlight.toSet() } &&
+                now - sub.lastAt >= settings.pollMs
+        }
+    }
+
+    /**
+     * **Keeps one subagent's cache warm**, and touches its clock so the next ping is an interval
+     * away rather than immediately.
+     *
+     * The ping is on this runner's worker, like every other request, so two never go out at once.
+     */
+    private fun warmSubagent(session: AgentSession, now: Long) {
+        val project = session.project
+        val registry = AgentSubagents(ws.accountDir)
+        val running = synchronized(inFlight) { inFlight.toSet() }
+        val sub = registry.read(project).firstOrNull { s ->
+            !s.retired && !s.stopped && s.task.isBlank() &&
+                subagentId(project, s.id) !in running &&
+                now - s.lastAt >= settings.pollMs
+        } ?: return
+        // **Touched before the work goes out**, so a slow ping cannot make the next tick think the
+        // same subagent is due again — the same rule `dispatch` follows for the session's clock.
+        registry.touched(project, sub.id, at = now)
+        synchronized(inFlight) { inFlight += subagentId(project, sub.id) }
+        Trace.note("subagent-warm", "$project #${sub.id}")
+        worker.execute {
+            try {
+                val run = SubagentRun(
+                    ws = ws, git = git, settings = settings, door = door, model = model,
+                    onPage = onPage, browser = browser, fetcher = fetcher, mcp = mcp,
+                    credentials = credentials, scanner = scanner, fetchAllowed = fetchAllowed,
+                    github = github, githubToken = githubToken, downloads = downloads,
+                    report = { _, _, _ -> },
+                )
+                val why = run.warm(project, sub.id)
+                if (why != null) Trace.note("subagent-warm-failed", "$project #${sub.id} · $why")
+            } finally {
+                synchronized(inFlight) { inFlight -= subagentId(project, sub.id) }
+            }
+        }
     }
 
     /**
