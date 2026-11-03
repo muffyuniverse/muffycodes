@@ -780,20 +780,30 @@ jobs:
           CHOSEN_VERSION: ${{ inputs.version_name }}
           REPOSITORY: ${{ github.repository }}
           RUN_NUMBER: ${{ github.run_number }}
+          # **The branch, explicitly.** `GITHUB_REF` is set for `run:` steps but reading the branch
+          # from an input the workflow already declares is one less thing that can be empty — and an
+          # empty one here would silently name a dev build after the last release again, which is the
+          # bug being fixed.
+          BRANCH: ${{ github.ref_name }}
         run: |
           # The name is for people to read. A release made by hand may be named
           # anything at all, so it is taken as given and only checked for
           # characters that would be unsafe in a tag or a shell word.
           if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "${CHOSEN_VERSION:-}" ]; then
             version_name="$CHOSEN_VERSION"
-          elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            # **A dev build is named for the run, not for the last release.**
+          elif [ "$EVENT_NAME" != "push" ] || [ "${BRANCH:-}" != "main" ]; then
+            # **A build that is not a release is named for the run, not for the last release.**
             #
             # The name used to be "highest published release + 1", and nothing publishes from
             # `development` — so every dev build was called `190`, the number the *next* release
             # would take, and the phone could not tell one build from another. That is the
             # operator's report: *"when I update the app its version doesnt change"*. Twelve builds
             # in a row all said 190, which also made every trace row ambiguous.
+            #
+            # **This branch is the one dev builds actually take.** They arrive as `push` events on
+            # `development`, not as dispatches — `version_name` is a required input, so a dispatch
+            # always names itself and never reaches here. Getting this wrong once already: I first
+            # wrote the rule for `workflow_dispatch`, which no dev build ever is.
             #
             # A run number is unique, monotone and already known here. The release name keeps its
             # own rule, because a release is a thing with a number people quote; a dev build is a
@@ -838,7 +848,7 @@ jobs:
           # A run number is below the clock's value, so this cannot collide with a release code, and
           # `tools/version-code.sh` still guards the ceiling. The offset puts dev codes in their own
           # range so they can never sort above a release made later.
-          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -z "${CHOSEN_VERSION:-}" ]; then
+          if [ "$EVENT_NAME" != "push" ] || [ "${BRANCH:-}" != "main" ]; then
             version_code="$(( 1000000000 + RUN_NUMBER ))"
           else
             version_code="$(bash tools/version-code.sh)"
