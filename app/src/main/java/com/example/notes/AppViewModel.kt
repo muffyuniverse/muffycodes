@@ -622,13 +622,13 @@ class AppViewModel @JvmOverloads constructor(
         // **Closed here rather than in the caller**, because there are two callers (`signIn` and
         // `saveModelKey`) and a copy of this in each is a copy that can drift. This is the one
         // moment onboarding ends, so it is the one place that has to tidy up after it.
-        if (onboardingIndexOf(openFile()) >= 0) {
+        // **Only the page it was actually on**, not any file: a person who opened an ordinary file
+        // during onboarding is not owed a closed editor when the connections land.
+        val shown = editingPath?.let { workspace?.fileAt(it) }
+        if (shown != null && onboardingIndexOf(shown) >= 0) {
             closeEditor()
         }
     }
-
-    /** The file the editor has open, or null. Read by the one place that needs to know. */
-    private fun openFile(): File? = editingPath?.let { workspace?.fileAt(it) }
 
     /** The index of the page the editor is showing, or -1 when it is not an onboarding page. */
     fun onboardingIndexOf(file: File): Int {
