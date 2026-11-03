@@ -559,7 +559,7 @@ class AgentRunnerTest {
         )
         assertTrue(
             "**the log names what it did**, so the agent can read it back and re-forget deliberately",
-            after.rows().any { it.text.contains("agent/session.log") },
+            after.rows().any { it.detail.contains("agent/session.log") },
         )
     }
 
@@ -572,8 +572,8 @@ class AgentRunnerTest {
         runner().stop("shopping")
 
         val said = AgentLog.open(ws.projectDir("shopping")).rows()
-            .filter { it.text.contains("the agent was stopped") }
-            .joinToString(" ") { it.text }
+            .filter { it.detail.contains("the agent was stopped") }
+            .joinToString(" ") { it.detail }
 
         assertTrue("the reason is in the row: $said", said.contains("you stopped it"))
     }
