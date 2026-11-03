@@ -13,10 +13,11 @@
 #   bundle --dev       the newest development build (the "install and look at" one)
 #   bundle --run 123   the bundle one run made (ci uses this after a build)
 #
-# Where things land:
-#   Downloads/muffycodes/<name>/            the whole bundle, as it was made
-#   Downloads/muffycodes-<name>.apk         the APK, at the convenience path
-#   Downloads/muffycodes/muffycodes-<name>.apk  the phone is given
+# Where things land — one folder, emptied on every delivery, holding only the
+# latest build:
+#   Downloads/muffycodes/muffycodes-<name>.apk      the shipped app, no log file
+#   Downloads/muffycodes/muffycodes-<name>-dev.apk  the debug build, writes the trace
+#   Downloads/muffycodes/<name>/                    the bundle: changes, pictures
 #
 # The renders of a real install are put on a release a few minutes after it is
 # published, in their own run. Whenever they are there, they are picked up too
@@ -198,24 +199,43 @@ fi
 
 # Everything is in place before anything is delivered, so the phone never
 # opens a folder that is still being filled.
-DEST="$DOWNLOADS/muffycodes/$FOLDER"
+#
+# ## One folder, and only the latest
+#
+# The operator, after finding ninety-two APKs and 3.6 GB in Downloads: *"you ship both app release
+# and muffycodes dev to downloads. and old releases arent deleted - but should, downloads should
+# keep only the latest version. and all in one muffycodes folder"*.
+#
+# The old shape put an APK at the Downloads root **and** a copy inside the bundle folder, and never
+# removed the previous run's files — so every build left two new APKs behind for ever. Worse, the
+# root copy was the *release* build and the bundle copy was the same file, while the debug build sat
+# beside them under a `-dev` suffix that is easy to miss on a phone. That is how a report came from a
+# release build while the log was expected from a debug one.
+#
+# So: **one folder, emptied each time, holding this run's two APKs and its bundle.** Nothing at the
+# Downloads root. The two files are named for what they are rather than for the run id, because the
+# question at the phone is "which one do I tap", not "which run was this".
+DEST="$DOWNLOADS/muffycodes"
 rm -rf "$DEST"
-mkdir -p "$DEST" "$DOWNLOADS/muffycodes"
-# `-R` because the bundle holds folders now: the scenarios keep their shape so
-# that the report's links resolve. Without it cp drops them, says so quietly
-# enough that a green run looks fine, and the phone gets no report.
+mkdir -p "$DEST"
+# `-R` because the bundle holds folders: the scenarios keep their shape so that the report's links
+# resolve. Without it cp drops them, says so quietly enough that a green run looks fine, and the
+# phone gets no report.
 cp -R "$TMP"/* "$DEST/"
-cp "$TMP/app-release.apk" "$DOWNLOADS/muffycodes-$LABEL.apk"
+rm -f "$DEST/app-release.apk" "$DEST/app-debug.apk"
 
-# The dev copy, when the run was asked for one. A debug build signed with the release
-# key, so it installs over the release APK on the same phone without uninstalling —
-# which is the whole point: live tracing without losing what is already in the app.
+# **The names say which is which**, and the dev one says what it is for. A person tapping a file
+# called `muffycodes-190.apk` has no way to know it keeps no log.
+mv "$TMP/app-release.apk" "$DEST/muffycodes-$LABEL.apk"
+echo "  + muffycodes-$LABEL.apk (the shipped app)"
 if [ -f "$TMP/app-debug.apk" ]; then
-  cp "$TMP/app-debug.apk" "$DOWNLOADS/muffycodes-$LABEL-dev.apk"
-  echo "  + $DOWNLOADS/muffycodes-$LABEL-dev.apk (dev: live trace on)"
+  # A debug build signed with the release key, so it installs over the release APK on the same phone
+  # without uninstalling — which is the whole point: live tracing without losing what is in the app.
+  mv "$TMP/app-debug.apk" "$DEST/muffycodes-$LABEL-dev.apk"
+  echo "  + muffycodes-$LABEL-dev.apk (writes the trace to Downloads)"
+else
+  echo "  ! no dev build in this run, so there is no build that writes a trace"
 fi
-cp "$TMP/app-release.apk" "$DOWNLOADS/muffycodes/muffycodes-$LABEL.apk"
 
 echo "delivered $FOLDER to $DEST"
-ls "$DEST" | sed 's/^/  /'
-echo "  + $DOWNLOADS/muffycodes-$LABEL.apk"
+ls "$DEST" | sed 's/^/  /' 

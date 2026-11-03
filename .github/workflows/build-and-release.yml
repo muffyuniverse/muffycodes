@@ -786,6 +786,19 @@ jobs:
           # characters that would be unsafe in a tag or a shell word.
           if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "${CHOSEN_VERSION:-}" ]; then
             version_name="$CHOSEN_VERSION"
+          elif [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            # **A dev build is named for the run, not for the last release.**
+            #
+            # The name used to be "highest published release + 1", and nothing publishes from
+            # `development` — so every dev build was called `190`, the number the *next* release
+            # would take, and the phone could not tell one build from another. That is the
+            # operator's report: *"when I update the app its version doesnt change"*. Twelve builds
+            # in a row all said 190, which also made every trace row ambiguous.
+            #
+            # A run number is unique, monotone and already known here. The release name keeps its
+            # own rule, because a release is a thing with a number people quote; a dev build is a
+            # thing with a *when*.
+            version_name="${RUN_NUMBER}"
           else
             # One more than the largest number ever released, so the numbers
             # only ever go up even if a release was named out of order.
@@ -815,7 +828,21 @@ jobs:
           # 32-bit integer, so the epoch seconds run out in 2038. If the build
           # ever runs past that, fall back to the run number, which is the
           # other integer GitHub guarantees to increase.
-          version_code="$(bash tools/version-code.sh)"
+          # **A dev build's code follows its name**, and that is the second half of the same bug.
+          #
+          # The code was the clock, so it went up — but a build whose *name* never changed made the
+          # phone's installer say "already installed" and leave the old app in place. The operator:
+          # *"when I update the app its version doesnt change and size is wrong"* — the size was
+          # wrong because the APK that installed was the old one.
+          #
+          # A run number is below the clock's value, so this cannot collide with a release code, and
+          # `tools/version-code.sh` still guards the ceiling. The offset puts dev codes in their own
+          # range so they can never sort above a release made later.
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -z "${CHOSEN_VERSION:-}" ]; then
+            version_code="$(( 1000000000 + RUN_NUMBER ))"
+          else
+            version_code="$(bash tools/version-code.sh)"
+          fi
           # The boundary lives in tools/version-code.sh, which has a self-test,
           # because the inline fallback it replaced was not monotonic: it produced
           # a number below the last one the clock had produced, so the first build

@@ -478,9 +478,19 @@ object Trace {
             // **Said when the ring is all there is**, because a paste with no "also at" line was the
             // only clue that nothing had reached the disk — and it took a week to notice. Now the
             // paste says it, in the place a person is already looking.
+            //
+            // **`sink == null` is not "turned off"**, which is what this said and why it lied on a
+            // phone whose switch had never been touched. It means no sink is attached, and there are
+            // two reasons for that: a release build, which writes nothing by design, or a build
+            // whose attach failed. The sentence says the fact and lets the build say which.
             appendLine(
                 if (sink == null) {
-                    "**Not written to a file**: the log is turned off, so this is only what is in memory."
+                    "**Not written to a file**: nothing is attached to receive it" +
+                        if (BuildConfig.DEBUG) {
+                            ", which is a fault in a debug build — the log is always on there."
+                        } else {
+                            ". A release build writes no log, by design."
+                        }
                 } else {
                     "**Not written to a file**: " + (
                         (sink as? DownloadsSink)?.refused

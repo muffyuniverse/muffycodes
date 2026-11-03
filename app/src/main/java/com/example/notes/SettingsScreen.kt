@@ -893,9 +893,25 @@ fun SettingsScreen(
             // Here rather than behind a long press, because the moment a person wants
             // it is the moment something did not work, and hunting for the screen that
             // explains it is the last thing they should have to do.
+            // **The report exists in every build, and it writes a file in only one of them.**
+            //
+            // The operator's confusion, and it was earned: *"why then release version has trace
+            // logging at all... confusing"*. A release build drew this button and a ring of events,
+            // and wrote nothing anywhere — so pressing Report produced a paste with no file behind
+            // it, on the build that cannot produce a file. Two different things called the same name.
+            //
+            // **Both stay, and the words say which is which.** The ring is a person's own account of
+            // what just happened, and it is worth having on any build. The file is the thing that
+            // makes a report *checkable*, and only a debug build has it.
             TextButton(onClick = onOpenTrace) { Text("What the app did") }
             Text(
-                "Every tap, what answered it, and anything that never got an answer.",
+                if (BuildConfig.DEBUG) {
+                    "Every tap, what answered it, and anything that never got an answer. " +
+                        "This build also writes it to Downloads as it happens."
+                } else {
+                    "Every tap, what answered it, and anything that never got an answer — this " +
+                        "session only. A release build keeps no file: share it now if you want it kept."
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
