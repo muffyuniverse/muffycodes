@@ -248,9 +248,9 @@ class ScopeTest {
         val file = File(ws.projectDir("groceries"), "list.txt")
         scoped().call("read", """{"path":"list.txt"}""")
 
-        // Another agent writes, a moment later.
-        Thread.sleep(20)
-        file.writeText("milk\neggs\nbread\n")
+        // Another agent writes, and the content is a different length — which is what makes this
+        // detectable on a filesystem that stamps modification times to the second.
+        file.writeText("milk\neggs\nbread\nbutter\ncheese\n")
 
         val before = Trace.report().lines.size
         scoped().call("edit", """{"path":"list.txt","at":3,"text":"butter"}""")

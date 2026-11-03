@@ -182,10 +182,21 @@ class AgentTools(
      * Keyed by canonical path, and only ever consulted on a write. Bounded, because a long turn
      * reads many files and a map that grew for ever would be a leak in a session that never ends.
      */
-    private val readAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val readAt = java.util.concurrent.ConcurrentHashMap<String, Seen>()
 
     /** How many reads are remembered; past this the oldest is forgotten. */
     private val READ_MEMORY = 256
+
+    /**
+     * **What a file looked like when this agent read it: its length and its modification time.**
+     *
+     * Both, because neither is enough on its own. A phone's filesystem may stamp modification times
+     * to the second, so two writes inside one second are indistinguishable by time alone — and a
+     * length catches most of those, because a changed file usually has a different length. A file
+     * edited to exactly the same length inside the same second is the one case this misses, and it
+     * is a case no cheap check can see.
+     */
+    private data class Seen(val size: Long, val at: Long)
 
     /** The project's own folder: what the agent stands in. */
     val projectDir: File get() = ws.projectDir(project)
@@ -1711,7 +1722,7 @@ class AgentTools(
         val file = resolve(raw).getOrNull() ?: return
         if (!file.isFile) return
         if (readAt.size >= READ_MEMORY) readAt.clear()
-        readAt[file.absolutePath] = file.lastModified()
+        readAt[file.absolutePath] = Seen(file.length(), file.lastModified())
     }
 
     /**
@@ -1728,8 +1739,10 @@ class AgentTools(
      */
     private fun noticeStale(file: File) {
         val seen = readAt[file.absolutePath] ?: return
-        val now = file.lastModified()
-        if (now <= seen) return
+        // **Length or time, whichever moved.** A phone's filesystem may stamp times to the second,
+        // so a change inside one second is invisible to time alone and visible to length.
+        val changed = file.length() != seen.size || file.lastModified() != seen.at
+        if (!changed) return
         Trace.note("stale-read", "${rel(file)} changed since it was read")
     }
 
