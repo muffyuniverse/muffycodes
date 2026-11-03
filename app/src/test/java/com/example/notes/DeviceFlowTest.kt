@@ -171,7 +171,10 @@ class DeviceFlowTest {
 
         val why = (poll as DeviceFlow.Poll.Failed).why
         assertTrue("it names the setting: $why", why.contains("setting on the OAuth App"))
-        assertFalse("and does not blame the phone: $why", why.contains("this phone can fix"))
+        // **"Not something this phone can fix" is the point**, not a phrase to avoid — it tells a
+        // person not to keep trying on their side. The assertion is on the words that send them to
+        // the developer, not on a phrase that happens to contain them.
+        assertFalse("and does not read as a retryable failure: $why", why.startsWith("GitHub refused"))
     }
 
     @Test

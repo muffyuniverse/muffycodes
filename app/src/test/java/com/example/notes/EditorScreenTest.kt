@@ -72,8 +72,11 @@ class EditorScreenTest {
         // `AccountsFeatureTest`. A test that wanted the onboarding behaviour would have to build its
         // own scene rather than borrow this one.
         made.await("onboarding to open") { made.viewModel.onboarding }
-        made.viewModel.onboardingReached(Onboarding.pages().lastIndex)
-        made.viewModel.finishOnboarding()
+        // **Connecting is the only way out**, so this connects rather than reading to the end: the
+        // gate is the settled rule, and a test harness that found a side door would be testing an
+        // app that does not exist.
+        made.viewModel.saveModelKey("sk-or-v1-a-key")
+        made.await("onboarding to close") { !made.viewModel.onboarding }
         made
     }
 
@@ -153,9 +156,8 @@ class EditorScreenTest {
         // the writing was meant, so a warning about a loss nobody chose would be the app blaming
         // them for its own timing.
         //
-        // **Back into Edit first, because View is now fullscreen** — the page has no text field to
-        // type into, which is the whole point of it. The Edit button on the fullscreen page is what
-        // returns to writing.
+        // **Back into Edit first**, because View has no text field to type into — the page is for
+        // reading, which is the whole point of it. The Edit segment is what returns to writing.
         compose.onNodeWithText("Edit").performClick()
         compose.onNodeWithText("three litres").performTextReplacement("four litres")
         compose.onNodeWithContentDescription("Back without saving").performClick()

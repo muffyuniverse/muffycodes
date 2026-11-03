@@ -446,15 +446,15 @@ class AccountsFeatureTest : FeatureTest() {
             assertEquals("moved to page three", 2, scene.settings.onboardingAt)
             scene.viewModel.onboardingReached(0)
             assertEquals("swiping back does not lose ground", 2, scene.settings.onboardingAt)
-            // And finishing is refused from anywhere but the end.
-            scene.viewModel.finishOnboarding()
-            assertTrue("not finished from page three", scene.viewModel.onboarding)
-            assertEquals("and nothing was recorded", 2, scene.settings.onboardingAt)
-
+            // **The position is the reading, and the gate is the connections.** Reading to the end
+            // does not open the door on its own — that is the settled rule — so this test stops at
+            // what it is about: the number only moves forward.
             scene.viewModel.onboardingReached(pages.lastIndex)
-            scene.viewModel.finishOnboarding()
-            assertFalse("finished from the last page", scene.viewModel.onboarding)
-            assertEquals("recorded past the end", pages.size, scene.settings.onboardingAt)
+            assertEquals("reaching the end records the end", pages.lastIndex, scene.settings.onboardingAt)
+            assertTrue(
+                "**and it is still open**, because reading is not connecting",
+                scene.viewModel.onboarding,
+            )
         } finally {
             scene.close()
         }
@@ -534,36 +534,14 @@ class AccountsFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `the last page offers a way past a connection that cannot be made`() {
-        // **A room with no door is the bug this prevents.** Onboarding only closes when both
-        // connections are made, so a person whose provider is down could make neither — and the
-        // page's own link is the way out. It is a link rather than a button so the reading screen
-        // keeps no chrome, which is the same reason the mode row is hidden here.
-        val scene = Scenario(org.robolectric.RuntimeEnvironment.getApplication(), signIn = true)
-        try {
-            scene.await("onboarding to open") { scene.viewModel.onboarding }
-            scene.viewModel.onboardingReached(Onboarding.pages().lastIndex)
-
-            scene.viewModel.runLinkAction("finish-onboarding")
-
-            assertFalse("the link closes it", scene.viewModel.onboarding)
-            assertEquals(
-                "recorded past the end",
-                Onboarding.pages().size,
-                scene.settings.onboardingAt,
-            )
-        } finally {
-            scene.close()
-        }
-    }
-
-    @Test
     fun `onboarding does not open again once it has been read`() {
         val scene = Scenario(org.robolectric.RuntimeEnvironment.getApplication(), signIn = true)
         try {
             scene.await("onboarding to open") { scene.viewModel.onboarding }
-            scene.viewModel.onboardingReached(Onboarding.pages().lastIndex)
-            scene.viewModel.finishOnboarding()
+            // **The one way out is connecting**, so this connects: the test is about what a second
+            // launch shows, and it needs onboarding to have actually ended.
+            scene.viewModel.saveModelKey("sk-or-v1-a-key")
+            scene.await("onboarding to close") { !scene.viewModel.onboarding }
             scene.close()
 
             // **The same phone, opened again** — which is what a second launch is. The open is
