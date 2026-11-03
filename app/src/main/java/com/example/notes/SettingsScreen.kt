@@ -782,6 +782,72 @@ fun SettingsScreen(
                 placeholder = "everything",
                 onValueChange = { settings.keepSession(it) },
             )
+            RowDivider()
+
+            // ---- subagents ----
+            //
+            // **Its own block, and its own numbers.** The operator's correction: *"we dont copy
+            // subagents from chat agents - we select and set up them separately (but they do share
+            // model and provider list)."* So the model, the provider and the effort are rows here
+            // of their own, chosen from the same catalogue and not mirrored from the chat agent —
+            // and the two numbers below are this block's alone.
+            Text(
+                "SUBAGENTS",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+            )
+            Text(
+                "Another agent working in a project beside the chat agent. It has its own record " +
+                    "and keeps its context between tasks; the chat agent gives it work and reads " +
+                    "its reports.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            LengthField(
+                label = "How many at once (blank = none)",
+                value = settings.subagentCount,
+                placeholder = "none",
+                onValueChange = { settings.keepSubagents(it) },
+            )
+            // **The arithmetic, where the number is typed.** At the defaults (3 subagents, 60
+            // minutes) three idle subagents cost up to 45 pings an hour, each reading a full prompt
+            // at cache price — and a person who set the chat agent's ceiling at an hour was told
+            // that was "about where keeping it warm stops being cheaper than letting it go cold".
+            // The same number, three times over, is not.
+            Text(
+                text = "Now: " + if (settings.subagentCount <= 0) {
+                    "no subagents. The chat agent does everything itself."
+                } else {
+                    "up to ${settings.subagentCount}. Each idle one is kept warm at the same " +
+                        "interval as the chat agent, so ${settings.subagentCount} of them cost up " +
+                        "to ${settings.subagentCount} times as much to keep warm."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            LengthField(
+                label = "Keep one warm for at most (minutes, blank = until its next task)",
+                value = settings.subagentWarmMinutes,
+                placeholder = "until its next task",
+                onValueChange = { settings.keepSubagentWarm(it) },
+            )
+            // **One number, two jobs, and both are named.** The operator: *"idle timeout is exactly
+            // keepalive timeout (as we have for chat agent already), just for subagents."* A person
+            // typing a number here is setting both the cost ceiling and the moment the subagent
+            // stops, and the sentence says so rather than leaving them to discover it.
+            Text(
+                text = "Now: " + if (settings.subagentWarmMinutes <= 0) {
+                    "a subagent waits until its next task, however long that is."
+                } else {
+                    "kept warm for ${settings.subagentWarmMinutes} min, then it stops. " +
+                        "Its context is kept, so its next task wakes it where it left off."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+
             // **The block ends here.** Reminders, the trace and the theme are the app's, not the
             // agent's: a reminder fires whether or not a model is configured, and the trace is the
             // app's own record. The heavier rule is the only thing on the screen that says so.

@@ -2404,6 +2404,11 @@ class AgentTools(
                                 "subagent {\"task\":\"...\"}.",
                         )
                     }
+                    // **Writing to a stopped subagent wakes it.** Its context is intact, which is
+                    // what "keeps its context between tasks" is for; a retired one never reaches
+                    // here, because the refusal above catches it first.
+                    registry.touchTask(project, id, task)
+                    registry.sleep(project, id, asleep = false)
                     registry.touched(project, id)
                     Trace.tap("subagent write", "$project #$id")
                     success("written to #$id; its report will arrive here when it has one")

@@ -229,6 +229,13 @@ class Agent(
      * the scope has to be visible where the layers are built.
      */
     private val scope: Scope = Scope.Account,
+    /**
+     * **How many subagents may run at once**, read per call like every other limit here.
+     *
+     * Zero by default, so an agent built without a decision cannot start one — the same rule the
+     * browser and the fetcher follow, and the reason a test acquires no subagents by accident.
+     */
+    private val subagentLimit: () -> Int = { 0 },
 ) {
 
     private val tools = AgentTools(
@@ -240,6 +247,7 @@ class Agent(
         github = github, githubToken = githubToken, downloads = downloads,
         modelSees = modelSees,
         scope = scope,
+        subagentLimit = subagentLimit,
     )
 
     /**

@@ -53,6 +53,20 @@ class AgentSubagents(private val accountDir: File) {
          * one.
          */
         val retired: Boolean = false,
+        /**
+         * **Asleep: it reached its warm ceiling and stopped.**
+         *
+         * Not retired — an id that is asleep keeps its place, its record and its context, and the
+         * next task wakes it where it left off. A retired id is one the count took away and cannot
+         * be woken. Three states, because they answer three different questions:
+         *
+         * | state | pinged? | can be given a task? |
+         * |---|---|---|
+         * | live | yes | yes |
+         * | **stopped** | no | **yes** — it wakes |
+         * | retired | no | no |
+         */
+        val stopped: Boolean = false,
         /** When it last did anything, for the count's "first idle" and for a list. */
         val lastAt: Long = 0,
     )
@@ -76,6 +90,7 @@ class AgentSubagents(private val accountDir: File) {
             id = id,
             task = json.optString(TASK, ""),
             retired = json.optBoolean(RETIRED, false),
+            stopped = json.optBoolean(STOPPED, false),
             lastAt = json.optLong(LAST_AT, 0),
         )
     } catch (t: Throwable) {
@@ -103,6 +118,7 @@ class AgentSubagents(private val accountDir: File) {
             put(ID, sub.id)
             put(TASK, sub.task)
             put(RETIRED, false)
+            put(STOPPED, false)
             put(LAST_AT, sub.lastAt)
         })
         bucket.put(NEXT, next + 1)
@@ -143,6 +159,28 @@ class AgentSubagents(private val accountDir: File) {
                 val one = list.optJSONObject(i) ?: continue
                 if (one.optInt(ID, 0) != id) continue
                 one.put(TASK, task)
+                writeRoot(root)
+                return
+            }
+        }
+    }
+
+    /**
+     * **Puts [id] to sleep, or wakes it, without touching its id, task or record.**
+     *
+     * A subagent that reached its warm ceiling stops; one that is given a task wakes. The flag is
+     * separate from [retired] because they answer different questions: asleep is temporary and the
+     * context is intact, retired is the count taking the place away.
+     */
+    fun sleep(project: String, id: Int, asleep: Boolean) {
+        synchronized(guard) {
+            val root = readRoot()
+            val list = root.optJSONObject(project)?.optJSONArray(LIST) ?: return
+            for (i in 0 until list.length()) {
+                val one = list.optJSONObject(i) ?: continue
+                if (one.optInt(ID, 0) != id) continue
+                if (one.optBoolean(STOPPED, false) == asleep) return
+                one.put(STOPPED, asleep)
                 writeRoot(root)
                 return
             }
@@ -237,6 +275,7 @@ class AgentSubagents(private val accountDir: File) {
         private const val ID = "id"
         private const val TASK = "task"
         private const val RETIRED = "retired"
+        private const val STOPPED = "stopped"
         private const val LAST_AT = "lastAt"
 
         /** One lock per file, shared by every instance over the same account. */

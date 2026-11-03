@@ -158,6 +158,63 @@ class AgentSubagentsTest {
         )
     }
 
+    // ---- asleep, which is not retired ---------------------------------------
+
+    @Test
+    fun `a subagent can be asleep without being retired, and wakes with its task`() {
+        // **Three states, because they answer three questions.** Live is pinged and takes work;
+        // stopped is not pinged and takes work; retired takes nothing. A design with two states
+        // would have to call a sleeping subagent retired, and then the count would refuse to let it
+        // work again — which is the opposite of "it keeps its context between tasks".
+        val reg = registry()
+        val one = reg.mint("groceries", "the first task")
+        reg.touchTask("groceries", one.id, "")
+        reg.sleep("groceries", one.id, asleep = true)
+
+        val asleep = reg.find("groceries", one.id)!!
+        assertTrue("it is stopped", asleep.stopped)
+        assertFalse("**and NOT retired**", asleep.retired)
+
+        reg.touchTask("groceries", one.id, "a new task")
+        reg.sleep("groceries", one.id, asleep = false)
+
+        val awake = reg.find("groceries", one.id)!!
+        assertFalse("it is awake again", awake.stopped)
+        assertEquals("**with the same id and its task**", "a new task", awake.task)
+        assertEquals("and the id never changed", one.id, awake.id)
+    }
+
+    @Test
+    fun `sleeping a subagent does not change its place in the count`() {
+        // A sleeping subagent still counts: it holds an id and a record, and waking it must not put
+        // the count over the limit. Only retirement frees a place.
+        val reg = registry()
+        val one = reg.mint("groceries", "a")
+        reg.sleep("groceries", one.id, asleep = true)
+
+        assertEquals(
+            "**still live for the count's purposes**",
+            1,
+            reg.read("groceries").count { !it.retired },
+        )
+    }
+
+    @Test
+    fun `a sleeping subagent is not a candidate for retirement by the count`() {
+        // `fitTo` retires by oldest `lastAt`, and a sleeping subagent is the oldest by definition.
+        // It is still a live subagent, so it *is* a candidate — the count is about places, not
+        // activity. This pins that, because the alternative reading is tempting and wrong.
+        val reg = registry()
+        val one = reg.mint("groceries", "a").also { reg.touched("groceries", it.id, at = 100) }
+        val two = reg.mint("groceries", "b").also { reg.touched("groceries", it.id, at = 200) }
+        reg.sleep("groceries", one.id, asleep = true)
+
+        val retired = reg.fitTo("groceries", limit = 1, busy = emptySet())
+
+        assertEquals("the sleeping one is retired first, being oldest", listOf(one.id), retired)
+        assertFalse("and the awake one keeps its place", reg.find("groceries", two.id)!!.retired)
+    }
+
     // ---- the file -----------------------------------------------------------
 
     @Test

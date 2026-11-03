@@ -59,7 +59,12 @@ class SettingsScreenTest {
         /** Whether a reminder would be seen: the phone's fact, stated by the test. */
         notified: (android.content.Context) -> Boolean = { true },
         onAskNotices: () -> Unit = {},
+        /** The count and the ceiling, set before the screen is drawn. */
+        subagentCount: Int? = null,
+        subagentWarm: Int? = null,
     ) {
+        subagentCount?.let { scene.viewModel.settings.keepSubagents(it) }
+        subagentWarm?.let { scene.viewModel.settings.keepSubagentWarm(it) }
         compose.setContent {
             Frame {
                 SettingsScreen(
@@ -99,6 +104,46 @@ class SettingsScreenTest {
         settings()
 
         compose.onNodeWithText("Identity").assertDoesNotExist()
+    }
+
+    @Test
+    fun `the subagents block is its own, and says what the number costs`() {
+        // **Two things the block must say, and both are the operator's own corrections.** It is set
+        // up separately from the chat agent (*"we dont copy subagents from chat agents"*), and the
+        // one warm ceiling is also the stop clock (*"idle timeout is exactly keepalive timeout"*).
+        settings()
+
+        compose.onNodeWithText("SUBAGENTS").performScrollTo().assertIsDisplayed()
+        // The count, and the arithmetic — three idle subagents cost three times the chat agent's
+        // keepalive, which is the fact a person typing the number needs.
+        compose.onNodeWithText("How many at once (blank = none)").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(
+            "Keep one warm for at most (minutes, blank = until its next task)",
+        ).performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun `the subagents block says the ceiling is also the stop clock`() {
+        // **The sentence that stops a person setting a number and getting different behaviour.**
+        // One number does two jobs, and the row says so rather than leaving it to be discovered
+        // when a subagent stops in the middle of a task it had not been given yet.
+        settings(subagentWarm = 30)
+
+        compose.onNodeWithText("Now: kept warm for 30 min, then it stops.", substring = true)
+            .performScrollTo()
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun `subagents are off by default, and the row says what that means`() {
+        // **A capability that spends money in parallel is off until somebody asks**, like the
+        // browser and the fetcher. The sentence says what "off" means, so it does not read as a
+        // broken feature.
+        settings(subagentCount = 0)
+
+        compose.onNodeWithText("Now: no subagents.", substring = true)
+            .performScrollTo()
+            .assertIsDisplayed()
     }
 
     @Test

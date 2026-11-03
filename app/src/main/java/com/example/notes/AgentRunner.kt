@@ -363,7 +363,43 @@ class AgentRunner(
     private fun subagentsDue(session: AgentSession, now: Long): Boolean {
         if (session.state == AgentSession.State.STOPPED) return false
         if (agentId(session.project) in polling()) return false
+        retireOverdue(session.project, now)
         return nextSubagent(session.project) != null
+    }
+
+    /**
+     * **Stops the subagents whose warm ceiling has passed — after the turn, never during one.**
+     *
+     * The operator's rule is one number with two jobs: *"idle timeout is exactly keepalive timeout
+     * (as we have for chat agent already), just for subagents."* So reaching the ceiling while a
+     * subagent is idle stops it; reaching it while a turn is running lets the turn finish and stops
+     * it afterwards.
+     *
+     * **A stop is never a kill**, which is the same rule `Stop all agents` follows and the reason
+     * the busy set is asked first: a turn killed mid-write is the half-file the app spends effort
+     * preventing, and the ceiling is a cost bound rather than an emergency.
+     *
+     * **What "stopped" means here is a blank task**, not a retired id: the id stays live, its
+     * record stays where it is, and the next task wakes it with its context intact — which is what
+     * "keeps its context between tasks" bought.
+     */
+    private fun retireOverdue(project: String, now: Long) {
+        val warmMs = settings.subagentWarmMs
+        if (warmMs <= 0) return
+        val running = synchronized(inFlight) { inFlight.toSet() }
+        for (sub in AgentSubagents(ws.accountDir).read(project)) {
+            if (sub.retired) continue
+            // **Only an idle one is stopped.** A subagent with a task outstanding is about to run,
+            // and one whose turn is on the worker is running now.
+            if (sub.task.isNotBlank()) continue
+            if (subagentId(project, sub.id) in running) continue
+            val idle = now - sub.lastAt
+            if (idle < warmMs) continue
+            // **Asleep, not retired.** Its id, its record and its context all stay; the next task
+            // wakes it where it left off, which is what "keeps its context between tasks" bought.
+            AgentSubagents(ws.accountDir).sleep(project, sub.id, asleep = true)
+            Trace.note("subagent-stop", "$project #${sub.id} · idle ${idle / 60_000} min")
+        }
     }
 
     /**
@@ -378,6 +414,9 @@ class AgentRunner(
         val registry = AgentSubagents(ws.accountDir)
         val running = synchronized(inFlight) { inFlight.toSet() }
         return registry.read(project)
+            // **`stopped` is not a filter here**, and that is deliberate: a stopped subagent with a
+            // task has been given work, and the work is what wakes it. Only a retired one is
+            // permanently out.
             .filter { !it.retired && it.task.isNotBlank() }
             .firstOrNull { subagentId(project, it.id) !in running }
     }
@@ -397,6 +436,9 @@ class AgentRunner(
         // **Claimed, before the work.** A blank task is "nothing outstanding"; the id stays live so
         // the count is unchanged and a report still names the right agent.
         registry.touchTask(project, sub.id, "")
+        // **A task wakes a sleeping subagent**, and its context is still there — which is the whole
+        // difference between asleep and retired.
+        registry.sleep(project, sub.id, asleep = false)
         synchronized(inFlight) { inFlight += subagentId(project, sub.id) }
         Trace.note("subagent-run", "$project #${sub.id} · ${task.take(40)}")
         worker.execute {
@@ -555,6 +597,10 @@ class AgentRunner(
                     github = github,
                     githubToken = githubToken,
                     downloads = downloads,
+                    // **The ceiling, read at the moment of the call.** A person who lowers the
+                    // number while an agent is idle means the next `subagent` call is refused —
+                    // not that the runner keeps offering what was allowed when it was built.
+                    subagentLimit = { settings.subagentCount },
                 )
                 if (waking == null) {
                     agent.warm() to log.rows()
