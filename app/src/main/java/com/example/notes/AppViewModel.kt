@@ -664,10 +664,6 @@ class AppViewModel @JvmOverloads constructor(
     val currentProject: String? get() = workspace?.projectAt(path)
 
     /**
-     * What the open project **is**, for the one-word caption in the bar — or null at the account root.
-     *
-     * **Read from the metadata on every ask rather than held in state.** It is one small file in a
-    /**
      * True when the account's own screen is showing: **the list of projects**.
      *
      * There is no `projects/` folder to walk into any more — the account root *is* the list, which

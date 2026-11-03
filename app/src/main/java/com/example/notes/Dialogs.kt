@@ -597,6 +597,11 @@ fun SignInDialog(
                 // **The code, when there is one.** Big and monospaced, because it is read off the
                 // screen and typed somewhere else — the one string in this app that is copied by
                 // eye rather than by finger.
+                // **Declared here, not inside the branch below.** It used to be read inside the
+                // `if`, so `shown` did not exist further down where the failure sentence is drawn —
+                // which is where a refused token's reason is shown. Kotlin says
+                // "Unresolved reference 'failed' on receiver of type 'Any'", which is what an
+                // out-of-scope smart cast looks like.
                 val shown = device
                 if (shown != null && shown.code.isNotEmpty()) {
                     // **Both the code and the address are selectable**, because the code is read off
