@@ -602,8 +602,13 @@ class BrowserChromeTest {
 
         awaitText(Workspace.SYSTEM_PROJECT)
         compose.waitForIdle()
-        // The row is drawn and offers nothing.
-        compose.onAllNodesWithContentDescription("More").assertCountEquals(0)
+        // **One menu per project, minus the system one.** Asserting zero would have been wrong in
+        // both directions: `groceries` is right there and its menu is correct, so the count has to
+        // be the *number of projects that are the person's* — which is what makes this a statement
+        // about the system project rather than about a screen that drew nothing.
+        val mine = scene.viewModel.projectNames.filterNot { Workspace.isSystem(it) }
+        compose.onAllNodesWithContentDescription("More").assertCountEquals(mine.size)
+        assertTrue("the account really has a project of the person's to compare against", mine.isNotEmpty())
 
         // **And inside it, the folder has no Add.** It is the second door into the same rule: the
         // menu is about the project, the Add button is about what goes in it.
