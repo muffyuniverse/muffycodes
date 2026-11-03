@@ -1031,6 +1031,16 @@ class AgentLog private constructor(
     fun rows(): List<Row> = parse(file)
 
     /**
+     * **The subagent reports newer than [since], oldest first.**
+     *
+     * By row id rather than by time, because two reports written in the same millisecond are two
+     * reports and a time watermark would drop one of them. Ids are minted in order and never
+     * reused, which is what makes them usable as a watermark at all.
+     */
+    fun reportsSince(since: Int): List<Row> =
+        rows().filter { it.kind == SUB && it.id > since }.sortedBy { it.id }
+
+    /**
      * The rows the model is sent, in order — **the rows whose ctx is `in`.**
      *
      * Answered from the evidence and never from `context.log`. That file is written from this

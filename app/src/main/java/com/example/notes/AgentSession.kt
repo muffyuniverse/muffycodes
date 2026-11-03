@@ -88,6 +88,19 @@ data class AgentSession(
      * need clearing and would lose the second command if the first wake failed.
      */
     val wokenThrough: Long = 0,
+    /**
+     * **The last subagent report this session has been woken for, by row id.**
+     *
+     * A row id rather than a time, and the difference matters: two reports written in the same
+     * millisecond are two reports, and a time watermark would wake the agent for one and silently
+     * drop the other. Ids are minted in order and never reused, which is exactly the property a
+     * watermark needs.
+     *
+     * Zero means no report has ever been woken for, which is also the state of a session written
+     * before subagents existed — and reading it as "everything is old" would drop the first report
+     * a person ever receives.
+     */
+    val reportedThrough: Int = 0,
 ) {
 
     /** The three states of §2.3, and the two the operator did not choose are the ones that speak. */
@@ -332,6 +345,15 @@ data class AgentSession(
      * ping's is — two tickers, one owner.
      */
     fun woken(at: Long): AgentSession = copy(lastPollAt = at, wokenThrough = at)
+
+    /**
+     * Records that a subagent report has been woken for, **without moving the clock.**
+     *
+     * A report's wake is not a poll: it does not reset the keepalive's interval, because the agent
+     * was not waiting on it. Moving `lastPollAt` here would let a chatty subagent keep the session
+     * from ever pinging, which is the opposite of what a ping is for.
+     */
+    fun reported(through: Int): AgentSession = copy(reportedThrough = through)
 
     fun warmed(at: Long): AgentSession = copy(
         lastPollAt = at,

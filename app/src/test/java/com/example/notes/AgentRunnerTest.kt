@@ -2,6 +2,7 @@ package com.example.notes
 
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -58,9 +59,12 @@ class AgentRunnerTest {
 
     private class PingDoor(private val answer: () -> Result<Unit> = { Result.success(Unit) }) : Door {
         val pings = mutableListOf<Request>()
+        /** **Every turn's request**, so a wake can be asked what it actually said. */
+        val requests = mutableListOf<Request>()
         var turns = 0
         override fun turn(request: Request): Result<Reply> {
             turns++
+            requests.add(request)
             return Result.success(Reply("nothing to do"))
         }
         override fun ping(request: Request): Result<Unit> {
@@ -111,6 +115,107 @@ class AgentRunnerTest {
         AgentSessions(ws.accountDir).put(
             AgentSession(project = project, state = AgentSession.State.IDLE, lastPollAt = now),
         )
+    }
+
+    // ---- subagent reports ---------------------------------------------------
+
+    /**
+     * **A subagent's report wakes the chat agent, and the wake does not repeat the body.**
+     *
+     * The operator's answer: *"should wake up, same as with background task completions."* The
+     * difference is that a completion is a file the sentence points at, and a report is a row the
+     * agent will read anyway — so sending the words as well would put them in the conversation twice
+     * and charge for both.
+     */
+    @Test
+    fun `a subagent report wakes the chat agent, once`() {
+        on("shopping", now = 1_000)
+        val door = PingDoor()
+        val runner = runner(door)
+        // **A report, written the way a subagent writes one.**
+        AgentLog.open(ws.projectDir("shopping")).report(from = 2, body = "0\ncounted 41 tests")
+
+        runner.tick(now = 2_000)
+        settle(runner)
+
+        assertEquals("one turn, not a ping", 1, door.turns)
+        assertTrue(
+            "**and the wake names the subagent without repeating its words**: " +
+                "${door.requests.last().messages.map { it.text }}",
+            door.requests.last().messages.any {
+                it.text.contains("A subagent has reported") && it.text.contains("#2")
+            },
+        )
+        assertFalse(
+            "the body is not in the wake sentence — the row is already in the context",
+            door.requests.last().messages.last().text.contains("counted 41 tests"),
+        )
+
+        // **A second tick must not wake again for the same report.** The watermark is the row id.
+        runner.tick(now = 3_000)
+        settle(runner)
+        assertEquals("still one turn", 1, door.turns)
+    }
+
+    @Test
+    fun `two reports arriving together are one wake`() {
+        // Three subagents finishing in a minute must not cost three turns — the same rule `woke`
+        // already follows for finished commands.
+        on("shopping", now = 1_000)
+        val door = PingDoor()
+        val runner = runner(door)
+        val log = AgentLog.open(ws.projectDir("shopping"))
+        log.report(from = 1, body = "0\ndone one")
+        log.report(from = 2, body = "0\ndone two")
+
+        runner.tick(now = 2_000)
+        settle(runner)
+
+        assertEquals("one turn for both", 1, door.turns)
+        assertTrue(
+            "and the sentence names both: ${door.requests.last().messages.last().text}",
+            door.requests.last().messages.any { it.text.contains("#1") && it.text.contains("#2") },
+        )
+    }
+
+    @Test
+    fun `a stopped session is not woken by a report`() {
+        // The rule the finished-command wake already follows: a stopped session has already asked
+        // the person to look, and waking it would spend a request against a provider that refused.
+        AgentSessions(ws.accountDir).put(
+            AgentSession(
+                project = "shopping",
+                state = AgentSession.State.STOPPED,
+                reason = AgentSession.StopReason.BY_OPERATOR,
+                lastPollAt = 1_000,
+            ),
+        )
+        val door = PingDoor()
+        val runner = runner(door)
+        AgentLog.open(ws.projectDir("shopping")).report(from = 1, body = "0\ndone")
+
+        runner.tick(now = 2_000)
+        settle(runner)
+
+        assertEquals("no turn", 0, door.turns)
+        assertEquals("and no ping either", 0, door.pings.size)
+    }
+
+    @Test
+    fun `a report wakes a session even when no ping is due`() {
+        // **The point of a wake.** An idle agent's next ping may be three minutes away; a subagent
+        // finishing now is work the person asked for, and waiting for the interval would be the app
+        // sitting on a result.
+        on("shopping", now = 1_000)
+        val door = PingDoor()
+        val runner = runner(door)
+        AgentLog.open(ws.projectDir("shopping")).report(from = 1, body = "0\ndone")
+
+        // One millisecond after the session's own clock, so nothing is due on time.
+        runner.tick(now = 1_001)
+        settle(runner)
+
+        assertEquals("woken anyway", 1, door.turns)
     }
 
     // ---- which session is due ----------------------------------------------

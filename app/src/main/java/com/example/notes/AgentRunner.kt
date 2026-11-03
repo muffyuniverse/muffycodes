@@ -264,7 +264,18 @@ class AgentRunner(
             // **The setting decides, not the session's copy of it.** The person may have changed
             // the interval, the switch or the ceiling since this session was written, and a tick is
             // when that matters.
-            if (finished.isNotEmpty() && agentId(current.project) !in polling()) {
+            // **A subagent's report outranks a finished command**, because the report is already in
+            // the conversation: the agent will read it on the next request whether it is woken or
+            // not, so a wake that is one tick late costs nothing, while a command's result is a file
+            // nothing reads until the agent is told about it.
+            val reports = if (current.state == AgentSession.State.STOPPED) {
+                emptyList<AgentLog.Row>()
+            } else {
+                AgentLog.open(ws.projectDir(current.project)).reportsSince(current.reportedThrough)
+            }
+            if (reports.isNotEmpty() && agentId(current.project) !in polling()) {
+                wakeForReports(current, now, reports)
+            } else if (finished.isNotEmpty() && agentId(current.project) !in polling()) {
                 wake(current, now, finished)
             } else if (subagentsDue(current, now)) {
                 // **A subagent's task outranks a ping, and does not wait for the interval** — for
@@ -295,6 +306,49 @@ class AgentRunner(
      */
     private fun wake(session: AgentSession, now: Long, finished: List<Background.Done>) =
         dispatch(session, now, woke(finished))
+
+    /**
+     * **A subagent reported: one real turn, and the sentence says only that it happened.**
+     *
+     * **The body is not repeated.** A background completion is a *file* the wake sentence points
+     * at; a report is a *row* the agent will read anyway, because it is in its own context. Sending
+     * the words as well would put them in the conversation twice and charge for both.
+     *
+     * **Two reports arriving together are one wake**, the same rule `woke` follows for finished
+     * commands — three subagents finishing in a minute must not cost three turns.
+     */
+    private fun wakeForReports(session: AgentSession, now: Long, reports: List<AgentLog.Row>) {
+        val project = session.project
+        val through = reports.maxOf { it.id }
+        Trace.note(
+            "agent-wake",
+            "$project · ${reports.size} subagent report" + (if (reports.size == 1) "" else "s"),
+        )
+        // **The watermark moves before the turn goes out**, so a report cannot wake the agent twice
+        // if the turn fails. It is written with the session, which is what makes it survive a
+        // restart — a report the app already acted on must not be acted on again after a reboot.
+        put(session.reported(through), speak = false)
+        dispatch(session.reported(through), now, toldReports(reports))
+    }
+
+    /**
+     * What the agent is told, in the conversation, about the reports that landed.
+     *
+     * **A sentence about the event, not the event.** The rows themselves are in the context; this
+     * only says that they are new and that something is expected of the agent, which is what makes
+     * the difference between reading a report in passing and acting on it.
+     */
+    private fun toldReports(reports: List<AgentLog.Row>): String = buildString {
+        append(
+            if (reports.size == 1) {
+                "A subagent has reported: ${reports.first().name}. "
+            } else {
+                "${reports.size} subagents have reported: " +
+                    reports.joinToString(", ") { it.name } + ". "
+            },
+        )
+        append("Its report is in your context. Read it and carry on, or conclude if there is nothing to do.")
+    }
 
     // ---- subagents ----------------------------------------------------------
 
