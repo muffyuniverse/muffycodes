@@ -593,8 +593,8 @@ class BrowserChromeTest {
         // name is fixed, its contents are written by the app, and it has no remote. A control whose
         // only possible outcome is a refusal teaches the person the app is broken.
         //
-        // **Both absences are asserted against a drawn screen.** The row and its contents are
-        // asserted first, so "no menu" cannot be the silence of a screen that never loaded.
+        // **The row is asserted against a drawn screen**, so "no menu" cannot be the silence of a
+        // screen that never loaded.
         scene.signedIn()
         scene.project("groceries")
         scene.open()
@@ -609,12 +609,20 @@ class BrowserChromeTest {
         val mine = scene.viewModel.projectNames.filterNot { Workspace.isSystem(it) }
         compose.onAllNodesWithContentDescription("More").assertCountEquals(mine.size)
         assertTrue("the account really has a project of the person's to compare against", mine.isNotEmpty())
+    }
 
-        // **And inside it, the folder has no Add.** It is the second door into the same rule: the
-        // menu is about the project, the Add button is about what goes in it.
+    @Test
+    fun `the system project's folder has no Add`() {
+        // **The second door into the same rule**, and its own test because a screen can only be
+        // set once: the menu is about the project, the Add button is about what goes in it, and the
+        // two are drawn by different branches of one composable.
+        scene.signedIn()
+        scene.project("groceries")
         scene.open(Workspace.SYSTEM_PROJECT)
         browser()
+
         compose.waitUntil(20_000) { there(AgentPrompt.DATA) }
+        // **The contents are asserted first**, so an empty folder cannot pass for a hidden button.
         assertTrue("the folder's contents are drawn", there(AgentPrompt.DATA))
         assertFalse("no Add inside the system project", thereIcon("Add"))
     }
