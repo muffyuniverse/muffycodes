@@ -3192,9 +3192,6 @@ class AppViewModel @JvmOverloads constructor(
                 // local-project path gives: the screen that waits is the add window, and a list
                 // redrawn after it has closed reaches nobody.
                 onDone(clone.success)
-                if (copied != null && copied.written.isNotEmpty()) {
-                    message = "${clone.message} ${copied.said()}"
-                }
                 refresh()
             }
         }
