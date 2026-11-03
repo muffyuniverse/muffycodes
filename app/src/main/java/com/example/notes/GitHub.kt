@@ -162,6 +162,15 @@ data class Identity(
     val login: String,
     val name: String,
     val email: String,
+    /**
+     * **What the token that produced this identity can do**, as GitHub reports it.
+     *
+     * Null when GitHub sent no scope header — a fine-grained token, or a device-flow token on a
+     * GitHub Enterprise instance that does not report them. Null is "cannot tell", not "nothing",
+     * and the check treats the two differently: a token it cannot judge is accepted, because
+     * refusing one on the strength of a missing header would lock out every fine-grained user.
+     */
+    val scopes: Set<String>? = null,
 )
 
 /**
@@ -403,7 +412,9 @@ class HttpGitHub(private val api: String = DEFAULT_API) : GitHub {
         val email = user?.optString("email").orEmpty().ifBlank {
             noreplyEmail(login, user?.optLong("id", 0L) ?: 0L)
         }
-        return GitHubResult(value = Identity(login = login, name = name, email = email))
+        return GitHubResult(
+            value = Identity(login = login, name = name, email = email, scopes = response.scopes),
+        )
     }
 
     override fun listRepos(token: String): GitHubResult<List<Repo>> {
@@ -1057,6 +1068,16 @@ class HttpGitHub(private val api: String = DEFAULT_API) : GitHub {
         val array: JSONArray? = null,
         val error: String? = null,
         val status: Int = 0,
+        /**
+         * **The token's scopes, as GitHub reports them.**
+         *
+         * GitHub answers `x-oauth-scopes` on any authenticated request, and it is the only way the
+         * app can know what a pasted token may actually do: a classic token missing `workflow` pushes
+         * every file except a workflow, and GitHub's refusal is the same "Resource not accessible"
+         * that a hundred other things produce. Empty when the token is fine-grained — GitHub sends no
+         * scopes header for those — which is *not* the same as "no scopes", so it is nullable.
+         */
+        val scopes: Set<String>? = null,
     )
 
     private fun get(
@@ -1102,11 +1123,21 @@ class HttpGitHub(private val api: String = DEFAULT_API) : GitHub {
                 return Response(error = Secrets.scrub(message))
             }
 
+            // **Read before the body is parsed**, because the header is on the connection and the
+            // connection is closed in the `finally` below.
+            //
+            // `null` when the header is absent, which is what a fine-grained token looks like: GitHub
+            // sends no scope header for those. That distinction matters — an empty set would say "this
+            // token has no scopes at all" and a fine-grained token is not that.
+            val scopes = connection.getHeaderField("x-oauth-scopes")?.let { header ->
+                header.split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+            }
+
             val trimmed = text.trim()
             when {
-                trimmed.isEmpty() -> Response(value = JSONObject())
-                trimmed.startsWith("[") -> Response(array = JSONArray(trimmed))
-                else -> Response(value = JSONObject(trimmed))
+                trimmed.isEmpty() -> Response(value = JSONObject(), scopes = scopes)
+                trimmed.startsWith("[") -> Response(array = JSONArray(trimmed), scopes = scopes)
+                else -> Response(value = JSONObject(trimmed), scopes = scopes)
             }
         } catch (e: Exception) {
             Response(error = Secrets.scrub(e.message ?: "Could not reach GitHub"))

@@ -135,7 +135,6 @@ private sealed interface Pending {
     data class DeleteEntry(val entry: Entry) : Pending
     data class ReplaceProject(val project: String) : Pending
     /** What the project is: the one-word caption in the bar, tapped. */
-    data class ChangeType(val project: String) : Pending
 }
 
 /**
@@ -488,15 +487,6 @@ private fun AppRoot(viewModel: AppViewModel) {
                 // **The same function the agent's `downloads` tool calls**, so a person's export and
                 // the agent's are the same bytes from the same place.
                 onRowExport = { project -> tap("export", project); viewModel.exportArtifact(project) },
-                // **The caption in the bar is the control**, so this is the act it starts. Recorded
-                // as its own tap name, because "changed what this project is" is not "made a
-                // project" and a log that conflated them could not answer when it changed.
-                onChangeType = {
-                    viewModel.currentProject?.let {
-                        tap("project type", it)
-                        pending = Pending.ChangeType(it)
-                    }
-                },
                 onCreateFile = { tap("new file"); viewModel.currentDir?.let { pending = Pending.NewFile(it) } },
                 onCreateFolder = { tap("new folder"); viewModel.currentDir?.let { pending = Pending.NewFolder(it) } },
                 onCreateImage = { tap("new image"); viewModel.currentDir?.let { pending = Pending.NewImage(it) } },
@@ -765,9 +755,9 @@ private fun Dialogs(
             licences = emptyList(),
             local = true,
             onDismiss = dismiss,
-            onCreate = { name, _, type ->
+            onCreate = { name, _ ->
                 tap("local project", name)
-                viewModel.createLocalProject(name, type)
+                viewModel.createLocalProject(name)
             },
         )
 
@@ -781,16 +771,6 @@ private fun Dialogs(
                       Trace.tap("confirm rename project", pending.project)
                       viewModel.renameProject(pending.project, name)
                   },
-        )
-
-        is Pending.ChangeType -> ChangeTypeDialog(
-            project = pending.project,
-            current = viewModel.typeOfProject,
-            onDismiss = dismiss,
-            onPick = { type ->
-                dismiss()
-                viewModel.changeProjectType(pending.project, type)
-            },
         )
 
         is Pending.PublishProject -> PublishProjectUI(
@@ -1075,9 +1055,9 @@ private fun NewProjectUI(viewModel: AppViewModel, dismiss: () -> Unit) {
     NewProjectDialog(
         licences = licences,
         onDismiss = dismiss,
-        onCreate = { name, licence, type ->
+        onCreate = { name, licence ->
             tap("new project", name)
-            viewModel.createProject(name, licence, type)
+            viewModel.createProject(name, licence)
         },
     )
 }

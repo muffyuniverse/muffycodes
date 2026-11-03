@@ -300,32 +300,38 @@ class ProjectsFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `a new local project arrives with its preset copied in`() {
-        // **The act that makes a preset a preset.** Everything in `Presets` was built and tested
-        // against a folder made by hand; this is the test that the app actually calls it, which is
-        // the difference between a feature and a function nobody runs.
-        scene.viewModel.createLocalProject("scratch", AppType.ANDROID)
+    fun `a new local project arrives with an empty prompts folder`() {
+        // **What replaced the preset.** The operator: *"just create empty system_data folder tree for
+        // each project when it is added and put there subfolders for all of our doc types"*. Empty is
+        // the point — a starter document would be a project type by another name, and the types were
+        // removed.
+        scene.viewModel.createLocalProject("scratch")
         scene.await("the local project", 30_000) {
             scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
         }
 
         val dir = scene.workspace!!.projectDir("scratch")
-        val workflow = File(dir, ".github/workflows/android.yml")
-        assertTrue("the workflow was copied in", workflow.isFile)
-        assertTrue("and it is the Android one", workflow.readText().contains("assembleRelease"))
-        val prompt = AgentPrompt.projectFile(dir)
-        assertTrue("and so was the prompt", prompt.isFile)
-        assertTrue("which says how to build this kind of project", prompt.readText().contains("Gradle"))
+        assertTrue("the prompts folder is there", ProjectTree.promptsDir(dir).isDirectory)
         assertEquals(
-            "and the type is recorded, so a later change can tell",
-            AppType.ANDROID,
-            ProjectMeta.read(dir).type,
+            "and it is empty, so nothing was prescribed",
+            emptyList<String>(),
+            ProjectTree.promptsDir(dir).listFiles()?.map { it.name }.orEmpty(),
         )
-        // **And they are in the history, not waiting to be.** A project made a second ago that opens
-        // with two changed files is showing work nobody did — the row counts what is not committed,
-        // so an uncommitted preset makes a brand-new project look edited. Three tests failed on this
-        // before it was fixed, which is why it is asserted here rather than left to the copy's own
-        // tests: `Presets` cannot know about the history and the view model is where they meet.
+        assertFalse(
+            "no workflow was invented for a project nobody has described",
+            File(dir, ".github").exists(),
+        )
+    }
+
+    @Test
+    fun `a new project opens with nothing waiting to be sent`() {
+        // **Empty folders are not in git**, so unlike the preset copy this replaces there is no
+        // commit to make. A project made a second ago that opens with two changed files is showing
+        // work nobody did — the row counts what is not committed.
+        scene.viewModel.createLocalProject("scratch")
+        scene.await("the local project", 30_000) {
+            scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
+        }
         val git = ProjectGit(
             scene.workspace!!,
             { null },
@@ -334,170 +340,24 @@ class ProjectsFeatureTest : FeatureTest() {
         )
         val changes = git.changes("scratch")
         assertEquals("nothing is waiting: $changes", 0, changes.staged + changes.unstaged + changes.untracked)
-        // **The person was told what arrived.** A copy that happened silently is one nobody knows
-        // about, and the first thing they would do is look for the workflow they did not know to
-        // expect.
-        assertTrue(
-            "and the answer says what was added: ${scene.viewModel.message}",
-            scene.viewModel.message.orEmpty().contains("android.yml"),
-        )
     }
 
     @Test
-    fun `the bar names what the project is, and a folder inside one is still that project`() {
-        // **The one word is the whole point**: it used to say "project", which is a fact nobody
-        // needs. What a person does not know is what the app thinks this project is, and that
-        // decides what they are offered here.
-        scene.viewModel.createLocalProject("scratch", AppType.ANDROID)
-        scene.await("the local project", 30_000) {
-            scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
-        }
-        scene.open("scratch")
-
-        assertEquals("the type is what the bar says", AppType.ANDROID, scene.viewModel.typeOfProject)
-
-        // A folder inside the project is the project's, so the bar still answers for it.
-        assertTrue("the folder was made", scene.viewModel.createFolder("src"))
-        scene.await("the folder to be on disk", 20_000) {
-            File(scene.workspace!!.projectDir("scratch"), "src").isDirectory
-        }
-        scene.open("scratch", "src")
-        assertEquals(
-            "a folder inside a project still names the project's type",
-            AppType.ANDROID,
-            scene.viewModel.typeOfProject,
-        )
-
-        // And at the account root there is no project to describe.
-        while (scene.viewModel.canGoUp) scene.viewModel.up()
-        assertNull("the root has no type", scene.viewModel.typeOfProject)
-    }
-
-    @Test
-    fun `a project made with decide later gets the brief that knows it does not know`() {
-        // **The whole reason "later" is a prompt and not an empty file.** An empty brief makes the
-        // agent guess, and a guess in the brief is the most expensive kind of wrong: everything after
-        // it inherits it. This brief says so out loud and tells the agent how to help.
-        scene.viewModel.createLocalProject("scratch", AppType.LATER)
+    fun `documents the agent writes into the folder become the brief`() {
+        // **The whole point of the folder**: a person asks the agent to write a rule, it writes a
+        // file, and from that moment the rule is in every brief. This is the seam between the
+        // project tree and what the agent is actually given.
+        scene.viewModel.createLocalProject("scratch")
         scene.await("the local project", 30_000) {
             scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
         }
 
         val dir = scene.workspace!!.projectDir("scratch")
-        assertFalse(
-            "no workflow was invented for an unanswered question",
-            File(dir, ".github").exists(),
-        )
-        val brief = AgentPrompt.projectFile(dir).readText()
-        assertTrue("it says nobody has chosen", brief.contains("Nobody has said yet"))
-        assertTrue("it names the choices", brief.contains("Android app") && brief.contains("web app"))
-        assertTrue("it says to look before asking", brief.contains("Read the project first"))
-        assertTrue(
-            "and it says where the answer is given",
-            brief.contains("bar inside the project"),
-        )
-        assertEquals("and the type is recorded", AppType.LATER, ProjectMeta.read(dir).type)
-    }
-
-    @Test
-    fun `a project made custom gets no preset at all, and is not asked again`() {
-        // Custom is an ANSWER: the person said they will write it. A brief written for them would be
-        // the app talking over them, and a bar asking again would be the app not listening.
-        scene.viewModel.createLocalProject("scratch", AppType.CUSTOM)
-        scene.await("the local project", 30_000) {
-            scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
-        }
-
-        val dir = scene.workspace!!.projectDir("scratch")
-        assertFalse("no workflow", File(dir, ".github").exists())
-        assertFalse("and no brief either", AgentPrompt.projectFile(dir).exists())
-        assertEquals("the type is recorded", AppType.CUSTOM, ProjectMeta.read(dir).type)
-        assertFalse("and the bar stops asking", ProjectMeta.read(dir).type.undecided)
-    }
-
-    @Test
-    fun `changing the type copies the new preset and keeps the old one`() {
-        // **The act the caption starts.** It was unreachable before this: `ProjectMeta.write` had
-        // one caller, in the create path, so "a type change keeps the old pair" was a tested
-        // function nobody could run.
-        scene.viewModel.createLocalProject("scratch", AppType.ANDROID)
-        scene.await("the local project", 30_000) {
-            scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
-        }
-
-        scene.viewModel.changeProjectType("scratch", AppType.WEB)
-        scene.await("the type to change", 30_000) { !scene.viewModel.busy }
-
-        val dir = scene.workspace!!.projectDir("scratch")
-        assertTrue("the web workflow arrived", File(dir, ".github/workflows/web.yml").isFile)
-        assertTrue(
-            "and the android one is still there, untouched",
-            File(dir, ".github/workflows/android.yml").isFile,
-        )
-        assertEquals("the record says what it is now", AppType.WEB, ProjectMeta.read(dir).type)
-        // **The bar is only about the OPEN project**, so it has nothing to say while nobody is in
-        // one — which is the assertion that catches a caption shown at the account root.
-        assertNull("nothing is open, so the bar says nothing", scene.viewModel.typeOfProject)
-        scene.open("scratch")
-        assertEquals("and once it is open the bar agrees", AppType.WEB, scene.viewModel.typeOfProject)
-    }
-
-    @Test
-    fun `changing the type is recorded in the project's own history`() {
-        // The app's rule: every act leaves a mark. The copy is an edit to a project that already
-        // exists, so it belongs in that project's history — and it is **not** pushed, because the
-        // person pushes.
-        scene.viewModel.createLocalProject("scratch", AppType.ANDROID)
-        scene.await("the local project", 30_000) {
-            scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
-        }
-        val before = scene.repo("scratch").log(null).size
-
-        scene.viewModel.changeProjectType("scratch", AppType.WEB)
-        scene.await("the type to change", 30_000) { !scene.viewModel.busy }
+        File(ProjectTree.promptsDir(dir), "never-push.md").writeText("Never push without asking.")
 
         assertTrue(
-            "the change is a version of the project: ${scene.repo("scratch").log(null).size}",
-            scene.repo("scratch").log(null).size > before,
-        )
-    }
-
-    @Test
-    fun `a project made as a web app gets a web workflow, not an android one`() {
-        // The picker is only worth having if the answer reaches the copy. This is that link.
-        scene.viewModel.createLocalProject("site", AppType.WEB)
-        scene.await("the site", 30_000) {
-            scene.viewModel.projectNames.contains("site") && !scene.viewModel.busy
-        }
-
-        val dir = scene.workspace!!.projectDir("site")
-        assertTrue("the web workflow arrived", File(dir, ".github/workflows/web.yml").isFile)
-        assertFalse(
-            "and nothing invented an android one",
-            File(dir, ".github/workflows/android.yml").exists(),
-        )
-        assertTrue(
-            "and the prompt is the web one",
-            AgentPrompt.projectFile(dir).readText().contains("npm"),
-        )
-    }
-
-    @Test
-    fun `a project made with no preset still gets its files, and says so`() {
-        // A preset a person deleted must not stop a project being made. The project is the thing;
-        // the preset is what it started from.
-        val dir = scene.workspace!!.projectDir("system")
-        File(File(dir, AgentPrompt.DATA), Workspace.STARTERS).deleteRecursively()
-        scene.viewModel.createLocalProject("scratch", AppType.ANDROID)
-        scene.await("the local project", 30_000) {
-            scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
-        }
-
-        val made = scene.workspace!!.projectDir("scratch")
-        assertTrue("the project is there", File(made, ".git").isDirectory)
-        assertTrue(
-            "and the type is still recorded: ${scene.viewModel.message}",
-            ProjectMeta.read(made).type == AppType.ANDROID,
+            "the new rule is in the brief",
+            AgentPrompt.project(dir).contains("Never push without asking."),
         )
     }
 

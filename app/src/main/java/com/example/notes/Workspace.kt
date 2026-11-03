@@ -117,7 +117,6 @@ class Workspace(val accountDir: File) {
         // return, so on any account that already had a readme — which is every account that has ever
         // been opened — the starters were never written at all. It only worked on a fresh install,
         // which is the one case a person testing it would not have.
-        ensureStarters(dir)
         ensureSystemData(dir)
         ensureOnboarding(dir)
     }
@@ -198,61 +197,6 @@ class Workspace(val accountDir: File) {
         }
     }
 
-
-    /**
-     * The starters, in the system project: **one folder per kind of project, holding the workflows
-     * and the instructions its agent starts with.**
-     *
-     * ## Why per kind, and why in a folder
-     *
-     * A flat `workflows/` folder would put the mapping from kind to template in code, where a person
-     * cannot see or change it. Here it is the layout: to know what an Android project starts with,
-     * look in `muffycodes_data/starters/android/`. Adding a kind is making a folder, and the app
-     * reads the folders that are there rather than an enum it was compiled with.
-     *
-     * ## Why these are starters and not lock-ins
-     *
-     * A project gets a **copy** of the pair when it is made, and another copy when its kind changes.
-     * The copy is the project's, editable, and an old copy is never removed — a person who has adapted
-     * a workflow to their project would lose it if a kind change tidied up after itself.
-     *
-     * **"Starter" and not "preset" or "type".** The operator's correction: *"no type prompts… the only
-     * place where I remember presets was statistics screen"*. This folder is read once, when the
-     * project is created; after that the copy is the project's own text and nothing consults the
-     * folder again. A name that promised a taxonomy would be a name that lied about when it is read.
-     *
-     * ## Why the folder is locked
-     *
-     * These are the app's own text, held at `system/muffycodes_data/starters/…` by a **path** rule rather than a
-     * name one, because every project with CI has a folder called `workflows` that the agent must be
-     * able to read. See [isTemplatePath].
-     */
-    private fun ensureStarters(dir: File) {
-        val root = File(File(dir, STARTER_DATA), STARTERS)
-        try {
-            root.mkdirs()
-            for (type in AppType.entries) {
-                val one = File(root, type.id)
-                one.mkdirs()
-                // **The prompt is written once and never overwritten**, so a person who has tuned
-                // their starter keeps the tuning.
-                val prompt = File(one, AgentPrompt.STARTER_FILE)
-                if (!prompt.isFile) {
-                    WorkflowTemplates.promptFor(type)?.let { prompt.writeText(it) }
-                }
-                // **A type with nothing to build gets no workflows folder.** An empty folder is a
-                // promise that something belongs in it.
-                val name = WorkflowTemplates.forType(type) ?: continue
-                val workflows = File(one, TEMPLATES)
-                workflows.mkdirs()
-                val file = File(workflows, name)
-                if (!file.isFile) file.writeText(WorkflowTemplates.ALL.getValue(name))
-            }
-        } catch (t: Throwable) {
-            // A folder that cannot be made is a phone problem, and every write that needs it says so
-            // on its own. Nothing to report from here.
-        }
-    }
 
     /**
      * The two lines that keep the app's own folders out of the project's repository.
@@ -631,10 +575,7 @@ class Workspace(val accountDir: File) {
         // inside it as surely as one at the top. `isAppFlag` is separate and stays about the leaf,
         // because `.muffy/`'s own files are the flags and there is nothing beneath them.
         val names = relative(file) ?: return Hold.NONE
-        // **The templates are held by path, not by name** — see [isTemplatePath]. A project's own
-        // `.github/workflows/` must stay readable, and it is called `workflows` too.
         val joined = names.joinToString("/")
-        if (isTemplatePath(joined)) return Hold.APP
         // **The onboarding pages are read-only, which is what "system locked" means here**: a person
         // opens them in the editor whenever they like and cannot change them, and the way to keep a
         // copy is to clone the file — which is an ordinary file and an ordinary edit.
@@ -1459,23 +1400,6 @@ class Workspace(val accountDir: File) {
         const val TEMPLATES = "workflows"
 
         /**
-         * The folder of **starters**, one per kind of project.
-         *
-         * **A starter, not a type, and the rename is the correction.** The operator's words: *"no
-         * type prompts. what I mean is just a list of user prompts that can be used by operator"* —
-         * so what this folder holds is the text a *new* project begins with, copied in once and then
-         * the project's own. Nothing reads it again. Calling it `project_types` promised a taxonomy
-         * the app does not have and would have been consulted on every turn if anyone believed it.
-         *
-         * The folder is still the list: a kind the app does not know about but which has a folder
-         * here is one a person added, and it appears.
-         */
-        const val STARTERS = "starters"
-
-        /** Where a starter's prompt and workflows sit, inside the system project. */
-        const val STARTER_DATA = AgentPrompt.DATA
-
-        /**
          * The subject folders inside `muffycodes_data/`, in one list because they are one idea.
          *
          * **One list, so adding a folder is one line.** Each is a place a person puts text the agent
@@ -1549,25 +1473,6 @@ class Workspace(val accountDir: File) {
                 // so on its own. What was written is still reported, because it is on disk either way.
             }
             return written
-        }
-
-        /**
-         * True when [path] — account-relative, as `Workspace.relative` writes it — is a template.
-         *
-         * The system project's own name is the first segment, so a project that happens to be called
-         * something else cannot match, and a file called `workflows` in a project is never this.
-         *
-         * **Three segments now**, because everything the app ships lives under the system project's
-         * `muffycodes_data/`: `system/muffycodes_data/starters/android/…`. A two-segment rule would
-         * lock the whole of `muffycodes_data/`, including a project's own dictionary and wiki if the
-         * system project were ever given one.
-         */
-        fun isTemplatePath(path: String): Boolean {
-            val parts = path.trim('/').split('/')
-            return parts.size >= 3 &&
-                parts[0].equals(SYSTEM_PROJECT, ignoreCase = true) &&
-                parts[1].equals(AgentPrompt.DATA, ignoreCase = true) &&
-                parts[2].equals(STARTERS, ignoreCase = true)
         }
 
         /**

@@ -667,30 +667,6 @@ class AppViewModel @JvmOverloads constructor(
      * What the open project **is**, for the one-word caption in the bar — or null at the account root.
      *
      * **Read from the metadata on every ask rather than held in state.** It is one small file in a
-     * folder the screen is already showing, the read is a few hundred bytes, and a copy held in a
-     * field would be a second answer to "what type is this project" that a change could leave stale —
-     * the same mistake the lock's redraw was, one screen over.
-     *
-     * **Null at the root, and null for a folder that is not a project.** The caption is about a
-     * project; a folder inside one is the project's, and the bar still names the project's type
-     * because that is what the folder belongs to. Only the account root has no type to show.
-     */
-    val typeOfProject: AppType? get() = currentProject?.let(::typeOf)
-
-    /**
-     * What a named project is, for a row in the list — the same read as [typeOfProject], for a project
-     * nobody has opened.
-     *
-     * **One function, so the caption and the row cannot disagree.** A second copy of "read the
-     * metadata" is a second answer to one question, and this file has paid for that before.
-     */
-    fun typeOf(project: String): AppType? {
-        val ws = workspace ?: return null
-        val dir = ws.projectDir(project)
-        if (!dir.isDirectory) return null
-        return ProjectMeta.read(dir).type
-    }
-
     /**
      * True when the account's own screen is showing: **the list of projects**.
      *
@@ -3061,7 +3037,6 @@ class AppViewModel @JvmOverloads constructor(
      */
     fun createLocalProject(
         name: String,
-        type: AppType = AppType.DEFAULT,
         onDone: (Boolean) -> Unit = {},
     ) {
         val ws = workspace ?: return
@@ -3100,18 +3075,17 @@ class AppViewModel @JvmOverloads constructor(
                 { settings.historyLength },
             )
             val made = git.init(clean)
-            // **The preset pair, copied in.** It is a copy and not a link: the project's workflow
-            // and prompt are its own files from this moment, editable and lockable, and a preset
-            // changed in the system project later does not reach back into them.
-            val copied = Presets.copy(ws.accountDir, ws.projectDir(clean), type)
-            // **And committed, because a preset that arrives uncommitted is a project that opens with
-            // changes waiting.** The row counts what is not in the history, so a project made a
-            // second ago would show two changed files and a "to send" count — work nobody did, in a
-            // project nobody has touched. It is also the truthful record: these files were added by
-            // the app when the project was made, and a history that starts with them is what a person
-            // reading it would expect to see.
-            if (copied.written.isNotEmpty()) {
-                git.commitOutcome(clean, "Start from the ${type.label} preset")
+            // **The folder tree, and nothing in it.** The operator: *"just create empty system_data
+            // folder tree for each project when it is added and put there subfolders for all of our
+            // doc types"*.
+            //
+            // **The markers are committed**, because they are files: an empty folder is invisible to
+            // git, so each one holds a marker, and a marker left uncommitted is a project that opens
+            // showing four changes nobody made. That is the same fault the preset copy had, one
+            // layer down, and it is why this returns the list rather than nothing.
+            val wrote = ProjectTree.create(ws.projectDir(clean))
+            if (wrote.isNotEmpty()) {
+                git.commitOutcome(clean, "Start the project's folders")
             }
             main.post {
                 busy = false
@@ -3122,7 +3096,7 @@ class AppViewModel @JvmOverloads constructor(
                 // deleting a project shows the change only after you exit and enter the project
                 // menue again".
                 message = if (made.isSuccess) {
-                    "Made \"$clean\" on this phone. It does not go to GitHub. ${copied.said()}"
+                    "Made \"$clean\" on this phone. It does not go to GitHub."
                 } else {
                     "Made the folder, but its history could not be started"
                 }
@@ -3139,7 +3113,6 @@ class AppViewModel @JvmOverloads constructor(
     fun createProject(
         name: String,
         licence: String,
-        type: AppType = AppType.DEFAULT,
         onDone: (Boolean) -> Unit = {},
     ) {
         val ws = workspace ?: return
@@ -3193,27 +3166,23 @@ class AppViewModel @JvmOverloads constructor(
                 { settings.historyLength },
             )
             val clone = git.cloneInto(clean, url)
-            // **The preset pair, after the clone and not before.** `cloneInto` refuses a folder that
-            // already holds anything, so a workflow written first would have stopped the repository
+            // **The folder tree, after the clone and not before.** `cloneInto` refuses a folder that
+            // already holds anything, so a folder made first would have stopped the repository
             // arriving at all — the same trap `createProjectFolders` had.
             //
-            // **And only when the clone worked**, because a copy into a folder that is not a project
-            // is a copy nobody asked for.
-            val copied = if (clone.success) {
-                Presets.copy(ws.accountDir, ws.projectDir(clean), type)
-            } else {
-                null
-            }
-            // **Sent, not merely committed.** A project made on GitHub is on GitHub; leaving the
-            // preset as a commit waiting to be sent would greet a person with "1 to send" on a
-            // project they have not touched, and a Sync button that pushes files they never wrote.
+            // **And only when the clone worked**, because folders in a folder that is not a project
+            // are folders nobody asked for.
             //
-            // This is the app's own act on a repository it just created, not the agent's: the person
-            // pressed Create, the app already spoke to GitHub to make the repository, and what it
-            // starts with is part of what was made. The agent's rule — that nothing it does is pushed
-            // — is unchanged.
-            if (copied != null && copied.written.isNotEmpty()) {
-                git.sync(clean, "Start from the ${type.label} preset")
+            // **And sent.** The markers are files, so there is something to commit — and a project
+            // made on GitHub is on GitHub. Leaving them as a commit waiting to be sent would greet a
+            // person with "1 to send" on a project they have not touched. The person pressed Create,
+            // the app already spoke to GitHub to make the repository, so what it starts with is part
+            // of what was made. The agent's rule — that nothing it does is pushed — is unchanged.
+            if (clone.success) {
+                val wrote = ProjectTree.create(ws.projectDir(clean))
+                if (wrote.isNotEmpty()) {
+                    git.sync(clean, "Start the project's folders")
+                }
             }
 
             main.post {
@@ -3231,54 +3200,6 @@ class AppViewModel @JvmOverloads constructor(
                     message = "${clone.message} ${copied.said()}"
                 }
                 refresh()
-            }
-        }
-    }
-
-    /**
-     * Changes what the open project **is**, copying the new type's preset in.
-     *
-     * ## Why this is an act and not a setting
-     *
-     * The type decides what the app offers the project — a release lane, a signing key, the workflow
-     * it starts with, and what the agent is told. So changing it is not a label: the new preset is
-     * copied in, and **the old one is left exactly where it is**. A project that changes type is a
-     * project somebody has already worked in, and an app that tidied up after the change would be
-     * deleting work it was not asked to delete.
-     *
-     * ## Why it is committed and not sent
-     *
-     * The copy is a change like any other: it belongs in the project's own history, and it goes to
-     * GitHub when the person syncs. Creating a project sends its preset because the repository was
-     * being made at that moment; changing a type is an edit to something that already exists, and the
-     * app does not push edits.
-     */
-    fun changeProjectType(project: String, type: AppType) {
-        val ws = workspace ?: return
-        val g = git ?: return
-        val dir = ws.projectDir(project)
-        if (!dir.isDirectory) {
-            message = "There is no project called \"$project\""
-            return
-        }
-        Trace.tap("project type", "${type.id} for $project")
-        busy = true
-        onWorker {
-            val copied = Presets.copy(ws.accountDir, dir, type)
-            if (copied.written.isNotEmpty()) {
-                g.commitOutcome(project, "Change the project type to ${type.label}")
-            }
-            // **The preset a person had is theirs, and the new one may not replace it.** Saying so
-            // is the difference between "it did not work" and "it kept the file you wrote".
-            Trace.note(
-                "project-type",
-                "$project · ${type.id} · wrote ${copied.written.size}, kept ${copied.kept.size}",
-            )
-            main.post {
-                busy = false
-                message = copied.said()
-                refresh()
-                refreshChanges()
             }
         }
     }
@@ -3548,16 +3469,12 @@ class AppViewModel @JvmOverloads constructor(
                 { accounts.account(login)?.author() ?: DEFAULT_AUTHOR },
                 { settings.historyLength },
             ).cloneInto(repo.name, repo.cloneUrl)
-            // **An imported project is asked, not assumed.** It arrives with no metadata, and no
-            // metadata means "nobody has said" — which is true, and is the answer that makes the
-            // caption in its bar a question. Writing `ANDROID` here would be the app deciding what a
-            // repository is from the fact that it exists, and a web project imported tomorrow would
-            // be told to build with Gradle.
-            //
-            // **The prompt is not copied either.** The person pulled in a project that already works;
-            // adding a workflow to it would be a file in their next push that they never wrote.
+            // **Nothing is written into an imported project.** It arrives with whatever the person
+            // put in it, and it already works — adding a file to it would put a file in their next
+            // push that they never wrote. The tree is made only because the app needs somewhere to
+            // put the prompt it is given; an empty folder is not in git, so nothing appears.
             if (result.success) {
-                ProjectMeta.write(ws.projectDir(repo.name), ProjectMeta(AppType.LATER))
+                ProjectTree.create(ws.projectDir(repo.name))
             }
             main.post {
                 busy = false
@@ -4481,9 +4398,25 @@ class AppViewModel @JvmOverloads constructor(
         onWorker {
             val result = signInGitHub().identity(token)
             val who = result.value
+            // **A token that cannot do the job is refused, and named.** The operator: *"window should
+            // check that all the scope requirements are satisfied and notify with rejection if they
+            // are not set for the provided token."*
+            //
+            // Refused here rather than after signing in, because accepting it would adopt an account
+            // whose first push fails with GitHub's "Resource not accessible by personal access token"
+            // — a message that names neither the scope nor the file, and that I have already watched
+            // cost this project a day. The dialog stays open with the reason in it.
+            val verdict = who?.let { TokenScopes.judge(it.scopes) }
             main.post {
                 if (who == null) {
                     message = result.error ?: "That key did not work"
+                    onDone(false)
+                } else if (verdict is TokenScopes.Verdict.Missing) {
+                    // **`device` is where the dialog's red line comes from**, and it is the same
+                    // place a refused device flow puts its reason — one way to show a refusal, not
+                    // two. `failed` is the field the dialog already renders in the error colour.
+                    device = Device("", "", failed = verdict.said())
+                    Trace.note("github-token", "refused · missing ${verdict.missing.joinToString(",")}")
                     onDone(false)
                 } else {
                     signIn(who.login, token, who.name, who.email)

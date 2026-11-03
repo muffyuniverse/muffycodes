@@ -26,6 +26,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -493,16 +494,13 @@ fun KeepLocalDialog(
 fun NewProjectDialog(
     licences: List<Licence>,
     onDismiss: () -> Unit,
-    onCreate: (name: String, licence: String, type: AppType) -> Unit,
+    onCreate: (name: String, licence: String) -> Unit,
     /** **Local**: no repository on GitHub, no licence to seed, nothing to push to. */
     local: Boolean = false,
-    /** What the picker offers. Empty means the question is not asked. */
-    types: List<AppType> = AppType.CHOOSABLE,
 ) {
     var name by remember { mutableStateOf("") }
     var licence by remember { mutableStateOf("gpl-3.0") }
     var showLicences by remember { mutableStateOf(false) }
-    var type by remember { mutableStateOf(AppType.DEFAULT) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (local) "New local project" else "New project") },
@@ -522,48 +520,6 @@ fun NewProjectDialog(
                     Text(
                         "This project stays on this phone. Its files keep their versions and the " +
                             "agent can work in it, and nothing is ever sent to GitHub.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                // **The type is what the project is for, and it is asked once.**
-                //
-                // It decides two things at creation and neither is a lock: which workflow is copied
-                // in, and which instructions the agent starts with. Both are ordinary files
-                // afterwards — editable, lockable, and the project's — so this is a question about
-                // where to start, not about what the project is allowed to become.
-                //
-                // **A column and not a row.** Five labels do not fit across a phone, and a row that
-                // wraps reads as two unrelated groups. One line each, with the chosen one's blurb
-                // underneath, says what the choice changes without a second screen.
-                //
-                // **"Decide later" is the default and is a real answer.** The agent is told what the
-                // choices are and can help; a wrong guess would tell it to build with Gradle in a
-                // repository that has no Gradle in it.
-                if (types.isNotEmpty()) {
-                    Text(
-                        "What is it?",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    for (choice in types) {
-                        val chosen = choice == type
-                        Text(
-                            text = if (chosen) "✓ ${choice.label}" else choice.label,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (chosen) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { type = choice }
-                                .padding(vertical = 4.dp),
-                        )
-                    }
-                    Text(
-                        type.blurb,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -601,7 +557,7 @@ fun NewProjectDialog(
             TextButton(
                 enabled = name.isNotBlank(),
                 onClick = {
-                    onCreate(name.trim(), licence, type)
+                    onCreate(name.trim(), licence)
                     onDismiss()
                 },
             ) { Text("Create") }
@@ -610,77 +566,6 @@ fun NewProjectDialog(
     )
 }
 
-/**
- * **What this project is** — the picker, opened from the caption in the bar.
- *
- * ## Why the current one is shown, and shown first
- *
- * A picker that does not say what is chosen leaves a person unsure whether the tap worked, and one
- * that lists the choices in a fixed order makes them hunt for the answer they already gave. The
- * current type is marked, and it is the first thing read.
- *
- * ## Why changing away is not warned about
- *
- * It deletes nothing. The new preset is copied in, the old files stay, and the metadata records the
- * new answer — so the worst outcome is a file a person did not want, which is visible in the folder
- * and removable. A warning here would be a warning about something reversible, which teaches people
- * to dismiss warnings.
- */
-@Composable
-fun ChangeTypeDialog(
-    project: String,
-    current: AppType?,
-    onDismiss: () -> Unit,
-    onPick: (AppType) -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("What is $project?") },
-        text = {
-            Column(
-                modifier = Modifier.heightIn(max = 420.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                for (type in AppType.CHOOSABLE) {
-                    val chosen = type == current
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onPick(type) }
-                            .padding(vertical = 8.dp),
-                    ) {
-                        Text(
-                            // **The mark is the answer, not a separate row.** A "current:" line
-                            // above the list would be a second place the same fact is written.
-                            text = if (chosen) "✓ ${type.label}" else type.label,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = if (chosen) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            },
-                        )
-                        Text(
-                            type.blurb,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                // **What happens to what is already here.** The one thing a person might fear is
-                // that changing the answer loses their workflow, and saying so costs a line.
-                Text(
-                    "Nothing already in the project is removed. The new preset is added beside it.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
-
-/** Signing in with a key (§5). The key is never shown back. */
 @Composable
 fun SignInDialog(
     onDismiss: () -> Unit,
@@ -752,8 +637,26 @@ fun SignInDialog(
                         )
                     }
                 } else {
-                    TextButton(onClick = onStartDevice, enabled = !signingIn) {
-                        Text("Sign in on github.com")
+                    // **Centred and larger, because it is the thing to press.** The operator:
+                    // *"make link Sign in to GitHub centered and bigger - to grab attention"*. A
+                    // `TextButton` at body size sat in the top-left of a dialog full of small grey
+                    // text, which is exactly where the eye goes last — and this is the primary door,
+                    // with the paste box as the backup underneath it.
+                    //
+                    // A `Button` rather than a bigger `TextButton`: the filled shape is what makes it
+                    // read as the action rather than as one more line of text that happens to be
+                    // tappable.
+                    Button(
+                        onClick = onStartDevice,
+                        enabled = !signingIn,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                    ) {
+                        Text(
+                            "Sign in to GitHub",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
                     }
                 }
                 if (shown?.failed != null) {
@@ -768,7 +671,10 @@ fun SignInDialog(
                 // not cooperate, or who already has a token, should not have to find another screen:
                 // the operator's rule is *"inside each link a manual key field as a backup signin
                 // option"*.
-                Text("Or paste a personal access key", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "Or paste a key",
+                    style = MaterialTheme.typography.titleSmall,
+                )
                 OutlinedTextField(
                     value = token,
                     onValueChange = { token = it },
@@ -776,33 +682,33 @@ fun SignInDialog(
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                 )
+                // **Two things, and only two: which kind of key, and which scopes.**
+                //
+                // The operator's report: *"description text with requirements should be to the
+                // point. It should say what type of token to supply and what access scopes it
+                // needs."* It used to be four paragraphs of justification, which is a person being
+                // made to read an argument when they wanted a checklist.
+                //
+                // `repo` covers `public_repo`, so one checkbox is enough for private repositories
+                // too. A missing `workflow` is why this is a list rather than a sentence: that
+                // token pushes every file except a workflow, and GitHub's refusal names neither.
                 Text(
-                    "Your commits are written as the GitHub account this key " +
-                        "belongs to: its name and its email, taken from GitHub.",
+                    "A classic token, with these three scopes ticked:",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                // **Three scopes, named, because a missing one is otherwise a mystery.** A classic
-                // token that lacks `workflow` can push every file except a workflow, and GitHub's
-                // answer is the same "Resource not accessible by personal access token" that a
-                // hundred other things produce. `repo` covers `public_repo`, so one checkbox is
-                // enough for private repositories too.
+                // **Read from the rule that enforces them**, not typed here. Two lists would drift,
+                // and the drift would be silent — the screen promising one thing while the check
+                // demanded another.
+                TokenScopes.REQUIRED.forEach { scope ->
+                    Text(
+                        "•  $scope — ${TokenScopes.why(scope)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Text(
-                    "This is a classic token, with the scopes repo, workflow and delete_repo. " +
-                        "`repo` is what lets the app read and write the repository; `workflow` is " +
-                        "what lets it push a workflow file; `delete_repo` is only used when you " +
-                        "delete a project and choose to remove its repository too.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                // **The one alternative, named so it is not a surprise.** A fine-grained token can do
-                // everything this app does, but the permission names differ and the app cannot read
-                // which of them are missing — so the honest thing is to say the supported path rather
-                // than leave a person to discover it from a 403.
-                Text(
-                    "A fine-grained token can also work, but this app only checks a classic one: " +
-                        "if a call is refused with \"Resource not accessible\", a classic token " +
-                        "with those three scopes is the quickest way past it.",
+                    "A fine-grained token works too, but its permissions cannot be checked here.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1605,6 +1511,37 @@ fun ModelKeyDialog(
                     )
                     TextButton(onClick = { onSignIn?.invoke() }) { Text("Open OpenRouter again") }
                 } else {
+                // **The sign-in is the primary door here too, and it comes first.**
+                //
+                // The operator's report: *"sign in to openrouter should be the primary option (same
+                // way and structure as with github signin window). and direct key insert as a
+                // backup"*. It was a `TextButton` below the paste field, so the backup came first and
+                // the easier path — a key the person never sees or copies — was the thing at the
+                // bottom in small type.
+                if (onSignIn != null && onCode != null) {
+                    Button(
+                        onClick = {
+                            signIn = true
+                            refused = null
+                            onSignIn.invoke()
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                    ) {
+                        Text(
+                            "Sign in to OpenRouter",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                    }
+                    Text(
+                        "You never see or copy the key: OpenRouter makes one and the app keeps it.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    HorizontalDivider()
+                    Text("Or paste a key", style = MaterialTheme.typography.titleSmall)
+                }
                 OutlinedTextField(
                     value = key,
                     onValueChange = { key = it },
@@ -1618,9 +1555,7 @@ fun ModelKeyDialog(
                     visualTransformation = PasswordVisualTransformation(),
                 )
                 Text(
-                    "The agent talks to OpenRouter with this key, so it is the thing that " +
-                        "pays for the work. It is kept encrypted on this phone, is never " +
-                        "written to the log, and the model list is read with it.",
+                    "It pays for the work. Kept encrypted on this phone, never written to the log.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1630,17 +1565,6 @@ fun ModelKeyDialog(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
-                }
-                // **The sign-in offered first**, because it is the shorter path for anyone who has
-                // not already made a key by hand.
-                if (onSignIn != null && onCode != null) {
-                    TextButton(
-                        onClick = {
-                            signIn = true
-                            refused = null
-                            onSignIn.invoke()
-                        },
-                    ) { Text("Sign in to OpenRouter instead") }
                 }
                 }
             }

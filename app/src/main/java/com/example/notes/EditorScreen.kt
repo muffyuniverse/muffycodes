@@ -1003,15 +1003,20 @@ private fun Reader(
             // **The two connections, marked on the page that offers them.** Only there: a tick
             // beside "Connect GitHub" on a page about writing files would be an answer to a
             // question that page did not ask.
+            // **Keyed by the address the link already carries**, so the mark lands on the line
+            // whose link it describes — and a page that has no such line is simply unaffected.
+            //
+            // Only on the page that offers the connections: a tick beside "Connect GitHub" on a
+            // page about writing files would be an answer to a question that page did not ask.
             marks = if (viewModel.onboardingIndexOf(file) >= 0 &&
                 file.name == Onboarding.pages().last().name
             ) {
-                listOf(
-                    "GitHub" to viewModel.signedIn,
-                    "OpenRouter" to viewModel.hasModelKey,
+                mapOf(
+                    "app:connect-github" to viewModel.signedIn,
+                    "app:connect-openrouter" to viewModel.hasModelKey,
                 )
             } else {
-                null
+                emptyMap()
             },
             modifier = Modifier.offset { IntOffset(offset.roundToInt(), 0) },
         )
@@ -1062,7 +1067,7 @@ private fun PagedPage(
      * goes stale the moment somebody connects. The text says what the links do; this says whether
      * they are done, and only one of those changes.
      */
-    marks: List<Pair<String, Boolean>>? = null,
+    marks: Map<String, Boolean> = emptyMap(),
 ) {
     val scrolling = modifier
         .fillMaxSize()
@@ -1077,6 +1082,7 @@ private fun PagedPage(
                     text = page.text,
                     baseDir = page.file.parentFile,
                     onLink = onLink,
+                    marks = marks,
                 )
             } else if (page.text.isNotEmpty()) {
                 Text(
@@ -1090,34 +1096,6 @@ private fun PagedPage(
                     text = page.file.name,
                     style = MaterialTheme.typography.titleMedium,
                 )
-            }
-        }
-        // **The marks, under the text they belong to.** A row of two, each a tick or a circle and
-        // the name of the thing — so "GitHub ✓" is readable at a glance from across the page.
-        if (!marks.isNullOrEmpty()) {
-            Spacer(Modifier.height(16.dp))
-            marks.forEach { (name, done) ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        if (done) "✓" else "○",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = if (done) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        if (done) "$name connected" else "$name not connected",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (done) {
-                            MaterialTheme.colorScheme.onSurface
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    )
-                }
             }
         }
     }

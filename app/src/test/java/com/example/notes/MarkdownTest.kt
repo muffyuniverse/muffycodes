@@ -192,4 +192,34 @@ class MarkdownTest {
     }
 
 
+
+    @Test
+    fun `a list line keeps the address of its first link`() {
+        // **What lets a tick be drawn beside the right line.** The operator: *"checkmarks should be
+        // on the same line with their links at the start of their lines"*. The mark is drawn by the
+        // renderer, keyed by this address, so the parser has to carry it.
+        val blocks = Markdown.parse("- [Connect GitHub](app:connect-github)\n- no link here")
+        val items = blocks.filterIsInstance<Markdown.Block.Item>()
+        assertEquals("the line with a link carries its address", "app:connect-github", items[0].link)
+        assertEquals("and a line without one carries none", null, items[1].link)
+    }
+
+    @Test
+    fun `only the first link on a line is carried`() {
+        // A line holding two links is not a line about one connection, and marking it with the
+        // second one's state would be a claim about the wrong thing. The onboarding lines hold one
+        // each; this pins the choice rather than leaving it to whichever the reader happened to find.
+        val blocks = Markdown.parse("- [a](app:first) and [b](app:second)")
+        val item = blocks.filterIsInstance<Markdown.Block.Item>().single()
+        assertEquals("the first address, not the last", "app:first", item.link)
+    }
+
+    @Test
+    fun `a link in a paragraph is not carried on an item`() {
+        // The mark belongs to list lines. A paragraph that mentions a link must not become a marked
+        // line by accident.
+        val blocks = Markdown.parse("See [Connect GitHub](app:connect-github).")
+        assertTrue("it is still a paragraph", blocks.single() is Markdown.Block.Paragraph)
+    }
+
 }

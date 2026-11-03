@@ -119,7 +119,6 @@ fun BrowserScreen(
     onDeleteSelected: () -> Unit,
     onReport: () -> Unit = {},
     /** Opens the picker for the open project's type. One word, in the bar, tap to change. */
-    onChangeType: () -> Unit = {},
 ) {
     val projects = viewModel.atProjects
     val here = viewModel.path
@@ -152,40 +151,19 @@ fun BrowserScreen(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        // **The second line is the type, and it is the control.** It used to say
-                        // "project", which is a fact nobody needs: a person who is inside a folder
-                        // and looking at a back arrow already knows they are in a project. What
-                        // they do not know is *what the app thinks this project is* — and that
-                        // decides what they are offered here, so it is the one word worth the line.
-                        //
-                        // **Tap to change it**, because the fact and the act belong together: a
-                        // setting buried in a menu is one a person reads as unchangeable, and this
-                        // is the place they would look for it.
-                        val type = viewModel.typeOfProject
-                        val small = when {
-                            here.isEmpty() -> "your projects"
-                            type != null -> type.label
-                            else -> here.dropLast(1).joinToString(" › ")
-                        }
+                        // **The second line is where you are**, because there is no longer a
+                        // project type to name. It used to be the type, which was a control as well
+                        // as a fact — and with the types gone the honest second line is the path,
+                        // which is the thing a person is inside of and can always be shown.
+                        val small = if (here.isEmpty()) "your projects"
+                        else here.dropLast(1).joinToString(" › ")
                         if (small.isNotEmpty()) {
                             Text(
                                 text = small,
                                 style = MaterialTheme.typography.labelSmall,
-                                // **A type that is undecided is drawn as a question**, not as an
-                                // answer: the colour is the app's way of saying "this is still
-                                // open" without a second line of words.
-                                color = if (type?.undecided == true) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
-                                modifier = if (type != null) {
-                                    Modifier.clickable(onClick = onChangeType)
-                                } else {
-                                    Modifier
-                                },
                             )
                         }
                     }
@@ -672,34 +650,20 @@ private fun ProjectList(
                             .combinedClickable(onClick = { viewModel.open(listOf(name)) }),
                     ) {
                         Text(name, style = MaterialTheme.typography.bodyLarge)
-                        // **What it is, and how much is unsent, on one line.** The list is where a
-                        // person scans every project at once, so it is the only place a project
-                        // whose type nobody chose can be noticed without opening it — and an
-                        // undecided project is the one thing on this screen that is waiting for
-                        // them rather than reporting.
-                        //
-                        // The type is left off a local project only when it is undecided, because
-                        // "local · decide later" would be two ways of saying "nothing has happened
-                        // yet" about a project that is fine as it is.
-                        val type = viewModel.typeOf(name)
+                        // **How much is unsent, on one line.** It used to lead with the project's
+                        // type; with types gone the count is the whole of it, which is the one fact
+                        // this screen exists to show at a glance.
                         val sending = if (viewModel.isLocalProject(name)) {
                             null
                         } else {
                             viewModel.changesOf(name).let { if (it > 0) "$it to send" else "up to date" }
                         }
-                        val second = listOfNotNull(
-                            type?.takeIf { it.undecided || !viewModel.isLocalProject(name) }?.label,
-                            sending,
-                        ).joinToString(" · ")
+                        val second = listOfNotNull(sending).joinToString(" · ")
                         if (second.isNotEmpty()) {
                             Text(
                                 text = second,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = if (type?.undecided == true) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }

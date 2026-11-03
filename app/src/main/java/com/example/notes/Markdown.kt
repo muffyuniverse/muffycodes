@@ -3,6 +3,7 @@ package com.example.notes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -16,6 +17,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
@@ -52,7 +54,20 @@ object Markdown {
         data class Heading(val level: Int, val text: String) : Block
         data class Paragraph(val text: String) : Block
         /** A list, with the marker kept so a numbered list keeps its numbers. */
-        data class Item(val marker: String, val text: String, val depth: Int) : Block
+        /**
+         * A list line.
+         *
+         * [link] is the address of the **first** link on the line, or null when it has none. It
+         * exists so a caller can mark a line as done — the operator's *"checkmarks should be on the
+         * same line with their links"* — without the mark being written into the text, which is a
+         * file that anybody can edit.
+         */
+        data class Item(
+            val marker: String,
+            val text: String,
+            val depth: Int,
+            val link: String? = null,
+        ) : Block
         data class Code(val language: String, val text: String) : Block
         data class Quote(val text: String) : Block
         data object Rule : Block
@@ -153,7 +168,7 @@ object Markdown {
             val entry = item(line)
             if (entry != null) {
                 flush()
-                blocks += Block.Item(entry.first, entry.second, entry.third)
+                blocks += Block.Item(entry.first, entry.second, entry.third, firstLink(entry.second))
                 i++
                 continue
             }
@@ -204,6 +219,21 @@ object Markdown {
         val body = line.replace(" ", "")
         if (body.length < 3) return false
         return body.all { it == '-' } || body.all { it == '*' } || body.all { it == '_' }
+    }
+
+    /**
+     * The address of the **first** `[words](address)` on a line, or null.
+     *
+     * Only the first: a line with two links is not a line about one connection, and marking it with
+     * the second one's state would be a claim about the wrong thing. The onboarding lines each hold
+     * one.
+     */
+    private fun firstLink(text: String): String? {
+        val open = text.indexOf("](")
+        if (open < 0) return null
+        val close = text.indexOf(')', open + 2)
+        if (close < 0) return null
+        return text.substring(open + 2, close).trim().ifEmpty { null }
     }
 
     /**
@@ -467,6 +497,23 @@ fun MarkdownBody(
      * instead of pretending.
      */
     onLink: ((String) -> Unit)? = null,
+    /**
+     * **A tick at the start of a list line whose link is done.**
+     *
+     * Keyed by the link's address — `app:connect-github` — because that is what identifies the line
+     * whoever wrote it. The value says whether it is done; a false entry draws an empty circle rather
+     * than nothing, so a line that *can* be done reads as not-yet rather than as a different kind of
+     * line.
+     *
+     * **A mark, not a word in the document.** The page is a file: versioned, editable, read by the
+     * agent. A tick written into it would be a claim that goes stale the moment somebody connects,
+     * and the operator's report — *"checkmarks should be on the same line with their links at the
+     * start of their lines (instead of at the bottom)"* — is about where the mark is drawn, not about
+     * what the file says.
+     *
+     * Empty by default, so every other document is unaffected.
+     */
+    marks: Map<String, Boolean> = emptyMap(),
 ) {
     val blocks = Markdown.parse(text)
     val link = MaterialTheme.colorScheme.primary
@@ -488,7 +535,7 @@ fun MarkdownBody(
             // tap would fire whichever link came first. A link annotation belongs to a range of
             // characters, so Compose resolves the target from the character under the finger.
             SelectionContainer {
-                OneBlock(block, link, baseDir, onLink)
+                OneBlock(block, link, baseDir, onLink, marks)
             }
         }
     }
@@ -504,6 +551,7 @@ private fun OneBlock(
     link: androidx.compose.ui.graphics.Color,
     baseDir: File?,
     onLink: ((String) -> Unit)?,
+    marks: Map<String, Boolean>,
 ) {
             when (block) {
                 is Markdown.Block.Heading -> Text(
@@ -523,11 +571,40 @@ private fun OneBlock(
                     modifier = Modifier.padding(vertical = 4.dp),
                 )
 
-                is Markdown.Block.Item -> Text(
-                    text = Markdown.inline("${block.marker}  ${block.text}", link, onLink),
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.padding(start = (block.depth * 16).dp, top = 2.dp, bottom = 2.dp),
-                )
+                is Markdown.Block.Item -> {
+                    // **The mark, at the start of the line it belongs to.** A `Row` rather than a
+                    // prefix inside the text: a prefix would become part of what a selection copies,
+                    // and "✓ Connect GitHub" pasted elsewhere is a claim about somebody else's
+                    // account.
+                    //
+                    // `done == null` means this line is not one that can be done, and then there is
+                    // no mark at all — a circle beside every bullet in every document would say
+                    // nothing about anything.
+                    val done = marks[block.link]
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (done != null) {
+                            Text(
+                                if (done) "✓" else "○",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = if (done) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                modifier = Modifier.padding(end = 6.dp),
+                            )
+                        }
+                        Text(
+                            text = Markdown.inline("${block.marker}  ${block.text}", link, onLink),
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.padding(
+                                start = (block.depth * 16).dp,
+                                top = 2.dp,
+                                bottom = 2.dp,
+                            ),
+                        )
+                    }
+                }
 
                 is Markdown.Block.Quote -> Text(
                     text = Markdown.inline(block.text, link, onLink),

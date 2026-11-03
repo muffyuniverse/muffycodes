@@ -286,8 +286,20 @@ object AgentPrompt {
      * **`mayCreate = false`, because a project that is not there is not a project to write to.** See
      * [layer]: a reader that makes the folder recreates one the person deleted.
      */
-    fun project(projectDir: File): String =
-        layer(projectFile(projectDir), PROJECT_DEFAULT, mayCreate = false)
+    fun project(projectDir: File): String {
+        // **Every document in the folder, in name order.** The operator: *"project prompt just takes
+        // and inserts in the context all the files from project_prompt subfolder"* — so this is a
+        // folder read rather than a file read, and adding a second document is adding a file.
+        //
+        // **One file is still honoured**, because that is what every existing project has: the
+        // single `project_prompt.txt` this used to read is picked up by [ProjectTree.prompt] when the
+        // folder is empty, so no project loses its brief to a feature removal.
+        val fromFolder = ProjectTree.prompt(projectDir)
+        if (fromFolder.isNotBlank()) return fromFolder
+        // Nothing written yet. **Not created**, because a project that is not there is not a project
+        // to write to — the same rule the file version had, and the reason `mayCreate` exists.
+        return PROJECT_DEFAULT
+    }
 
     /**
      * **What [scoped] cannot do, computed from the two tool lists.**
