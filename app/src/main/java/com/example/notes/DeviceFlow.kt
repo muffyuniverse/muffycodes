@@ -169,8 +169,14 @@ object DeviceFlow {
         code: Code,
         /** True once the person has left, which is the only thing that stops a live poll. */
         cancelled: () -> Boolean,
-        /** One poll. Defaults to the real request. */
-        poll: (String) -> Poll = { poll(it) },
+        /**
+         * One poll. Defaults to the real request.
+         *
+         * **`DeviceFlow::poll` and not a lambda calling `poll`**, which the compiler caught: inside the
+         * parameter's own default, the name `poll` is the parameter, not the function, so the lambda
+         * would have referred to itself.
+         */
+        poll: (String) -> Poll = DeviceFlow::poll,
         /** The wait between polls. Defaults to sleeping the thread this runs on. */
         wait: (Long) -> Unit = { Thread.sleep(it) },
         clock: () -> Long = { System.currentTimeMillis() },
