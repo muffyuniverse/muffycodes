@@ -3816,13 +3816,6 @@ class AgentTools(
     }
 
     /** True when [file] is inside the project the agent is working in. */
-    /** True when [file] is inside the project the agent is working in. */
-    fun isMine(file: File): Boolean = projectOf(file) == project
-
-    /** True when [file] is inside the project the agent is working in. */
-    fun isMine(file: File): Boolean = projectOf(file) == project
-
-    /** True when [file] is inside the project the agent is working in. */
     fun isMine(file: File): Boolean = projectOf(file) == project
 
     /**
