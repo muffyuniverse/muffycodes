@@ -552,7 +552,11 @@ class AgentRunnerTest {
         runner().stop("shopping")
 
         val after = AgentLog.open(ws.projectDir("shopping"))
-        assertEquals("**the context is empty**", 0, after.contextRows().size)
+        assertEquals(
+            "**the context is empty**: ${after.contextRows().map { it.name }}",
+            0,
+            after.contextRows().size,
+        )
         assertTrue(
             "**and nothing was deleted** — every row is still in the record, marked `app`",
             after.rows().size > before,

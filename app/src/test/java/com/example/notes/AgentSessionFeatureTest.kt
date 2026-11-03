@@ -637,8 +637,14 @@ class AgentSessionFeatureTest : FeatureTest() {
         scene.viewModel.resetAgent("groceries")
         // **Wait on the trace, not on the file.** The row is written before the note that says so,
         // and a test that waited on the file read the app mid-act.
+        //
+        // **Counted, not merely present.** The trace is a process-wide singleton that this class
+        // never clears, so `any { it.contains("agent-reset") }` matched a note left by an earlier
+        // test and the wait returned before this reset had been written — the assertion then read
+        // the log mid-act, which is exactly what waiting on the trace was meant to prevent.
+        val resetsBefore = Trace.report().lines.count { it.contains("agent-reset") }
         scene.await("the reset to be written") {
-            Trace.report().lines.any { it.contains("agent-reset") }
+            Trace.report().lines.count { it.contains("agent-reset") } > resetsBefore
         }
 
         assertEquals(

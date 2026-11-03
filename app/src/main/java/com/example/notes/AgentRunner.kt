@@ -804,8 +804,12 @@ class AgentRunner(
      */
     fun stop(project: String) {
         val session = sessionOf(project) ?: return
-        sessions.put(session.stopped(AgentSession.StopReason.BY_OPERATOR))
         Trace.tap("stop agent", project)
+        // **Through [put], not `sessions.put`.** This line wrote the session directly, which made
+        // "every stop goes through one place" false: the reset lived in [put] and this door walked
+        // past it. The operator's rule is every trigger, so every write of a stopped session has to
+        // be the same write.
+        put(session.stopped(AgentSession.StopReason.BY_OPERATOR))
         Trace.note("agent-state", "$project · stopped by you")
         changed(sessions.read())
     }
@@ -841,9 +845,7 @@ class AgentRunner(
         // → `layers()`), so this drops the conversation and not the brief; and `agent/` is readable,
         // so the agent can read back what mattered and re-forget deliberately. That is the whole
         // argument: a stop is not a judgement, and `forget` is.
-        val wasStopped = session.state == AgentSession.State.STOPPED &&
-            sessionOf(session.project)?.state != AgentSession.State.STOPPED
-        if (wasStopped) resetOnStop(session)
+        AgentStops.resetIfStopped(ws, session, was = sessionOf(session.project))
         sessions.put(session)
         Trace.note("agent-state", "${session.project} · ${session.label()}")
         // **Only a session that just started needing somebody speaks.** Otherwise every reminder
@@ -903,29 +905,6 @@ class AgentRunner(
      * agent that is off with a stale context is better than an agent that is on because its log
      * would not open — so the trace records it and the stop goes ahead.
      */
-    private fun resetOnStop(session: AgentSession) {
-        val project = session.project
-        try {
-            val log = AgentLog.open(ws.projectDir(project))
-            val why = session.lastWords.ifBlank { session.reason?.let { whyStopped(it) } ?: "it stopped" }
-            val id = log.reset(
-                "the agent was stopped ($why) — the working context was cleared. " +
-                    "What it did is still in ${AgentLog.DIR}/${AgentLog.SESSION}",
-            )
-            Trace.note("agent-reset", "$project · stopped · row $id")
-        } catch (t: Throwable) {
-            Trace.note("agent-reset-failed", "$project · ${Secrets.explain(t, "the context was kept")}")
-        }
-    }
-
-    /** Why a session stopped, in the words the row will carry. */
-    private fun whyStopped(reason: AgentSession.StopReason): String = when (reason) {
-        AgentSession.StopReason.BY_OPERATOR -> "you stopped it"
-        AgentSession.StopReason.PIN_REFUSED -> "the provider kept refusing"
-        AgentSession.StopReason.LOOP -> "it was going in circles"
-        AgentSession.StopReason.ERROR -> "something went wrong"
-    }
-
     /** The record's one line when an outage ends, and the rows it leaves behind. */
     private fun afterOutage(
         session: AgentSession,

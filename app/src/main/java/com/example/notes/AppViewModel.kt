@@ -4144,6 +4144,12 @@ class AppViewModel @JvmOverloads constructor(
     /** Reads a session's own file and keeps the observable copy in step. */
     private fun putSession(session: AgentSession) {
         val ws = workspace ?: return
+        // **The same rule the runner applies, from the same function.** There are two doors a
+        // session is written through — this one and `AgentRunner.put` — and the reset lived in only
+        // the second, so the screen's Stop wrote a stopped session and left the context in place.
+        // A rule that lives in one of two doors is a rule the app does not have.
+        val was = agentSessions.firstOrNull { it.project == session.project }
+        AgentStops.resetIfStopped(ws, session, was)
         AgentSessions(ws.accountDir).put(session)
         agentSessions = agentSessions.filterNot { it.project == session.project } + session
         // **The service follows the sessions, always.** One call, from the one place a session is
