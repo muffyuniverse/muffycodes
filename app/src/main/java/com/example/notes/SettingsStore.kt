@@ -107,25 +107,20 @@ class SettingsStore(context: Context, name: String = "settings") {
     /**
      * Whether the trace is copied into Downloads while the app is open.
      *
-     * **A development aid, and only a development aid.** A release build answers no
-     * whatever is stored, because a release build has no business writing a running log
-     * of a person's tapping into a folder other apps can read. In a debug build it
-     * starts on: a session spent describing bugs by hand produces fewer of them per
-     * hour than one where the app describes itself.
+     * **Not a setting any more.** The operator's question, and the answer to it: *"why is there a
+     * switch? dev version is for debugging - trace log should be on by default."*
+     *
+     * The switch cost a week. A debug build exists to be reported on, the log is the report, and
+     * every session where it was off produced a paste that looked like a healthy session with no
+     * file behind it. A development aid that can be quietly switched off is a development aid that
+     * will be off on the day something goes wrong — and the person then has to *remember* it was
+     * off, which is exactly the thing nobody remembers.
+     *
+     * **Still gated on `DEBUG`, and that is not a setting either.** A release build has no business
+     * writing a running log of a person's tapping into a folder other apps can read, so there it is
+     * off and cannot be turned on. In a debug build it is on, always.
      */
-    var liveTrace: Boolean by mutableStateOf(
-        BuildConfig.DEBUG && prefs.getBoolean(KEY_LIVE, true),
-    )
-        private set
-
-    /** True only where it can work at all. */
-    val liveTraceAvailable: Boolean get() = BuildConfig.DEBUG
-
-    fun keepLiveTrace(on: Boolean) {
-        if (!liveTraceAvailable) return
-        liveTrace = on
-        prefs.edit().putBoolean(KEY_LIVE, on).apply()
-    }
+    val liveTrace: Boolean get() = BuildConfig.DEBUG
 
     fun selectTheme(theme: AppTheme) {
         // **A setting is a tap too.** These four went through this store, not the view
@@ -824,7 +819,6 @@ class SettingsStore(context: Context, name: String = "settings") {
 
     const val KEY_THEME = "theme"
         const val KEY_DARK = "use_dark"
-        const val KEY_LIVE = "live_trace"
         const val KEY_HISTORY = "history_length"
 
         /** Which onboarding page a person reached. Absent means they have not started. */

@@ -59,25 +59,20 @@ import androidx.compose.ui.text.style.TextAlign
  * projects are.
  */
 /**
- * Where the log is, said plainly — including when it is not where the switch says.
+ * Where the log is, said plainly — including when it is not where it promised.
  *
  * Read at composition rather than held in state: the answer changes when a write happens,
  * and a write is not a Compose event. Opening this screen re-reads it, which is when a
  * person looks.
- */
-@Composable
-/**
- * What the switch is doing, in a sentence that distinguishes the three ways it can be doing nothing.
  *
- * **"Turned off" and "writes nowhere" are different answers**, and the old sentence gave the first for
- * both — so a person who had not touched the switch was told they had turned it off. That is the app
- * blaming them for its own silence, the same mistake as the silent fallback one screen over.
+ * **There is no "off" branch any more.** The log is on in a debug build and off in a release one,
+ * and a release build does not draw this block at all — so the only two answers left are "written
+ * here" and "written there instead, because …".
  */
-private fun traceWhere(on: Boolean): String {
+private fun traceWhere(): String {
     val where = Trace.where
     return when {
-        !on -> "Off: nothing is written. The switch above turns it on."
-        where == null -> "On, but nothing has been written yet. One line per thing that happened."
+        where == null -> "Nothing has been written yet. One line per thing that happened."
         !where.contains(DownloadsSink.FOLDER) ->
             // **The reason, when the sink knows one.** "Downloads refused" was the whole story the
             // screen could tell, and it was the question that needed answering for a week: refused
@@ -904,32 +899,27 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            // **Only a debug build shows this at all.** A release build has no business
-            // writing a running log of a person's tapping into a folder other apps can
-            // read, so the switch does not exist there — not disabled, absent.
-            if (viewModel.settings.liveTraceAvailable) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Write the log to Downloads", style = MaterialTheme.typography.bodyMedium)
-                        // **The path is reported, not promised.** This used to read "at
-                        // Download/MuffyCodes log/trace.log" — a sentence true of the
-                        // intention and false of the phone, because a write can fall back
-                        // to the app's own folder. A line naming where the file really is
-                        // turns "I cannot find the log" into a path.
-                        Text(
-                            traceWhere(viewModel.settings.liveTrace),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Switch(
-                        checked = viewModel.settings.liveTrace,
-                        onCheckedChange = { viewModel.keepLog(it) },
-                    )
-                }
+            // **No switch.** The operator's question: *"why is there a switch? dev version is for
+            // debugging - trace log should be on by default."* A debug build writes; a release build
+            // does not; there is nothing here to decide.
+            //
+            // The switch cost a week. Every session where it was off produced a paste that looked
+            // like a healthy session with no file behind it — and the person then had to *remember*
+            // it was off, which is the thing nobody remembers.
+            //
+            // **The line stays, and it is the useful half.** It says where the log actually went,
+            // and when it went somewhere other than promised, why. That sentence is what a person
+            // needs; the switch was never what they needed.
+            if (viewModel.settings.liveTrace) {
+                // **The path is reported, not promised.** This used to read "at
+                // Download/MuffyCodes log/trace.log" — a sentence true of the intention and false of
+                // the phone, because a write can fall back to the app's own folder. A line naming
+                // where the file really is turns "I cannot find the log" into a path.
+                Text(
+                    traceWhere(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))

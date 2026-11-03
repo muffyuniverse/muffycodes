@@ -640,22 +640,6 @@ class AppViewModel @JvmOverloads constructor(
         return pages.indexOfFirst { it.name == file.name }
     }
 
-    /**
-     * Turns the log's file on or off, now.
-     *
-     * A switch that only took effect at the next launch would have been a lie for a whole
-     * session — and the moment somebody wants it is the moment something is going wrong,
-     * which is not a good moment to be told to restart.
-     */
-    fun keepLog(on: Boolean) {
-        settings.keepLiveTrace(on)
-        attachTrace()
-        Trace.note(
-            "log-switched",
-            if (on) "writing to " + (Trace.where ?: "nowhere") else "off",
-        )
-    }
-
 
     /**
      * Points the log at Downloads.
@@ -666,11 +650,9 @@ class AppViewModel @JvmOverloads constructor(
      * nothing at all, so nothing is ever written there.
      */
     private fun attachTrace() {
-        if (!settings.liveTrace) {
-            Trace.attach((null as Trace.Sink?))
-            return
-        }
-        Trace.attach(DownloadsSink(getApplication()))
+        // **No switch, so no branch that can leave the app silent.** `liveTrace` is `DEBUG`, and this
+        // is the only place it is read: a debug build always writes, a release build never does.
+        Trace.attach(if (settings.liveTrace) DownloadsSink(getApplication()) else null)
     }
 
     // ---- reading the tree ---------------------------------------------------

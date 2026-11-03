@@ -72,6 +72,35 @@ class DownloadsSinkTest {
     }
 
     @Test
+    fun `a debug build always writes the log, and there is no way to turn it off`() {
+        // **The operator's question, as a rule**: *"why is there a switch? dev version is for
+        // debugging - trace log should be on by default."*
+        //
+        // The switch cost a week. A session with it off produced a paste that looked like a healthy
+        // session with no file behind it, and the person then had to remember it was off — which is
+        // the thing nobody remembers. So the answer is not "default it on": it is that the state
+        // cannot exist in a build whose whole purpose is being reported on.
+        val name = "trace-${System.nanoTime()}"
+        val settings = SettingsStore(app, name)
+
+        assertTrue("**a debug build writes**", settings.liveTrace)
+
+        // **And a preference left over from the old switch cannot turn it back off.** The build that
+        // had the switch wrote `live_trace=false` when a person used it — so a phone upgrading to
+        // this build still has that key on disk. Reading it again would resurrect the exact silence
+        // this removes, on the phones that had already hit it.
+        app.getSharedPreferences(name, android.content.Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean("live_trace", false)
+            .commit()
+
+        assertTrue(
+            "**a stale `live_trace=false` is ignored**",
+            SettingsStore(app, name).liveTrace,
+        )
+    }
+
+    @Test
     fun `a fallback says why it fell back`() {
         // **The week this cost.** `dump()` printed no "also at" line when it had no file, and the
         // sink swallowed twelve exceptions in silence — seven of them saying nothing at all. So a
