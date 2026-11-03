@@ -461,6 +461,37 @@ class AccountsFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `finishing onboarding leaves the connect page instead of stranding it`() {
+        // **The operator's report**: *"after both connections are done the onboarding screen should
+        // close itself - and you automatically enter account screen"*.
+        //
+        // `onboarding = false` only stopped the page being an onboarding page. The editor stayed
+        // open on `06-connect.md`, so the person sat on the CONNECT page with the two links they had
+        // just used — and because the guard in `closeEditor` reads `onboarding`, it had already
+        // stopped refusing, leaving an ordinary file on screen with no reason to be there.
+        val scene = Scenario(org.robolectric.RuntimeEnvironment.getApplication(), signIn = true)
+        try {
+            scene.await("onboarding to open") { scene.viewModel.onboarding }
+            val connect = Onboarding.pages().last()
+            scene.viewModel.onboardingReached(Onboarding.pages().lastIndex)
+            scene.viewModel.openEditor(connect)
+            assertNotNull("the page is open", scene.viewModel.editingPath)
+
+            // **The second connection is what ends it**, so this makes the first one's answer stand
+            // and then connects the model.
+            scene.viewModel.saveModelKey("sk-or-v1-a-key")
+            scene.await("onboarding to close") { !scene.viewModel.onboarding }
+
+            assertNull(
+                "**and the page is gone with it**: ${scene.viewModel.editingPath}",
+                scene.viewModel.editingPath,
+            )
+        } finally {
+            scene.close()
+        }
+    }
+
+    @Test
     fun `onboarding closes on its own once both connections are made`() {
         // **The operator's rule**: *"after providing both signins onboarding should close on its
         // own"*. Reading six pages is not the goal; connecting is. A person who connected on page

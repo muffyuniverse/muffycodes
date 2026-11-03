@@ -642,6 +642,22 @@ private fun Dialogs(
             // success is the only thing that dismisses.
             var signingIn by remember { mutableStateOf(false) }
             var error by remember { mutableStateOf<String?>(null) }
+            // **The device flow's success closes this window, and nothing used to.**
+            //
+            // The operator's report: *"sign in the github window should be closing on its own when
+            // success response from github is received"*. It did not, and the reason is that the
+            // two paths into this dialog end differently: the token path calls back with a yes and
+            // dismisses, while the device path sets `device = null` on the view model and stops
+            // there. So the sign-in had happened — the account was adopted, onboarding closed — and
+            // the window sat on top of it still saying "Waiting for you to approve it…".
+            //
+            // **Watched rather than called back**, because the device flow finishes on the worker
+            // thread with no caller to answer: there is no `onDone` to invoke. `signedIn` becoming
+            // true is the fact that ends it, and it is the same fact that closes onboarding.
+            val nowSignedIn = viewModel.signedIn
+            LaunchedEffect(nowSignedIn) {
+                if (nowSignedIn && viewModel.device == null) dismiss()
+            }
             SignInDialog(
                 onDismiss = {
                     // **Leaving stops the poll**, which is what "foreground only" means: a code

@@ -609,7 +609,26 @@ class AppViewModel @JvmOverloads constructor(
         settings.markOnboardingAt(Onboarding.pages().size)
         onboarding = false
         Trace.note("onboarding", "finished")
+        // **And it leaves the last page**, which is the report this exists for: *"after both
+        // connections are done the onboarding screen should close itself - and you automatically
+        // enter account screen"*.
+        //
+        // `onboarding = false` alone only stops the page *being* an onboarding page. The editor was
+        // still open on `06-connect.md`, so the person stayed on the CONNECT page with the two links
+        // they had just used — a screen that had done its job and would not leave. Worse, the guard
+        // in `closeEditor` reads `onboarding`, so it had already stopped refusing: the page was now
+        // an ordinary file with no reason to be on screen and no obvious way off it.
+        //
+        // **Closed here rather than in the caller**, because there are two callers (`signIn` and
+        // `saveModelKey`) and a copy of this in each is a copy that can drift. This is the one
+        // moment onboarding ends, so it is the one place that has to tidy up after it.
+        if (onboardingIndexOf(openFile()) >= 0) {
+            closeEditor()
+        }
     }
+
+    /** The file the editor has open, or null. Read by the one place that needs to know. */
+    private fun openFile(): File? = editingPath?.let { workspace?.fileAt(it) }
 
     /** The index of the page the editor is showing, or -1 when it is not an onboarding page. */
     fun onboardingIndexOf(file: File): Int {
