@@ -267,14 +267,16 @@ class AgentRunnerTest {
 
         val door = PingDoor()
         val runner = runner(door)
+        val mark = Trace.report().lines.size
         // One interval after it last did anything.
         runner.tick(now = 1_000 + settings.pollMs + 1)
         settle(runner)
+        val fresh = Trace.report().lines.take(Trace.report().lines.size - mark)
 
         assertTrue(
             "**a subagent ping went out** — that is the whole point of keeping its context warm: " +
-                "${Trace.report().lines.take(6)}",
-            Trace.report().lines.take(10).any { it.contains("subagent-warm") },
+                "$fresh",
+            fresh.any { it.contains("subagent-warm") },
         )
     }
 
@@ -292,15 +294,20 @@ class AgentRunnerTest {
 
         val door = PingDoor()
         val runner = runner(door)
+        val mark = Trace.report().lines.size
         runner.tick(now = 1_000 + settings.pollMs + 1)
         settle(runner)
+        val fresh = Trace.report().lines.take(Trace.report().lines.size - mark)
 
         // **The chat agent's own ping is not the question.** It is due at the same moment and goes
         // out regardless; what must not happen is a ping for the *subagent*. The trace names which,
         // because a count of pings cannot tell two kinds apart.
+        //
+        // **Scoped to what this test wrote**, because the trace is a process-wide singleton and a
+        // `take(n)` of it shows whichever tests ran before this one.
         assertFalse(
-            "no subagent ping: ${Trace.report().lines.take(6)}",
-            Trace.report().lines.take(10).any { it.contains("subagent-warm") },
+            "no subagent ping: $fresh",
+            fresh.any { it.contains("subagent-warm") },
         )
     }
 
@@ -316,12 +323,14 @@ class AgentRunnerTest {
 
         val door = PingDoor()
         val runner = runner(door)
+        val mark = Trace.report().lines.size
         runner.tick(now = 1_000 + settings.pollMs + 1)
         settle(runner)
+        val fresh = Trace.report().lines.take(Trace.report().lines.size - mark)
 
         assertFalse(
-            "**no subagent ping** — it ran its task instead: turns=${door.turns}",
-            Trace.report().lines.take(10).any { it.contains("subagent-warm") },
+            "**no subagent ping** — it ran its task instead: turns=${door.turns}; $fresh",
+            fresh.any { it.contains("subagent-warm") },
         )
     }
 
