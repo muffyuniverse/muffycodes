@@ -1460,8 +1460,18 @@ class Workspace(val accountDir: File) {
                 // The cost, stated: the marker is a document in the folder, and every document in
                 // the folder is read as part of the prompt. So the prompt assembly skips the marker
                 // by name — see `ProjectTree.prompt` — which is the one place that rule belongs.
-                File(root, AgentPrompt.PROMPTS).mkdirs()
-                markTrackable(File(root, AgentPrompt.PROMPTS))
+                //
+                // **Written by hand rather than by `markTrackable`**, which is an instance method and
+                // this is the companion object — and rather than through the loop below, which only
+                // walks `SUBJECTS`. The marker is reported in `written` for the same reason every
+                // other one is: an uncommitted marker is a project that opens showing changes nobody
+                // made.
+                val prompts = File(root, AgentPrompt.PROMPTS)
+                prompts.mkdirs()
+                if (prompts.listFiles()?.isEmpty() != false) {
+                    File(prompts, KEEPER).writeText("")
+                    written.add("${AgentPrompt.DATA}/${AgentPrompt.PROMPTS}/$KEEPER")
+                }
                 for (name in SUBJECTS) {
                     val one = File(root, name)
                     one.mkdirs()
