@@ -272,8 +272,9 @@ class AgentRunnerTest {
         settle(runner)
 
         assertTrue(
-            "**a ping went out** — that is the whole point of keeping a subagent's context warm",
-            door.pings.isNotEmpty(),
+            "**a subagent ping went out** — that is the whole point of keeping its context warm: " +
+                "${Trace.report().lines.take(6)}",
+            Trace.report().lines.take(10).any { it.contains("subagent-warm") },
         )
     }
 
@@ -294,7 +295,13 @@ class AgentRunnerTest {
         runner.tick(now = 1_000 + settings.pollMs + 1)
         settle(runner)
 
-        assertTrue("nothing was pinged", door.pings.isEmpty())
+        // **The chat agent's own ping is not the question.** It is due at the same moment and goes
+        // out regardless; what must not happen is a ping for the *subagent*. The trace names which,
+        // because a count of pings cannot tell two kinds apart.
+        assertFalse(
+            "no subagent ping: ${Trace.report().lines.take(6)}",
+            Trace.report().lines.take(10).any { it.contains("subagent-warm") },
+        )
     }
 
     @Test
@@ -312,9 +319,9 @@ class AgentRunnerTest {
         runner.tick(now = 1_000 + settings.pollMs + 1)
         settle(runner)
 
-        assertTrue(
-            "**no ping** — the subagent ran its task instead: turns=${door.turns}, pings=${door.pings.size}",
-            door.pings.isEmpty(),
+        assertFalse(
+            "**no subagent ping** — it ran its task instead: turns=${door.turns}",
+            Trace.report().lines.take(10).any { it.contains("subagent-warm") },
         )
     }
 
