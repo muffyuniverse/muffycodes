@@ -3,6 +3,7 @@ package com.example.notes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -1251,6 +1252,11 @@ class ScenariosTest {
         // sentence rather than a link.
         //
         // This scenario is the picture of the fixed window, and the assertions are the two defects.
+        // **Two states of the same window**, because the two defects were about what a *press* can
+        // reach rather than what is on the screen: the code could not be selected, and the address
+        // could not be tapped. So the second picture is the address having been tapped — the dialog
+        // reports the act and this stands in for the browser that opens.
+        val opened = mutableStateOf<String?>(null)
         scenario(
             compose, "35-a-window-with-a-code-to-type",
             "A window showing a code to type on github.com.",
@@ -1263,6 +1269,7 @@ class ScenariosTest {
                             code = "ABCD-1234",
                             where = "https://github.com/login/device",
                         ),
+                        onOpenWhere = { opened.value = it },
                         onSignIn = {},
                     )
                 }
@@ -1275,7 +1282,17 @@ class ScenariosTest {
             // **The key field is still here**, which is the backup the operator asked for: a person
             // whose browser will not cooperate is not stuck on a code they cannot use.
             assertTrue("the backup is present", there("Personal access key"))
-            then("The code and the address are both selectable, and the address is a link.") {}
+
+            then("The address is tapped.") {
+                // **The link, pressed.** A `Text` with a `clickable` modifier is what makes it
+                // interactive; before this the address was a fragment of a sentence and the press
+                // could not reach anything.
+                compose.onNodeWithText("https://github.com/login/device").performClick()
+            }
+            assertTrue(
+                "**and the press asked to open it**: ${opened.value}",
+                opened.value == "https://github.com/login/device",
+            )
             after()
             result(
                 "The code is monospaced and selectable so it can be copied, and the address is " +
