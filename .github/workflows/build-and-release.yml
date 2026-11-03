@@ -1236,6 +1236,8 @@ jobs:
           cat changes.md
 
       - name: Put the bundle together
+        env:
+          VERSION_NAME: ${{ needs.build-release.outputs.version_name }}
         run: |
           mkdir -p bundle
           cp apk/app-release.apk bundle/
@@ -1246,6 +1248,12 @@ jobs:
             echo "a dev copy is in this artifact"
           fi
           cp changes.md bundle/
+          # **The version, as a file, so the delivery can name the APK for what the app calls
+          # itself.** Two names were in play — the run id named the file and the version named the
+          # app — so a file called `muffycodes-dev-41669824765.apk` contained an app reporting `190`.
+          # Nothing said they were the same build, and the operator's report was exactly that: *"when
+          # I update the app its version doesnt change"*.
+          printf '%s\n' "$VERSION_NAME" > bundle/version
           # The scenarios keep their folders: the report refers to the pictures
           # beside it, so flattening them would break every link.
           cp -r scenarios bundle/scenarios

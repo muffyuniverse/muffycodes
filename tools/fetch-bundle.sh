@@ -168,7 +168,18 @@ case "$MODE" in
         fi
 
         FOLDER="dev-$RUN_ID"
-        LABEL="dev-$RUN_ID"
+        # **The label is the version the app will report, not the run id.**
+        #
+        # The operator, looking at a phone and at this folder: *"when I update the app its version
+        # doesnt change"*. Two different names were in play — the run id named the *file*, the
+        # version named the *app* — so a file called `muffycodes-dev-41669824765.apk` contained an app
+        # that called itself `190`, and nothing on either side said they were the same build.
+        #
+        # The bundle carries `version` because the release job writes it, so the file is named for
+        # what the app says it is. A file name and a version that agree is the whole point of naming
+        # it at all.
+        LABEL="$(cat "$TMP/version" 2>/dev/null || echo "$RUN_ID")"
+        LABEL="${LABEL#v}"
         ;;
 esac
 
@@ -222,6 +233,9 @@ mkdir -p "$DEST"
 # resolve. Without it cp drops them, says so quietly enough that a green run looks fine, and the
 # phone gets no report.
 cp -R "$TMP"/* "$DEST/"
+# **The staging names are not delivered.** `app-release.apk` and `app-debug.apk` are what the bundle
+# arrives as; the folder a person opens holds the two files named below, the change list and the
+# pictures. `version` stays, because it is what the names above are built from and it is one line.
 rm -f "$DEST/app-release.apk" "$DEST/app-debug.apk"
 
 # **The names say which is which**, and the dev one says what it is for. A person tapping a file
