@@ -582,28 +582,31 @@ class AppViewModel @JvmOverloads constructor(
      * already ended does nothing. It does **not** require having reached the last page, because the
      * last page is where the connections are *offered*, not where they must be made.
      */
-    fun closeOnboardingIfConnected() {
-        if (!onboarding) return
-        if (!onboardingConnected) return
-        settings.markOnboardingAt(Onboarding.pages().size)
-        onboarding = false
-        Trace.note("onboarding", "closed by connecting")
-    }
+    fun closeOnboardingIfConnected() = finishOnboarding()
 
     /**
-     * Finishes onboarding from the last page, **for a person who read to the end without
-     * connecting**.
+     * **Finishes onboarding — and there is exactly one way in: both connections made.**
      *
-     * **The refusal is the point here**: it only works from the last page, so the gesture cannot be
-     * used to skip the reading. But it is no longer the only way out — [closeOnboardingIfConnected]
-     * is the one that matters, and this is the fallback for someone whose provider would not
-     * cooperate, which is what [Connection.Token] exists for.
+     * This is a **gate**, and it is a settled decision rather than a defect. `4220da6` records it:
+     * *"cannot be left early, and that is enforced in two places on purpose"* — a disabled control
+     * is not a rule, so `closeEditor` refuses as well.
+     *
+     * **It used to take the last page as its condition, which was the wrong question.** Reaching
+     * page six is reading; connecting is the thing the app needs. So the condition is
+     * [onboardingConnected], and reading every page without connecting does not open the door.
+     *
+     * **A person whose provider will not cooperate is not trapped**, because the key field is inside
+     * both connect windows: it is the second way to make the same connection, not a way around it.
+     * (`app:use-token` still exists as a verb for a cloned page that names it, but the page no longer
+     * offers it as a third link.)
      */
     fun finishOnboarding() {
-        val pages = Onboarding.pages()
         if (!onboarding) return
-        if (settings.onboardingAt < pages.lastIndex) return
-        settings.markOnboardingAt(pages.size)
+        if (!onboardingConnected) {
+            Trace.note("onboarding", "finish refused, not connected")
+            return
+        }
+        settings.markOnboardingAt(Onboarding.pages().size)
         onboarding = false
         Trace.note("onboarding", "finished")
     }
@@ -1337,14 +1340,36 @@ class AppViewModel @JvmOverloads constructor(
             // at all: onboarding cannot be left, so a page that offers only OAuth would trap a
             // person whose provider is rate-limited or whose phone has no browser.
             "use-token" -> pendingConnection = Connection.Token
-            // **The way out for someone who read every page and could not connect.** Without it the
-            // last page is a room with no door: onboarding only closes when both connections are
-            // made, and a person whose provider is down can make neither. This is the page's own
-            // link rather than a button on the chrome, so the screen stays furniture-free.
-            "finish-onboarding" -> finishOnboarding()
             else -> Trace.note("link-action-unknown", verb)
         }
     }
+
+    /**
+     * **A GitHub device-flow sign-in in progress**, or null.
+     *
+     * Three fields and no more: the code the person types, where they type it, and the sentence to
+     * show if it ends badly. The polling itself is the worker's, and its interval is GitHub's.
+     *
+     * **It lives here rather than in the dialog** because the dialog can be dismissed and reopened,
+     * and a flow that died with the composable would leave a code on screen that nobody is polling
+     * for. The person can leave the dialog, come back, and the same code is still live.
+     */
+    data class Device(
+        val code: String,
+        val where: String,
+        val failed: String? = null,
+        /**
+         * **The secret half of the pair**, and it is not shown anywhere.
+         *
+         * The person types [code]; the app polls with this one. They are issued together and one is
+         * useless without the other, which is why they travel as one object rather than in two
+         * places that could disagree about which sign-in they belong to.
+         */
+        val deviceCode: String = "",
+    )
+
+    var device by mutableStateOf<Device?>(null)
+        private set
 
     /** A connection dialog a document asked for. */
     enum class Connection { GitHub, OpenRouter, Token }
@@ -4326,6 +4351,93 @@ class AppViewModel @JvmOverloads constructor(
      * The call reaches the network, so it runs behind the UI like every other piece
      * of git work.
      */
+    /**
+     * **Starts GitHub's device flow: a code to type, and a poll that finishes by itself.**
+     *
+     * The decision behind it is `3f213fd` (D5): PKCE does not remove GitHub's client secret, so the
+     * device flow is the only secretless path — and it is the one designed for a client that cannot
+     * keep one.
+     *
+     * **Foreground only.** The poll stops when [cancelDevice] is called, which the screen does when
+     * it leaves. A background poll is a battery cost and a token-request cost for a flow that needs
+     * a person in front of it anyway.
+     *
+     * **A transport failure is not a verdict** — [DeviceFlow.poll] answers `Waiting` for one — so a
+     * dead moment does not end the sign-in. The code's own lifetime is the bound.
+     */
+    fun startDeviceSignIn() {
+        if (device != null) return
+        Trace.tap("github device", "start")
+        onWorker {
+            DeviceFlow.requestCode().fold(
+                onSuccess = { code ->
+                    main.post {
+                        device = Device(code.code, code.url, deviceCode = code.device)
+                        Trace.note("github-device", "code issued, ${code.expiresInMs / 60_000} min")
+                    }
+                    pollDevice(code)
+                },
+                onFailure = { t ->
+                    val said = Secrets.explain(t, "GitHub sign-in could not start")
+                    main.post {
+                        // **Said in the dialog, not as a toast.** The dialog is where the person is
+                        // looking, and this is the answer to the thing they pressed.
+                        device = Device("", "", failed = said)
+                    }
+                },
+            )
+        }
+    }
+
+    /**
+     * **Polls until the code is approved, refused, or out of time.** On the worker, one sleep at a
+     * time, with the interval GitHub set and `slow_down` respected.
+     */
+    private fun pollDevice(code: DeviceFlow.Code) {
+        val deadline = System.currentTimeMillis() + code.expiresInMs
+        var wait = code.intervalMs
+        while (System.currentTimeMillis() < deadline) {
+            // **Stopped when the person leaves**, which is what "foreground only" means.
+            if (device == null) return
+            Thread.sleep(wait)
+            // **Read per poll, so a cancelled flow stops even mid-sleep** — the loop checks the
+            // object it was given rather than a copy taken at the start.
+            val held = device ?: return
+            when (val answer = DeviceFlow.poll(held.deviceCode)) {
+                is DeviceFlow.Poll.Done -> {
+                    main.post { device = null }
+                    // **The same door the token uses**, so there is one way in rather than two.
+                    val who = signInGitHub().identity(answer.token).value
+                    main.post {
+                        if (who == null) {
+                            message = "GitHub accepted the sign-in but would not say who you are."
+                        } else {
+                            signIn(who.login, answer.token, who.name, who.email)
+                        }
+                    }
+                    return
+                }
+                is DeviceFlow.Poll.Waiting -> wait = answer.intervalMs
+                is DeviceFlow.Poll.Slow -> wait = answer.intervalMs
+                is DeviceFlow.Poll.Failed -> {
+                    main.post { device = device?.copy(failed = answer.why) }
+                    Trace.note("github-device", "ended · ${answer.why.take(60)}")
+                    return
+                }
+            }
+        }
+        main.post {
+            device = device?.copy(failed = "The code expired before it was entered. Start again.")
+        }
+    }
+
+    /** Stops a device-flow sign-in. The screen calls this when it leaves. */
+    fun cancelDevice() {
+        if (device == null) return
+        Trace.note("github-device", "cancelled")
+        device = null
+    }
+
     fun signInWithToken(token: String, onDone: (Boolean) -> Unit) {
         onWorker {
             val result = signInGitHub().identity(token)

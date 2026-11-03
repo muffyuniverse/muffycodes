@@ -82,6 +82,7 @@ import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.height
 
 /**
  * The editor: the file's name in the top row, and its text below.
@@ -979,6 +980,19 @@ private fun Reader(
         PagedPage(
             page = Neighbour(file, text, isMarkdown(file)),
             onLink = onLink,
+            // **The two connections, marked on the page that offers them.** Only there: a tick
+            // beside "Connect GitHub" on a page about writing files would be an answer to a
+            // question that page did not ask.
+            marks = if (viewModel.onboardingIndexOf(file) >= 0 &&
+                file.name == Onboarding.pages().last().name
+            ) {
+                listOf(
+                    "GitHub" to viewModel.signedIn,
+                    "OpenRouter" to viewModel.hasModelKey,
+                )
+            } else {
+                null
+            },
             modifier = Modifier.offset { IntOffset(offset.value.roundToInt(), 0) },
         )
     }
@@ -1016,6 +1030,19 @@ private fun PagedPage(
     page: Neighbour,
     onLink: (String) -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * **Whether each connection is made**, drawn as a mark beside the two links that offer them.
+     *
+     * Null on every page but the one that has links to mark. The operator's rule: *"add a visual
+     * checkmark to the onboarding screen page across links, so that it is visual whether the keys are
+     * set on not"*.
+     *
+     * **It is drawn here rather than written into the page's text**, because the page is a file —
+     * versioned, editable, and read by the agent — and a mark baked into it would be a claim that
+     * goes stale the moment somebody connects. The text says what the links do; this says whether
+     * they are done, and only one of those changes.
+     */
+    marks: List<Pair<String, Boolean>>? = null,
 ) {
     val scrolling = modifier
         .fillMaxSize()
@@ -1023,28 +1050,55 @@ private fun PagedPage(
         .padding(horizontal = 20.dp, vertical = 16.dp)
     // **Selectable, because View is where a person copies from.** Edit mode is not: a selection
     // there fights the text field's own cursor, and the field already supports selecting.
-    SelectionContainer {
-        if (page.markdown) {
-            MarkdownBody(
-                text = page.text,
-                modifier = scrolling,
-                baseDir = page.file.parentFile,
-                onLink = onLink,
-            )
-        } else if (page.text.isNotEmpty()) {
-            Text(
-                text = page.text,
-                style = MaterialTheme.typography.bodyLarge,
-                modifier = scrolling,
-            )
-        } else {
-            // **A picture, named.** A page that is a photograph still has to be a page the swipe can
-            // move to, and a blank frame would look like one that failed to load.
-            Text(
-                text = page.file.name,
-                style = MaterialTheme.typography.titleMedium,
-                modifier = scrolling,
-            )
+    Column(modifier = scrolling) {
+        SelectionContainer {
+            if (page.markdown) {
+                MarkdownBody(
+                    text = page.text,
+                    baseDir = page.file.parentFile,
+                    onLink = onLink,
+                )
+            } else if (page.text.isNotEmpty()) {
+                Text(
+                    text = page.text,
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+            } else {
+                // **A picture, named.** A page that is a photograph still has to be a page the swipe
+                // can move to, and a blank frame would look like one that failed to load.
+                Text(
+                    text = page.file.name,
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            }
+        }
+        // **The marks, under the text they belong to.** A row of two, each a tick or a circle and
+        // the name of the thing — so "GitHub ✓" is readable at a glance from across the page.
+        if (!marks.isNullOrEmpty()) {
+            Spacer(Modifier.height(16.dp))
+            marks.forEach { (name, done) ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (done) "✓" else "○",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = if (done) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (done) "$name connected" else "$name not connected",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (done) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
+            }
         }
     }
 }

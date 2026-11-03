@@ -507,6 +507,33 @@ class AccountsFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `the last page marks which connections are made`() {
+        // **The operator's rule**: *"add a visual checkmark to the onboarding screen page across
+        // links, so that it is visual whether the keys are set on not"*.
+        //
+        // The mark is derived from the same two facts that close onboarding — `signedIn` and
+        // `hasModelKey` — so a tick and the gate can never disagree. That is the whole reason it is
+        // drawn rather than written into the page's text: a mark baked into a versioned file would
+        // be a claim that goes stale the moment somebody connects.
+        val scene = Scenario(org.robolectric.RuntimeEnvironment.getApplication(), signIn = true)
+        try {
+            scene.await("onboarding to open") { scene.viewModel.onboarding }
+            assertTrue("GitHub is connected", scene.viewModel.signedIn)
+            assertFalse("and the model is not yet", scene.viewModel.hasModelKey)
+
+            // **Half marked.** The pair is read as two separate answers, not one "done" flag.
+            assertTrue("one of the two is made", scene.viewModel.signedIn)
+            assertFalse("and one is not", scene.viewModel.hasModelKey)
+
+            scene.viewModel.saveModelKey("sk-or-v1-a-key")
+
+            assertTrue("**and now both**, which is the pair the marks draw", scene.viewModel.hasModelKey)
+        } finally {
+            scene.close()
+        }
+    }
+
+    @Test
     fun `the last page offers a way past a connection that cannot be made`() {
         // **A room with no door is the bug this prevents.** Onboarding only closes when both
         // connections are made, so a person whose provider is down could make neither — and the

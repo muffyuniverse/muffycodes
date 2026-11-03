@@ -31,9 +31,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -53,6 +50,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.font.FontFamily
 
 /** Asks for one line of text. */
 @Composable
@@ -687,6 +685,14 @@ fun SignInDialog(
     onDismiss: () -> Unit,
     signingIn: Boolean = false,
     error: String? = null,
+    /**
+     * **The device flow, offered first**, because it is the one that needs nothing from the person
+     * but a code and a tap on github.com. Null when there is no flow to offer — a build with no
+     * OAuth App registered — and then the key field is the only thing on the screen, which is the
+     * honest shape rather than a button that cannot work.
+     */
+    device: AppViewModel.Device? = null,
+    onStartDevice: () -> Unit = {},
     onSignIn: (token: String) -> Unit,
 ) {
     var token by remember { mutableStateOf("") }
@@ -695,6 +701,45 @@ fun SignInDialog(
         title = { Text("Sign in to GitHub") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // **The code, when there is one.** Big and monospaced, because it is read off the
+                // screen and typed somewhere else — the one string in this app that is copied by
+                // eye rather than by finger.
+                val shown = device
+                if (shown != null && shown.code.isNotEmpty()) {
+                    Text("Type this code at ${shown.where}", style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        shown.code,
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp))
+                        Text(
+                            "Waiting for you to approve it…",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                } else {
+                    TextButton(onClick = onStartDevice, enabled = !signingIn) {
+                        Text("Sign in on github.com")
+                    }
+                }
+                if (shown?.failed != null) {
+                    Text(
+                        shown.failed,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                HorizontalDivider()
+                // **The backup, and it is a field rather than a link.** A person whose provider will
+                // not cooperate, or who already has a token, should not have to find another screen:
+                // the operator's rule is *"inside each link a manual key field as a backup signin
+                // option"*.
+                Text("Or paste a personal access key", style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(
                     value = token,
                     onValueChange = { token = it },

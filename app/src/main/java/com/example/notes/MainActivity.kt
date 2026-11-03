@@ -643,9 +643,17 @@ private fun Dialogs(
             var signingIn by remember { mutableStateOf(false) }
             var error by remember { mutableStateOf<String?>(null) }
             SignInDialog(
-                onDismiss = dismiss,
+                onDismiss = {
+                    // **Leaving stops the poll**, which is what "foreground only" means: a code
+                    // nobody is watching for is a code spending the token-request limit for a
+                    // person who has walked away.
+                    viewModel.cancelDevice()
+                    dismiss()
+                },
                 signingIn = signingIn,
                 error = error,
+                device = viewModel.device,
+                onStartDevice = { viewModel.startDeviceSignIn() },
                 // The login is whatever GitHub says it is, not what was typed, and
                 // the question goes to GitHub off the main thread.
                 onSignIn = { token ->

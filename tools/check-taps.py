@@ -98,6 +98,9 @@ VOCABULARY = {
     # app for a web page, the other makes the app do something. A log that called both "link" could
     # not answer "did the onboarding page get them as far as the sign-in dialog".
     "link", "link action",
+    # **A GitHub device-flow sign-in.** Its own name because it is a different act from `save key`
+    # and from `sign in`: no credential is typed, and the person is on github.com while it runs.
+    "github device",
     # **Starting a subagent, and writing to one.** Two names because they are two decisions: one
     # spends a new id against the operator's ceiling, the other reuses one that already exists. A log
     # that called both "subagent" could not answer "did it run out of subagents, or did it just keep

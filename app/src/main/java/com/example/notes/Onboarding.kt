@@ -145,12 +145,9 @@ Both are your own accounts. Neither is ours.
 - [Connect GitHub](app:connect-github)
 - [Connect OpenRouter](app:connect-openrouter)
 
-If GitHub is busy or will not answer, [use a token instead](app:use-token) — it does the same job and
-it never depends on a limit.
+A personal access key is accepted inside each of those windows, for a provider that will not answer.
 
-When both are connected this page closes on its own. If you would rather read the app first and connect
-later, [carry on without connecting](app:finish-onboarding) — everything is here, and Settings has the
-same two buttons.
+When both are connected this page closes on its own.
 
 ---
 
