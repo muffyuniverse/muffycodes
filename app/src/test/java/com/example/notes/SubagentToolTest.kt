@@ -229,7 +229,9 @@ class SubagentToolTest {
 
         val said = call("""{"do":"list"}""")
 
-        assertTrue("the count is in the first line: $said", said.startsWith("2 of 3 allowed"))
+        // **The body, not the status.** `success` prefixes `0\n`, so "the first line" is the first
+        // line of what the model reads, which is the second line of the raw answer.
+        assertTrue("the count is in the first line: $said", said.startsWith("0\n2 of 3 allowed"))
     }
 
     @Test
@@ -243,7 +245,7 @@ class SubagentToolTest {
 
         val said = call("""{"do":"list"}""")
 
-        assertTrue("nothing live of one allowed: $said", said.startsWith("0 of 1 allowed"))
+        assertTrue("nothing live of one allowed: $said", said.startsWith("0\n0 of 1 allowed"))
     }
 
     @Test
