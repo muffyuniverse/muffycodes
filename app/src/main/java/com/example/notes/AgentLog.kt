@@ -699,6 +699,140 @@ class AgentLog private constructor(
 
     /** The terminating question, and the terminating statement. */
 
+: Int = record(
+        SUB,
+        "#$from",
+        if (big > 0) "[this report is about ${ContextBudget.short(big)} tokens]\n$body" else body,
+    )
+
+    /** A row the agent or the app wants on the record without it being a tool. */
+    fun note(name: String, detail: String, cost: Long? = null): Int =
+        record(NOTE, name, detail, cost = cost)
+
+    /**
+     * A note the **app** wrote, which is in the record and not in the context.
+     *
+     * The operator's rule: "app errors like no openrouter key etc - all should go into session log
+     * only, they should not reach the context". It is a real distinction and it was not being made:
+     * every failure the app wrote - a refusal, a stop, a loop guard - was an ordinary note, born
+     * `in`, so it counted against the context budget and could be handed to the model as something
+     * that had happened in the conversation.
+     *
+     * **The model is told what it needs to act on, and that is a different set.** A tool refusal is
+     * the agent's business and stays a normal note; an outage, a missing key or a loop guard is the
+     * app's report to the person, and the model reading "OpenRouter answered 400" tells it nothing
+     * it can use - it cannot fix a key.
+     */
+    fun appNote(name: String, detail: String): Int = record(NOTE, name, detail, ctx = APP)
+
+    /**
+     * What the model thought before a reply, **stored so it can be sent back with it.**
+     *
+     * A thinking-mode provider refuses the next request unless the reasoning comes back inside the
+     * assistant turn it belonged to: `400 The reasoning_content in the thinking mode must be passed
+     * back to the API`. So it is a row, written after the reply and before the next request.
+     *
+     * **Born `app`, and that is the whole reason it is not just another note.** `contextRows()`
+     * keeps only `in`, so a reasoning row never reaches the model as prose it wrote — it is replayed
+     * by [Agent.messages] as the `reasoning_content` field of the turn it came from, which is what
+     * the provider asked for. A note in `in` would also have been drawn as a page in the chat, and
+     * the thinking is already in the footer where it belongs.
+     *
+     * **The row is written only when there is something to write.** An empty reasoning string is not
+     * the same as a missing one: a model that never reasons must not be handed a field it never
+     * produced, and a row saying "it thought nothing" would be a claim about the provider.
+     */
+    fun thinking(of: Int, text: String): Int = record(
+        NOTE,
+        "thinking",
+        // The id of the reply it belongs to, so the replay can attach it to the right turn. `of` is
+        // the `agent` note's id, which is the row the reply was written as.
+        "reply=$of ${text.replace('\n', ' ')}",
+        ctx = APP,
+    )
+
+    /**
+     * Records what a request was charged for, **against the row it was charged for.**
+     *
+     * Written after the reply, because the numbers arrive with the end of the stream and the row
+     * they describe was written before it. [of] is that row's id.
+     *
+     * **Both figures are required and neither may be guessed.** A provider that sent no `usage`
+     * block has nothing to record, and the caller passes nothing rather than writing zeroes: a zero
+     * is a measurement and "not reported" is a different fact, which is the same rule the stats
+     * screen follows with its dashes.
+     *
+     * The detail is two `key=value` tokens so a reader needs no column widths: `out=123 think=45`.
+     */
+    fun usage(of: Int, output: Int?, thinking: Int?): Int = record(
+        USAGE,
+        "usage",
+        // **Absent keys are absent, not zero.** `out=123` alone means the provider reported output
+        // and said nothing about reasoning; `out=0` would mean it thought nothing, which is a claim
+        // nobody made. The reader parses only the keys it finds.
+        listOfNotNull(
+            output?.let { "out=$it" },
+            thinking?.let { "think=$it" },
+        ).joinToString(" "),
+        ctx = APP,
+        answers = of,
+    )
+
+    /**
+     * A row the app writes for itself, and that the model is never sent.
+     *
+     * For the repeated `wait` poll above all: the request is re-sent every four minutes, and the
+     * record keeps every one of them, while the context keeps only the first — because a context
+     * that grew by a timestamped row every four minutes would never be the same request twice, and
+     * the whole poll is cheap only because it is a cache hit. The turn boundary and the reconnect
+     * line are here for the same reason: they are how the *app* counts, not what the model said.
+     */
+    fun bookkeeping(kind: String, name: String, detail: String, answers: Int = 0): Int =
+        record(kind, name, detail, ctx = APP, answers = answers)
+
+    private fun record(
+        kind: String,
+        name: String,
+        detail: String,
+        ctx: String = IN,
+        answers: Int = 0,
+        now: Long = System.currentTimeMillis(),
+        /**
+         * What this row costs the context, when the body is **not** what the model reads.
+         *
+         * Null means "measure the text", which is right for every row whose body is the words that
+         * will be sent. It is wrong for exactly one kind of row — a `see`, whose body is base64 that
+         * the model never reads as text: it reads the *picture*, and a picture is charged by its
+         * pixels.
+         *
+         * **The difference is not small.** A 200 kB PNG is a 270 kB data URL, which `tokens()` counts
+         * as about 77,000 tokens; the real charge is 765. Without this the budget would believe one
+         * picture had filled the context and start clearing up for no reason.
+         */
+        cost: Long? = null,
+    ): Int {
+        synchronized(guard) {
+            val id = nextId()
+            // **Measured once, here, and never again.** The body is what a request carries, so the
+            // cost of the body is what this row costs — not the formatted line, whose padding the
+            // model never sees.
+            val measured = cost ?: ContextBudget.tokens(detail)
+            // **The row's own shape is this writer's promise, and a name is where it can break.**
+            // The columns are separated by spaces and the name is one of them, so a name with a
+            // space in it does not make a wide column - it makes the row unparseable, and a row
+            // that cannot be read is a row that was never written as far as the app is concerned.
+            // Most names are the app's own one-word words, but `GOT`'s is a tool name from the
+            // model, which can be anything at all.
+            val oneWord = name.trim().replace(Regex("\\s+"), "_").ifEmpty { "-" }
+            append(file, LogFormat.recordRow(now, id, measured, kind, ctx, answers, oneWord, detail))
+            // **The context file grows with the evidence, one row at a time.** A row the app wrote
+            // for itself (`app`) never enters it, which is what keeps a repeated `wait` out of the
+            // request and the request byte-identical between polls.
+            if (ctx == IN) append(context, LogFormat.contextRow(id, measured, oneWord, detail))
+            gate.seen = size()
+            return id
+        }
+    }
 
     /**
      * Takes rows out of the context, by id — **the agent's compaction, and the whole of it.**
@@ -835,9 +969,9 @@ class AgentLog private constructor(
      * **The project a record file belongs to, however deep the record is.**
      *
      * A project's record is `<project>/agent/session.log`, and a record can be nested deeper. All
-     * of them are "somewhere under a project's `agent/`", so the answer is found by walking up to the
-     * folder that contains `agent/` rather than by counting levels — a count is what broke once, and
-     * it failed *quietly*, because a row that cannot be written is deliberately not an error.
+     * of them are "somewhere under a project's `agent/`", so the answer is found by walking up to
+     * the folder that contains `agent/` rather than by counting levels — a count is what broke once,
+     * and it failed *quietly*, because a row that cannot be written is deliberately not an error.
      *
      * Returns null when the file is not under an `agent/` folder at all, which means the caller is
      * not writing a record and this rule does not apply.

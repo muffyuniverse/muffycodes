@@ -223,6 +223,672 @@ class Agent(
     private val modelSees: (() -> Boolean)? = null,
 ) {
 
+    private val tools = AgentTools(
+        ws, project, git, log, maxResult, bg, backgroundMs, triggerTokens,
+        browser = browser, browseMs = browseMs, privateAllowed = privateAllowed,
+        fetcher = fetcher,
+        mcp = mcp, credentials = credentials, scanner = scanner,
+        fetchAllowed = fetchAllowed,
+        github = github, githubToken = githubToken, downloads = downloads,
+        modelSees = modelSees,
+    )
+
+    /**
+     * One page of the message being written: a call, and its result when there is one.
+     *
+     * [answer] is null while the tool is running, which is a real state and not a placeholder - it is
+     * the difference between "asked for this" and "this is what it said", and a screen that could not
+     * say the first would show nothing at all for a slow tool.
+     */
+    data class Live(
+        val id: Int,
+        val tool: String,
+        val asked: String,
+        val answer: String? = null,
+        val failed: Boolean = false,
+    )
+
+    /** How a turn ended. */
+    sealed class End {
+        /**
+         * The work is done — **the model said something and called nothing.**
+         *
+         * There used to be an `Asked` beside this, for a `conclude`/`ask` tool the model called to
+         * end a turn. Both tools are gone: an agent that needs a person says so in its words, which
+         * is a conclusion like any other, and the session goes idle — which is what the keepalive
+         * polls, and what a person replies into.
+         */
+        data class Concluded(val said: String) : End()
+
+        /**
+         * The person spoke while the agent was working, so the turn was abandoned.
+         *
+         * **Not a stop.** The session goes on — the words that interrupted it are the next turn —
+         * and the only thing that changed is that this request's commands did not run. Treating it
+         * as a stop would switch the agent off every time somebody typed a second sentence.
+         */
+        data class Interrupted(val why: String) : End()
+
+        /**
+         * The turn could not go on, and the reason is in the record.
+         *
+         * [retryable] is the difference between **a blip and a wall**: a transport that failed is
+         * a session that reconnects in one, two, four seconds, and a model that answered with
+         * nonsense is a session that stops and says so. Without the difference, a tunnel through
+         * a train would end an agent for good, and a stuck model would spin for ever.
+         *
+         * [reason] is what the session's own state says once it stops, so the app has one
+         * vocabulary for "why" rather than translating a sentence back into a cause.
+         */
+        data class Stopped(
+            val why: String,
+            val retryable: Boolean = false,
+            val reason: AgentSession.StopReason = AgentSession.StopReason.ERROR,
+        ) : End()
+
+        /** The one word the trace uses for this ending. */
+        val word: String
+            get() = when (this) {
+                is Concluded -> "concluded"
+                is Interrupted -> "interrupted"
+                is Stopped -> "stopped"
+            }
+
+        /**
+         * What follows the word: the question, the conclusion, or why it stopped.
+         *
+         * Named `detail`, not `reason`: [Stopped.reason] is the session's own vocabulary for
+         * why it stopped, and a property in the parent with that name would hide it.
+         */
+        val detail: String
+            get() = when (this) {
+                is Concluded -> said
+                is Interrupted -> why
+                is Stopped -> why
+            }
+
+        /**
+         * The session's own state, moved on by this ending.
+         *
+         * **Here rather than in the caller**, because there are two callers — a burst from the
+         * screen and a poll from the timer — and a transition each of them remembered is a
+         * transition one of them forgets. A blip reconnects on the session's ladder; a wall stops
+         * and keeps the provider's words, because those are what the stopped label shows.
+         */
+        /**
+         * The session this ending leaves — **with the operator's stop standing over it.**
+         *
+         * **One rule, one place, because it was two and they disagreed.** The screen and the runner
+         * each carried a copy, and the copies were not the same: the screen kept the operator's stop
+         * against every ending, while the runner kept it only against an ending that left the session
+         * running — so a hard stop arriving a second later (a provider refusing the key) replaced the
+         * operator's "I stopped it" with the app's reason. A session the person switched off must not
+         * change its story because a reply landed after they did it.
+         *
+         * The rule is the operator's own: it must never stop until they remove it, and it must never
+         * be restarted by anything but them either.
+         */
+        fun onto(
+            session: AgentSession,
+            now: Long,
+            reconnectMs: Long = AgentSession.DEFAULT_RECONNECT_MS,
+        ): AgentSession =
+            if (session.state == AgentSession.State.STOPPED &&
+                session.reason == AgentSession.StopReason.BY_OPERATOR
+            ) {
+                session
+            } else {
+                after(session, now, reconnectMs)
+            }
+
+        /**
+         * [reconnectMs] is **the operator's window**, passed in rather than read here: this is a
+         * nested class, so it has no `Agent` to ask, and the number that applies is the one in force
+         * when the turn began.
+         */
+        fun after(
+            session: AgentSession,
+            now: Long,
+            reconnectMs: Long = AgentSession.DEFAULT_RECONNECT_MS,
+        ): AgentSession = when (this) {
+            is Concluded -> session.concluded(now)
+            // **The person speaking does not change the session.** The agent is still on and the
+            // words that interrupted it are the next turn; a stop is the only thing here that
+            // switches anything off.
+            is Interrupted -> session
+            is Stopped -> if (retryable) {
+                session.copy(lastWords = why).failed(now, forMs = reconnectMs)
+            } else {
+                session.stopped(reason, why)
+            }
+        }
+
+        /**
+         * The sentence the box shows a person after a turn.
+         *
+         * Not the trace's: a trace is read later by somebody reconstructing what happened, and a
+         * sentence on the screen is read now by the person who asked. Two audiences, two strings,
+         * and each one defined once — here, on the type that knows the difference.
+         */
+        fun plainly(): String = when (this) {
+            is Concluded -> "The agent finished"
+            is Interrupted -> "The agent was cut short by what you said"
+            is Stopped -> why
+        }
+    }
+
+    /**
+     * What one keepalive ping did. **Not an [End]**, because a ping cannot end a turn.
+     *
+     * The distinction is the feature: an ending moves the session, and a ping that could move the
+     * session would be a model able to stop itself by failing. [Failed.stopping] is the one thing a
+     * ping may act on, and only when the refusal is the person's to fix — a key or an empty balance.
+     */
+    sealed class Warm {
+        /** Sent, and the cache is warm again. Nothing else happened. */
+        data object Sent : Warm()
+
+        /**
+         * It was not sent. [stopping] when the ladder should take over, which it does only for a
+         * refusal of the key or the credit: everything else — a provider that will not take a
+         * one-token answer, a tunnel, a Doze window — is a ping missed, not a session stopped.
+         */
+        data class Failed(val why: String, val stopping: Boolean = false) : Warm()
+
+        companion object {
+            /**
+             * What a ping that could not be built says, **in the one place it can be changed.**
+             *
+             * It is written by the turn as well as by the runner, and two copies of a sentence a
+             * person reads is two sentences the day one of them is edited.
+             */
+            const val NOT_WARM = "The conversation could not be kept warm"
+        }
+    }
+
+    companion object {
+        /**
+         * **What a reply with no text is called**, in one place.
+         *
+         * It used to be a string literal inside `wordsWithoutCalls`, which meant anything asking "did
+         * it actually say anything" had to spell the sentence itself — and a caller that tested for
+         * emptiness got a branch that could never run.
+         */
+        const val EMPTY_REPLY = "(the model said nothing)"
+
+        /**
+         * The most requests one turn may make — **and it is a backstop, not a budget.**
+         *
+         * It used to be 40, and the operator reached it: "it made 40 requests without ending the
+         * turn - what is this restriction? I dont need it, agent must be able to do as many requests
+         * as needed." They are right that a turn's length is the work's business. Forty is a small
+         * number for a real refactor: reading ten files, editing each, checking the result is forty
+         * calls before anything goes wrong, and the turn was cut in the middle of coherent work with
+         * a sentence about requests rather than about a mistake.
+         *
+         * **The guard that actually protects the turn is [AgentTools.IDLE_CALLS]**, which counts
+         * calls that changed nothing and asked nothing — a model going in circles. This number is
+         * only here so that a provider answering with endless *useful-looking* calls cannot hold the
+         * worker for ever, so it is set where it can only ever mean that: a turn that has made five
+         * hundred requests and not concluded has a problem that a request count cannot describe, and
+         * the operator should see the log rather than a budget.
+         */
+        const val MAX_REQUESTS = 500
+
+        /** Why a turn was cut short by the person stopping the agent. */
+        const val BY_OPERATOR = "the agent was stopped"
+
+        /**
+         * The alphabet the keepalive's tail is drawn from: **three symbols, base62.**
+         *
+         * Base62 rather than digits, and the reason is a measurement rather than taste. The tail is
+         * the only part of a ping that is not in the provider's cache, so its cost is its *length*
+         * and not its alphabet: three digits and three base62 symbols are both about two tokens.
+         * What differs is the chance of drawing the same tail twice in a row, which is the one
+         * repeat that matters - 1.4% of 15-ping sessions for digits against 0.01% for base62, and
+         * 26% against 0.13% over 300 pings. Making a rare failure rarer by 238x for no cost is not a
+         * trade, it is a free move.
+         */
+        const val MARK_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+        /** Three symbols, freshly drawn. In the companion so a default argument can name it. */
+        fun mark(): String = (1..3).map { MARK_ALPHABET.random() }.joinToString("")
+
+        /**
+         * The refusals that are the person's to fix, and so the only ones a ping may hand to the
+         * ladder: the key was refused (401/403) or the credit ran out (402).
+         *
+         * Everything else — a provider that will not take a one-token answer, a tunnel, a Doze
+         * window — is a courtesy that did not arrive, and a session stopped over one of those would
+         * be the app charging a mistake in its own keepalive to the person's work.
+         */
+        val KEY_REFUSALS = setOf(401, 402, 403)
+
+        /** How many rows the clear-up line names. Five is enough to make a dent; more is a list. */
+        const val BIGGEST_ROWS = 5
+    }
+
+    /**
+     * Runs one turn and answers how it ended.
+     *
+     * [operator] is the person's own words; they are written into the record first, so a turn
+     * that fails still begins with what was asked.
+     */
+    fun burst(operator: String, progress: () -> Unit = {}): End = turn(operator, progress)
+
+    /**
+     * The keepalive: the same conversation, sent again for the provider's cache.
+     *
+     * **Nothing is written into the context and nothing is read back.** A ping asks for one token
+     * (see [Door.PING_TOKENS]) and drops the answer, so the conversation the person will add to is
+     * the one that was kept warm, byte for byte — which is the whole economy of it. Two rows go into
+     * the evidence, both bookkeeping: the box shows the check, the model never sees it.
+     *
+     * **No `TOLD` row either.** The person did not say anything, and the words they will say next
+     * are the only thing that may change that part of the context.
+     *
+     * The request is built by [build], the same function a turn uses, so the ping is the turn the
+     * person is about to take. It can trim the context if the app's own limit says so, exactly as a
+     * turn would: a limit the app enforces only when somebody is talking is not a limit.
+     */
+    fun warm(): Warm {
+        val layers = layers()
+        val request = try {
+            // **The instruction is appended, never written down.** It is a message on the wire and
+            // not a row in the record: a `TOLD` row here would enter the conversation the ping
+            // exists to keep warm, and the next real turn would be answering a question the person
+            // never asked. `build` reads the record; this is the one thing added after it.
+            val built = build(layers, readOpening(layers, log, AgentTools.specs(fetchAllowed())))
+            built.copy(messages = built.messages + pingInstruction())
+        } catch (t: Throwable) {
+            // **A request that could not be built is not a ping that got through.** This said
+            // `stopping = false`, and the runner's false branch calls `warmed()` — which clears the
+            // ladder, because a ping that *arrived* is proof the transport is back. A build failure
+            // proves nothing of the kind: it is the app's own machinery, and it is very often the
+            // very thing that is wrong (a context that will not trim, a log that will not open).
+            // So it takes the same branch a refusal does, which is where a repeated failure belongs.
+            return Warm.Failed(Secrets.explain(t, Warm.NOT_WARM), stopping = true)
+        }
+        return door.ping(request).fold(
+            onSuccess = {
+                log.bookkeeping(AgentLog.TURN, "turn", "ping")
+                log.bookkeeping(AgentLog.NOTE, "ping", "kept warm")
+                // **The shape, and not the cost.** What a ping cost is a fact about one response
+                // and it goes in the request log, where every response has a line; the trace is
+                // the running account of what the app *did*, and a number repeated there would be
+                // a second copy of the same fact that could drift from the first.
+                Trace.note("agent-warm", "$project · ${request.shape}")
+                Warm.Sent
+            },
+            onFailure = { t ->
+                val said = Secrets.explain(t, Warm.NOT_WARM)
+                val code = (t as? Refused)?.code ?: (t.cause as? Refused)?.code
+                val stopping = code != null && code in KEY_REFUSALS
+                Trace.note("agent-warm-failed", "$project · $said")
+                // **The first failure of an outage is written down, and the rest are one outage.**
+                // Same rule as [blip]'s, for the same reason: a key that was refused eight times is
+                // one thing a person has to fix, and the runner's `retry` row carries the count.
+                if (stopping && !retrying) log.appNote("stopped", said)
+                Warm.Failed(said, stopping = stopping)
+            },
+        )
+    }
+
+    /**
+     * A background command finished: **one turn the model takes without being spoken to.**
+     *
+     * Its own work coming back is the one thing worth spending a turn on that the person did not
+     * ask for, and nothing else in the app can act on it — a ping is one token, and the file is only
+     * read by something that decides to read it.
+     *
+     * [what] is written into the record first, in the context, as the app's own line: the model is
+     * handed the same conversation it ended plus one sentence saying what landed and where. Without
+     * it there is nothing new to answer, and a model asked the same question twice answers the same
+     * way.
+     *
+     * **No `TOLD` row.** The person did not speak; the note is the app's, and the ending is the
+     * turn's own.
+     */
+    fun wake(what: String): End {
+        log.note("woke", what)
+        return turn(null, {})
+    }
+
+    /**
+     * One turn, and the two things that happen however it ends.
+     *
+     * **The layers are read here, once.** Not at startup, so an edit to the project's
+     * instructions is not missed; not per request, so one conversation cannot be answered under
+     * two different briefs. [AgentPrompt.Layers] carries that decision.
+     *
+     * The trim and the redraw are in a `finally` because they belong to the turn, not to a loop
+     * that reached its end: a turn that threw still has to leave the evidence at its size, and
+     * still has to hand the box what was written — otherwise a failure stays on the screen as
+     * "working" for ever.
+     */
+    private fun turn(operator: String?, progress: () -> Unit): End {
+        val layers = layers()
+        // **Measured once, at the start of the turn.** The warning names a size, and a size that
+        // changed with every request would change the *system* message — the first thing in the
+        // array — and a provider's cache matches the longest common prefix, so the warning would
+        // invalidate the whole conversation on every request of the turn it appeared in. That is
+        // the 50× cost §2.4 is about, paid by the feature meant to prevent it.
+        val opening = readOpening(layers, log, AgentTools.specs(fetchAllowed()))
+        try {
+            return loop(layers, opening, operator, progress)
+        } finally {
+            // The evidence is kept to the size the operator asked for, and a turn boundary is the
+            // only place a trim cannot cut a conversation in half. Zero means they asked for nothing
+            // to be removed, and then nothing is.
+            log.trimSession(sessionTokens)
+            progress()
+        }
+    }
+
+    private fun loop(
+        layers: AgentPrompt.Layers,
+        opening: Opening,
+        operator: String?,
+        progress: () -> Unit,
+    ): End {
+        // The seal belongs here, at the start of a session, and not to a read: no endpoint
+        // accepts a conversation whose last assistant message calls a tool nobody answered. A
+        // poll continues a session, so it does not seal anything.
+        if (operator != null) {
+            log.beginSession()
+            log.told(operator)
+            // **The person's own words reach the screen before anything else happens.** Reported:
+            // "and why user message isnt shown untill agent responds?" — because `progress` was only
+            // ever called after a reply, so the row the person had just caused sat in the record
+            // unread until the model answered. On a slow turn that is a minute of a chat that looks
+            // as though it did not hear them.
+            //
+            // **Once, here, and not per reply**, because this is the only moment the row is new and
+            // the turn has not started: everything after it is the agent's own work, which the
+            // per-reply report already covers.
+            progress()
+            Trace.note("agent", "$project: ${operator.take(80)}")
+        }
+
+        var idle = 0
+        var requests = 0
+        // **No watch, and no `clearedUp` flag.** Whether the clear-up worked is answered by the
+        // measurement the next request is already built from: `size <= trigger`. Watching the row
+        // count was a second answer to the same question, and it cost **two reads of the context
+        // file per turn** - the exact cache miss the size memo exists to avoid.
+        //
+        // The operator's words: "it should stop asking when context is below compaction trigger.
+        // that is explicitely done so that there is just one forget call and one cache miss."
+        //
+        // One `forget`, one measurement, and the loop stops asking because the number says so.
+        while (requests < maxRequests) {
+            // Before the request: nothing is sent for a turn that has been called off.
+            cut()?.let { return finish(cutShort(it, emptyList())) }
+            if (idle >= AgentTools.IDLE_CALLS) return finish(tooIdle())
+            requests++
+            // The boundary the box counts turns by, and the app's own row, not the model's.
+            log.bookkeeping(AgentLog.TURN, "turn", "$requests")
+            val request = build(layers, opening)
+            // **The shape of the request, once per turn the person started.** Which model, which
+            // pinned endpoint, how big the conversation had grown: the three things needed to
+            // explain a refusal or a bill, and nowhere else on the trace. Not traced for a poll —
+            // fifteen an hour of the same line would bury everything else.
+            if (operator != null && requests == 1) {
+                Trace.note("agent-request", "$project · ${request.shape}")
+            }
+            val reply = door.turn(request).getOrElse { return finish(blip(it)) }
+            // After the reply, before it is obeyed: a request already on the wire cannot be
+            // un-sent, but its commands must not run once the person has spoken or stopped.
+            cut()?.let { return finish(cutShort(it, reply.calls)) }
+
+            if (reply.text.isNotBlank()) {
+                val said = log.note("agent", reply.text)
+                // **The accounting goes on the words, because the words are what it is for.**
+                // `output` is the tokens the model wrote and `thinking` the ones it spent getting
+                // there, so they belong to the message a person reads - not to the tool calls, whose
+                // own bubble would then show the same figure twice and invite adding it up.
+                //
+                // **Nothing is written when the provider said nothing.** A scripted door has no
+                // usage, and a row of zeroes would claim the request was free rather than that it
+                // was never reported.
+                if (reply.outputTokens != null || reply.thinkingTokens != null) {
+                    log.usage(said, reply.outputTokens, reply.thinkingTokens)
+                }
+                // **The reasoning is stored with the reply, because the next request has to carry
+                // it.** A thinking-mode provider answers `400 The reasoning_content in the thinking
+                // mode must be passed back to the API` if it is dropped. Written here rather than
+                // in the door so it lands beside the words it belongs to and only for a reply that
+                // had words - a reply of calls alone is replayed from its calls.
+                if (reply.thinking.isNotBlank()) log.thinking(said, reply.thinking)
+            }
+
+            // **Words and no calls is the ending**, and it is the only one. There used to be a
+            // second: `ask` and `conclude` were tools the model called to end a turn, with a rule
+            // that they be called alone, a refusal for calling them in company, and a branch here
+            // for each shape. All of it is gone — a turn now ends the way a conversation does, with
+            // the agent saying something and calling nothing.
+            if (reply.calls.isEmpty()) return finish(wordsWithoutCalls(reply))
+
+            val moved = work(reply.calls)
+            if (moved) idle = 0 else idle++
+            progress()
+        }
+        return finish(overBudget())
+    }
+
+    // ---- the ways a turn ends ------------------------------------------------
+    //
+    // One function each, and each one is the whole rule: the record rows it writes, and the
+    // sentence the session keeps. [finish] is the only place a trace line is written, so an
+    // ending cannot be added without being on the trace.
+    //
+    // **Two of the four are gone with `ask` and `conclude`.** `asked` wrote a question row and
+    // stopped the session needing a person; `concluded` wrote a statement and stopped it finished.
+    // A conclusion is now the model's own words with no call, which [wordsWithoutCalls] handles —
+    // and it does not need a row of its own, because the words are already on the record as the
+    // agent's own note. The old pair said the same paragraph twice.
+
+    /**
+     * A call's arguments, tolerated rather than thrown.
+     *
+     * A reply whose arguments are not JSON at all is a reply the loop still has to answer — the
+     * conversation refuses an unanswered call — so the parse failure is `{}` here and the command's
+     * own refusals do the complaining.
+     */
+    private fun argsOf(call: Call): org.json.JSONObject = try {
+        org.json.JSONObject(call.args.ifBlank { "{}" })
+    } catch (e: Exception) {
+        org.json.JSONObject()
+    }
+
+    /**
+     * The turn was called off, and its calls are answered anyway.
+     *
+     * **A call with no result is an illegal conversation**, so every call the abandoned reply
+     * carried is closed with `1 interrupted` — the operator's own correction: "the tool that was
+     * running gets its result anyway (1 interrupted)". The next request, which carries the
+     * person's words, is then a legal one with the interrupted results above it in order.
+     */
+    private fun cutShort(why: String, calls: List<Call>): End {
+        for (call in calls) {
+            val id = log.call(call.tool, call.args)
+            log.got(call.tool, "${AgentLog.FAILURE} interrupted: $why", answers = id)
+        }
+        // **The app's line, not the conversation's.** Reported: "OpenRouter answered 403 # error
+        // messages should be only for session log, why are they shown as if they are 'in context'?
+        // it is wasteful". A turn cut short by an outage is the app explaining itself to the person;
+        // the model cannot act on "OpenRouter answered 403", and the row was counting against the
+        // context budget while telling it nothing. The interrupted results above stay in context,
+        // because a call with no answer is an illegal conversation and those *are* the model's
+        // business.
+        log.appNote("stopped", why)
+        // A person speaking is not a session stopping; a person stopping is.
+        return if (why == BY_OPERATOR) {
+            End.Stopped(why, reason = AgentSession.StopReason.BY_OPERATOR)
+        } else {
+            End.Interrupted(why)
+        }
+    }
+
+    /**
+     * The model answered with words and no call: **that is the end of the turn.**
+     *
+     * It used to stop the session with `LOOP`, on the reasoning that a model which ignored the tool
+     * protocol would only produce more prose. The operator's ruling is the better one: the words are
+     * what it has to say, and a person reading "I read the three files and changed nothing, because
+     * the file they asked about is locked" has been answered — stopping the agent over the shape of
+     * the reply punishes the person for the model's grammar.
+     *
+     * **One row, not two.** A `CONCLUDE` row used to be written here beside the agent's own note —
+     * the same paragraph twice, once for the box and once for the model. The note is the one that
+     * matters: it is what the model reads back, and it is what the box draws. What is left is the
+     * app's own line saying *why* the turn ended, which is a fact about the loop rather than a copy
+     * of what the model said.
+     */
+    private fun wordsWithoutCalls(reply: Reply): End {
+        val said = reply.text.trim().ifEmpty { EMPTY_REPLY }
+        log.bookkeeping(AgentLog.NOTE, "ended", "no tool call, so the words are the conclusion")
+        return End.Concluded(said)
+    }
+
+    /** A transport that failed: the session reconnects on its ladder, and the words are kept. */
+    private fun blip(problem: Throwable): End {
+        val said = Secrets.explain(problem, "The model could not be asked")
+        // The first failure of an outage is written down; the retries are one outage, not eight
+        // events. What the person wants to know when it comes back is how many tries it took, and
+        // that row is the runner's — it is the one holding the ladder.
+        if (!retrying) log.appNote("stopped", said)
+        return End.Stopped(said, retryable = true)
+    }
+
+    private fun tooIdle(): End {
+        val said = "it made ${AgentTools.IDLE_CALLS} calls in a row that changed nothing " +
+            "and asked nothing"
+        log.appNote("stopped", said)
+        return End.Stopped(said, reason = AgentSession.StopReason.LOOP)
+    }
+
+    private fun overBudget(): End {
+        val said = "it made $maxRequests requests without ending the turn — that is a runaway, " +
+            "not a long job: nothing in the log explains it"
+        log.appNote("stopped", said)
+        return End.Stopped(said, reason = AgentSession.StopReason.LOOP)
+    }
+
+    /**
+     * The one place a turn is put on the trace.
+     *
+     * Worth the indirection: five separate `Trace.note` calls meant a sixth ending could be
+     * added and be invisible on the screen that exists to show what the app is doing.
+     */
+    private fun finish(end: End): End {
+        Trace.note("agent", "$project ${end.word}: ${end.detail.take(80)}")
+        return end
+    }
+
+    /** Runs a reply's calls, and says whether any of them changed the project. */
+    private fun work(calls: List<Call>): Boolean {
+        val before = changedFiles()
+        var changed = false
+        for (call in calls) {
+            val id = log.call(call.tool, call.args)
+            Trace.note("agent", "$project call ${call.tool} #$id")
+            // **Published before the tool runs**, so a slow call is visible while it is slow.
+            onPage(Live(id = id, tool = call.tool, asked = call.args))
+            val body = answer(call)
+            // **The id the result is for.** Written by the caller that just took it, so the record
+            // says which call this answers rather than leaving a reader to infer it from position.
+            log.got(call.tool, body, answers = id)
+            // **And again with the answer**, which is the same page filled in rather than a new one.
+            onPage(
+                Live(
+                    id = id,
+                    tool = call.tool,
+                    asked = call.args,
+                    answer = body,
+                    failed = body.startsWith(AgentLog.FAILURE),
+                ),
+            )
+            if (call.tool in AgentTools.WRITING && !body.startsWith(AgentLog.FAILURE)) changed = true
+        }
+        // A call that wrote nothing and left the project as it was is a call that did nothing —
+        // the count the idle guard is about. Files, not the reply's own claim about itself.
+        return changed || changedFiles() != before
+    }
+
+    /** Runs one call and returns its body with its `0` or `1` already on the front. */
+    private fun runTool(call: Call): String = tools.run(call)
+    /**
+     * A call's result, **with the operator's deadline on it.**
+     *
+     * The conversation has one shape that is legal and it is unforgiving: every tool call in an
+     * assistant message must be answered before the next request. So a command that runs out of time
+     * is answered now, with the truth, and the turn carries on. Nothing is handed over and nothing is
+     * asked again.
+     *
+     * **Every command, not a short list of slow ones.** There used to be a `LONG` set here, on the
+     * argument that everything outside it finishes in microseconds — which stopped being true the
+     * moment nothing bounded a `read` by its size. A file and a project are as big as the person's
+     * disk, so the deadline is attached to the dispatch itself and each command asks it where it can.
+     */
+    private fun answer(call: Call): String {
+        // **A command that outlasts the wait is handed over, not thrown away** - report 13. The
+        // handover lives inside `tools.run`, because that is where the stop is caught: the deadline
+        // is asked inside each command's own loop, `StoppedException` travels up through it, and
+        // `run` is the one place that turns it into a sentence. A `catch` here would never fire.
+        //
+        // What the app used to say was "stopped after 60 s; nothing was kept", which is the app
+        // treating a limit on how long it *waits* as a limit on the work. The operator asked for the
+        // other half: the command carries on and its result arrives with the next batch. That
+        // machinery already exists and is already proven by `background`, so a slow foreground
+        // command joins it rather than getting a second mechanism of its own.
+        val body = if (foregroundMs <= 0L) {
+            runTool(call)
+        } else {
+            tools.run(call, Deadline(foregroundMs, clock), canHandOver = true)
+        }
+        // **The one place the result limit applies**, because this is the one place a result enters
+        // the conversation. A backgrounded command's body goes straight to its file, and so does the
+        // text an `edit` copies out of one, so neither is measured — the limit is a conversation
+        // budget, not a size cap on work.
+        return tools.forConversation(call, body)
+    }
+
+    /**
+     * What the turn began with.
+     *
+     * [biggest] is here rather than re-derived per request for the same reason [size] is: the line
+     * that carries them is part of the system message, and a list that changed as tool results
+     * arrived would cost a full re-read of the conversation on every request. A list that goes
+     * slightly stale within one turn is the cheaper wrong.
+     */
+    private data class Opening(val size: Long, val biggest: List<RowCost>)
+
+    /**
+     * One row and what it costs, for the index the clear-up line carries.
+     *
+     * [line] is the row's position in `agent/context.log`, counted from one — the handle `read`
+     * takes, so `read agent/context.log from 7 to 7` returns exactly this row. [id] is the handle
+     * `forget` takes. Two tools, two handles on one row: one to look, one to act.
+     *
+     * **The line is a line because the file is appended to.** A record written newest-first would
+     * make this a moving target, and the index would open a different row a turn later.
+     */
+    private data class RowCost(
+        val id: Int,
+        val kind: String,
+        val name: String,
+        val tokens: Long,
+        val line: Int,
+    )
+
+    /**
+     * Reads the turn's opening size and the rows taking the most room.
+     *
+     * **The sizes are the app's estimate, in the unit the limit is in** — a list in bytes beside a
+     * limit in tokens would be two numbers a model has to convert before it can act, and it would
+     * convert wrong. The exact bytes are what a *person* is shown, where they can check it.
+     */
     /** **The prompt for this agent**, built fresh each turn so an edit is seen next turn. */
     private fun layers(): AgentPrompt.Layers = AgentPrompt.read(accountDir, tools.projectDir)
 
