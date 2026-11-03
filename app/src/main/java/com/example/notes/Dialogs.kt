@@ -737,10 +737,7 @@ fun SignInDialog(
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.primary,
                                 textDecoration = TextDecoration.Underline,
-                                modifier = Modifier.clickable {
-                                    tap("open github device")
-                                    onOpenWhere(shown.where)
-                                },
+                                modifier = Modifier.clickable { onOpenWhere(shown.where) },
                             )
                         }
                     }

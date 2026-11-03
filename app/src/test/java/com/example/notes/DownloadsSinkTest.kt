@@ -42,6 +42,36 @@ class DownloadsSinkTest {
     }
 
     @Test
+    fun `the name says which build wrote it, so no two builds collide`() {
+        // **The operator's report**: *"the log name is dangerous, it duplicates itself and adds
+        // suffixes (n). probably some more conventional naming where all trace logs are named after
+        // the app build will be better."*
+        //
+        // The suffixes were not cosmetic. `trace.log.txt`, `trace.log (1).txt`, `trace.log (2).txt`,
+        // `trace.log (3).txt` sat in Downloads — one per launch — and the newest was four days old
+        // when a fresh report was expected. `MediaStore` appends ` (n)` rather than overwrite, so a
+        // name that did not identify the build turned every failed lookup into another file.
+        assertTrue(
+            "the name carries the version: ${DownloadsSink.NAME}",
+            DownloadsSink.NAME.contains(BuildConfig.VERSION_NAME),
+        )
+        assertTrue(
+            "and the build number, because two dev builds share a version name: ${DownloadsSink.NAME}",
+            DownloadsSink.NAME.contains(BuildConfig.VERSION_CODE.toString()),
+        )
+        assertTrue(
+            "and it is a .log, not a name that grows a second extension: ${DownloadsSink.NAME}",
+            DownloadsSink.NAME.endsWith(".log"),
+        )
+        // **The prefix is what a lookup searches by**, and it must match this build's own name or an
+        // upgrade would never find the log it just wrote.
+        assertTrue(
+            "**the search prefix matches the name**: ${DownloadsSink.NAME} vs ${DownloadsSink.PREFIX}",
+            DownloadsSink.NAME.startsWith(DownloadsSink.PREFIX),
+        )
+    }
+
+    @Test
     fun `the first line makes the file`() {
         DownloadsSink(app).append(listOf("12:00:00.000    0 NOTE    app-opened  hi"))
 

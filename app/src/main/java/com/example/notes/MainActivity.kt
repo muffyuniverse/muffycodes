@@ -659,6 +659,10 @@ private fun Dialogs(
                 // whose page is asking. `https://` is added if GitHub ever answers a bare host, so
                 // the intent is always a web page rather than something else that parses as a URI.
                 onOpenWhere = { where ->
+                    // **Traced here, where `tap` lives.** The dialog reports the act and this file
+                    // records it, rather than the dialog reaching into a private function in
+                    // another file — which is what the compiler refused, correctly.
+                    tap("open github device")
                     openInBrowser(
                         here,
                         if (where.startsWith("http")) where else "https://$where",

@@ -88,6 +88,17 @@ class DownloadsSink(context: Context) : Trace.Sink {
         }
     }
 
+    /**
+     * **Where the log actually is, and it says when it is not where it promised.**
+     *
+     * The fallback used to be silent: Downloads refused, the text went to the app's own folder, and
+     * `where()` reported that path as though it were the plan. A person looking in Downloads found a
+     * four-day-old file and no reason to think anything had gone wrong — which is exactly how a
+     * session's log went missing without a word.
+     *
+     * **Null means nothing has been written yet**, which is different from "written somewhere you
+     * cannot see". Settings draws the difference; a path here is always a real one.
+     */
     override fun where(): String? = path ?: privateFile()?.absolutePath
 
     override fun clear() {
@@ -232,7 +243,7 @@ class DownloadsSink(context: Context) : Trace.Sink {
             MediaStore.Downloads.EXTERNAL_CONTENT_URI,
             projection,
             "${MediaStore.Downloads.DISPLAY_NAME} LIKE ?",
-            arrayOf("$NAME%"),
+            arrayOf("$PREFIX%"),
             // Newest first: `_ID DESC` is insertion order, which is what "the one that has
             // been appended to lately" means here. Sorting in the query rather than in
             // memory is what makes the newest row the one the cursor sees first.
@@ -265,6 +276,18 @@ class DownloadsSink(context: Context) : Trace.Sink {
     }
 
 /** Before Android 10, or when Downloads cannot be written at all. */
+    /**
+     * **The fallback, and it no longer pretends.**
+     *
+     * This is reached when Downloads cannot be written — no permission, a full volume, a store that
+     * refuses — and the log still has to go somewhere, because a trace that vanishes is worse than
+     * one in an awkward place. What it must not do is *report* the Downloads path afterwards, which
+     * is what made a missing log look like a person's mistake.
+     *
+     * `path` stays null on this route, so [where] answers the private path and Settings says
+     * *"Writing to … instead — Downloads refused, so other apps cannot see it."* A person then knows
+     * to look there, or to fix the reason, rather than hunting a folder that was never written.
+     */
     private fun intoPrivate(text: String) {
         val file = privateFile() ?: return
         try {
@@ -286,7 +309,36 @@ class DownloadsSink(context: Context) : Trace.Sink {
         /** The folder inside Downloads. */
         const val FOLDER = "MuffyCodes log"
 
-        /** The file. One, always, appended to. */
-        const val NAME = "trace.log"
+        /**
+         * **The file is named after the build**, so a log is never ambiguous and never duplicates.
+         *
+         * The operator: *"the log name is dangerous, it duplicates itself and adds suffixes (n).
+         * probably some more conventional naming where all trace logs are named after the app build
+         * will be better."* Exactly right, and the duplication was not cosmetic — it was evidence
+         * that the one-file promise had broken: `trace.log.txt`, `trace.log (1).txt`,
+         * `trace.log (2).txt`, `trace.log (3).txt` sat in Downloads, one per launch, and the newest
+         * was four days old.
+         *
+         * **Why the suffix appeared at all.** `MediaStore` refuses to give two rows the same display
+         * name in one folder; it appends ` (1)`, ` (2)` instead. The old code searched for `trace.log%`
+         * and took the newest row, so it should have found the file it made — but any failure to find
+         * it inserted a fresh row, and each insert was another suffix. A name that changes with the
+         * build makes the opposite true: this build writes `trace-<version>-<build>.log` every time,
+         * so a person can see at a glance which build a log came from, and two builds do not collide.
+         *
+         * **The version and code are in the name** rather than only the version: a dev build and the
+         * next dev build share a `versionName` for a while, and the number is what tells them apart.
+         */
+        val NAME: String =
+            "trace-${BuildConfig.VERSION_NAME}-${BuildConfig.VERSION_CODE}.log"
+
+        /**
+         * **What [find] looks for**, which is deliberately not [NAME].
+         *
+         * A new build makes a new file, so the search must not be narrowed to this build's name or a
+         * person upgrading would start a second log beside the first. `trace-` matches every build's
+         * file, and the newest row wins — so an upgrade continues the log rather than forking it.
+         */
+        const val PREFIX = "trace-"
     }
 }
