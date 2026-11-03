@@ -449,11 +449,25 @@ class EditorScreenTest {
      * the second does.
      */
     @Test
-    fun `photograph is offered on a writable page and absent on a locked one`() {
+    fun `photograph is offered on a writable page`() {
         val mine = scene.file("milk.txt", "two litres")
         editorFor(mine)
         compose.onNodeWithContentDescription("Photograph this page").assertExists()
+    }
 
+    /**
+     * **And absent where the picture could not be written.**
+     *
+     * A photograph goes *beside* the page it came from, so a locked folder has nowhere to put it:
+     * `Workspace.writeBytes` refuses, and the button would be an act that always fails. The
+     * operator's rule: *"make sure that it cant be triggered from a system locked folder (otherwise
+     * it will clash with readonly lock when saving the photo)"*.
+     *
+     * **Its own test, and its own scenario**, because `setContent` may be called once per test — a
+     * second call throws, which is how the first attempt at this failed.
+     */
+    @Test
+    fun `photograph is absent on a locked page`() {
         val phone = Scenario(RuntimeEnvironment.getApplication(), signIn = true)
         try {
             phone.await("onboarding to open") { phone.viewModel.onboarding }
@@ -646,10 +660,10 @@ class EditorScreenTest {
         // a helper that took a path would be a second way to say where a file goes.
         scene.folder("reading")
         scene.open("reading")
-        scene.file("a.md", "# first page")
-        scene.file("b.md", "# second page")
-        scene.file("c.md", "# third page")
-        val middle = File(scene.workspace!!.projectDir("groceries"), "reading/b.md")
+        scene.file("a.txt", "FIRSTPAGE")
+        scene.file("b.txt", "SECONDPAGE")
+        scene.file("c.txt", "THIRDPAGE")
+        val middle = File(scene.workspace!!.projectDir("groceries"), "reading/b.txt")
         scene.viewModel.openEditor(middle)
         compose.setContent {
             Frame {
@@ -662,27 +676,23 @@ class EditorScreenTest {
             }
         }
 
-        // **Both neighbours, not just one**, because a swipe goes both ways.
+        // **All three in the tree at once**, which is the whole claim: the two neighbours are drawn
+        // before any gesture, so a finger moving toward one has text to drag in rather than a blank
+        // frame. Plain text rather than markdown, so the words are the words and not a heading
+        // rendered from them.
         compose.waitUntil(5_000) {
-            compose.onAllNodesWithText("first page", substring = true)
-                .fetchSemanticsNodes().isNotEmpty()
+            listOf("FIRSTPAGE", "SECONDPAGE", "THIRDPAGE").all { word ->
+                compose.onAllNodesWithText(word, substring = true)
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
         }
-        assertTrue(
-            "the page before is drawn",
-            compose.onAllNodesWithText("first page", substring = true)
-                .fetchSemanticsNodes().isNotEmpty(),
-        )
-        assertTrue(
-            "and the page after",
-            compose.onAllNodesWithText("third page", substring = true)
-                .fetchSemanticsNodes().isNotEmpty(),
-        )
-        // **And this page is still the one on screen**, so the prefetch did not replace it.
-        assertTrue(
-            "this page too",
-            compose.onAllNodesWithText("second page", substring = true)
-                .fetchSemanticsNodes().isNotEmpty(),
-        )
+        for (word in listOf("FIRSTPAGE", "SECONDPAGE", "THIRDPAGE")) {
+            assertTrue(
+                "**$word is drawn** — the page before, this page, and the page after",
+                compose.onAllNodesWithText(word, substring = true)
+                    .fetchSemanticsNodes().isNotEmpty(),
+            )
+        }
     }
 
     /**

@@ -475,16 +475,19 @@ fun EditorScreen(
             // then History and Save - because three modes and two acts did not fit on a phone. Moving
             // History to the top bar is what bought the row back, which is the operator's point:
             // "put it on the same row with save button".
-            // **A system-locked file has no row at all.** Every control on it would be disabled —
+            // **An onboarding page has no row at all.** Every control on it would be disabled —
             // Edit, Diff, Reset — so the row would be three greyed words and one live one that is
             // already selected. The operator's rule: *"instead of greying out just dont render the
             // row at all, because it will just have view active on it which is default anyway — but
             // that is only for system locked files (such as onboarding/)"*.
             //
-            // **Not for the agent's record**, which is `readOnly` too but is a different case: it
-            // is not locked, it is the app's, and the sentence above the text explains what may be
-            // done to it. Hiding the row there would hide the explanation's subject.
-            if (!locked) Row(
+            // **`onboarding/`, and not every locked file.** The agent's record is locked too, and
+            // its Diff is *not* a disabled control: reading a file's history is not writing it, so
+            // the record's row keeps a live Diff beside a disabled Edit. Hiding the row there would
+            // take away something the record never forbade — and the sentence above the text would
+            // be explaining controls that are not on screen.
+            val page = viewModel.onboardingIndexOf(file) >= 0
+            if (!page) Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
@@ -589,7 +592,7 @@ fun EditorScreen(
                 ) { Text(if (kind == EntryKind.IMAGE) "Save" else "Reset") }
             }
             // **No rule either**, because a divider is the line under a row and there is no row.
-            if (!locked) HorizontalDivider()
+            if (!page) HorizontalDivider()
 
             // No sync row here. The editor is a page of writing, not a place where
             // projects are managed: a line of account, project and "3 changed" above
@@ -970,19 +973,16 @@ private data class Neighbour(
  * same "could not be opened" sentence the editor's own picture view does, rather than an empty frame
  * that would look like a page still loading for ever.
  */
-private fun read(file: java.io.File): Neighbour? {
-    val kind = when (file.extension.lowercase()) {
-        "md", "markdown", "txt", "kt", "kts", "java", "json", "yml", "yaml", "xml", "toml",
-        "gradle", "properties", "sh", "py", "js", "ts", "css", "html", "",
-        -> true
-        else -> false
-    }
-    return try {
-        if (kind) Neighbour(file, file.readText(), isMarkdown(file))
-        else Neighbour(file, "", false)
-    } catch (t: Throwable) {
-        null
-    }
+private fun read(file: java.io.File): Neighbour? = try {
+    // **Text is read; a picture is named.** A neighbour that is an image has no text to show, and
+    // `PagedPage` draws it by its name — the alternative, decoding it here, is two bitmaps alive at
+    // once on a phone for a page nobody may swipe to. What the swipe needs is *something in the
+    // frame to move*, and a name is that.
+    Neighbour(file, file.readText(), isMarkdown(file))
+} catch (t: Throwable) {
+    // **A picture, or a file that cannot be read as text.** Either way the page still exists, so
+    // the swipe can move to it; it says what it is rather than showing an empty frame.
+    Neighbour(file, "", isMarkdown(file))
 }
 
 /** One page, drawn at the size a page is drawn: the whole screen, its own scroll, selectable. */
@@ -1006,10 +1006,18 @@ private fun PagedPage(
                 baseDir = page.file.parentFile,
                 onLink = onLink,
             )
-        } else {
+        } else if (page.text.isNotEmpty()) {
             Text(
                 text = page.text,
                 style = MaterialTheme.typography.bodyLarge,
+                modifier = scrolling,
+            )
+        } else {
+            // **A picture, named.** A page that is a photograph still has to be a page the swipe can
+            // move to, and a blank frame would look like one that failed to load.
+            Text(
+                text = page.file.name,
+                style = MaterialTheme.typography.titleMedium,
                 modifier = scrolling,
             )
         }
