@@ -21,6 +21,7 @@ import androidx.compose.ui.test.performTextReplacement
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -675,6 +676,17 @@ class EditorScreenTest {
                 )
             }
         }
+
+        // **What the prefetch is given, before asking whether it drew it.** A failure here says the
+        // *source* is empty, which is a different fault from the renderer not drawing it.
+        assertNotNull(
+            "**there is a page before b.txt**",
+            scene.viewModel.fileBeside(middle, -1),
+        )
+        assertNotNull(
+            "**and a page after it**",
+            scene.viewModel.fileBeside(middle, 1),
+        )
 
         // **All three in the tree at once**, which is the whole claim: the two neighbours are drawn
         // before any gesture, so a finger moving toward one has text to drag in rather than a blank
