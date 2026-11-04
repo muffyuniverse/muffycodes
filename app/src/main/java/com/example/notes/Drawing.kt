@@ -297,7 +297,45 @@ object Drawing {
             return View(next, x - under.x * next, y - under.y * next)
         }
 
-        /** Dragged by a finger, in screen pixels. */
+        /**
+     * **What one finger does, as a value rather than a branch buried in the gesture handler.**
+     *
+     * The operator's rule, twice stated: "when any draw tool is selected you can only use it — no
+     * movement, no zoom", and "when no tools selected one finger is for movement and two fingers for
+     * zoom".
+     *
+     * It is a function here so it can be *asked*, which is the only way to test it: the gesture
+     * handler is a `pointerInput` block and the canvas it draws on is not rasterised in a unit test.
+     */
+    enum class OneFinger {
+        /** No tool: the finger moves the picture. */
+        PAN,
+
+        /** The eraser: the finger removes whole strokes. */
+        ERASE,
+
+        /** A pen, line or box: the finger draws. */
+        DRAW,
+    }
+
+    /** What a single finger does with [tool] chosen, or with none. */
+    fun oneFinger(tool: Tool?): OneFinger = when (tool) {
+        null -> OneFinger.PAN
+        Tool.ERASER -> OneFinger.ERASE
+        else -> OneFinger.DRAW
+    }
+
+    /**
+     * **Whether two fingers may zoom and pan the picture.**
+     *
+     * False with any tool chosen, which is the strict half of the operator's rule and the half that is
+     * easy to lose: a pinch that moved the paper mid-stroke is movement the tool was supposed to
+     * forbid. The stroke is still dropped and the pinch is still swallowed, so the gesture is not
+     * silently reinterpreted as a draw.
+     */
+    fun twoFingers(tool: Tool?): Boolean = tool == null
+
+    /** Dragged by a finger, in screen pixels. */
         fun pannedBy(dx: Float, dy: Float): View = copy(panX = panX + dx, panY = panY + dy)
 
         /**
@@ -568,27 +606,46 @@ fun DrawingSurface(
                         // The touch count at the moment the gesture began decides its kind, and a
                         // second finger arriving cancels a stroke rather than converting it.
                         val startCount = currentEvent.changes.size
-                        // **No tool means the canvas is for looking at.** The operator: "make it so
-                        // that you cant move or zoom drawing while any of the drawing tools
-                        // (pen/line/box) is selected" — which is the other side of the same coin:
-                        // with a tool chosen, one finger draws and only a second finger moves the
-                        // paper; with nothing chosen, one finger pans, because a pen that is not
-                        // selected cannot draw a stroke the person did not mean.
+                        // **Two modes, and the tool decides which — not the finger count.**
+                        //
+                        // | tool | one finger | two fingers |
+                        // |---|---|---|
+                        // | any (pen, line, box, eraser) | draw or erase | nothing |
+                        // | none | move the picture | zoom |
+                        //
+                        // That is the operator's rule, twice stated: "when any draw tool is selected
+                        // you can only use it — no movement, no zoom", and "when no tools selected one
+                        // finger is for movement and two fingers for zoom".
+                        //
+                        // **The count cannot decide it, which is why this is read once from the
+                        // tool.** A split by finger count alone would let a two-finger pinch move the
+                        // paper while a pen was chosen, and the person's stroke would end in a
+                        // jump they did not ask for. Nothing is decided by how many fingers are down
+                        // except *inside* the no-tool mode, where that is the whole distinction.
                         var panning = false
                         val chosen = tool
+                        // **No tool: the whole gesture is movement**, whether it began with one
+                        // finger or two. One finger then pans, two pinch-and-pan, and losing one
+                        // keeps panning.
                         if (startCount == 1) {
                             val at = currentView.toPicture(down.position.x, down.position.y)
-                            when {
-                                chosen == null -> panning = true
-                                chosen == Drawing.Tool.ERASER -> {
+                            // **The rule is `oneFinger`'s**, so this handler and a test cannot
+                            // disagree about what a finger does.
+                            when (Drawing.oneFinger(chosen)) {
+                                Drawing.OneFinger.PAN -> panning = true
+                                Drawing.OneFinger.ERASE -> {
                                     erasing = true
                                     Drawing.hit(liveStrokes, at, 8f / currentView.zoom)?.let(onErase)
                                 }
-                                else -> {
+                                Drawing.OneFinger.DRAW -> {
                                     drawing = true
                                     current = listOf(at)
                                 }
                             }
+                        } else if (Drawing.oneFinger(chosen) == Drawing.OneFinger.PAN) {
+                            // **A gesture that began with two fingers, in the look mode**, is a
+                            // pinch; if it loses one it keeps panning rather than becoming a stroke.
+                            panning = true
                         }
 
                         do {
@@ -606,6 +663,25 @@ fun DrawingSurface(
                             )
                             touched = currentView
                             if (pressed.size >= 2) {
+                                // **With a tool chosen, a second finger does nothing at all.** The
+                                // operator: "when any draw tool is selected you can only use it — no
+                                // movement, no zoom." That is stricter than the usual split, and it is
+                                // deliberate: a pinch that arrived mid-stroke used to drop the stroke
+                                // and move the paper, which is two surprises from one gesture.
+                                //
+                                // The stroke is still dropped, because the person changed what they
+                                // were doing and a mark left half-made is not one they meant. What
+                                // does not happen is the zoom.
+                                if (!Drawing.twoFingers(chosen)) {
+                                    if (drawing || erasing) {
+                                        current = emptyList()
+                                        drawing = false
+                                        erasing = false
+                                    }
+                                    event.changes.forEach { it.consume() }
+                                    lastSpan = 0f
+                                    continue
+                                }
                                 // **Two fingers: scale about their midpoint, and move with it.** Any
                                 // stroke in progress is dropped, because the person has changed what
                                 // they are doing — leaving the mark so far would be a mark they never
@@ -635,11 +711,14 @@ fun DrawingSurface(
                                 continue
                             }
 
-                            if (!drawing && !erasing && pressed.size == 1) {
-                                // **A gesture that started as a pan and lost one keeps panning**, and
-                                // so does one that began with no tool chosen. `panning` is set when
-                                // the gesture began, so losing a finger cannot turn a look into a
-                                // stroke.
+                            // **`panning`, not "not drawing"** — and the difference is a real bug.
+                            // This branch used to fire whenever nothing was being drawn, so a gesture
+                            // that *began* with two fingers while a pen was chosen fell through to
+                            // here on the next frame and moved the picture: exactly the movement the
+                            // tool is supposed to forbid. A gesture that began as a pinch and lost a
+                            // finger also keeps panning, because `panning` is set once, when the
+                            // gesture begins, rather than re-decided from the fingers still down.
+                            if (panning && pressed.size == 1) {
                                 val at = pressed[0].position
                                 currentView = currentView.pannedBy(at.x - lastPan.x, at.y - lastPan.y)
                                 touched = currentView
@@ -695,7 +774,14 @@ fun DrawingSurface(
                 with(Drawing) { drawStrokes(strokes, 1f) }
                 if (current.isNotEmpty()) {
                     with(Drawing) {
-                        drawStrokes(listOf(Drawing.Stroke(tool, current, colour, width)), 1f)
+                        // **The tool in force, and only while a stroke is being made.** `current` is
+                        // empty whenever no tool is chosen, so with nothing selected there is nothing
+                        // to preview — and the non-null assertion is the link between those two
+                        // facts rather than a guess about them.
+                        drawStrokes(
+                            listOf(Drawing.Stroke(tool ?: Drawing.Tool.PEN, current, colour, width)),
+                            1f,
+                        )
                     }
                 }
             }

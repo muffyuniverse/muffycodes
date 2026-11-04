@@ -211,6 +211,30 @@ class DrawingTest {
     }
 
     @Test
+    fun `a chosen tool owns the finger, and no tool gives it back to the picture`() {
+        // **The operator's rule, in the words it was given in**: "when any draw tool is selected you
+        // can only use it — no movement, no zoom", and "when no tools selected one finger is for
+        // movement and two fingers for zoom".
+        //
+        // Asserted on the rule rather than through a gesture, because the gesture is a `pointerInput`
+        // block drawing on a canvas a unit test does not rasterise. The rule is the thing that can be
+        // wrong; getting it into the handler is a copy of one expression.
+        assertEquals("no tool: the finger pans", Drawing.OneFinger.PAN, Drawing.oneFinger(null))
+        assertEquals("the eraser erases", Drawing.OneFinger.ERASE, Drawing.oneFinger(Drawing.Tool.ERASER))
+        for (drawing in listOf(Drawing.Tool.PEN, Drawing.Tool.LINE, Drawing.Tool.BOX)) {
+            assertEquals("$drawing draws", Drawing.OneFinger.DRAW, Drawing.oneFinger(drawing))
+        }
+
+        // **And two fingers zoom only in the look mode.** With any tool chosen they do nothing, which
+        // is the half that is easy to lose — a pinch that moved the paper mid-stroke was movement the
+        // tool was supposed to forbid.
+        assertTrue("no tool: two fingers zoom", Drawing.twoFingers(null))
+        for (tool in Drawing.Tool.entries) {
+            assertFalse("$tool forbids it", Drawing.twoFingers(tool))
+        }
+    }
+
+    @Test
     fun `a typed stroke width is clamped, and nonsense leaves the width alone`() {
         // **The operator**: "add stroke size field where you can type size number."
         //
