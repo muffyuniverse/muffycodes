@@ -182,22 +182,25 @@ class ArchiveTest {
         }
         assertTrue("the readme is in: $names", names.contains("README.md"))
         assertTrue("and the record is not: $names", names.none { it.startsWith("agent/") })
-        assertTrue("and every entry is under the packed folder's own name: $names",
-            names.all { it.startsWith("shopping/") })
+        // **Entries are relative to the folder that was packed**, so packing the project itself
+        // names files from the project root — and unpacking it gives back one folder of that shape.
+        assertTrue("and nothing is prefixed with the project's name: $names",
+            names.none { it.startsWith("shopping/") })
     }
 
     // ---- unpack -------------------------------------------------------------
 
     @Test
-    fun `unpack writes a tree into the folder it was told to`() {
+    fun `unpack writes a tree into the folder the zip is named after`() {
         zipWith("agent/lib.zip", mapOf("lib/a.kt" to "a", "lib/b/c.kt" to "c"))
 
         val answer = tools().run(call("""{"path":"agent/lib.zip","unpack":true}"""))
 
         assertTrue("it is an answer: ${answer.replace("\n", " | ")}", answer.startsWith("0\n"))
-        // **Beside the zip, named after it without its suffix** — `agent/lib.zip` → `agent/lib/`.
-        assertEquals("a", File(project(), "agent/lib/lib/a.kt").readText())
-        assertEquals("c", File(project(), "agent/lib/lib/b/c.kt").readText())
+        // **Named after the zip without its suffix, in the project** — `agent/lib.zip` would unpack
+        // into `agent/`, which the agent may not write, so `outputFolder` sends it here instead.
+        assertEquals("a", File(project(), "lib/lib/a.kt").readText())
+        assertEquals("c", File(project(), "lib/lib/b/c.kt").readText())
     }
 
     @Test
@@ -228,8 +231,9 @@ class ArchiveTest {
         assertTrue("it is a refusal: $answer", answer.startsWith("1\n"))
         assertTrue("and names the entry: $answer", answer.contains("../../outside.txt"))
         assertTrue("and says why: $answer", answer.contains("climbs out"))
-        // **Derived destination, so the untouched folder is the one beside the zip.**
-        assertFalse("the safe entry was NOT written either", File(project(), "agent/evil/ok.txt").exists())
+        // **Derived destination, so the untouched folder is the one the zip is named after** — and
+        // it must not exist at all, which is stronger than "the safe entry is not in it".
+        assertFalse("the folder was not even made", File(project(), "evil").exists())
         assertFalse("and nothing escaped", File(project(), "outside.txt").exists())
     }
 
