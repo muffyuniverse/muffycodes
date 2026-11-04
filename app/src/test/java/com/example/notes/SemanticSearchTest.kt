@@ -247,6 +247,9 @@ class SemanticSearchTest {
             .answer(null, "sour", paths = 10, depth = 8, Deadline.none(), history = true)
             .getOrThrow()
 
+        // **The ghost's text must not be answered at all**, because its only id is a blob no commit
+        // reaches and `read` could not resolve it. The live version of the same words is still
+        // answered — that is the point of dropping the row rather than the answer.
         assertFalse("no dead id is handed out: $answer", answer.contains("milk.txt@0000000"))
         assertTrue("and the loss is said out loud: $answer", answer.contains("no longer in this project"))
     }

@@ -117,7 +117,15 @@ object Maintenance {
         deadline: Deadline = Deadline(PASS_MS),
     ): List<Done> {
         val out = mutableListOf<Done>()
-        for (project in ws.projectNames()) {
+        // **Folders, not `projectNames()`.** That asks which folders are repositories, and a project
+        // that was cloned but never committed to has a marker and no `.git` — the case that has
+        // nothing to collect. Asking the narrower question would leave its marker in place for ever,
+        // which is a "nothing to do" that looks like work.
+        val folders = (ws.accountDir.listFiles() ?: emptyArray())
+            .filter { it.isDirectory && !ws.isHidden(it.name) }
+            .map { it.name }
+            .sortedBy { it.lowercase() }
+        for (project in folders) {
             val dir = ws.projectDir(project)
             if (!waiting(dir)) continue
             val why = why(dir)
@@ -165,6 +173,13 @@ object Maintenance {
                     // **Not a failure.** A folder with no history has nothing stranded and no index
                     // rows to sweep, so it is finished — and its marker has to go, or this pass
                     // would ask the same question at every start for ever.
+                    //
+                    // **There is still an index to empty of versions.** A project cloned and then
+                    // re-created has one; leaving rows that no commit reaches is exactly what this
+                    // pass exists to remove, and "no repository" is the strongest case of it.
+                    val (swept, released) = index.sweep(emptySet())
+                    rows = swept
+                    vectors = released
                     return@tryHold
                 }
                 repo.use {

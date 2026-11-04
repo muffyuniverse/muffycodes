@@ -1156,6 +1156,22 @@ object GitService {
     }
 
     /**
+     * The bytes of one blob, **by its own id** — no path and no commit.
+     *
+     * [bytesAt] takes a *revision* and walks a tree to find the file in it; a blob id is not a tree,
+     * so asking it for one finds nothing. The index stores blobs ([Change.blob]), so reading a saved
+     * version back is this call and not that one.
+     */
+    fun bytesOf(repo: Repository, blob: String): ByteArray? = try {
+        val id = ObjectId.fromString(blob)
+        repo.open(id).use { obj ->
+            if (obj.type == org.eclipse.jgit.lib.Constants.OBJ_BLOB) obj.bytes else null
+        }
+    } catch (e: Throwable) {
+        null
+    }
+
+    /**
      * The bytes of [path] at [revisionId], or null when it is not there.
      *
      * A version is not always text. A picture keeps its bytes exactly as they were

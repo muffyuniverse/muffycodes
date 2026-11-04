@@ -407,8 +407,11 @@ class SemanticSearch(
                         if (stopped != null) return@walkChanges
                         if (!change.real) continue
                         if (change.path to change.blob in held) continue
+                        // **By blob id, not by path and revision.** `bytesAt` walks a tree to find a
+                        // file in a revision, and a blob is not a tree — asking it that way found
+                        // nothing and the version was silently skipped.
                         val text = try {
-                            GitService.bytesAt(it, change.path, change.blob)
+                            GitService.bytesOf(it, change.blob)
                                 ?.let { raw -> String(raw, Charsets.UTF_8) }
                         } catch (e: Throwable) {
                             null
@@ -732,7 +735,7 @@ class SemanticSearch(
                 } else {
                     val repo = GitService.openExisting(root) ?: return null
                     repo.use {
-                        val raw = GitService.bytesAt(it, path, blob) ?: return null
+                        val raw = GitService.bytesOf(it, blob) ?: return null
                         String(raw, Charsets.UTF_8).lines()
                     }
                 }
