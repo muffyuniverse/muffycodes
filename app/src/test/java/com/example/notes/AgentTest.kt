@@ -497,7 +497,7 @@ class AgentTest {
         // again the same way".
         val door = ScriptedDoor(
             Reply("started it"),
-            Reply("", listOf(call("read", """{"path":"agent/background_results/tree-c9.txt"}"""))),
+            Reply("", listOf(call("read", """{"path":"agent/background_results/search-c9.txt"}"""))),
             Reply("three files, all fine"),
         )
         val agent = agent(door)
@@ -508,13 +508,13 @@ class AgentTest {
         // app's own folder and now holds its whole branch - so `write` refuses it, correctly. The
         // app itself goes round that with `Beside.write`, and a fixture that went through the
         // person's door was testing a write that can never happen.
-        val result = File(ws.projectDir("shopping"), "agent/background_results/tree-c9.txt")
+        val result = File(ws.projectDir("shopping"), "agent/background_results/search-c9.txt")
         result.parentFile?.mkdirs()
         Beside.write(result, "0\n3 files: milk.txt, bread.txt, eggs.txt")
         val talked = door.asked.size
 
         val end = agent.wake(
-            "A background command has finished: agent/background_results/tree-c9.txt (tree). " +
+            "A background command has finished: agent/background_results/search-c9.txt (search). " +
                 "Read the result and carry on, or conclude if there is nothing to do.",
         )
 
@@ -528,7 +528,7 @@ class AgentTest {
         val asked = door.asked[talked]
         assertEquals(
             "the last message is the app's own",
-            "user" to "A background command has finished: agent/background_results/tree-c9.txt (tree). " +
+            "user" to "A background command has finished: agent/background_results/search-c9.txt (search). " +
                 "Read the result and carry on, or conclude if there is nothing to do.",
             asked.messages.last().role to asked.messages.last().text,
         )
@@ -646,7 +646,7 @@ class AgentTest {
         )
         assertFalse("it does not claim the work was thrown away: $got", "nothing was kept" in got)
         // The file exists from the moment the work starts, which is what makes the path worth naming.
-        assertTrue("and the result file is there to read", File(ws.projectDir("shopping"), "agent/background_results/tree-c1.txt").isFile)
+        assertTrue("and the result file is there to read", File(ws.projectDir("shopping"), "agent/background_results/search-c1.txt").isFile)
     }
 
     @Test
@@ -1378,7 +1378,9 @@ class AgentTest {
         val named = tool("search", """{"scope":"notes/"}""")
         val grepped = tool("search", """{"query":"needle"}""")
 
-        assertTrue("the folder is named: $named", named.lines().any { it.trim() == "notes/" })
+        // **Named from the account**, like every other path a search answers with — `tree` named it
+        // from the project, which is a spelling no other command uses.
+        assertTrue("the folder is named: $named", named.lines().any { it.trim() == "shopping/notes/" })
         assertTrue("and the hit is a file and a line: $grepped", grepped.contains("notes/inner.txt:1: a needle here"))
         assertFalse(
             "but no bare folder rides along with a content search: $grepped",
@@ -1485,7 +1487,10 @@ class AgentTest {
         val found = tool("search", """{"query":"needle"}""")
 
         assertFalse("the link is not listed: $listed", listed.contains("escape"))
-        assertFalse("and nothing behind it is read: $found", found.contains("needle"))
+        // **The file behind the link, not the word.** "nothing matches \"needle\"" echoes the
+        // query, so asking whether the answer contains "needle" would fail on the sentence that says
+        // nothing was found — a test that cannot tell a refusal from a hit.
+        assertFalse("and nothing behind it is read: $found", found.contains("secret.txt"))
     }
 
     @Test
@@ -1581,7 +1586,9 @@ class AgentTest {
         // the second is a request to walk the phone: the answer is a listing, not a refusal.
         ws.write(File(ws.repoOf("shopping"), "a/b/c/deep.txt"), "deep")
 
-        val text = tool("search", """{"scope":"a/","depth":"3"}""")
+        // **5, because `depth` counts from the account**: account 0, shopping 1, a 2, b 3, c 4, the
+        // file 5. `tree` counted from the project, so the same number meant one level more.
+        val text = tool("search", """{"scope":"a/","depth":"5"}""")
         val silly = tool("search", """{"scope":"a/","depth":99}""")
 
         assertTrue("a depth written as text is read: $text", text.contains("a/b/c/"))
@@ -2131,6 +2138,12 @@ class AgentTest {
             ws.write(file, if (n % 2 == 0) "milk $n" else "bread $n")
             git.commit("shopping", "save $n")
         }
+        // **The current file must not match, or it takes one of the two rows.** The loop's last write
+        // is "milk 6", so the working tree matched the query and the current-file row consumed a
+        // slot — a test about which *versions* survive the cut would have been measuring the wrong
+        // thing, and did: it saw "milk 6" twice and no "milk 4".
+        ws.write(file, "nothing here now")
+        git.commit("shopping", "cleared")
 
         val body = tool(
             "search",

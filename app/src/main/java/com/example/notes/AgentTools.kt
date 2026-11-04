@@ -1290,12 +1290,15 @@ class AgentTools(
         found: MutableList<String>,
         deadline: Deadline,
     ): Boolean {
-        if (left <= 0) return false
+        // **The order of these two lines is the difference between a note and no note.** A folder at
+        // the depth edge that also filled the answer was never looked into, so there is work left —
+        // checking `left` first would return "done" for a listing that had just been cut short.
         if (state.full) {
             // **Full before arriving** means this folder was never looked into, which is work left.
             state.more = true
             return true
         }
+        if (left <= 0) return false
         val entries = try {
             ws.list(dir)
         } catch (e: Throwable) {

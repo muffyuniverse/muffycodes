@@ -325,7 +325,7 @@ class AgentLogTest {
         log.told("finished")
         // Half a row, with no brace in it: the repository's brace check counts braces in
         // text as well as in code, and a fixture is not a reason to weaken a check.
-        log.session.appendText("  99   12 CALL    in  tree  \"path\":\"Git")
+        log.session.appendText("  99   12 CALL    in  search  \"scope\":\"Git")
 
         val rows = AgentLog.open(project).rows()
         assertEquals("only the finished one", 1, rows.size)

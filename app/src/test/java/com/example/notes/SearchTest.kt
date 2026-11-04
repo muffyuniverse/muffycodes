@@ -341,18 +341,22 @@ class SearchTest {
     }
 
     @Test
-    fun `depth bounds the walk, and says so in the answer when it stops`() {
-        // **A listing has no `query` to narrow what the walk visits**, so `depth` is the only thing
-        // bounding it — which makes it a key that matters most in exactly the mode that has fewest.
+    fun `depth counts folders below the account`() {
+        // **`depth` is counted from the account, not from the project**, which is the one thing the
+        // merge changed about it: `tree` counted from the project it was opened in, and the merged
+        // command has no such starting point — `scope` is a pattern, so there is no root to measure
+        // from. The account is the only well-defined origin, and the numbers in this test are the
+        // arithmetic of that: the account is level 0, a project is 1.
         write("shopping", "top.txt", "top\n")
         write("shopping", "a/one.txt", "one\n")
         write("shopping", "a/b/two.txt", "two\n")
 
-        val shallow = tools().run(call("""{"scope":"^shopping/","depth":2}"""))
+        // 3 reaches `a/one.txt` (account 0, shopping 1, a 2, the file 3).
+        val shallow = tools().run(call("""{"scope":"^shopping/","depth":3}"""))
         assertTrue("one level down is there: $shallow", shallow.contains("shopping/a/one.txt"))
         assertFalse("two levels is not: $shallow", shallow.contains("shopping/a/b/two.txt"))
 
-        val deep = tools().run(call("""{"scope":"^shopping/","depth":4}"""))
+        val deep = tools().run(call("""{"scope":"^shopping/","depth":5}"""))
         assertTrue("raising depth reaches it: $deep", deep.contains("shopping/a/b/two.txt"))
     }
 
@@ -360,8 +364,11 @@ class SearchTest {
     fun `paths bounds a listing when it is given`() {
         for (i in 1..5) write("shopping", "note$i.txt", "text $i\n")
 
-        val answer = tools().run(call("""{"scope":"^shopping/","paths":2}"""))
+        val answer = tools().run(call("""{"scope":"note","paths":2}"""))
 
+        // **The scope names the files, so the project folder is not one of the two.** With a scope
+        // of `^shopping/` the folder itself occupies a row, which is correct for a listing and would
+        // make this test count one file where two were asked for.
         assertEquals("two of them", 2, answer.lines().count { it.contains("note") })
         assertTrue("and it says it stopped: $answer", answer.contains("stopped at 2 paths"))
     }

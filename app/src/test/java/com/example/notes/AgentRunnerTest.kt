@@ -391,7 +391,7 @@ class AgentRunnerTest {
         assertEquals("one turn was taken", 1, door.asked.size)
         assertTrue(
             "and it says what finished: ${door.asked.firstOrNull()?.messages?.last()?.text}",
-            door.asked.first().messages.last().text.contains("agent/background_results/tree-c9.txt"),
+            door.asked.first().messages.last().text.contains("agent/background_results/search-c9.txt"),
         )
         val session = runner.sessions().single()
         assertEquals("its ending moved the session", AgentSession.Sub.FINISHED, session.sub)
@@ -524,7 +524,7 @@ class AgentRunnerTest {
         assertTrue(
             "and names the file that arrived while it was off: " +
                 door.asked.single().messages.last().text,
-            door.asked.single().messages.last().text.contains("tree-c1.txt"),
+            door.asked.single().messages.last().text.contains("search-c1.txt"),
         )
     }
 
@@ -551,7 +551,7 @@ class AgentRunnerTest {
         assertEquals("one turn for two results", 1, door.asked.size)
         val said = door.asked.single().messages.last().text
         assertTrue("it says there were two: $said", said.startsWith("2 background commands have finished"))
-        assertTrue("naming the first", said.contains("tree-c1.txt"))
+        assertTrue("naming the first", said.contains("search-c1.txt"))
         assertTrue("and the second", said.contains("read-c2.txt"))
 
         runner.tick(9_000)
