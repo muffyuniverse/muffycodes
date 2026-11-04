@@ -286,13 +286,37 @@ is *"the whole sequence under one hold"* and answers `CommitOutcome(written)`. E
 agent's `write`, a delete, a move, a restore — arrives there. "There are four writers, so a save hook has to be
 written four times" was wrong: there are four **callers** and one **choke point**.
 
-So there are three triggers now, and the search guard is the net under the other two:
+So there are **four** triggers, and the search guard is the net under the other three:
 
 | trigger | where | why it exists |
 |---|---|---|
 | a commit that **wrote** a version | `ProjectGit.commitOutcome` | every change the app makes is one commit; `written` false asks for nothing, because a pass would answer "nothing had changed" at the cost of a walk |
-| a project arriving from a remote | `ProjectGit.cloneInto` | a clone writes a whole tree and commits none of it file by file, so the hook above never fires for the one case where the *whole* index is stale |
-| a search | `SemanticSearch.answer` | the net: a pull, a file the app did not write, a commit that failed |
+| a project arriving from a remote | `ProjectGit.cloneInto` | a clone writes a whole tree and **makes no local commit at all**, so the hook above never fires for the one case where the *whole* index is stale |
+| a **pull** | `ProjectGit.replaceWithRemote` | `resetToRemote` replaces the working tree with the remote's and records no local version — the same shape as a clone, found by asking the same question of it |
+| a search | `SemanticSearch.answer` | the net: a file the app did not write, a commit that failed, any future writer nobody has thought of |
+
+**Two of the four are changes with no commit**, which is why "every change is a commit" was right about the
+app's own writes and wrong as a general rule.
+
+### Changing the embedding model: a question, then a rebuild
+
+The operator: *"we need to notify that on model change index for all projects will be rebuilt in background and
+that it will take up to several minutes. We should discourage change and say that it should be done only if the
+selected endpoint stopped its service."*
+
+So a different embedding model is **not applied when it is picked**:
+
+- **What counts as different** is `PickedModel.space()` — the model **and its size**, not the endpoint. The
+  endpoint says where a request goes, so moving a model to another provider keeps the index valid; the size is
+  part of the space, because 1024 and 4096 from one model are two coordinate systems.
+- **The screen asks** — "Rebuild every project's index?", naming what is thrown away, saying it takes several
+  minutes and spends tokens, and saying when to do it anyway: *only if that endpoint has stopped answering*.
+  The declining button is **Keep the one I have**, because that is what happens and "Cancel" says nothing.
+- **On agree**: the choice is written, **every** project's index is emptied, and each is asked of the queue.
+  The empty comes first because a pass opens the index, sees what built it, and refuses a different model —
+  asking first would queue work every pass would decline. Emptying also clears the record of the builder,
+  which is what lets the new model be declared ([SearchIndex.clear]).
+- **Until it finishes**, a search answers with whatever is already indexed and says how much is behind.
 
 **`IndexQueue` is one object, not a per-instance hook**, because the app builds `ProjectGit` twice (the editor's
 and the runner's) and two indexers would race on one database. Requests **coalesce per project** — an index pass

@@ -121,6 +121,36 @@ class IndexQueueTest {
         )
     }
 
+    @Test
+    fun `a pull asks for a pass, because it changes files and records nothing`() {
+        // **The second case with no commit.** `replaceWithRemote` fetches and resets the worktree to
+        // the remote's copy — the files change, and no local version is written, so the commit hook
+        // is blind to it. Left to the search guard it would be indexed by whichever search came next,
+        // which is to say the one search that most needs to be fast pays for the whole diff.
+        val origin = File(temp.root, "origin").apply { mkdirs() }
+        val source = ProjectGit(
+            Workspace(origin),
+            { null },
+            { GitAuthor("Muffy", "muffy@example.com") },
+        ).also {
+            Workspace(origin).repoOf("far").mkdirs()
+            Workspace(origin).write(File(File(origin, "far"), "notes.txt"), "a fact\n")
+            it.init("far")
+        }
+        source.commit("far", "first")
+        git.cloneInto("shopping", File(origin, "far").toURI().toString())
+        asked.clear()
+
+        val replaced = git.replaceWithRemote("shopping")
+
+        assertTrue("the pull worked: ${replaced.message}", replaced.success)
+        assertEquals("one ask", 1, asked.size)
+        assertTrue(
+            "and it says what did it: ${asked.single().second}",
+            "remote" in asked.single().second,
+        )
+    }
+
     // ---- 3: many asks, one pass -------------------------------------------
 
     @Test

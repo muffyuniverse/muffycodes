@@ -997,12 +997,92 @@ class AppViewModel @JvmOverloads constructor(
             dimensions = if (kind == CatalogueKind.EMBEDDING) dimensions else null,
             providers = providersFor(kind, model),
         )
+        // **A different embedding model is asked about before it happens**, because it is not a
+        // preference: the vectors already on disk are in the old model's coordinate system, so every
+        // project's index has to be thrown away and rebuilt. That costs minutes and tokens, so the
+        // person is told what it costs and can say no — [pendingPicked] is the question, and the
+        // screen draws it.
+        //
+        // **A different endpoint is not that question.** The provider is where the request goes, not
+        // where the vectors come from, so moving a model to another endpoint keeps the index and is
+        // applied at once.
+        val current = modelConfig.embedding
+        if (kind == CatalogueKind.EMBEDDING && current != null && current.space() != one.space()) {
+            pendingPicked = one
+            return
+        }
+        applyPicked(kind, one)
+    }
+
+    /**
+     * The embedding model waiting for a person to agree to the rebuild, or null.
+     *
+     * **The question is state rather than a lambda in the dialog**, so the rule — *is this a new
+     * vector space, and what does it cost* — lives in the app layer where a test can ask it.
+     */
+    var pendingPicked: PickedModel? by mutableStateOf(null)
+        private set
+
+    /** What the screen says before an embedding-model change. One sentence, and it is the truth. */
+    val pendingPickedSaid: String
+        get() {
+            val one = pendingPicked ?: return ""
+            val now = modelConfig.embedding
+            return "Choosing ${one.model} at ${one.dimensions} dimensions throws away the index of " +
+                "every project and rebuilds it in the background. That takes several minutes and " +
+                "spends tokens on your key, and until it finishes a search answers with what is " +
+                "already indexed.\n\n" +
+                "The index on disk was built with ${now?.model ?: "another model"}. Only change this " +
+                "if that endpoint has stopped answering — otherwise the index you have works."
+        }
+
+    /** Agreed: the choice is written, every project's index is emptied, and the queue rebuilds them. */
+    fun confirmPicked() {
+        val one = pendingPicked ?: return
+        pendingPicked = null
+        applyPicked(CatalogueKind.EMBEDDING, one)
+        rebuildIndexes()
+    }
+
+    /** Refused: nothing changes, and the index that works is still the one in force. */
+    fun cancelPicked() {
+        pendingPicked = null
+    }
+
+    private fun applyPicked(kind: CatalogueKind, one: PickedModel) {
         val next = when (kind) {
             CatalogueKind.CHAT -> return
             CatalogueKind.EMBEDDING -> modelConfig.copy(embedding = one)
             CatalogueKind.RERANK -> modelConfig.copy(rerank = one)
         }
-        writeModelConfig(next, "Chose $model on $provider for ${kind.label.lowercase()}")
+        writeModelConfig(next, "Chose ${one.model} on ${one.provider} for ${kind.label.lowercase()}")
+    }
+
+    /**
+     * Empties every project's index and asks for each to be rebuilt.
+     *
+     * **Both halves in one place, and in this order.** The empty has to come first: a pass opens the
+     * index, sees what it was built with, and refuses a model that differs — so asking first would
+     * queue work that every pass would decline. Emptying also clears the record of which model built
+     * it, which is what lets the new choice be declared ([SearchIndex.clear]).
+     *
+     * **One project at a time, on the worker**: each open is a database handle, and the queue
+     * coalesces the asks anyway.
+     */
+    private fun rebuildIndexes() {
+        val ws = workspace ?: return
+        onWorker {
+            val names = ws.projectNames()
+            for (name in names) {
+                try {
+                    SearchIndex.open(ws.projectDir(name)).use { it.clear() }
+                } catch (e: Throwable) {
+                    // A project whose index cannot be emptied still gets a pass; that pass will say
+                    // why in its own note rather than the whole rebuild stopping on one folder.
+                }
+            }
+            for (name in names) IndexQueue.want(name, "the embedding model changed")
+        }
     }
 
     /** The endpoints stored for [model] in [kind]'s block, so a choice keeps its provider list. */

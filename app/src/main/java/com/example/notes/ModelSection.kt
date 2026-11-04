@@ -224,6 +224,26 @@ fun PickedSection(viewModel: AppViewModel) {
             onDismiss = { picking = null },
         )
     }
+
+    // **The question a new embedding model asks.** It is drawn from state rather than opened by the
+    // picker, because it has to survive the picker closing: the sheet is dismissed with the choice
+    // made, and this asks what that choice costs before anything is written.
+    val asked = viewModel.pendingPicked
+    if (asked != null) {
+        AlertDialog(
+            onDismissRequest = { viewModel.cancelPicked() },
+            title = { Text("Rebuild every project's index?") },
+            text = { Text(viewModel.pendingPickedSaid) },
+            confirmButton = {
+                TextButton(onClick = { viewModel.confirmPicked() }) { Text("Rebuild") }
+            },
+            dismissButton = {
+                // **The safe answer is the worded one**, not "Cancel": what is kept is an index that
+                // works, and saying so is what makes declining an obvious choice rather than a loss.
+                TextButton(onClick = { viewModel.cancelPicked() }) { Text("Keep the one I have") }
+            },
+        )
+    }
 }
 
 /**

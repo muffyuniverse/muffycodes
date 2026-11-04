@@ -173,6 +173,86 @@ class ModelSectionTest {
         )
     }
 
+    // ---- a new embedding model is a question, not a preference --------------
+
+    @Test
+    fun `changing the embedding model asks first, and says what the rebuild costs`() {
+        // **The vectors on disk are in the old model's coordinate system**, so a new one throws every
+        // project's index away. That costs minutes and tokens, so the person is told and can decline
+        // — and the option that keeps what works has a name rather than being called Cancel.
+        scene.viewModel.choosePicked(CatalogueKind.EMBEDDING, "first/embed", "deepinfra", 1024)
+        scene.viewModel.choosePicked(CatalogueKind.EMBEDDING, "second/embed", "deepinfra", 1024)
+
+        assertEquals("nothing is written yet", "first/embed", scene.viewModel.modelConfig.embedding?.model)
+        assertEquals("and the question is waiting", "second/embed", scene.viewModel.pendingPicked?.model)
+        val said = scene.viewModel.pendingPickedSaid
+        assertTrue("it says every project: $said", "every project" in said)
+        assertTrue("and that it takes minutes: $said", "several minutes" in said)
+        assertTrue("and what it costs: $said", "tokens" in said)
+        assertTrue("and when to do it anyway: $said", "stopped answering" in said)
+        // **It names what is being thrown away**, or the warning is a general caution instead of a
+        // statement about this index.
+        assertTrue("naming the model in force: $said", "first/embed" in said)
+
+        compose.setContent { Section() }
+        compose.onNodeWithText("Rebuild every project's index?").assertIsDisplayed()
+        compose.onNodeWithText("Keep the one I have").assertIsDisplayed()
+    }
+
+    @Test
+    fun `declining the rebuild keeps the index that works`() {
+        scene.viewModel.choosePicked(CatalogueKind.EMBEDDING, "first/embed", "deepinfra", 1024)
+        scene.viewModel.choosePicked(CatalogueKind.EMBEDDING, "second/embed", "deepinfra", 1024)
+
+        scene.viewModel.cancelPicked()
+
+        assertEquals("the choice is unchanged", "first/embed", scene.viewModel.modelConfig.embedding?.model)
+        assertEquals("and nothing is waiting", null, scene.viewModel.pendingPicked)
+        val read = ModelConfigFile.load(scene.viewModel.workspace!!.accountDir).getOrThrow()
+        assertEquals("the file too", "first/embed", read.embedding?.model)
+    }
+
+    @Test
+    fun `agreeing writes the model, and the index is rebuilt under it`() {
+        // **Both halves, and in the order that works**: emptying the index also clears the record of
+        // which model built it, which is what lets the new one be declared. A pass asked before the
+        // empty would open the index, see the old model and refuse.
+        scene.viewModel.choosePicked(CatalogueKind.EMBEDDING, "first/embed", "deepinfra", 1024)
+        scene.viewModel.choosePicked(CatalogueKind.EMBEDDING, "second/embed", "deepinfra", 2048)
+
+        scene.viewModel.confirmPicked()
+
+        assertEquals("written", "second/embed", scene.viewModel.modelConfig.embedding?.model)
+        assertEquals("at its own size", 2048, scene.viewModel.modelConfig.embedding?.dimensions)
+        assertEquals("and no longer waiting", null, scene.viewModel.pendingPicked)
+        val read = ModelConfigFile.load(scene.viewModel.workspace!!.accountDir).getOrThrow()
+        assertEquals("in the file", "second/embed", read.embedding?.model)
+        assertEquals("with the size", 2048, read.embedding?.dimensions)
+    }
+
+    @Test
+    fun `the same model at another endpoint is applied without a question`() {
+        // **The endpoint says where the request goes, not where the numbers come from**, so the index
+        // stays valid and asking would be asking somebody to rebuild everything for a change of
+        // route. This is what `PickedModel.space()` exists to get right.
+        scene.viewModel.choosePicked(CatalogueKind.EMBEDDING, "qwen/qwen3-embedding-8b", "deepinfra", 1024)
+        scene.viewModel.choosePicked(CatalogueKind.EMBEDDING, "qwen/qwen3-embedding-8b", "cloudflare", 1024)
+
+        assertEquals("applied at once", "cloudflare", scene.viewModel.modelConfig.embedding?.provider)
+        assertEquals("nothing was asked", null, scene.viewModel.pendingPicked)
+    }
+
+    @Test
+    fun `the same model at a new size is a new space, so it asks`() {
+        // **The size is part of the vector space, not a preference about it**: 1024 and 4096 from the
+        // same model are two coordinate systems, which is why `declare` compares the pair.
+        scene.viewModel.choosePicked(CatalogueKind.EMBEDDING, "qwen/qwen3-embedding-8b", "deepinfra", 1024)
+        scene.viewModel.choosePicked(CatalogueKind.EMBEDDING, "qwen/qwen3-embedding-8b", "deepinfra", 4096)
+
+        assertEquals("the question is asked", 4096, scene.viewModel.pendingPicked?.dimensions)
+        assertEquals("and nothing is written", 1024, scene.viewModel.modelConfig.embedding?.dimensions)
+    }
+
     @Test
     fun `a rerank model is given no dimension, because the job has none`() {
         // **The three jobs are not the same shape.** Passing a size for a reranker would store a

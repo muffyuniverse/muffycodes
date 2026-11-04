@@ -341,7 +341,14 @@ class ProjectGit(
         )
         // The files are now GitHub's, and nothing has to be noted down: the row's count is a diff
         // against that same remote-tracking ref.
-        return repo.use { GitService.resetToRemote(it, tokenProvider()) }
+        val result = repo.use { GitService.resetToRemote(it, tokenProvider()) }
+        // **A pull is a change with no commit**, which is the second case the commit hook cannot
+        // see — the working tree is replaced by the remote's and no local version is written. Left to
+        // the search guard it would be indexed when somebody next searched, which is to say the one
+        // search that most needs to be fast pays for the whole diff. Asked for here instead, and only
+        // when it worked: a failed reset changed nothing worth indexing.
+        if (result.success) index(project, "the remote replaced the files")
+        return result
     }
 
     /**

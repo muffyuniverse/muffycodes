@@ -61,7 +61,18 @@ data class PickedModel(
     val dimensions: Int? = null,
     /** The endpoints allowed for this model, in the order the person put them. */
     val providers: List<String> = emptyList(),
-)
+) {
+    /**
+     * What decides the **vectors** this choice produces: the model and the size, and nothing else.
+     *
+     * **The endpoint is deliberately absent.** It says where a request is sent, not where the numbers
+     * come from, so moving a model to another provider keeps its index valid — and comparing whole
+     * [PickedModel] values instead would have asked a person to rebuild every project for a change of
+     * route. Two models at the same size are still two spaces: the size being equal does not make
+     * their vectors comparable.
+     */
+    fun space(): Pair<String, Int?> = model to dimensions
+}
 
 /**
  * `model_conf.json` at the account root: the catalogue and the choice.
