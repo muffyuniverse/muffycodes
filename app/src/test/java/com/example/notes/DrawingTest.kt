@@ -243,15 +243,20 @@ class DrawingTest {
         // clamped — the person meant something wide and the field should not silently do nothing.
         // `abc` says nothing at all, so it is null and the width stays where it was; turning it into a
         // default would be the field typing on the person's behalf.
-        assertEquals("a number is a number", 12f, Drawing.widthOf("12"), 0.001f)
-        assertEquals("a comma is a decimal point in half of Europe", 7.5f, Drawing.widthOf("7,5"), 0.001f)
-        assertEquals("spaces are not content", 4f, Drawing.widthOf("  4  "), 0.001f)
-        assertEquals("too wide is as wide as allowed", Drawing.MAX_WIDTH, Drawing.widthOf("900"), 0.001f)
-        assertEquals("too thin is a hairline", 1f, Drawing.widthOf("0"), 0.001f)
-        assertEquals("a negative is a hairline too", 1f, Drawing.widthOf("-5"), 0.001f)
+        // **The `!!` is the assertion**: a null here is a failure with a clearer message than a
+        // `Float?` reaching `assertEquals` and being compared as a boxed value would give.
+        fun width(typed: String): Float =
+            Drawing.widthOf(typed) ?: error("\"$typed\" should have been a number")
+
+        assertEquals("a number is a number", 12f, width("12"), 0.001f)
+        assertEquals("a comma is a decimal point in half of Europe", 7.5f, width("7,5"), 0.001f)
+        assertEquals("spaces are not content", 4f, width("  4  "), 0.001f)
+        assertEquals("too wide is as wide as allowed", Drawing.MAX_WIDTH, width("900"), 0.001f)
+        assertEquals("too thin is a hairline", 1f, width("0"), 0.001f)
+        assertEquals("a negative is a hairline too", 1f, width("-5"), 0.001f)
 
         assertNull("a word is not a number", Drawing.widthOf("abc"))
-        assertEquals("nor is an empty field", null, Drawing.widthOf(""))
+        assertNull("nor is an empty field", Drawing.widthOf(""))
         assertNull("nor is NaN", Drawing.widthOf("NaN"))
     }
 
