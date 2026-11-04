@@ -2113,8 +2113,11 @@ class AgentTest {
 
         assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
         assertTrue("three matched, two shown: $body", body.contains("showing the newest 2 of 3"))
+        // **Newest first, so the two kept are 6 and 4, and the one dropped is 2** — which is the
+        // assertion that proves the cut happened at the right end.
         assertTrue("the newest match is there: $body", body.contains("milk 6"))
-        assertFalse("the one before it is not: $body", body.contains("milk 4"))
+        assertTrue("and the second newest: $body", body.contains("milk 4"))
+        assertFalse("the oldest of the three was cut: $body", body.contains("milk 2"))
     }
 
     @Test
