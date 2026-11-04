@@ -58,6 +58,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -246,7 +248,18 @@ fun AgentChatScreen(
             last == null || (last.index >= info.totalItemsCount - 1)
         }
     }
-    LaunchedEffect(box?.messages?.size, generation) {
+    LaunchedEffect(box?.messages?.size) {
+        // **Keyed on the count and nothing else.** This used to include the generation, so every
+        // re-read of the record ran it — and the session poll re-reads on a timer. The effect then
+        // asked `atBottom`, which reads the *layout*, and the layout at that moment still described
+        // the list before the change: a person reading an earlier message could be at the bottom for
+        // one frame after a poll that added nothing, and be scrolled to the end for no reason.
+        //
+        // The operator: "there is a bug that moves me to the beginning of the message when a new page
+        // arrives. I want when I am at the bottom stay at the bottom ... but when I read something
+        // above (view is not at the very bottom) then I want for the view to stay where it is."
+        //
+        // A count that did not change cannot have moved anything, so there is nothing to decide.
         val last = (box?.messages?.size ?: 0) - 1
         if (last < 0) return@LaunchedEffect
         if (firstPass) {
@@ -254,7 +267,14 @@ fun AgentChatScreen(
             // visibly slide there.
             firstPass = false
             list.scrollToItem(last)
-        } else if (atBottom) {
+            return@LaunchedEffect
+        }
+        // **Read *after* the new item is laid out, not before.** `atBottom` consults
+        // `layoutInfo`, and on the frame the effect runs the list may not have measured the new
+        // message yet — so a person who was genuinely at the end would be told they were not, and
+        // the list would stop following. Waiting for the layout settles that without a timer.
+        snapshotFlow { list.layoutInfo.totalItemsCount }.first { it > last }
+        if (atBottom) {
             // **Smooth, because the motion is information** - something arrived below where you
             // were looking - and because the operator asked for it: "scrolling to fit the keyboard
             // below the last message looks too snappy, can you make it smooth and without lag?"

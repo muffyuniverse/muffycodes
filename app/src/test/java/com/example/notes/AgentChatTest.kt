@@ -306,7 +306,14 @@ class AgentChatTest {
         val agent = box.bubbles.lastOrNull { it.caption == "agent" }
         assertNotNull("**the reply is still drawn**", agent)
         assertEquals("and it is the words the log holds", "Nothing to change.", agent!!.body)
-        assertEquals("there is no separate idle line for it", null, box.idle)
+        // **And the ping is still one idle line, not a message.** The fix must not turn checks into
+        // messages; it only has to stop a check from swallowing the reply it followed. Both halves
+        // are asserted here because either one alone is satisfiable by the wrong rule.
+        assertEquals(
+            "the ping is still the idle line and not a message",
+            "idle since #${rows.last().id} · 1 check",
+            box.idle,
+        )
     }
 
     @Test

@@ -4369,16 +4369,37 @@ class AppViewModel @JvmOverloads constructor(
     })(model)
 
     /**
-     * Hands a freshly read conversation to the screen.
+     * Hands a freshly read conversation to the screen — **and bumps the generation only when it
+     * changed.**
      *
      * **There is no "which turn" any more.** The box drew one turn at a time and kept a position so
      * a re-read would not pull a person away from the turn they were reading; a list of bubbles
      * scrolls, so the position is the scroll's, and the screen keeps the one thing that *is* a
      * position — which bubble is open — keyed by the row's id rather than by a count.
+     *
+     * **Why "only when it changed" is the whole fix, and not an optimisation.** The screen keys its
+     * *view* state on the generation — which bubble is open, which page each message is showing, and
+     * whether a message is being read fullscreen — on the reasoning that a re-read should close a
+     * bubble that may no longer exist. That is right for a re-read that changed something and wrong
+     * for the one that did not, and there are two of the second kind every few minutes: the session
+     * poll re-reads the record, and the keepalive re-reads it again. The operator saw both:
+     *
+     * > *"there is some bug that closes the message fullscreen view and returns me to chat view"*
+     * > *"and there is a bug that moves me to the beginning of the message when a new page arrives"*
+     *
+     * The first is a fullscreen page closed by a poll that found nothing new. The second is the hold
+     * set — which message the person turned back in — wiped by the same bump, so the message resumed
+     * following its newest page after they had deliberately stopped it.
+     *
+     * **The row ids are the comparison**, because they are the one thing a record cannot change
+     * without meaning it: an appended row adds an id, a forget rewrites a row's `ctx` and leaves the
+     * id, and a trim shortens the list. A count alone would miss a forget.
      */
     private fun applyChat(rows: List<AgentLog.Row>, follow: Boolean) {
-        chatBox = AgentChat.box(rows)
-        chatGeneration++
+        val box = AgentChat.box(rows)
+        val same = chatBox == box
+        chatBox = box
+        if (!same) chatGeneration++
     }
 
     // ---- accounts -----------------------------------------------------------
