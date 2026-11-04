@@ -156,7 +156,7 @@ class SemanticSearchTest {
         write("shopping", "milk.txt", "nothing about dairy here\n")
 
         val answer = engine()
-            .answer(null, "sour", paths = 10, depth = 8, Deadline.none(), history = true)
+            .answer(null, "milk", paths = 10, depth = 8, Deadline.none(), history = true)
             .getOrThrow()
 
         // **`path@sha7`, which is what `read {revision}` takes** — so the row is usable as the next
@@ -170,7 +170,7 @@ class SemanticSearchTest {
         savedTwice()
         write("shopping", "milk.txt", "nothing about dairy here\n")
 
-        val answer = engine().answer(null, "sour", paths = 10, depth = 8, Deadline.none()).getOrThrow()
+        val answer = engine().answer(null, "milk", paths = 10, depth = 8, Deadline.none()).getOrThrow()
 
         assertFalse("the old text is not in the answer: $answer", answer.contains("sour"))
     }
@@ -244,7 +244,7 @@ class SemanticSearchTest {
         }
 
         val answer = engine()
-            .answer(null, "sour", paths = 10, depth = 8, Deadline.none(), history = true)
+            .answer(null, "milk", paths = 10, depth = 8, Deadline.none(), history = true)
             .getOrThrow()
 
         // **The ghost's text must not be answered at all**, because its only id is a blob no commit

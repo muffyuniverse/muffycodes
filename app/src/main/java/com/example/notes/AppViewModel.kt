@@ -552,6 +552,13 @@ class AppViewModel @JvmOverloads constructor(
      */
     private fun housekeeping() {
         val ws = workspace ?: return
+        // **No thread unless something is waiting.** A start where nothing has been pruned or pulled
+        // is the ordinary start, and spawning a worker for it costs a thread and a file read on every
+        // construction — which in a test shard is hundreds of them, all competing with whatever the
+        // shard is actually measuring.
+        val any = (ws.accountDir.listFiles() ?: emptyArray())
+            .any { it.isDirectory && !ws.isHidden(it.name) && Maintenance.waiting(it) }
+        if (!any) return
         // **The account it was started for, named.** A `gc` can run for a minute, and an account
         // deleted while it does would be re-created by nothing here — but the log row a finished pass
         // writes would be written into a folder the person removed, which is a deleted account coming

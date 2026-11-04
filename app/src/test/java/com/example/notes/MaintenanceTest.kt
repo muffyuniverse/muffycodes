@@ -221,14 +221,27 @@ class MaintenanceTest {
         // **On another thread, because the lock is reentrant.** Holding it on this one and calling
         // into the pass would let the pass take it again — `ReentrantLock` says yes to its own thread
         // — and the test would pass while proving nothing about a real second caller.
-        var done: Maintenance.Done? = null
-        val holding = Thread {
-            RepoLocks.tryHold(dir, "a test", 5_000L) {
-                done = Maintenance.run(ws).firstOrNull()
+        // **The hold is on one thread and the pass on another**, because `tryHold` is reentrant: a
+        // pass called from inside its own holder's block would take the lock again and the test would
+        // pass while proving nothing about a real second caller.
+        val held = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val holder = Thread {
+            RepoLocks.tryHold(dir, "a test", 10_000L) {
+                held.countDown()
+                release.await(10, java.util.concurrent.TimeUnit.SECONDS)
             }
         }
-        holding.start()
-        holding.join(10_000)
+        holder.start()
+        held.await(10, java.util.concurrent.TimeUnit.SECONDS)
+
+        var done: Maintenance.Done? = null
+        try {
+            done = Maintenance.run(ws).firstOrNull()
+        } finally {
+            release.countDown()
+            holder.join(10_000)
+        }
 
         val said = done?.said() ?: "the pass never ran"
         assertTrue("it said it was busy: $said", said.contains("busy"))
