@@ -190,6 +190,22 @@ class MaintenanceTest {
         assertTrue("and it says what happened: ${row?.second}", row?.second?.contains("shortened") == true)
     }
 
+    @Test
+    fun `a deleted account stops the pass instead of writing into the folder it removed`() {
+        // **The flake this closes.** A pass can outlive the account it was started for — a `gc` is
+        // seconds to minutes — and a finished pass writes a log row. Writing that row into a folder
+        // somebody deleted is a deleted account coming back as an empty folder with one file in it,
+        // which is exactly what `a queued save alone does not bring a deleted account back` catches.
+        val dir = ws.projectDir("shopping")
+        repository(2)
+        Maintenance.mark(dir, "the history was shortened")
+
+        val done = Maintenance.run(ws, alive = { false })
+
+        assertTrue("nothing was attempted: $done", done.isEmpty())
+        assertTrue("and the marker is still waiting", Maintenance.waiting(dir))
+    }
+
     // ---- 3. the bounds -----------------------------------------------------
 
     @Test

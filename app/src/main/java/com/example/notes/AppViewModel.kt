@@ -552,11 +552,22 @@ class AppViewModel @JvmOverloads constructor(
      */
     private fun housekeeping() {
         val ws = workspace ?: return
+        // **The account it was started for, named.** A `gc` can run for a minute, and an account
+        // deleted while it does would be re-created by nothing here — but the log row a finished pass
+        // writes would be written into a folder the person removed, which is a deleted account coming
+        // back in the smallest possible form. So the folder is checked before the pass writes
+        // anything, and the whole thing stops if the account went away.
+        val account = ws.accountDir
         Thread({
             try {
-                val sessions = AgentSessions(ws.accountDir).read()
+                if (!account.isDirectory) return@Thread
+                val sessions = AgentSessions(account).read()
                 val done = Maintenance.run(
                     ws = ws,
+                    // **The account can go away mid-pass.** A person can delete it while a `gc` is
+                    // running, and the log row a finished pass writes would be written into a folder
+                    // they removed — a deleted account coming back in the smallest possible form.
+                    alive = { account.isDirectory },
                     busy = { project ->
                         sessions.any { it.project == project && it.running }
                     },

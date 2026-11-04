@@ -114,6 +114,14 @@ object Maintenance {
         ws: Workspace,
         /** Asked per project: true when an agent is switched on there. */
         busy: (String) -> Boolean = { false },
+        /**
+         * Asked before every project: false when the account has been deleted.
+         *
+         * **A pass can outlive the account it was started for.** Deleting an account removes the
+         * folder, and a `gc` in flight would then write its log row back into it — a deleted account
+         * reappearing as an empty folder with one file in it.
+         */
+        alive: () -> Boolean = { true },
         deadline: Deadline = Deadline(PASS_MS),
     ): List<Done> {
         val out = mutableListOf<Done>()
@@ -126,6 +134,7 @@ object Maintenance {
             .map { it.name }
             .sortedBy { it.lowercase() }
         for (project in folders) {
+            if (!alive()) break
             val dir = ws.projectDir(project)
             if (!waiting(dir)) continue
             val why = why(dir)
