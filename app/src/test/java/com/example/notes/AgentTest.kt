@@ -2044,6 +2044,9 @@ class AgentTest {
     fun `a history row says what the version contained, so twenty saves are told apart`() {
         // **Save commits one word, so the message tells versions apart not at all.** The file's own
         // first line is the only thing that does, and `versionsOf` has already loaded it.
+        //
+        // **The fixture's own first save counts too**: `fresh` writes "two litres" and `init`
+        // commits it, so this file already has one version before the two below.
         val file = File(ws.repoOf("shopping"), "milk.txt")
         ws.write(file, "one litre and a lemon")
         git.commit("shopping", CommitMessage.SAVE)
@@ -2059,11 +2062,12 @@ class AgentTest {
         // contains the grep." So the message and the timestamp are gone, and what is asserted is the
         // shape a model actually parses: an id, then the text.
         val rows = body.substringAfter('\n').lines().filter { it.isNotBlank() }
-        assertEquals("two versions", 2, rows.size)
+        assertEquals("three versions: the fixture's, then these two", 3, rows.size)
         for (row in rows) {
             val id = row.substringBefore("  ")
             assertEquals("a seven-character id", 7, id.length)
             assertTrue("and only hex in it: $id", id.all { it.isDigit() || it in 'a'..'f' })
+            // **The fixture's version says "two litres"**, so "litre" is the word every row shares.
             assertTrue("the rest is the line itself: $row", row.contains("litre"))
             assertFalse("with no commit message column: $row", row.contains(CommitMessage.SAVE))
         }
@@ -2074,6 +2078,7 @@ class AgentTest {
         // **The operator asked for a count with a default of ten.** A file saved twenty times would
         // otherwise answer with twenty ids, and each row is a version the model reads next.
         val file = File(ws.repoOf("shopping"), "milk.txt")
+        // Twelve, plus the fixture's own first version = thirteen.
         for (n in 1..12) {
             ws.write(file, "version $n")
             git.commit("shopping", "save $n")
@@ -2082,12 +2087,12 @@ class AgentTest {
         val body = tool("history", """{"path":"milk.txt"}""")
 
         assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
-        assertTrue("it says it stopped: $body", body.contains("showing the newest 10 of 12"))
+        assertTrue("it says it stopped: $body", body.contains("showing the newest 10 of 13"))
         assertEquals("and ten rows follow", 11, body.substringAfter('\n').lines().count { it.isNotBlank() })
 
         // **`paths` raises it**, and the newest versions come first.
-        val all = tool("history", """{"path":"milk.txt","paths":12}""")
-        assertTrue("twelve of twelve, so no note: $all", !all.contains("showing the newest"))
+        val all = tool("history", """{"path":"milk.txt","paths":13}""")
+        assertTrue("all thirteen, so no note about stopping: $all", !all.contains("showing the newest"))
         assertTrue("and the newest is first: $all", all.indexOf("version 12") < all.indexOf("version 11"))
     }
 
@@ -2097,6 +2102,8 @@ class AgentTest {
         // match" — the other order answers fewer rows than asked for and leaves the model believing
         // the rest did not match at all.
         val file = File(ws.repoOf("shopping"), "milk.txt")
+        // Six written, plus the fixture's "two litres" — which does not contain "milk", so the
+        // matching versions are still exactly three.
         for (n in 1..6) {
             ws.write(file, if (n % 2 == 0) "milk $n" else "bread $n")
             git.commit("shopping", "save $n")
