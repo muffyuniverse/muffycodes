@@ -124,18 +124,70 @@ upload    {path}                    one project file into Downloads
 
 ---
 
-## Step 5 — semantic `search`, account-wide
+## Step 5 — one `search`, and `tree`/`history` fold into it
 
-Reports 24 and your four answers. **This is the biggest step and it comes last** because it is a feature,
-not an argument fix, and every tool above changes shape while it is untouched.
+**The operator's design, 2026-11-04**, reached over two rounds of pushing back and forth. It replaces three
+commands with one:
+
+```
+search {
+  scope:   regex over the relative path            (absent = everywhere)
+  query:   regex over file content, or meaning      (absent = no content filter)
+  mode:    regex | semantic                          (what `query` means)
+  history: also search every saved version          (→ path@hash)
+  depth:   how deep to walk
+  paths:   how many paths to answer with            (10 default, 100 max)
+}
+```
+
+**Where I was wrong, recorded because it decided the shape.** I first argued against this on three grounds,
+and the operator answered all three:
+
+1. *"`name` has nowhere to go."* **Wrong.** `scope` is a regex over the whole relative path, so
+   `scope: "\\.md$"` **is** the name filter. The axis folds into scope and the command needs one fewer key
+   than the six it started with.
+2. *"`rows` means two different things."* **Resolved by the operator's naming**: it is `paths` because the
+   answer is `path@hash`. Which forces a decision worth stating — a content match answers **one row per
+   path** ("`x.kt:12: …` and 39 more"), not 39 rows. "Every occurrence" is then `read {path, grep}`, which is
+   the cleaner layering: search finds files, read finds lines.
+3. *"Listing with no query is a degenerate case."* **Wrong, and this was my worst argument.** With `scope`
+   present, listing is `scope` + `depth`. The filters are **independent axes**; setting none of them is
+   setting none, not a mode switch. That is a different thing from `grep`/`from`/`to`/`at`, where three keys
+   competed to say *where* and two at once was a refusal. Orthogonal filters are not competing selectors, by
+   the same standard step 1 used to delete `replace`.
+
+### What each old call becomes
+
+| today | after |
+|---|---|
+| `tree {path, depth}` — list a folder | `search {scope, depth}` |
+| `tree {name:"\\.md$"}` — list markdown | `search {scope:"\\.md$"}` |
+| `tree {content:"needle"}` — files whose text matches | `search {query:"needle"}` |
+| `search {query, in, paths}` — account-wide | `search {query, scope, paths}` |
+| `history {path, grep, paths}` — a file's versions | `search {scope:"milk.txt", query:"…", history:true, paths}` |
+| `search {query, history:true}` — versions anywhere | same, without scope |
+
+### The one thing to get right: `mode` changes the engine, not the filter
+
+Every other key **narrows** one search. `mode` **swaps** the engine. That is the only key here that can make
+a model believe it searched when it did not, so:
+
+- **The answer says which engine ran.** Semantic hits carry their score; regex hits carry a line number.
+  A model reading an answer can tell what produced it without being told.
+- **`mode: semantic` with no index is a refusal that names the setting**, never a silent regex run.
+- **`mode: regex` is the default**, because it works offline and instantly and is what most questions want.
+- **Both keys are checked from `query`'s presence**: `mode` without `query` is a refusal, because there is
+  nothing to interpret.
+- **Terminology**: the operator's own word is `mode`, and it is one key with two values rather than two
+  mutually-exclusive keys — the wrong value is then a refusal naming both, not a missing key.
 
 ### What already exists (verified, not assumed)
 
 | piece | state |
 |---|---|
 | `Chunker` | **built and in use** — 800 chars, 160 overlap, SHA-256, 11 tests. Used today by `Scanner` |
-| `SearchIndex` | **built and tested, never constructed in main** — 15 tests: hash sharing, per-version rows, size refusal, orphan collection |
-| `Embedder` | **built, never called in main** — real OpenRouter implementation |
+| `SearchIndex` | **built and tested, never constructed in main** — 15 tests: hash sharing across versions, per-version rows, size refusal, orphan collection, `path@sha7` as the caller-facing form |
+| `Embedder` | **built, never called in main** — real OpenRouter implementation, `/api/v1/embeddings` + `/api/v1/rerank` |
 | model picker | **built** — `CatalogueKind` already has three catalogues; the settings screen picks from them |
 
 Measured live: **40 embedding models, 12 rerank models, rerank all priced 0.** Cheapest paid embedding
@@ -151,56 +203,41 @@ Measured live: **40 embedding models, 12 rerank models, rerank all priced 0.** C
 | `llama-nemotron-embed-vl-1b-v2:free` | **rejected** | `400: exceeds maximum 8192` despite declaring 131 072 |
 
 `AppViewModel.kt` is 61 747 tokens — whole-file embedding would index the app's own largest file as half of
-itself, with no error. Chunking makes that impossible by construction, and costs **1.25×** (the overlap),
-not the 10× the old argument assumed.
+itself, with no error. Chunking makes that impossible by construction, and costs **1.25×** (the overlap), not
+the 10× the old argument assumed.
 
-### The four parts
+### The work, in order
 
-1. **Write path.** On save, chunk and embed *changed* chunks in the background (the queue exists as
-   `Background`). Session-log status `0`/`1`, per your instruction. `SearchIndex.put` already skips chunks
-   whose hash is present and reports how many, so a no-op save is cheap.
-2. **The unindexed count — and you are right that it comes from the database.** It has to be *derived*,
-   not a counter, or it drifts the first time a write fails midway. The shape:
+1. **`scope` replaces `path` + `in`.** One regex over the relative path, so a folder, a file and a pattern
+   are the same kind of filter. `tree`'s `depth` and `name`-as-listing move here.
+2. **`history` becomes a third axis** (it already exists in `search` and is not yet in `tree`), so `history`
+   the command is deleted and every one of its cases is a `search` with `scope` narrow enough.
+3. **`paths` counts paths in both modes**, and a content match answers one row per path.
+4. **The write path**: on save, chunk and embed changed chunks in the background; session-log status `0`/`1`.
+   `SearchIndex.put` already skips chunks whose hash is present and reports how many, so a no-op save is
+   cheap.
+5. **The unindexed count, from the database — not a counter.** A file added on disk while the app was
+   closed was never counted by anything, so no counter can answer "how many are behind". The shape:
+   - `pending(path, mtime, state, error)` — every file the walk has seen; `state` is `0` indexed,
+     `1` failed, `NULL` not attempted.
+   - The count is a query: `state IS NULL OR state = 1`, plus files whose `mtime` is newer than their
+     indexed row.
+   - It appears as a **note on a successful answer** ("12 files are not indexed yet, so this may be
+     incomplete"), the same shape as the existing "stopped at 10 paths; narrow `scope` for the rest".
+6. **The read path**: embed the query → score → rerank the top ~30 → answer path + line. **No regex
+   fallback** (the operator's call): a failure is `1` + a reason, a timeout is `Deadline`, an answer too big
+   is filed to `agent/background_results/`. The one honest case is a model not chosen yet, and that is a
+   refusal naming the setting.
 
-   - `meta` gains `scanned_at` (when the account walk last completed) — one row, already exists as a table.
-   - **`pending`** gets a row per known file: `path`, `mtime`, `state` (`0` indexed / `1` failed / `NULL`
-     not attempted), `error`. The walk inserts/updates a row per file it finds, which is the list of what
-     *should* be indexed.
-   - **The count is a query**, not a variable: `SELECT COUNT(*) FROM pending WHERE state IS NULL OR state = 1`,
-     plus files whose `mtime` is newer than their indexed row.
+### Why `search` keeps no regex fallback, restated
 
-   That is the part worth calling out: **a counter cannot answer "how many are behind"**, because a file
-   added on disk while the app was closed was never counted by anything. A table of known files makes the
-   answer a query over what exists versus what is indexed, which is what makes it able to *notice* an
-   embedding bug rather than hide it.
-3. **Read path.** Embed the query → score → rerank top ~30 → answer path + line.
-
-   **No regex fallback.** You are right, and the machinery already exists on all three sides:
-
-   - **A failure is `1` + a sentence.** `refusal(said)` is exactly that, and the protocol already says
-     "0 worked, 1 did not, read the rest and do not guess".
-   - **A timeout is `Deadline`.** `tools.run` already hands every command one, `check(tool)` throws
-     `StoppedException`, and `Stopped.body` writes "stopped after N s; nothing was kept". An embedding
-     request that does not answer is the same case as a slow `read` — it stops and says so.
-   - **A big answer is filed, not cut.** `forConversation` writes it to `agent/background_results/` and
-     answers with the path.
-
-   So a fallback would be a **second mechanism doing a worse job than the first**: it would answer a
-   question with a text search the person did not ask for, and the "this is a text search" sentence is
-   the kind of hedging that makes an agent believe it searched when it did not. What is left is the one
-   honest case — **no model chosen yet** — and that is a refusal that names the setting, not a silent
-   route to a different tool.
-
-   **And "how many files are not indexed yet" is not a fallback trigger.** It is a *note* on a successful
-   answer: the search runs, and the answer says "12 files are not indexed yet, so this may be
-   incomplete". That is the same shape as the existing "stopped at N paths; narrow `in` for the rest" — a
-   successful result that states its own limit, rather than a different result.
-4. **`tree` keeps the regex** — that is the whole point of two tools.
-
-**Account-wide**, per your answer: the walk covers every project, so `search`'s reach does not change, and
-the unindexed count is a count over the whole account — which is exactly what makes it a useful warning.
-
----
+The machinery already exists on all three sides: `refusal` is `1` + a sentence; `Deadline` is handed to every
+command by `run` and throws `StoppedException` so the result reads "stopped after N s; nothing was kept"; and
+`forConversation` files an oversized result rather than cutting it. A fallback would be a second mechanism
+doing a worse job than the first — answering with a text search nobody asked for, with a hedge that makes a
+model believe it searched. And it would hide the one thing worth seeing: **`search` is the first tool here
+with a network dependency**, and an agent that reads a network error as "nothing matches" will conclude the
+corpus is empty and act on it.
 
 ## How each report closes
 
@@ -212,6 +249,7 @@ the unindexed count is a count over the whole account — which is exactly what 
 | 36 | 3 |
 | 37, 23 | 4 |
 | 24 | 5 |
+| 26, 27, 28, 33, 35 | 5 (re-expressed as `scope`/`query`/`paths`) |
 
 **22** ("1 session" row) is not a tool report — it goes with the project-screen work and stays on the ledger.
 
@@ -232,3 +270,13 @@ Every step lands with its ledger row marked in the same commit, per `docs/REPORT
   empty and act on it.
 - **`MediaStore` cannot be tested in CI** (no device). The listing gets a unit test against a fake
   resolver, and the honest limitation is written into the tool's description rather than trusted to memory.
+- **Step 5 deletes two commands.** `tree` and `history` go, so every prompt, example and test that names them
+  changes at once — the same one-way door as step 1, one size up. The refusals have to name the new shape or a
+  model in flight is stranded with a sentence about a command that no longer exists.
+- **`scope` + `history` + `mode: semantic` is the expensive corner**: every version of everything under the
+  scope, embedded. The hash-shared index makes it cheap for unchanged chunks, but a broad scope over a long
+  history is the one combination that costs real money, and the description should say so rather than let an
+  agent discover it.
+- **`mode` is the only key that swaps the engine rather than narrowing a filter.** A model that omits it gets
+  regex and may believe it searched semantically. That is why the answer must say which engine ran and
+  semantic hits carry their score.

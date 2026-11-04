@@ -21,11 +21,11 @@ Full analysis in `/root/Downloads/PROPOSAL-tool-api-2026-11-04.md`. **All 17 wer
 |---|---|---|
 | 22 | "1 session" row is still visible — remove it | **OPEN** · not a tool report; belongs to the project-screen batch |
 | 23 | clone/move to Downloads as a choice | **PLANNED** step 4 · ⋮ gains "Copy to Downloads" |
-| 24 | search regex or text? if reranked why regex? | **PLANNED** step 5 · semantic, account-wide, **no regex fallback** — a failure is `1`+reason, a timeout is `Deadline` |
+| 24 | search regex or text? if reranked why regex? | **PLANNED** step 5 · one `search` with `mode: regex|semantic`; **no regex fallback** — a failure is `1`+reason, a timeout is `Deadline` |
 | 25 | `paths` 10–100 instead of ≥1, default 10 | **SETTLED** · operator: "keep 100 max"; spec text will state 1 minimum. §2 |
-| 26 | `tree`: rename `name`/`grep` → `name`/`content` | **CLOSED** `effe08f` · the value is still a pattern; the name says what it selects |
-| 27 | why does `tree` have `from`/`to` | **CLOSED** `effe08f` · dropped — it was a slice over a path list |
-| 28 | `history` does not need `from`/`to` | **CLOSED** `effe08f` · dropped — it sliced the version list |
+| 26 | `tree`: rename `name`/`grep` → `name`/`content` | **CLOSED** `effe08f` · then **superseded**: step 5 folds `tree` into `search`, where `scope` *is* the name filter |
+| 27 | why does `tree` have `from`/`to` | **CLOSED** `effe08f` · dropped; step 5 replaces the whole tool with `search {scope, depth}` |
+| 28 | `history` does not need `from`/`to` | **CLOSED** `effe08f` · dropped; step 5 deletes the command, `history` becomes a flag |
 | 29 | merge `create`+`edit` into `write` | **CLOSED** `b078981` · 21 tools where 22 were; count asserted |
 | 30 | remove `from`/`to` from commands | **CLOSED** `effe08f` · kept on `read`, `write`, `browse` — where the lines are real |
 | 31 | remove `at` | **CLOSED** `b078981` · guard test refuses the key |
