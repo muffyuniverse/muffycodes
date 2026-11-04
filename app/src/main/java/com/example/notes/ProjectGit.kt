@@ -159,7 +159,7 @@ class ProjectGit(
                 // fails with the project refusing every save for ever.
                 val outcome = GitService.commitEverything(it, what, authorProvider(), inFlight = false)
                 if (outcome.written) {
-                    prune(it)
+                    prune(it, project)
                     // **Every change the app makes is one commit, so this is the single signal that
                     // the project's text changed** — the editor, the agent's `write`, a delete, a
                     // move, a restore: they all arrive here. The queue is asked rather than told, so
@@ -242,7 +242,7 @@ class ProjectGit(
                 // history to GitHub, so a prune that ran afterwards would shorten
                 // this phone's copy and leave the repository as long as it was —
                 // the length would only appear to take effect on the next sync.
-                prune(it)
+                prune(it, project)
                 // **What is sent is `HEAD` minus the unsynced paths.** The local commit is already
                 // made above and stays exactly as it is; the push derives a tree without them, so a
                 // file the person unsynced keeps every version it has on this phone and never
@@ -332,7 +332,7 @@ class ProjectGit(
      * app start, where a person is not waiting, and only for a project that said something is
      * waiting — which is this.
      */
-    private fun prune(repo: Repository) {
+    private fun prune(repo: Repository, project: String) {
         val keep = keepProvider()
         if (keep <= 0) return
         try {
