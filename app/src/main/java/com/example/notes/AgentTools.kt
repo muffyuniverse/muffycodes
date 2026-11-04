@@ -421,17 +421,18 @@ class AgentTools(
             "runs" to setOf("run", "job", "grep"),
             "artifact" to setOf("run", "name"),
             "downloads" to setOf("path"),
-            // **One tool, two modes** — `pack` and `unpack` are the same capability and two names in
-            // the tool list is two descriptions in every request's cache prefix for one thing. Only
-            // one of the two key sets is ever used per call, and a call naming neither is refused
-            // with both shapes.
+            // **One tool, two directions** — packing and unpacking are the same capability, and two
+            // names in the tool list is two descriptions in every request's cache prefix for one
+            // thing.
             // **One path, and one flag.** Report 38: *"make archive simpler: -u (flag to unarchive)
             // path (path of what you want to un/archive)"*. So there is no destination key at all —
             // the output is a property of the input, not something the caller has to invent.
             "archive" to setOf("path", "unpack"),
-            // **No `into`.** A fetched file lands in `agent/fetched/` always, and `unpack` is what
-            // moves it into the project — the operator's *"everything can land there"*, and the
-            // reason vendoring is two visible steps rather than one that commits 40 MB.
+            // **No `into`.** A fetched file lands in `agent/fetched/` always, and `archive` with
+            // `unpack` is what moves it into the project — the operator's *"everything can land
+            // there"*, and the reason vendoring is two visible steps rather than one that commits
+            // 40 MB. That step works because `outputFolder` sends the output to the project when
+            // `agent/` is not writable; without it the documented workflow would be a refusal.
             "fetch" to setOf("url"),
             // **One tool, not one tool per remote tool.** The tool list is part of every request's cache
             // prefix, so registering a server's own tools would rewrite that prefix whenever a server
@@ -758,7 +759,8 @@ class AgentTools(
                     "**never the bytes**, because binary in this conversation costs the whole " +
                     "context to say nothing. " +
                     "Private addresses are refused unless the person has allowed them, and so is " +
-                    "anything past ${Fetcher.size(Fetched.LIMIT_BYTES)}. A download that is too big " +
+                    "anything past ${Fetcher.size(Fetched.LIMIT_BYTES)}, which is the size of a " +
+                    "large dependency and not the size of an ISO. A download that is too big " +
                     "is refused, not truncated: half an archive is worse than none, because it " +
                     "fails later with the cause three steps back.",
                 "{\"url\":\"https://example.com/data.zip\"}",
@@ -3419,11 +3421,12 @@ class AgentTools(
      * the order they were listed, which is a file nobody can reason about.
      */
     private fun pack(source: File, deadline: Deadline): String {
-        val target = free(File(source.parentFile, source.name ?: "archive"), ".zip")
+        val target = free(File(outputFolder(source), source.name ?: "archive"), ".zip")
         // **Collected before anything is written**, so a bad source refuses the call rather than
         // leaving a half-made zip on disk for the agent to mistake for a complete one.
         val entries = mutableListOf<Pair<String, File>>()
         collectForPack(source, source, entries, deadline)
+        mayWrite(target)?.let { return refusal(it) }
         if (entries.isEmpty()) {
             return refusal("There is nothing inside ${rel(source)} to pack.")
         }
@@ -3471,14 +3474,14 @@ class AgentTools(
         into: MutableList<Pair<String, File>>,
         deadline: Deadline,
     ) {
-        // **Named from the packed thing's own folder**, so packing `src/` writes `main/Main.kt` and
-        // unpacking it beside `src/` puts the files back inside `src 2/` — a round trip that
-        // reproduces the tree. This used to be the project-relative path, which was right when `as`
-        // named the destination and wrong now that the destination is derived from the input.
-        val name = source.relativeToOrNull(base.parentFile)?.invariantSeparatorsPath
-            ?: (source.name ?: "file")
+        // **Named from the thing being packed, not from the project.** Packing `src/` writes
+        // `Main.kt` and `util/Text.kt`, so unpacking that zip gives back a folder with exactly the
+        // shape of `src/` — which is what "the same name and a different suffix" means as a round
+        // trip. The name was project-relative before, which repeated the top folder (`src/src/…`)
+        // as soon as the destination was derived from the input instead of given by `as`.
+        val name = source.relativeToOrNull(base)?.invariantSeparatorsPath ?: ""
         if (source.isFile) {
-            into.add(name to source)
+            into.add(name.ifEmpty { source.name ?: "file" } to source)
             return
         }
         // **`ws.list` rather than `listFiles`**, so dot-folders stay out of a zip the person is
@@ -3495,8 +3498,8 @@ class AgentTools(
             if (entry.isFolder) {
                 collectForPack(entry.file, base, into, deadline)
             } else {
-                val at = entry.file.relativeToOrNull(base.parentFile)?.invariantSeparatorsPath
-                into.add((at ?: rel(entry.file)) to entry.file)
+                val at = entry.file.relativeToOrNull(base)?.invariantSeparatorsPath ?: rel(entry.file)
+                into.add(at to entry.file)
             }
         }
     }
@@ -3523,8 +3526,7 @@ class AgentTools(
      */
     private fun unpack(zipFile: File, deadline: Deadline): String {
         val folder = zipFile.name.substringBeforeLast('.', zipFile.name)
-        val parent = zipFile.parentFile ?: zipFile
-        val into = free(File(parent, folder.ifBlank { "unpacked" }), "")
+        val into = free(File(outputFolder(zipFile), folder.ifBlank { "unpacked" }), "")
         // **The one funnel every write asks**, and skipping it was a real hole: `resolve` allows a
         // single `..` so an agent can READ another project, and an unpack that only resolved would
         // have written there — the cross-project rule is "read-only", and this is the tool that
@@ -3581,6 +3583,30 @@ class AgentTools(
                     ""
                 },
         )
+    }
+
+    /**
+     * The folder an archive's output goes in: **beside the input, or the project's own** when beside
+     * is not a place the agent may write.
+     *
+     * Report 38 settles the ordinary case — *"produced file lands in the same folder as the original
+     * with the same name but different suffix"* — and one rule covers every case that is not
+     * ordinary, because the two exceptions are the same exception:
+     *
+     * - **A fetched zip is in `agent/fetched/`**, which is the app's own folder and read-only for
+     *   the agent. `fetch`'s description says `archive` is how a fetched archive gets into the
+     *   project, so the output goes to the project root rather than being refused — a refusal here
+     *   would make the documented two-step workflow impossible instead of one step.
+     * - **A project's own folder is in the account**, one level above the writable boundary. Zipping
+     *   the whole project would otherwise land the zip in the account root, which is not writable
+     *   either.
+     *
+     * Both cases answer "beside the input" with "inside the project", which is the only other place
+     * the answer can be, and the answer always says which folder it used.
+     */
+    private fun outputFolder(inside: File): File {
+        val beside = inside.parentFile ?: inside
+        return if (mayWrite(File(beside, "x")) == null) beside else projectDir
     }
 
     /**

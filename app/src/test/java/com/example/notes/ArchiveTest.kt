@@ -92,9 +92,11 @@ class ArchiveTest {
         }
         // **Named from the packed folder's own parent**, so unpacking it beside `src/` gives back
         // `src/main/Main.kt`. Sorted, because entry order is the walk's and not the call's.
+        // **Named from the packed folder, not from the project**, so unpacking this zip gives back
+        // a folder with exactly the shape of `src/` rather than `src/src/`.
         assertEquals(
-            "every file, under the packed folder's own name",
-            listOf("src/Main.kt", "src/util/Text.kt"),
+            "every file, relative to the folder that was packed",
+            listOf("Main.kt", "util/Text.kt"),
             names.sorted(),
         )
     }
@@ -173,11 +175,15 @@ class ArchiveTest {
         val answer = tools().run(call("""{"path":"."}"""))
 
         assertTrue("it worked: ${answer.replace("\n", " | ")}", answer.startsWith("0\n"))
-        val names = java.util.zip.ZipFile(File(ws.accountDir, "shopping.zip")).use { zip ->
+        // **The project's parent is the account, which the agent may not write**, so the zip lands
+        // inside the project instead. See `outputFolder`.
+        val names = java.util.zip.ZipFile(File(project(), "shopping.zip")).use { zip ->
             zip.entries().asSequence().map { it.name }.toList()
         }
         assertTrue("the readme is in: $names", names.contains("README.md"))
         assertTrue("and the record is not: $names", names.none { it.startsWith("agent/") })
+        assertTrue("and every entry is under the packed folder's own name: $names",
+            names.all { it.startsWith("shopping/") })
     }
 
     // ---- unpack -------------------------------------------------------------
@@ -251,11 +257,10 @@ class ArchiveTest {
     }
 
     @Test
-    fun `an unpack of another project's zip is refused by the write rule`() {
-        // **The boundary every other write already honours**, not a second rule invented here. The
-        // destination is now derived, so the case that reaches this rule is a zip that lives in
-        // another project: the read is allowed and the write is not, which is exactly the axis
-        // `mayWrite` names.
+    fun `unpacking another project's zip writes into this one, never into that`() {
+        // **Reading across projects is allowed and writing is not**, and the derived destination is
+        // what keeps them apart: `../work/lib.zip` would unpack *into* `work`, so it goes to this
+        // project's own folder instead. The rule the whole app already has, expressed once.
         ws.projectDir("work").mkdirs()
         ZipOutputStream(File(ws.projectDir("work"), "lib.zip").outputStream()).use { zip ->
             zip.putNextEntry(ZipEntry("a.txt"))
@@ -265,8 +270,28 @@ class ArchiveTest {
 
         val answer = tools().run(call("""{"path":"../work/lib.zip","unpack":true}"""))
 
-        assertTrue("it is a refusal: $answer", answer.startsWith("1\n"))
-        assertFalse("and nothing landed there", File(ws.projectDir("work"), "lib").exists())
+        assertTrue("it is an answer: ${answer.replace("\n", " | ")}", answer.startsWith("0\n"))
+        assertEquals("it landed here", "a", File(project(), "lib/a.txt").readText())
+        assertFalse("and not there", File(ws.projectDir("work"), "lib").exists())
+    }
+
+    @Test
+    fun `a fetched zip unpacks into the project, because fetch lands it somewhere read-only`() {
+        // **The two-step workflow `fetch`'s description promises.** `agent/fetched/` is the app's
+        // own folder, so "beside the input" would be a refusal and the documented step would be
+        // impossible. It goes to the project root, and the answer says which folder it used.
+        File(project(), "agent/fetched").mkdirs()
+        ZipOutputStream(File(project(), "agent/fetched/lib.zip").outputStream()).use { zip ->
+            zip.putNextEntry(ZipEntry("lib/a.kt"))
+            zip.write("a".toByteArray())
+            zip.closeEntry()
+        }
+
+        val answer = tools().run(call("""{"path":"agent/fetched/lib.zip","unpack":true}"""))
+
+        assertTrue("it is an answer: ${answer.replace("\n", " | ")}", answer.startsWith("0\n"))
+        assertEquals("a", File(project(), "lib/lib/a.kt").readText())
+        assertTrue("and it says where: $answer", answer.contains("into lib"))
     }
 
     // ---- the round trip -----------------------------------------------------
@@ -280,14 +305,15 @@ class ArchiveTest {
         write("README.md", "# readme")
 
         // **Both sides derive their own destination**, so a round trip needs no names at all:
-        // packing `.` writes `shopping.zip` beside the project, and unpacking it writes `shopping/`
-        // beside that — a second copy of the tree, with the same shape.
+        // packing `.` writes `shopping.zip` in the project, and unpacking it writes `shopping/`
+        // beside it — a second copy of the tree, with the same shape.
         tools().run(call("""{"path":"."}"""))
-        tools().run(call("""{"path":"../shopping.zip","unpack":true}"""))
+        val back = tools().run(call("""{"path":"shopping.zip","unpack":true}"""))
 
-        assertEquals("fun main() {}", File(ws.accountDir, "shopping/src/Main.kt").readText())
-        assertEquals("fun text() {}", File(ws.accountDir, "shopping/src/util/Text.kt").readText())
-        assertEquals("# readme", File(ws.accountDir, "shopping/README.md").readText())
+        assertTrue("accepted: $back", back.startsWith("0\n"))
+        assertEquals("fun main() {}", File(project(), "shopping/src/Main.kt").readText())
+        assertEquals("fun text() {}", File(project(), "shopping/src/util/Text.kt").readText())
+        assertEquals("# readme", File(project(), "shopping/README.md").readText())
     }
 
     // ---- the two modes, and what a call with neither gets --------------------

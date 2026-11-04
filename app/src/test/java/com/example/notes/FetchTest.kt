@@ -200,7 +200,10 @@ class FetchTest {
 
         assertTrue("it is a refusal: $answer", answer.startsWith("1\n"))
         assertTrue("and names the size: $answer", answer.contains("2.0 GB"))
-        assertTrue("and the cap: $answer", answer.contains("20.0 MB"))
+        // **The number comes from the constant, not from a string someone has to remember** — the
+        // cap was raised from 20 MB to 100 MB once already, and a literal here would have made a
+        // correct change look like a broken test.
+        assertTrue("and the cap: $answer", answer.contains(Fetcher.size(Fetched.LIMIT_BYTES)))
         assertFalse("and nothing landed", File(project(), "agent/fetched/big.iso").exists())
     }
 
