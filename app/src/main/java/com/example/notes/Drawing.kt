@@ -152,7 +152,9 @@ object Drawing {
         // field that is typed from the keyboard (1-64 px)". A stroke 4.5 pixels wide is a number
         // nobody asked for and nothing can check.
         val value = typed.trim().toIntOrNull() ?: return null
-        return value.coerceIn(1f, MAX_WIDTH)
+        // **Clamped in whole pixels, then floated** — the field is whole pixels and the picture works in
+        // floats, so the conversion is here once rather than at every use.
+        return value.coerceIn(1, MAX_WIDTH.toInt()).toFloat()
     }
 
     /**
