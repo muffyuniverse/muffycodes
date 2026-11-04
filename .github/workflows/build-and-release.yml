@@ -61,6 +61,12 @@ on:
 # a run in the same group blocks the next one, the *following* push sat queued for
 # eleven minutes with nothing wrong with it.
 #
+# **That was a platform fault, not this repository.** GitHub declared "Incident
+# with Actions and Pages" at 16:05 the same day, with Actions at degraded
+# performance, and nothing was scheduled onto a runner for the next fifteen
+# minutes. It should be reverted to the plain group once that run is gone — it
+# cannot block anything while it is in a group nobody else joins.
+#
 # A group is matched by its **name**, so renaming it leaves the wedged run holding
 # the old one and lets the next run start. Nothing else changes: same workflow,
 # same ref, same cancel-in-progress. If this ever has to be done again, change the

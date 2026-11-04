@@ -155,6 +155,12 @@ echo "run $RUN_ID  https://github.com/$REPO/actions/runs/$RUN_ID"
 # already over, and the log said nothing but a repeated `in_progress/`, so the
 # only way to tell a wedge from a slow build was to go and ask by hand.
 #
+# The cause that day was a GitHub Actions incident ("Incident with Actions and
+# Pages", declared 16:05) — Actions went to degraded performance and nothing was
+# scheduled onto a runner for fifteen minutes. The wedge and the queue stall are
+# the same fault seen from two sides, and neither is something a repository can
+# fix; what it can do is say which one it is looking at instead of sleeping.
+#
 # So the state is remembered, and a run whose state has not changed for
 # STALL_MINUTES is called what it is: **stalled, with the jobs that are settled**.
 # It is a warning and not a verdict, because the run is not this script's to
