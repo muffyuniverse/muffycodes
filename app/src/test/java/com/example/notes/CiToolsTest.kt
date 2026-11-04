@@ -530,13 +530,17 @@ class CiToolsTest {
     }
 
     @Test
-    fun `a path that escapes the project is refused`() {
-        // **The same rule `read` and `edit` use**, so an exit that reaches any file on the phone
+    fun `a path that escapes the account is refused`() {
+        // **The same rule `read` and `write` use**, so an exit that reaches any file on the phone
         // cannot exist by a different route.
+        //
+        // **The account, not the project**, which is what `withinProject` has always compared —
+        // and what this assertion used to mis-state. See `upload`'s refusal for the same
+        // correction, found by the same false assertion on the other side of the file.
         val body = call("upload", """{"path":"../../etc/passwd"}""", withDownloads = true)
 
         assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
-        assertTrue("and it says where the limit is: $body", body.contains("inside this project"))
+        assertTrue("and it says where the limit is: $body", body.contains("outside this account"))
         assertTrue("and nothing was handed over", exported.isEmpty())
     }
 
