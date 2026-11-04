@@ -602,10 +602,10 @@ class AgentTools(
             spec(
                 "history",
                 "List the versions of a file, newest first: the id each is restored from, and the " +
-                    "first line it contained. `from`/`to` pick a range of versions; `grep` keeps " +
-                    "only the versions with a matching line, and shows that line instead. A pattern " +
-                    "is a regular expression, case-insensitive, matched inside one line.",
-                "{\"path\":\"the file\",\"grep\":\"a pattern\",\"from\":1,\"to\":20}",
+                    "first line it contained. `grep` keeps only the versions with a matching " +
+                    "line, and shows that line instead. A pattern is a regular expression, " +
+                    "case-insensitive, matched inside one line.",
+                "{\"path\":\"the file\",\"grep\":\"a pattern\"}",
             ),
             spec(
                 "restore",

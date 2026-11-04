@@ -2088,13 +2088,16 @@ class AgentTest {
         // while there is still nothing to undo.
         val dir = ws.repoOf("shopping")
         ws.write(File(dir, "milk.txt"), "two litres")
-        ws.write(File(dir, "dairy.txt"), "the taken name")
+        // **The folder exists and holds the taken name**, because `into` names the destination now:
+        // a folder that is not there would be made, and then there would be nothing to collide with.
+        ws.write(File(dir, "drafts/dairy.txt"), "the taken name")
 
         val body = tool("move", """{"path":"milk.txt","into":"drafts/dairy.txt","copy":true}""")
 
         assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
-        assertEquals("the taken file is untouched", "the taken name", File(dir, "dairy.txt").readText())
-        assertFalse("and nothing was copied", File(dir, "drafts/dairy.txt").exists())
+        assertEquals("the taken file is untouched", "the taken name",
+            File(dir, "drafts/dairy.txt").readText())
+        assertFalse("and no second copy was made", File(dir, "drafts/dairy (1).txt").exists())
     }
 
     // ---- background: a result that lands in a file ---------------------------
