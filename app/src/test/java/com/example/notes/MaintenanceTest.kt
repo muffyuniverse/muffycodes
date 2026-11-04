@@ -170,6 +170,9 @@ class MaintenanceTest {
         val done = Maintenance.run(ws).first()
 
         assertTrue("it said why: ${done.said()}", done.said().contains("no repository"))
+        // **And it stops asking.** Nothing can be collected in a folder with no history, so a marker
+        // that survived would be retried at every start for ever — the kind of "nothing to do" that
+        // looks like work being done.
         assertFalse("and it did not keep asking", Maintenance.waiting(dir))
     }
 
@@ -196,15 +199,23 @@ class MaintenanceTest {
         Maintenance.mark(dir, "the history was shortened")
 
         // **`tryHold`, not `hold`**: a background pass that waits in front of a commit is a commit
-        // somebody is waiting for. The lock is taken here for the length of the pass, so the
-        // maintenance pass must not block on it.
-        var ran = false
-        RepoLocks.tryHold(dir, "a test", 1_000L) {
-            val done = Maintenance.run(ws).first()
-            ran = true
-            assertTrue("it said it was busy: ${done.said()}", done.said().contains("busy"))
+        // somebody is waiting for. The lock is held here for the length of the pass, and the pass has
+        // to notice and come back later.
+        //
+        // **On another thread, because the lock is reentrant.** Holding it on this one and calling
+        // into the pass would let the pass take it again — `ReentrantLock` says yes to its own thread
+        // — and the test would pass while proving nothing about a real second caller.
+        var done: Maintenance.Done? = null
+        val holding = Thread {
+            RepoLocks.tryHold(dir, "a test", 5_000L) {
+                done = Maintenance.run(ws).firstOrNull()
+            }
         }
-        assertTrue("the test held the lock", ran)
+        holding.start()
+        holding.join(10_000)
+
+        val said = done?.said() ?: "the pass never ran"
+        assertTrue("it said it was busy: $said", said.contains("busy"))
         assertTrue("and the marker survived for the next start", Maintenance.waiting(dir))
     }
 }

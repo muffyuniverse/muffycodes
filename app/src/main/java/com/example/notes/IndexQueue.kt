@@ -66,6 +66,17 @@ object IndexQueue {
 
     private var worker: Thread? = null
 
+    /**
+     * Bumped by [clear], and captured by each worker when it starts.
+     *
+     * **A cleared queue must not keep working.** The worker runs passes off its own thread, and a
+     * pass over a large project outlives the request that asked for it — so a test that cleared the
+     * queue and moved on would still have a thread walking a temp folder that no longer exists, and
+     * a shard would spend its budget on work nobody asked for. The generation is the stop: a worker
+     * whose generation is no longer current finishes the pass it is in and exits.
+     */
+    private var generation = 0
+
     /** How many passes this process has run, for a test that must not race a thread. */
     @Volatile
     var passes: Int = 0
@@ -98,6 +109,10 @@ object IndexQueue {
         synchronized(lock) {
             wiring = null
             waiting.clear()
+            // **Stops the worker as well as the wiring.** Without this a pass in flight runs to
+            // completion against a folder the caller has already deleted — and in a test shard it
+            // spends the next test's budget.
+            generation++
         }
     }
 
@@ -113,7 +128,8 @@ object IndexQueue {
             if (wiring == null) return
             waiting.putIfAbsent(project, why)
             if (worker != null) return
-            val thread = Thread({ drain() }, "index-queue")
+            val mine = generation
+            val thread = Thread({ drain(mine) }, "index-queue")
             thread.isDaemon = true
             worker = thread
             thread
@@ -129,9 +145,15 @@ object IndexQueue {
      * next commit, the next project or the next search is a better moment, and each of those will
      * ask.
      */
-    private fun drain() {
+    private fun drain(mine: Int) {
         while (true) {
             val job = synchronized(lock) {
+                // **The stop, checked before every pass.** A queue cleared while this worker was
+                // busy is a queue whose wiring is gone and whose remaining asks belong to nobody.
+                if (mine != generation) {
+                    worker = null
+                    return
+                }
                 val next = waiting.entries.firstOrNull()
                 if (next == null) {
                     worker = null

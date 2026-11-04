@@ -140,10 +140,14 @@ class SemanticSearchTest {
     private fun savedTwice(): String {
         val git = ProjectGit(ws, { null }, { GitAuthor("Test", "test@example.com") })
         write("shopping", "milk.txt", "the milk went sour\n")
+        // **`init` is the first save.** It commits whatever is already on disk — so the text written
+        // above is the initial commit's, and a `commit` right after it would find nothing to write
+        // and answer null. The version that says "sour" is therefore the *oldest* commit, which is
+        // exactly the one a search has to reach back for.
         git.init("shopping").getOrThrow()
-        git.commit("shopping", "first").let { requireNotNull(it) }
         write("shopping", "milk.txt", "the milk was poured away\n")
-        return requireNotNull(git.commit("shopping", "second"))
+        requireNotNull(git.commit("shopping", "second"))
+        return RepoHistory(ws.projectDir("shopping")).log().last().id
     }
 
     @Test
@@ -179,10 +183,10 @@ class SemanticSearchTest {
         val git = ProjectGit(ws, { null }, { GitAuthor("Test", "test@example.com") })
         val body = (1..40).joinToString("\n") { "line $it about milk" }
         write("shopping", "long.txt", body + "\n")
+        // **`init` is the first version**, and it holds every line of the body.
         git.init("shopping").getOrThrow()
-        git.commit("shopping", "first")
         write("shopping", "long.txt", body + "\nthe last line mentions bread\n")
-        git.commit("shopping", "second")
+        requireNotNull(git.commit("shopping", "second"))
 
         val fake = Fake()
         engine(fake).index(Deadline.none()).getOrThrow()
@@ -206,6 +210,9 @@ class SemanticSearchTest {
         val again = engine(fake).index(Deadline.none()).getOrThrow()
 
         assertEquals("nothing new: ${again.said()}", 0, again.versions)
+        // **Nothing embedded at all**, which is stronger than "no new versions": the working tree is
+        // unchanged (mtime and size) and every version's text is already held, so the pass costs no
+        // request rather than a request that happens to add nothing.
         assertTrue("and no request was made: ${fake.texts}", fake.texts.isEmpty())
     }
 

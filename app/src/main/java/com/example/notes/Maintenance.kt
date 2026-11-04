@@ -57,10 +57,13 @@ object Maintenance {
         val collected: Boolean,
         /** Null when the work finished; the reason it did not, otherwise. */
         val stopped: String?,
+        /** False when the project had no repository, which is "nothing to do" rather than a fault. */
+        val tried: Boolean = true,
     ) {
         /** One sentence for the log, the notification and a test. */
         fun said(): String {
             if (stopped != null) return "housekeeping did not finish: $stopped"
+            if (!tried) return "there is no repository here, so there was nothing to collect"
             val swept = when {
                 rows == 0 -> "no index rows were left behind"
                 rows == 1 -> "1 index row was left behind"
@@ -142,6 +145,7 @@ object Maintenance {
         var vectors = 0
         var collected = false
         var stopped: String? = null
+        var repository = false
         // **The lock is taken without waiting.** A commit in flight is milliseconds away from done,
         // and a marker that waits for it is a marker that gets collected on the next start anyway.
         val held = RepoLocks.tryHold(dir, "maintenance", 0L) {
@@ -158,10 +162,13 @@ object Maintenance {
                     null
                 }
                 if (repo == null) {
-                    stopped = "there is no repository to collect"
+                    // **Not a failure.** A folder with no history has nothing stranded and no index
+                    // rows to sweep, so it is finished — and its marker has to go, or this pass
+                    // would ask the same question at every start for ever.
                     return@tryHold
                 }
                 repo.use {
+                    repository = true
                     // **The reachable set first**, because the collection destroys the evidence.
                     val reachable = try {
                         reachableBlobs(it, deadline)
@@ -186,7 +193,7 @@ object Maintenance {
         if (!held) {
             return Done(project, why, 0, 0, false, "the project was busy, so it will try next time")
         }
-        val done = Done(project, why, rows, vectors, collected, stopped)
+        val done = Done(project, why, rows, vectors, collected, stopped, tried = repository)
         // **The marker goes only when the work did.** A failed collection keeps it, so the next start
         // asks again rather than silently never collecting.
         if (stopped == null) {
