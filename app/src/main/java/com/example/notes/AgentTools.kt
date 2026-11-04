@@ -690,8 +690,9 @@ class AgentTools(
                     "(the names are in the answer when you leave it out). `grep` is a regular " +
                     "expression, case-insensitive, matched inside one line, and answers with the " +
                     "matching lines — which is how to find `FAILED` or `e: file` in a build. " +
-                    "`from`/`to` are line numbers of the filed log, both included.",
-                "{\"run\":41177826224,\"job\":\"Test (0)\",\"grep\":\"FAILED\",\"from\":1,\"to\":40}",
+                    "The log is filed, so when you need a range rather than a match, `read` it: " +
+                    "the path is in this answer and `read` takes `from`/`to`.",
+                "{\"run\":41177826224,\"job\":\"Test (0)\",\"grep\":\"FAILED\"}",
             ),
             spec(
                 "artifact",
