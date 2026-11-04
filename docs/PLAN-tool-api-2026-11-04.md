@@ -260,6 +260,10 @@ the 10× the old argument assumed.
    searches, and an unchanged file costs one directory entry and no request. It is bounded by the same
    `Deadline` as every other command: a pass that runs out of time answers with what it has and says what is
    left, and asking again carries on from there because the rows are already recorded.
+   **The status is in the answer's note, not in the session log** — the plan asked for `0`/`1` rows there.
+   The note is what both the model and the person read, and a log row would be a second copy of the same
+   fact with its own chance of being wrong; a session-log row is still the right place for *what a tool
+   did*, and indexing is a step inside one answer rather than an act of its own.
 5. **The unindexed count, from the database — not a counter.** ✅ `files(path, mtime, state, error)`; the
    count is a query, the note appears on the answer, and a **failed** file has no `indexedAt`, so the next
    pass retries it instead of skipping it for ever.
