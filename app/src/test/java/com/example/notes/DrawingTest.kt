@@ -211,6 +211,55 @@ class DrawingTest {
     }
 
     @Test
+    fun `the pinch limits are the operator's numbers`() {
+        // **"limit min zoom by 30% ... and max zoom by 300%."** Asserted as literals rather than
+        // against the constants, because a test that read `MIN_ZOOM` would pass whatever the constant
+        // became — and the number is the request.
+        assertEquals("a third, no further out", 0.3f, Drawing.View.MIN_ZOOM, 0.001f)
+        assertEquals("three times, no further in", 3f, Drawing.View.MAX_ZOOM, 0.001f)
+    }
+
+    @Test
+    fun `the fit is not held to the pinch floor, so a page still fits whole`() {
+        // **The floor is on the gesture, not on the answer to "show me the whole thing".** A
+        // 1240-pixel page in a 300-pixel window needs 0.24, and a 0.3 floor would make it 372 pixels
+        // wide — overflowing 36 pixels each side, which is the bug that was already fixed once when
+        // the floor was 0.25.
+        val page = Drawing.View.fittedTo(1240, 1754, 300f, 500f)
+
+        assertEquals("the whole page, at whatever it takes", 300f / 1240f, page.zoom, 0.001f)
+        assertTrue(
+            "**which is below the pinch floor** — that is the point: ${page.zoom}",
+            page.zoom < Drawing.View.MIN_ZOOM,
+        )
+        // **And the picture is centred**, so the leftover space is split rather than all on one side.
+        assertEquals("centred horizontally", (300f - 1240 * page.zoom) / 2f, page.panX, 0.5f)
+    }
+
+    @Test
+    fun `zooming out keeps the picture centred, and cannot walk it off screen`() {
+        // **The operator**: "why when you zoom out the drawing isnt centered on the screen but moves
+        // to the upper left corner?"
+        //
+        // The bound was measured from the home corner, so at a small zoom it was nearly zero and the
+        // picture drifted to the top-left as it shrank. Symmetric about the middle, the pan a person
+        // already had is preserved and the picture stays where they left it.
+        val wide = Drawing.View(zoom = 1f, panX = 0f, panY = 0f)
+        val zoomedOut = wide.zoomedBy(0.5f, 540f, 960f)
+        // **Centred on the pinch point**, which is the algebra `zoomedBy` already guarantees.
+        assertEquals("the focal point did not move", 540f, zoomedOut.toScreen(zoomedOut.toPicture(540f, 960f)).x, 0.5f)
+
+        // **A pan far past the picture is pulled back, in both directions, by the same amount.**
+        val pushed = Drawing.View(zoom = 1f, panX = 100_000f, panY = 100_000f)
+            .bounded(1080, 1920)
+        assertEquals("bounded by half the shown width", 540f + 540f * Drawing.View.EDGE_MARGIN, pushed.panX, 0.5f)
+        assertEquals("and the same the other way", -pushed.panX, pushed.copy(panX = -pushed.panX).panX, 0.5f)
+        // **Symmetric**, so the direction last dragged does not decide what is allowed next.
+        val pulledBack = Drawing.View(zoom = 1f, panX = -100_000f, panY = -100_000f).bounded(1080, 1920)
+        assertEquals("mirrored", -pushed.panX, pulledBack.panX, 0.5f)
+    }
+
+    @Test
     fun `a pan moves the picture with the finger`() {
         val view = Drawing.View().pannedBy(30f, -20f)
         assertEquals("x", 30f, view.panX, 0.001f)

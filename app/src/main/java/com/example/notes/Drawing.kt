@@ -278,11 +278,20 @@ object Drawing {
             val shownHeight = height * zoom
             val marginX = shownWidth * EDGE_MARGIN
             val marginY = shownHeight * EDGE_MARGIN
-            // The picture's left edge may sit anywhere from `marginX` to `screen - shownWidth + margin`.
-            // Without a screen size here, the bound is expressed against the picture alone: never
-            // further than its own width away from home, in either direction.
-            val limitX = shownWidth - marginX
-            val limitY = shownHeight - marginY
+            // **The bound is symmetric about the middle, and the middle is the whole point.** This
+            // used to allow the pan to reach `±(shown - margin)` — measured from the *home* corner —
+            // which at a small zoom is nearly zero and at a large one is enormous, so the picture
+            // drifted to the top-left as a person zoomed out rather than staying where it was.
+            //
+            // The operator: "why when you zoom out the drawing isnt centered on the screen but moves
+            // to the upper left corner?"
+            //
+            // A pan is how far the picture has been moved from home. Letting it reach half the
+            // picture's shown size in each direction is what keeps a panned picture reachable while
+            // refusing to lose it: at the limit, half of it is still on screen. Symmetric, because
+            // the direction a person last dragged must not decide what is allowed next.
+            val limitX = shownWidth / 2f + marginX
+            val limitY = shownHeight / 2f + marginY
             return copy(
                 panX = panX.coerceIn(-limitX, limitX),
                 panY = panY.coerceIn(-limitY, limitY),
@@ -291,21 +300,24 @@ object Drawing {
 
         companion object {
             /**
-             * Zoomed out enough to see a **page** whole.
+             * **How far out a person may pinch: a third.** The operator's number — "limit min zoom by
+             * 30%" — and it is a floor on the *gesture*, not on the fit.
              *
-             * **0.25 was too high, and a photograph of a page proved it.** A 1240-pixel page in a
-             * 300-pixel window needs 0.24 to fit; at a 0.25 floor it was 310 pixels wide and
-             * overflowed five pixels on each side, so "fit" did not fit and the person could not see
-             * the whole page they had just made. 0.1 shows a page at a tenth, which is small but
-             * whole — and a thumbnail is still recognisable as a page.
+             * **The distinction is not pedantic, and it is the bug that was here before.** A 1240-pixel
+             * page in a 300-pixel window needs 0.24 to fit whole, so a 0.25 floor made "fit" 310 pixels
+             * wide and overflowed five pixels each side — the person could not see the page they had
+             * just made. A floor applied to the fit would reintroduce exactly that at 0.3. See
+             * [fittedTo], which is allowed below this because a picture that does not fit is not a
+             * picture a person can look at.
              */
-            const val MIN_ZOOM = 0.1f
+            const val MIN_ZOOM = 0.3f
 
             /**
-             * 8×, which is where a 1080-wide screenshot shows about 135 pixels across the screen —
-             * enough to place a mark on one character.
+             * **How far in a person may pinch: three times.** The operator's number — "and max zoom by
+             * 300%". A 1080-wide screenshot at 3× shows 360 pixels across the screen, which is enough
+             * to place a mark on one word.
              */
-            const val MAX_ZOOM = 8f
+            const val MAX_ZOOM = 3f
 
             /** How much of the picture may be panned past its own edge. */
             const val EDGE_MARGIN = 0.5f
@@ -329,8 +341,11 @@ object Drawing {
                 if (pictureWidth <= 0 || pictureHeight <= 0 || surfaceWidth <= 0f || surfaceHeight <= 0f) {
                     return View()
                 }
+                // **The fit is exempt from [MIN_ZOOM]**, because it is not a zoom the person chose:
+                // it is the answer to "show me the whole thing", and a floor would make that answer
+                // no. It is still capped at 1:1 so a small icon is not blown up and blurred.
                 val fit = minOf(surfaceWidth / pictureWidth, surfaceHeight / pictureHeight)
-                val zoom = fit.coerceIn(MIN_ZOOM, 1f)
+                val zoom = fit.coerceIn(0.01f, 1f)
                 // The leftover space on each axis, halved: that is where the picture's top-left goes for
                 // it to sit in the middle.
                 val panX = (surfaceWidth - pictureWidth * zoom) / 2f
