@@ -1872,7 +1872,7 @@ class AgentTest {
         val file = File(ws.repoOf("shopping"), "milk.txt")
         ws.write(file, "two litres")
         git.commit("shopping", "milk")
-        val id = git.versions("shopping", "milk.txt").first().shortId
+        val id = git.versions("shopping", "milk.txt").first().first.shortId
         ws.write(file, "three litres")
 
         val body = tool("read", """{"path":"milk.txt@$id"}""")
