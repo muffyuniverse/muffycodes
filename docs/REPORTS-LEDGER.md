@@ -23,16 +23,16 @@ Full analysis in `/root/Downloads/PROPOSAL-tool-api-2026-11-04.md`. **All 17 wer
 | 23 | clone/move to Downloads as a choice | **PLANNED** step 4 · ⋮ gains "Copy to Downloads" |
 | 24 | search regex or text? if reranked why regex? | **PLANNED** step 5 · semantic, account-wide, **no regex fallback** — a failure is `1`+reason, a timeout is `Deadline` |
 | 25 | `paths` 10–100 instead of ≥1, default 10 | **SETTLED** · operator: "keep 100 max"; spec text will state 1 minimum. §2 |
-| 26 | `tree`: rename `name`/`grep` → `name`/`content` | **PLANNED** step 2 |
-| 27 | why does `tree` have `from`/`to` | **PLANNED** step 2 · dropped |
-| 28 | `history` does not need `from`/`to` | **PLANNED** step 2 · dropped |
+| 26 | `tree`: rename `name`/`grep` → `name`/`content` | **CLOSED** `effe08f` · the value is still a pattern; the name says what it selects |
+| 27 | why does `tree` have `from`/`to` | **CLOSED** `effe08f` · dropped — it was a slice over a path list |
+| 28 | `history` does not need `from`/`to` | **CLOSED** `effe08f` · dropped — it sliced the version list |
 | 29 | merge `create`+`edit` into `write` | **CLOSED** `b078981` · 21 tools where 22 were; count asserted |
-| 30 | remove `from`/`to` from commands | **PLANNED** step 2 · kept on `read` only |
+| 30 | remove `from`/`to` from commands | **CLOSED** `effe08f` · kept on `read`, `write`, `browse` — where the lines are real |
 | 31 | remove `at` | **CLOSED** `b078981` · guard test refuses the key |
 | 32 | what does `replace` mean on `write`? | **CLOSED** `b078981` · `replace` deleted; `text` is the new text in all three shapes |
-| 33 | regex selection is per-symbol? | **SETTLED** · `multi: true` granted; it carries **no cap of its own** — `forConversation` already bounds every result |
-| 34 | `move` needs no `name` | **PLANNED** step 2 |
-| 35 | remove `from`/`to` **only if** regex can select lines | **SETTLED** · `multi` granted; `from`/`to` stay on `read`/`write` only |
+| 33 | regex selection is per-symbol? | **CLOSED** `effe08f` · `multi: true` added; no cap of its own |
+| 34 | `move` needs no `name` | **CLOSED** `effe08f` · `into` is the destination, name and all |
+| 35 | remove `from`/`to` **only if** regex can select lines | **CLOSED** `effe08f` · it is **our** per-line loop, not regex; `multi` lifts it. `from`/`to` kept where lines are real |
 | 36 | `fetch` up to 100 MB | **PLANNED** step 3 · `LIMIT_BYTES` is 20 MB |
 | 37 | split `downloads` into `download`/`upload` | **PLANNED** step 4 · three tools, `download` capped 100 MB |
 | 38 | `archive`: `-u` flag + one path | **PLANNED** step 3 · `unpack: true`, output beside input |
