@@ -270,7 +270,11 @@ class SemanticSearchTest {
 
     @Test
     fun `a reranker that is down answers in vector order and says so`() {
+        // **Two files, because a reranker is only consulted about a list it can reorder.** With one
+        // candidate there is nothing to reorder and nothing to be down about — the first version of
+        // this test asked for a note about a step that correctly never ran.
         write("shopping", "milk.txt", "the milk went sour\n")
+        write("shopping", "toast.txt", "milk and bread\n")
         val fake = Fake(brokenRerank = true)
 
         val answer = engine(fake, rerank = PickedModel("test/rerank", "test"))

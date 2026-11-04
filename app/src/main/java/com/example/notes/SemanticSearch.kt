@@ -320,6 +320,11 @@ class SemanticSearch(
         // **The extent, in every answer.** A person reading "nothing matches" cannot tell an empty
         // project from a search that only looked in one folder, and the second is this tool's design.
         notes += "$project/ only — semantic search is per project"
+        // **What the indexing pass did, also in every answer** — and before the empty case is decided,
+        // because the answer that finds nothing is the one that most needs to know its index is
+        // incomplete. The first version added these after the search and skipped them on the way out,
+        // so a pass that ran out of time answered "nothing is indexed yet" with no reason beside it.
+        notes += caughtNotes(index, caught)
 
         val vector = embedder.embed(listOf(query), pick.model, dims)
             .getOrElse { return Result.failure(it) }
@@ -395,22 +400,6 @@ class SemanticSearch(
             }
         }
 
-        if (caught.stopped != null) {
-            // **"0 of 0 are left" is not a sentence a person can use.** When the pass stopped before
-            // it could name anything, what is true is that the index may not have seen every file.
-            notes += if (caught.left > 0) {
-                "indexing stopped: ${caught.stopped}; ${caught.left} of ${caught.total} file(s) are " +
-                    "not indexed yet, and asking again carries on from here"
-            } else {
-                "indexing stopped: ${caught.stopped}, so this index may be missing files"
-            }
-        }
-        if (caught.failed > 0) {
-            val why = index.failed().second
-            notes += "${caught.failed} file(s) could not be indexed" +
-                (why?.let { ": $it" } ?: "")
-        }
-
         val rows = candidates.take(paths).map { one ->
             val said = excerpt(one.text)
             // **`path:line`, account-relative**, which is the same spelling a text-mode hit uses and
@@ -464,6 +453,32 @@ class SemanticSearch(
 
     private fun score(value: Double): String =
         String.format(java.util.Locale.ROOT, "%.2f", value)
+
+    /**
+     * What the indexing pass could not take, as notes for the answer.
+     *
+     * **Two facts, and they are different:** a pass that stopped early has not seen every file, and a
+     * file it did see and could not take is missing from an index that otherwise looks complete. A
+     * person told neither would trust an answer that is missing their newest work.
+     */
+    private fun caughtNotes(index: SearchIndex, caught: Caught): List<String> {
+        val notes = mutableListOf<String>()
+        if (caught.stopped != null) {
+            // **"0 of 0 are left" is not a sentence a person can use.** When the pass stopped before
+            // it could name anything, what is true is that the index may not have seen every file.
+            notes += if (caught.left > 0) {
+                "indexing stopped: ${caught.stopped}; ${caught.left} of ${caught.total} file(s) are " +
+                    "not indexed yet, and asking again carries on from here"
+            } else {
+                "indexing stopped: ${caught.stopped}, so this index may be missing files"
+            }
+        }
+        if (caught.failed > 0) {
+            val why = index.failed().second
+            notes += "${caught.failed} file(s) could not be indexed" + (why?.let { ": $it" } ?: "")
+        }
+        return notes
+    }
 
     private fun compose(rows: List<String>, notes: List<String>): String =
         if (notes.isEmpty()) {

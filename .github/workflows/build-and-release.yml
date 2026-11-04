@@ -72,8 +72,11 @@ on:
 # same ref, same cancel-in-progress. If this ever has to be done again, change the
 # suffix and say why here — the alternative is waiting for a platform bug to clear
 # while the queue fills.
+#
+# **Reverted 2026-11-04 18:30**, because the wedged run is `completed/cancelled`
+# and the suffix has done its job. The paragraph above stays as the recipe.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-v2
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 # The tests only read the repository. Writing is granted to the one job that
