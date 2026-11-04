@@ -405,7 +405,10 @@ class AgentTools(
             // **No `from`/`to`.** A version list is not read by line number, and a range over this
             // result meant a range over *versions* — a second meaning for two keys that everywhere
             // else name the file's own lines.
-            "history" to setOf("path", "grep"),
+            // **`paths` is a count, named as `search` names it.** The operator: "an optional key to
+            // set how many rows are shown (with default max of 10)". Same key in both tools, because
+            // both answer a list and the question is the same one.
+            "history" to setOf("path", "grep", "paths"),
             "restore" to setOf("path", "revision"),
             "background" to setOf("tool", "args"),
             // **`from`/`to` stay**: they are lines of the page text the agent is about to read,
@@ -601,11 +604,13 @@ class AgentTools(
             ),
             spec(
                 "history",
-                "List the versions of a file, newest first: the id each is restored from, and the " +
-                    "first line it contained. `grep` keeps only the versions with a matching " +
-                    "line, and shows that line instead. A pattern is a regular expression, " +
-                    "case-insensitive, matched inside one line.",
-                "{\"path\":\"the file\",\"grep\":\"a pattern\"}",
+                "List the versions of a file, newest first, one line each: **the id read and " +
+                    "restore take, and the line that tells one save from another** (the file's first " +
+                    "non-blank line, or with `grep` the line that matched). `grep` keeps only the " +
+                    "versions that contain a match — a regular expression, case-insensitive, matched " +
+                    "inside one line. `paths` is how many versions to answer with: 10 by default, " +
+                    "100 at most. Take a `path@id` from this straight to `read`.",
+                "{\"path\":\"the file\",\"grep\":\"a pattern\",\"paths\":10}",
             ),
             spec(
                 "restore",
@@ -2433,14 +2438,20 @@ class AgentTools(
         if (versions.isEmpty()) return success("$path has no versions yet")
         // **No range any more.** `from`/`to` here used to slice the *version list*, which gave two
         // keys that name a file's lines a second meaning that was not about lines at all. The
-        // operator: "history command doesnt need from and to args". `grep` is the selector, and the
-        // operator's own result limit is what bounds a very long history.
-        val chosen = versions
+        // operator: "history command doesnt need from and to args".
+        //
+        // **`paths` is how many versions to answer with**, the same key `search` uses for the same
+        // question. Ten by default, and 100 at most, for the reason `search` has a ceiling: each row
+        // is a version the model will read next, and a file saved five hundred times would otherwise
+        // answer with five hundred ids.
+        val most = count(args, "paths", DEFAULT_PATHS)
+            .getOrElse { return refusal(it.message ?: "that count cannot be used") }
+            .coerceIn(1, MOST_PATHS)
         // **A version is shown when its own text matches.** [versionsOf] loads every version's bytes
         // anyway, so asking is free — and it is the question a model actually has ("when did it say
         // this?"), which a commit message cannot answer.
         val rows = mutableListOf<String>()
-        for ((commit, text) in chosen) {
+        for ((commit, text) in versions) {
             if (grep == null) {
                 rows.add(versionRow(commit, text))
                 continue
@@ -2452,17 +2463,30 @@ class AgentTools(
             if (found != null) rows.add(versionRow(commit, text, found))
         }
         if (rows.isEmpty()) return success("no version of $path matches that")
-        return success(rows.joinToString("\n"))
+        // **Filtered first, then cut** — so `paths: 5` with a `grep` means the newest five matching
+        // versions, not "the newest five, of which some match". The other order would answer fewer
+        // rows than asked for and leave the model believing the rest did not match.
+        val shown = rows.take(most)
+        val head = if (rows.size > shown.size) {
+            "showing the newest ${shown.size} of ${rows.size}; raise `paths` for more\n"
+        } else {
+            ""
+        }
+        return success(head + shown.joinToString("\n"))
     }
 
     /**
-     * One version as a line: its id, its message, when it was made, and what the file said.
+     * One version as a line: **its id, and the line that tells it apart.**
      *
-     * **The excerpt is what makes a list of saves readable.** A commit message describes the change,
-     * and Save's is one word, so twenty versions of one file read as twenty identical rows. The
-     * file's own first non-blank line is the only thing that tells them apart, and it is already in
-     * hand. An empty version says so, and so does one that is not text — a picture's first line is
-     * not a sentence.
+     * The operator: *"just hash and line that contains the grep."* The message and the timestamp were
+     * mine, and neither earned its column: a Save's message is the word "Save", and the timestamp is a
+     * second way to say which save this is when the id already says it exactly.
+     *
+     * **The excerpt is the whole reason a row has a second column.** Twenty saves of one file are
+     * twenty ids without it, and the file's own first non-blank line is what makes them
+     * distinguishable — already in hand, because [versionsOf] reads every version to diff it anyway.
+     * An empty version says so, and so does one that is not text: a picture's first line is not a
+     * sentence, and pretending it is would be the answer to a question nobody asked.
      */
     private fun versionRow(
         commit: GitService.CommitInfo,
@@ -2485,7 +2509,11 @@ class AgentTools(
                 }
             }
         }
-        return "${commit.shortId}  ${commit.message}  ${stamp(commit.timestamp)}  $said"
+        // **The hash and the line, and nothing else.** The operator: "just hash and line that
+        // contains the grep." The message and the time were mine — a commit message for a Save is
+        // the word "Save", so it told a reader nothing, and the timestamp is a second way to say
+        // which save is which when the id already does.
+        return "${commit.shortId}  $said"
     }
 
     private fun restore(args: JSONObject, deadline: Deadline): String {
@@ -4075,7 +4103,6 @@ class AgentTools(
     }
 
     /** A version's time, in the one shape a row reads in. */
-    private fun stamp(at: Long): String = LogFormat.stamp(at)
 
     /**
      * A file's name as the agent says it: relative to the project, with forward slashes.
