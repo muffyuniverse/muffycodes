@@ -1656,6 +1656,9 @@ class AgentTest {
         val body = tool("write", """{"path":"milk.txt","from":2,"to":3,"text":"TWO"}""")
 
         assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
+        // **The block became one line, and the lines after it moved up.** `from`/`to` name the lines
+        // to replace; `text` is what goes there, split on its own newlines. A single line of text
+        // therefore shortens the file by one, which is what replacing two lines with one means.
         assertEquals("the block was replaced, the rest untouched", "one\nTWO\nfour",
             ws.read(File(ws.repoOf("shopping"), "milk.txt")))
     }

@@ -369,7 +369,12 @@ class AgentTools(
             //
             // **`at` is gone too.** It was a cursor between lines for repeated edits; every shape
             // that remains says where it acts by naming the place.
-            "write" to setOf("path", "grep", "from", "to", "text", "revision"),
+            //
+            // **No `revision`.** `read` and `restore` take one because they act on a version; `write`
+            // acts on the file in front of it, and a key the runner never reads is a key a model is
+            // told it may send — which is what `no tool takes an argument it never describes` exists to
+            // catch, in the other direction.
+            "write" to setOf("path", "grep", "from", "to", "text"),
             "forget" to setOf("ids"),
             "delete" to setOf("path"),
             "move" to setOf("path", "into", "name", "copy"),
@@ -1825,11 +1830,11 @@ class AgentTools(
      * `from`/`to`, and the model that used both got a refusal.
      */
     private fun write(args: JSONObject, deadline: Deadline): String {
-        val asked = args.optString("path").trim()
-        if (asked.isEmpty()) {
-            return refusal("Say which file to write: {\"path\":\"notes/x.md\",\"text\":\"…\"}")
-        }
-        val file = resolveFile(asked)
+        // **No empty-path refusal of my own.** `resolveFile` already answers `""` and `"."` with the
+        // project's own folder, which is the sentence every other command uses — and a second check
+        // here would pre-empt it with a different one, so the same mistake read two ways depending on
+        // which tool was called.
+        val file = resolveFile(args.optString("path"))
             .getOrElse { return refusal(it.message ?: "that path cannot be written") }
         mayWrite(file)?.let { return refusal(it) }
 
@@ -1838,7 +1843,6 @@ class AgentTools(
             .getOrElse { return refusal("That is not a pattern: ${it.message}") }
         val hasFind = find != null
         val hasRange = args.has("from") || args.has("to")
-        val given = listOf(hasText, hasFind, hasRange).count { it }
 
         // **Nothing at that path means "make it", and that is the only case a missing file is not a
         // refusal.** A selector against a file that does not exist is a model that believes it is
@@ -1880,11 +1884,13 @@ class AgentTools(
                     "replaces those lines; `grep` with `text` replaces every match.",
             )
         }
-        if (given > 1 && !(hasFind && hasRange)) {
+        // **`text` is not a competing selector — it is what every shape writes.** Counting it as one
+        // refused "replace these lines with this text", which is the block shape itself. The only
+        // pair that is two edits is a pattern *and* a range used without text, and `grep` narrowed by
+        // a range is one selection with a bound, exactly as `read` composes them.
+        if (hasFind && hasRange && !hasText) {
             return refusal(
-                "Give `text` alone, or `from`/`to` with `text`, or `grep` with `text`. `grep` may " +
-                    "be narrowed by `from`/`to`; nothing else pairs, because a call that means two " +
-                    "edits cannot be checked.",
+                "`grep` with `from`/`to` says where to look but not what to write. Add `text`.",
             )
         }
         // **The write path asks, and a failure is a refusal.** A write computes the whole new file
