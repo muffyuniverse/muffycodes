@@ -455,7 +455,11 @@ object Drawing {
                 // it is the answer to "show me the whole thing", and a floor would make that answer
                 // no. It is still capped at 1:1 so a small icon is not blown up and blurred.
                 val fit = minOf(surfaceWidth / pictureWidth, surfaceHeight / pictureHeight)
-                val zoom = fit.coerceIn(0.01f, 1f)
+                // **No lower floor at all**, because there is no number below which "show me the
+                // whole picture" stops being the right answer. A 0.01 here would have made a
+                // 100 000-pixel picture 1000 pixels wide in a 100-pixel window — the floor would
+                // have reintroduced, at a different size, exactly the bug it was removed to fix.
+                val zoom = fit.coerceAtMost(1f).coerceAtLeast(0f)
                 // The leftover space on each axis, halved: that is where the picture's top-left goes for
                 // it to sit in the middle.
                 val panX = (surfaceWidth - pictureWidth * zoom) / 2f
