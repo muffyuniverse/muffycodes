@@ -3375,12 +3375,19 @@ class AgentTools(
             )
         }
         val file = File(projectDir, asked.trim('/'))
-        // **Inside the project, by the resolved path** — the same [withinProject] rule `read` and
-        // `write` use, so an exit that reaches any file on the phone cannot exist by a different route.
-        // A `../` that escapes is caught here, and so is a symlink pointing out.
+        // **Inside the account, by the resolved path** — the same [withinProject] rule `read` and
+        // `write` use, so an exit that reaches any file on the phone cannot exist by a different
+        // route. A `../` that escapes is caught here, and so is a symlink pointing out.
+        //
+        // **The sentence said "project" and the rule has never been one.** `withinProject` compares
+        // against `ws.accountDir`, so another project's file is exportable — which is what the
+        // operator's rule implies, since `upload` only *reads* the file and writes to the person's own
+        // Downloads. A refusal that named the project was describing a stricter rule than the one it
+        // enforced, and a model reading it would try another spelling of the same path.
         if (!withinProject(file)) {
             return refusal(
-                "\"$asked\" is not inside this project, and only the project can be exported from.",
+                "\"$asked\" is outside this account. Everything in it can be exported — any project, " +
+                    "including system — but nothing beyond it can.",
             )
         }
         if (file.isDirectory) {
@@ -3393,9 +3400,17 @@ class AgentTools(
         if (!file.isFile) {
             return refusal("There is no file at \"$asked\" in this project.")
         }
+        // **A failure still says where the file is.** The model's next act after "Downloads is not
+        // available" is to do something else with it, and the path is what that act needs — the same
+        // rule `fetch` follows when it refuses a download that is too big.
         return phone.write(file).fold(
             onSuccess = { success(it.said()) },
-            onFailure = { refusal(it.message ?: "The file could not be put in Downloads") },
+            onFailure = {
+                refusal(
+                    (it.message ?: "The file could not be put in Downloads") +
+                        " It is still in the project, at ${rel(file)}.",
+                )
+            },
         )
     }
 

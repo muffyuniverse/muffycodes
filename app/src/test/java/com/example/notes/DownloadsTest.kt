@@ -238,16 +238,32 @@ class DownloadsTest {
     }
 
     @Test
-    fun `upload refuses a path outside the project`() {
-        // **The bound is the resolved path**, so a `..` that escapes is caught here and so is a link
-        // pointing out — the same rule `read` and `write` ask.
-        File(ws.accountDir, "secret.txt").writeText("not yours")
-
-        val answer = call("upload", """{"path":"../secret.txt"}""")
+    fun `upload refuses a path that leaves the account`() {
+        // **The bound is the account, not the project** — `withinProject` compares against
+        // `ws.accountDir`, and the refusal used to say "project", which described a stricter rule
+        // than the one it enforced. This test believed that sentence until CI disagreed.
+        //
+        // So what is outside is what escapes the account, and a symlink pointing out is caught by
+        // the same `canonicalFile` comparison.
+        val answer = call("upload", """{"path":"../../../etc/passwd"}""")
 
         assertTrue("it is a refusal: $answer", answer.startsWith("1\n"))
-        assertTrue("and says the project is the bound: $answer", answer.contains("not inside this project"))
+        assertTrue("and names the account as the bound: $answer", answer.contains("outside this account"))
         assertTrue("and nothing was handed over", phone.writes.isEmpty())
+    }
+
+    @Test
+    fun `upload can export another project's file, because it only reads it`() {
+        // **The truth the old sentence hid.** The agent has read access to every project in the
+        // account, and an export reads the file and writes to the person's own Downloads — so it is
+        // allowed, and a refusal claiming otherwise would send a model hunting for another route.
+        ws.projectDir("work").mkdirs()
+        File(ws.projectDir("work"), "notes.txt").writeText("from the other project")
+
+        val answer = call("upload", """{"path":"../work/notes.txt"}""")
+
+        assertTrue("it is an answer: ${answer.replace("\n", " | ")}", answer.startsWith("0\n"))
+        assertEquals("and it exported that file", 1, phone.writes.size)
     }
 
     // ---- the tool list itself ----------------------------------------------
