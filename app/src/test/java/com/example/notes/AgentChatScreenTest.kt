@@ -219,7 +219,7 @@ class AgentChatScreenTest {
         // A bare tool name beside a Close button reads as a verb you could press. Saying "call" makes
         // it a label, and a label cannot be mistaken for a control.
         val door = ScriptedDoor(
-            Reply("", listOf(call("write", """{"path":"shapes"}"""))),
+            Reply("", listOf(call("write", """{"path":"shapes","text":""}"""))),
             Reply("Made the folder."),
         )
         chat(door)
@@ -241,9 +241,9 @@ class AgentChatScreenTest {
         compose.onAllNodesWithContentDescription("Read this message fullscreen").onLast().performClick()
         compose.waitForIdle()
 
-        // **The words, not the raw tool name.** `create` on its own is the question the report
-        // asked; "Agent · call · create" is the answer.
-        compose.onNodeWithText("Agent · call · create").assertExists()
+        // **The words, not the raw tool name.** A bare tool name on its own is the question the
+        // report asked; "Agent · call · write" is the answer.
+        compose.onNodeWithText("Agent · call · write").assertExists()
         compose.onNodeWithText("Agent · agent").assertDoesNotExist()
     }
 
@@ -257,7 +257,7 @@ class AgentChatScreenTest {
         // still be on that page. Before the fix it was on the last one again, because fullscreen's
         // `at` was a local that died with it.
         val door = ScriptedDoor(
-            Reply("", listOf(call("write", """{"path":"shapes"}"""))),
+            Reply("", listOf(call("write", """{"path":"shapes","text":""}"""))),
             Reply("Made the folder."),
         )
         chat(door)
@@ -279,7 +279,7 @@ class AgentChatScreenTest {
         // **Turn back inside the fullscreen view**, which is the gesture the report is about.
         compose.onAllNodesWithContentDescription("Previous page").onLast().performClick()
         compose.waitForIdle()
-        compose.onNodeWithText("Agent · call · create").assertExists()
+        compose.onNodeWithText("Agent · call · write").assertExists()
 
         // Close, and the bubble is on the call's page — not snapped back to the words.
         compose.onNodeWithText("Close").performClick()
@@ -291,7 +291,7 @@ class AgentChatScreenTest {
         // And opening fullscreen again lands on the same page rather than resetting.
         compose.onAllNodesWithContentDescription("Read this message fullscreen").onLast().performClick()
         compose.waitForIdle()
-        compose.onNodeWithText("Agent · call · create").assertExists()
+        compose.onNodeWithText("Agent · call · write").assertExists()
     }
 
     @Test
