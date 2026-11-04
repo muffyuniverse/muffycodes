@@ -106,6 +106,18 @@ class AgentRunner(
     private val githubToken: () -> String? = { null },
     /** The phone's Downloads folder. See `AgentTools.phone`. */
     private val phone: PhoneDownloads = PhoneDownloads.NONE,
+    /**
+     * Where a vector comes from. See `Agent.embedder` — injected for the same reason, and refused by
+     * default so a runner built without a decision cannot spend a key on an embedding.
+     */
+    private val embedder: Embedder = Embedder.NONE,
+    /**
+     * The account's three model choices, read per call. See `Agent.models`.
+     *
+     * The chat model is already read that way ([model]); these are the other two rows of the same
+     * file, and reading them from a second place would be the moment they could disagree.
+     */
+    private val models: () -> ModelConfig? = { null },
 ) {
 
     private val sessions = AgentSessions(ws.accountDir)
@@ -387,6 +399,8 @@ class AgentRunner(
                     github = github,
                     githubToken = githubToken,
                     phone = phone,
+                    embedder = embedder,
+                    models = models,
                 )
                 if (waking == null) {
                     agent.warm() to log.rows()

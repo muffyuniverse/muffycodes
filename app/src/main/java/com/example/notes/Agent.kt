@@ -221,6 +221,21 @@ class Agent(
      * a courtesy that stops a blind model wasting a turn, never a gate on the capability itself.
      */
     private val modelSees: (() -> Boolean)? = null,
+    /**
+     * Where a vector comes from, and whether a hit can be reordered.
+     *
+     * **Injected like the browser and the fetcher**, and the default refuses — so an agent built
+     * without a decision cannot spend a person's key on an embedding it never asked for.
+     */
+    private val embedder: Embedder = Embedder.NONE,
+    /**
+     * The account's three model choices, **read per call**.
+     *
+     * Per call for the same reason the chat model is: a person who chooses an embedding model while
+     * the agent is idle means the next turn, not the next launch. Null is "this app has read no
+     * config", which [SemanticSearch] turns into the refusal that names the setting.
+     */
+    private val models: () -> ModelConfig? = { null },
 ) {
 
     private val tools = AgentTools(
@@ -231,6 +246,15 @@ class Agent(
         fetchAllowed = fetchAllowed,
         github = github, githubToken = githubToken, phone = phone,
         modelSees = modelSees,
+        // **One engine per agent, because one agent is one project.** That is also the extent of a
+        // semantic search — see [SemanticSearch] — so the two facts are the same fact here.
+        semantic = SemanticSearch(
+            ws = ws,
+            project = project,
+            embedder = embedder,
+            embedding = { models()?.embedding },
+            rerank = { models()?.rerank },
+        ),
     )
 
     /**

@@ -58,6 +58,17 @@ class AgentTools(
      */
     private val phone: PhoneDownloads = PhoneDownloads.NONE,
     /**
+     * Search by meaning, or null when this tool set was built without a way to reach a model.
+     *
+     * **Injected rather than constructed here**, for the same reason [browser] and [phone] are: it
+     * needs an `Embedder`, which needs a key, and a tool set built in a test must not need one. The
+     * default is null, so a tool set built without a decision refuses `mode: "semantic"` in words.
+     *
+     * **One per project, because the index is per project** — the operator's decision, and the reason
+     * [SemanticSearch] takes the project rather than walking the account.
+     */
+    private val semantic: SemanticSearch? = null,
+    /**
      * The browser, or `Browser.NONE` when the agent may not browse.
      *
      * **Injected rather than made here**, for the same reason [bg] is: a test must be able to say
@@ -539,10 +550,16 @@ class AgentTools(
                     "answer line is `path:line: the text` with a count of further matches in that " +
                     "file. One row per **path**, because `paths` counts paths. " +
                     "\n\n" +
-                    "**`mode` says what `query` means**, and is `regex` (the default) or `semantic`. " +
-                    "Semantic search is not built yet: asking for it is refused and names the " +
-                    "setting, rather than quietly answering with a text search you did not ask for. " +
-                    "`mode` without `query` is refused, because there is nothing to interpret. " +
+                    "**`mode` says what `query` means**, and is `regex` (the default) or " +
+                    "`semantic`. `regex` matches the words; `semantic` matches what the text is " +
+                    "about, and answers one row per path with a score, `path:line: text  [0.87]`. " +
+                    "**Semantic search is per project**: it reads an index of THIS project only, a " +
+                    "`scope` naming another project is refused and says so, and the answer always " +
+                    "ends with the folder that was searched. It needs an embedding model chosen in " +
+                    "Settings; with none chosen it is refused and names the setting. There is no " +
+                    "text-search fallback, because an answer nobody asked for reads like the one " +
+                    "they did. `mode` without `query` is refused, and `history` is not indexed, so " +
+                    "`history` with `semantic` is refused rather than half-answered. " +
                     "\n\n" +
                     "**`history: true` also searches every saved version** of this project's files " +
                     "and answers `path@sha7` — which **`read` takes directly**, so a hit is usable " +
@@ -1179,17 +1196,6 @@ class AgentTools(
                     "text itself; `semantic` matches what it is about.",
             )
         }
-        // **Semantic search is refused rather than faked**, which is the operator's rule: no regex
-        // fallback, because a text search nobody asked for answers a question nobody asked and the
-        // hedge makes a model believe it searched. The refusal names the setting so a person can
-        // act on it instead of guessing.
-        if (mode == "semantic") {
-            return refusal(
-                "Semantic search is not built yet: this account has no index and no embedding model " +
-                    "chosen. Use `mode: \"regex\"` (or leave `mode` out) to search the text itself, " +
-                    "and tell the person if you needed meaning rather than wording.",
-            )
-        }
         val depth = count(args, "depth", SEARCH_DEPTH)
             .getOrElse { return refusal(it.message ?: "that depth cannot be used") }
             .coerceIn(1, SEARCH_DEPTH_MOST)
@@ -1206,6 +1212,52 @@ class AgentTools(
         val most = count(args, "paths", if (query == null && !history) MOST_PATHS else DEFAULT_PATHS)
             .getOrElse { return refusal(it.message ?: "that count cannot be used") }
             .coerceIn(1, MOST_PATHS)
+
+        // **`mode: "semantic"` is a different engine and a smaller world**, so it is answered before
+        // any of the walking below. Three rules belong to it, and each is a refusal rather than a
+        // narrowing, because a model that asked for one thing and got another learns nothing:
+        //
+        // 1. **It is per project** — the operator's decision. The index is one project's, so a search
+        //    that answered across projects would be reading vectors from a space it cannot score.
+        // 2. **A `scope` that names another project is refused by name.** Answering "nothing matches"
+        //    about a folder it never looked in is the silent no-op this app treats as a defect.
+        // 3. **`history` is not indexed yet.** Only current text is, so accepting the flag would
+        //    answer a narrower question under a wider name.
+        if (mode == "semantic") {
+            // **`mode` without `query` is already refused above**, so this is the one place the
+            // pattern is known to exist.
+            val asked = query ?: return refusal("`mode: \"semantic\"` needs a `query` to search for.")
+            if (history) {
+                return refusal(
+                    "`history` is not indexed — only the current text of each file is. Use " +
+                        "`mode: \"regex\"` with `history: true` to search every saved version, or " +
+                        "leave `history` out to search what the files say now.",
+                )
+            }
+            // **A folder in the account, not `projectNames()`.** That asks which folders are
+            // repositories, and a folder that has never been committed to is still a place this index
+            // does not hold — refusing it is right, and missing it because it has no `.git` would
+            // refuse it later with "nothing matches", which is the answer this check exists to avoid.
+            val elsewhere = (ws.accountDir.listFiles() ?: emptyArray())
+                .filter { it.isDirectory && !ws.isHidden(it.name) && it.name != project }
+                .map { it.name }
+                .firstOrNull { inScope("$it/", scope) }
+            if (elsewhere != null) {
+                return refusal(
+                    "`scope` matches \"$elsewhere/\", which is not inside \"$project/\". " +
+                        "Semantic search is per project: its index is \"$project/\"'s, so it can " +
+                        "only look inside that folder. Leave `scope` out to search all of this " +
+                        "project, or narrow it to a folder in it.",
+                )
+            }
+            val engine = semantic ?: return refusal(SemanticSearch.NO_MODEL)
+            // **`Deadline` is not caught here**, so a search that outlasts the wait reports the
+            // tool's own sentence with the limit it passed, the same as every other command.
+            return engine.answer(scope, asked.pattern, most, depth, deadline).fold(
+                onSuccess = { success(it) },
+                onFailure = { refusal(it.message ?: "the search could not be answered") },
+            )
+        }
 
         val state = SearchState(most)
         val found = mutableListOf<String>()

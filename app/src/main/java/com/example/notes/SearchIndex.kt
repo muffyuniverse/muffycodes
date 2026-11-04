@@ -35,7 +35,23 @@ class SearchIndex private constructor(
     private val db: SQLiteDatabase,
     /** Where the database is, for a test that wants to measure or delete it. */
     val file: File,
-) {
+) : java.io.Closeable {
+
+    /**
+     * Hands the handle back.
+     *
+     * **A tool that opened it must close it**, because the database is a lock on a file: a search that
+     * left one open per call would end with a project that cannot be deleted while the app is running,
+     * and the failure would look like a permissions problem months later.
+     */
+    override fun close() {
+        try {
+            db.close()
+        } catch (e: Throwable) {
+            // Already closed, or the platform refused. There is no useful recovery at this point and
+            // nothing is lost by it: the data is on disk and the next open sees it.
+        }
+    }
 
     /** What the index was built with, or null when it holds nothing yet. */
     fun builtWith(): Built? {
@@ -80,9 +96,9 @@ class SearchIndex private constructor(
     /**
      * Records the chunks of one file at one version, **embedding only what is new.**
      *
-     * [vectors] is asked for the hashes that are not already stored, and only those are written — so
-     * re-indexing a file whose text has not changed costs one query and no embedding at all. That is
-     * the same fact as the hash, used from the other side.
+     * [vectorFor] is asked for **the text** of the chunks that are not already stored, one vector
+     * each, and only those are written — so re-indexing a file whose text has not changed costs one
+     * query and no embedding at all. That is the same fact as the hash, used from the other side.
      *
      * [commit] is `""` for the current file and a sha for a version. Both live in the same table,
      * which is what lets one search answer about either.
@@ -101,13 +117,20 @@ class SearchIndex private constructor(
         )
         // **Which hashes are already in the vector table.** A hash is the text, so a chunk whose
         // text is stored is a chunk that needs no embedding — from any file, at any version.
+        //
+        // **One entry per distinct text**, because the same paragraph twice in one file is one
+        // vector: the second copy is a row pointing at the same hash, not a second bill.
         val missing = mutableListOf<Chunker.Chunk>()
-        val present = mutableSetOf<String>()
+        val seen = mutableSetOf<String>()
         for (chunk in chunks) {
-            if (hasVector(chunk.hash)) present.add(chunk.hash) else missing.add(chunk)
+            if (!seen.add(chunk.hash)) continue
+            if (!hasVector(chunk.hash)) missing.add(chunk)
         }
         if (missing.isNotEmpty()) {
-            val got = vectorFor(missing.map { it.hash }).getOrElse { return Result.failure(it) }
+            // **The text, not the hash.** This callback used to receive content addresses, which
+            // cannot be embedded: its first caller would have had to keep a hash-to-text map to undo
+            // the answer it was given. The hashes are [missing]'s job, and the caller's is the model.
+            val got = vectorFor(missing.map { it.text }).getOrElse { return Result.failure(it) }
             if (got.size != missing.size) {
                 return Result.failure(
                     IllegalStateException(
@@ -248,11 +271,68 @@ class SearchIndex private constructor(
         if (c.moveToFirst()) c.getInt(0) else 0
     }
 
+    // ---- what the walk has seen -------------------------------------------
+    //
+    // **A row per file, and the reason it is a table rather than a counter.** The question the note
+    // on an answer asks is "how many files are not in this index", and the only party that can answer
+    // it honestly is the walk: a file written while the app was closed was never counted by anything,
+    // so a counter would report zero behind while half the project was missing. The walk leaves a
+    // row for every file it met, and the count is a `SELECT`.
+
+    /**
+     * Records what the walk did with one file.
+     *
+     * [state] is [INDEXED] or [FAILED]; the second carries [error], because "this file is not in the
+     * index" and "this file is not in the index *and here is why*" are different answers to a person
+     * wondering why their search misses.
+     */
+    fun note(path: String, mtime: Long, state: Int, error: String? = null) {
+        db.insertWithOnConflict(
+            "files",
+            null,
+            ContentValues().apply {
+                put("path", path)
+                put("mtime", mtime)
+                put("state", state)
+                if (error == null) putNull("error") else put("error", error)
+            },
+            SQLiteDatabase.CONFLICT_REPLACE,
+        )
+    }
+
+    /**
+     * The modification time this index last **indexed** [path] at, or null.
+     *
+     * **Null for a file that failed**, deliberately: a file whose last attempt failed is not up to
+     * date, so the next pass has to try again rather than compare times and skip it. A failed file
+     * that was never retried is a file that stays missing with no way to notice.
+     */
+    fun indexedAt(path: String): Long? =
+        db.rawQuery("SELECT mtime FROM files WHERE path = ? AND state = 0", arrayOf(path)).use { c ->
+            if (c.moveToFirst()) c.getLong(0) else null
+        }
+
+    /** How many files the walk met and could not index, with the first reason it gave. */
+    fun failed(): Pair<Int, String?> = db.rawQuery(
+        "SELECT COUNT(*), MIN(error) FROM files WHERE state = 1",
+        null,
+    ).use { c ->
+        if (c.moveToFirst()) c.getInt(0) to (if (c.isNull(1)) null else c.getString(1)) else 0 to null
+    }
+
+    /** How many files this index holds text for. */
+    fun files(): Int = db.rawQuery("SELECT COUNT(*) FROM files", null).use { c ->
+        if (c.moveToFirst()) c.getInt(0) else 0
+    }
+
     /** Forgets one file at one version, and any vector no longer referenced. */
     fun forget(path: String, commit: String = "") {
         db.beginTransaction()
         try {
             db.delete("chunks", "path = ? AND version = ?", arrayOf(path, commit))
+            // **The walk's row goes with the text**, or the next pass would compare a time against
+            // an index that no longer holds the file and answer "up to date" about nothing.
+            if (commit.isEmpty()) db.delete("files", "path = ?", arrayOf(path))
             // **A vector nothing points at is dead weight**, and collecting it here rather than on a
             // timer keeps the table honest: the count of vectors means "distinct text indexed".
             db.execSQL("DELETE FROM vectors WHERE hash NOT IN (SELECT hash FROM chunks)")
@@ -268,6 +348,7 @@ class SearchIndex private constructor(
         try {
             db.delete("chunks", null, null)
             db.delete("vectors", null, null)
+            db.delete("files", null, null)
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
@@ -314,6 +395,12 @@ class SearchIndex private constructor(
     companion object {
         /** The database file's name, inside a project's `agent/`. */
         const val FILE = "search.db"
+
+        /** [note]'s `state` for a file whose text is in the index. */
+        const val INDEXED = 0
+
+        /** [note]'s `state` for a file the walk tried and could not take; the reason travels with it. */
+        const val FAILED = 1
 
         /**
          * Opens (or creates) the index for one project.
@@ -367,6 +454,21 @@ class SearchIndex private constructor(
                   id      INTEGER PRIMARY KEY,
                   model   TEXT NOT NULL,
                   dims    INTEGER NOT NULL
+                )
+                """.trimIndent(),
+            )
+            // **What the walk did with each file, so "how many are behind" is a query.** A counter
+            // cannot answer it: a file written while the app was closed was never told to anything,
+            // so the only honest source is the row the walk leaves behind. `mtime` is the file's own
+            // number, which is what makes a second pass cheap — an unchanged file is one read of a
+            // directory entry rather than one embedding.
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS files(
+                  path   TEXT PRIMARY KEY,
+                  mtime  INTEGER NOT NULL,
+                  state  INTEGER NOT NULL,
+                  error  TEXT
                 )
                 """.trimIndent(),
             )

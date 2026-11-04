@@ -376,18 +376,51 @@ class SearchTest {
     // ---- `mode`: what the query means --------------------------------------
 
     @Test
-    fun `mode semantic is refused, and says semantic search is not built`() {
+    fun `mode semantic without a model is refused, and names the setting`() {
         // **No regex fallback.** The operator's rule: a failure is a reason, not a text search
         // nobody asked for — because a hedge makes a model believe it searched by meaning when it
         // searched by wording, and it then acts on an answer to a different question.
+        //
+        // **And no silent nothing when the app has no engine at all.** A tool set built without one —
+        // this test's — must say which setting is missing rather than answer "nothing matches",
+        // which would read as an empty project.
         write("shopping", "milk.txt", "milk is bought on Saturdays\n")
 
         val answer = tools().run(call("""{"query":"dairy","mode":"semantic"}"""))
 
         assertTrue("it is a refusal: $answer", answer.startsWith("1\n"))
-        assertTrue("and names what is missing: $answer", answer.contains("not built"))
-        assertTrue("and offers the mode that works: $answer", answer.contains("regex"))
+        assertTrue("and names what is missing: $answer", answer.contains("Embedding model"))
         assertFalse("and answers nothing at all: $answer", answer.contains("milk.txt"))
+    }
+
+    @Test
+    fun `a semantic scope that names another project is refused by name`() {
+        // **The operator's boundary, refused rather than narrowed**: *"account wide semantic search is
+        // forbidden and scope must be project and lower"*. Answering "nothing matches" about a folder
+        // the engine never looked in is the silent no-op this app treats as a defect, so the refusal
+        // names the project and the folder that can be searched.
+        write("groceries", "list.txt", "milk\n")
+
+        val answer = tools().run(call("""{"scope":"groceries/","query":"milk","mode":"semantic"}"""))
+
+        assertTrue("it is a refusal: $answer", answer.startsWith("1\n"))
+        assertTrue("naming the project it refused: $answer", answer.contains("groceries"))
+        assertTrue("and the one it can search: $answer", answer.contains("shopping/"))
+        assertTrue("and the rule: $answer", answer.contains("per project"))
+    }
+
+    @Test
+    fun `semantic history is refused, because versions are not indexed`() {
+        // **Half an answer under a wider name is worse than a refusal.** `history` says "and every
+        // saved version too"; the index holds only the current text, so accepting the flag would
+        // answer a narrower question while looking like the wider one.
+        val answer = tools().run(
+            call("""{"query":"milk","mode":"semantic","history":true}"""),
+        )
+
+        assertTrue("it is a refusal: $answer", answer.startsWith("1\n"))
+        assertTrue("naming what is missing: $answer", answer.contains("indexed"))
+        assertTrue("and the mode that can: $answer", answer.contains("regex"))
     }
 
     @Test

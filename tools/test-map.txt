@@ -97,6 +97,7 @@ ArchiveTest app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/
 FetchTest app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Fetcher.kt app/src/main/java/com/example/notes/Workspace.kt
 ChunkerTest app/src/main/java/com/example/notes/Chunker.kt
 SearchIndexTest app/src/main/java/com/example/notes/SearchIndex.kt app/src/main/java/com/example/notes/Chunker.kt app/src/main/java/com/example/notes/Embedder.kt
+SemanticSearchTest app/src/main/java/com/example/notes/SemanticSearch.kt app/src/main/java/com/example/notes/SearchIndex.kt app/src/main/java/com/example/notes/Chunker.kt app/src/main/java/com/example/notes/Embedder.kt
 McpTest app/src/main/java/com/example/notes/Mcp.kt app/src/main/java/com/example/notes/CredentialStore.kt
 McpTestTools app/src/main/java/com/example/notes/Mcp.kt app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/CredentialStore.kt app/src/main/java/com/example/notes/Workspace.kt
 ScannerTest app/src/main/java/com/example/notes/Scanner.kt app/src/main/java/com/example/notes/Chunker.kt

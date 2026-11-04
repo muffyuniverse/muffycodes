@@ -305,6 +305,85 @@ class SearchIndexTest {
         assertEquals(0.0, SearchIndex.cosine(floatArrayOf(1f, 2f), floatArrayOf(1f, 2f, 3f)), 1e-6)
     }
 
+    // ---- what the walk has seen --------------------------------------------
+
+    @Test
+    fun `how many files are behind is a query, not a counter`() {
+        // **The reason it is a table.** A file written while the app was closed was never told to
+        // anything, so no counter can answer "how many are not in this index" — only the row the walk
+        // leaves behind can. A file whose attempt **failed** is not "indexed at that time" either:
+        // answering its time would make the next pass skip it for ever.
+        built()
+        index.note("a.txt", 1_000L, SearchIndex.INDEXED)
+        index.note("b.txt", 2_000L, SearchIndex.FAILED, "it is not text")
+
+        assertEquals("the indexed file's time", 1_000L, index.indexedAt("a.txt"))
+        assertNull("a failed file has no time to compare", index.indexedAt("b.txt"))
+        assertNull("and one never seen has none either", index.indexedAt("c.txt"))
+        assertEquals("both files were met", 2, index.files())
+        val (count, why) = index.failed()
+        assertEquals("one failed", 1, count)
+        assertEquals("with its reason", "it is not text", why)
+    }
+
+    @Test
+    fun `forgetting a file forgets the walk's row with it`() {
+        // **Or the next pass compares a time against an index that no longer holds the file** and
+        // answers "up to date" about nothing.
+        built()
+        index.put("a.txt", "", Chunker.split("milk"), vectors()).getOrThrow()
+        index.note("a.txt", 1_000L, SearchIndex.INDEXED)
+
+        index.forget("a.txt")
+
+        assertNull("no time is claimed", index.indexedAt("a.txt"))
+        assertEquals("and no file is listed", 0, index.files())
+        assertEquals("nothing is left to score", 0, index.size())
+    }
+
+    @Test
+    fun `the embedder is asked for the text, not for its hash`() {
+        // **The contract the first caller depends on.** The callback used to receive content
+        // addresses, which cannot be embedded: a caller would have had to keep a hash-to-text map to
+        // undo the answer it was handed. The hashes are the index's business, and the text is the
+        // model's.
+        built()
+        val chunks = Chunker.split("the timeout is 90 seconds")
+        val asked = mutableListOf<String>()
+
+        index.put("a.txt", "", chunks) { texts ->
+            asked += texts
+            Result.success(texts.map { vector(4, 1f) })
+        }.getOrThrow()
+
+        assertEquals("one chunk", 1, asked.size)
+        assertEquals("the text itself", chunks.single().text, asked.single())
+    }
+
+    @Test
+    fun `the same paragraph twice in one file is embedded once`() {
+        // **A hash is the text, so a repeated paragraph is one vector.** A file that says the same
+        // thing in two places (a heading repeated under two sections) must not pay twice — the two
+        // rows point at one hash. **Two different lines, one text**, which is the shape a file can
+        // really produce: the same line number twice is not a file, and the primary key refuses it.
+        built()
+        val first = Chunker.Chunk("milk", start = 1, end = 1)
+        val again = Chunker.Chunk("milk", start = 9, end = 9)
+        var requests = 0
+        val asked = mutableListOf<String>()
+
+        index.put("a.txt", "", listOf(first, again)) { texts ->
+            requests++
+            asked += texts
+            Result.success(texts.map { vector(4, 1f) })
+        }.getOrThrow()
+
+        assertEquals("one request", 1, requests)
+        assertEquals("for one text", 1, asked.size)
+        assertEquals("and two rows pointing at it", 2, index.size())
+        assertEquals("but one vector", 1, index.vectors())
+    }
+
     // ---- what the file is --------------------------------------------------
 
     @Test

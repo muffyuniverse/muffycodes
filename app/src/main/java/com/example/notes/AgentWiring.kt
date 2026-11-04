@@ -114,6 +114,17 @@ object AgentWiring {
             // so a test can be a store without a keystore.
             mcp = Mcp.http(),
             credentials = credentials,
+            // **The real embedder, over the same key the chat model uses.** One key per account is the
+            // operator's rule, and a second key for vectors would be a second thing to rotate, leak or
+            // forget. Reading it per call means pasting a new key reaches the next search, not the next
+            // launch.
+            embedder = Embedder.openRouter(
+                key = { credentials.activeLogin?.let { credentials.modelKey(it) } },
+            ),
+            // **The whole config, read per call, not just the two rows.** `SemanticSearch` asks it for
+            // its `embedding` and `rerank` at the moment of the search, so a person who changes either
+            // while the agent is idle is answered by the choice in force.
+            models = { ModelConfigFile.load(ws.accountDir).getOrNull() },
             // **The real scanner, and the account's own threshold.** Read per call, like the other limits: a
             // person who moves the number while an agent is idle means the next page read.
             // **The account's own answer, read per call.** A threshold of zero and the switch being off are

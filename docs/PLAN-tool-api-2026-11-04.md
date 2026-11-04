@@ -201,6 +201,27 @@ a model believe it searched when it did not, so:
 - **Terminology**: the operator's own word is `mode`, and it is one key with two values rather than two
   mutually-exclusive keys — the wrong value is then a refusal naming both, not a missing key.
 
+### The operator's decision: semantic search is per project
+
+> *"semantic search is per project, make it this way, so that account wide semantic search is forbidden and
+> scope must be project and lower."* — 2026-11-04
+
+This answered the one question the plan could not: **where the index lives.** It had two candidate homes —
+one database per project (`agent/search.db`, which `SearchIndex.open` already took) or one for the account.
+The operator chose per project, so:
+
+| | |
+|---|---|
+| **index** | one `SearchIndex` per project, in that project's `agent/` — the existing `open(projectDir)` shape, so the decision cost nothing to place |
+| **extent** | `mode: "semantic"` walks and answers inside the current project only, by construction: the walk root is the project and anything whose canonical path leaves it is skipped |
+| **`scope`** | still a pattern over the **account-relative path** (one spelling in both modes), but the search is bounded by the project — and a `scope` that names **another folder in the account is refused by name**, because answering "nothing matches" about a folder never looked in is the silent no-op this app treats as a defect |
+| **the answer** | ends with `shopping/ only — semantic search is per project`, so the limit is visible rather than inferable |
+| **`history`** | refused with `semantic`: versions are not indexed, and half an answer under a wider name is worse than a refusal |
+
+**Why per project is the right shape and not just the chosen one:** a vector space is only meaningful against
+the vectors it was built with. Per account, every project's saves would write to one database, and one
+project's re-index would hold the write lock for the whole account's search.
+
 ### What already exists (verified, not assumed)
 
 | piece | state |
@@ -226,28 +247,25 @@ Measured live: **40 embedding models, 12 rerank models, rerank all priced 0.** C
 itself, with no error. Chunking makes that impossible by construction, and costs **1.25×** (the overlap), not
 the 10× the old argument assumed.
 
-### The work, in order
+### The work, in order — **1–6 BUILT**
 
-1. **`scope` replaces `path` + `in`.** One regex over the relative path, so a folder, a file and a pattern
-   are the same kind of filter. `tree`'s `depth` and `name`-as-listing move here.
-2. **`history` becomes a third axis** (it already exists in `search` and is not yet in `tree`), so `history`
-   the command is deleted and every one of its cases is a `search` with `scope` narrow enough.
-3. **`paths` counts paths in both modes**, and a content match answers one row per path.
-4. **The write path**: on save, chunk and embed changed chunks in the background; session-log status `0`/`1`.
-   `SearchIndex.put` already skips chunks whose hash is present and reports how many, so a no-op save is
-   cheap.
-5. **The unindexed count, from the database — not a counter.** A file added on disk while the app was
-   closed was never counted by anything, so no counter can answer "how many are behind". The shape:
-   - `pending(path, mtime, state, error)` — every file the walk has seen; `state` is `0` indexed,
-     `1` failed, `NULL` not attempted.
-   - The count is a query: `state IS NULL OR state = 1`, plus files whose `mtime` is newer than their
-     indexed row.
-   - It appears as a **note on a successful answer** ("12 files are not indexed yet, so this may be
-     incomplete"), the same shape as the existing "stopped at 10 paths; narrow `scope` for the rest".
-6. **The read path**: embed the query → score → rerank the top ~30 → answer path + line. **No regex
-   fallback** (the operator's call): a failure is `1` + a reason, a timeout is `Deadline`, an answer too big
-   is filed to `agent/background_results/`. The one honest case is a model not chosen yet, and that is a
-   refusal naming the setting.
+1. **`scope` replaces `path` + `in`.** ✅
+2. **`history` becomes a third axis.** ✅ (and refused with `semantic`, which is the operator's boundary)
+3. **`paths` counts paths in both modes.** ✅
+4. **The write path.** ✅ **but not where the plan said.** The plan said "on save, in the background". There
+   is no single save: the editor writes, the agent writes, a clone writes, a restore writes, and a save hook
+   would have to exist in each — with the one that was missed being a project whose search silently misses
+   its newest work. Instead the **walk runs inside the search**, with a modification time per file in
+   `files(path, mtime, state, error)`, so anything that ever wrote a file is caught the next time anybody
+   searches, and an unchanged file costs one directory entry and no request. It is bounded by the same
+   `Deadline` as every other command: a pass that runs out of time answers with what it has and says what is
+   left, and asking again carries on from there because the rows are already recorded.
+5. **The unindexed count, from the database — not a counter.** ✅ `files(path, mtime, state, error)`; the
+   count is a query, the note appears on the answer, and a **failed** file has no `indexedAt`, so the next
+   pass retries it instead of skipping it for ever.
+6. **The read path.** ✅ embed → `nearest` → **drop rows whose cosine is not positive** → rerank the top
+   `RERANK_DEPTH = 30` → answer `path:line: text  [0.87]`. No regex fallback. A reranker that is down is a
+   **note**, not a failure: vector order is still a meaning search, unlike a text search standing in for one.
 
 ### What the build found that the design did not foresee
 

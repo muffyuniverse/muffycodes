@@ -1,0 +1,519 @@
+package com.example.notes
+
+import java.io.File
+
+/**
+ * **Search by meaning, inside one project.**
+ *
+ * ## Why per project, and not per account
+ *
+ * The operator's decision (2026-11-04): *"semantic search is per project, make it this way, so that
+ * account wide semantic search is forbidden and scope must be project and lower."*
+ *
+ * The reason is the index, not taste. A vector space is only meaningful against the vectors it was
+ * built with: one model, one dimension, one table. Per account, every project's text would share one
+ * database that every project's save has to write to, and a single project's re-index would take the
+ * write lock on the whole account's search. Per project, the unit that changes is the unit that is
+ * indexed, and [SearchIndex.open] already takes a project folder — the decision cost nothing to place.
+ *
+ * **So `mode: "semantic"` never reaches outside the project the agent is working in**, which two
+ * things enforce and one says out loud:
+ *
+ * - the walk starts at the project and refuses anything whose canonical path leaves it, so a link
+ *   cannot carry a search into a sibling;
+ * - [AgentTools] refuses a `scope` that names another project, by name, rather than answering
+ *   "nothing matches" about a folder it never looked in;
+ * - every answer ends with the folder that was searched, because a limit nobody can see is a limit
+ *   somebody will mistake for an empty corpus.
+ *
+ * ## What it does, in order
+ *
+ * 1. **Keep the index current** — walk the project, and for each text file whose modification time is
+ *    not the one already indexed, chunk and embed it. Unchanged files cost one directory entry and no
+ *    request, which is what makes this cheap enough to run inside a search.
+ * 2. **Embed the query**, and score it against every stored chunk.
+ * 3. **Rerank the top [RERANK_DEPTH]**, because a vector compares a paragraph with a question without
+ *    knowing what the question is.
+ * 4. **Answer one row per path** — the same shape `search` answers in text mode, so a hit is read with
+ *    the same `read {path, from}` as any other line number.
+ *
+ * ## Why the index is built here, in the search, rather than on save
+ *
+ * Because there is no other place that runs for every way a file changes. The editor writes, the agent
+ * writes, a clone writes, a restore writes; a save hook would have to be added to each, and the one
+ * that was missed would be a project whose search silently misses its newest work. Here it is one
+ * pass over the tree with a modification time per file, so anything that ever wrote a file is caught
+ * the next time anybody searches. The cost is paid once per project per change, and it is bounded by
+ * the same [Deadline] as every other command: a search that runs out of time answers with what is
+ * indexed and says what is left, which is true and actionable, where a search that refused would
+ * leave a person with nothing.
+ *
+ * **A file the walk could not take is recorded, not skipped quietly** — with its reason — and the
+ * count travels in the answer. That is the operator's rule for every other tool here: a failure says
+ * what happened.
+ */
+class SemanticSearch(
+    private val ws: Workspace,
+    /** The project this agent is working in. **The whole of the search's extent.** */
+    private val project: String,
+    private val embedder: Embedder,
+    /** The chosen embedding model, read per call: a person may pick one while the agent is idle. */
+    private val embedding: () -> PickedModel? = { null },
+    /** The chosen rerank model, read per call, or null when the person has not chosen one. */
+    private val rerank: () -> PickedModel? = { null },
+) {
+
+    /**
+     * Rows for what [query] is about, inside this project.
+     *
+     * @return the body of the answer, or the reason it could not be answered. **A failure is a
+     * sentence**, never a text search standing in for a meaning search: the operator's rule, and the
+     * reason is that a substitute answers a question nobody asked while looking like the one asked.
+     */
+    fun answer(
+        scope: Regex?,
+        query: String,
+        paths: Int,
+        depth: Int,
+        deadline: Deadline,
+    ): Result<String> {
+        val pick = embedding() ?: return Result.failure(IllegalStateException(NO_MODEL))
+        val dims = pick.dimensions?.takeIf { it > 0 }
+            ?: return Result.failure(
+                IllegalStateException(
+                    "\"${pick.model}\" is chosen as the embedding model but no dimension is, and " +
+                        "an index has to be one size. Open Settings, choose the row called " +
+                        "\"Embedding model\", and pick its dimensions.",
+                ),
+            )
+        val root = ws.projectDir(project)
+        val index = try {
+            SearchIndex.open(root)
+        } catch (e: Throwable) {
+            return Result.failure(
+                IllegalStateException(
+                    "The index for \"$project\" could not be opened, so nothing was searched: " +
+                        "${reason(e)}",
+                ),
+            )
+        }
+        return try {
+            index.declare(pick.model, dims).getOrElse { return Result.failure(it) }
+            val caught = catchUp(index, root, pick, dims, deadline)
+            search(index, root, scope, query, paths, depth, pick, dims, caught, deadline)
+        } finally {
+            index.close()
+        }
+    }
+
+    // ---- 1. keeping the index current --------------------------------------
+
+    /**
+     * What one pass over the project did, for the note on the answer.
+     *
+     * **`left` is arithmetic rather than a second walk**: the files were listed before any of them
+     * were read, so what was not reached is a subtraction and not a guess.
+     */
+    private data class Caught(
+        val total: Int,
+        val done: Int,
+        val unchanged: Int,
+        val failed: Int,
+        /** Why the pass stopped early, or null when it finished. */
+        val stopped: String?,
+    ) {
+        val left: Int get() = (total - done - unchanged - failed).coerceAtLeast(0)
+    }
+
+    private fun catchUp(
+        index: SearchIndex,
+        root: File,
+        pick: PickedModel,
+        dims: Int,
+        deadline: Deadline,
+    ): Caught {
+        val files = mutableListOf<File>()
+        var stopped: String? = null
+        // **One canonical root, used for both halves.** `relativeTo` compares paths textually, so a
+        // root with a link in it and a file without one would disagree about their own relationship —
+        // the file would look like it was outside the project it was just listed from.
+        val canon = try {
+            root.canonicalFile
+        } catch (e: Throwable) {
+            root.absoluteFile
+        }
+        // **The list first, the reads after.** Listing is directory entries and costs nothing next to
+        // an embedding request, and knowing the whole list before touching any file is what lets
+        // "how many are left" be a subtraction instead of a wish.
+        try {
+            gather(root, canon, 0, files, deadline)
+        } catch (e: StoppedException) {
+            stopped = "the time limit ran out while listing the project"
+        }
+        var done = 0
+        var unchanged = 0
+        var failed = 0
+        for (file in files) {
+            if (stopped != null) break
+            val rel = relTo(canon, file) ?: continue
+            val mtime = file.lastModified()
+            // **The whole of why this is affordable.** An unchanged file is one comparison.
+            if (index.indexedAt(rel) == mtime) {
+                unchanged++
+                continue
+            }
+            try {
+                deadline.check(TOOL)
+            } catch (e: StoppedException) {
+                stopped = "the time limit ran out while indexing"
+                break
+            }
+            val text = try {
+                file.readText()
+            } catch (e: Throwable) {
+                index.note(rel, mtime, SearchIndex.FAILED, reason(e))
+                failed++
+                continue
+            }
+            // **A file too big to chunk is refused, not cut.** Half a file in the index is a search
+            // that answers about text nobody wrote, and the note says which file and why.
+            if (text.length > MAX_CHARS) {
+                index.note(
+                    rel,
+                    mtime,
+                    SearchIndex.FAILED,
+                    "it is ${text.length / 1024} kB and this index takes files up to ${MAX_CHARS / 1024} kB",
+                )
+                failed++
+                continue
+            }
+            val chunks = Chunker.split(text)
+            val put = try {
+                index.put(rel, "", chunks) { texts -> embedAll(texts, pick, dims, deadline) }
+            } catch (e: StoppedException) {
+                stopped = "the time limit ran out while embedding"
+                break
+            } catch (e: Throwable) {
+                Result.failure(e)
+            }
+            put.fold(
+                onSuccess = {
+                    // **An empty file is indexed**, with no chunks: "there is nothing here" is an
+                    // answer, and a file that stayed unindexed would be counted behind on every pass.
+                    index.note(rel, mtime, SearchIndex.INDEXED)
+                    done++
+                },
+                onFailure = { e ->
+                    index.note(rel, mtime, SearchIndex.FAILED, reason(e))
+                    failed++
+                    // **One failure ends the pass.** Every remaining file would ask the same model
+                    // the same question and get the same refusal, and a person wants the reason once
+                    // rather than forty times inside a note.
+                    stopped = "the index could not be written: ${reason(e)}"
+                },
+            )
+        }
+        return Caught(files.size, done, unchanged, failed, stopped)
+    }
+
+    /**
+     * The project's text files, as files.
+     *
+     * **Hidden names, the agent's own folder, and anything outside the project are not files to
+     * index.** `ws.list` already leaves out the first two kinds it knows — `.git`, a half-written
+     * temporary — but `agent/` is an ordinary name holding the log, the fetched pages and this index
+     * itself, and indexing the index is the one recursion worth naming rather than discovering.
+     */
+    private fun gather(
+        dir: File,
+        root: File,
+        depth: Int,
+        out: MutableList<File>,
+        deadline: Deadline,
+    ) {
+        if (depth > WALK_DEPTH) return
+        for (entry in ws.list(dir)) {
+            deadline.check(TOOL)
+            if (entry.isFolder) {
+                if (entry.name == AgentLog.DIR) continue
+                // **Canonical, because a link is the same escape with no `..` in it.** The index is
+                // the project; a folder that leaves it is another project's text, and another
+                // project is where this search is not allowed to look.
+                if (!inside(entry.file, root)) continue
+                gather(entry.file, root, depth + 1, out, deadline)
+                continue
+            }
+            if (entry.kind != EntryKind.TEXT) continue
+            if (!inside(entry.file, root)) continue
+            out.add(entry.file)
+        }
+    }
+
+    private fun inside(file: File, root: File): Boolean = try {
+        val canon = file.canonicalFile
+        canon == root || canon.path.startsWith(root.path + File.separator)
+    } catch (e: Throwable) {
+        false
+    }
+
+    private fun relTo(root: File, file: File): String? = try {
+        file.canonicalFile.relativeTo(root).invariantSeparatorsPath
+    } catch (e: Throwable) {
+        null
+    }
+
+    /**
+     * [texts] embedded in groups of [BATCH].
+     *
+     * **A file is not one request.** A four-hundred-kilobyte source file is five hundred chunks, and
+     * asking for five hundred vectors at once is a request whose size is decided by whichever file
+     * happened to be biggest — the kind of failure that arrives as a 413 from a provider and reads
+     * like a model limit. The batch is the bound, and the deadline is checked between batches, which
+     * is the granularity a person waiting actually feels.
+     */
+    private fun embedAll(
+        texts: List<String>,
+        pick: PickedModel,
+        dims: Int,
+        deadline: Deadline,
+    ): Result<List<FloatArray>> {
+        val out = mutableListOf<FloatArray>()
+        for (batch in texts.chunked(BATCH)) {
+            deadline.check(TOOL)
+            val got = embedder.embed(batch, pick.model, dims).getOrElse { return Result.failure(it) }
+            if (got.size != batch.size) {
+                return Result.failure(
+                    IllegalStateException(
+                        "The embedder answered ${got.size} vectors for ${batch.size} chunks.",
+                    ),
+                )
+            }
+            out += got
+        }
+        return Result.success(out)
+    }
+
+    // ---- 2. answering ------------------------------------------------------
+
+    /** One chunk that survived the walk, with the text a reader needs to judge it. */
+    private data class Candidate(
+        val path: String,
+        val line: Int,
+        val text: String,
+        /** The vector's score, or the reranker's when one ran. */
+        val score: Double,
+    )
+
+    private fun search(
+        index: SearchIndex,
+        root: File,
+        scope: Regex?,
+        query: String,
+        paths: Int,
+        depth: Int,
+        pick: PickedModel,
+        dims: Int,
+        caught: Caught,
+        deadline: Deadline,
+    ): Result<String> {
+        val notes = mutableListOf<String>()
+        // **The extent, in every answer.** A person reading "nothing matches" cannot tell an empty
+        // project from a search that only looked in one folder, and the second is this tool's design.
+        notes += "$project/ only — semantic search is per project"
+
+        val vector = embedder.embed(listOf(query), pick.model, dims)
+            .getOrElse { return Result.failure(it) }
+            .firstOrNull()
+            ?: return Result.failure(
+                IllegalStateException("The embedder answered nothing for the query."),
+            )
+        // **Thirty, not ten**: the reranker's whole job is to disagree with the vector order, so it
+        // has to be shown a few answers it can move. Ten would leave it reordering the top of a list
+        // that is already the answer.
+        val hits = index.nearest(vector, RERANK_DEPTH, history = false)
+            .getOrElse { return Result.failure(it) }
+            // **A cosine that is not positive is not a hit.** `nearest` answers with the closest
+            // rows whether or not any of them is close, so without this every search would answer
+            // thirty files: the ones that matched and a tail of ones that are merely indexed. Zero or
+            // below is the mathematical line — the text points somewhere else, or nowhere — and it is
+            // a line the code can justify without inventing a number.
+            .filter { it.score > 0.0 }
+            .filter { withinDepth(it.path, depth) }
+            .filter { scope == null || scope.containsMatchIn("$project/${it.path}") }
+
+        if (hits.isEmpty()) {
+            val said = if (index.size() == 0) {
+                "nothing is indexed in \"$project\" yet"
+            } else {
+                "nothing in \"$project\" is close to \"$query\""
+            }
+            return Result.success(compose(listOf(said), notes))
+        }
+
+        val cache = mutableMapOf<String, List<String>>()
+        var candidates = hits.mapNotNull { hit ->
+            // **Thirty files are read here, so this is where a slow disk is felt.** The check is per
+            // hit rather than per file, because a cached file costs nothing and a new one may be big.
+            deadline.check(TOOL)
+            val text = chunkText(root, hit.path, hit.start, hit.end, cache) ?: return@mapNotNull null
+            Candidate(hit.path, hit.start, text, hit.score)
+        }
+        if (candidates.isEmpty()) {
+            // **A row whose text is gone is not an answer.** A file deleted between the index and the
+            // query leaves a chunk pointing at nothing; showing its path would send the model to read
+            // a file that is not there, with no way to tell why.
+            return Result.success(
+                compose(
+                    listOf(
+                        "nothing in \"$project\" is close to \"$query\" — the index points at " +
+                            "text that is no longer on disk",
+                    ),
+                    notes,
+                ),
+            )
+        }
+
+        val rerankModel = rerank()
+        if (rerankModel != null && candidates.size > 1) {
+            val reranked = embedder.rerank(query, candidates.map { it.text }, rerankModel.model)
+            val order = reranked.getOrNull()
+            if (order.isNullOrEmpty()) {
+                // **Vector order is still a meaning search**, so this is a note rather than a
+                // failure — and unlike a text search it answers the question that was asked. The
+                // reason travels because a person whose model is misconfigured deserves to see it.
+                notes += "the reranker did not reorder these, so they are in vector order: " +
+                    reason(reranked.exceptionOrNull())
+            } else {
+                val before = candidates
+                candidates = order.mapNotNull { ranked ->
+                    before.getOrNull(ranked.index)?.copy(score = ranked.score)
+                }
+                if (candidates.isEmpty()) {
+                    notes += "the reranker answered with positions this search does not have, so " +
+                        "these are in vector order"
+                }
+            }
+        }
+
+        if (caught.stopped != null) {
+            // **"0 of 0 are left" is not a sentence a person can use.** When the pass stopped before
+            // it could name anything, what is true is that the index may not have seen every file.
+            notes += if (caught.left > 0) {
+                "indexing stopped: ${caught.stopped}; ${caught.left} of ${caught.total} file(s) are " +
+                    "not indexed yet, and asking again carries on from here"
+            } else {
+                "indexing stopped: ${caught.stopped}, so this index may be missing files"
+            }
+        }
+        if (caught.failed > 0) {
+            val why = index.failed().second
+            notes += "${caught.failed} file(s) could not be indexed" +
+                (why?.let { ": $it" } ?: "")
+        }
+
+        val rows = candidates.take(paths).map { one ->
+            val said = excerpt(one.text)
+            // **`path:line`, account-relative**, which is the same spelling a text-mode hit uses and
+            // the same thing `read {path, from}` takes. The score is in brackets because it is one
+            // number a reader can compare down the column, and it is the only thing that tells one
+            // semantic row from another once the text is what they both match on.
+            "$project/${one.path}:${one.line}: $said  [${score(one.score)}]"
+        }
+        return Result.success(compose(rows, notes))
+    }
+
+    /** A file's lines, cached for the length of one answer: several hits often share a file. */
+    private fun chunkText(
+        root: File,
+        path: String,
+        start: Int,
+        end: Int,
+        cache: MutableMap<String, List<String>>,
+    ): String? {
+        val lines = try {
+            cache.getOrPut(path) { File(root, path).readLines() }
+        } catch (e: Throwable) {
+            return null
+        }
+        if (start < 1 || start > lines.size) return null
+        val last = minOf(end, lines.size)
+        if (last < start) return null
+        return lines.subList(start - 1, last).joinToString("\n")
+    }
+
+    /**
+     * Whether the account-relative path this index holds at [path] is inside `depth`.
+     *
+     * **The same arithmetic the text walk uses**, so `depth` means one thing in both modes: the
+     * account is level 0, a project is 1, and a project's own top-level file is 2. The index holds
+     * project-relative paths, so the project's own level is the `+ 2` — and the walk's own test is
+     * "found with `left > 0` at level `depth`", which is the same statement.
+     */
+    private fun withinDepth(path: String, depth: Int): Boolean =
+        path.count { it == '/' } + 2 <= depth
+
+    /** The chunk's first line that says something, cut to a readable length. */
+    private fun excerpt(text: String): String {
+        val line = text.lineSequence()
+            .firstOrNull { it.isNotBlank() }
+            ?.filterNot { it < ' ' && it != '\t' }
+            ?.trim()
+        if (line.isNullOrEmpty()) return "empty"
+        return if (line.length > EXCERPT) line.take(EXCERPT) + "\u2026" else line
+    }
+
+    private fun score(value: Double): String =
+        String.format(java.util.Locale.ROOT, "%.2f", value)
+
+    private fun compose(rows: List<String>, notes: List<String>): String =
+        if (notes.isEmpty()) {
+            rows.joinToString("\n")
+        } else {
+            rows.joinToString("\n") + "\n(" + notes.joinToString("; ") + ")"
+        }
+
+    companion object {
+        /** What the tool is called, for a [Deadline]'s own sentence. */
+        private const val TOOL = "search"
+
+        /** The sentence a person sees when the feature has no model to work with. */
+        const val NO_MODEL =
+            "No embedding model is chosen, so there is nothing here that can search by meaning. " +
+                "Open Settings, choose the row called \"Embedding model\", and pick its dimensions."
+
+        /**
+         * How many chunks are shown to the reranker.
+         *
+         * **About thirty, and the number is the model's, not a preference**: a reranker is shown the
+         * query and each document together, so the cost is linear in what is offered and a hundred
+         * would be a second's work to reorder a list whose tail nobody reads.
+         */
+        const val RERANK_DEPTH = 30
+
+        /** Chunks per embedding request; see [embedAll]. */
+        const val BATCH = 32
+
+        /**
+         * The largest file the index will take, in characters.
+         *
+         * **400 000 characters**, which is comfortably more than the app's own biggest source file
+         * (`AppViewModel.kt`, about 250 000) and far less than a log or a dump that would cost more to
+         * index than every answer it could ever give. A larger file is recorded as failed with its
+         * size, so the note can say which file and why.
+         */
+        const val MAX_CHARS = 400_000
+
+        /** Folder levels below the project that the walk will follow. A tree, not a graph. */
+        const val WALK_DEPTH = 24
+
+        /** How much of a chunk's first line an answer shows. */
+        const val EXCERPT = 160
+
+        /** A reason from a [Throwable], never empty, because "null" is not a sentence. */
+        private fun reason(e: Throwable?): String {
+            if (e == null) return "no reason given"
+            val said = e.message?.takeIf { it.isNotBlank() } ?: e::class.simpleName ?: "it failed"
+            return Secrets.explain(e, said).ifBlank { said }
+        }
+    }
+}
