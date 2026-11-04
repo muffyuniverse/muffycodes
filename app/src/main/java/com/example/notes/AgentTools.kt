@@ -3403,7 +3403,6 @@ class AgentTools(
     private fun day(at: Long): String = LogFormat.recordStamp(at).substringBefore('T', "")
 
     /**
-     * Downloads one file from a URL into `agent/fetched/`.    /**
      * Downloads one file from a URL into `agent/fetched/`.
      *
      * ## Why this tool had to exist
