@@ -23,7 +23,15 @@ import java.util.concurrent.Executors
  * worker, so a save never waits for a commit and a sync never freezes a list.
  */
 class AppViewModel @JvmOverloads constructor(
-    app: Application,
+    /**
+     * The application, **kept** rather than used and dropped.
+     *
+     * It was a constructor parameter only, which was enough while the class needed nothing from it
+     * after construction — and not enough once an index pass finished while nobody was looking and
+     * had to say so in the tray. A `Context` on a view model is only safe as the application one,
+     * which is what this is and why `Application` is the parameter's type.
+     */
+    private val app: Application,
     /** Where accounts live; `files/` on a phone, a temporary folder in a test. */
     rootDir: File = app.filesDir,
     private val credentials: Credentials = CredentialStore(app),
