@@ -844,6 +844,19 @@ object GitService {
         return commits.map { toInfo(it) }
     }
 
+    /**
+     * One commit, by id — or null when the repository does not have it.
+     *
+     * **For a commit the file's own log will not contain.** `log(repo, path)` answers "which commits
+     * touched this file", and the last synced commit may have touched nothing here. A diff that
+     * compares against it still has to name both ends, so this looks the commit up directly.
+     */
+    fun commitInfo(repo: Repository, id: String): CommitInfo? = try {
+        RevWalk(repo).use { walker -> toInfo(walker.parseCommit(ObjectId.fromString(id))) }
+    } catch (t: Throwable) {
+        null
+    }
+
     /** Turns a JGit commit into the app's own summary of it. */
     private fun toInfo(commit: RevCommit): CommitInfo = CommitInfo(
         id = commit.name,

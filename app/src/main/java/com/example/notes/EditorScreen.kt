@@ -170,9 +170,17 @@ fun EditorScreen(
      * switch was wrong: a person opening a file usually wants to *read* it, and an editor that
      * starts in Edit puts a cursor in the text and a keyboard on the screen before anybody has said
      * they want to change anything. A locked or kept file opens in View and cannot leave it.
+     *
+     * **Except a file opened from "changes to send"**, which starts in Diff. The operator: "files
+     * from this list when clicked should open in diff mode." A person who tapped a row of a list
+     * called "Changes to send" has already said what they want to see; making them press Diff
+     * afterwards is asking the same question twice.
      */
     var mode by remember(session) {
-        mutableStateOf(if (readOnly) Mode.VIEW else Mode.VIEW)
+        mutableStateOf(
+            if (viewModel.editorOpening == AppViewModel.Opening.UNSENT && !readOnly) Mode.DIFF
+            else Mode.VIEW,
+        )
     }
     // Kept as a name because the rest of this function asks "is the text being written" in a dozen
     // places, and a boolean read off the mode is clearer at each of them than the comparison is.
@@ -1391,15 +1399,18 @@ private fun SingleChoiceSegmentedButtonRowScope.ModeSegment(
  */
 @Composable
 private fun DiffMode(viewModel: AppViewModel, path: String) {
-    var from by remember(path) { mutableStateOf<String?>(viewModel.diffFrom) }
-    var to by remember(path) { mutableStateOf<String?>(viewModel.diffTo) }
+    // **The view model owns the pair, and the screen only names it.** This used to be local state
+    // seeded from the view model, which read the pair in force when the composable was first drawn:
+    // the second file opened in a session got the first file's two commits, and the guard meant to
+    // fix that could never fire because the local value was already set. The operator saw it as
+    // "inside diff editor mode from and to versions dont react to touches".
+    val from = viewModel.diffFrom
+    val to = viewModel.diffTo
     LaunchedEffect(path) { viewModel.openDiff(path) }
-    // The view model's read is asynchronous, so the local choice follows it until somebody picks.
-    LaunchedEffect(viewModel.diffFrom, viewModel.diffTo) {
-        if (from == null) from = viewModel.diffFrom
-        if (to == null) to = viewModel.diffTo
-    }
 
+    // **Keyed on the two ids, so a pick is redrawn.** A file at a revision is a repository read, and
+    // a screen that re-read it on every recomposition would be doing that work for a frame; the key
+    // is what makes it once per pair rather than once per draw.
     val before = remember(path, from) { viewModel.fileAtRevision(path, from) }
     val after = remember(path, to) { viewModel.fileAtRevision(path, to) }
     val choices = viewModel.diffChoices
@@ -1408,8 +1419,8 @@ private fun DiffMode(viewModel: AppViewModel, path: String) {
         // **The picker, and it says which end each is.** "From" and "to" rather than "a" and "b":
         // a diff reads forwards, and the two ids a person picks are the older and the newer.
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Picker("From", choices, from) { from = it }
-            Picker("To", choices, to) { to = it }
+            Picker("From", choices, from) { viewModel.chooseDiffFrom(it) }
+            Picker("To", choices, to) { viewModel.chooseDiffTo(it) }
         }
         HorizontalDivider()
         when {
@@ -1419,11 +1430,18 @@ private fun DiffMode(viewModel: AppViewModel, path: String) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(8.dp),
             )
-            // **A file added since the last sync**, which is the common case for a diff here: the
-            // older end has no version of it, so every line is new. Said rather than drawn.
+            // **A file with no older version, and why**, which is a different sentence depending on
+            // how the person got here. From the changes list, the missing end is the last sync — the
+            // file was added since. From the Diff button, it is the version before this one, which
+            // means the file has a single commit. Saying "new since the last sync" in the second
+            // case would be a true-sounding sentence about something the person did not ask.
             before == null && after != null -> Column {
                 Text(
-                    "This file is new since the last sync, so every line is an addition.",
+                    if (from == null) {
+                        "This file is new since the last sync, so every line is an addition."
+                    } else {
+                        "There is no earlier version of this file, so every line is an addition."
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(8.dp),
@@ -1431,8 +1449,10 @@ private fun DiffMode(viewModel: AppViewModel, path: String) {
                 DiffPreview(after.lines().map { GitService.DiffLine(GitService.DiffLine.Kind.ADDED, it) })
             }
             before != null && after != null -> DiffPreview(GitService.diffLines(before, after))
+            // **The one case left is an end that names a commit the file is not in**, which happens
+            // when a person picks an older commit from before the file was added. Named as such.
             else -> Text(
-                "There is no version of this file at one of those commits.",
+                "The file is not in one of those two versions. Pick another above.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(8.dp),
@@ -1441,12 +1461,19 @@ private fun DiffMode(viewModel: AppViewModel, path: String) {
     }
 }
 
-/** One end of the comparison: a menu of the file's own commits. */
+/**
+ * One end of the comparison: a menu of the file's own commits.
+ *
+ * **Disabled when there is nothing to choose**, rather than a button that opens an empty menu. The
+ * operator's second report on this screen was "inside diff editor mode from and to versions dont
+ * react to touches" — and one of the reasons a control does not react is that there is nothing
+ * behind it. A disabled button says "not yet"; an empty menu says "the app is broken".
+ */
 @Composable
 private fun Picker(label: String, choices: List<GitService.CommitInfo>, selected: String?, onPick: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
-        TextButton(onClick = { open = true }) {
+        TextButton(onClick = { open = true }, enabled = choices.isNotEmpty()) {
             val shown = choices.firstOrNull { it.id == selected }?.shortId ?: "none"
             Text("$label: $shown")
         }

@@ -2318,10 +2318,45 @@ class AppViewModel @JvmOverloads constructor(
     var editorSession: Int by mutableStateOf(0)
         private set
 
+    /**
+     * **Why the editor is being opened**, which decides which two versions a diff starts on.
+     *
+     * The operator, 2026-11-04: *"I want newest to last synced only when you open diffs from
+     * 'changes to see' on the sync row (and files from this list when clicked should open in diff
+     * mode). Ordinary diff when you just open diff mode yourself should show newest to previous."*
+     *
+     * So the pair is not a property of the file — it is a property of the **question the person
+     * came with**. Arriving from the changes list, the question is "what am I about to send", and
+     * the answer is HEAD against the last commit GitHub has. Pressing Diff yourself, the question is
+     * "what changed in this file lately", and the answer is the newest version against the one
+     * before it.
+     *
+     * It is read once, when the editor opens, and then it is the editor's: a person who enters Diff
+     * from a file they opened from the list, and then changes the picker, has asked a different
+     * question and must not have it overruled by where they came from.
+     */
+    enum class Opening {
+        /** A plain file open: the editor starts in View, and Diff means newest-vs-previous. */
+        READ,
+
+        /**
+         * **Entered from "see changes", so the question is "what am I about to send".**
+         *
+         * The editor starts in Diff — the operator: "files from this list when clicked should open
+         * in diff mode" — and the pair is HEAD against the last synced commit.
+         */
+        UNSENT,
+    }
+
+    /** How the editor was opened. [Opening.READ] until something says otherwise. */
+    var editorOpening: Opening by mutableStateOf(Opening.READ)
+        private set
+
     /** Opens a file in the editor. */
-    fun openEditor(file: File) {
+    fun openEditor(file: File, opening: Opening = Opening.READ) {
         Trace.tap("open file", file.name)
         editingPath = workspace?.relative(file)
+        editorOpening = opening
         editorSession++
     }
 
@@ -2455,6 +2490,9 @@ class AppViewModel @JvmOverloads constructor(
         val ws = workspace ?: return
         val project = currentProject ?: return
         val g = git ?: return
+        // **Read before the post, not inside it.** `main.post` runs on the UI thread, and every one
+        // of these is a walk of the repository: a ref lookup, a log, and a file at a revision.
+        val wanted = editorOpening
         onWorker {
             val repo = g.open(project)
             val choices = if (repo == null) {
@@ -2466,26 +2504,80 @@ class AppViewModel @JvmOverloads constructor(
                     emptyList()
                 }
             }
+            // **The synced commit, and the file's version there**, worked out on the worker. Null
+            // when the file did not exist at that commit — the honest answer for a file added since
+            // the last sync, and the screen has words for it.
+            //
+            // **Its own summary is kept, because the picker has to be able to name it.** The log
+            // above is the commits that *touched this file*; the last synced commit may have touched
+            // nothing here, and a picker that could not name the older end would draw "From: none"
+            // above a diff that plainly has two sides.
+            val synced = if (wanted == Opening.UNSENT) {
+                // **Through the same function the test asserts with**, so the pair the screen picks
+                // and the pair the test expects cannot drift apart.
+                val id = syncedFor(path, repo)
+                if (id == null || repo == null) {
+                    null
+                } else {
+                    try {
+                        GitService.commitInfo(repo, id)
+                    } catch (t: Throwable) {
+                        null
+                    }
+                }
+            } else {
+                null
+            }
             main.post {
-                diffChoices = choices
-                // **The default is the newest version against the one before it.** The operator's
-                // report: "diff isnt getting selected even when there is history to compare, fix
-                // it. and set it so that by default it shows newest version vs previous one".
+                // **The picker's list, with the synced commit added when the file's own log does not
+                // have it.** It is the older end of the comparison the person is looking at, so a
+                // picker that could not name it would draw "From: none" above a diff with two sides.
+                diffChoices = if (synced != null && choices.none { it.id == synced.id }) {
+                    choices + synced
+                } else {
+                    choices
+                }
+                // **Two questions, two pairs, and which one is asked depends on how the person got
+                // here.** The operator, 2026-11-04: "I want newest to last synced only when you
+                // open diffs from 'changes to see' on the sync row ... Ordinary diff when you just
+                // open diff mode yourself should show newest to previous."
                 //
-                // It used to be newest against the *last synced* commit, and that is a different
-                // question with a hole in it: a file that has never been pushed has no synced
-                // version, so `diffFrom` was null and the screen said "there is no version of this
-                // file at one of those commits" about a file with a dozen commits behind it. The
-                // person saw an empty diff and a file with history, which is exactly what the
-                // report describes.
+                // **From the changes list, the question is "what am I about to send".** The answer
+                // is HEAD against the last commit GitHub has, because that is exactly the set of
+                // changes the row's "3 to send" is counting. A file added since the last sync has no
+                // version at the older end — that is the truth of the situation and the screen says
+                // so rather than inventing a comparison.
                 //
-                // Newest-vs-previous always has both ends whenever there are two commits, which is
-                // the condition for the mode to mean anything at all. `from` is the older one
-                // because a diff reads forwards.
+                // **From the Diff button, the question is "what changed in this file lately".**
+                // Newest against the one before it, which is the pair an ordinary history view
+                // means, and which always has both ends whenever there are two commits.
+                //
+                // `from` is the older one either way, because a diff reads forwards.
                 diffTo = choices.getOrNull(0)?.id
-                diffFrom = choices.getOrNull(1)?.id
+                diffFrom = synced?.id ?: choices.getOrNull(1)?.id
             }
         }
+    }
+
+    /**
+     * **Sets one end of the comparison, because the picker's choice belongs to the mode.**
+     *
+     * It used to be local state in the composable, seeded from these two fields — and the seeding
+     * was the bug: a `remember(path)` block reads whatever the view model held *when the composable
+     * was first drawn*, which for the second file opened in a session is the **first** file's pair.
+     * The guard that was supposed to fix that (`if (from == null) from = viewModel.diffFrom`) could
+     * never fire, because `from` was already non-null. So the picker named commits that did not
+     * belong to the file, and the diff drew nothing against them.
+     *
+     * One owner is the fix, and it is also the smaller thing: the picker says which end it means,
+     * and the diff is drawn from what the view model holds.
+     */
+    fun chooseDiffFrom(id: String) {
+        diffFrom = id
+    }
+
+    fun chooseDiffTo(id: String) {
+        diffTo = id
     }
 
     /**
@@ -2505,12 +2597,43 @@ class AppViewModel @JvmOverloads constructor(
         }
     }
 
+    /**
+     * The last commit GitHub has, when it holds a version of [path] — or null.
+     *
+     * **The older end of the diff a changes-list row opens**, and public because that is the only
+     * way to assert it: the pair the picker shows is the view model's, so a test that recomputed it
+     * with its own git call would be testing the test.
+     */
+    fun syncedCommitOf(path: String): String? =
+        syncedFor(path, git?.let { currentProject?.let { p -> it.open(p) } })
+
+    /**
+     * **Whether the last synced commit holds a version of [path]**, which is the whole question.
+     *
+     * A file added since the last sync has no version there, and the answer must be null rather than
+     * that commit's id: the screen says "this file is new since the last sync, so every line is an
+     * addition", and naming a commit the file is not in would make it say "there is no version of
+     * this file at one of those commits" instead — about the ordinary case the mode exists for.
+     */
+    private fun syncedFor(path: String, repo: org.eclipse.jgit.lib.Repository?): String? {
+        if (repo == null) return null
+        return try {
+            GitService.lastSynced(repo)?.takeIf { GitService.fileAt(repo, path, it) != null }
+        } catch (t: Throwable) {
+            null
+        }
+    }
+
     fun openChangedFile(path: String) {
         // The list's own act: which file a person entered from "see n changes".
         Trace.tap("open changed file", path)
         val ws = workspace ?: return
         val project = currentProject ?: return
-        openEditor(File(ws.projectDir(project), path))
+        // **Straight into Diff, against the last synced commit.** The operator: "files from this
+        // list when clicked should open in diff mode." A person who tapped a file in a list called
+        // "Changes to send" has already said what they want to see, and making them press Diff
+        // after that is asking the same question twice.
+        openEditor(File(ws.projectDir(project), path), Opening.UNSENT)
     }
 
     /** The file the editor is showing, or null. */

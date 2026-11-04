@@ -431,6 +431,13 @@ fun ChangesWindow(viewModel: AppViewModel) {
                         // that I can enter": what a person wants from the list is the shape of the
                         // change — which file, how much of it — and the diff itself is one tap
                         // away in the editor, where it has the room and the commit picker.
+                        //
+                        // **The tap opens the file in Diff, not in View.** The operator, 2026-11-04:
+                        // "files from this list when clicked should open in diff mode." A person
+                        // who tapped a row of a list called "Changes to send" has already said what
+                        // they want to see, and the pair it starts on is HEAD against the last
+                        // commit GitHub has — the same set of changes the count beside the row is
+                        // counting.
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()

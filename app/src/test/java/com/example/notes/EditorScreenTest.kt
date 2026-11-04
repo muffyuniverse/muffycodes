@@ -22,6 +22,7 @@ import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextReplacement
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -1104,6 +1105,120 @@ class EditorScreenTest {
         assertTrue("the file has a history to compare: ${choices.size}", choices.size >= 2)
         assertEquals("the newer end is the newest version", choices[0].id, scene.viewModel.diffTo)
         assertEquals("and the older is the one before it", choices[1].id, scene.viewModel.diffFrom)
+    }
+
+    @Test
+    fun `opened from the changes list, the diff is the newest against the last synced commit`() {
+        // **The operator, 2026-11-04**: "I want newest to last synced only when you open diffs from
+        // 'changes to see' on the sync row (and files from this list when clicked should open in
+        // diff mode)."
+        //
+        // **The two questions are different, and the file is the same one.** Arriving from the
+        // changes list, the question is "what am I about to send", and the answer is HEAD against
+        // the last commit GitHub has — which is exactly the set of changes the row's count is
+        // counting. Pressing Diff yourself asks "what changed lately", and the answer is the newest
+        // version against the one before it.
+        //
+        // **Two commits after the sync, so the two defaults must differ.** With one, both pairs
+        // would be the same and the test could pass while the rule was not there.
+        scene.project("groceries")
+        val file = scene.file("milk.txt", "one")
+        scene.sync("groceries")
+        // **The editor has to be open to save a version**, and it has to be the file the versions
+        // belong to.
+        scene.viewModel.openEditor(file)
+        scene.saveAsVersion("two")
+        scene.saveAsVersion("three")
+
+        scene.viewModel.openChangedFile("milk.txt")
+
+        scene.await("the diff to choose its two ends", 20_000) {
+            scene.viewModel.diffFrom != null && scene.viewModel.diffTo != null
+        }
+        val choices = scene.viewModel.diffChoices
+        assertEquals("the newer end is still the newest version", choices[0].id, scene.viewModel.diffTo)
+        assertNotEquals(
+            "and the older end is the last synced commit, not the version before this one",
+            choices[1].id,
+            scene.viewModel.diffFrom,
+        )
+        // **Named, not just different.** "Not the previous version" would also pass if the older end
+        // were some third commit, so this names the one the question has: the file's version at the
+        // last synced commit, read through the same function the diff uses.
+        val synced = scene.viewModel.syncedCommitOf("milk.txt")
+        assertNotNull("the project really has a synced commit", synced)
+        assertEquals("the older end is the commit GitHub has", synced, scene.viewModel.diffFrom)
+        // **And the picker can name it**, which is the half that would otherwise draw "From: none"
+        // above a diff with two sides.
+        assertTrue(
+            "the picker's list contains the synced commit",
+            choices.any { it.id == synced },
+        )
+    }
+
+    @Test
+    fun `a file opened from the changes list starts in diff mode`() {
+        // The other half of the same report: "files from this list when clicked should open in diff
+        // mode." A person who tapped a row of a list called "Changes to send" has already said what
+        // they want to see.
+        scene.project("groceries")
+        val file = scene.file("milk.txt", "one")
+        scene.sync("groceries")
+        scene.viewModel.openEditor(file)
+        scene.saveAsVersion("two")
+
+        scene.viewModel.openChangedFile("milk.txt")
+        scene.await("the editor to open", 20_000) { scene.viewModel.editingPath != null }
+        assertEquals(
+            "the editor was told why it opened",
+            AppViewModel.Opening.UNSENT,
+            scene.viewModel.editorOpening,
+        )
+
+        // **And a plain open is the ordinary reason**, which is what keeps the two defaults apart.
+        scene.viewModel.openEditor(scene.viewModel.editingFile!!)
+        assertEquals(
+            "a plain open is not a changes-list open",
+            AppViewModel.Opening.READ,
+            scene.viewModel.editorOpening,
+        )
+    }
+
+    @Test
+    fun `picking an end moves that end, and the screen reads it from the view model`() {
+        // **The operator's second report**: "inside diff editor mode from and to versions dont react
+        // to touches." The picker's choice used to be local state seeded from the view model, and a
+        // `remember(path)` block reads what the view model held *when the composable was first
+        // drawn* — so the second file opened in a session inherited the first file's pair, and the
+        // guard meant to fix it could never fire because the local value was already set.
+        //
+        // One owner is the fix, so this asserts the owner moves and that nothing else can hold a
+        // different answer.
+        scene.localProject("Shopping")
+        val made = scene.made("Shopping")
+        scene.open(made)
+        val file = scene.file("milk.txt", "two litres")
+        scene.viewModel.openEditor(file)
+        scene.saveAsVersion("three litres")
+        scene.saveAsVersion("four litres")
+        scene.viewModel.openDiff("milk.txt")
+        scene.await("the diff to choose its two ends", 20_000) {
+            scene.viewModel.diffFrom != null && scene.viewModel.diffTo != null
+        }
+
+        val choices = scene.viewModel.diffChoices
+        assertTrue("there are three versions to pick from: ${choices.size}", choices.size >= 3)
+        // **The oldest version as the new older end**, which is not where it started.
+        val oldest = choices.last().id
+        assertNotEquals("the older end did not already sit there", oldest, scene.viewModel.diffFrom)
+        scene.viewModel.chooseDiffFrom(oldest)
+        assertEquals("the pick is the pair now", oldest, scene.viewModel.diffFrom)
+
+        // **And the other end independently**, so one setter is not quietly writing both.
+        val before = scene.viewModel.diffFrom
+        scene.viewModel.chooseDiffTo(choices[1].id)
+        assertEquals("the newer end moved", choices[1].id, scene.viewModel.diffTo)
+        assertEquals("and the older end did not", before, scene.viewModel.diffFrom)
     }
 
 }
