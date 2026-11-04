@@ -262,6 +262,34 @@ object Drawing {
     }
 
     /**
+     * **HSV to the app's `Int` colour**, at a given saturation and value.
+     *
+     * Written out rather than using `android.graphics.Color.HSVToColor`, because that takes a
+     * `FloatArray` and returns a colour with alpha already applied — a round trip through a mutable
+     * array for arithmetic this short, in a function a test can ask directly.
+     *
+     * **Hue is degrees, 0 pointing right and increasing clockwise**, which is how every wheel on every
+     * platform is arranged; the wheel's hit test reads its angle that way, so a person's hand already
+     * knows where the colour they want is.
+     */
+    fun hsv(hue: Float, saturation: Float, value: Float): Int {
+        val h = ((hue % 360f) + 360f) % 360f / 60f
+        val c = value * saturation
+        val x = c * (1 - kotlin.math.abs(h % 2f - 1))
+        val m = value - c
+        val (r, g, b) = when (h.toInt()) {
+            0 -> Triple(c, x, 0f)
+            1 -> Triple(x, c, 0f)
+            2 -> Triple(0f, c, x)
+            3 -> Triple(0f, x, c)
+            4 -> Triple(x, 0f, c)
+            else -> Triple(c, 0f, x)
+        }
+        fun byte(f: Float) = ((f + m) * 255f).toInt().coerceIn(0, 255)
+        return (0xFF shl 24) or (byte(r) shl 16) or (byte(g) shl 8) or byte(b)
+    }
+
+    /**
      * **What one finger does, as a value rather than a branch buried in the gesture handler.**
      *
      * The operator's rule, twice stated: "when any draw tool is selected you can only use it — no

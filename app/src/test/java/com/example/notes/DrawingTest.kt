@@ -256,6 +256,30 @@ class DrawingTest {
     }
 
     @Test
+    fun `the wheel's hue arithmetic gives the colour the angle points at`() {
+        // **The one piece of new arithmetic in the wheel**, so it is the one piece that can be wrong
+        // quietly: a wrong hue map is a wheel whose red is where a person expects orange, and nothing
+        // crashes to say so.
+        //
+        // Hue is degrees, 0 to the right and increasing clockwise — the arrangement every platform's
+        // wheel uses, and the one the hit test reads.
+        assertEquals("0 is red", 0xFFFF0000.toInt(), Drawing.hsv(0f, 1f, 1f))
+        assertEquals("120 is green", 0xFF00FF00.toInt(), Drawing.hsv(120f, 1f, 1f))
+        assertEquals("240 is blue", 0xFF0000FF.toInt(), Drawing.hsv(240f, 1f, 1f))
+        assertEquals("360 wraps back to red", 0xFFFF0000.toInt(), Drawing.hsv(360f, 1f, 1f))
+        // **And the other side of zero**, because a wheel reports an angle and `atan2` gives negative
+        // radians for the upper half.
+        assertEquals("-120 is the same blue", 0xFF0000FF.toInt(), Drawing.hsv(-120f, 1f, 1f))
+
+        // **The value and saturation axes**, which are what the light/dark band drives.
+        assertEquals("no value is black", 0xFF000000.toInt(), Drawing.hsv(0f, 1f, 0f))
+        assertEquals("no saturation is white", 0xFFFFFFFF.toInt(), Drawing.hsv(0f, 0f, 1f))
+        // **Every result is opaque**, because the strokes are baked into a PNG and a translucent one
+        // would be invisible over the picture's own colours.
+        assertEquals("and never translucent", 0xFF, Drawing.hsv(200f, 0.5f, 0.7f) ushr 24)
+    }
+
+    @Test
     fun `a colour prints as the hex every other tool uses`() {
         // The field beside the wheel, and a designer's spec sheet, and a browser's inspector all say
         // `#E53935` — so that is what the app prints, not a Kotlin `Color.toString()`.

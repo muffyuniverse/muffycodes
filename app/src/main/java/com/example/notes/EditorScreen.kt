@@ -13,6 +13,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
@@ -73,6 +74,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
@@ -91,6 +93,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import kotlin.math.atan2
+import kotlin.math.hypot
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -1595,6 +1599,10 @@ private fun Picker(label: String, choices: List<GitService.CommitInfo>, selected
 @Composable
 private fun ToolGlyph(tool: Drawing.Tool) {
     val tint = MaterialTheme.colorScheme.onSurface
+    // **Both colours read outside the `Canvas`, because a `DrawScope` is not a composable.** Asking
+    // `MaterialTheme` inside it is a compile error — and a compile error is the good version of that
+    // mistake; the bad one would be a hard-coded colour that ignores the theme.
+    val gap = MaterialTheme.colorScheme.surface
     val label = when (tool) {
         Drawing.Tool.PEN -> "Pen"
         Drawing.Tool.LINE -> "Line"
@@ -1616,7 +1624,7 @@ private fun ToolGlyph(tool: Drawing.Tool) {
                 }
                 drawPath(tip, tint)
                 drawLine(
-                    MaterialTheme.colorScheme.surface,
+                    gap,
                     Offset(w * 0.5f, h * 0.30f),
                     Offset(w * 0.5f, h * 0.74f),
                     stroke * 0.5f,
@@ -1647,7 +1655,7 @@ private fun ToolGlyph(tool: Drawing.Tool) {
                 }
                 drawPath(body, tint)
                 drawLine(
-                    MaterialTheme.colorScheme.surface,
+                    gap,
                     Offset(w * 0.34f, h * 0.62f),
                     Offset(w * 0.60f, h * 0.80f),
                     stroke * 0.7f,
@@ -1671,46 +1679,106 @@ private fun ToolGlyph(tool: Drawing.Tool) {
  */
 @Composable
 private fun ColourButton(colour: Int, onColour: (Int) -> Unit) {
-    val context = LocalContext.current
+    var open by remember { mutableStateOf(false) }
     Box(
         modifier = Modifier
             .size(36.dp)
             .clip(CircleShape)
             .background(Color(colour))
             .border(2.dp, MaterialTheme.colorScheme.outline, CircleShape)
-            .clickable {
-                // **The system picker, because a wheel is a wheel.** Building one is a canvas, a hue
-                // ring and a hit test — and the platform already has one that the person has used
-                // before, in the same place, with the same gestures.
-                dialogColour(context, colour, onColour)
-            }
+            .clickable { open = true }
             .semantics { contentDescription = "Colour" },
-    )
+    ) {
+        if (open) {
+            ColourWheel(current = colour, onPick = { open = false; onColour(it) }, onDismiss = { open = false })
+        }
+    }
 }
 
 /**
- * **The platform's colour picker, as a dialog.**
+ * **A colour wheel, drawn, because there is no premade one to use.**
  *
- * `ColorPickerDialog` has been in the framework since API 26 and is what a person's other apps show.
- * It is not Compose, so it is drawn in its own window — which is what "popup window" means here and is
- * the one place in this app where a framework dialog is the right answer: the alternative is drawing a
- * wheel and getting the hit test wrong.
+ * The operator asked: "make it a color wheel popup window - look if there is a premade material for
+ * that." There is not. Compose Material 3 has no colour picker at all — `MaterialColors` is a palette of
+ * *roles* (primary, surface) chosen by a design system, not a wheel a person points at — and Android has
+ * no `ColorPicker` widget in the SDK either. The nearest thing in the framework is an OEM addition that
+ * is not on every phone.
+ *
+ * So the wheel is drawn the way [LinkedGlyph] is: a hue ring plus a light-to-dark band, and a hit test
+ * that reads the finger's angle and radius. Which is honest about the cost — about forty lines — and
+ * means the app carries no dependency for one control.
  */
-private fun dialogColour(context: android.content.Context, current: Int, onColour: (Int) -> Unit) {
-    val dialog = android.app.Dialog(context)
-    val picker = android.widget.ColorPicker(context).apply {
-        // **Opaque, always.** A translucent stroke on a drawing is invisible over the picture's own
-        // colours, and the strokes are baked into the PNG — there is no alpha to composite against.
-        setAlphaSliderVisible(false)
-        // The framework picker's own constructor signature differs before API 29; `color` handles both.
-        color = current
+@Composable
+private fun ColourWheel(current: Int, onPick: (Int) -> Unit, onDismiss: () -> Unit) {
+    val diameter = 220.dp
+    val ring = 34.dp
+    // **The value the person is choosing at**, which the band under the ring changes. Saturation is
+    // always full on the ring: a washed-out ring is a ring where the colours are hard to tell apart,
+    // and the band is where "lighter or darker" is answered.
+    var value by remember { mutableFloatStateOf(1f) }
+    Column(
+        modifier = Modifier
+            .width(260.dp)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(12.dp))
+            .padding(12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Canvas(
+            modifier = Modifier
+                .size(diameter)
+                .pointerInput(Unit) {
+                    detectTapGestures { at ->
+                        val centre = Offset(size.width / 2f, size.height / 2f)
+                        val dx = at.x - centre.x
+                        val dy = at.y - centre.y
+                        val radius = hypot(dx, dy)
+                        val outer = size.width / 2f
+                        val inner = outer - ring.toPx()
+                        if (radius in inner..outer) {
+                            // **The angle is the hue**, with 0 pointing right and increasing clockwise —
+                            // the arrangement every wheel uses, so a person's hand already knows it.
+                            val degrees = ((Math.toDegrees(atan2(dy, dx).toDouble()) + 360) % 360).toFloat()
+                            onPick(Drawing.hsv(degrees, 1f, value))
+                        }
+                    }
+                },
+        ) {
+            // **Drawn as a ring of short arcs rather than a sweep**, because a sweep needs a
+            // `SweepGradient` brush whose stops are the colours and one `drawCircle` with a hole — and
+            // a hole is done with `Stroke`, which is what this is. 180 segments is a tenth of a degree
+            // each, well under what an eye can see at this size.
+            val outer = size.width / 2f
+            val inner = outer - ring.toPx()
+            val mid = (outer + inner) / 2f
+            val segments = 180
+            for (i in 0 until segments) {
+                val from = i * 360f / segments
+                drawArc(
+                    color = Color(Drawing.hsv(from, 1f, value)),
+                    startAngle = from,
+                    sweepAngle = 360f / segments + 0.6f,
+                    useCenter = false,
+                    topLeft = Offset(outer - mid, outer - mid),
+                    size = androidx.compose.ui.geometry.Size(mid * 2f, mid * 2f),
+                    style = Stroke(width = ring.toPx()),
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        // **A band for lighter and darker**, because a hue with fixed value is half a colour.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Light", style = MaterialTheme.typography.labelSmall)
+            androidx.compose.material3.Slider(
+                value = value,
+                onValueChange = { value = it },
+                valueRange = 0.2f..1f,
+                modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+            )
+            Text("Dark", style = MaterialTheme.typography.labelSmall)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = onDismiss) { Text("Close") }
+            TextButton(onClick = { onPick(current) }) { Text("Keep") }
+        }
     }
-    dialog.setContentView(android.widget.FrameLayout(context).apply {
-        addView(picker)
-    })
-    picker.setOnColorChangedListener { picked ->
-        onColour(picked or (0xFF shl 24))
-        dialog.dismiss()
-    }
-    dialog.show()
 }
