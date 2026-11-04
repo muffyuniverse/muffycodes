@@ -1859,7 +1859,10 @@ class AgentTest {
         )
 
         assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
-        assertEquals("the block is one line, the rest untouched", "head\nfun a() { }\ntail",
+        // **The trailing newline is the file's own and is kept.** Splitting on "\n" puts an empty
+        // last element there, so the joined result ends with one — which is exactly what the file
+        // said before, and what every other shape preserves.
+        assertEquals("the block is one line, the rest untouched", "head\nfun a() { }\ntail\n",
             ws.read(File(ws.repoOf("shopping"), "code.kt")))
     }
 
