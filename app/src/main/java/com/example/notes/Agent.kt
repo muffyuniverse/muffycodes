@@ -204,14 +204,14 @@ class Agent(
     private val github: () -> GitHub? = { null },
     private val githubToken: () -> String? = { null },
     /**
-     * Where a `downloads` call puts a file, or null when the app has no way to write one.
+     * The phone's Downloads folder, or `PhoneDownloads.NONE` when the agent may not reach it.
      *
      * **Injected for the same reason the browser is**: `MediaStore` needs a `Context`, and an `Agent`
      * built in a test must not need one. Null makes the tool refuse in words rather than fail at the
      * last moment, which is the difference between a model that learns the app cannot do this and one
      * that learns nothing.
      */
-    private val downloads: ((File) -> Result<Export.Done>)? = null,
+    private val phone: PhoneDownloads = PhoneDownloads.NONE,
     /**
      * Whether the model in force can see a picture — or `null` when nothing has said.
      *
@@ -229,7 +229,7 @@ class Agent(
         fetcher = fetcher,
         mcp = mcp, credentials = credentials, scanner = scanner,
         fetchAllowed = fetchAllowed,
-        github = github, githubToken = githubToken, downloads = downloads,
+        github = github, githubToken = githubToken, phone = phone,
         modelSees = modelSees,
     )
 

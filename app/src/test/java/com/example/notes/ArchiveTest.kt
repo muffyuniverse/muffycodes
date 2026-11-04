@@ -347,17 +347,17 @@ class ArchiveTest {
     }
 
     @Test
-    fun `the downloads description no longer tells the agent to do the impossible`() {
+    fun `the upload description no longer tells the agent to do the impossible`() {
         // **The bug this step exists to fix.** The sentence used to say *"there is no command that
         // makes one yet: say so rather than trying"* — true when written, and a lie the moment the
         // app could make one. It now names the tool that does.
-        val spec = AgentTools.specs().first { it.name == "downloads" }
+        val spec = AgentTools.specs().first { it.name == "upload" }
         val said = spec.description
 
         assertFalse(
             "it does not claim there is no way to zip: $said",
             said.contains("no command that makes one"),
         )
-        assertTrue("and names the tool that does: $said", said.contains("pack"))
+        assertTrue("and names the tool that does: $said", said.contains("archive"))
     }
 }

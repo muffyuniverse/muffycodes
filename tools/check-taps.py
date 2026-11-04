@@ -57,6 +57,10 @@ VOCABULARY = {
     # it is a different button: the one item a system-locked row offers, and the trace
     # should name what the person pressed rather than the code path behind it.
     "clone",
+    # **Copying a file out to the phone's Downloads** — report 23's "clone/move to the downloads".
+    # Named after the button, which says Downloads, because `export` already means the project
+    # menu's "the newest CI artifact" and the two are not the same act.
+    "copy to downloads",
     # the chat: turning to another page of a message, and opening one fullscreen
     "message page", "message fullscreen",
     # making things

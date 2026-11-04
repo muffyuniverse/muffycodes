@@ -386,6 +386,9 @@ private fun AppRoot(viewModel: AppViewModel) {
         // "Clone…", and a trace that said `copy` would be describing a button the person did not
         // press.
         onClone = { entry -> tap("clone", entry.name); pending = Pending.CopyEntry(entry) },
+        // **A tap of its own**, and recorded before the copy is attempted: a copy that fails has to
+        // be visible in the trace, or the person sees a message and no evidence.
+        onDownload = { entry -> tap("copy to downloads", entry.name); viewModel.copyToDownloads(entry.file) },
         onRename = { entry -> tap("rename", entry.name); pending = Pending.RenameEntry(entry) },
         onDelete = { entry -> tap("delete", entry.name); pending = Pending.DeleteEntry(entry) },
         onTogglePin = { entry -> viewModel.togglePinned(entry.file) },

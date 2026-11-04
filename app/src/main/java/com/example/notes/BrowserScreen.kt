@@ -74,6 +74,18 @@ class BrowserActions(
      * defaults to [onCopy] so a caller that does not care about the distinction needs no change.
      */
     val onClone: (Entry) -> Unit = onCopy,
+    /**
+     * **Copy this file out to the phone's Downloads** — report 23: *"I should be able to clone/move
+     * to the downloads - add this as a choice"*.
+     *
+     * It is a *copy*, and named as one, because nothing is removed from the project. It sits beside
+     * Rename and Copy rather than beside Export, which is the project's own menu item and means "the
+     * newest CI artifact"; this one is about the file the person is looking at.
+     *
+     * **Offered on an app-held row too**, because a copy is a read: the lock is about changing what
+     * is here, and taking a copy out changes nothing — the same reasoning [onClone] records.
+     */
+    val onDownload: (Entry) -> Unit = {},
     val onDelete: (Entry) -> Unit,
     val onTogglePin: (Entry) -> Unit,
     val onToggleLock: (Entry) -> Unit,
@@ -1062,6 +1074,15 @@ private fun EntryRow(
                             actions.onClone(entry)
                         },
                     )
+                    // **And the copy out**, which is the other act a lock was never about: it reads
+                    // the file and writes somewhere else entirely.
+                    DropdownMenuItem(
+                        text = { Text("Copy to Downloads") },
+                        onClick = {
+                            menu = false
+                            actions.onDownload(entry)
+                        },
+                    )
                 } else {
                 // **Two things, because they are the two that need a menu.** Lock has its
                 // own button on the row and History has one in the editor, so listing them
@@ -1098,6 +1119,15 @@ private fun EntryRow(
                     onClick = {
                         menu = false
                         actions.onCopy(entry)
+                    },
+                )
+                // **The same act the `upload` tool does**, through the same `Export` call, so a
+                // person's copy and an agent's cannot drift apart.
+                DropdownMenuItem(
+                    text = { Text("Copy to Downloads") },
+                    onClick = {
+                        menu = false
+                        actions.onDownload(entry)
                     },
                 )
                 DropdownMenuItem(

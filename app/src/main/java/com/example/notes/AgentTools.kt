@@ -49,14 +49,14 @@ class AgentTools(
      */
     private val triggerTokens: () -> Long = { 0L },
     /**
-     * Where a file goes when the call asks for it in Downloads — or `null` when it may not.
+     * The phone's Downloads folder — or `PhoneDownloads.NONE` when the agent may not reach it.
      *
      * **Injected rather than reached for**, for the same reason [bg] and the browser are: `MediaStore`
-     * needs a `Context`, and a tool set built in a test must not need one. It is a `null` default so a
-     * tool set built without a decision cannot write into a person's Downloads by accident, and the app
-     * passes the real one at the one place it builds tools for a turn.
+     * needs a `Context`, and a tool set built in a test must not need one. The default cannot reach
+     * anything, so a tool set built without a decision cannot read or write a person's Downloads by
+     * accident, and the app passes the real one at the one place it builds tools for a turn.
      */
-    private val downloads: ((File) -> Result<Export.Done>)? = null,
+    private val phone: PhoneDownloads = PhoneDownloads.NONE,
     /**
      * The browser, or `Browser.NONE` when the agent may not browse.
      *
@@ -316,6 +316,16 @@ class AgentTools(
         const val UNPACKED_SHOWN = 20
 
         /**
+         * How many rows a `downloads` listing shows.
+         *
+         * **A person's Downloads folder is not a project**, so it is usually short — but a phone that
+         * has been used for a year holds hundreds of files, and a listing of all of them is a page of
+         * CSV names an agent will not read. Forty is a screenful and it says how many more there
+         * are, so a missing name is never a silent absence.
+         */
+        const val DOWNLOADS_SHOWN = 40
+
+        /**
          * How many entry names a `fetch` answer lists.
          *
          * **The names, not the bytes**: a fetched zip in the conversation would cost the whole
@@ -420,7 +430,12 @@ class AgentTools(
             "ci" to setOf("workflow", "branch", "limit", "event", "inputs"),
             "runs" to setOf("run", "job", "grep"),
             "artifact" to setOf("run", "name"),
-            "downloads" to setOf("path"),
+            // **Three acts, three verbs.** Report 37: *"what is downloads command? shouldn't it be 2
+            // commands: download (from downloads), upload (to downloads)"* — and the listing is the
+            // third, because an agent cannot name a file it has not been shown.
+            "downloads" to setOf(),
+            "download" to setOf("name"),
+            "upload" to setOf("path"),
             // **One tool, two directions** — packing and unpacking are the same capability, and two
             // names in the tool list is two descriptions in every request's cache prefix for one
             // thing.
@@ -717,13 +732,36 @@ class AgentTools(
             ),
             spec(
                 "downloads",
+                "List what is in the phone's Downloads, newest first: **names, sizes and dates, " +
+                    "never contents** — a name is what `download` takes, and bytes here would " +
+                    "cost the context to say nothing. Take no arguments. " +
+                    "**An empty answer is not proof the folder is empty**: Downloads is read " +
+                    "through the phone's own store, and a file put there by a shell or by an old " +
+                    "app may have no entry in it, so the listing cannot see it even though the " +
+                    "file is there.",
+                "{}",
+            ),
+            spec(
+                "download",
+                "Copy one file **out of** the phone's Downloads into this project, at " +
+                    "`agent/downloaded/<name>`. This is how a log another app wrote reaches this " +
+                    "conversation: list it, copy it, `read` it. " +
+                    "**It never lands on a project file** — `agent/` is outside git, so a download " +
+                    "does not commit itself, and it cannot overwrite work by arriving. " +
+                    "`name` is a name, not a path: Downloads is one folder. " +
+                    "Refused above ${Fetcher.size(Fetched.LIMIT_BYTES)}, naming the size, because a " +
+                    "video is something a phone's Downloads holds and not something an agent reads.",
+                "{\"name\":\"trace.log.txt\"}",
+            ),
+            spec(
+                "upload",
                 "Put one file of this project into the phone's Downloads, so a person can open it. " +
                     "**This is the only way a file leaves the project**: an app's own storage is a " +
                     "place nobody can browse, so a report you wrote, an APK you fetched or a " +
                     "screenshot you took is only useful once it is here. `path` is one file, " +
                     "relative to the project. A folder is refused — a project is a tree and " +
                     "Downloads is one flat folder — so several files have to be put into one " +
-                    "archive first — `archive` with `pack` makes one.",
+                    "archive first — `archive` makes one from a single `path`.",
                 "{\"path\":\"release/app-release.apk\"}",
             ),
             spec(
@@ -897,7 +935,9 @@ class AgentTools(
             "ci" -> ci(args, deadline)
             "runs" -> runs(args, deadline)
             "artifact" -> artifact(args)
-            "downloads" -> downloads(args)
+            "downloads" -> listDownloads()
+            "download" -> download(args, deadline)
+            "upload" -> upload(args)
             "archive" -> archive(args, deadline)
             "fetch" -> if (fetchAllowed()) {
                 fetch(args, deadline)
@@ -3224,7 +3264,106 @@ class AgentTools(
         }
     }
 
-    private fun downloads(args: JSONObject): String {
+    /**
+     * What is in the phone's Downloads, newest first.
+     *
+     * **No arguments, and that is the design.** Report 37 split one command into two, and this is the
+     * third thing an agent needs: a name it can pass to `download`. Asking for a filter here would be
+     * a second way to say what `paths` may not: this folder is a person's, not a project, and it is
+     * usually small. What is not shown is the count, so an agent knows more is there.
+     */
+    private fun listDownloads(): String {
+        val items = phone.list().getOrElse {
+            return refusal(it.message ?: "Downloads could not be read")
+        }
+        if (items.isEmpty()) {
+            return success(
+                "Downloads has nothing in it that the phone told this app about.\n" +
+                    "A file put there by a shell or by an old app may have no entry the store \n" +
+                    "knows, so an empty answer is not proof the folder is empty.",
+            )
+        }
+        val shown = items.take(DOWNLOADS_SHOWN)
+        val head = if (items.size > shown.size) {
+            "the newest ${shown.size} of ${items.size}\n"
+        } else {
+            ""
+        }
+        return success(
+            head + shown.joinToString("\n") { "${it.name}  ${bytes(it.bytes)}  ${day(it.at)}" },
+        )
+    }
+
+    /**
+     * Copies one file out of Downloads **into `agent/downloaded/`**, never over a project file.
+     *
+     * ## Why a second copy, and why there
+     *
+     * The same reason `fetch` lands in `agent/fetched/`: a download is a thing that arrived from
+     * outside, and putting it where the project keeps its own files would make an import look like an
+     * edit. Two visible steps — it lands, then the agent moves or unpacks it — and `agent/` is not in
+     * git, so a download never commits itself.
+     *
+     * ## The cap, and the name
+     *
+     * **100 MB, refused above it with the size named.** A phone's Downloads can hold a video; an agent
+     * that copied one into a project would spend the person's storage to read nothing. The name is
+     * kept as it is, because it is the person's own name for their own file, and a name made safe
+     * here would break the round trip through `upload`.
+     */
+    private fun download(args: JSONObject, deadline: Deadline): String {
+        val asked = args.optString("name", "").trim()
+        if (asked.isEmpty()) {
+            return refusal(
+                "`download` takes `name`, a file in Downloads: {\"name\":\"log.txt\"}. " +
+                    "`downloads` with no arguments lists what is there.",
+            )
+        }
+        // **A name, not a path.** `Downloads` is one flat folder and a name is what the listing
+        // answers with; a `/` in it is either a mistake or an attempt to reach somewhere else, and
+        // both are refused rather than resolved.
+        if (asked.contains('/') || asked.contains('\\')) {
+            return refusal(
+                "\"$asked\" is a path, and `name` is a name: {\"name\":\"log.txt\"}. " +
+                    "Downloads is one folder, so a subfolder is not something this reads.",
+            )
+        }
+        val target = File(File(projectDir, AgentLog.DIR), "downloaded/$asked")
+        val size = try {
+            phone.list().getOrElse {
+                return refusal(it.message ?: "Downloads could not be read")
+            }.firstOrNull { it.name == asked }?.bytes
+        } catch (e: Throwable) {
+            return refusal("Downloads could not be read: " + Secrets.explain(e, "not read"))
+        } ?: return refusal(
+            "There is no file called \"$asked\" in Downloads. Run `downloads` with no arguments to " +
+                "see what is there.",
+        )
+        if (size > Fetched.LIMIT_BYTES) {
+            return refusal(
+                "\"$asked\" is ${Fetcher.size(size)} and the limit is ${Fetcher.size(Fetched.LIMIT_BYTES)}. " +
+                    "Nothing was copied: a file this big is not something an agent reads.",
+            )
+        }
+        deadline.check("download")
+        mayWrite(target)?.let { return refusal(it) }
+        val copied = phone.read(asked, target).getOrElse {
+            return refusal(it.message ?: "The file could not be copied out of Downloads")
+        }
+        return success(
+            "Copied $asked (${bytes(copied)}) to ${rel(target)}.\n" +
+                "It is outside git; `read` it, or `move` it into the project if it belongs there.",
+        )
+    }
+
+    /**
+     * Puts one file of this project into the phone's Downloads, so a person can open it.
+     *
+     * **This was called `downloads` and the report was right** — one verb cannot mean both
+     * directions. The checks are the ones it already had, unchanged: one file, inside the project,
+     * a folder refused with the sentence that says why and what to do instead.
+     */
+    private fun upload(args: JSONObject): String {
         val asked = args.optString("path").trim()
         if (asked.isEmpty()) {
             return refusal(
@@ -3245,24 +3384,26 @@ class AgentTools(
             return refusal(
                 "\"$asked\" is a folder. A folder is not exported: a project is a tree and Downloads " +
                     "is one flat folder, so its files would arrive with names that no longer tell " +
-                    "them apart. Name a file, or use `archive` with `pack` to make one.",
+                    "them apart. Name a file, or use `archive` with `path` to make one.",
             )
         }
         if (!file.isFile) {
             return refusal("There is no file at \"$asked\" in this project.")
         }
-        val put = downloads ?: return refusal(
-            "This app was not given a way to write into Downloads, so nothing can be exported from " +
-                "here. The file is at ${file.relativeTo(projectDir).invariantSeparatorsPath} in the " +
-                "project.",
-        )
-        return put(file).fold(
+        return phone.write(file).fold(
             onSuccess = { success(it.said()) },
             onFailure = { refusal(it.message ?: "The file could not be put in Downloads") },
         )
     }
 
+    /** A byte count a model can act on: exact below a kilobyte, two figures above it. */
+    private fun bytes(n: Long): String = Fetcher.size(n)
+
+    /** The date of a listing row, as the day it was last written. */
+    private fun day(at: Long): String = LogFormat.recordStamp(at).substringBefore('T', "")
+
     /**
+     * Downloads one file from a URL into `agent/fetched/`.    /**
      * Downloads one file from a URL into `agent/fetched/`.
      *
      * ## Why this tool had to exist

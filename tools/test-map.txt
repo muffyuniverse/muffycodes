@@ -90,6 +90,7 @@ ReleaseKeyTest app/src/main/java/com/example/notes/ReleaseKey.kt app/src/main/ja
 SigningFeatureTest app/src/main/java/com/example/notes/ReleaseKey.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/BrowserScreen.kt
 ReleaseTest app/src/main/java/com/example/notes/Release.kt app/src/main/java/com/example/notes/GitHub.kt
 ExportTest app/src/main/java/com/example/notes/Export.kt
+DownloadsTest app/src/main/java/com/example/notes/Downloads.kt app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/AgentLog.kt app/src/main/java/com/example/notes/Workspace.kt
 BrowseToolsTest app/src/main/java/com/example/notes/AgentTools.kt
 SearchTest app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Workspace.kt
 ArchiveTest app/src/main/java/com/example/notes/AgentTools.kt app/src/main/java/com/example/notes/Workspace.kt

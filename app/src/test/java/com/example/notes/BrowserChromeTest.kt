@@ -449,7 +449,7 @@ class BrowserChromeTest {
     }
 
     @Test
-    fun `a file the app keeps offers the clone and nothing else`() {
+    fun `a file the app keeps offers the clone and the copy out, and nothing else`() {
         // The contents of that menu, which is the half the count above cannot see. Opening it is the
         // only way to tell "one item, and it is Clone" from "one item, and it is something the lock
         // will refuse".
@@ -465,8 +465,11 @@ class BrowserChromeTest {
         compose.onAllNodesWithContentDescription("More")[0].performClick()
         compose.waitForIdle()
         compose.onNodeWithText("Clone…").assertExists()
-        // **And the ones that would be lies.** Named rather than counted, because "one item" would
-        // also pass if the one item were Rename.
+        // **And the copy out**, which report 23 asked for and which is the other act a lock was
+        // never about: it reads the file and writes to Downloads, changing nothing here.
+        compose.onNodeWithText("Copy to Downloads").assertExists()
+        // **And the ones that would be lies.** Named rather than counted, because "two items" would
+        // also pass if they were Rename and Delete.
         for (refused in listOf("Rename…", "Move…", "Delete", "Pin", "Copy…")) {
             compose.onAllNodesWithText(refused).assertCountEquals(0)
         }

@@ -74,15 +74,20 @@ class CiToolsTest {
         github = { if (withGitHub) github else null },
         githubToken = { if (withGitHub) "a-key" else null },
         // **Injected rather than reached for**, because `MediaStore` needs a `Context` and this test
-        // has no phone. The real one is `Export.copyToDownloads`, and what is being tested here is the
-        // tool's decisions: what it refuses, and what it hands over.
-        downloads = if (withDownloads) {
-            { file ->
-                exported += file
-                Result.success(Export.Done(file.name, file.length(), Export.FOLDER))
+        // has no phone. What is being tested here is the tool's decision — what it hands over — and
+        // the real folder is `MediaStoreDownloads`.
+        phone = if (withDownloads) {
+            object : PhoneDownloads {
+                override fun list() = Result.success(emptyList<PhoneDownloads.Item>())
+                override fun read(name: String, into: File) =
+                    Result.failure<Long>(IllegalStateException("nothing to read"))
+                override fun write(file: File): Result<Export.Done> {
+                    exported += file
+                    return Result.success(Export.Done(file.name, file.length(), Export.FOLDER))
+                }
             }
         } else {
-            null
+            PhoneDownloads.NONE
         },
     )
 

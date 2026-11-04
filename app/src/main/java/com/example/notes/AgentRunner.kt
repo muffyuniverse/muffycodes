@@ -104,8 +104,8 @@ class AgentRunner(
      */
     private val github: () -> GitHub? = { null },
     private val githubToken: () -> String? = { null },
-    /** Where a `downloads` call puts a file. See `AgentTools.downloads`. */
-    private val downloads: ((File) -> Result<Export.Done>)? = null,
+    /** The phone's Downloads folder. See `AgentTools.phone`. */
+    private val phone: PhoneDownloads = PhoneDownloads.NONE,
 ) {
 
     private val sessions = AgentSessions(ws.accountDir)
@@ -386,7 +386,7 @@ class AgentRunner(
                     browseMs = { settings.browseMs },
                     github = github,
                     githubToken = githubToken,
-                    downloads = downloads,
+                    phone = phone,
                 )
                 if (waking == null) {
                     agent.warm() to log.rows()

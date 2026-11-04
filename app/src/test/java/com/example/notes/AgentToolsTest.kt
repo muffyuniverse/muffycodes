@@ -133,10 +133,11 @@ class AgentToolsTest {
                 // `shot` makes a picture and nothing could consume one until `look` existed.
                 "look",
                 "ci", "runs",
-                // **The two that move a file rather than words.** `artifact` fetches what a run
-                // produced, and `downloads` is the only way anything leaves the project.
-                "artifact", "downloads",
-                // **`archive` is what makes the `downloads` sentence true.** It packs a folder into
+                // **The ones that move a file rather than words.** `artifact` fetches what a run
+                // produced; `downloads` lists the phone's folder, `download` copies out of it and
+                // `upload` is the only way anything leaves the project.
+                "artifact", "downloads", "download", "upload",
+                // **`archive` is what makes the `upload` sentence true.** It packs a folder into
                 // one file for that flat folder, and it unpacks a fetched dependency into the
                 // project — the two directions of one capability, which is why it is one tool.
                 "archive",
