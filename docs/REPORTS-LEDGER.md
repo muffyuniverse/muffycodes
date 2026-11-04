@@ -20,22 +20,22 @@ Full analysis in `/root/Downloads/PROPOSAL-tool-api-2026-11-04.md`. **All 17 wer
 | # | Report | State |
 |---|---|---|
 | 22 | "1 session" row is still visible — remove it | **OPEN** · not a tool report; belongs to the project-screen batch |
-| 23 | clone/move to Downloads as a choice | **OPEN** · outbound `downloads` exists, the ⋮ menu has no Downloads destination |
-| 24 | search regex or text? if reranked why regex? | **ANSWERED** · operator: *"`tree` keeps regex, `search` should be semantic"* — but **the catalogue lists no embedding/rerank model**, so defaults must be hard-coded. Counterproposal §1 |
+| 23 | clone/move to Downloads as a choice | **PLANNED** step 4 · ⋮ gains "Copy to Downloads" |
+| 24 | search regex or text? if reranked why regex? | **PLANNED** step 5 · semantic, account-wide; three catalogues already exist (40 embedding, 12 rerank) |
 | 25 | `paths` 10–100 instead of ≥1, default 10 | **SETTLED** · operator: "keep 100 max"; spec text will state 1 minimum. §2 |
-| 26 | `tree`: rename `name`/`grep` → `name`/`content` | **OPEN** |
-| 27 | why does `tree` have `from`/`to` | **OPEN** |
-| 28 | `history` does not need `from`/`to` | **OPEN** |
-| 29 | merge `create`+`edit` into `write` | **OPEN** |
-| 30 | remove `from`/`to` from commands | **OPEN** · 5 tools still take them |
-| 31 | remove `at` | **OPEN** · dies with §3's merge |
+| 26 | `tree`: rename `name`/`grep` → `name`/`content` | **PLANNED** step 2 |
+| 27 | why does `tree` have `from`/`to` | **PLANNED** step 2 · dropped |
+| 28 | `history` does not need `from`/`to` | **PLANNED** step 2 · dropped |
+| 29 | merge `create`+`edit` into `write` | **PLANNED** step 1 |
+| 30 | remove `from`/`to` from commands | **PLANNED** step 2 · kept on `read` only |
+| 31 | remove `at` | **PLANNED** step 1 · dies with the merge |
 | 32 | what does `replace` mean on `write`? | **SETTLED** · option A (whole-file); **`replace` is deleted** — `text` is the new text in every shape |
-| 33 | regex selection is per-symbol? | **ANSWERED** · yes, to one character; cannot cross a line **because we apply it per line**. §4 proposes `multi: true` |
-| 34 | `move` needs no `name` | **OPEN** |
-| 35 | remove `from`/`to` **only if** regex can select lines | **ANSWERED** · it is **our** restriction, not regex's; `multi: true` proposed. `from`/`to` stay on `read`/`write`, go everywhere else. §5 |
-| 36 | `fetch` up to 100 MB | **OPEN** · `LIMIT_BYTES` is 20 MB |
-| 37 | split `downloads` into `download`/`upload` | **SETTLED** · operator: read-only over all of Downloads + download + upload. §6 needs one confirmation |
-| 38 | `archive`: `-u` flag + one path | **SETTLED** · operator: "ok". `unpack: true`, output beside input |
+| 33 | regex selection is per-symbol? | **SETTLED** · `multi: true` granted; it carries **no cap of its own** — `forConversation` already bounds every result |
+| 34 | `move` needs no `name` | **PLANNED** step 2 |
+| 35 | remove `from`/`to` **only if** regex can select lines | **SETTLED** · `multi` granted; `from`/`to` stay on `read`/`write` only |
+| 36 | `fetch` up to 100 MB | **PLANNED** step 3 · `LIMIT_BYTES` is 20 MB |
+| 37 | split `downloads` into `download`/`upload` | **PLANNED** step 4 · three tools, `download` capped 100 MB |
+| 38 | `archive`: `-u` flag + one path | **PLANNED** step 3 · `unpack: true`, output beside input |
 | 39 | prompt still tells about `ask`/`conclude` | **CLOSED** `989c502` · brief rewritten, test reads the live brief |
 
 ---
