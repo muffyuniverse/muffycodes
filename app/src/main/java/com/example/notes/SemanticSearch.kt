@@ -382,18 +382,17 @@ class SemanticSearch(
         deadline: Deadline,
     ): Triple<Int, Int, String?> {
         val dir = ws.projectDir(project)
-        val repo = try {
-            if (!GitService.isRepository(dir)) return Triple(0, 0, null)
-            // **`openExisting`, never `initOrOpen`.** The index is derived data and must never be
-            // the thing that creates a repository: an initialised repo here would make a project
-            // with no history report one, and it would commit whatever the index walk happened to
-            // find. A project with no `.git` has no versions, and that is an answer.
+        // **`openExisting`, never `initOrOpen`.** The index is derived data and must never be the
+        // thing that creates a repository: an initialised repo here would make a project with no
+        // history report one, and it would commit whatever the index walk happened to find. A project
+        // with no `.git` has no versions, and that is an answer.
+        // **A project with no repository has no versions**, which is not a failure: it is a project
+        // that has never been saved. The working tree half already indexed it.
+        val repo: org.eclipse.jgit.lib.Repository = try {
             GitService.openExisting(dir)
         } catch (e: Throwable) {
-            // **A project with no repository has no versions**, which is not a failure: it is a
-            // project that has never been saved. The working tree half already indexed it.
-            return Triple(0, 0, null)
-        }
+            null
+        } ?: return Triple(0, 0, null)
         var versions = 0
         var chunks = 0
         var stopped: String? = null

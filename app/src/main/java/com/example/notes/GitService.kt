@@ -1037,7 +1037,7 @@ object GitService {
                             if (path.isEmpty()) continue
                             // `oldId` is the all-zero id for an addition, which is exactly right:
                             // the caller filters by [Change.blob].
-                            changes += Change(path, entry.newId.name)
+                            changes += Change(path, entry.newId.name())
                         }
                     }
                 } catch (e: Throwable) {

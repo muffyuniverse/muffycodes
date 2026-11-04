@@ -337,7 +337,7 @@ class ProjectGit(
         if (keep <= 0) return
         try {
             if (HistoryPrune.prune(repo, keep) > 0) {
-                Maintenance.mark(repo.workTree ?: return, "the history was shortened")
+                Maintenance.mark(workspace.projectDir(project), "the history was shortened")
             }
         } catch (e: Throwable) {
             // A history that could not be shortened is still a working history.
