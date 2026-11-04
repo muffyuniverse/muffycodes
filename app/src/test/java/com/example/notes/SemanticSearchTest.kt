@@ -210,6 +210,39 @@ class SemanticSearchTest {
     }
 
     @Test
+    fun `a model chosen after the index was built is refused rather than ignored`() {
+        // **The index's record used to win in silence**, so choosing a new embedding model in Settings
+        // had no effect and said nothing — a silent no-op. Same dimensions do not rescue it: two
+        // models at 1024 are two coordinate systems, and a cosine between them is a number that looks
+        // like a score. The refusal names both models and the way out.
+        write("shopping", "milk.txt", "the milk went sour\n")
+        engine().answer(null, "milk", 10, 8, Deadline.none()).getOrThrow()
+
+        val switched = engine(model = PickedModel("other/embed", "test", dimensions = 4))
+            .answer(null, "milk", 10, 8, Deadline.none())
+
+        assertTrue("refused", switched.isFailure)
+        val said = switched.exceptionOrNull()?.message.orEmpty()
+        assertTrue("naming the model that built it: $said", said.contains("test/embed"))
+        assertTrue("and the one chosen now: $said", said.contains("other/embed"))
+        assertTrue("and that they cannot be compared: $said", said.contains("cannot be compared"))
+        assertTrue("and what empties it: $said", said.contains("emptied"))
+    }
+
+    @Test
+    fun `an index whose config was lost still answers, because the index remembers its model`() {
+        // **The other side of that rule.** A phone whose `model_conf.json` is gone has an index that
+        // knows exactly what it is; refusing then would throw away work for no reason.
+        write("shopping", "milk.txt", "the milk went sour\n")
+        engine().answer(null, "milk", 10, 8, Deadline.none()).getOrThrow()
+
+        val answer = engine(model = null).answer(null, "milk", 10, 8, Deadline.none())
+
+        assertTrue("it still answers: ${answer.exceptionOrNull()?.message}", answer.isSuccess)
+        assertTrue("with the file", answer.getOrThrow().contains("shopping/milk.txt"))
+    }
+
+    @Test
     fun `an embedding model with no dimension is refused, because an index is one size`() {
         val answer = engine(model = PickedModel("test/embed", "test", dimensions = null))
             .answer(null, "milk", 10, 8, Deadline.none())

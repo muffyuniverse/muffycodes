@@ -464,14 +464,43 @@ class AppViewModel @JvmOverloads constructor(
         else account?.author() ?: DEFAULT_AUTHOR
 
     private val git: ProjectGit?
-        get() = workspace?.let { ws ->
-            ProjectGit(
-                workspace = ws,
-                tokenProvider = { activeLogin?.let { credentials.token(it) } },
-                authorProvider = { author },
-                keepProvider = { settings.historyLength },
-            )
-        }
+        get() = workspace?.let { ws -> projectGit(ws) }
+
+    /**
+     * A [ProjectGit] that asks for an index pass, wired to this account's key and model file.
+     *
+     * **The editor's path needs its own wiring**, because the agent may never have been switched on:
+     * [AgentWiring] configures the same queue, and either being first is enough — `configure` is
+     * idempotent and both describe the same account, key and config. Doing it here, beside the
+     * construction, is what keeps "who indexes" from being a thing a person has to turn on.
+     */
+    private fun projectGit(ws: Workspace): ProjectGit = ProjectGit(
+        workspace = ws,
+        tokenProvider = { activeLogin?.let { credentials.token(it) } },
+        authorProvider = { author },
+        keepProvider = { settings.historyLength },
+        index = indexer(ws),
+    )
+
+    /**
+     * The provider a `ProjectGit` asks for an index pass through — **and the wiring that makes the
+     * ask mean something.**
+     *
+     * The two calls are one function on purpose: every place that hands out a `ProjectGit` gets a
+     * queue that has been told where the account is, so there is no arrangement in which a commit
+     * asks a queue that was never configured. Calling it repeatedly is free.
+     */
+    private fun indexer(ws: Workspace): (String, String) -> Unit {
+        IndexQueue.configure(
+            ws = ws,
+            embedder = Embedder.openRouter(
+                key = { activeLogin?.let { credentials.modelKey(it) } },
+            ),
+            models = { ModelConfigFile.load(ws.accountDir).getOrNull() },
+            context = app,
+        )
+        return { project, why -> IndexQueue.want(project, why) }
+    }
 
 
     init {
@@ -3219,6 +3248,7 @@ class AppViewModel @JvmOverloads constructor(
                     else accounts.account(activeLogin ?: "")?.author() ?: DEFAULT_AUTHOR
                 },
                 { settings.historyLength },
+                index = indexer(ws),
             )
             val made = git.init(clean)
             // **The folder tree, and nothing in it.** The operator: *"just create empty system_data
@@ -3310,6 +3340,7 @@ class AppViewModel @JvmOverloads constructor(
                 { credentials.token(login) },
                 { accounts.account(login)?.author() ?: DEFAULT_AUTHOR },
                 { settings.historyLength },
+                index = indexer(ws),
             )
             val clone = git.cloneInto(clean, url)
             // **The folder tree, after the clone and not before.** `cloneInto` refuses a folder that
@@ -3611,6 +3642,7 @@ class AppViewModel @JvmOverloads constructor(
                 { credentials.token(login) },
                 { accounts.account(login)?.author() ?: DEFAULT_AUTHOR },
                 { settings.historyLength },
+                index = indexer(ws),
             ).cloneInto(repo.name, repo.cloneUrl)
             // **Nothing is written into an imported project.** It arrives with whatever the person
             // put in it, and it already works — adding a file to it would put a file in their next

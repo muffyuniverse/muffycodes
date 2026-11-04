@@ -342,13 +342,23 @@ class SearchIndex private constructor(
         }
     }
 
-    /** Empties the index but keeps its declared model, so a rebuild needs no re-declaration. */
+    /**
+     * Empties the index **including what it says it was built with.**
+     *
+     * This used to keep the declared model "so a rebuild needs no re-declaration", and that was both
+     * unnecessary and fatal: the caller declares on every open anyway, while [declare] refuses any
+     * model other than the recorded one — so leaving the record behind made changing the model
+     * **impossible**, and the refusal said "it has to be rebuilt" with no way to rebuild it. Emptying
+     * the record is what makes that sentence true: after this, the next open declares whatever the
+     * person has chosen and re-embeds the project under it.
+     */
     fun clear() {
         db.beginTransaction()
         try {
             db.delete("chunks", null, null)
             db.delete("vectors", null, null)
             db.delete("files", null, null)
+            db.delete("meta", null, null)
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()

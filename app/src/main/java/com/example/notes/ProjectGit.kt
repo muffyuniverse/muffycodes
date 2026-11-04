@@ -30,6 +30,15 @@ class ProjectGit(
     private val authorProvider: () -> GitAuthor,
     /** How many commits a project's history keeps; 0 means no limit. */
     private val keepProvider: () -> Int = { 0 },
+    /**
+     * How to ask for a background index pass, or a no-op.
+     *
+     * **A provider like the three above it**, and a parameter rather than a call into [IndexQueue]
+     * for the reason they are: a `ProjectGit` built in a test must not spend a key or start a
+     * thread, and a test that wants to see *that a commit asks for an index* passes a recorder. The
+     * app passes `IndexQueue::want` at the places that also configure the queue.
+     */
+    private val index: (String, String) -> Unit = { _, _ -> },
 ) {
 
     /** The worktree of a project — **which is the project's own folder.** */
@@ -151,6 +160,14 @@ class ProjectGit(
                 val outcome = GitService.commitEverything(it, what, authorProvider(), inFlight = false)
                 if (outcome.written) {
                     prune(it)
+                    // **Every change the app makes is one commit, so this is the single signal that
+                    // the project's text changed** — the editor, the agent's `write`, a delete, a
+                    // move, a restore: they all arrive here. The queue is asked rather than told, so
+                    // the work happens off this thread and a save does not wait for an embedding.
+                    //
+                    // A commit that wrote nothing asks for nothing: `written` is false, and a pass
+                    // would answer "nothing had changed" at the cost of a walk.
+                    index(project, "a change was saved")
                 }
                 outcome
             }
@@ -354,6 +371,12 @@ class ProjectGit(
             open(project)?.use { repo -> GitService.scrubRemoteUrls(repo) }
             workspace.ensureIgnore(dir)
             workspace.ensureSecretIgnores(dir)
+            // **The comprehensive pass, asked for once, right after the tree lands.** A clone writes
+            // hundreds of files at once and commits none of them, so the commit hook above never
+            // fires for it — and a project that arrived from GitHub is exactly the case where the
+            // whole index is stale at once. The queue makes it background work with a result, rather
+            // than the first search paying for it while somebody waits.
+            index(project, "the project was added")
         }
         return result
     }

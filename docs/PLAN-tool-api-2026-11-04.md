@@ -252,7 +252,9 @@ the 10× the old argument assumed.
 1. **`scope` replaces `path` + `in`.** ✅
 2. **`history` becomes a third axis.** ✅ (and refused with `semantic`, which is the operator's boundary)
 3. **`paths` counts paths in both modes.** ✅
-4. **The write path.** ✅ **but not where the plan said.** The plan said "on save, in the background". There
+4. **The write path.** ✅ **and it is now three triggers**, not one — see the operator's correction above.
+   The original note follows, because the reasoning that produced the search guard is still why it is there.
+   **but not where the plan said.** The plan said "on save, in the background". There
    is no single save: the editor writes, the agent writes, a clone writes, a restore writes, and a save hook
    would have to exist in each — with the one that was missed being a project whose search silently misses
    its newest work. Instead the **walk runs inside the search**, with a modification time per file in
@@ -270,6 +272,48 @@ the 10× the old argument assumed.
 6. **The read path.** ✅ embed → `nearest` → **drop rows whose cosine is not positive** → rerank the top
    `RERANK_DEPTH = 30` → answer `path:line: text  [0.87]`. No regex fallback. A reranker that is down is a
    **note**, not a failure: vector order is still a meaning search, unlike a text search standing in for one.
+
+### The operator's correction: there IS a per-change hook, and the search guard is not alone
+
+> *"why do you say that we dont have a hook for per change embeddng if every change produces a commit - cant
+> we use that? and activate indexing in background"* — 2026-11-04
+>
+> *"it shouldnt be alone. we should run comprehensive indexing of a project we add from github the moment it
+> is added and in background with result status returning to session log as app notification."*
+
+**The first half was my error, and `docs/PLAN` had already recorded the fact I ignored:** `ProjectGit.commitOutcome`
+is *"the whole sequence under one hold"* and answers `CommitOutcome(written)`. Every writer — the editor, the
+agent's `write`, a delete, a move, a restore — arrives there. "There are four writers, so a save hook has to be
+written four times" was wrong: there are four **callers** and one **choke point**.
+
+So there are three triggers now, and the search guard is the net under the other two:
+
+| trigger | where | why it exists |
+|---|---|---|
+| a commit that **wrote** a version | `ProjectGit.commitOutcome` | every change the app makes is one commit; `written` false asks for nothing, because a pass would answer "nothing had changed" at the cost of a walk |
+| a project arriving from a remote | `ProjectGit.cloneInto` | a clone writes a whole tree and commits none of it file by file, so the hook above never fires for the one case where the *whole* index is stale |
+| a search | `SemanticSearch.answer` | the net: a pull, a file the app did not write, a commit that failed |
+
+**`IndexQueue` is one object, not a per-instance hook**, because the app builds `ProjectGit` twice (the editor's
+and the runner's) and two indexers would race on one database. Requests **coalesce per project** — an index pass
+is the idempotent statement "make this index match this project", so five saves in a row are one pass. It runs on
+a daemon thread, writes to the same `Deadline`-bounded `index()` the guard uses, and its result goes to the
+**session log** (`appNote`, so it is in the file and not in the model's context) and to a **notification** that
+replaces itself rather than stacking.
+
+### The batch, measured, and where 512 comes from
+
+| chunks per request | tokens | time | throughput |
+|---|---|---|---|
+| 32 | 4 662 | 1.9 s | 2 470 tok/s |
+| 128 | 23 826 | 2.9 s | 8 085 tok/s |
+| **512** | 95 634 | **3.1 s** | **30 837 tok/s** |
+| 1024 | — | refused | `input array exceeds maximum of 512 items` |
+
+512 is the **provider's ceiling**, not a preference: 3.7× the throughput of 128 because the per-request cost is
+paid once. A batch refused **for its size** is halved and retried (down to one), since another model may have a
+lower ceiling than this measurement; any other failure returns at once, because retrying a dead network nine
+times slower spends a minute to learn what the first answer said.
 
 ### What the build found that the design did not foresee
 

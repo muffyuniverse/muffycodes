@@ -66,6 +66,11 @@ class SemanticSearch(
     /**
      * Rows for what [query] is about, inside this project.
      *
+     * **The guard runs first**: anything that changed since the last pass is embedded before the
+     * question is asked, so an answer is never about text the project no longer has. That is the net
+     * under the two faster paths — [IndexQueue] indexes after a commit and after a clone — and it is
+     * what catches a pull, a file the app did not write, or a commit that failed.
+     *
      * @return the body of the answer, or the reason it could not be answered. **A failure is a
      * sentence**, never a text search standing in for a meaning search: the operator's rule, and the
      * reason is that a substitute answers a question nobody asked while looking like the one asked.
@@ -77,15 +82,59 @@ class SemanticSearch(
         depth: Int,
         deadline: Deadline,
     ): Result<String> {
-        val pick = embedding() ?: return Result.failure(IllegalStateException(NO_MODEL))
-        val dims = pick.dimensions?.takeIf { it > 0 }
-            ?: return Result.failure(
-                IllegalStateException(
-                    "\"${pick.model}\" is chosen as the embedding model but no dimension is, and " +
-                        "an index has to be one size. Open Settings, choose the row called " +
-                        "\"Embedding model\", and pick its dimensions.",
-                ),
+        val ready = ready().getOrElse { return Result.failure(it) }
+        try {
+            val caught = catchUp(ready.index, ready.model, ready.dims, deadline)
+            return search(
+                ready.index, scope, query, paths, depth, ready.model, ready.dims, caught, deadline,
             )
+        } finally {
+            ready.close()
+        }
+    }
+
+    /**
+     * One pass: **make the index match the project.**
+     *
+     * The same pass the guard runs, without a question at the end — this is what [IndexQueue] calls
+     * after a commit and after a clone, so a project's text is indexed while nobody is waiting.
+     *
+     * Idempotent by construction: a file whose modification time is the one already recorded costs one
+     * directory entry and no request, so running this twice answers "nothing had changed" and spends
+     * nothing. That is what lets the queue coalesce three requests into one pass, and what makes a
+     * pass safe to interrupt — the rows it wrote stay true and the next pass carries on.
+     */
+    fun index(deadline: Deadline): Result<Indexed> {
+        val ready = ready().getOrElse { return Result.failure(it) }
+        return try {
+            Result.success(catchUp(ready.index, ready.model, ready.dims, deadline))
+        } finally {
+            ready.close()
+        }
+    }
+
+    /**
+     * An index open and agreeing about its own space.
+     *
+     * ## One model, and it is the one the index was built with
+     *
+     * A vector only means something against vectors from the **same model** — and, less obviously,
+     * the same size. Two models at 1024 dimensions are still two coordinate systems: a cosine between
+     * a query from one and a chunk from the other is arithmetic on unrelated numbers that lands in
+     * [-1, 1] and looks exactly like a score. That is why [SearchIndex.declare] compares the pair and
+     * why fixing the dimensions everywhere would not make models interchangeable.
+     *
+     * So the index's own record decides, and a **different** model chosen in Settings is refused by
+     * name rather than obeyed or ignored: obeying it compares two spaces, ignoring it is the silent
+     * no-op this app treats as a defect. The refusal says what empties the index, which is the one
+     * act that makes the sentence true.
+     */
+    private class Ready(val index: SearchIndex, val model: String, val dims: Int) : java.io.Closeable {
+        override fun close() = index.close()
+    }
+
+    private fun ready(): Result<Ready> {
+        val pick = embedding()
         val root = ws.projectDir(project)
         val index = try {
             SearchIndex.open(root)
@@ -93,45 +142,108 @@ class SemanticSearch(
             return Result.failure(
                 IllegalStateException(
                     "The index for \"$project\" could not be opened, so nothing was searched: " +
-                        "${reason(e)}",
+                        reason(e),
                 ),
             )
         }
-        return try {
-            index.declare(pick.model, dims).getOrElse { return Result.failure(it) }
-            val caught = catchUp(index, root, pick, dims, deadline)
-            search(index, root, scope, query, paths, depth, pick, dims, caught, deadline)
-        } finally {
+        val built = index.builtWith()
+        // **A project that has never been indexed needs a choice; one that has does not.** Settings
+        // is where the choice is made, and an index already built carries its own — which is what
+        // lets a search work on a phone whose model config was lost.
+        if (built == null && pick == null) {
             index.close()
+            return Result.failure(IllegalStateException(NO_MODEL))
         }
+        // **A model chosen after the index was built is refused, not ignored.** The index's own record
+        // used to win silently, so a person who picked a different embedding model in Settings got no
+        // effect and no word about it — the silent no-op this app treats as a defect. Dimensions do
+        // not rescue this: two models at 1024 are still two coordinate systems, and a cosine between
+        // them is a number that looks like a score. So the refusal names both and says what empties
+        // it, because a rebuild is a real cost and not a thing to do behind somebody's cursor.
+        if (built != null && pick != null && built.model != pick.model) {
+            index.close()
+            return Result.failure(
+                IllegalStateException(
+                    "The index for \"$project\" was built with \"${built.model}\", and " +
+                        "\"${pick.model}\" is chosen now. Vectors from two models cannot be " +
+                        "compared, so the index has to be emptied and rebuilt before this model " +
+                        "can answer — choose \"${built.model}\" again to keep the index, or empty " +
+                        "it to switch.",
+                ),
+            )
+        }
+        val model = built?.model ?: pick!!.model
+        val dims = built?.dims ?: pick!!.dimensions ?: run {
+            index.close()
+            return Result.failure(
+                IllegalStateException(
+                    "\"${pick!!.model}\" is chosen as the embedding model but no dimension is, and " +
+                        "an index has to be one size. Open Settings, choose the row called " +
+                        "\"Embedding model\", and pick its dimensions.",
+                ),
+            )
+        }
+        index.declare(model, dims).onFailure { why ->
+            index.close()
+            return Result.failure(
+                IllegalStateException(
+                    "${why.message} Emptying the index rebuilds it under the model chosen now; " +
+                        "until then this one can still answer, and nothing about it is lost.",
+                ),
+            )
+        }
+        return Result.success(Ready(index, model, dims))
     }
 
     // ---- 1. keeping the index current --------------------------------------
 
     /**
-     * What one pass over the project did, for the note on the answer.
+     * What one pass over the project did.
      *
      * **`left` is arithmetic rather than a second walk**: the files were listed before any of them
      * were read, so what was not reached is a subtraction and not a guess.
+     *
+     * **[said] is the sentence both audiences get** — the note under a search answer, the row in the
+     * session log and the line in the notification. One sentence, because three copies of the same
+     * fact written three ways is three chances to disagree.
      */
-    private data class Caught(
+    data class Indexed(
         val total: Int,
         val done: Int,
         val unchanged: Int,
         val failed: Int,
+        /** Chunks embedded, which is what a request was actually spent on. */
+        val chunks: Int,
         /** Why the pass stopped early, or null when it finished. */
         val stopped: String?,
     ) {
         val left: Int get() = (total - done - unchanged - failed).coerceAtLeast(0)
+
+        /** Nothing was stale and nothing failed: the index already said what the project says. */
+        val nothingToDo: Boolean get() = done == 0 && failed == 0 && stopped == null
+
+        fun said(): String = when {
+            total == 0 -> "there is no text to index"
+            // **"nothing had changed" is the answer to a pass that was asked for anyway**, and it says
+            // how much is behind it so the number is not mistaken for an empty project.
+            nothingToDo ->
+                "nothing had changed: all $total file(s) were already indexed"
+            stopped != null && left > 0 ->
+                "stopped at $done of $total file(s): $stopped"
+            stopped != null -> "$done file(s) indexed, then it stopped: $stopped"
+            failed > 0 ->
+                "$done of $total file(s) indexed, $failed could not be, $chunks chunk(s) embedded"
+            else -> "$done of $total file(s) indexed, $chunks chunk(s) embedded"
+        }
     }
 
     private fun catchUp(
         index: SearchIndex,
-        root: File,
-        pick: PickedModel,
+        model: String,
         dims: Int,
         deadline: Deadline,
-    ): Caught {
+    ): Indexed {
+        val root = ws.projectDir(project)
         val files = mutableListOf<File>()
         var stopped: String? = null
         // **One canonical root, used for both halves.** `relativeTo` compares paths textually, so a
@@ -153,6 +265,7 @@ class SemanticSearch(
         var done = 0
         var unchanged = 0
         var failed = 0
+        var chunks = 0
         for (file in files) {
             if (stopped != null) break
             val rel = relTo(canon, file) ?: continue
@@ -187,9 +300,9 @@ class SemanticSearch(
                 failed++
                 continue
             }
-            val chunks = Chunker.split(text)
+            val pieces = Chunker.split(text)
             val put = try {
-                index.put(rel, "", chunks) { texts -> embedAll(texts, pick, dims, deadline) }
+                index.put(rel, "", pieces) { texts -> embedAll(texts, model, dims, deadline) }
             } catch (e: StoppedException) {
                 stopped = "the time limit ran out while embedding"
                 break
@@ -197,10 +310,11 @@ class SemanticSearch(
                 Result.failure(e)
             }
             put.fold(
-                onSuccess = {
+                onSuccess = { embedded ->
                     // **An empty file is indexed**, with no chunks: "there is nothing here" is an
                     // answer, and a file that stayed unindexed would be counted behind on every pass.
                     index.note(rel, mtime, SearchIndex.INDEXED)
+                    chunks += embedded
                     done++
                 },
                 onFailure = { e ->
@@ -213,7 +327,7 @@ class SemanticSearch(
                 },
             )
         }
-        return Caught(files.size, done, unchanged, failed, stopped)
+        return Indexed(files.size, done, unchanged, failed, chunks, stopped)
     }
 
     /**
@@ -263,34 +377,85 @@ class SemanticSearch(
     }
 
     /**
-     * [texts] embedded in groups of [BATCH].
+     * [texts] embedded in as few requests as the provider allows.
      *
-     * **A file is not one request.** A four-hundred-kilobyte source file is five hundred chunks, and
-     * asking for five hundred vectors at once is a request whose size is decided by whichever file
-     * happened to be biggest — the kind of failure that arrives as a 413 from a provider and reads
-     * like a model limit. The batch is the bound, and the deadline is checked between batches, which
-     * is the granularity a person waiting actually feels.
+     * ## Why the batch is [BATCH] and not a handful, measured
+     *
+     * **Two thousand five hundred tokens a second in one request, ten thousand eight hundred in a
+     * request of 256** — the cost of an embedding call is dominated by getting to the model, not by
+     * the text, so a small batch pays that overhead once per handful of chunks. Measured on
+     * `perplexity/pplx-embed-v1-0.6b` with this app's own 800-character chunks:
+     *
+     * | chunks per request | tokens | time | throughput |
+     * |---|---|---|---|
+     * | 32 | 4 662 | 1.9 s | 2 470 tok/s |
+     * | 128 | 23 826 | 2.9 s | 8 085 tok/s |
+     * | **512** | 95 634 | **3.1 s** | **30 837 tok/s** |
+     *
+     * 1024 is refused outright — `input array exceeds maximum of 512 items` — so **512 is the
+     * provider's ceiling, not a guess**, and it is the number this uses.
+     *
+     * ## Why halving, on a refusal only
+     *
+     * The ceiling is the provider's, and a different model may have a lower one. Rather than keep a
+     * table of each model's limit — which would be wrong the week it changed — a batch that is
+     * **refused for its size** is halved and retried, down to one. A batch that fails for any other
+     * reason (a dead network, a refused key) is returned at once: retrying that nine times slower
+     * would spend a minute to learn what the first answer already said.
      */
     private fun embedAll(
         texts: List<String>,
-        pick: PickedModel,
+        model: String,
         dims: Int,
         deadline: Deadline,
     ): Result<List<FloatArray>> {
         val out = mutableListOf<FloatArray>()
-        for (batch in texts.chunked(BATCH)) {
+        var size = BATCH
+        var at = 0
+        while (at < texts.size) {
             deadline.check(TOOL)
-            val got = embedder.embed(batch, pick.model, dims).getOrElse { return Result.failure(it) }
-            if (got.size != batch.size) {
-                return Result.failure(
-                    IllegalStateException(
-                        "The embedder answered ${got.size} vectors for ${batch.size} chunks.",
-                    ),
-                )
-            }
-            out += got
+            val batch = texts.subList(at, minOf(at + size, texts.size))
+            val answer = embedder.embed(batch, model, dims)
+            answer.fold(
+                onSuccess = { got ->
+                    if (got.size != batch.size) {
+                        return Result.failure(
+                            IllegalStateException(
+                                "The embedder answered ${got.size} vectors for ${batch.size} chunks.",
+                            ),
+                        )
+                    }
+                    out += got
+                    at += batch.size
+                },
+                onFailure = { e ->
+                    // **Only a size refusal is worth a second try**, and it is worth exactly
+                    // log2(BATCH) of them.
+                    if (size > 1 && tooBig(e)) {
+                        size /= 2
+                    } else {
+                        return Result.failure(e)
+                    }
+                },
+            )
         }
         return Result.success(out)
+    }
+
+    /**
+     * Whether [e] is the provider saying "that request was too large".
+     *
+     * **Matched on the numbers and words the two shapes actually use** — a bare 413, or a 400 whose
+     * message says the array is too long — and nothing else, so a timeout is never mistaken for a
+     * size problem and retried as a smaller request that will time out the same way.
+     */
+    private fun tooBig(e: Throwable): Boolean {
+        val chain = generateSequence(e as Throwable?) { it.cause }
+            .map { it.message.orEmpty() }
+            .joinToString(" ")
+            .lowercase()
+        if ("413" in chain || "too large" in chain || "too many" in chain) return true
+        return "400" in chain && listOf("exceed", "maximum", "too long", "limit").any { it in chain }
     }
 
     // ---- 2. answering ------------------------------------------------------
@@ -306,16 +471,16 @@ class SemanticSearch(
 
     private fun search(
         index: SearchIndex,
-        root: File,
         scope: Regex?,
         query: String,
         paths: Int,
         depth: Int,
-        pick: PickedModel,
+        model: String,
         dims: Int,
-        caught: Caught,
+        caught: Indexed,
         deadline: Deadline,
     ): Result<String> {
+        val root = ws.projectDir(project)
         val notes = mutableListOf<String>()
         // **The extent, in every answer.** A person reading "nothing matches" cannot tell an empty
         // project from a search that only looked in one folder, and the second is this tool's design.
@@ -326,7 +491,7 @@ class SemanticSearch(
         // so a pass that ran out of time answered "nothing is indexed yet" with no reason beside it.
         notes += caughtNotes(index, caught)
 
-        val vector = embedder.embed(listOf(query), pick.model, dims)
+        val vector = embedder.embed(listOf(query), model, dims)
             .getOrElse { return Result.failure(it) }
             .firstOrNull()
             ?: return Result.failure(
@@ -461,14 +626,16 @@ class SemanticSearch(
      * file it did see and could not take is missing from an index that otherwise looks complete. A
      * person told neither would trust an answer that is missing their newest work.
      */
-    private fun caughtNotes(index: SearchIndex, caught: Caught): List<String> {
+    private fun caughtNotes(index: SearchIndex, caught: Indexed): List<String> {
         val notes = mutableListOf<String>()
+        // **The same sentence the log and the notification carry**, said twice in different words
+        // would be two chances to disagree about one pass.
         if (caught.stopped != null) {
             // **"0 of 0 are left" is not a sentence a person can use.** When the pass stopped before
             // it could name anything, what is true is that the index may not have seen every file.
             notes += if (caught.left > 0) {
                 "indexing stopped: ${caught.stopped}; ${caught.left} of ${caught.total} file(s) are " +
-                    "not indexed yet, and asking again carries on from here"
+                    "not indexed yet, so this answer may be incomplete"
             } else {
                 "indexing stopped: ${caught.stopped}, so this index may be missing files"
             }
@@ -505,8 +672,13 @@ class SemanticSearch(
          */
         const val RERANK_DEPTH = 30
 
-        /** Chunks per embedding request; see [embedAll]. */
-        const val BATCH = 32
+        /**
+         * Chunks per embedding request — **the provider's own ceiling**, measured; see [embedAll].
+         *
+         * 512 is where `input array exceeds maximum of 512 items` begins, and it is 3.7× the
+         * throughput of 128 because the per-request cost is paid once.
+         */
+        const val BATCH = 512
 
         /**
          * The largest file the index will take, in characters.

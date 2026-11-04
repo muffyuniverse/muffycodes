@@ -90,6 +90,18 @@ object AgentWiring {
             tokenProvider = { credentials.token(login) },
             authorProvider = { author },
             keepProvider = { settings.historyLength },
+            index = { project, why -> IndexQueue.want(project, why) },
+        )
+        // **The indexer, wired before anything can commit.** Both the runner and the screen build a
+        // `ProjectGit`, and either of them can be the first to save something, so both wire this —
+        // `configure` is idempotent and this is the same account, key and model file either way.
+        IndexQueue.configure(
+            ws = ws,
+            embedder = Embedder.openRouter(
+                key = { credentials.activeLogin?.let { credentials.modelKey(it) } },
+            ),
+            models = { ModelConfigFile.load(ws.accountDir).getOrNull() },
+            context = app,
         )
         // The model is read per request, not once: a person who changes the model while the
         // service is running expects the next poll to use it, and a runner built at boot with a

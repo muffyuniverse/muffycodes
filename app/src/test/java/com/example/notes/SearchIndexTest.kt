@@ -153,6 +153,27 @@ class SearchIndexTest {
     // ---- the dimension is a fact about the index ---------------------------
 
     @Test
+    fun `emptying the index is what makes a different model possible`() {
+        // **The refusal promised a rebuild that could not happen.** `declare` refuses any model other
+        // than the recorded one, and `clear` left the record behind — so a person who chose a new
+        // embedding model got "it has to be rebuilt" for ever. Emptying the record is what makes the
+        // sentence true, and the next `declare` is the one that decides what the index is.
+        built()
+        index.put("a.txt", "", Chunker.split("milk"), vectors()).getOrThrow()
+        assertEquals("built with the first model", "test/embed", index.builtWith()?.model)
+
+        index.clear()
+
+        assertNull("and now it claims nothing", index.builtWith())
+        assertEquals("with no text", 0, index.size())
+        assertEquals("and no file it has seen", 0, index.files())
+        // **Re-declared at the other model and the other size, both at once**, which is the whole
+        // point: nothing about the old space is left to disagree with.
+        index.declare("other/embed", 8).getOrThrow()
+        assertEquals("the new space", SearchIndex.Built("other/embed", 8), index.builtWith())
+    }
+
+    @Test
     fun `an index built at one size refuses to be redeclared at another`() {
         // **Mixing two spaces in one table is arithmetic on unrelated numbers.** The refusal names
         // both, so the caller can say "re-index needed" rather than the app quietly answering
