@@ -1899,12 +1899,11 @@ class AgentTools(
         val before = readWhole(file, deadline, "write")
             .getOrElse { return refusal(it.message ?: "${rel(file)} could not be read, so nothing was changed") }
         val lines = before.split("\n")
+        // **`grep` first, then the range, then the whole file — and the order is the logic.**
+        // `text` is present in all three shapes, so testing it first made every `grep` call take the
+        // whole-file branch and overwrite the file with the replacement word. The selector decides
+        // which shape this is; `text` only says what goes there.
         val text = when {
-            // **`text` may be a `read` call**, so it goes through `replacementText` like the other
-            // two shapes. Reading it with `optString` here would answer `""` for an object and
-            // silently empty the file — the exact data loss this shape exists to avoid.
-            hasText -> replacementText(args, deadline)
-                .getOrElse { return refusal(it.message ?: "that text cannot be read") }
             hasFind -> {
                 // **The match is the replacement's whole extent, and it is a pattern.** `before
                 // .replace(find, put)` took a literal, so the key was called `find` and behaved

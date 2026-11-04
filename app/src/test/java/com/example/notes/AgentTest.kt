@@ -1579,14 +1579,18 @@ class AgentTest {
     }
 
     @Test
-    fun `create will not write over a file, and says what is there`() {
+    fun `a whole-file write over an existing file replaces it, which is the merge`() {
+        // **This test used to assert the opposite, and the report is what changed it.** `create`
+        // refused a path that already existed, because it could only make a new one — so "make this
+        // file say X" was two calls: delete, then create. The operator's merge is that creating and
+        // overwriting are the same act: "*if path doesn't exist it creates it automatically*".
         ws.write(File(ws.repoOf("shopping"), "milk.txt"), "two litres")
 
         val body = tool("write", """{"path":"milk.txt","text":"three"}""")
 
-        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
-        assertTrue("naming the path: $body", body.contains("milk.txt"))
-        assertEquals("and nothing was written", "two litres", File(ws.repoOf("shopping"), "milk.txt").readText())
+        assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
+        assertEquals("and the file says the new text", "three",
+            File(ws.repoOf("shopping"), "milk.txt").readText())
     }
 
     @Test
