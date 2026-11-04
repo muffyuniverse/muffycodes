@@ -655,6 +655,12 @@ object AgentChat {
                         // **`ended` is machinery, not conversation.** The words themselves are the
                         // `agent` note beside it, and drawing both would say the ending twice.
                         "ended" -> Unit
+                        // **The reasoning is not a page, and it used to be one.** It is written
+                        // `app` — app bookkeeping, like `usage` — so `isNotice` says no and the
+                        // `else` branch below drew it as a page captioned "thinking", beside the
+                        // answer it belongs to. A person reads what the agent said; the reasoning is
+                        // sent back to the provider and belongs in the footer's token count.
+                        AgentLog.THINKING_NAME -> Unit
                         "agent" -> {
                             // **Every thing the agent said is a page, not just the last one.**
                             //

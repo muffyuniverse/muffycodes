@@ -794,6 +794,49 @@ class AgentTest {
     }
 
     @Test
+    fun `reasoning written to the record comes back out of it on the next request`() {
+        // **The report**: "check that we return agent's reasoning all the time." The answer was no,
+        // and in the worst way: the app stored it, described the mechanism in a comment, and the
+        // branch that was supposed to replay it could never run.
+        //
+        // `AgentLog.thinking` wrote the row `ctx = app`, and `contextRows()` kept only `in` — so the
+        // row never reached `messages()`, and the `"thinking"` branch there was dead code. The test
+        // beside this one built its `Msg` by hand, so it proved the *encoder* and not the path from
+        // the record to the request. That is the gap; this is the test that closes it.
+        val said = log.note("agent", "I read it.")
+        log.thinking(said, "I should read the file first.")
+
+        // **The row is in the context even though it is `app`**, which is the one exception and the
+        // whole fix.
+        val rows = log.contextRows()
+        assertTrue(
+            "the reasoning row is sent, though it is app bookkeeping: ${rows.map { it.name }}",
+            rows.any { it.name == AgentLog.THINKING_NAME },
+        )
+
+        // **And it lands on the assistant turn**, as a field of its own.
+        // **A door that is never asked.** `messages` builds the array from the record and does not
+        // contact anything, which is the point: this is a test about what the record becomes.
+        val built = agent(
+            object : Door {
+                override fun turn(request: Request) = Result.success(Reply("never asked"))
+            },
+        ).messages(rows)
+        val assistant = built.lastOrNull { it.role == "assistant" }
+        assertNotNull("the reply is a turn", assistant)
+        assertEquals(
+            "with the reasoning attached rather than in its words",
+            "I should read the file first.",
+            assistant!!.thinking,
+        )
+        assertEquals("and the words are only what it said", "I read it.", assistant.text)
+        assertFalse(
+            "the reasoning is not folded into the prose: ${assistant.text}",
+            "read the file first" in assistant.text,
+        )
+    }
+
+    @Test
     fun `the reasoning goes back on the assistant turn, and never as words`() {
         // **The 400 in the operator's trace**: "The `reasoning_content` in the thinking mode must be
         // passed back to the API". The app used to keep the reasoning out of the conversation on

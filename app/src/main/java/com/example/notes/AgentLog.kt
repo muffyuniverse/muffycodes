@@ -162,6 +162,12 @@ class AgentLog private constructor(
          */
         const val PING_NAME = "ping"
 
+        /**
+         * The name a reply's reasoning carries, **kept beside [PING_NAME] for the same reason**: it
+         * is written by [thinking] and read by two classes that cannot name each other's constants.
+         */
+        const val THINKING_NAME = "thinking"
+
 
         /** A result's first line: the call worked. */
         const val SUCCESS = "0"
@@ -755,7 +761,7 @@ class AgentLog private constructor(
      */
     fun thinking(of: Int, text: String): Int = record(
         NOTE,
-        "thinking",
+        THINKING_NAME,
         // The id of the reply it belongs to, so the replay can attach it to the right turn. `of` is
         // the `agent` note's id, which is the row the reply was written as.
         "reply=$of ${text.replace('\n', ' ')}",
@@ -1161,7 +1167,22 @@ class AgentLog private constructor(
             ?: marker.detail.trim().substringBefore(' ').toIntOrNull()
             ?: 0
 
-    fun contextRows(): List<Row> = rows().filter { it.ctx == IN }
+    /**
+     * **The rows the model is sent**, in the order the file holds them.
+     *
+     * `in` is the whole of the rule for what a person or the app decided. There is **one exception,
+     * and it is not a decision**: a `thinking` row is written `app` because it is not prose — the
+     * chat draws the agent's words and a reasoning row beside them would be a second page saying the
+     * same turn — but the next request has to carry it, or a thinking-mode provider refuses with
+     * `400 The reasoning_content in the thinking mode must be passed back to the API`.
+     *
+     * **It was `app`, so it was never sent, and the replay branch in `Agent.messages` was dead
+     * code.** The comment there describes exactly this failure and the branch could not run: the
+     * operator asked "check that we return agent's reasoning all the time", and the answer was that
+     * the app stored it and dropped it.
+     */
+    fun contextRows(): List<Row> =
+        rows().filter { it.ctx == IN || (it.kind == NOTE && it.name == THINKING_NAME) }
 
     /**
      * **What the agent decided did not matter.**
