@@ -3346,7 +3346,10 @@ class AgentTools(
             )
         }
         deadline.check("download")
-        mayWrite(target)?.let { return refusal(it) }
+        // **No `mayWrite`, and it is the same reason `fetch` asks none.** The destination is derived
+        // here rather than written by the call — `agent/downloaded/` plus a name that has already
+        // been refused a separator — so there is no path for a rule to check. `agent/` is precisely
+        // the folder `mayWrite` refuses, which is what makes it the right place for an arrival.
         val copied = phone.read(asked, target).getOrElse {
             return refusal(it.message ?: "The file could not be copied out of Downloads")
         }

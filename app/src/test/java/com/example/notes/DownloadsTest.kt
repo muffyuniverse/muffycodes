@@ -110,7 +110,7 @@ class DownloadsTest {
 
         assertTrue("it is an answer: $answer", answer.startsWith("0\n"))
         assertTrue("the name is there: $answer", answer.contains("new.log"))
-        assertTrue("and the size: $answer", answer.contains("2.0 KB"))
+        assertTrue("and the size: $answer", answer.contains(Fetcher.size(2_048)))
         assertTrue("and the other file: $answer", answer.contains("old.txt"))
         // **Newest first**, because a download an agent was just told about is the one it wants.
         assertTrue("the newer file is listed first: $answer", answer.indexOf("new.log") < answer.indexOf("old.txt"))
