@@ -600,8 +600,23 @@ fun EditorScreen(
                             // other direction from losing them.
                             (decoded as? PictureOpen.Ready)?.let { open ->
                                 if (strokes.isNotEmpty()) {
-                                    viewModel.savePicture(Drawing.flatten(open.bitmap, strokes))
+                                    val flattened = Drawing.flatten(open.bitmap, strokes)
+                                    viewModel.savePicture(flattened)
                                     strokes = emptyList()
+                                    // **The base becomes what was just written.** It used to stay the
+                                    // picture from *before* the strokes, so View — which re-reads the
+                                    // file — showed them and Draw, which draws `decoded` plus the
+                                    // stroke list it had just emptied, did not. The operator's report:
+                                    // "see why changes after saving are visible in view mode, but
+                                    // become invisible in draw mode".
+                                    //
+                                    // Decoding the bytes the app just encoded is the one way to be
+                                    // sure the two screens agree: it is the same image View will read
+                                    // back off disk, not a second guess at it.
+                                    decoded = android.graphics.BitmapFactory
+                                        .decodeByteArray(flattened, 0, flattened.size)
+                                        ?.let { PictureOpen.Ready(it) }
+                                        ?: decoded
                                 }
                             }
                         } else {
@@ -656,7 +671,31 @@ fun EditorScreen(
                         },
                     )
                 } else {
-                    Picture(file = file, padding = content)
+                    // **View is the paged reader, even for a picture.** It used to be a bare
+                    // `Picture`, which is why the operator could not swipe out of one: "why can't I
+                    // swipe from its view mode to other files?" The swipe is a property of reading,
+                    // not of text — and a page that is a drawing is one a person flips past like any
+                    // other.
+                    Reader(
+                        viewModel = viewModel,
+                        file = file,
+                        text = "",
+                        onLink = onLink,
+                        kind = EntryKind.IMAGE,
+                        onStep = { steps ->
+                            val beside = viewModel.fileBeside(file, steps)
+                            if (beside != null) {
+                                Trace.tap("swipe file", beside.name)
+                                autosaveIfChanged()
+                                viewModel.openEditor(beside)
+                            } else {
+                                Trace.note(
+                                    "swipe file",
+                                    if (steps > 0) "past the last" else "before the first",
+                                )
+                            }
+                        },
+                    )
                 }
                 EntryKind.UNKNOWN -> CannotEdit(file = file, padding = content)
 
@@ -896,6 +935,8 @@ private fun Reader(
     text: String,
     onLink: (String) -> Unit,
     onStep: (Int) -> Unit,
+    /** **What kind of page this is**, so a picture is drawn rather than shown as its name. */
+    kind: EntryKind = EntryKind.TEXT,
 ) {
     // **The page that will be dragged in from each side**, read ahead of the gesture.
     var previous by remember(file.path) { mutableStateOf<Neighbour?>(null) }
@@ -905,8 +946,8 @@ private fun Reader(
         next = null
         // Off the main thread, so opening a page is not waiting on the ones beside it.
         val found = withContext(Dispatchers.IO) {
-            viewModel.fileBeside(file, -1)?.let { read(it) } to
-                viewModel.fileBeside(file, 1)?.let { read(it) }
+            viewModel.fileBeside(file, -1)?.let { read(it, viewModel.workspace?.kindOf(it)) } to
+                viewModel.fileBeside(file, 1)?.let { read(it, viewModel.workspace?.kindOf(it)) }
         }
         previous = found.first
         next = found.second
@@ -1006,7 +1047,8 @@ private fun Reader(
             )
         }
         PagedPage(
-            page = Neighbour(file, text, isMarkdown(file)),
+            // **The page being read, with its own kind**, so a picture is drawn rather than named.
+            page = Neighbour(file, text, isMarkdown(file), kind),
             onLink = onLink,
             // **The two connections, marked on the page that offers them.** Only there: a tick
             // beside "Connect GitHub" on a page about writing files would be an answer to a
@@ -1036,7 +1078,8 @@ private data class Neighbour(
     val file: java.io.File,
     val text: String,
     val markdown: Boolean,
-)
+    val kind: EntryKind = EntryKind.TEXT,
+) { val image: Boolean get() = kind == EntryKind.IMAGE }
 
 /**
  * **Reads one page so it is ready before it is needed.**
@@ -1045,15 +1088,26 @@ private data class Neighbour(
  * same "could not be opened" sentence the editor's own picture view does, rather than an empty frame
  * that would look like a page still loading for ever.
  */
-private fun read(file: java.io.File): Neighbour? = try {
+private fun read(file: java.io.File, kind: EntryKind?): Neighbour? = try {
     // **Text is read; a picture is named.** A neighbour that is an image has no text to show, and
     // `PagedPage` draws it by its name — the alternative, decoding it here, is two bitmaps alive at
     // once on a phone for a page nobody may swipe to. What the swipe needs is *something in the
     // frame to move*, and a name is that.
-    Neighbour(file, file.readText(), isMarkdown(file))
+    //
+    // **And this is why the check is here rather than in a catch.** It used to be `file.readText()`
+    // unconditionally, so a PNG's bytes were read as text and drawn as characters for the moment
+    // before the real bitmap arrived. The operator saw exactly that: "why drawing when you swipe into
+    // it from another file is briefly shown as a set of characters only then it renders into the
+    // actual drawing?" The catch below never fired, because reading a PNG as text *succeeds* — it
+    // returns convincing nonsense.
+    if (kind == EntryKind.IMAGE) {
+        Neighbour(file, "", markdown = false, kind = EntryKind.IMAGE)
+    } else {
+        Neighbour(file, file.readText(), isMarkdown(file), kind ?: EntryKind.TEXT)
+    }
 } catch (t: Throwable) {
-    // **A picture, or a file that cannot be read as text.** Either way the page still exists, so
-    // the swipe can move to it; it says what it is rather than showing an empty frame.
+    // **A file that cannot be read as text.** The page still exists, so the swipe can move to it; it
+    // says what it is rather than showing an empty frame.
     Neighbour(file, "", isMarkdown(file))
 }
 
@@ -1097,9 +1151,17 @@ private fun PagedPage(
                     text = page.text,
                     style = MaterialTheme.typography.bodyLarge,
                 )
+            } else if (page.image) {
+                // **A picture, drawn.** It used to be only its name here, on the reasoning that
+                // decoding two bitmaps at once is expensive — and that was the wrong trade: the
+                // operator's report was "why drawing when you swipe into it from another file is
+                // briefly shown as a set of characters only then it renders into the actual
+                // drawing?", and the characters were the PNG's bytes read as text. A neighbour that
+                // slides in as its own file name is the redraw the paged reader exists to avoid.
+                Picture(file = page.file, padding = PaddingValues(0.dp))
             } else {
-                // **A picture, named.** A page that is a photograph still has to be a page the swipe
-                // can move to, and a blank frame would look like one that failed to load.
+                // **A file with no text and no picture**, which is a page the swipe can still move
+                // to. It says what it is rather than showing an empty frame.
                 Text(
                     text = page.file.name,
                     style = MaterialTheme.typography.titleMedium,

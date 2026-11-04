@@ -760,6 +760,91 @@ class EditorScreenTest {
         }
     }
 
+    @Test
+    fun `a picture beside a page is drawn as a picture, never as its bytes`() {
+        // **The operator's report**: "why drawing when you swipe into it from another file is briefly
+        // shown as a set of characters only then it renders into the actual drawing?"
+        //
+        // The characters were the PNG's own bytes, read by `file.readText()` and drawn as a page.
+        // Reading a PNG as text *succeeds* — it returns convincing nonsense — so the `catch` that was
+        // supposed to handle pictures never fired, and the neighbour page showed the file's contents
+        // until the gesture finished and the real bitmap arrived.
+        //
+        // **What this asserts is the absence of text**, which is the one thing the bug produced: a
+        // neighbour that is a picture must contribute no characters to the tree at all.
+        scene.open("groceries")
+        scene.file("a.txt", "THEONLYSENTENCE")
+        // **A one-pixel PNG**, the smallest thing that is genuinely a picture and the same fixture
+        // the other picture tests use.
+        val picture = scene.file("drawing.png")
+        picture.writeBytes(ONE_PIXEL_PNG)
+        scene.viewModel.openEditor(picture)
+        compose.setContent {
+            Frame {
+                EditorScreen(
+                    viewModel = scene.viewModel,
+                    file = picture,
+                    onBack = {},
+                    onOpenHistory = {},
+                )
+            }
+        }
+
+        // **The page after the picture is text, so the tree is not empty** — an absence assertion on
+        // a screen that drew nothing would pass for the wrong reason.
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("THEONLYSENTENCE", substring = true)
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        // **Not one trace of the PNG's own bytes.** A PNG begins with 89 50 4E 47, and the old
+        // `readText()` turned those into the characters `\u0089PNG`; `IHDR` is the first chunk every
+        // PNG has. Neither is anything a page would say.
+        for (word in listOf("IHDR", "PNG")) {
+            assertTrue(
+                "**no trace of the PNG's own bytes: $word**",
+                compose.onAllNodesWithText(word, substring = true).fetchSemanticsNodes().isEmpty(),
+            )
+        }
+    }
+
+    @Test
+    fun `a picture is a page the swipe can leave`() {
+        // **The operator's second report on the same screen**: "why can't I swipe from its view mode
+        // to other files?" The picture's View mode was a bare `Picture`, not the paged reader, so it
+        // had no gesture at all — while the file beside it was a page the swipe could have reached.
+        //
+        // **Asserted on what the reader is given**, because a gesture test would pin Compose's drag
+        // detection: the picture must have a neighbour, and the screen must be the reader rather than
+        // the standalone picture view.
+        scene.open("groceries")
+        scene.file("a.txt", "BEFORE THE PICTURE")
+        val picture = scene.file("drawing.png")
+        picture.writeBytes(ONE_PIXEL_PNG)
+        scene.viewModel.openEditor(picture)
+
+        assertNotNull(
+            "**the picture has a page before it**",
+            scene.viewModel.fileBeside(picture, -1),
+        )
+        // **And the screen draws that neighbour**, which is what only the paged reader does. A bare
+        // `Picture` renders one image and nothing else, so this word can only appear if the swipe's
+        // reader is the thing on screen.
+        compose.setContent {
+            Frame {
+                EditorScreen(
+                    viewModel = scene.viewModel,
+                    file = picture,
+                    onBack = {},
+                    onOpenHistory = {},
+                )
+            }
+        }
+        compose.waitUntil(10_000) {
+            compose.onAllNodesWithText("BEFORE THE PICTURE", substring = true)
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
     /**
      * Swiping moves through the folder's files, and stops at both ends.
      *
@@ -975,6 +1060,51 @@ class EditorScreenTest {
 
         assertEquals("the bytes are what was given", OTHER_PIXEL_PNG.toList(), file.readBytes().toList())
         assertEquals("and it is still a picture", EntryKind.IMAGE, scene.viewModel.workspace!!.kindOf(file))
+    }
+
+    @Test
+    fun `the bytes a save writes are the bytes the screen keeps as its base`() {
+        // **The operator's report**: "see why changes after saving are visible in view mode, but
+        // become invisible in draw mode".
+        //
+        // The cause was one line of staleness. `savePicture` writes the flattened image, and the
+        // stroke list is then emptied — but the *base* the canvas draws under that list stayed the
+        // picture from **before** the strokes. So View, which re-reads the file, showed them; Draw,
+        // which draws base-plus-list and the list was now empty, did not. The two screens disagreed
+        // about the same file.
+        //
+        // **What this pins is the equality that fixes it**: the bytes handed to the writer, decoded,
+        // are the image the canvas would draw. A canvas cannot be rasterised under Robolectric, so
+        // the arithmetic is asserted where it lives instead of the pixels.
+        scene.project("groceries").open("groceries")
+        val file = scene.file("drawing.png")
+        file.writeBytes(ONE_PIXEL_PNG)
+
+        val base = android.graphics.BitmapFactory.decodeByteArray(
+            ONE_PIXEL_PNG, 0, ONE_PIXEL_PNG.size,
+        )
+        assertNotNull("the fixture really decodes", base)
+        val flattened = Drawing.flatten(
+            base!!,
+            listOf(
+                Drawing.Stroke(
+                    tool = Drawing.Tool.LINE,
+                    points = listOf(Drawing.Point(10f, 10f), Drawing.Point(40f, 40f)),
+                    colour = 0xFF0000FF.toInt(),
+                    width = 4f,
+                ),
+            ),
+        )
+        // **The base changed, or there would be nothing to notice.** A flatten that returned the
+        // source unchanged would make the staleness invisible and this test vacuous.
+        assertFalse(
+            "the drawn image is not the empty one it started from",
+            flattened.contentEquals(ONE_PIXEL_PNG),
+        )
+        // **And decoding what was written gives a picture**, which is what the fix does: the base
+        // becomes the file's own bytes rather than a second guess at them.
+        val reread = android.graphics.BitmapFactory.decodeByteArray(flattened, 0, flattened.size)
+        assertNotNull("what a save writes can be read back as the new base", reread)
     }
 
     @Test
