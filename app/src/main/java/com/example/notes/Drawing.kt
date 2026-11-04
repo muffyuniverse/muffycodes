@@ -273,28 +273,40 @@ object Drawing {
          * screen with no gesture that brings it back — the person would have to close and reopen the
          * file. The allowance is a margin either side so the edges can still be reached.
          */
-        fun bounded(width: Int, height: Int): View {
-            val shownWidth = width * zoom
-            val shownHeight = height * zoom
-            val marginX = shownWidth * EDGE_MARGIN
-            val marginY = shownHeight * EDGE_MARGIN
-            // **The bound is symmetric about the middle, and the middle is the whole point.** This
-            // used to allow the pan to reach `±(shown - margin)` — measured from the *home* corner —
-            // which at a small zoom is nearly zero and at a large one is enormous, so the picture
-            // drifted to the top-left as a person zoomed out rather than staying where it was.
+        fun bounded(
+            surfaceWidth: Float,
+            surfaceHeight: Float,
+            pictureWidth: Int,
+            pictureHeight: Int,
+        ): View {
+            val shownWidth = pictureWidth * zoom
+            val shownHeight = pictureHeight * zoom
+            // **The one range that is right for both cases, and it is the same expression for both.**
             //
-            // The operator: "why when you zoom out the drawing isnt centered on the screen but moves
-            // to the upper left corner?"
+            // A pan is the picture's left edge in screen coordinates, so the rule is "the left edge
+            // goes from the smaller of the two extremes to the larger":
             //
-            // A pan is how far the picture has been moved from home. Letting it reach half the
-            // picture's shown size in each direction is what keeps a panned picture reachable while
-            // refusing to lose it: at the limit, half of it is still on screen. Symmetric, because
-            // the direction a person last dragged must not decide what is allowed next.
-            val limitX = shownWidth / 2f + marginX
-            val limitY = shownHeight / 2f + marginY
+            // * **Picture wider than the window** (`surface - shown < 0`): the range is
+            //   `[surface - shown, 0]`, so it can slide until its right edge meets the window's right
+            //   edge and its left edge meets the window's left edge — every part reachable, nothing
+            //   further.
+            // * **Picture narrower than the window** (`surface - shown > 0`): the range is
+            //   `[0, surface - shown]`, so it stays wholly inside the window and can be slid around
+            //   in it.
+            //
+            // **This is what the corner drift was.** The old bound was measured against the picture
+            // alone — it had no surface to compare with — so a *centred* small picture sat outside the
+            // allowed range and was clamped toward the top-left on the very frame it became small
+            // enough to fit. The operator: "why when you zoom out the drawing isnt centered on the
+            // screen but moves to the upper left corner?" It was not a centring bug; the centre was
+            // being refused.
+            fun range(surface: Float, shown: Float): ClosedFloatingPointRange<Float> {
+                val slack = surface - shown
+                return if (slack >= 0f) 0f..slack else slack..0f
+            }
             return copy(
-                panX = panX.coerceIn(-limitX, limitX),
-                panY = panY.coerceIn(-limitY, limitY),
+                panX = panX.coerceIn(range(surfaceWidth, shownWidth)),
+                panY = panY.coerceIn(range(surfaceHeight, shownHeight)),
             )
         }
 
@@ -319,8 +331,6 @@ object Drawing {
              */
             const val MAX_ZOOM = 3f
 
-            /** How much of the picture may be panned past its own edge. */
-            const val EDGE_MARGIN = 0.5f
 
             /**
              * The view that shows the whole picture in a surface of [surfaceWidth]×[surfaceHeight].
@@ -415,7 +425,7 @@ object Drawing {
 fun DrawingSurface(
     picture: ImageBitmap,
     strokes: List<Drawing.Stroke>,
-    tool: Drawing.Tool,
+    tool: Drawing.Tool?,
     colour: Int,
     width: Float,
     modifier: Modifier = Modifier,
@@ -524,14 +534,26 @@ fun DrawingSurface(
                         // The touch count at the moment the gesture began decides its kind, and a
                         // second finger arriving cancels a stroke rather than converting it.
                         val startCount = currentEvent.changes.size
+                        // **No tool means the canvas is for looking at.** The operator: "make it so
+                        // that you cant move or zoom drawing while any of the drawing tools
+                        // (pen/line/box) is selected" — which is the other side of the same coin:
+                        // with a tool chosen, one finger draws and only a second finger moves the
+                        // paper; with nothing chosen, one finger pans, because a pen that is not
+                        // selected cannot draw a stroke the person did not mean.
+                        var panning = false
+                        val chosen = tool
                         if (startCount == 1) {
                             val at = currentView.toPicture(down.position.x, down.position.y)
-                            if (tool == Drawing.Tool.ERASER) {
-                                erasing = true
-                                Drawing.hit(liveStrokes, at, 8f / currentView.zoom)?.let(onErase)
-                            } else {
-                                drawing = true
-                                current = listOf(at)
+                            when {
+                                chosen == null -> panning = true
+                                chosen == Drawing.Tool.ERASER -> {
+                                    erasing = true
+                                    Drawing.hit(liveStrokes, at, 8f / currentView.zoom)?.let(onErase)
+                                }
+                                else -> {
+                                    drawing = true
+                                    current = listOf(at)
+                                }
                             }
                         }
 
@@ -542,7 +564,12 @@ fun DrawingSurface(
                             // a pan cannot walk the picture off screen and leave a blank canvas with no
                             // gesture that brings it back. It sits above the branches for exactly that
                             // reason: two of them skip to the next frame.
-                            currentView = currentView.bounded(picture.width, picture.height)
+                            currentView = currentView.bounded(
+                                windowSize.width.toFloat(),
+                                windowSize.height.toFloat(),
+                                picture.width,
+                                picture.height,
+                            )
                             touched = currentView
                             if (pressed.size >= 2) {
                                 // **Two fingers: scale about their midpoint, and move with it.** Any
@@ -575,8 +602,10 @@ fun DrawingSurface(
                             }
 
                             if (!drawing && !erasing && pressed.size == 1) {
-                                // A gesture that started as a pan (two fingers) and lost one keeps
-                                // panning rather than suddenly drawing.
+                                // **A gesture that started as a pan and lost one keeps panning**, and
+                                // so does one that began with no tool chosen. `panning` is set when
+                                // the gesture began, so losing a finger cannot turn a look into a
+                                // stroke.
                                 val at = pressed[0].position
                                 currentView = currentView.pannedBy(at.x - lastPan.x, at.y - lastPan.y)
                                 touched = currentView

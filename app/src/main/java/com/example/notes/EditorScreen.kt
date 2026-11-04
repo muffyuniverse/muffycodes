@@ -241,7 +241,16 @@ fun EditorScreen(
      * PNG, and two documents that can disagree is the thing this codebase spends its time avoiding.
      */
     var strokes by remember(session) { mutableStateOf<List<Drawing.Stroke>>(emptyList()) }
-    var tool by remember(session) { mutableStateOf(Drawing.Tool.PEN) }
+    /**
+     * **The tool in force, or null for none.**
+     *
+     * The operator: "so that when you touch a selected tool it gets unselected" — and the reason that
+     * matters is the other half of the same report, "you cant move or zoom drawing while any of the
+     * drawing tools (pen/line/box) is selected". No tool means the canvas is for looking at, so one
+     * finger pans and two pinch; a tool means one finger draws and two still pinch, because pinching to
+     * see what you are drawing is not the same act as moving the paper under a pen.
+     */
+    var tool by remember(session) { mutableStateOf<Drawing.Tool?>(Drawing.Tool.PEN) }
     var inkColour by remember(session) { mutableStateOf(Drawing.COLOURS.first()) }
     var inkWidth by remember(session) { mutableStateOf(Drawing.WIDTHS[1]) }
     /**
@@ -1175,10 +1184,10 @@ private fun PagedPage(
 private fun DrawMode(
     picture: PictureOpen,
     strokes: List<Drawing.Stroke>,
-    tool: Drawing.Tool,
+    tool: Drawing.Tool?,
     colour: Int,
     width: Float,
-    onTool: (Drawing.Tool) -> Unit,
+    onTool: (Drawing.Tool?) -> Unit,
     onColour: (Int) -> Unit,
     onWidth: (Float) -> Unit,
     onUndo: () -> Unit,

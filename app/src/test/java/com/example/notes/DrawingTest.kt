@@ -237,26 +237,29 @@ class DrawingTest {
     }
 
     @Test
-    fun `zooming out keeps the picture centred, and cannot walk it off screen`() {
+    fun `zooming out from the fit keeps the picture centred`() {
         // **The operator**: "why when you zoom out the drawing isnt centered on the screen but moves
         // to the upper left corner?"
         //
-        // The bound was measured from the home corner, so at a small zoom it was nearly zero and the
-        // picture drifted to the top-left as it shrank. Symmetric about the middle, the pan a person
-        // already had is preserved and the picture stays where they left it.
-        val wide = Drawing.View(zoom = 1f, panX = 0f, panY = 0f)
-        val zoomedOut = wide.zoomedBy(0.5f, 540f, 960f)
-        // **Centred on the pinch point**, which is the algebra `zoomedBy` already guarantees.
-        assertEquals("the focal point did not move", 540f, zoomedOut.toScreen(zoomedOut.toPicture(540f, 960f)).x, 0.5f)
+        // The answer was not that the zoom was uncentred — `zoomedBy` keeps the focal point under the
+        // fingers — it was that the *bound* then refused the centred pan. The bound had no window to
+        // compare against, so a picture narrower than the window sat outside its range and was clamped
+        // toward the top-left, on the frame it became small enough to fit.
+        val surface = 1000f
+        val fitted = Drawing.View.fittedTo(1080, 1920, surface, 1800f)
+        // **Zoom out about the centre of the window**, which is what a pinch there does.
+        val out = fitted.zoomedBy(0.5f, surface / 2f, 900f)
+        val bounded = out.bounded(
+            surfaceWidth = surface,
+            surfaceHeight = 1800f,
+            pictureWidth = 1080,
+            pictureHeight = 1920,
+        )
 
-        // **A pan far past the picture is pulled back, in both directions, by the same amount.**
-        val pushed = Drawing.View(zoom = 1f, panX = 100_000f, panY = 100_000f)
-            .bounded(1080, 1920)
-        assertEquals("bounded by half the shown width", 540f + 540f * Drawing.View.EDGE_MARGIN, pushed.panX, 0.5f)
-        assertEquals("and the same the other way", -pushed.panX, pushed.copy(panX = -pushed.panX).panX, 0.5f)
-        // **Symmetric**, so the direction last dragged does not decide what is allowed next.
-        val pulledBack = Drawing.View(zoom = 1f, panX = -100_000f, panY = -100_000f).bounded(1080, 1920)
-        assertEquals("mirrored", -pushed.panX, pulledBack.panX, 0.5f)
+        assertEquals("bounding did not move it at all", out, bounded)
+        // **And it really is centred by the range's own arithmetic**: the leftover space is split.
+        val slackX = surface - 1080f * bounded.zoom
+        assertEquals("centred horizontally", slackX / 2f, bounded.panX, bounded.zoom * 0.5f)
     }
 
     @Test
@@ -279,16 +282,37 @@ class DrawingTest {
     }
 
     @Test
-    fun `the picture cannot be panned entirely out of view`() {
-        // **A picture panned away is a blank screen with no gesture that brings it back** — the person
-        // would have to close and reopen the file. The bound allows half the picture past its own
-        // edge so the corners are still reachable, and no further.
-        val far = Drawing.View(zoom = 2f, panX = 100_000f, panY = -100_000f).bounded(1000, 500)
-        assertEquals("x is bounded", 1000f * 2f * Drawing.View.EDGE_MARGIN, far.panX, 0.01f)
-        assertEquals("y is bounded the other way", -500f * 2f * Drawing.View.EDGE_MARGIN, far.panY, 0.01f)
+    fun `a picture wider than the window can be moved until its edges meet the window's`() {
+        // **A picture panned away is a blank screen with no gesture that brings it back.** The range
+        // is the one that is right for a big picture: its left edge goes from `surface - shown` (right
+        // edges meeting) to `0` (left edges meeting). Every part reachable, nothing further.
+        val far = Drawing.View(zoom = 2f, panX = 100_000f, panY = -100_000f)
+            .bounded(surfaceWidth = 1000f, surfaceHeight = 500f, pictureWidth = 1000, pictureHeight = 500)
 
-        val gentle = Drawing.View(zoom = 2f, panX = 10f, panY = 10f).bounded(1000, 500)
-        assertEquals("and a small pan is left alone", 10f, gentle.panX, 0.01f)
+        assertEquals("the left edge stops where the right edges meet", 0f, far.panX, 0.01f)
+        assertEquals("and the other way", 500f - 500f * 2f, far.panY, 0.01f)
+
+        val gentle = Drawing.View(zoom = 2f, panX = -10f, panY = -10f)
+            .bounded(surfaceWidth = 1000f, surfaceHeight = 500f, pictureWidth = 1000, pictureHeight = 500)
+        assertEquals("and a small pan is left alone", -10f, gentle.panX, 0.01f)
+    }
+
+    @Test
+    fun `a picture smaller than the window is kept wholly inside it, and can be moved around`() {
+        // **The other half of the same range**, and the half that was wrong. When the picture is
+        // narrower than the window the range is `0..slack` — it may slide anywhere inside the window,
+        // and no further. The old rule had no window to compare with, so a centred small picture was
+        // outside its allowed range and got clamped toward the top-left: that is the drift the
+        // operator reported, and it happened on the frame the picture became small enough to fit.
+        val centred = Drawing.View(zoom = 0.5f, panX = 250f, panY = 250f)
+            .bounded(surfaceWidth = 1000f, surfaceHeight = 1000f, pictureWidth = 1000, pictureHeight = 1000)
+        assertEquals("**the centre is allowed** — it always was, geometrically", 250f, centred.panX, 0.01f)
+        assertEquals("on both axes", 250f, centred.panY, 0.01f)
+
+        val far = Drawing.View(zoom = 0.5f, panX = 100_000f, panY = -100_000f)
+            .bounded(surfaceWidth = 1000f, surfaceHeight = 1000f, pictureWidth = 1000, pictureHeight = 1000)
+        assertEquals("it stops at the window's right edge", 500f, far.panX, 0.01f)
+        assertEquals("and at its top", 0f, far.panY, 0.01f)
     }
 
     @Test
@@ -325,11 +349,13 @@ class DrawingTest {
     }
 
     @Test
-    fun `the fit is never below the zoom floor`() {
-        // A huge picture in a tiny window would otherwise compute a zoom that the rest of the canvas
-        // refuses to accept — so the fit obeys the same limits a pinch does.
+    fun `the fit may go below the pinch floor, because "show me all of it" is not a zoom`() {
+        // **A huge picture in a tiny window must still be shown whole.** A floor here would make the
+        // answer to "show me the whole thing" no — and it has already caused that bug once, when the
+        // floor was 0.25 and a 1240-pixel page in a 300-pixel window needed 0.24.
         val view = Drawing.View.fittedTo(100_000, 100_000, 100f, 100f)
-        assertEquals("clamped to the floor", Drawing.View.MIN_ZOOM, view.zoom, 0.001f)
+        assertEquals("the whole thing, at whatever it takes", 0.001f, view.zoom, 0.0001f)
+        assertTrue("**below the pinch floor**", view.zoom < Drawing.View.MIN_ZOOM)
     }
 
     @Test
