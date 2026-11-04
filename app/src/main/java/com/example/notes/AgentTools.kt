@@ -348,9 +348,11 @@ class AgentTools(
          * old name for a count and the parser had stopped looking at it. A typo that changes the
          * answer without saying so is the worst kind of answer.
          *
-         * `ask` and `conclude` are here even though [run] never dispatches them: the loop ends the
-         * turn on them, and it asks this same table first, so a `conclude` with a misspelled key is
-         * refused rather than turned into an ending with the wrong words.
+         * **Only tools [run] actually dispatches are here.** `ask` and `conclude` used to be listed
+         * without being runnable — [run] ended the turn on them — and that is exactly the confusion
+         * this table is supposed to prevent: a spec for something that cannot be called. Report 39 in
+         * the 1285 trace found the same pair still described in the system prompt, where a model
+         * reading it would try to call two tools that no longer exist.
          */
         val KEYS: Map<String, Set<String>> = mapOf(
             "tree" to setOf("path", "depth", "name", "grep", "from", "to"),

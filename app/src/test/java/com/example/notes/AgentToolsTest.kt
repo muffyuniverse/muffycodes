@@ -75,6 +75,30 @@ class AgentToolsTest {
     }
 
     @Test
+    fun `the prompt does not name a tool that no longer exists`() {
+        // **Report 39 in the 1285 trace**: "why system prompt still tells about `ask` and `conclude` -
+        // they were removed." It was right, and the contradiction was total: the prompt told the model
+        // two turn-ending tools existed, [AgentTools.run] never dispatched either, and `KEYS` no longer
+        // listed them — so a model following the brief was told to call things that answer as unknown.
+        //
+        // **A prompt is the one file no compiler checks.** Every other tool name is reachable from a
+        // `when` that has to compile; the brief is a string, and a string can describe a mechanism that
+        // was deleted a week ago. So the assertion is on the text, against the live tool list.
+        val brief = AgentPrompt.read(java.io.File("."), java.io.File(".")).system
+        val names = specs.map { it.name }.toSet()
+        for (gone in listOf("ask", "conclude", "wait")) {
+            assertFalse(
+                "the brief must not name `$gone`, which is not in the tool list ($names)",
+                Regex("""(^|\s)`?$gone`?\s+(you need|the work|to sit)""").containsMatchIn(brief),
+            )
+        }
+        // **And the ending it does describe is the one that exists**: calling nothing.
+        assertTrue(
+            "the brief says how a turn ends",
+            brief.contains("A turn ends when you call nothing"),
+        )
+    }
+
     fun `there is no wait tool, because a keepalive is the app's own act`() {
         // **A regression guard with a reason.** `wait` was a tool the model called to sit still; it
         // is gone, replaced by the app's own keepalive poll. A tool the model can call to do nothing
