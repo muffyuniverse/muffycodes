@@ -162,7 +162,7 @@ class IndexQueueTest {
         IndexQueue.configure(
             ws = ws,
             embedder = fake,
-            models = { ModelConfigFile(ActiveModel("chat/model", "p", "high")).copy(embedding = PICK) },
+            models = { Config(embedding = PICK) },
         )
 
         repeat(5) { IndexQueue.want("shopping", "a change was saved") }
@@ -180,7 +180,7 @@ class IndexQueueTest {
         IndexQueue.configure(
             ws = ws,
             embedder = Fake(),
-            models = { ModelConfigFile(ActiveModel("chat/model", "p", "high")).copy(embedding = PICK) },
+            models = { Config(embedding = PICK) },
         )
 
         IndexQueue.want("shopping", "the project was added")
@@ -211,7 +211,7 @@ class IndexQueueTest {
         IndexQueue.configure(
             ws = ws,
             embedder = Fake(),
-            models = { ModelConfigFile(ActiveModel("chat/model", "p", "high")).copy(embedding = PICK) },
+            models = { Config(embedding = PICK) },
         )
         ws.repoOf("shopping").deleteRecursively()
 
@@ -267,6 +267,19 @@ class IndexQueueTest {
         ): Result<List<Embedder.Ranked>> =
             Result.success(documents.indices.map { Embedder.Ranked(it, 1.0) })
     }
+
+    /**
+     * A config whose only interesting row is the embedding model.
+     *
+     * **`ModelConfig`, not `ModelConfigFile`** — the second is the object that reads and writes the
+     * file, and calling it as a constructor is the mistake this test made first: the compiler said
+     * `Unresolved reference`, which reads like a missing import and is a missing `val`.
+     */
+    private fun Config(embedding: PickedModel?) = ModelConfig(
+        active = ActiveModel("chat/model", "provider", "high"),
+        models = emptyList(),
+        embedding = embedding,
+    )
 
     private companion object {
         val PICK = PickedModel("test/embed", "test", dimensions = 4)
