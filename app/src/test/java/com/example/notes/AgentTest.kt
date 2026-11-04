@@ -1128,7 +1128,7 @@ class AgentTest {
     fun `tree with grep answers with the line that matched, and where it is`() {
         ws.write(File(ws.repoOf("shopping"), "README.md"), "one line\ntwo litres\n")
 
-        val body = tool("tree", """{"path":"","grep":"litres"}""")
+        val body = tool("tree", """{"path":"","content":"litres"}""")
 
         assertTrue(
             "the file, the line number and the line: $body",
@@ -1327,7 +1327,7 @@ class AgentTest {
         val file = File(ws.repoOf("shopping"), "list.txt")
         ws.write(file, "bread\nmilk\neggs\n")
 
-        val found = tool("tree", """{"path":"","grep":"^milk$"}""")
+        val found = tool("tree", """{"path":"","content":"^milk$"}""")
         val read = tool("read", """{"path":"list.txt","grep":"^milk$"}""")
 
         // `tree` answers where it is; `read` answers where it is too, because `^milk$` matches a
@@ -1372,7 +1372,7 @@ class AgentTest {
         ws.write(File(ws.repoOf("shopping"), "notes/inner.txt"), "a needle here")
 
         val named = tool("tree", """{"path":"","name":"^notes$"}""")
-        val grepped = tool("tree", """{"path":"","grep":"needle"}""")
+        val grepped = tool("tree", """{"path":"","content":"needle"}""")
 
         assertTrue("the folder is named: $named", named.lines().any { it.trim() == "notes/" })
         assertTrue("and the hit is a file and a line: $grepped", grepped.contains("notes/inner.txt:1: a needle here"))
@@ -1477,7 +1477,7 @@ class AgentTest {
         }
 
         val listed = tool("tree", """{"path":""}""")
-        val found = tool("tree", """{"path":"","grep":"needle"}""")
+        val found = tool("tree", """{"path":"","content":"needle"}""")
 
         assertFalse("the link is not listed: $listed", listed.contains("escape"))
         assertFalse("and nothing behind it is read: $found", found.contains("needle"))
@@ -2073,7 +2073,7 @@ class AgentTest {
         ws.write(File(dir, "milk.txt"), "two litres")
         ws.createFolder(dir, "drafts")
 
-        val body = tool("move", """{"path":"milk.txt","into":"drafts","copy":true,"name":"dairy.txt"}""")
+        val body = tool("move", """{"path":"milk.txt","into":"drafts/dairy.txt","copy":true}""")
 
         assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
         assertEquals("the copy is under the new name", "two litres", File(dir, "drafts/dairy.txt").readText())
@@ -2090,7 +2090,7 @@ class AgentTest {
         ws.write(File(dir, "milk.txt"), "two litres")
         ws.write(File(dir, "dairy.txt"), "the taken name")
 
-        val body = tool("move", """{"path":"milk.txt","into":"drafts","copy":true,"name":"dairy.txt"}""")
+        val body = tool("move", """{"path":"milk.txt","into":"drafts/dairy.txt","copy":true}""")
 
         assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
         assertEquals("the taken file is untouched", "the taken name", File(dir, "dairy.txt").readText())

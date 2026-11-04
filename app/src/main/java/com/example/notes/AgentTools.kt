@@ -229,8 +229,14 @@ class AgentTools(
          */
         const val MAX_PICTURES = 4
 
-        /** The tools that change a file. */
-        val WRITING = setOf("edit", "create", "delete", "move", "restore")
+        /**
+         * The tools that change a file.
+         *
+         * **`write` where `edit` and `create` were two**, which is why this is a set of names and not
+         * a predicate: the loop reads it to decide whether a call made progress, and a name that is
+         * not here is a write that counted as doing nothing.
+         */
+        val WRITING = setOf("write", "delete", "move", "restore")
 
         /**
          * How many calls in a row may change nothing and answer nothing before the loop stops.
@@ -355,9 +361,24 @@ class AgentTools(
          * reading it would try to call two tools that no longer exist.
          */
         val KEYS: Map<String, Set<String>> = mapOf(
-            "tree" to setOf("path", "depth", "name", "grep", "from", "to"),
+            // **`content`, not `grep`.** The operator: "why tree has arguments name and grep?
+            // rename them in name and content. and all arguments that use text selection should use
+            // grep regex patterns - so it shouldn't be in their argument name". The *value* is still
+            // a pattern; the *name* now says what it selects, so `tree` reads as "this name, that
+            // content" instead of naming the tool it happens to use twice.
+            //
+            // **No `from`/`to`.** They were a slice over the *path list* here, which is a paging
+            // cursor wearing the name of a line range — the one thing this pass is removing.
+            "tree" to setOf("path", "depth", "name", "content"),
             "search" to setOf("query", "in", "paths", "history"),
-            "read" to setOf("path", "from", "to", "grep", "revision"),
+            // **`from`/`to` stay here, and only here plus `write`.** You cannot grep text you have
+            // not found yet: "show me lines 40-60 of a file I have never seen" has no pattern to
+            // search with, and it is the most common first read an agent does.
+            //
+            // **`path` may carry a version**: `notes.md@a1b2c3d`, the form `search {history}` and
+            // `history` both answer with. Splitting it is what makes a search hit directly usable
+            // instead of requiring the model to move the id into `revision` itself.
+            "read" to setOf("path", "from", "to", "grep", "revision", "multi"),
             // **One tool where `create` and `edit` were two.** Report: "merge create and edit into
             // one command 'write' - if path doesn't exist it creates it automatically (folders and
             // files)". So `write` is the only way anything is written, and there is no second name
@@ -374,19 +395,27 @@ class AgentTools(
             // acts on the file in front of it, and a key the runner never reads is a key a model is
             // told it may send — which is what `no tool takes an argument it never describes` exists to
             // catch, in the other direction.
-            "write" to setOf("path", "grep", "from", "to", "text"),
+            "write" to setOf("path", "grep", "from", "to", "text", "multi"),
             "forget" to setOf("ids"),
             "delete" to setOf("path"),
-            "move" to setOf("path", "into", "name", "copy"),
-            "history" to setOf("path", "grep", "from", "to"),
+            // **No `name`.** The operator: "move doesnt need \"name\" arg - it should rename
+            // according to \"into\" path, same as unix move does." `into` is the destination, name
+            // and all, so there is one way to say where a file goes.
+            "move" to setOf("path", "into", "copy"),
+            // **No `from`/`to`.** A version list is not read by line number, and a range over this
+            // result meant a range over *versions* — a second meaning for two keys that everywhere
+            // else name the file's own lines.
+            "history" to setOf("path", "grep"),
             "restore" to setOf("path", "revision"),
             "background" to setOf("tool", "args"),
+            // **`from`/`to` stay**: they are lines of the page text the agent is about to read,
+            // applied *after* the scanner, which is a real use rather than a paging cursor.
             "browse" to setOf("url", "wait", "eval", "from", "to"),
             "shot" to setOf("url", "full", "eval"),
             "look" to setOf("paths"),
             "query" to setOf("sql", "path"),
             "ci" to setOf("workflow", "branch", "limit", "event", "inputs"),
-            "runs" to setOf("run", "job", "grep", "from", "to"),
+            "runs" to setOf("run", "job", "grep"),
             "artifact" to setOf("run", "name"),
             "downloads" to setOf("path"),
             // **One tool, two modes** — `pack` and `unpack` are the same capability and two names in
@@ -460,8 +489,9 @@ class AgentTools(
                     "**Search before you guess**, and search before you write a wiki article: a " +
                     "duplicate article is worse than a missing one. " +
                     "`history: true` also searches **every saved version** and answers " +
-                    "`path@sha7` instead of `path` — a form `read {revision}` and `restore` both " +
-                    "accept, so a hit is directly usable as the next call. Use it for \"what did " +
+                    "`path@sha7` instead of `path` — **and `read` now takes that form directly**, so " +
+                    "a hit is usable as the next call with no translation. `restore` takes the id. " +
+                    "Use it for \"what did " +
                     "this say before\" and for finding the commit that introduced something.",
                 "{\"query\":\"the text to find, a case-insensitive regular expression\"," +
                     "\"in\":[\"src/\",\"wiki/\"],\"paths\":10,\"history\":false}",
@@ -469,14 +499,14 @@ class AgentTools(
             spec(
                 "tree",
                 "List the files in a folder of this project. Folders end with a slash. " +
-                    "`name` keeps only paths whose own name matches, and may answer with a folder; " +
-                    "`grep` keeps only files whose text matches, and shows the matching lines. " +
-                    "A pattern is a regular expression, case-insensitive, matched inside one line. " +
-                    "`from`/`to` pick a range of the result's lines, which here are paths. " +
+                    "`name` keeps only paths whose own **name** matches, and may answer with a " +
+                    "folder; `content` keeps only files whose **text** matches, and shows the " +
+                    "matching lines. The two are named for what they select, not for the tool they " +
+                    "use — the value of each is a regular expression either way, case-insensitive, " +
+                    "matched inside one line. " +
                     "**A path starting `../` lists another project**, which is allowed.",
                 "{\"path\":\"where to look, relative to the project\",\"depth\":2," +
-                    "\"name\":\"a pattern for file names\",\"grep\":\"a pattern for their text\"," +
-                    "\"from\":1,\"to\":200}",
+                    "\"name\":\"a pattern for file names\",\"content\":\"a pattern for their text\"}",
             ),
             spec(
                 "read",
@@ -496,9 +526,17 @@ class AgentTools(
                     "with `kind` and `ctx`. " +
                     "**A path starting `../` reads another project** — `../other/src/x.kt` — which is " +
                     "allowed and is how you learn from work that already solved this problem. You may " +
-                    "read across; you may not write across.",
+                    "read across; you may not write across. " +
+                    "**`path` may carry a version: `notes.md@a1b2c3d`**, which is the form `search " +
+                    "{history}` and `history` answer with — so a hit is a usable next call as it " +
+                    "stands. `revision` does the same thing explicitly. " +
+                    "`multi: true` makes `grep` match **across lines**: by default a pattern is " +
+                    "tested one line at a time, and `multi` runs it over the whole selection so a " +
+                    "block can be selected by its opening and closing text. The answer then names the " +
+                    "lines it spans (`12-20: …`). Use `[\\s\\S]` for \"any character, newlines too\".",
                 "{\"path\":\"the file, relative to the project\",\"from\":1,\"to\":200," +
-                    "\"grep\":\"a pattern to select\",\"revision\":\"an id from history\"}",
+                    "\"grep\":\"a pattern to select\",\"revision\":\"an id from history\"," +
+                    "\"multi\":false}",
             ),
             spec(
                 "write",
@@ -514,13 +552,16 @@ class AgentTools(
                     "`text` may also be a `read` call - `{\"tool\":\"read\",\"args\":{...}}` - " +
                     "which copies that call's answer out of another file without it passing " +
                     "through this conversation, so a large paste is never refused for its size. " +
+                    "**`multi: true` makes `grep` match across lines**, so a whole function can be " +
+                    "replaced by its opening line and its closing brace. " +
                     "**Read before you write.** A file you have not read is one you may be about " +
                     "to overwrite with a guess.",
                 // **Every argument the tool reads is in the example, and that is load-bearing.**
                 // `spec()` derives the schema from this sample, so a key left out of it is an
                 // argument the model is never told it may send - while the runner still reads it.
                 "{\"path\":\"the file, relative to the project\",\"text\":\"the new text\"," +
-                    "\"grep\":\"a pattern, when replacing matches\",\"from\":1,\"to\":20}",
+                    "\"grep\":\"a pattern, when replacing matches\",\"from\":1,\"to\":20," +
+                    "\"multi\":false}",
             ),
             spec(
                 "forget",
@@ -535,12 +576,15 @@ class AgentTools(
             spec("delete", "Delete a file, or a folder and everything in it.", """{"path":"what to delete"}"""),
             spec(
                 "move",
-                "Move a file into a folder, or rename it inside its own folder. With `copy` the " +
-                    "original stays where it is, and `name` renames the copy in the same call. A " +
-                    "name that is already taken is refused, and nothing is written. A locked file " +
-                    "may be copied: a copy reads it and leaves it exactly as it was.",
-                "{\"path\":\"the file\",\"into\":\"the folder\",\"name\":\"the new name\"," +
-                    "\"copy\":true}",
+                "Move a file, or copy it. **`into` is the destination, name and all** — the way " +
+                    "`mv` works: a folder moves the file into it keeping its name, while " +
+                    "`notes/renamed.md` moves it there under that name, and a bare `renamed.md` " +
+                    "renames it where it stands. Missing folders are made. A destination that is " +
+                    "already taken is refused and nothing is written. With `copy` the original " +
+                    "stays; a locked file may be copied, because a copy reads it and leaves it " +
+                    "exactly as it was.",
+                "{\"path\":\"the file\",\"into\":\"where it goes, name included\"," +
+                    "\"copy\":false}",
             ),
             spec(
                 "query",
@@ -990,19 +1034,17 @@ class AgentTools(
             .coerceIn(1, 8)
         val name = pattern(args.optString("name", ""))
             .getOrElse { return refusal("That is not a pattern: ${it.message}") }
-        val content = pattern(args.optString("grep", ""))
+        val content = pattern(args.optString("content", ""))
             .getOrElse { return refusal("That is not a pattern: ${it.message}") }
         if (name == null && content == null) {
             val out = mutableListOf<String>()
             walk(root, depth, out, deadline)
             if (out.isEmpty()) return success("${rel(root)} is empty")
-            // **The "lines" here are paths.** A listing of four thousand names has to be narrowable
-            // once no cap of its own exists, and `from`/`to` is the same range every other command
-            // takes — the description says so, because a range over a path list whose unit a model
-            // has to guess is a trap.
-            val chosen = slice(out, args).getOrElse { return refusal(it.message ?: "that range cannot be used") }
-            if (chosen.isEmpty()) return success("nothing in that range: there are ${out.size} paths")
-            return success(chosen.joinToString("\n"))
+            // **No range, and no cap of its own.** A listing is narrowed by `depth` and `name`,
+            // which say what to list; `from`/`to` said where to start reading a list, which is a
+            // paging cursor and not a selector. What is too big is handled the way every other
+            // result is: the operator's limit files it whole and says the path.
+            return success(out.joinToString("\n"))
         }
         // **A search, not a listing.** With `name` the answer is the paths whose own name matches,
         // and a folder can be one of them. With `grep` the answer is files and lines: a folder in the
@@ -1015,9 +1057,7 @@ class AgentTools(
         // **No cap of its own.** The only limit a result has is the operator's, and a result past it
         // is an error asking for a narrower pattern — not a list of the first N with a note, which a
         // model reads as "here they all are".
-        val chosen = slice(found, args).getOrElse { return refusal(it.message ?: "that range cannot be used") }
-        if (chosen.isEmpty()) return success("nothing in that range: ${found.size} matches")
-        return success(chosen.joinToString("\n"))
+        return success(found.joinToString("\n"))
     }
 
     /**
@@ -1682,7 +1722,27 @@ class AgentTools(
      * [trim], and a replacement never does.
      */
     private fun readInto(args: JSONObject, deadline: Deadline): Result<String> {
-        val file = resolveFile(args.optString("path"))
+        // **`path` may carry a version: `notes.md@a1b2c3d`.**
+        //
+        // `search {history: true}` and `history` both answer a version in that form, and the tool
+        // descriptions promised `read` would take it. It did not: `resolveFile` reads `@` as part of
+        // a filename, so a model that copied a search hit got "there is no file at notes.md@a1b2c3d".
+        // The promise and the behaviour disagreed, and the promise was the reasonable one.
+        //
+        // **Split on the LAST `@`**, because a filename may contain one and a revision id never does.
+        // The tail is a revision only when it looks like a git id — hex, 4 to 40 characters — so a
+        // real file called `budget@home.md` still reads as itself rather than as a version of
+        // `budget`.
+        val raw = args.optString("path")
+        val carried = raw.substringAfterLast('@', "")
+        val composite = raw.contains('@') &&
+            carried.length in 4..40 &&
+            carried.all { it.isDigit() || it.lowercaseChar() in 'a'..'f' }
+        val asked = if (composite) raw.substringBeforeLast('@') else raw
+        // **`revision` wins if both are given**, because it is the explicit one.
+        val namedRevision = args.optString("revision").trim()
+        val revision = namedRevision.ifEmpty { if (composite) carried else "" }
+        val file = resolveFile(asked)
             .getOrElse { return Result.failure(IllegalArgumentException(it.message ?: "that path cannot be read")) }
         if (!file.exists()) {
             return Result.failure(IllegalArgumentException("There is no file at ${rel(file)}"))
@@ -1699,7 +1759,6 @@ class AgentTools(
         // is the step between them, and without it the middle of a version's life could only be
         // guessed at by restoring it. The bytes come from the same function `restore` uses, so a
         // revision is read exactly as it would be written back.
-        val revision = args.optString("revision").trim()
         // **A file is shown as it is.** There is no second view of any file here: `grep` is how a
         // model finds the row it wants, in the columns the file actually has, and a projection would
         // make what it reads differ from what a person sees when they open the file themselves.
@@ -1760,6 +1819,49 @@ class AgentTools(
         // file where one line is entirely `milk` and another is `milk and bread` gets one line
         // answer and one text answer — each line answered the way that line's match asked. That is
         // not two answers to one question: it is the same question, and each line answered it.
+        if (grep != null && args.optBoolean("multi", false)) {
+            // **`multi: true` lets one match span lines.** The operator asked how an agent replaces a
+            // function by grepping its signature and its closing brace: *"if agent needs to replace a
+            // function block by grepping its signature and curly braces how doe he do that?"* It
+            // could not, and the limit was **ours**, not regex's — `hit`/`hits` hand the engine one
+            // line at a time, so `.` never meets a newline.
+            //
+            // The grant compiles the pattern with `DOTALL or MULTILINE` and runs it over the whole
+            // file, so `fun render\([\s\S]*?\n\}` and `fun render\(.*?\n\}` both work. **No cap of
+            // its own**: a match bigger than the operator's result limit is filed whole by
+            // `forConversation` like every other result, and inventing a second ceiling here would be
+            // a number nobody chose.
+            //
+            // **The answer is still positional**: the line the match starts on and the line it ends
+            // on, so the model can name the place next call.
+            val wide = try {
+                Regex(
+                    grep.pattern,
+                    setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.MULTILINE) +
+                        (if (grep.options.contains(RegexOption.IGNORE_CASE)) setOf(RegexOption.IGNORE_CASE) else emptySet()),
+                )
+            } catch (e: Throwable) {
+                return Result.failure(IllegalArgumentException("That is not a pattern: ${e.message}"))
+            }
+            val whole = chosen.joinToString("\n")
+            val found = ArrayList<String>()
+            // **The line number is counted once per match, from the offset the engine gave**, which
+            // is the only way to know where a multi-line match sits. `from` is added because
+            // `chosen` is already a slice of the file.
+            val breaks = whole.indices.filter { whole[it] == '\n' }
+            for (match in wide.findAll(Timed(whole, deadline, "read"))) {
+                val start = from + breaks.count { it < match.range.first }
+                val end = start + match.value.count { it == '\n' }
+                // **One line is answered like every other whole-line hit** — `12: text` — and a block
+                // is answered by its extent, because "lines 12 to 20" is what a next call names.
+                // **The matched text is shown as it is, newlines and all** — `excerpt` strips
+                // control characters to keep a one-line answer on one line, which would flatten the
+                // very block this mode exists to select. A block is what was asked for.
+                found.add(if (start == end) "$start: ${match.value}" else "$start-$end: ${match.value}")
+            }
+            if (found.isEmpty()) return Result.success("nothing in ${rel(file)} matches that")
+            return Result.success(found.joinToString("\n"))
+        }
         if (grep != null) {
             val found = ArrayList<String>()
             var any = false
@@ -1949,17 +2051,37 @@ class AgentTools(
                 // `read` put a number on the front: a part-of-line pattern never produces one, so a
                 // body that happens to begin with digits is left exactly as it was written.
                 var changed = false
-                val rewritten = lines.mapIndexed { index, line ->
-                    // 1-based, and only inside the range the model named.
-                    if (index + 1 < first || index + 1 > last) return@mapIndexed line
-                    val at = hit(line, find, deadline, "edit") ?: return@mapIndexed line
-                    changed = true
-                    val wholeLine = at.first == 0 && at.last == line.length - 1
-                    val body = if (wholeLine) stripNumber(put) else put
-                    find.replace(line, Regex.escapeReplacement(body))
+                // **`multi: true` replaces across lines**, which is the only way to rewrite a
+                // function by its signature and its closing brace. `grep` is per line by default —
+                // cheap, and every hit keeps one line number — and this is the deliberate opt-in.
+                if (args.optBoolean("multi", false)) {
+                    val wide = Regex(
+                        find.pattern,
+                        setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.MULTILINE) +
+                            (if (find.options.contains(RegexOption.IGNORE_CASE)) setOf(RegexOption.IGNORE_CASE) else emptySet()),
+                    )
+                    // **The range still bounds it**, because `grep` narrowed by `from`/`to` is one
+                    // selection with a bound — the operator's own rule, and it applies here too.
+                    val head = lines.take(first - 1)
+                    val scanned = lines.subList(first - 1, last.coerceAtMost(lines.size))
+                    val tail = lines.drop(last.coerceAtMost(lines.size))
+                    val whole = scanned.joinToString("\n")
+                    if (!wide.containsMatchIn(whole)) return refusal("Nothing in ${rel(file)} matches that")
+                    (head + wide.replace(whole, Regex.escapeReplacement(put)).split("\n") + tail)
+                        .joinToString("\n")
+                } else {
+                    val rewritten = lines.mapIndexed { index, line ->
+                        // 1-based, and only inside the range the model named.
+                        if (index + 1 < first || index + 1 > last) return@mapIndexed line
+                        val at = hit(line, find, deadline, "write") ?: return@mapIndexed line
+                        changed = true
+                        val wholeLine = at.first == 0 && at.last == line.length - 1
+                        val body = if (wholeLine) stripNumber(put) else put
+                        find.replace(line, Regex.escapeReplacement(body))
+                    }
+                    if (!changed) return refusal("Nothing in ${rel(file)} matches that")
+                    rewritten.joinToString("\n")
                 }
-                if (!changed) return refusal("Nothing in ${rel(file)} matches that")
-                rewritten.joinToString("\n")
             }
             hasRange -> {
                 val from = count(args, "from", 1)
@@ -2217,11 +2339,52 @@ class AgentTools(
         if (!copy) mayWrite(file)?.let { return refusal(it) }
         if (!file.exists()) return refusal("There is nothing at ${rel(file)}")
         deadline.check("move")
-        val into = resolve(args.optString("into", file.parentFile?.let { rel(it) } ?: ""))
+        val asked = args.optString("into", "").trim()
+        // **`into` is the destination, name and all — the way `mv` works.**
+        //
+        // The operator: *"move doesnt need \"name\" arg - it should rename according to \"into\"
+        // path, same as unix move does."* So `into: "notes/renamed.md"` both renames and moves in one
+        // sentence, and there is no second key whose relationship to `into` a model has to guess.
+        //
+        // **How the two are told apart, because they have to be.** A path that names something
+        // already there, or ends in a slash, or has no suffix and matches a folder, is a folder to
+        // move into; anything else is the new name. That is the same heuristic a shell uses, and it
+        // is written down here rather than left to the caller.
+        // **`into` is the destination path, name and all — `mv`'s own rule.**
+        //
+        // - `"notes"` or `"notes/"` — a folder that exists: move into it, keeping the name.
+        // - `"notes/x.md"` — the full destination: move it there under that name.
+        // - `"x.md"` — no folder part: rename where it stands.
+        //
+        // The folder part is everything before the last slash; the name is everything after it. An
+        // `into` that resolves to an existing folder is the folder case even without a trailing
+        // slash, because that is unambiguous — you cannot move a file onto a folder's name.
+        val existing = resolve(asked).getOrNull()
+        val isFolder = asked.isEmpty() || asked.endsWith("/") || existing?.isDirectory == true
+        val slash = asked.lastIndexOf('/')
+        // **No slash means rename in place**, so the folder is the file's own and the name is `into`.
+        val folder = if (isFolder) asked else if (slash >= 0) asked.substring(0, slash) else ""
+        val name = when {
+            isFolder -> ""
+            slash >= 0 -> asked.substring(slash + 1)
+            else -> asked
+        }
+        if (name.isNotEmpty() && (name == "." || name == ".." || name.contains('\u0000'))) {
+            return refusal("\"$asked\" is not a usable name")
+        }
+        val into = resolve(folder.ifEmpty { file.parentFile?.let { rel(it) } ?: "" })
             .getOrElse { return refusal(it.message ?: "that folder cannot be used") }
-        if (!into.isDirectory) return refusal("${rel(into)} is not a folder")
-        mayWrite(File(into, file.name))?.let { return refusal(it) }
-        val name = args.optString("name", "").trim()
+        // **Missing folders are made, the same as `write`.** Reported with `write` and true here for
+        // the same reason: a destination that names a folder the project does not have yet is a
+        // person saying "put it there", not a mistake — and refusing it made moving into a new folder
+        // two calls.
+        if (!into.isDirectory) {
+            val made = makeFolders(into)
+            if (made.isFailure) {
+                return refusal(made.exceptionOrNull()?.message ?: "the folder could not be made")
+            }
+        }
+        mayWrite(File(into, name.ifEmpty { file.name }))?.let { return refusal(it) }
         // **`copy` is the one difference between the two acts.** Everything else — the destination
         // checks, the refusal of a taken name, a folder into itself — is the same question, and it
         // is asked in one place per act rather than in a second tool that would drift from this one.
@@ -2267,11 +2430,11 @@ class AgentTools(
             .getOrElse { return refusal("That is not a pattern: ${it.message}") }
         val versions = git.versions(project, path, deadline)
         if (versions.isEmpty()) return success("$path has no versions yet")
-        // **The range picks versions, then the pattern picks among those.** The same order as
-        // everywhere else, and it has to be this way round: a version is one line of this result, so
-        // a range over this result is a range over versions — never over the file's own lines.
-        val chosen = slice(versions, args).getOrElse { return refusal(it.message ?: "that range cannot be used") }
-        if (chosen.isEmpty()) return success("nothing in that range: ${versions.size} versions")
+        // **No range any more.** `from`/`to` here used to slice the *version list*, which gave two
+        // keys that name a file's lines a second meaning that was not about lines at all. The
+        // operator: "history command doesnt need from and to args". `grep` is the selector, and the
+        // operator's own result limit is what bounds a very long history.
+        val chosen = versions
         // **A version is shown when its own text matches.** [versionsOf] loads every version's bytes
         // anyway, so asking is free — and it is the question a model actually has ("when did it say
         // this?"), which a commit message cannot answer.
@@ -3450,22 +3613,17 @@ class AgentTools(
             return "$path — ${hits.size} line(s) matching \"$pattern\":\n" +
                 hits.joinToString("\n") { "${it.index + 1}: ${it.value}" }
         }
-        val from = args.optInt("from", 1).coerceAtLeast(1)
-        val to = if (args.has("to")) args.optInt("to", 0) else 0
-        if (from > 1 || to > 0) {
-            val end = if (to > 0) to.coerceAtMost(lines.size) else lines.size
-            if (from > lines.size) {
-                return "$path has ${lines.size} lines, so there is no line $from."
-            }
-            return "$path — lines $from to $end of ${lines.size}:\n" +
-                lines.subList(from - 1, end).joinToString("\n")
-        }
-        // Nothing asked: the file, and the first screenful of it.
+        // **No range here any more.** `from`/`to` were a paging cursor over a *filed log*, which gave
+        // two keys that name a file's own lines a second meaning. A log bigger than a screenful is
+        // read with `read`, which is the tool for reading a file — it takes the path this answer gives.
+        //
+        // What remains is the selector and the first screenful, so one call always tells the caller
+        // the shape of the log and where it is.
         val head = lines.take(SHOW).joinToString("\n")
         return "written to $path (${lines.size} lines)\n" + head +
             (if (lines.size > SHOW) {
                 "\n… and ${lines.size - SHOW} more. Read them with " +
-                    "{\"run\": ${args.optLong("run", 0L)},\"from\":${SHOW + 1},\"to\":${lines.size}} " +
+                    "`read {\"path\":\"$path\",\"from\":${SHOW + 1},\"to\":${lines.size}}` " +
                     "or select with {\"grep\":\"FAILED\"}."
             } else {
                 ""
