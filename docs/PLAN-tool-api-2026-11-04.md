@@ -98,6 +98,22 @@ Reports 36, 38. Independent and small.
   name and the other suffix. Collision → next free name, matching `Export`'s rule. `as` and `into` are gone.
   (`-u` stays a boolean named `unpack`, since a one-letter key is a CLI habit.)
 
+**Two things the plan did not foresee, found by the suite (`6da6f00`).**
+
+1. **"Beside the input" collides with two read-only folders, and it is the same collision twice.** `agent/` is
+   the app's own folder, so unpacking a *fetched* zip — the workflow `fetch`'s own description promises — would
+   have been a refusal; and a project's parent is the account, also read-only, so zipping a whole project would
+   have put the zip outside it. Resolved with one rule, `outputFolder`: **beside the input, or the project when
+   beside is not writable.** Both exceptions reduce to "inside the project", which is the only other answer, and
+   every answer still says which folder it used. The alternative — refuse and tell the agent to `move` the zip
+   first — protects a folder holding a download cache, not the record, at the cost of the documented step.
+2. **Entry names had to stop being project-relative.** With the destination derived from the input, a
+   project-relative name repeated the top folder on the way back out (`src/src/…`). They are relative to the
+   packed thing now, so packing `src/` and unpacking gives back a folder shaped exactly like `src/`.
+
+**One test was pinning a number the plan changed**: `a size past the cap` asserted the literal `20.0 MB`. It
+reads `Fetcher.size(Fetched.LIMIT_BYTES)` now, so raising a cap cannot look like a broken test.
+
 ---
 
 ## Step 4 — Downloads: listing, `download`, `upload`
