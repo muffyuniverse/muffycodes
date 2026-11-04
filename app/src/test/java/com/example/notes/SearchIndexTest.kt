@@ -405,6 +405,93 @@ class SearchIndexTest {
         assertEquals("but one vector", 1, index.vectors())
     }
 
+    // ---- versions, and what a prune strands --------------------------------
+
+    @Test
+    fun `a version row survives a rewrite of the current file, because they are different keys`() {
+        // **The whole reason the key is the blob.** A saved version and the file as it is now are two
+        // rows in one table; writing the current text must not delete the version, which is what a
+        // path-only key would do.
+        built()
+        index.put("a.txt", "", Chunker.split("the milk went sour")) { texts ->
+            Result.success(texts.map { vector(4, 1f) })
+        }.getOrThrow()
+        index.put("a.txt", "abc1234", Chunker.split("the milk was poured away")) { texts ->
+            Result.success(texts.map { vector(4, 2f) })
+        }.getOrThrow()
+
+        val versions = index.versions()
+
+        assertEquals("one saved version: $versions", 1, versions.size)
+        assertEquals("keyed by the blob", "abc1234" to "a.txt", versions.single().second to versions.single().first)
+    }
+
+    @Test
+    fun `sweeping drops unreachable versions and keeps the current file`() {
+        built()
+        index.put("a.txt", "", Chunker.split("the milk went sour")) { texts ->
+            Result.success(texts.map { vector(4, 1f) })
+        }.getOrThrow()
+        index.put("a.txt", "keep", Chunker.split("the milk was poured away")) { texts ->
+            Result.success(texts.map { vector(4, 2f) })
+        }.getOrThrow()
+        index.put("a.txt", "drop", Chunker.split("a version nobody saved")) { texts ->
+            Result.success(texts.map { vector(4, 3f) })
+        }.getOrThrow()
+
+        val (rows, _) = index.sweep(setOf("keep"))
+
+        assertEquals("one row swept", 1, rows)
+        assertEquals("the reachable version stays", setOf("a.txt" to "keep"), index.versions())
+        // **The working tree is not a commit's business.** A prune says nothing about it, so its row
+        // must survive a sweep that emptied every version.
+        val current = index.nearest(vector(4, 1f), 10, history = false).getOrThrow()
+        assertTrue("the current row survives", current.isNotEmpty())
+        assertTrue(
+            "and the dead vector went with it",
+            index.vectors() <= 2,
+        )
+    }
+
+    @Test
+    fun `a sweep with nothing reachable releases every version vector`() {
+        built()
+        index.put("a.txt", "gone", Chunker.split("text nobody reaches")) { texts ->
+            Result.success(texts.map { vector(4, 3f) })
+        }.getOrThrow()
+        assertEquals("one vector", 1, index.vectors())
+
+        val (rows, vectors) = index.sweep(emptySet())
+
+        assertEquals("one row", 1, rows)
+        assertEquals("and its vector", 1, vectors)
+        assertEquals("nothing left", 0, index.vectors())
+    }
+
+    @Test
+    fun `a file whose text changed but whose time did not is noticed`() {
+        // **Two numbers, because one of them lies.** A restore, a `cp -p` or two saves inside one
+        // filesystem tick leave an edited file with its old modification time; without the size the
+        // index would answer about text the project no longer has.
+        built()
+        index.note("a.txt", mtime = 1_000L, state = SearchIndex.INDEXED, size = 40L)
+
+        assertEquals("the pair it was indexed at", 1_000L to 40L, index.seen("a.txt"))
+        // Same time, different size: not the pair, so the walk re-reads it.
+        assertTrue("a different size is a different file", index.seen("a.txt") != (1_000L to 41L))
+        // Same pair: unchanged, and the walk spends nothing.
+        assertEquals("an unchanged file", 1_000L to 40L, index.seen("a.txt"))
+    }
+
+    @Test
+    fun `a failed file is never up to date, so the next pass retries it`() {
+        built()
+        index.note("a.txt", mtime = 1_000L, state = SearchIndex.FAILED, error = "it was too big", size = 40L)
+
+        assertEquals("nothing to compare, so it is read again", null, index.seen("a.txt"))
+        assertEquals("and the reason is kept", 1 to "it was too big", index.failed())
+    }
+
     // ---- what the file is --------------------------------------------------
 
     @Test

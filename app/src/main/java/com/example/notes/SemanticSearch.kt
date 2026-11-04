@@ -81,12 +81,15 @@ class SemanticSearch(
         paths: Int,
         depth: Int,
         deadline: Deadline,
+        /** Also search the saved versions, which the pass has just brought up to date. */
+        history: Boolean = false,
     ): Result<String> {
         val ready = ready().getOrElse { return Result.failure(it) }
         try {
             val caught = catchUp(ready.index, ready.model, ready.dims, deadline)
             return search(
                 ready.index, scope, query, paths, depth, ready.model, ready.dims, caught, deadline,
+                history,
             )
         } finally {
             ready.close()
@@ -216,11 +219,14 @@ class SemanticSearch(
         val chunks: Int,
         /** Why the pass stopped early, or null when it finished. */
         val stopped: String?,
+        /** Saved versions whose text was added or refreshed by the history pass. */
+        val versions: Int = 0,
     ) {
         val left: Int get() = (total - done - unchanged - failed).coerceAtLeast(0)
 
         /** Nothing was stale and nothing failed: the index already said what the project says. */
-        val nothingToDo: Boolean get() = done == 0 && failed == 0 && stopped == null
+        val nothingToDo: Boolean
+            get() = done == 0 && failed == 0 && versions == 0 && stopped == null
 
         fun said(): String = when {
             total == 0 -> "there is no text to index"
@@ -232,9 +238,14 @@ class SemanticSearch(
                 "stopped at $done of $total file(s): $stopped"
             stopped != null -> "$done file(s) indexed, then it stopped: $stopped"
             failed > 0 ->
-                "$done of $total file(s) indexed, $failed could not be, $chunks chunk(s) embedded"
-            else -> "$done of $total file(s) indexed, $chunks chunk(s) embedded"
+                "$done of $total file(s) indexed, $failed could not be, $chunks chunk(s) embedded" +
+                    versionsSaid()
+            else -> "$done of $total file(s) indexed, $chunks chunk(s) embedded" + versionsSaid()
         }
+
+        /** The history half of [said], or nothing when the pass found no new version. */
+        private fun versionsSaid(): String =
+            if (versions == 0) "" else ", $versions saved version(s)"
     }
 
     private fun catchUp(
@@ -270,8 +281,11 @@ class SemanticSearch(
             if (stopped != null) break
             val rel = relTo(canon, file) ?: continue
             val mtime = file.lastModified()
-            // **The whole of why this is affordable.** An unchanged file is one comparison.
-            if (index.indexedAt(rel) == mtime) {
+            val size = file.length()
+            // **The whole of why this is affordable.** An unchanged file is one comparison — of two
+            // numbers, because the time alone says an edited file is untouched when whatever wrote it
+            // preserved the timestamp (a restore, `cp -p`, two saves in one tick).
+            if (index.seen(rel) == (mtime to size)) {
                 unchanged++
                 continue
             }
@@ -284,7 +298,7 @@ class SemanticSearch(
             val text = try {
                 file.readText()
             } catch (e: Throwable) {
-                index.note(rel, mtime, SearchIndex.FAILED, reason(e))
+                index.note(rel, mtime, SearchIndex.FAILED, reason(e), size)
                 failed++
                 continue
             }
@@ -296,6 +310,7 @@ class SemanticSearch(
                     mtime,
                     SearchIndex.FAILED,
                     "it is ${text.length / 1024} kB and this index takes files up to ${MAX_CHARS / 1024} kB",
+                    size,
                 )
                 failed++
                 continue
@@ -313,12 +328,12 @@ class SemanticSearch(
                 onSuccess = { embedded ->
                     // **An empty file is indexed**, with no chunks: "there is nothing here" is an
                     // answer, and a file that stayed unindexed would be counted behind on every pass.
-                    index.note(rel, mtime, SearchIndex.INDEXED)
+                    index.note(rel, mtime, SearchIndex.INDEXED, size = size)
                     chunks += embedded
                     done++
                 },
                 onFailure = { e ->
-                    index.note(rel, mtime, SearchIndex.FAILED, reason(e))
+                    index.note(rel, mtime, SearchIndex.FAILED, reason(e), size)
                     failed++
                     // **One failure ends the pass.** Every remaining file would ask the same model
                     // the same question and get the same refusal, and a person wants the reason once
@@ -327,7 +342,112 @@ class SemanticSearch(
                 },
             )
         }
-        return Indexed(files.size, done, unchanged, failed, chunks, stopped)
+        // **The history half, after the working tree.** Only when the tree finished: a pass that ran
+        // out of time has not indexed the newest text yet, and spending what is left of the turn on
+        // old versions would answer a search about the past while the present is missing.
+        var versions = 0
+        if (stopped == null) {
+            val walked = history(index, model, dims, deadline)
+            versions = walked.first
+            chunks += walked.second
+            if (walked.third != null) stopped = walked.third
+        }
+        return Indexed(files.size, done, unchanged, failed, chunks, stopped, versions)
+    }
+
+    /**
+     * Indexes the **saved versions** of the project's files.
+     *
+     * ## Why this is affordable, and why it is not a second copy of the project
+     *
+     * A version's chunks are keyed by their text ([Chunker.hashOf]), so a version that edits one
+     * paragraph pays for that paragraph. Everything else it shares with the version before it, and
+     * with the working tree — which is why "index the history" is not "index the project forty times
+     * over". [SearchIndex.put] skips a hash it already holds and reports how much it embedded, so a
+     * second pass over an unchanged history costs nothing at all.
+     *
+     * ## Why the blob, and not the commit
+     *
+     * [GitService.walkChanges] reports the blob each commit left at each path. That is the key: a
+     * commit id does not survive a prune (which rewrites every commit and no blob) or a force-pushed
+     * remote, so keying by it would leave rows dangling in bulk. The commit is resolved when an answer
+     * is written, never stored.
+     *
+     * @return versions added, chunks embedded, and the reason it stopped early (or null).
+     */
+    private fun history(
+        index: SearchIndex,
+        model: String,
+        dims: Int,
+        deadline: Deadline,
+    ): Triple<Int, Int, String?> {
+        val dir = ws.projectDir(project)
+        val repo = try {
+            if (!GitService.isRepository(dir)) return Triple(0, 0, null)
+            // **`openExisting`, never `initOrOpen`.** The index is derived data and must never be
+            // the thing that creates a repository: an initialised repo here would make a project
+            // with no history report one, and it would commit whatever the index walk happened to
+            // find. A project with no `.git` has no versions, and that is an answer.
+            GitService.openExisting(dir)
+        } catch (e: Throwable) {
+            // **A project with no repository has no versions**, which is not a failure: it is a
+            // project that has never been saved. The working tree half already indexed it.
+            return Triple(0, 0, null)
+        }
+        var versions = 0
+        var chunks = 0
+        var stopped: String? = null
+        try {
+            repo.use {
+                // **What is already held, asked once.** Every skip below is then a set lookup rather
+                // than a tree read, which is what keeps a repeated pass cheap.
+                val held = index.versions()
+                GitService.walkChanges(it, limit = VERSIONS_PER_PATH, deadline = deadline) { _, changes ->
+                    if (stopped != null) return@walkChanges
+                    for (change in changes) {
+                        if (stopped != null) return@walkChanges
+                        if (!change.real) continue
+                        if (change.path to change.blob in held) continue
+                        val text = try {
+                            GitService.bytesAt(it, change.path, change.blob)
+                                ?.let { raw -> String(raw, Charsets.UTF_8) }
+                        } catch (e: Throwable) {
+                            null
+                        } ?: continue
+                        // **Binary and oversized content is skipped silently here.** A version is not
+                        // something a person chose to index, so a failure to take one must not turn
+                        // into a note on every answer; the working tree half already reports the
+                        // files it could not read, and a version of one of those is the same text.
+                        if (GitService.looksBinary(text)) continue
+                        if (text.length > MAX_CHARS) continue
+                        val put = try {
+                            index.put(change.path, change.blob, Chunker.split(text)) { texts ->
+                                embedAll(texts, model, dims, deadline)
+                            }
+                        } catch (e: StoppedException) {
+                            stopped = "the time limit ran out while indexing saved versions"
+                            return@walkChanges
+                        } catch (e: Throwable) {
+                            Result.failure(e)
+                        }
+                        put.fold(
+                            onSuccess = { embedded ->
+                                chunks += embedded
+                                versions++
+                            },
+                            onFailure = { e ->
+                                stopped = "saved versions could not be indexed: ${reason(e)}"
+                            },
+                        )
+                    }
+                }
+            }
+        } catch (e: StoppedException) {
+            stopped = "the time limit ran out while reading the history"
+        } catch (e: Throwable) {
+            stopped = "the history could not be read: ${reason(e)}"
+        }
+        return Triple(versions, chunks, stopped)
     }
 
     /**
@@ -467,6 +587,8 @@ class SemanticSearch(
         val text: String,
         /** The vector's score, or the reranker's when one ran. */
         val score: Double,
+        /** The save this text was found in, or `""` for the file as it is now. */
+        val commit: String = "",
     )
 
     private fun search(
@@ -479,6 +601,7 @@ class SemanticSearch(
         dims: Int,
         caught: Indexed,
         deadline: Deadline,
+        history: Boolean,
     ): Result<String> {
         val root = ws.projectDir(project)
         val notes = mutableListOf<String>()
@@ -500,7 +623,7 @@ class SemanticSearch(
         // **Thirty, not ten**: the reranker's whole job is to disagree with the vector order, so it
         // has to be shown a few answers it can move. Ten would leave it reordering the top of a list
         // that is already the answer.
-        val hits = index.nearest(vector, RERANK_DEPTH, history = false)
+        val hits = index.nearest(vector, RERANK_DEPTH, history = history)
             .getOrElse { return Result.failure(it) }
             // **A cosine that is not positive is not a hit.** `nearest` answers with the closest
             // rows whether or not any of them is close, so without this every search would answer
@@ -520,13 +643,19 @@ class SemanticSearch(
             return Result.success(compose(listOf(said), notes))
         }
 
+        // **The versions are resolved before anything is read**, because a row whose blob no commit
+        // reaches cannot be answered at all — and because resolving them is one walk of the history
+        // rather than one per hit.
+        val saves = saves(root, hits.map { it.path to it.commit }, notes)
         val cache = mutableMapOf<String, List<String>>()
         var candidates = hits.mapNotNull { hit ->
             // **Thirty files are read here, so this is where a slow disk is felt.** The check is per
             // hit rather than per file, because a cached file costs nothing and a new one may be big.
             deadline.check(TOOL)
-            val text = chunkText(root, hit.path, hit.start, hit.end, cache) ?: return@mapNotNull null
-            Candidate(hit.path, hit.start, text, hit.score)
+            val commit = if (hit.commit.isEmpty()) "" else saves[hit.path to hit.commit] ?: return@mapNotNull null
+            val text = chunkText(root, hit.path, hit.start, hit.end, hit.commit, cache)
+                ?: return@mapNotNull null
+            Candidate(hit.path, hit.start, text, hit.score, commit)
         }
         if (candidates.isEmpty()) {
             // **A row whose text is gone is not an answer.** A file deleted between the index and the
@@ -571,21 +700,44 @@ class SemanticSearch(
             // the same thing `read {path, from}` takes. The score is in brackets because it is one
             // number a reader can compare down the column, and it is the only thing that tells one
             // semantic row from another once the text is what they both match on.
-            "$project/${one.path}:${one.line}: $said  [${score(one.score)}]"
+            //
+            // **`path@sha7` for a saved version**, the same spelling `search {history}` answers in
+            // text mode and the same thing `read {revision}` takes — so a row is directly usable as
+            // the next call whether it names the file now or the file as it was.
+            val where = if (one.commit.isEmpty()) one.path else "${one.path}@${one.commit.take(7)}"
+            "$project/$where:${one.line}: $said  [${score(one.score)}]"
         }
         return Result.success(compose(rows, notes))
     }
 
-    /** A file's lines, cached for the length of one answer: several hits often share a file. */
+    /**
+     * The lines of one chunk — **from the working tree, or from the version it was found in.**
+     *
+     * The two are not interchangeable: a hit in a saved version quotes text the file may no longer
+     * have, so reading the working tree would show a line that is not what matched. The key carries
+     * the blob for that reason, and a version's bytes come from git.
+     */
     private fun chunkText(
         root: File,
         path: String,
         start: Int,
         end: Int,
+        blob: String,
         cache: MutableMap<String, List<String>>,
     ): String? {
+        val key = if (blob.isEmpty()) path else "$path@$blob"
         val lines = try {
-            cache.getOrPut(path) { File(root, path).readLines() }
+            cache.getOrPut(key) {
+                if (blob.isEmpty()) {
+                    File(root, path).readLines()
+                } else {
+                    val repo = GitService.openExisting(root) ?: return null
+                    repo.use {
+                        val raw = GitService.bytesAt(it, path, blob) ?: return null
+                        String(raw, Charsets.UTF_8).lines()
+                    }
+                }
+            }
         } catch (e: Throwable) {
             return null
         }
@@ -593,6 +745,51 @@ class SemanticSearch(
         val last = minOf(end, lines.size)
         if (last < start) return null
         return lines.subList(start - 1, last).joinToString("\n")
+    }
+
+    /**
+     * **The commits behind the saved versions in this answer — resolved once, never stored.**
+     *
+     * The index is keyed by content, so a version row names a blob. A person (and a model) needs a
+     * *save*: "which version do I read?" — and that is a commit id, which [GitService.VersionResolver]
+     * answers by walking the history **once** for every pair at once.
+     *
+     * **A pair no commit reaches is dropped, and said out loud.** A row can outlive the commits that
+     * produced it: a prune rewrites the history, a force-pushed remote replaces it, and a collection
+     * may then take the objects. Answering with the blob id would hand out an id `read` cannot use —
+     * so the row goes, and the note counts them.
+     */
+    private fun saves(
+        root: File,
+        pairs: List<Pair<String, String>>,
+        notes: MutableList<String>,
+    ): Map<Pair<String, String>, String> {
+        val wanted = pairs.filter { it.second.isNotEmpty() }.toSet()
+        if (wanted.isEmpty()) return emptyMap()
+        val repo = try {
+            GitService.openExisting(root)
+        } catch (e: Throwable) {
+            null
+        } ?: return emptyMap()
+        val found = try {
+            repo.use { GitService.VersionResolver(it).resolve(wanted) }
+        } catch (e: StoppedException) {
+            // **A turn that ran out of time still answered** — with the rows it could resolve and the
+            // count of the ones it could not, which is more use than a refusal.
+            emptyMap()
+        } catch (e: Throwable) {
+            emptyMap()
+        }
+        val lost = wanted.size - found.size
+        if (lost > 0) {
+            notes += if (found.isEmpty()) {
+                "$lost saved version(s) are no longer in this project's history, so they were " +
+                    "not answered"
+            } else {
+                "$lost saved version(s) are no longer in this project's history and were left out"
+            }
+        }
+        return found
     }
 
     /**
@@ -689,6 +886,16 @@ class SemanticSearch(
          * size, so the note can say which file and why.
          */
         const val MAX_CHARS = 400_000
+
+        /**
+         * How many commits back the history pass reads.
+         *
+         * **The same bound the text-mode history uses** ([AgentTools.VERSIONS_CONSIDERED]), so
+         * `search {history}` means one thing in both modes: the newest forty saves of anything, not
+         * "everything that ever happened". A thousand-save file is a thousand trees to open, and a
+         * person asking what a file used to say means the recent answers.
+         */
+        const val VERSIONS_PER_PATH = AgentTools.VERSIONS_CONSIDERED
 
         /** Folder levels below the project that the walk will follow. A tree, not a graph. */
         const val WALK_DEPTH = 24

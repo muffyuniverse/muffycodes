@@ -534,6 +534,42 @@ class AppViewModel @JvmOverloads constructor(
         // thing. The call is posted instead, so it happens once everything above and below has been
         // built.
         main.post { openOnboarding() }
+        // **The housekeeping, after the screen is up.** A prune moves a ref and a pull replaces the
+        // history; both strand objects that nothing has ever deleted, because `gc` is proportional to
+        // the whole repository and has no place inside a save. It runs here — app start, daemon
+        // thread, only for a project that said something is waiting — and it is posted rather than
+        // called so that nothing above it waits for a `gc`.
+        main.post { housekeeping() }
+    }
+
+    /**
+     * Runs [Maintenance] in the background, for every project that asked for it.
+     *
+     * **Guarded by the same "is an agent on" answer the runner uses**, because a collection holding a
+     * repository for a minute would stall the next commit an agent makes. A skipped project keeps its
+     * marker, so the next start tries again — which is the same rule the pass itself follows when a
+     * lock is taken.
+     */
+    private fun housekeeping() {
+        val ws = workspace ?: return
+        Thread({
+            try {
+                val sessions = AgentSessions(ws.accountDir).read()
+                val done = Maintenance.run(
+                    ws = ws,
+                    busy = { project ->
+                        sessions.any { it.project == project && it.running }
+                    },
+                )
+                // **Only what did something refreshes the screen.** A start where nothing was
+                // waiting is the normal case; a project whose sweep removed rows has just changed
+                // what a search can answer, so the screens are asked again. The log row is written by
+                // the pass itself, per project, so nothing is lost by not repeating it here.
+                if (done.any { it.rows > 0 }) main.post { refresh() }
+            } catch (e: Throwable) {
+                // Housekeeping that could not run leaves its markers for the next start.
+            }
+        }, "maintenance").apply { isDaemon = true }.start()
     }
 
     /**

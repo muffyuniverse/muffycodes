@@ -410,17 +410,22 @@ class SearchTest {
     }
 
     @Test
-    fun `semantic history is refused, because versions are not indexed`() {
-        // **Half an answer under a wider name is worse than a refusal.** `history` says "and every
-        // saved version too"; the index holds only the current text, so accepting the flag would
-        // answer a narrower question while looking like the wider one.
+    fun `semantic history is answered by the engine rather than refused here`() {
+        // **It used to be a refusal, and the refusal was true.** The index held only the current text
+        // of each file, so `history` would have answered a narrower question under a wider name. The
+        // index holds saved versions now, keyed by their content, so the flag reaches the engine — and
+        // what this tool owes is that it does not stop it on the way.
+        //
+        // The engine's own behaviour is `SemanticSearchTest`'s: this test's job is the boundary, and
+        // the boundary is that a tool set with no engine still refuses with the reason that names the
+        // setting, rather than quietly dropping the flag.
         val answer = tools().run(
             call("""{"query":"milk","mode":"semantic","history":true}"""),
         )
 
         assertTrue("it is a refusal: $answer", answer.startsWith("1\n"))
-        assertTrue("naming what is missing: $answer", answer.contains("indexed"))
-        assertTrue("and the mode that can: $answer", answer.contains("regex"))
+        assertTrue("and it names the missing setting: $answer", answer.contains("Embedding model"))
+        assertFalse("and never says versions are unindexed: $answer", answer.contains("not indexed"))
     }
 
     @Test

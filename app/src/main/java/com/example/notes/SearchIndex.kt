@@ -286,13 +286,14 @@ class SearchIndex private constructor(
      * index" and "this file is not in the index *and here is why*" are different answers to a person
      * wondering why their search misses.
      */
-    fun note(path: String, mtime: Long, state: Int, error: String? = null) {
+    fun note(path: String, mtime: Long, state: Int, error: String? = null, size: Long = -1L) {
         db.insertWithOnConflict(
             "files",
             null,
             ContentValues().apply {
                 put("path", path)
                 put("mtime", mtime)
+                put("size", size)
                 put("state", state)
                 if (error == null) putNull("error") else put("error", error)
             },
@@ -307,9 +308,27 @@ class SearchIndex private constructor(
      * date, so the next pass has to try again rather than compare times and skip it. A failed file
      * that was never retried is a file that stays missing with no way to notice.
      */
-    fun indexedAt(path: String): Long? =
-        db.rawQuery("SELECT mtime FROM files WHERE path = ? AND state = 0", arrayOf(path)).use { c ->
-            if (c.moveToFirst()) c.getLong(0) else null
+    fun indexedAt(path: String): Long? = seen(path)?.first
+
+    /**
+     * What this index last **indexed** [path] at, as `(mtime, size)`, or null.
+     *
+     * **Two numbers, because one of them can lie.** A writer that preserves the modification time —
+     * a restore, `cp -p`, two saves inside one filesystem tick — leaves an edited file looking
+     * untouched, and the index would go on answering about text the project no longer has. The size
+     * is a second opinion that costs one column and no extra read: the directory entry the walk
+     * already has carries it.
+     *
+     * **Null for a file that failed**, deliberately: a file whose last attempt failed is not up to
+     * date, so the next pass has to try again rather than compare times and skip it. A failed file
+     * that was never retried is a file that stays missing with no way to notice.
+     */
+    fun seen(path: String): Pair<Long, Long>? =
+        db.rawQuery(
+            "SELECT mtime, size FROM files WHERE path = ? AND state = 0",
+            arrayOf(path),
+        ).use { c ->
+            if (c.moveToFirst()) c.getLong(0) to c.getLong(1) else null
         }
 
     /** How many files the walk met and could not index, with the first reason it gave. */
@@ -323,6 +342,71 @@ class SearchIndex private constructor(
     /** How many files this index holds text for. */
     fun files(): Int = db.rawQuery("SELECT COUNT(*) FROM files", null).use { c ->
         if (c.moveToFirst()) c.getInt(0) else 0
+    }
+
+    // ---- versions ----------------------------------------------------------
+    //
+    // **A version row is keyed by the blob, not by the commit that saved it.** The commit is the wrong
+    // key twice over: `HistoryPrune` rebuilds every surviving commit with a new id on every save that
+    // prunes, and a force-pushed remote rewrites local commits with no prune to hook at all — so a
+    // commit-keyed row dangles in bulk and repeatedly. A blob is the content, which is what an index
+    // is about and what does not move. The commit is resolved at read time instead ([commitsFor]),
+    // because "when" is the one thing worth not storing.
+
+    /**
+     * Every `(path, blob)` pair this index holds a version of.
+     *
+     * Asked by the walk so it can skip text it already has: reading a blob to chunk it costs a tree
+     * walk, and knowing the pair up front turns that into a `SELECT`.
+     */
+    fun versions(): Set<Pair<String, String>> {
+        val out = mutableSetOf<Pair<String, String>>()
+        db.rawQuery(
+            "SELECT DISTINCT path, version FROM chunks WHERE version != ''",
+            null,
+        ).use { c ->
+            while (c.moveToNext()) out += c.getString(0) to c.getString(1)
+        }
+        return out
+    }
+
+    /**
+     * Drops version rows whose blob is no longer reachable, and any vector nothing points at.
+     *
+     * **The current file is never touched.** [reachable] is built from the trees the history still
+     * reaches, and a prune or a reset says nothing about the working tree — a person's newest work is
+     * not in a commit yet and must not be swept because of one.
+     *
+     * Returns how many rows and how many vectors went, so a maintenance pass can say what it did
+     * rather than "done".
+     */
+    fun sweep(reachable: Set<String>): Pair<Int, Int> {
+        val before = vectors()
+        var rows = 0
+        db.beginTransaction()
+        try {
+            // **In Kotlin rather than one `NOT IN (…)`**, because a history of a thousand commits is a
+            // thousand bind parameters and SQLite's own limit is 999 — a limit that would silently
+            // truncate the list and sweep live rows.
+            val dead = mutableListOf<Pair<String, String>>()
+            db.rawQuery(
+                "SELECT DISTINCT path, version FROM chunks WHERE version != ''",
+                null,
+            ).use { c ->
+                while (c.moveToNext()) {
+                    val pair = c.getString(0) to c.getString(1)
+                    if (pair.second !in reachable) dead += pair
+                }
+            }
+            for ((path, blob) in dead) {
+                rows += db.delete("chunks", "path = ? AND version = ?", arrayOf(path, blob))
+            }
+            db.execSQL("DELETE FROM vectors WHERE hash NOT IN (SELECT hash FROM chunks)")
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        return rows to (before - vectors())
     }
 
     /** Forgets one file at one version, and any vector no longer referenced. */
@@ -477,6 +561,10 @@ class SearchIndex private constructor(
                 CREATE TABLE IF NOT EXISTS files(
                   path   TEXT PRIMARY KEY,
                   mtime  INTEGER NOT NULL,
+                  -- **A second opinion on "unchanged".** `mtime` alone says an edited file is
+                  -- untouched when the writer preserved the timestamp; the size is already in the
+                  -- directory entry, so the check costs nothing and closes the common half of that.
+                  size   INTEGER NOT NULL DEFAULT -1,
                   state  INTEGER NOT NULL,
                   error  TEXT
                 )

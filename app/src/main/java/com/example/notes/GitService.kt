@@ -124,6 +124,25 @@ object GitService {
      * The repository starts with one empty commit so that it has a history to
      * browse even before anything is written.
      */
+    /**
+     * Opens the repository in [dir] **without creating anything**, or null.
+     *
+     * The read-only half of [initOrOpen], for a caller that must not change the project it is looking
+     * at — the index walk above all: an index pass that initialised a repository would give a project
+     * with no history a history, and commit whatever it found while looking.
+     */
+    fun openExisting(dir: File): Repository? {
+        if (!isRepository(dir)) return null
+        return try {
+            FileRepositoryBuilder()
+                .setGitDir(File(dir, ".git"))
+                .setWorkTree(dir)
+                .build()
+        } catch (e: Throwable) {
+            null
+        }
+    }
+
     fun initOrOpen(dir: File, author: GitAuthor): Repository {
         dir.mkdirs()
         val gitDir = File(dir, ".git")
@@ -955,6 +974,146 @@ object GitService {
         } finally {
             walk.close()
         }
+    }
+
+    /**
+     * **What each commit in the history changed, newest first — one walk for the whole history.**
+     *
+     * ## Why this exists rather than [versionsOf] per file
+     *
+     * [versionsOf] runs `git log -- <path>`, so asking about thirty paths is thirty walks of the
+     * history. The index needs every path's versions at once, and this answers that in one pass: each
+     * commit is diffed against its parent, and the diff *is* the set of `(path, blob)` pairs that
+     * commit introduced. It is the same work git does to show a commit, done once for all of them.
+     *
+     * ## The pairs, not the commits
+     *
+     * The caller is the vector index, and the index is keyed by **content**: the same text saved twice
+     * is one blob and one set of vectors. So what this yields is the blob id, which is what makes a
+     * version survive a prune ([HistoryPrune] rewrites every commit and no blob), and what makes two
+     * identical saves cost one embedding rather than two.
+     *
+     * A blob id names content, not a place: the same text can appear at two paths, and this reports
+     * both, because the *path* is what a search answer has to say.
+     *
+     * ## Bounds
+     *
+     * [limit] is commits, not files, and the newest [limit] are the ones a person is likely to mean.
+     * [deadline] is checked once per commit — a diff of one commit is not interruptible, but the walk
+     * between them is, and that is where a long history spends its time.
+     */
+    fun walkChanges(
+        repo: Repository,
+        limit: Int = READ_ALL,
+        deadline: Deadline = Deadline.none(),
+        onCommit: (CommitInfo, List<Change>) -> Unit,
+    ) {
+        val head = repo.resolve("HEAD") ?: return
+        RevWalk(repo).use { walk ->
+            walk.markStart(walk.parseCommit(head))
+            var seen = 0
+            for (commit in walk) {
+                if (seen >= limit) return
+                deadline.check("history")
+                seen++
+                // **The root commit is diffed against nothing**, so every file it holds is a change.
+                // `EmptyTreeIterator` is that nothing, and it is the same trick `unsentPaths` uses.
+                val older: AbstractTreeIterator = if (commit.parentCount == 0) {
+                    EmptyTreeIterator()
+                } else {
+                    treeOf(repo, commit.getParent(0).id) ?: EmptyTreeIterator()
+                }
+                val newer = treeOf(repo, commit.id) ?: continue
+                val changes = mutableListOf<Change>()
+                try {
+                    DiffFormatter(DISCARD).use { diff ->
+                        diff.setRepository(repo)
+                        for (entry in diff.scan(older, newer)) {
+                            // **A deletion has no blob**, so it is not a change to index — and saying
+                            // so here is what keeps the caller from having to ask. "This file was not
+                            // there" is a fact about a tree, and the history screen reads trees.
+                            if (entry.changeType == DiffEntry.ChangeType.DELETE) continue
+                            val path = entry.newPath
+                            if (path.isEmpty()) continue
+                            // `oldId` is the all-zero id for an addition, which is exactly right:
+                            // the caller filters by [Change.blob].
+                            changes += Change(path, entry.newId.name)
+                        }
+                    }
+                } catch (e: Throwable) {
+                    // **One unreadable commit does not end the walk.** A repository mid-write, or an
+                    // object a collection took, leaves this commit with nothing to report; the rest of
+                    // the history is still worth reading.
+                    continue
+                }
+                onCommit(toInfo(commit), changes)
+            }
+        }
+    }
+
+    /**
+     * **Blob ids resolved back to the commits that produced them — one pass for many pairs.**
+     *
+     * The index is keyed by content ([GitService.Change.blob]) because a commit id does not survive a
+     * prune or a force-pushed remote. But an answer a person or a model reads has to name a *save* —
+     * "which version do I read?" — and that is a commit. So the resolution happens here, at read time,
+     * and never gets stored: a cached commit id would be the very thing that goes stale.
+     *
+     * ## Why one object for many pairs
+     *
+     * A search answers up to thirty rows, so resolving each one separately would walk the history
+     * thirty times. [GitService.walkChanges] already yields `(path, blob)` per commit, newest first, so
+     * one walk resolves the whole answer — and stops as soon as every pair is accounted for, which for
+     * recent work is the first handful of commits.
+     *
+     * ## What "the commit for a blob" means
+     *
+     * **The newest commit that put this content at this path.** Newest, because a person asking about
+     * a version means the most recent time they saved it; the pair, because content addressing does not
+     * know about names — the same text can live at two paths, and the answer has to say which.
+     */
+    class VersionResolver(
+        private val repo: Repository,
+        private val deadline: Deadline = Deadline.none(),
+    ) {
+        /**
+         * Every pair that some commit reaches, mapped to the newest such commit's id.
+         *
+         * Pairs no commit reaches are simply absent — the caller drops their rows and says so, because
+         * a row that outlives its commits is a search hit that cannot be read.
+         */
+        fun resolve(pairs: Collection<Pair<String, String>>): Map<Pair<String, String>, String> {
+            val wanted = pairs.toSet()
+            val out = mutableMapOf<Pair<String, String>, String>()
+            if (wanted.isEmpty()) return out
+            try {
+                walkChanges(repo, deadline = deadline) { commit, changes ->
+                    // **Every pair accounted for is the end of the walk**, which for recent work is
+                    // the first few commits rather than the whole history.
+                    if (out.size >= wanted.size) return@walkChanges
+                    for (change in changes) {
+                        if (!change.real) continue
+                        val pair = change.path to change.blob
+                        if (pair in wanted && pair !in out) out[pair] = commit.id
+                    }
+                }
+            } catch (e: StoppedException) {
+                // **What was resolved is still true.** A history too long to finish in the turn
+                // answers for the versions it reached and lets the rest be dropped by the caller's own
+                // rule, rather than failing the search outright.
+                throw e
+            } catch (e: Throwable) {
+                // An unreadable repository resolves nothing; the caller's note says the rows were
+                // dropped, which is honest about the outcome.
+            }
+            return out
+        }
+    }
+
+    /** One file as one commit left it: where it is, and **what it was** — the blob's id. */
+    data class Change(val path: String, val blob: String) {
+        /** True when the diff carried a real object id rather than the zero id of a deletion. */
+        val real: Boolean get() = blob.isNotEmpty() && blob.trim('0').isNotEmpty()
     }
 
     /**

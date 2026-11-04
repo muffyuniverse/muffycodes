@@ -149,6 +149,13 @@ class IndexQueueTest {
             "and it says what did it: ${asked.single().second}",
             "remote" in asked.single().second,
         )
+        // **And the housekeeping is asked for too.** A reset strands this phone's old commits, and
+        // no prune sees it — nothing shortened the history — so the reset itself is the only place
+        // that can notice. Left unwritten, those objects are never collected.
+        assertTrue(
+            "the reset says it stranded commits",
+            Maintenance.waiting(ws.projectDir("shopping")),
+        )
     }
 
     // ---- 3: many asks, one pass -------------------------------------------

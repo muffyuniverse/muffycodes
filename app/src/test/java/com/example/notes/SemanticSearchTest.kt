@@ -129,6 +129,121 @@ class SemanticSearchTest {
         assertTrue("raising depth reaches it: $deep", deep.contains("shopping/a/b/deep.txt"))
     }
 
+    // ---- 1b. saved versions ------------------------------------------------
+
+    /**
+     * A project with a repository, and a file saved twice with different text.
+     *
+     * **The commits are real**, written through [ProjectGit] the way the app writes them, because the
+     * history pass reads git rather than a fixture: a fake repository would test the fake.
+     */
+    private fun savedTwice(): String {
+        val git = ProjectGit(ws, { null }, { GitAuthor("Test", "test@example.com") })
+        write("shopping", "milk.txt", "the milk went sour\n")
+        git.init("shopping").getOrThrow()
+        git.commit("shopping", "first").let { requireNotNull(it) }
+        write("shopping", "milk.txt", "the milk was poured away\n")
+        return requireNotNull(git.commit("shopping", "second"))
+    }
+
+    @Test
+    fun `history finds text that was deleted, and names the save it was in`() {
+        val second = savedTwice()
+        write("shopping", "milk.txt", "nothing about dairy here\n")
+
+        val answer = engine()
+            .answer(null, "sour", paths = 10, depth = 8, Deadline.none(), history = true)
+            .getOrThrow()
+
+        // **`path@sha7`, which is what `read {revision}` takes** — so the row is usable as the next
+        // call with no translation, and the model never has to be told which kind of id it holds.
+        assertTrue("the deleted line, with its save: $answer", answer.contains("shopping/milk.txt@${second.take(7)}"))
+        assertTrue("and the text: $answer", answer.contains("sour"))
+    }
+
+    @Test
+    fun `without history, a deleted line is not answered`() {
+        savedTwice()
+        write("shopping", "milk.txt", "nothing about dairy here\n")
+
+        val answer = engine().answer(null, "sour", paths = 10, depth = 8, Deadline.none()).getOrThrow()
+
+        assertFalse("the old text is not in the answer: $answer", answer.contains("sour"))
+    }
+
+    @Test
+    fun `a version that changes one line does not re-embed the whole file`() {
+        // **The measurement the whole design rests on.** A file's chunks are keyed by their text, so
+        // a version differing in one paragraph shares every other vector with the version before it —
+        // which is why "index the history" is not "index the project forty times over".
+        val git = ProjectGit(ws, { null }, { GitAuthor("Test", "test@example.com") })
+        val body = (1..40).joinToString("\n") { "line $it about milk" }
+        write("shopping", "long.txt", body + "\n")
+        git.init("shopping").getOrThrow()
+        git.commit("shopping", "first")
+        write("shopping", "long.txt", body + "\nthe last line mentions bread\n")
+        git.commit("shopping", "second")
+
+        val fake = Fake()
+        engine(fake).index(Deadline.none()).getOrThrow()
+
+        // **The second version's cost is the paragraph that changed**, plus the unchanged tail of the
+        // overlapping chunk — nowhere near the whole file twice.
+        val chunksForLong = fake.texts.count { it.contains("about milk") }
+        assertTrue(
+            "the shared lines were embedded once, not once per version: $chunksForLong requests",
+            chunksForLong < 40,
+        )
+    }
+
+    @Test
+    fun `a second pass over an unchanged history embeds nothing`() {
+        savedTwice()
+        val first = engine().index(Deadline.none()).getOrThrow()
+        assertTrue("the versions were indexed: ${first.said()}", first.versions > 0)
+
+        val fake = Fake()
+        val again = engine(fake).index(Deadline.none()).getOrThrow()
+
+        assertEquals("nothing new: ${again.said()}", 0, again.versions)
+        assertTrue("and no request was made: ${fake.texts}", fake.texts.isEmpty())
+    }
+
+    @Test
+    fun `a project with no repository has no versions and is still searchable`() {
+        write("shopping", "milk.txt", "the milk went sour\n")
+
+        val caught = engine().index(Deadline.none()).getOrThrow()
+
+        assertEquals("no versions: ${caught.said()}", 0, caught.versions)
+        assertTrue("and the file is indexed: ${caught.said()}", caught.done == 1)
+    }
+
+    @Test
+    fun `a row no commit reaches is left out and counted, rather than answered with a dead id`() {
+        // **The prune case, built by hand**: the index holds a version of text that never existed in
+        // this repository, which is what a rewritten history leaves behind.
+        savedTwice()
+        val index = SearchIndex.open(ws.projectDir("shopping"))
+        try {
+            index.declare("test/embed", 4).getOrThrow()
+            val fake = Fake()
+            val ghost = "the milk went sour\n"
+            index.put("milk.txt", "0".repeat(40), Chunker.split(ghost)) { texts ->
+                Result.success(texts.map { text -> fake.embed(listOf(text), "test/embed", 4).getOrThrow().first() })
+            }.getOrThrow()
+        } finally {
+            index.close()
+        }
+
+        val answer = engine()
+            .answer(null, "sour", paths = 10, depth = 8, Deadline.none(), history = true)
+            .getOrThrow()
+
+        assertFalse("no dead id is handed out: $answer", answer.contains("milk.txt@0000000"))
+        assertTrue("and the loss is said out loud: $answer", answer.contains("no longer in this project"))
+    }
+
     // ---- 2. keeping the index current --------------------------------------
 
     @Test

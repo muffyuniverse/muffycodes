@@ -323,12 +323,22 @@ class ProjectGit(
         }
     }
 
-    /** Applies the project's history length, when one is set. */
+    /**
+     * Applies the project's history length, when one is set.
+     *
+     * **What a prune leaves behind is a marker, not a collection.** It moves a ref, so the dropped
+     * commits and their trees are unreachable but still on disk; deleting them is `git gc`, which is
+     * proportional to the whole repository and has no place inside a save. [Maintenance] collects at
+     * app start, where a person is not waiting, and only for a project that said something is
+     * waiting — which is this.
+     */
     private fun prune(repo: Repository) {
         val keep = keepProvider()
         if (keep <= 0) return
         try {
-            HistoryPrune.prune(repo, keep)
+            if (HistoryPrune.prune(repo, keep) > 0) {
+                Maintenance.mark(repo.workTree ?: return, "the history was shortened")
+            }
         } catch (e: Throwable) {
             // A history that could not be shortened is still a working history.
         }
@@ -347,7 +357,13 @@ class ProjectGit(
         // the search guard it would be indexed when somebody next searched, which is to say the one
         // search that most needs to be fast pays for the whole diff. Asked for here instead, and only
         // when it worked: a failed reset changed nothing worth indexing.
-        if (result.success) index(project, "the remote replaced the files")
+        if (result.success) {
+            index(project, "the remote replaced the files")
+            // **A reset strands commits too, and no prune sees it.** A force-pushed or rebased remote
+            // makes this phone's old commits unreachable; nothing shortened the history, so the only
+            // place that can notice is here, where the reset happened.
+            Maintenance.mark(repoDir(project), "the remote replaced the history")
+        }
         return result
     }
 

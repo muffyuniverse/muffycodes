@@ -558,14 +558,15 @@ class AgentTools(
                     "ends with the folder that was searched. It needs an embedding model chosen in " +
                     "Settings; with none chosen it is refused and names the setting. There is no " +
                     "text-search fallback, because an answer nobody asked for reads like the one " +
-                    "they did. `mode` without `query` is refused, and `history` is not indexed, so " +
-                    "`history` with `semantic` is refused rather than half-answered. " +
+                    "they did. `mode` without `query` is refused. " +
                     "\n\n" +
                     "**`history: true` also searches every saved version** of this project's files " +
                     "and answers `path@sha7` — which **`read` takes directly**, so a hit is usable " +
-                    "as the next call with no translation, and `restore` takes the id. Only this " +
-                    "project's files have versions reachable from here; the answer says when other " +
-                    "projects in scope were left out. " +
+                    "as the next call with no translation, and `restore` takes the id. It works in " +
+                    "both modes: in `regex` mode the versions are read from git, and in `semantic` " +
+                    "mode they come from the same index as the current text. Only this project's " +
+                    "files have versions reachable from here; the answer says when other projects " +
+                    "in scope were left out. " +
                     "\n\n" +
                     "**`paths`** is how many paths to answer with: 10 by default when a `query` " +
                     "filters, 100 (the most) when nothing does, because a listing is read whole. " +
@@ -1221,19 +1222,13 @@ class AgentTools(
         //    that answered across projects would be reading vectors from a space it cannot score.
         // 2. **A `scope` that names another project is refused by name.** Answering "nothing matches"
         //    about a folder it never looked in is the silent no-op this app treats as a defect.
-        // 3. **`history` is not indexed yet.** Only current text is, so accepting the flag would
-        //    answer a narrower question under a wider name.
+        // 3. **`history` is answered from the index**, which now holds saved versions as well as the
+        //    current text — keyed by content, so the pass after a save costs the paragraph that
+        //    changed rather than the file.
         if (mode == "semantic") {
             // **`mode` without `query` is already refused above**, so this is the one place the
             // pattern is known to exist.
             val asked = query ?: return refusal("`mode: \"semantic\"` needs a `query` to search for.")
-            if (history) {
-                return refusal(
-                    "`history` is not indexed — only the current text of each file is. Use " +
-                        "`mode: \"regex\"` with `history: true` to search every saved version, or " +
-                        "leave `history` out to search what the files say now.",
-                )
-            }
             // **A folder in the account, not `projectNames()`.** That asks which folders are
             // repositories, and a folder that has never been committed to is still a place this index
             // does not hold — refusing it is right, and missing it because it has no `.git` would
@@ -1253,7 +1248,7 @@ class AgentTools(
             val engine = semantic ?: return refusal(SemanticSearch.NO_MODEL)
             // **`Deadline` is not caught here**, so a search that outlasts the wait reports the
             // tool's own sentence with the limit it passed, the same as every other command.
-            return engine.answer(scope, asked.pattern, most, depth, deadline).fold(
+            return engine.answer(scope, asked.pattern, most, depth, deadline, history).fold(
                 onSuccess = { success(it) },
                 onFailure = { refusal(it.message ?: "the search could not be answered") },
             )
