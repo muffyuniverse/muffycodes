@@ -262,42 +262,6 @@ object Drawing {
     }
 
     /**
-     * How the picture is shown: how far in, and how far along.
-     *
-     * **One value, and every mapping goes through it.** A zoom and a pan are two numbers that must
-     * agree — the point under a person's fingers has to stay under their fingers while they pinch —
-     * and two separate states would let them drift apart on the frame after a gesture.
-     *
-     * **[zoom] of 1 is one picture pixel per screen pixel.** Below it the whole picture is visible and
-     * a mark is coarse; above it a person can put a correction on a single letter of a screenshot,
-     * which is the case this exists for.
-     */
-    data class View(val zoom: Float = 1f, val panX: Float = 0f, val panY: Float = 0f) {
-
-        /** A screen point, as a point on the picture. */
-        fun toPicture(x: Float, y: Float): Point = Point((x - panX) / zoom, (y - panY) / zoom)
-
-        /** A picture point, as a point on the screen. */
-        fun toScreen(point: Point): Point = Point(point.x * zoom + panX, point.y * zoom + panY)
-
-        /**
-         * Pinched by [factor] about the screen point ([x], [y]).
-         *
-         * **The focal point is what makes a pinch feel like a pinch**: whatever was under the fingers
-         * stays under them, so the picture grows *around* the place being examined rather than around
-         * its own corner. The algebra is the whole of it — the picture point under the fingers is
-         * fixed, so the pan that keeps it there is `p - p·zoom'`.
-         */
-        fun zoomedBy(factor: Float, x: Float, y: Float): View {
-            val next = (zoom * factor).coerceIn(MIN_ZOOM, MAX_ZOOM)
-            // Nothing moved: at a limit the pan must not creep, or a pinch that hits the ceiling
-            // would slide the picture sideways while the person thinks they are only zooming.
-            if (next == zoom) return this
-            val under = toPicture(x, y)
-            return View(next, x - under.x * next, y - under.y * next)
-        }
-
-        /**
      * **What one finger does, as a value rather than a branch buried in the gesture handler.**
      *
      * The operator's rule, twice stated: "when any draw tool is selected you can only use it — no
@@ -335,7 +299,43 @@ object Drawing {
      */
     fun twoFingers(tool: Tool?): Boolean = tool == null
 
-    /** Dragged by a finger, in screen pixels. */
+    /**
+     * How the picture is shown: how far in, and how far along.
+     *
+     * **One value, and every mapping goes through it.** A zoom and a pan are two numbers that must
+     * agree — the point under a person's fingers has to stay under their fingers while they pinch —
+     * and two separate states would let them drift apart on the frame after a gesture.
+     *
+     * **[zoom] of 1 is one picture pixel per screen pixel.** Below it the whole picture is visible and
+     * a mark is coarse; above it a person can put a correction on a single letter of a screenshot,
+     * which is the case this exists for.
+     */
+    data class View(val zoom: Float = 1f, val panX: Float = 0f, val panY: Float = 0f) {
+
+        /** A screen point, as a point on the picture. */
+        fun toPicture(x: Float, y: Float): Point = Point((x - panX) / zoom, (y - panY) / zoom)
+
+        /** A picture point, as a point on the screen. */
+        fun toScreen(point: Point): Point = Point(point.x * zoom + panX, point.y * zoom + panY)
+
+        /**
+         * Pinched by [factor] about the screen point ([x], [y]).
+         *
+         * **The focal point is what makes a pinch feel like a pinch**: whatever was under the fingers
+         * stays under them, so the picture grows *around* the place being examined rather than around
+         * its own corner. The algebra is the whole of it — the picture point under the fingers is
+         * fixed, so the pan that keeps it there is `p - p·zoom'`.
+         */
+        fun zoomedBy(factor: Float, x: Float, y: Float): View {
+            val next = (zoom * factor).coerceIn(MIN_ZOOM, MAX_ZOOM)
+            // Nothing moved: at a limit the pan must not creep, or a pinch that hits the ceiling
+            // would slide the picture sideways while the person thinks they are only zooming.
+            if (next == zoom) return this
+            val under = toPicture(x, y)
+            return View(next, x - under.x * next, y - under.y * next)
+        }
+
+        /** Dragged by a finger, in screen pixels. */
         fun pannedBy(dx: Float, dy: Float): View = copy(panX = panX + dx, panY = panY + dy)
 
         /**
@@ -631,18 +631,18 @@ fun DrawingSurface(
                             val at = currentView.toPicture(down.position.x, down.position.y)
                             // **The rule is `oneFinger`'s**, so this handler and a test cannot
                             // disagree about what a finger does.
-                            when (Drawing.oneFinger(chosen)) {
-                                Drawing.OneFinger.PAN -> panning = true
-                                Drawing.OneFinger.ERASE -> {
+                            when (oneFinger(chosen)) {
+                                OneFinger.PAN -> panning = true
+                                OneFinger.ERASE -> {
                                     erasing = true
                                     Drawing.hit(liveStrokes, at, 8f / currentView.zoom)?.let(onErase)
                                 }
-                                Drawing.OneFinger.DRAW -> {
+                                OneFinger.DRAW -> {
                                     drawing = true
                                     current = listOf(at)
                                 }
                             }
-                        } else if (Drawing.oneFinger(chosen) == Drawing.OneFinger.PAN) {
+                        } else if (oneFinger(chosen) == OneFinger.PAN) {
                             // **A gesture that began with two fingers, in the look mode**, is a
                             // pinch; if it loses one it keeps panning rather than becoming a stroke.
                             panning = true
@@ -672,7 +672,7 @@ fun DrawingSurface(
                                 // The stroke is still dropped, because the person changed what they
                                 // were doing and a mark left half-made is not one they meant. What
                                 // does not happen is the zoom.
-                                if (!Drawing.twoFingers(chosen)) {
+                                if (!twoFingers(chosen)) {
                                     if (drawing || erasing) {
                                         current = emptyList()
                                         drawing = false
