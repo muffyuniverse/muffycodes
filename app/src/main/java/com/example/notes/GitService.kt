@@ -1164,9 +1164,10 @@ object GitService {
      */
     fun bytesOf(repo: Repository, blob: String): ByteArray? = try {
         val id = ObjectId.fromString(blob)
-        repo.open(id).use { obj ->
-            if (obj.type == org.eclipse.jgit.lib.Constants.OBJ_BLOB) obj.bytes else null
-        }
+        // **No `use`: a loader is not `Closeable`.** It holds no handle of its own — the repository
+        // owns the reader — so the only thing to close is the repository, and that is the caller's.
+        val obj = repo.open(id)
+        if (obj.type == org.eclipse.jgit.lib.Constants.OBJ_BLOB) obj.bytes else null
     } catch (e: Throwable) {
         null
     }
