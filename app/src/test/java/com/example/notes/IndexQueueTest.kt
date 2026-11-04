@@ -111,10 +111,14 @@ class IndexQueueTest {
         }
         source.commit("far", "first")
 
-        val clone = git.cloneInto("shopping", File(origin, "far").toURI().toString())
+        // **A folder with no repository, which is the whole point of the case.** `setUp` initialises
+        // `shopping`, and cloning into a project that already has a `.git` is refused — so this asks
+        // for a project of its own rather than deleting the fixture's repository underneath it.
+        val clone = git.cloneInto("arriving", File(origin, "far").toURI().toString())
 
         assertTrue("the clone worked: ${clone.message}", clone.success)
         assertEquals("one ask", 1, asked.size)
+        assertEquals("for the project that arrived", "arriving", asked.single().first)
         assertTrue(
             "and it says the project arrived: ${asked.single().second}",
             "added" in asked.single().second,
@@ -138,10 +142,12 @@ class IndexQueueTest {
             it.init("far")
         }
         source.commit("far", "first")
-        git.cloneInto("shopping", File(origin, "far").toURI().toString())
+        // **Its own project, for the same reason as the clone test**: `shopping` already has a
+        // repository, and a clone into one is refused, so the pull would have nothing to pull.
+        git.cloneInto("arriving", File(origin, "far").toURI().toString())
         asked.clear()
 
-        val replaced = git.replaceWithRemote("shopping")
+        val replaced = git.replaceWithRemote("arriving")
 
         assertTrue("the pull worked: ${replaced.message}", replaced.success)
         assertEquals("one ask", 1, asked.size)
@@ -154,12 +160,12 @@ class IndexQueueTest {
         // that can notice. Left unwritten, those objects are never collected.
         assertTrue(
             "the reset says it stranded commits",
-            Maintenance.waiting(ws.projectDir("shopping")),
+            Maintenance.waiting(ws.projectDir("arriving")),
         )
         // **And the marker is cleared here**, because the queue's own pass would otherwise run a
         // collection inside a test's temp folder after the test ended — the same reason `clear()` is
         // called in `tearDown`.
-        File(File(ws.projectDir("shopping"), AgentLog.DIR), Maintenance.MARKER).delete()
+        File(File(ws.projectDir("arriving"), AgentLog.DIR), Maintenance.MARKER).delete()
     }
 
     // ---- 3: many asks, one pass -------------------------------------------
@@ -242,13 +248,15 @@ class IndexQueueTest {
         // no credentials get. Asking must not start a thread, and must not throw.
         IndexQueue.clear()
 
+        // **`passes` is the process's count**, and other tests in this class have already run
+        // passes — so "nothing happened" is this ask not adding one, not the counter reading zero.
+        val before = IndexQueue.passes
         IndexQueue.want("shopping", "a change was saved")
-        // **No pass will ever come, so this waits for the queue to be idle rather than for one.**
-        // A deadline of its own, because `settle` is about a pass that is expected.
+        // No pass will ever come, so this waits for the queue to be idle rather than for one.
         val until = System.currentTimeMillis() + 1_000
         while (System.currentTimeMillis() < until && !IndexQueue.idle) Thread.sleep(10)
 
-        assertEquals("no pass", 0, IndexQueue.passes)
+        assertEquals("no pass", before, IndexQueue.passes)
     }
 
     // ---- harness ----------------------------------------------------------
