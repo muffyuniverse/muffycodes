@@ -13,7 +13,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
@@ -31,7 +30,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -83,7 +81,6 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -94,8 +91,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import kotlin.math.atan2
-import kotlin.math.hypot
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -267,7 +262,7 @@ fun EditorScreen(
      */
     var tool by remember(session) { mutableStateOf<Drawing.Tool?>(Drawing.Tool.PEN) }
     var inkColour by remember(session) { mutableStateOf(Drawing.COLOURS.first()) }
-    var inkWidth by remember(session) { mutableStateOf(Drawing.WIDTHS[1]) }
+    var inkWidth by remember(session) { mutableStateOf(Drawing.DEFAULT_WIDTH) }
     /**
      * The picture as it was when this screen opened, decoded once.
      *
@@ -1258,6 +1253,9 @@ private fun DrawMode(
                 // **Tapping the chosen tool takes it off.** That is the only way into "no tool", which
                 // is the look-and-move mode: one finger pans, two pinch. A separate "Hand" tool would
                 // be a fifth thing to learn, and the operator asked for the toggle instead.
+                //
+                // **Five things share this row** — four tools, the colour, the size field — so the
+                // glyphs are 20dp and the chips are as narrow as the padding allows.
                 FilterChip(
                     selected = tool == one,
                     onClick = {
@@ -1271,53 +1269,36 @@ private fun DrawMode(
                 )
             }
             Spacer(Modifier.width(4.dp))
-            // **One colour button, not four swatches.** It shows the colour in force and opens the
-            // wheel; four swatches were four decisions in the way of the drawing.
+            // **One colour button, not four swatches**, and the button shows the colour in force:
+            // the operator's "make color picker an icon that shows selected color".
             ColourButton(colour = colour, onColour = { Trace.tap("draw colour", Drawing.hex(it)); onColour(it) })
-            Spacer(Modifier.weight(1f))
-            TextButton(onClick = { Trace.tap("draw undo"); onUndo() }, enabled = strokes.isNotEmpty()) {
-                Text("Undo")
-            }
-        }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                "Size",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            // **Typed, and the offered widths are still there as buttons.** The operator: "add stroke
-            // size field where you can type size number." A field alone makes a person guess the range;
-            // the buttons say the common ones and the field is for anything else.
-            for (thick in Drawing.WIDTHS) {
-                TextButton(
-                    onClick = { Trace.tap("draw width"); onWidth(thick) },
-                    colors = if (thick == width) ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.primary,
-                    ) else ButtonDefaults.textButtonColors(),
-                ) { Text(thick.toInt().toString()) }
-            }
+            Spacer(Modifier.width(4.dp))
+            // **The size is a field and nothing else.** The operator: "px size is just a number field
+            // that is typed from the keyboard (1-64 px)." The three width buttons that used to sit
+            // beside it were three numbers picked by me, in the way of the one number the person
+            // wanted to type; the range is said in the field's own label instead.
             OutlinedTextField(
                 value = typed,
                 onValueChange = { text ->
-                    // **Only digits and one separator**, so the field cannot hold something it would
-                    // then have to refuse. Anything else that arrives (a paste) is filtered the same
-                    // way rather than being rejected after the fact.
-                    val clean = text.filter { it.isDigit() || it == '.' || it == ',' }.take(5)
+                    // **Only digits**, so the field cannot hold something it would then have to
+                    // refuse. The range is enforced by [Drawing.widthOf], which clamps — a person
+                    // typing 900 meant "as wide as it goes", and a field that silently ignored them
+                    // would be the app typing on their behalf.
+                    val clean = text.filter { it.isDigit() }.take(2)
                     typed = clean
                     Drawing.widthOf(clean)?.let { onWidth(it) }
                 },
                 label = { Text("px", style = MaterialTheme.typography.labelSmall) },
+                placeholder = { Text("1-64", style = MaterialTheme.typography.labelSmall) },
                 singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                modifier = Modifier.width(78.dp).height(52.dp),
-                textStyle = MaterialTheme.typography.labelSmall,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.width(72.dp).height(48.dp),
+                textStyle = MaterialTheme.typography.labelMedium,
             )
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = { Trace.tap("draw undo"); onUndo() }, enabled = strokes.isNotEmpty()) {
+                Text("Undo")
+            }
         }
         DrawingSurface(
             picture = shown,
@@ -1681,6 +1662,9 @@ private fun ToolGlyph(tool: Drawing.Tool) {
 @Composable
 private fun ColourButton(colour: Int, onColour: (Int) -> Unit) {
     var open by remember { mutableStateOf(false) }
+    // **The button *is* the swatch**: a filled circle in the colour in force, ringed so white is
+    // visible against a white toolbar. That is the operator's "make color picker an icon that shows
+    // selected color" — the colour is not described, it is shown.
     Box(
         modifier = Modifier
             .size(36.dp)
@@ -1689,97 +1673,86 @@ private fun ColourButton(colour: Int, onColour: (Int) -> Unit) {
             .border(2.dp, MaterialTheme.colorScheme.outline, CircleShape)
             .clickable { open = true }
             .semantics { contentDescription = "Colour" },
-    ) {
-        if (open) {
-            ColourWheel(current = colour, onPick = { open = false; onColour(it) }, onDismiss = { open = false })
-        }
+    )
+    if (open) {
+        ColourWindow(
+            current = colour,
+            onPick = { open = false; onColour(it) },
+            onDismiss = { open = false },
+        )
     }
 }
 
 /**
- * **A colour wheel, drawn, because there is no premade one to use.**
+ * **The swatch window: every colour, then Select.**
  *
- * The operator asked: "make it a color wheel popup window - look if there is a premade material for
- * that." There is not. Compose Material 3 has no colour picker at all — `MaterialColors` is a palette of
- * *roles* (primary, surface) chosen by a design system, not a wheel a person points at — and Android has
- * no `ColorPicker` widget in the SDK either. The nearest thing in the framework is an OEM addition that
- * is not on every phone.
+ * The operator: "when you press it a color selection window pops up with several basic color swatches
+ * with select button (black, white + basic colors)." So there are two states and one button — a tap
+ * *picks* a swatch (the ring moves), and **Select** closes the window with it. Picking and closing on
+ * one tap would make a mis-tap a drawing decision with no way to see it first; this way the chosen
+ * swatch is visible, named, before anything changes.
  *
- * So the wheel is drawn the way [LinkedGlyph] is: a hue ring plus a light-to-dark band, and a hit test
- * that reads the finger's angle and radius. Which is honest about the cost — about forty lines — and
- * means the app carries no dependency for one control.
+ * **It is a `Dialog` and not a `Popup`**, because a `Popup` is dismissed by a tap anywhere outside it,
+ * which is the same gesture as "changed my mind" and would make the Select button decorative.
  */
 @Composable
-private fun ColourWheel(current: Int, onPick: (Int) -> Unit, onDismiss: () -> Unit) {
-    val diameter = 220.dp
-    val ring = 34.dp
-    // **The value the person is choosing at**, which the band under the ring changes. Saturation is
-    // always full on the ring: a washed-out ring is a ring where the colours are hard to tell apart,
-    // and the band is where "lighter or darker" is answered.
-    var value by remember { mutableFloatStateOf(1f) }
-    Column(
-        modifier = Modifier
-            .width(260.dp)
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(12.dp))
-            .padding(12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Canvas(
-            modifier = Modifier
-                .size(diameter)
-                .pointerInput(Unit) {
-                    detectTapGestures { at ->
-                        val centre = Offset(size.width / 2f, size.height / 2f)
-                        val dx = at.x - centre.x
-                        val dy = at.y - centre.y
-                        val radius = hypot(dx, dy)
-                        val outer = size.width / 2f
-                        val inner = outer - ring.toPx()
-                        if (radius in inner..outer) {
-                            // **The angle is the hue**, with 0 pointing right and increasing clockwise —
-                            // the arrangement every wheel uses, so a person's hand already knows it.
-                            val degrees = ((Math.toDegrees(atan2(dy, dx).toDouble()) + 360) % 360).toFloat()
-                            onPick(Drawing.hsv(degrees, 1f, value))
+private fun ColourWindow(current: Int, onPick: (Int) -> Unit, onDismiss: () -> Unit) {
+    var chosen by remember { mutableStateOf(current) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Colour") },
+        text = {
+            Column {
+                // **Two rows of five, which is the grid these ten fall into naturally**: dark and
+                // light at the far left, then the six hues, then brown and grey. A single row of ten
+                // 36dp swatches would be 400dp wide, wider than the dialog.
+                for (row in Drawing.COLOURS.chunked(5)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for (one in row) {
+                            Swatch(
+                                colour = one,
+                                selected = chosen == one,
+                                onClick = { chosen = one },
+                            )
                         }
                     }
-                },
-        ) {
-            // **Drawn as a ring of short arcs rather than a sweep**, because a sweep needs a
-            // `SweepGradient` brush whose stops are the colours and one `drawCircle` with a hole — and
-            // a hole is done with `Stroke`, which is what this is. 180 segments is a tenth of a degree
-            // each, well under what an eye can see at this size.
-            val outer = size.width / 2f
-            val inner = outer - ring.toPx()
-            val mid = (outer + inner) / 2f
-            val segments = 180
-            for (i in 0 until segments) {
-                val from = i * 360f / segments
-                drawArc(
-                    color = Color(Drawing.hsv(from, 1f, value)),
-                    startAngle = from,
-                    sweepAngle = 360f / segments + 0.6f,
-                    useCenter = false,
-                    topLeft = Offset(outer - mid, outer - mid),
-                    size = androidx.compose.ui.geometry.Size(mid * 2f, mid * 2f),
-                    style = Stroke(width = ring.toPx()),
+                    Spacer(Modifier.height(8.dp))
+                }
+                Text(
+                    // **Named, because ten colours are not self-describing.** The operator asked for
+                    // black, white and "basic colors"; the name is how a person checks they picked the
+                    // one they meant before pressing Select.
+                    Drawing.nameOf(chosen),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-        }
-        Spacer(Modifier.height(8.dp))
-        // **A band for lighter and darker**, because a hue with fixed value is half a colour.
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Light", style = MaterialTheme.typography.labelSmall)
-            androidx.compose.material3.Slider(
-                value = value,
-                onValueChange = { value = it },
-                valueRange = 0.2f..1f,
-                modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+        },
+        confirmButton = {
+            TextButton(onClick = { onPick(chosen) }) { Text("Select") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
+}
+
+@Composable
+private fun Swatch(colour: Int, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            // **The selection is a ring outside the colour, not a tick inside it.** A tick drawn in a
+            // fixed colour disappears on white and on black — which are two of the ten.
+            .border(
+                width = if (selected) 3.dp else 1.dp,
+                color = if (selected) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.outlineVariant,
+                shape = CircleShape,
             )
-            Text("Dark", style = MaterialTheme.typography.labelSmall)
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = onDismiss) { Text("Close") }
-            TextButton(onClick = { onPick(current) }) { Text("Keep") }
-        }
-    }
+            .padding(4.dp)
+            .clip(CircleShape)
+            .background(Color(colour))
+            .clickable(onClick = onClick),
+    )
 }

@@ -144,7 +144,7 @@ class DrawingTest {
         // The row shows four swatches and three dots; two identical entries would be a control that
         // does nothing when pressed, which reads as a broken button.
         assertEquals("four colours", Drawing.COLOURS.size, Drawing.COLOURS.distinct().size)
-        assertEquals("three widths", Drawing.WIDTHS.size, Drawing.WIDTHS.distinct().size)
+        assertEquals("the starting width is one of them", 10f, Drawing.DEFAULT_WIDTH, 0.001f)
     }
 
     // ---- zoom and pan, which is the part that can be asked here --------------------------------
@@ -249,39 +249,38 @@ class DrawingTest {
             Drawing.widthOf(typed) ?: error("\"$typed\" should have been a number")
 
         assertEquals("a number is a number", 12f, width("12"), 0.001f)
-        assertEquals("a comma is a decimal point in half of Europe", 7.5f, width("7,5"), 0.001f)
         assertEquals("spaces are not content", 4f, width("  4  "), 0.001f)
+        assertEquals("both ends of the range", 1f, width("1"), 0.001f)
+        assertEquals("and its top", 64f, width("64"), 0.001f)
         assertEquals("too wide is as wide as allowed", Drawing.MAX_WIDTH, width("900"), 0.001f)
         assertEquals("too thin is a hairline", 1f, width("0"), 0.001f)
         assertEquals("a negative is a hairline too", 1f, width("-5"), 0.001f)
 
+        // **Whole pixels only**, because the field is "a number field that is typed from the keyboard
+        // (1-64 px)". A half-pixel stroke is a number nobody asked for.
+        assertNull("a fraction is not a pixel", Drawing.widthOf("4.5"))
+        assertNull("nor is a comma decimal", Drawing.widthOf("7,5"))
         assertNull("a word is not a number", Drawing.widthOf("abc"))
         assertNull("nor is an empty field", Drawing.widthOf(""))
         assertNull("nor is NaN", Drawing.widthOf("NaN"))
     }
 
     @Test
-    fun `the wheel's hue arithmetic gives the colour the angle points at`() {
-        // **The one piece of new arithmetic in the wheel**, so it is the one piece that can be wrong
-        // quietly: a wrong hue map is a wheel whose red is where a person expects orange, and nothing
-        // crashes to say so.
-        //
-        // Hue is degrees, 0 to the right and increasing clockwise — the arrangement every platform's
-        // wheel uses, and the one the hit test reads.
-        assertEquals("0 is red", 0xFFFF0000.toInt(), Drawing.hsv(0f, 1f, 1f))
-        assertEquals("120 is green", 0xFF00FF00.toInt(), Drawing.hsv(120f, 1f, 1f))
-        assertEquals("240 is blue", 0xFF0000FF.toInt(), Drawing.hsv(240f, 1f, 1f))
-        assertEquals("360 wraps back to red", 0xFFFF0000.toInt(), Drawing.hsv(360f, 1f, 1f))
-        // **And the other side of zero**, because a wheel reports an angle and `atan2` gives negative
-        // radians for the upper half.
-        assertEquals("-120 is the same blue", 0xFF0000FF.toInt(), Drawing.hsv(-120f, 1f, 1f))
+    fun `every swatch has a name, and an unusual colour falls back to its hex`() {
+        // **Ten swatches, ten names, in the same order** — the window labels the chosen one, and a
+        // name that slipped out of step would label the wrong colour. The operator asked for "black,
+        // white + basic colors", and black and white are the first two because they are the first two
+        // anyone reaches for.
+        assertEquals("one name per swatch", Drawing.COLOURS.size, Drawing.COLOUR_NAMES.size)
+        assertEquals("no repeated swatch", Drawing.COLOURS.size, Drawing.COLOURS.distinct().size)
+        assertEquals("black first", "Black", Drawing.nameOf(Drawing.COLOURS.first()))
+        assertEquals("white second", "White", Drawing.nameOf(Drawing.COLOURS[1]))
+        assertEquals("black is black", 0xFF000000.toInt(), Drawing.COLOURS.first())
+        assertEquals("white is white", 0xFFFFFFFF.toInt(), Drawing.COLOURS[1])
 
-        // **The value and saturation axes**, which are what the light/dark band drives.
-        assertEquals("no value is black", 0xFF000000.toInt(), Drawing.hsv(0f, 1f, 0f))
-        assertEquals("no saturation is white", 0xFFFFFFFF.toInt(), Drawing.hsv(0f, 0f, 1f))
-        // **Every result is opaque**, because the strokes are baked into a PNG and a translucent one
-        // would be invisible over the picture's own colours.
-        assertEquals("and never translucent", 0xFF, Drawing.hsv(200f, 0.5f, 0.7f) ushr 24)
+        // **A colour that is not a swatch still has something to show**, and its hex is the honest
+        // answer — a saved drawing can hold any colour, and the label must not read "null".
+        assertEquals("off-palette falls back to hex", "#123456", Drawing.nameOf(0xFF123456.toInt()))
     }
 
     @Test

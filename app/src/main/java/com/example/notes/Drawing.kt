@@ -100,21 +100,42 @@ object Drawing {
 
     /** The colours a person may draw in. Red first: the commonest correction. */
     val COLOURS = listOf(
-        0xFFE53935.toInt(), // red
-        0xFF1E88E5.toInt(), // blue
-        0xFF43A047.toInt(), // green
         0xFF000000.toInt(), // black
+        0xFFFFFFFF.toInt(), // white
+        0xFFE53935.toInt(), // red
+        0xFFFB8C00.toInt(), // orange
+        0xFFFDD835.toInt(), // yellow
+        0xFF43A047.toInt(), // green
+        0xFF1E88E5.toInt(), // blue
+        0xFF8E24AA.toInt(), // purple
+        0xFF6D4C41.toInt(), // brown
+        0xFF757575.toInt(), // grey
     )
 
-    /** The widths offered, in picture pixels. */
-    val WIDTHS = listOf(4f, 10f, 24f)
+    /**
+     * **A name for each of [COLOURS]**, in the same order, because a swatch is a colour a person has to
+     * be told apart by — and eight of them at once is exactly where "the third one" stops working. The
+     * window says the name under the selected swatch.
+     */
+    val COLOUR_NAMES = listOf(
+        "Black", "White", "Red", "Orange", "Yellow", "Green", "Blue", "Purple", "Brown", "Grey",
+    )
 
     /**
-     * **The widest stroke a typed number may ask for**, in picture pixels.
+     * **The width a new drawing starts with**, in picture pixels.
+     *
+     * There used to be a list of three offered widths beside the field. The operator: "px size is just
+     * a number field that is typed from the keyboard (1-64 px)" — so the offer is gone and this is only
+     * what the field is pre-filled with, which is a middle of the range a thumb can see.
+     */
+    const val DEFAULT_WIDTH = 10f
+
+    /**
+     * **The widest stroke a typed number may ask for**, in picture pixels — the 64 of "1-64 px".
      *
      * A stroke is drawn as a rounded line; past about a fifth of the picture it stops being a line and
      * becomes a shape, and a person who typed 900 by mistake would fill the canvas with one drag. 64 is
-     * generous — wider than any of the offered [WIDTHS] — and still a line.
+     * generous — wider than any stroke a note needs — and still a line.
      */
     const val MAX_WIDTH = 64f
 
@@ -127,21 +148,26 @@ object Drawing {
      * difference: 900 says "as wide as you allow", "abc" says nothing.
      */
     fun widthOf(typed: String): Float? {
-        // **A comma is a decimal point in half of Europe**, and the keyboard offers one on the number
-        // pad in those locales. Replacing it is the whole of what this function does about input.
-        val clean = typed.trim().replace(',', '.')
-        val value = clean.toFloatOrNull() ?: return null
-        if (value != value) return null // NaN, which `toFloatOrNull` accepts
+        // **Whole pixels, because the field is whole pixels.** The operator: "px size is just a number
+        // field that is typed from the keyboard (1-64 px)". A stroke 4.5 pixels wide is a number
+        // nobody asked for and nothing can check.
+        val value = typed.trim().toIntOrNull() ?: return null
         return value.coerceIn(1f, MAX_WIDTH)
     }
 
     /**
-     * **A colour as `#RRGGBB`**, for the field beside the wheel.
+     * **A colour as `#RRGGBB`**, for the swatch window's label and the trace.
      *
      * The hex form rather than `Color.toString()`'s, because it is the one every other tool a person
      * uses prints — a designer's spec sheet and a browser's inspector both say `#E53935`.
      */
     fun hex(colour: Int): String = "#%06X".format(colour and 0xFFFFFF)
+
+    /** The name of [colour] if it is one of [COLOURS], and its hex if it is not. */
+    fun nameOf(colour: Int): String {
+        val at = COLOURS.indexOf(colour)
+        return if (at >= 0) COLOUR_NAMES[at] else hex(colour)
+    }
 
     /**
      * The strokes with the last one removed — **the whole of undo.**
@@ -261,33 +287,6 @@ object Drawing {
         return distance(at, Point(from.x + t * dx, from.y + t * dy))
     }
 
-    /**
-     * **HSV to the app's `Int` colour**, at a given saturation and value.
-     *
-     * Written out rather than using `android.graphics.Color.HSVToColor`, because that takes a
-     * `FloatArray` and returns a colour with alpha already applied — a round trip through a mutable
-     * array for arithmetic this short, in a function a test can ask directly.
-     *
-     * **Hue is degrees, 0 pointing right and increasing clockwise**, which is how every wheel on every
-     * platform is arranged; the wheel's hit test reads its angle that way, so a person's hand already
-     * knows where the colour they want is.
-     */
-    fun hsv(hue: Float, saturation: Float, value: Float): Int {
-        val h = ((hue % 360f) + 360f) % 360f / 60f
-        val c = value * saturation
-        val x = c * (1 - kotlin.math.abs(h % 2f - 1))
-        val m = value - c
-        val (r, g, b) = when (h.toInt()) {
-            0 -> Triple(c, x, 0f)
-            1 -> Triple(x, c, 0f)
-            2 -> Triple(0f, c, x)
-            3 -> Triple(0f, x, c)
-            4 -> Triple(x, 0f, c)
-            else -> Triple(c, 0f, x)
-        }
-        fun byte(f: Float) = ((f + m) * 255f).toInt().coerceIn(0, 255)
-        return (0xFF shl 24) or (byte(r) shl 16) or (byte(g) shl 8) or byte(b)
-    }
 
     /**
      * **What one finger does, as a value rather than a branch buried in the gesture handler.**
