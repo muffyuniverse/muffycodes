@@ -298,7 +298,7 @@ class AgentTest {
         // answers has no calls to check — and an invariant that holds because there is nothing
         // to hold it against is not a test.
         val door = ScriptedDoor(
-            Reply("", listOf(call("tree", """{"path":""}"""))),
+            Reply("", listOf(call("search", """{}"""))),
             Reply("Fix the README too?"),
             Reply("", listOf(call("read", """{"path":"README.md"}"""))),
             Reply("Fixed."),
@@ -386,7 +386,7 @@ class AgentTest {
         // The guard is on *unproductive* calls, not on turns: a turn that keeps working is
         // allowed to keep working, and a turn limit would stop every healthy session.
         val replies = List(AgentTools.IDLE_CALLS + 2) {
-            Reply("", listOf(call("tree", """{"path":""}""")))
+            Reply("", listOf(call("search", """{}""")))
         }
         val door = ScriptedDoor(*replies.toTypedArray())
 
@@ -618,7 +618,7 @@ class AgentTest {
         // what the turn is told about.
         val bg = Background.inline()
         val door = ScriptedDoor(
-            Reply("", listOf(Call("c1", "tree", """{"path":""}"""))),
+            Reply("", listOf(Call("c1", "search", """{}"""))),
             Reply("done"),
         )
         // **The clock is the test's, and it jumps after the deadline is made.** `Deadline` reads the
@@ -636,10 +636,10 @@ class AgentTest {
 
         slow.burst("go")
 
-        val got = gotRows().first { it.name == "tree" }.body
+        val got = gotRows().first { it.name == "search" }.body
         assertTrue("it says the command is still running: $got", "still running" in got)
         assertTrue("and names the limit it passed: $got", "after 1 s" in got)
-        assertTrue("and where the result will be: $got", "background_results/tree-c1.txt" in got)
+        assertTrue("and where the result will be: $got", "background_results/search-c1.txt" in got)
         assertTrue(
             "and that it arrives with other results, not alone: $got",
             "next turns with other call results" in got,
@@ -1105,18 +1105,20 @@ class AgentTest {
         }
     }
 
-    // ---- the agent's search: tree and read with grep -------------------------
+    // ---- the agent's search, and read with grep -----------------------------
 
     /** One call, answered the way the loop answers it. */
     private fun tool(name: String, args: String): String =
         tools().run(Call("c7", name, args))
 
     @Test
-    fun `tree with a name answers with the paths that match and nothing else`() {
+    fun `a scope that is a name suffix answers with the paths that match and nothing else`() {
+        // **This is `tree`'s `name` argument, now spelled as a pattern over the path** — the
+        // basename is part of the path, which is what let one key replace two.
         ws.write(File(ws.repoOf("shopping"), "README.md"), "the readme")
         ws.write(File(ws.repoOf("shopping"), "notes.md"), "notes")
 
-        val body = tool("tree", """{"path":"","name":"\\.md$"}""")
+        val body = tool("search", """{"scope":"\\.md$"}""")
 
         assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
         assertTrue("the readme is in the answer: $body", body.contains("README.md"))
@@ -1125,10 +1127,10 @@ class AgentTest {
     }
 
     @Test
-    fun `tree with grep answers with the line that matched, and where it is`() {
+    fun `a query answers with the line that matched, and where it is`() {
         ws.write(File(ws.repoOf("shopping"), "README.md"), "one line\ntwo litres\n")
 
-        val body = tool("tree", """{"path":"","content":"litres"}""")
+        val body = tool("search", """{"query":"litres"}""")
 
         assertTrue(
             "the file, the line number and the line: $body",
@@ -1320,17 +1322,18 @@ class AgentTest {
     // ---- one pattern, one meaning, in every command --------------------------
 
     @Test
-    fun `an anchored pattern finds the same line in tree and in read`() {
-        // **The bug this replaces.** `tree` tested the whole file before testing the lines, and `^`
-        // only matches at the start of what it is given — so a file whose *second* line was `milk`
-        // was skipped by a search and found by a read, with nothing in either answer to say why.
+    fun `an anchored pattern finds the same line in search and in read`() {
+        // **The bug this replaces.** The old search tested the whole file before testing the lines,
+        // and `^` only matches at the start of what it is given — so a file whose *second* line was
+        // `milk` was skipped by a search and found by a read, with nothing in either answer to say
+        // why.
         val file = File(ws.repoOf("shopping"), "list.txt")
         ws.write(file, "bread\nmilk\neggs\n")
 
-        val found = tool("tree", """{"path":"","content":"^milk$"}""")
+        val found = tool("search", """{"query":"^milk$"}""")
         val read = tool("read", """{"path":"list.txt","grep":"^milk$"}""")
 
-        // `tree` answers where it is; `read` answers where it is too, because `^milk$` matches a
+        // The search answers where it is; `read` answers where it is too, because `^milk$` matches a
         // whole line and a whole-line question is a question about a place.
         assertTrue("the search finds it: $found", found.contains("list.txt:2: milk"))
         assertEquals("and the read agrees", "0\n2: milk", read)
@@ -1366,13 +1369,14 @@ class AgentTest {
 
     @Test
     fun `a search can answer with a folder's name, and a content search never can`() {
-        // **A folder is a name, not a text.** `{"name":"agent"}` used to answer nothing, which reads
-        // as "there is no such folder". `grep` stays files-only: a folder would be in the result
-        // because something inside it matched, and that is a line nobody asked about.
+        // **A folder is a name, not a text.** `{"scope":"notes"}` used to answer nothing when the
+        // only key was a pattern on names, which reads as "there is no such folder". A `query` stays
+        // files-only: a folder would be in the result because something inside it matched, and that
+        // is a line nobody asked about.
         ws.write(File(ws.repoOf("shopping"), "notes/inner.txt"), "a needle here")
 
-        val named = tool("tree", """{"path":"","name":"^notes$"}""")
-        val grepped = tool("tree", """{"path":"","content":"needle"}""")
+        val named = tool("search", """{"scope":"notes/"}""")
+        val grepped = tool("search", """{"query":"needle"}""")
 
         assertTrue("the folder is named: $named", named.lines().any { it.trim() == "notes/" })
         assertTrue("and the hit is a file and a line: $grepped", grepped.contains("notes/inner.txt:1: a needle here"))
@@ -1413,29 +1417,30 @@ class AgentTest {
 
     @Test
     fun `another project's folder can be listed, and its paths come back named from the account`() {
-        // **The listing half of the read-only rule.** `tree ../groceries/` has to work, because
-        // otherwise the agent cannot discover what it may read — and `walk` was bounded at the
-        // *project*, so it would have answered "empty" for a folder it is allowed to read. An empty
-        // answer for a permitted read is worse than a refusal: it says the project holds nothing.
+        // **The listing half of the read-only rule.** Another project has to be listable, because
+        // otherwise the agent cannot discover what it may read — a walk bounded at the *project*
+        // answered "empty" for a folder it is allowed to read, and an empty answer for a permitted
+        // read is worse than a refusal: it says the project holds nothing.
         //
-        // **And the paths come back as `../groceries/…`**, which is the same spelling the agent used
-        // to get there. A bare `milk.txt` would name a file in *this* project to anyone reading the
-        // answer, which is the one thing it is not.
+        // **And the paths come back spelled from the account** — `groceries/milk.txt` — where the
+        // old `tree` answered `../groceries/milk.txt` because it was resolving the path the call
+        // wrote. A listing has no such path now: `scope` is a pattern, and the name of a file is the
+        // same name however a caller reached it.
         val other = File(ws.accountDir, "groceries").apply { mkdirs() }
         File(other, "milk.txt").writeText("two litres")
 
-        val listed = tool("tree", """{"path":"../groceries/"}""")
+        val listed = tool("search", """{"scope":"^groceries/"}""")
 
         assertTrue("it is a listing: $listed", listed.startsWith(AgentLog.SUCCESS))
-        assertTrue("and it has the file: $listed", listed.contains("../groceries/milk.txt"))
+        assertTrue("and it has the file: $listed", listed.contains("groceries/milk.txt"))
         // **Every path in the answer is spelled from the account.** The direct form of that: no line
         // of the listing is a bare path, which is what a path in *this* project looks like.
         val paths = listed.lines().drop(1).filter { it.contains("milk.txt") }
         assertTrue("the file appears: $listed", paths.isNotEmpty())
         for (line in paths) {
             assertTrue(
-                "spelled from the account, not from here: $line",
-                line.contains("../groceries/"),
+                "spelled from the account, not from this project: $line",
+                line.trim().startsWith("groceries/"),
             )
         }
     }
@@ -1476,8 +1481,8 @@ class AgentTest {
             return // a filesystem that cannot make one cannot be escaped through one either
         }
 
-        val listed = tool("tree", """{"path":""}""")
-        val found = tool("tree", """{"path":"","content":"needle"}""")
+        val listed = tool("search", """{"scope":"^shopping/"}""")
+        val found = tool("search", """{"query":"needle"}""")
 
         assertFalse("the link is not listed: $listed", listed.contains("escape"))
         assertFalse("and nothing behind it is read: $found", found.contains("needle"))
@@ -1490,7 +1495,9 @@ class AgentTest {
         // the same path by another name. A command that needs a file says so before it does anything.
         val before = File(ws.repoOf("shopping"), "milk.txt").readText()
 
-        for (name in listOf("write", "delete", "move", "restore", "history")) {
+        // **`search` is not in this list**, because it does not name a file: `scope` is a pattern
+        // over paths and an empty one means the account, which is a legitimate call.
+        for (name in listOf("write", "delete", "move", "restore")) {
             for (path in listOf("", ".")) {
                 val body = tool(name, """{"path":"$path"}""")
                 assertTrue(
@@ -1552,12 +1559,15 @@ class AgentTest {
     }
 
     @Test
-    fun `history with a pattern shows the line that matched, not the first line`() {
+    fun `a version search shows the line that matched, not the first line`() {
         val file = File(ws.repoOf("shopping"), "milk.txt")
         ws.write(file, "intro\ntwo litres of bread\noutro")
         git.commit("shopping", CommitMessage.SAVE)
 
-        val body = tool("history", """{"path":"milk.txt","grep":"bread"}""")
+        val body = tool(
+            "search",
+            """{"scope":"milk\\.txt$","query":"bread","history":true}""",
+        )
 
         assertTrue("the line that matched: $body", body.contains("two litres of bread"))
         assertFalse("and not the line above it: $body", body.contains("intro"))
@@ -1566,13 +1576,13 @@ class AgentTest {
     // ---- the edges of the commands a model writes by hand ---------------------
 
     @Test
-    fun `depth is read as a number and clamped, so a silly one still lists something`() {
+    fun `depth is read as a number and clamped, so a silly one still answers`() {
         // A model writes `"depth":"2"` and `"depth":99`. The first is a number it typed as text, and
         // the second is a request to walk the phone: the answer is a listing, not a refusal.
         ws.write(File(ws.repoOf("shopping"), "a/b/c/deep.txt"), "deep")
 
-        val text = tool("tree", """{"path":"","depth":"3"}""")
-        val silly = tool("tree", """{"path":"","depth":99}""")
+        val text = tool("search", """{"scope":"a/","depth":"3"}""")
+        val silly = tool("search", """{"scope":"a/","depth":99}""")
 
         assertTrue("a depth written as text is read: $text", text.contains("a/b/c/"))
         assertTrue("and a huge one is clamped rather than refused: $silly", silly.startsWith(AgentLog.SUCCESS))
@@ -1632,13 +1642,18 @@ class AgentTest {
     }
 
     @Test
-    fun `history of a file that has never been saved says so instead of refusing`() {
+    fun `a file with no saved versions is listed once and not blamed for it`() {
+        // **The merge changed what "no versions" looks like.** The old command answered "fresh.txt
+        // has no versions yet" because a version list was all it could answer. The merged command
+        // answers the file itself — it is in scope, so it is listed — and adds no `@sha` row
+        // because there is no save to name. That is truthful and needs no special sentence.
         ws.write(File(ws.repoOf("shopping"), "fresh.txt"), "not committed yet")
 
-        val body = tool("history", """{"path":"fresh.txt"}""")
+        val body = tool("search", """{"scope":"fresh\\.txt$","history":true}""")
 
         assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
-        assertTrue("and it says what is true: $body", body.contains("no versions yet"))
+        assertTrue("the file is there: $body", body.contains("fresh.txt"))
+        assertFalse("and no version is invented for it: $body", body.contains("fresh.txt@"))
     }
 
     @Test
@@ -2053,24 +2068,25 @@ class AgentTest {
         ws.write(file, "three litres")
         git.commit("shopping", CommitMessage.SAVE)
 
-        val body = tool("history", """{"path":"milk.txt"}""")
+        val body = tool("search", """{"scope":"milk\\.txt$","history":true,"paths":20}""")
 
         assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
         assertTrue("the newer save is recognisable: $body", body.contains("three litres"))
         assertTrue("and so is the older one: $body", body.contains("one litre and a lemon"))
-        // **One row per version, and a row is two columns.** The operator: "just hash and line that
-        // contains the grep." So the message and the timestamp are gone, and what is asserted is the
-        // shape a model actually parses: an id, then the text.
-        val rows = body.substringAfter('\n').lines().filter { it.isNotBlank() }
+        // **One row per version, and a row is a path@id and the line.** The operator: "just hash and
+        // line that contains the grep." So the message and the timestamp are gone, and what is
+        // asserted is the shape a model actually parses: `path@sha7`, then the text.
+        val rows = body.lines().filter { it.contains("milk.txt@") }
         assertEquals("three versions: the fixture's, then these two", 3, rows.size)
         for (row in rows) {
-            val id = row.substringBefore("  ")
-            assertEquals("a seven-character id", 7, id.length)
-            assertTrue("and only hex in it: $id", id.all { it.isDigit() || it in 'a'..'f' })
+            val id = Regex("""milk\.txt@([0-9a-f]{7})""").find(row)?.groupValues?.get(1)
+            assertEquals("a seven-character id in $row", 7, id?.length ?: 0)
             // **The fixture's version says "two litres"**, so "litre" is the word every row shares.
             assertTrue("the rest is the line itself: $row", row.contains("litre"))
             assertFalse("with no commit message column: $row", row.contains(CommitMessage.SAVE))
         }
+        // **And the file itself is listed first**, because `history` means "also", not "instead".
+        assertTrue("the current file is named too: $body", body.contains("shopping/milk.txt\n"))
     }
 
     @Test
@@ -2084,15 +2100,22 @@ class AgentTest {
             git.commit("shopping", "save $n")
         }
 
-        val body = tool("history", """{"path":"milk.txt"}""")
+        val body = tool("search", """{"scope":"milk\\.txt$","history":true}""")
 
         assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
-        assertTrue("it says it stopped: $body", body.contains("showing the newest 10 of 13"))
-        assertEquals("and ten rows follow", 11, body.substringAfter('\n').lines().count { it.isNotBlank() })
+        // **Ten is the default when `history` is on**, which is the operator's own number: "an
+        // optional key to set how many rows are shown (with default max of 10)". A listing with no
+        // `history` is a different case and is answered whole.
+        assertTrue("it says it stopped: $body", body.contains("stopped at 10 paths"))
+        assertEquals(
+            "and ten paths follow: the file, then nine of its thirteen saves",
+            10,
+            body.substringAfter('\n').lines().count { it.isNotBlank() && !it.startsWith("stopped") },
+        )
 
         // **`paths` raises it**, and the newest versions come first.
-        val all = tool("history", """{"path":"milk.txt","paths":13}""")
-        assertTrue("all thirteen, so no note about stopping: $all", !all.contains("showing the newest"))
+        val all = tool("search", """{"scope":"milk\\.txt$","history":true,"paths":14}""")
+        assertTrue("all fourteen, so no note about stopping: $all", !all.contains("stopped at"))
         assertTrue("and the newest is first: $all", all.indexOf("version 12") < all.indexOf("version 11"))
     }
 
@@ -2109,10 +2132,13 @@ class AgentTest {
             git.commit("shopping", "save $n")
         }
 
-        val body = tool("history", """{"path":"milk.txt","grep":"milk","paths":2}""")
+        val body = tool(
+            "search",
+            """{"scope":"milk\\.txt$","query":"milk","history":true,"paths":2}""",
+        )
 
         assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
-        assertTrue("three matched, two shown: $body", body.contains("showing the newest 2 of 3"))
+        assertTrue("two shown, and it says there was more: $body", body.contains("stopped at 2 paths"))
         // **Newest first, so the two kept are 6 and 4, and the one dropped is 2** — which is the
         // assertion that proves the cut happened at the right end.
         assertTrue("the newest match is there: $body", body.contains("milk 6"))
@@ -2128,7 +2154,10 @@ class AgentTest {
         ws.write(file, "two litres of bread")
         git.commit("shopping", "second")
 
-        val body = tool("history", """{"path":"milk.txt","grep":"bread"}""")
+        val body = tool(
+            "search",
+            """{"scope":"milk\\.txt$","query":"bread","history":true}""",
+        )
 
         assertTrue("the version whose text matched: $body", body.contains("bread"))
         assertFalse("and not the one whose text did not: $body", body.contains("of milk"))
@@ -2350,12 +2379,12 @@ class AgentTest {
         val body = tool("write", """{"path":"notes/plan.md","text":"first line"}""")
         assertTrue("created: $body", body.startsWith(AgentLog.SUCCESS))
 
-        val history = tool("history", """{"path":"notes/plan.md"}""")
+        val history = tool("search", """{"scope":"plan\\.md$","history":true}""")
 
         assertTrue("it has a version: $history", history.startsWith(AgentLog.SUCCESS))
-        assertFalse(
-            "and is not reported as having none: $history",
-            history.contains("has no versions yet"),
+        assertTrue(
+            "and the version is named by its id: $history",
+            Regex("""plan\.md@[0-9a-f]{7}""").containsMatchIn(history),
         )
         assertTrue("the version shows the line it held: $history", history.contains("first line"))
     }
@@ -2486,8 +2515,8 @@ class AgentTest {
     @Test
     fun `the newest task cannot be forgotten`() {
         log.told("task one")
-        (log.call("tree", "{}")).also { lastCall = it }
-        log.got("tree", "0\nnothing", answers = lastCall)
+        (log.call("search", "{}")).also { lastCall = it }
+        log.got("search", "0\nnothing", answers = lastCall)
         val task = log.told("task two")
 
         val answer = forget(task)
@@ -2500,8 +2529,8 @@ class AgentTest {
     @Test
     fun `a call and its result are forgotten together`() {
         log.told("a task")
-        val call = (log.call("tree", "{}")).also { lastCall = it }
-        val got = log.got("tree", "0\nnothing", answers = lastCall)
+        val call = (log.call("search", "{}")).also { lastCall = it }
+        val got = log.got("search", "0\nnothing", answers = lastCall)
 
         val onlyCall = forget(call)
         assertTrue("the call alone is refused: $onlyCall", onlyCall.startsWith(AgentLog.FAILURE))
@@ -2628,8 +2657,8 @@ class AgentTest {
         // model two turns where there was one, and the calls would look unprompted.
         log.told("do it")
         log.note("agent", "I will look first.")
-        (log.call("tree", """{"path":""}""")).also { lastCall = it }
-        log.got("tree", "0\nmilk.txt", answers = lastCall)
+        (log.call("search", """{}""")).also { lastCall = it }
+        log.got("search", "0\nmilk.txt", answers = lastCall)
 
         val messages = agent(ScriptedDoor()).messages(log.contextRows())
 
@@ -2646,9 +2675,9 @@ class AgentTest {
         // both results answer the *last* call, which would have passed a weaker test and made this
         // one - "a tool result is matched to its own call" - impossible to fail.
         val read = (log.call("read", """{"path":"milk.txt"}""")).also { lastCall = it }
-        val tree = (log.call("tree", """{"path":""}""")).also { lastCall = it }
+        val second = (log.call("search", """{}""")).also { lastCall = it }
         log.got("read", "0\nfile contents", answers = read)
-        log.got("tree", "0\nmilk.txt", answers = tree)
+        log.got("search", "0\nmilk.txt", answers = second)
 
         val messages = agent(ScriptedDoor()).messages(log.contextRows())
         val toolMessages = messages.filter { it.role == "tool" }
@@ -2672,7 +2701,7 @@ class AgentTest {
     @Test
     fun `the record holds the operator, the calls, their answers and the ending`() {
         val door = ScriptedDoor(
-            Reply("", listOf(call("tree", """{"path":""}"""))),
+            Reply("", listOf(call("search", """{}"""))),
             Reply("there is one file"),
         )
 
@@ -2696,7 +2725,7 @@ class AgentTest {
         // The property the whole "an id that appears once" query rests on, asserted from the
         // other side: a turn that ended cannot leave a call unanswered.
         val door = ScriptedDoor(
-            Reply("", listOf(call("tree", """{"path":""}"""))),
+            Reply("", listOf(call("search", """{}"""))),
             Reply("", listOf(call("read", """{"path":"milk.txt"}"""))),
             Reply("done"),
         )
@@ -2844,7 +2873,7 @@ class AgentTest {
                 if (asked.size == 1) brief.writeText("Answer in three sentences.")
                 return Result.success(
                     if (asked.size == 1) {
-                        Reply("", listOf(Call("c1", "tree", """{"path":""}""")))
+                        Reply("", listOf(Call("c1", "search", """{}""")))
                     } else {
                         Reply("done")
                     },
@@ -2953,7 +2982,7 @@ class AgentTest {
                 // The person types while this request is out.
                 if (asked.size == 1) speak = true
                 return Result.success(
-                    Reply("", listOf(Call("c${asked.size}", "tree", """{"path":""}"""))),
+                    Reply("", listOf(Call("c${asked.size}", "search", """{}"""))),
                 )
             }
         }
@@ -3002,7 +3031,7 @@ class AgentTest {
         // stop — not as an interruption — and the session goes off.
         val door = object : Door {
             override fun turn(request: Request): Result<Reply> =
-                Result.success(Reply("", listOf(Call("c1", "tree", """{"path":""}"""))))
+                Result.success(Reply("", listOf(Call("c1", "search", """{}"""))))
         }
         val agent = Agent(
             account, "shopping", ws, git, log, door, model(),
@@ -3066,7 +3095,7 @@ class AgentTest {
         // is the turn where a re-read is most expensive.
         val limits = ContextBudget.Limits.of(triggerAsked = 1, hardAsked = 0, ceiling = 100_000)
         val door = ScriptedDoor(
-            Reply("", listOf(call("c1", "tree", """{"path":""}"""))),
+            Reply("", listOf(call("c1", "search", """{}"""))),
             Reply("", listOf(call("c2", "read", """{"path":"milk.txt"}"""))),
             Reply("done"),
         )
@@ -3429,9 +3458,9 @@ class AgentTest {
         // plain reply that ends it. Three replies would have left the second burst without a call,
         // which is the thing this test counts.
         val door = ScriptedDoor(
-            Reply("", listOf(call("tree", """{"path":""}"""))),
+            Reply("", listOf(call("search", """{}"""))),
             Reply("done"),
-            Reply("", listOf(call("tree", """{"path":"milk.txt"}"""))),
+            Reply("", listOf(call("search", """{"scope":"milk\\.txt$"}"""))),
             Reply("done again"),
         )
         val agent = agent(door)
@@ -3461,7 +3490,7 @@ class AgentTest {
         )
         assertTrue(
             "while the evidence still has all of it",
-            log.rows().any { it.kind == AgentLog.CALL && it.name == "tree" },
+            log.rows().any { it.kind == AgentLog.CALL && it.name == "search" },
         )
     }
 
@@ -3470,7 +3499,7 @@ class AgentTest {
         // What a reset can leave behind: the evidence answers a call the context no longer has.
         // A tool message the model cannot place is a request every endpoint refuses.
         log.told("do it")
-        log.bookkeeping(AgentLog.GOT, "tree", "0\nleft over from before the reset")
+        log.bookkeeping(AgentLog.GOT, "search", "0\nleft over from before the reset")
         log.note("agent", "Carrying on.")
 
         val messages = agent(ScriptedDoor()).messages(log.contextRows())
@@ -3612,7 +3641,7 @@ class AgentTest {
             // is a different test.
             Reply(
                 text = "",
-                calls = listOf(call("tree", "{}", "c1")),
+                calls = listOf(call("search", "{}", "c1")),
                 usage = JSONObject("""{"completion_tokens":900}"""),
             ),
             // **And a second reply that does speak, with its own numbers.** Without them this test

@@ -140,7 +140,11 @@ upload    {path}                    one project file into Downloads
 
 ---
 
-## Step 5 — one `search`, and `tree`/`history` fold into it
+## Step 5 — one `search`, and `tree`/`history` fold into it — **BUILT**
+
+**Built and pushed; CI is queued behind a GitHub Actions incident, so this is code-complete and not yet
+verified by a compiler.** What is below is the design as agreed; the three things the build added that the
+design did not foresee are listed at the end.
 
 **The operator's design, 2026-11-04**, reached over two rounds of pushing back and forth. It replaces three
 commands with one:
@@ -244,6 +248,18 @@ the 10× the old argument assumed.
    fallback** (the operator's call): a failure is `1` + a reason, a timeout is `Deadline`, an answer too big
    is filed to `agent/background_results/`. The one honest case is a model not chosen yet, and that is a
    refusal naming the setting.
+
+### What the build found that the design did not foresee
+
+1. **`spec()` marked every example key `required`.** That was harmless while every tool's example was its
+   only shape, and wrong here: `search` has five optional filters, and a schema saying `query` is required
+   forbids the listing — the mode the operator named. `spec` takes an optional `required` list now, and
+   `search` passes none, so `{}` is a legal call. A test pins it.
+2. **`paths` needed two defaults, not two meanings.** A pure listing is read whole (default 100), while a
+   `query` or `history` answers a handful (default 10 — the operator's own number). One key, one meaning.
+3. **The walk's "there is more" flag was wrong for a folder.** When the entry that filled the limit was a
+   *folder*, its contents were never visited and nothing recorded that they had been skipped, so a
+   truncated listing looked complete. `walkForSearch` now returns whether it stopped with work left.
 
 ### Why `search` keeps no regex fallback, restated
 

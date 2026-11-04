@@ -23,9 +23,9 @@ Full analysis in `/root/Downloads/PROPOSAL-tool-api-2026-11-04.md`. **All 17 wer
 | 23 | clone/move to Downloads as a choice | **PLANNED** step 4 · ⋮ gains "Copy to Downloads" |
 | 24 | search regex or text? if reranked why regex? | **PLANNED** step 5 · one `search` with `mode: regex|semantic`; **no regex fallback** — a failure is `1`+reason, a timeout is `Deadline` |
 | 25 | `paths` 10–100 instead of ≥1, default 10 | **SETTLED** · operator: "keep 100 max"; spec text will state 1 minimum. §2 |
-| 26 | `tree`: rename `name`/`grep` → `name`/`content` | **CLOSED** `effe08f` · then **superseded**: step 5 folds `tree` into `search`, where `scope` *is* the name filter |
-| 27 | why does `tree` have `from`/`to` | **CLOSED** `effe08f` · dropped; step 5 replaces the whole tool with `search {scope, depth}` |
-| 28 | `history` does not need `from`/`to` | **CLOSED** `effe08f` · dropped; step 5 deletes the command, `history` becomes a flag |
+| 26 | `tree`: rename `name`/`grep` → `name`/`content` | **CLOSED** `effe08f` · then **superseded**: `tree` is gone; `scope` as a path pattern *is* the name filter |
+| 27 | why does `tree` have `from`/`to` | **CLOSED** `effe08f` · dropped; `tree` itself replaced by `search {scope, depth}` |
+| 28 | `history` does not need `from`/`to` | **CLOSED** `effe08f` · dropped; the command is gone, `history` is a flag on `search` |
 | 29 | merge `create`+`edit` into `write` | **CLOSED** `b078981` · 21 tools where 22 were; count asserted |
 | 30 | remove `from`/`to` from commands | **CLOSED** `effe08f` · kept on `read`, `write`, `browse` — where the lines are real |
 | 31 | remove `at` | **CLOSED** `b078981` · guard test refuses the key |
@@ -34,7 +34,7 @@ Full analysis in `/root/Downloads/PROPOSAL-tool-api-2026-11-04.md`. **All 17 wer
 | 34 | `move` needs no `name` | **CLOSED** `effe08f` · `into` is the destination, name and all |
 | 35 | remove `from`/`to` **only if** regex can select lines | **CLOSED** `effe08f` · it is **our** per-line loop, not regex; `multi` lifts it. `from`/`to` kept where lines are real |
 | 36 | `fetch` up to 100 MB | **CLOSED** step 3 · `LIMIT_BYTES` is 100 MB; every sentence reads the constant |
-| 37 | split `downloads` into `download`/`upload` | **PLANNED** step 4 · three tools, `download` capped 100 MB |
+| 37 | split `downloads` into `download`/`upload` | **CLOSED** step 4 · three verbs: list, copy out (100 MB cap), copy in |
 | 38 | `archive`: `-u` flag + one path | **CLOSED** step 3 · `{path}` packs, `{path, unpack:true}` opens, output beside input, next free name |
 | 39 | prompt still tells about `ask`/`conclude` | **CLOSED** `989c502` · brief rewritten, test reads the live brief |
 

@@ -10,20 +10,24 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 
 /**
- * `search` — finding a fact by what a file says, across the whole account.
+ * `search` — **one question, six filters**, and the command that replaced `tree` and `history`.
  *
- * **The tool exists because the agent does not know where a fact lives.** `tree` answers about one
- * folder; `search` answers about a question. The operator's rule is what shapes it: *"all text files
- * are embedded and searched the same way with folders as search filter flags"* — so the difference
- * from `tree` is defaults and filters, not scope.
+ * The operator's shape: *"scope (path of folder/file which branch to search), query (optional
+ * filecontent filter), regex/semantic (type of search - when there is query), history (optional flag
+ * to also search historic file versions), depth (how deeply search the branch), rows (how many
+ * results to show)"*.
  *
- * Three things are worth testing and they are the three that break quietly:
+ * Four things are worth testing and they are the four that break quietly:
  *
  * 1. **It crosses projects**, because a search that silently stayed in one project would answer
  *    "nothing" about a question it never asked.
- * 2. **`in` is a prefix on the path**, so `wiki/` means the wiki of *every* project and
- *    `groceries/wiki/` means one — and neither is a "scope".
- * 3. **`paths` counts files, not matches**, because a file matching forty times is one thing to read.
+ * 2. **`scope` is a pattern over the path**, so one key covers a folder (`wiki/`), a project
+ *    (`^shopping/`), a file (`milk.txt`) and a name suffix (`\\.md$`). The last of those is what
+ *    removed `tree`'s separate `name` argument.
+ * 3. **No `query` is a listing, not an error.** `scope` plus `depth` is "what is here" — the same
+ *    walk with nothing filtered out. That is the objection the operator answered and the reason
+ *    `tree` could go.
+ * 4. **`paths` counts paths, not matches**, because a file matching forty times is one thing to read.
  */
 class SearchTest {
 
@@ -84,18 +88,17 @@ class SearchTest {
         assertTrue("found: $answer", answer.contains("system/muffycodes_data/wiki/retries.md"))
     }
 
-    // ---- `in` is a prefix, not a scope --------------------------------------
+    // ---- `scope` is a pattern over the path ---------------------------------
 
     @Test
-    fun `a folder filter with one segment means that folder in every project`() {
-        // **This is what "folders as filter flags" buys.** `wiki/` is not a mode called "wiki"; it is
-        // a prefix, so it matches the wiki of every project at once. The alternative — a scope per
-        // folder — is a schema the operator did not ask for.
+    fun `a scope with one segment means that folder in every project`() {
+        // **A pattern, not a list of prefixes.** `wiki/` is not a mode called "wiki"; it is a
+        // substring of the path, so it finds the wiki of every project at once.
         write("shopping", "wiki/milk.md", "milk is bought on Saturdays\n")
         write("work", "wiki/retries.md", "milk is not involved here\n")
         write("shopping", "notes.txt", "milk, twice\n")
 
-        val answer = tools().run(call("""{"query":"milk","in":["wiki/"]}"""))
+        val answer = tools().run(call("""{"query":"milk","scope":"wiki/"}"""))
 
         val said = answer.replace("\n", " | ")
         assertTrue("both wikis are searched: $said", answer.contains("shopping/wiki/milk.md"))
@@ -104,26 +107,53 @@ class SearchTest {
     }
 
     @Test
-    fun `a filter with the project in it means one project`() {
+    fun `a scope with the project in it means one project`() {
         write("shopping", "wiki/milk.md", "milk is bought on Saturdays\n")
         write("work", "wiki/retries.md", "milk is not involved here\n")
 
-        val answer = tools().run(call("""{"query":"milk","in":["shopping/wiki/"]}"""))
+        val answer = tools().run(call("""{"query":"milk","scope":"shopping/wiki/"}"""))
 
         assertTrue("the one asked for: $answer", answer.contains("shopping/wiki/milk.md"))
         assertFalse("and only that one: $answer", answer.contains("work/wiki/retries.md"))
     }
 
     @Test
-    fun `a filter that matches nothing says so about the filter`() {
-        // **The sentence has to name what was searched.** "nothing matches" without the filter reads
+    fun `a scope that matches nothing says so about the scope`() {
+        // **The sentence has to name what was searched.** "nothing matches" without the scope reads
         // as "the account has no such text", and the agent then stops looking everywhere.
         write("shopping", "notes.txt", "milk\n")
 
-        val answer = tools().run(call("""{"query":"milk","in":["nowhere/"]}"""))
+        val answer = tools().run(call("""{"query":"milk","scope":"nowhere/"}"""))
 
         assertTrue("it is not a failure: $answer", answer.startsWith("0\n"))
-        assertTrue("and names the folder: $answer", answer.contains("nowhere/"))
+        assertTrue("and names the scope: $answer", answer.contains("nowhere/"))
+    }
+
+    @Test
+    fun `a scope that is a name suffix replaces tree's name argument`() {
+        // **The reason `tree` could lose its `name` key.** The basename is part of the path, so a
+        // pattern that anchors at the end of the path is the same filter — and it works on the whole
+        // account rather than one folder, which is more than `tree` could do.
+        write("shopping", "milk.md", "# milk\n")
+        write("shopping", "milk.txt", "milk, twice\n")
+        write("work", "notes.md", "# other\n")
+
+        val answer = tools().run(call("""{"scope":"\\.md$"}"""))
+
+        assertTrue("the markdown is listed: $answer", answer.contains("shopping/milk.md"))
+        assertTrue("including the other project's: $answer", answer.contains("work/notes.md"))
+        assertFalse("and the text file is not: $answer", answer.contains("shopping/milk.txt"))
+    }
+
+    @Test
+    fun `a scope naming one file answers that file and its folder's siblings not at all`() {
+        write("shopping", "milk.txt", "milk\n")
+        write("shopping", "eggs.txt", "eggs\n")
+
+        val answer = tools().run(call("""{"scope":"milk\\.txt$"}"""))
+
+        assertTrue("the file asked for: $answer", answer.contains("shopping/milk.txt"))
+        assertFalse("and nothing beside it: $answer", answer.contains("eggs.txt"))
     }
 
     // ---- `paths` counts files ----------------------------------------------
@@ -167,6 +197,21 @@ class SearchTest {
     }
 
     @Test
+    fun `a listing cut off inside a folder still says it stopped`() {
+        // **The bug the first version had.** When the entry that filled the limit was a *folder*, its
+        // contents were never visited and nothing recorded that they had been skipped — so a
+        // truncated listing looked complete, which is the one thing this note exists to prevent.
+        // Two entries in `shopping/`, and the second is a folder with a file inside it.
+        write("shopping", "a.txt", "a\n")
+        write("shopping", "z/inner.txt", "inner\n")
+
+        val answer = tools().run(call("""{"scope":"^shopping/","paths":2}"""))
+
+        assertEquals("two entries", 2, answer.lines().count { it.contains("shopping/") })
+        assertTrue("and it says there was more: $answer", answer.contains("stopped at 2 paths"))
+    }
+
+    @Test
     fun `a walk that ends exactly at the limit does not promise more`() {
         // **"stopped at N" is only true when the walk stopped at N.** If the account holds exactly
         // `paths` matching files, there is nothing more, and promising a remainder sends the agent
@@ -179,10 +224,10 @@ class SearchTest {
         assertEquals("both are there", 2, answer.lines().count { it.contains("note") })
     }
 
-    // ---- history ------------------------------------------------------------
+    // ---- history: the same search, one axis wider ---------------------------
 
     @Test
-    fun `history finds a version whose text is no longer in the file`() {
+    fun `a version whose text is no longer in the file is still found`() {
         // **The operator's reason for wanting it**: *"I believe history search will be important."*
         // A line that was deleted is unreachable by any current-file search, and it is exactly what
         // a person asks for when they want to know why something used to be the way it was.
@@ -211,6 +256,30 @@ class SearchTest {
     }
 
     @Test
+    fun `history with no query lists a file's versions, which is what the old command did`() {
+        // **A version list is a listing too.** The merged command reaches it with `scope` naming one
+        // file and `history` set, and each row is `path@sha7` plus the line that tells the saves
+        // apart — so nothing the old command answered became unreachable.
+        val repo = File(ws.accountDir, "shopping")
+        val file = File(repo, "milk.txt")
+        file.writeText("one litre\n")
+        git.init("shopping").getOrThrow()
+        git.commit("shopping", "save 1")
+        file.writeText("three litres\n")
+        git.commit("shopping", "save 2")
+
+        val answer = tools().run(call("""{"scope":"milk\\.txt$","history":true}"""))
+
+        assertTrue("a version is named: $answer", answer.contains("milk.txt@"))
+        assertTrue("the newer text is there: $answer", answer.contains("three litres"))
+        assertTrue("and the older: $answer", answer.contains("one litre"))
+        // **One row per version, each with the seven-character id `read` takes.**
+        val ids = Regex("""milk\.txt@([0-9a-f]{7})""").findAll(answer).map { it.groupValues[1] }.toList()
+        assertTrue("at least two versions: $answer", ids.size >= 2)
+        assertTrue("all seven characters: $ids", ids.all { it.length == 7 })
+    }
+
+    @Test
     fun `a version hit can be read with the revision form read already takes`() {
         // **The whole value of `path@sha7` is that it is not a new syntax.** This asserts the join:
         // the sha a search answers with is the sha `read {revision}` accepts.
@@ -236,13 +305,128 @@ class SearchTest {
     // ---- what it refuses ----------------------------------------------------
 
     @Test
-    fun `a search with no query is refused, and points at tree`() {
-        // A search with no pattern is a listing, and `tree` is the tool for that. Answering with
-        // every file in the account would be the most expensive way to say nothing.
-        val answer = tools().run(call("""{"in":["wiki/"]}"""))
+    fun `a search with no query lists what is in scope`() {
+        // **The objection the operator answered.** I argued a listing was a degenerate search; they
+        // said *"why searching all is degenerative? you just provide scope and get all of current
+        // paths inside of it in return."* They were right: the filters are independent axes, and
+        // setting none is setting none — not the absence of a question.
+        write("shopping", "milk.txt", "milk\n")
+        write("shopping", "src/Main.kt", "fun main() {}\n")
+        write("work", "notes.txt", "other\n")
+
+        val answer = tools().run(call("""{"scope":"^shopping/"}"""))
+
+        assertTrue("it is an answer: $answer", answer.startsWith("0\n"))
+        assertTrue("the file is listed: $answer", answer.contains("shopping/milk.txt"))
+        assertTrue("and the nested one: $answer", answer.contains("shopping/src/Main.kt"))
+        // **A folder is listed with its slash**, which is how `tree` said "this is a folder" and
+        // what tells a model it may look inside rather than read it.
+        assertTrue("and the folder, with a slash: $answer", answer.contains("shopping/src/"))
+        assertFalse("and nothing outside the scope: $answer", answer.contains("work/notes.txt"))
+        // **No line numbers or excerpts in a listing** — there is no match to point at.
+        assertFalse("a listing is paths, not matches: $answer", answer.contains(":1:"))
+    }
+
+    @Test
+    fun `a listing is not cut at ten, because it is read whole`() {
+        // **`paths` means the same thing in both modes, but what a sensible number is depends on the
+        // question.** A search answers a handful; a listing is a folder's contents, and stopping it
+        // at ten would make `scope` useless for "what is here".
+        for (i in 1..15) write("shopping", "note$i.txt", "text $i\n")
+
+        val answer = tools().run(call("""{"scope":"^shopping/"}"""))
+
+        assertEquals("all fifteen", 15, answer.lines().count { it.contains("note") })
+        assertFalse("and no note about stopping: $answer", answer.contains("stopped at"))
+    }
+
+    @Test
+    fun `depth bounds the walk, and says so in the answer when it stops`() {
+        // **A listing has no `query` to narrow what the walk visits**, so `depth` is the only thing
+        // bounding it — which makes it a key that matters most in exactly the mode that has fewest.
+        write("shopping", "top.txt", "top\n")
+        write("shopping", "a/one.txt", "one\n")
+        write("shopping", "a/b/two.txt", "two\n")
+
+        val shallow = tools().run(call("""{"scope":"^shopping/","depth":2}"""))
+        assertTrue("one level down is there: $shallow", shallow.contains("shopping/a/one.txt"))
+        assertFalse("two levels is not: $shallow", shallow.contains("shopping/a/b/two.txt"))
+
+        val deep = tools().run(call("""{"scope":"^shopping/","depth":4}"""))
+        assertTrue("raising depth reaches it: $deep", deep.contains("shopping/a/b/two.txt"))
+    }
+
+    @Test
+    fun `paths bounds a listing when it is given`() {
+        for (i in 1..5) write("shopping", "note$i.txt", "text $i\n")
+
+        val answer = tools().run(call("""{"scope":"^shopping/","paths":2}"""))
+
+        assertEquals("two of them", 2, answer.lines().count { it.contains("note") })
+        assertTrue("and it says it stopped: $answer", answer.contains("stopped at 2 paths"))
+    }
+
+    // ---- `mode`: what the query means --------------------------------------
+
+    @Test
+    fun `mode semantic is refused, and says semantic search is not built`() {
+        // **No regex fallback.** The operator's rule: a failure is a reason, not a text search
+        // nobody asked for — because a hedge makes a model believe it searched by meaning when it
+        // searched by wording, and it then acts on an answer to a different question.
+        write("shopping", "milk.txt", "milk is bought on Saturdays\n")
+
+        val answer = tools().run(call("""{"query":"dairy","mode":"semantic"}"""))
 
         assertTrue("it is a refusal: $answer", answer.startsWith("1\n"))
-        assertTrue("and names the tool that does this: $answer", answer.contains("tree"))
+        assertTrue("and names what is missing: $answer", answer.contains("not built"))
+        assertTrue("and offers the mode that works: $answer", answer.contains("regex"))
+        assertFalse("and answers nothing at all: $answer", answer.contains("milk.txt"))
+    }
+
+    @Test
+    fun `mode without a query is refused, because there is nothing to interpret`() {
+        // **Silently ignoring it is the dangerous option**: a model that asked for semantic and got
+        // a listing would believe its question was answered.
+        val answer = tools().run(call("""{"scope":"shopping/","mode":"regex"}"""))
+
+        assertTrue("it is a refusal: $answer", answer.startsWith("1\n"))
+        assertTrue("and names the missing key: $answer", answer.contains("query"))
+    }
+
+    @Test
+    fun `a mode that is neither regex nor semantic is refused, naming both`() {
+        val answer = tools().run(call("""{"query":"milk","mode":"fuzzy"}"""))
+
+        assertTrue("it is a refusal: $answer", answer.startsWith("1\n"))
+        assertTrue("and names the value it cannot take: $answer", answer.contains("fuzzy"))
+        assertTrue("and both it can: $answer", answer.contains("regex") && answer.contains("semantic"))
+    }
+
+    @Test
+    fun `mode regex is accepted and is what the default already does`() {
+        write("shopping", "milk.txt", "milk is bought on Saturdays\n")
+
+        val said = tools().run(call("""{"query":"Saturdays","mode":"regex"}"""))
+        val implied = tools().run(call("""{"query":"Saturdays"}"""))
+
+        assertEquals("the same answer either way", implied, said)
+    }
+
+    @Test
+    fun `every key is optional, and the schema says so`() {
+        // **A schema that marked all six required would forbid the listing**, which is the mode the
+        // operator named — *"you just provide scope and get all of current paths inside of it in
+        // return"*. `spec()` defaults `required` to the example's keys, which is right for `read`
+        // and wrong here, so this command passes none and this test is what says so.
+        val spec = AgentTools.specs().first { it.name == "search" }
+        val required = spec.parameters.optJSONArray("required")
+
+        assertEquals("nothing is required", 0, required?.length() ?: -1)
+        // **And the call it allows is the one that must work.** `{}` lists the account; if that is
+        // not reachable, the default scope is unreachable too.
+        val bare = tools().run(call("""{}"""))
+        assertTrue("a bare call is a listing, not a refusal: ${bare.take(60)}", bare.startsWith("0\n"))
+        assertTrue("and it names the project: $bare", bare.contains("shopping/"))
     }
 
     @Test

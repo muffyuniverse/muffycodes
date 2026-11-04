@@ -736,7 +736,7 @@ class ScenariosTest {
         val door = ScriptedDoor(
             Reply(
                 text = "",
-                calls = listOf(Call("call-1", "tree", """{"path":""}""")),
+                calls = listOf(Call("call-1", "search", """{"path":""}""")),
                 usage = org.json.JSONObject(
                     """{"completion_tokens":412,"completion_tokens_details":{"reasoning_tokens":1880}}""",
                 ),

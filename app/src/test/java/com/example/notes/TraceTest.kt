@@ -90,7 +90,7 @@ class TraceTest {
         // carries a newline breaks all three, and it is the one part of a row the app does not
         // choose the shape of: a tool's output, a parser's message, an exception.
         val body = "0\nGitHub/\nGitHub/milk.txt"
-        Trace.note("tree", body)
+        Trace.note("search", body)
         settle()
 
         val line = firstLine()

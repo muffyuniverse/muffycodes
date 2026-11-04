@@ -101,7 +101,7 @@ class AgentChatScreenTest {
     @Test
     fun `the box draws what was asked, what the agent called, and what it answered`() {
         val door = ScriptedDoor(
-            Reply("", listOf(call("tree", """{"path":""}"""))),
+            Reply("", listOf(call("search", """{"path":""}"""))),
             Reply("There is one file."),
         )
 
@@ -130,7 +130,7 @@ class AgentChatScreenTest {
         // of two pages, and it opens on page 2, which is the words.
         assertEquals("one bubble for the exchange", 1, agent.size)
         val only = agent.single()
-        assertEquals("the call first", "tree", only.pages[0].caption)
+        assertEquals("the call first", "search", only.pages[0].caption)
         assertEquals("and the words last", "agent", only.pages.last().caption)
         assertTrue(
             "the words are the agent's sentence: ${only.pages.last().body}",
@@ -359,8 +359,8 @@ class AgentChatScreenTest {
         // **Two calls, because the assertion below is about calls plural.** It asked for two or
         // more while the script made one, so it could only ever have passed by accident.
         val door = ScriptedDoor(
-            Reply("", listOf(call("tree", """{"path":""}"""))),
-            Reply("", listOf(call("tree", """{"path":"."}"""))),
+            Reply("", listOf(call("search", """{"path":""}"""))),
+            Reply("", listOf(call("search", """{"path":"."}"""))),
             Reply("There is one file."),
         )
 
@@ -396,7 +396,7 @@ class AgentChatScreenTest {
     @Test
     fun `the conversation is bubbles, and every one of them is on the screen`() {
         val door = ScriptedDoor(
-            Reply("", listOf(call("tree", """{"path":""}"""))),
+            Reply("", listOf(call("search", """{"path":""}"""))),
             Reply("There is one file."),
         )
 
@@ -410,7 +410,7 @@ class AgentChatScreenTest {
         // something that happened in the conversation.
         assertEquals(
             "the operator's message, the call, and the answer",
-            listOf("you", "tree", "agent"),
+            listOf("you", "search", "agent"),
             scene.viewModel.chatBox?.bubbles?.map { it.caption },
         )
         // The call and its result are **one** bubble, not two: they are one act.
@@ -481,7 +481,7 @@ class AgentChatScreenTest {
         // view of. The time comes with it because a transcript without one is a list of things
         // that might have happened in any order.
         val door = ScriptedDoor(
-            Reply("", listOf(call("tree", """{"path":""}"""))),
+            Reply("", listOf(call("search", """{"path":""}"""))),
             Reply("There is one file."),
         )
 
@@ -512,7 +512,7 @@ class AgentChatScreenTest {
         // `ctx` is `in` for a row the model is sent and `out` for one the agent took out with
         // `forget`, so the footer reads the column rather than deciding anything.
         val door = ScriptedDoor(
-            Reply("", listOf(call("tree", """{"path":""}"""))),
+            Reply("", listOf(call("search", """{"path":""}"""))),
             Reply("There is one file."),
         )
         chat(door)
@@ -582,7 +582,7 @@ class AgentChatScreenTest {
         // **A bubble that simply stopped would be indistinguishable from one that had finished.**
         // The cap hides nothing - it asks for one tap - and the sentence is what makes that true.
         val door = ScriptedDoor(
-            Reply("", listOf(call("tree", """{"path":""}"""))),
+            Reply("", listOf(call("search", """{"path":""}"""))),
             Reply((1..30).joinToString("\n") { "line $it" }),
         )
         scene.settings.keepBubbleLines(5)
@@ -658,7 +658,7 @@ class AgentChatScreenTest {
         // The distinction the report makes is between *being* at the end and *animating* to it. A
         // test can only see the end state, so it asserts what it can: the last message is on screen
         // the moment the conversation is read, with no scroll left to do.
-        val calls = (1..30).map { call("tree", """{"path":"$it"}""") }
+        val calls = (1..30).map { call("search", """{"path":"$it"}""") }
         chat(ScriptedDoor(Reply("", calls), Reply("Done.")))
         say("Look at everything.")
         awaitTurns(2)
@@ -678,7 +678,7 @@ class AgentChatScreenTest {
         // alternative — a conversation that grows the column — pushes the composer off the bottom,
         // and the one control a person needs is the one that disappears first. Forty calls is what an
         // afternoon of work looks like, and the line to speak in is still there.
-        val calls = (1..40).map { call("tree", """{"path":"$it"}""") }
+        val calls = (1..40).map { call("search", """{"path":"$it"}""") }
         chat(ScriptedDoor(Reply("", calls), Reply("Done.")))
 
         say("Look at everything.")

@@ -40,7 +40,7 @@ class StreamTest {
         assertEquals("one call, not one per fragment", 1, stream.callCount)
         val call = stream.calls.single()
         assertEquals("the id from the first fragment", "call_a", call.id)
-        assertEquals("the name from the first fragment", "tree", call.tool)
+        assertEquals("the name from the first fragment", "search", call.tool)
         assertEquals("the arguments, joined", """{"path":""}""", call.args)
     }
 
@@ -52,7 +52,7 @@ class StreamTest {
         val stream = recorded("two-calls-index-reused.sse")
 
         assertEquals("both calls are there", 2, stream.callCount)
-        assertEquals("the first is the tree", "tree", stream.calls[0].tool)
+        assertEquals("the first is the tree", "search", stream.calls[0].tool)
         assertEquals("with its own arguments", """{"path":""}""", stream.calls[0].args)
         assertEquals("the second is the read", "read", stream.calls[1].tool)
         assertEquals(

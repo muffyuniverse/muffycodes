@@ -119,16 +119,16 @@ class AgentToolsTest {
         assertEquals(
             "and the twenty-one that are",
             listOf(
-                // **`search` is the account-wide reader**, and it sits beside `tree` because the
-                // difference between them is a default rather than a permission: `tree` answers
-                // about one folder, `search` about a question, and both only read.
-                "search", "tree", "read", "write", "forget", "delete",
+                // **`search` is every read of the tree there is.** It absorbed `tree` and `history`:
+                // `scope` names where, `query` names what, `history` widens it to saved versions —
+                // three questions that were three commands and are now six keys of one.
+                "search", "read", "write", "forget", "delete",
                 "move",
                 // **`query` is the agent's own reading of what it cost.** It is the one tool that
                 // answers questions nobody wrote a tool for, and it sits beside the request log's
                 // own card: both read the same database, one for a glance and one for a question.
                 "query",
-                "history", "restore", "background", "browse", "shot",
+                "restore", "background", "browse", "shot",
                 // **`look` sits beside `shot`**, because they are the two halves of one loop:
                 // `shot` makes a picture and nothing could consume one until `look` existed.
                 "look",
@@ -169,7 +169,7 @@ class AgentToolsTest {
     @Test
     fun `a tool's description is a sentence a model can act on, not its own name`() {
         // The description is the whole of what the model knows about when to call a tool, and the
-        // failure mode is silent: a tool described as "tree" is one the model uses at random.
+        // failure mode is silent: a tool described as "search" is one the model uses at random.
         for (spec in specs) {
             assertTrue("${spec.name} needs a description", spec.description.length > 20)
             assertTrue(

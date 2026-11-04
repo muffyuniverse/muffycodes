@@ -89,12 +89,12 @@ class BackgroundTest {
         // the file it reads are the same address.
         val bg = Background(launch = { work -> work() }, now = { 4_000 })
 
-        val answer = bg.start(project, call("tree", id = "7")) { "${AgentLog.SUCCESS} three files" }
+        val answer = bg.start(project, call("search", id = "7")) { "${AgentLog.SUCCESS} three files" }
 
         val done = bg.finishedSince(project.name, 0)
         assertEquals("one completion", 1, done.size)
         assertEquals("for this project", project.name, done.single().project)
-        assertEquals("naming the tool", "tree", done.single().tool)
+        assertEquals("naming the tool", "search", done.single().tool)
         assertEquals("at the registry's time", 4_000L, done.single().at)
         assertTrue(
             "and the same path the answer gave: ${done.single().path} / $answer",

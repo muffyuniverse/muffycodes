@@ -73,8 +73,8 @@ class AgentLogTest {
         // **One file, so there is nothing to keep in step.** Every event is one row with one id,
         // and being in the context is a column rather than a second copy of the same line.
         log.told("rename milk.txt to dairy.txt")
-        (log.call("tree", """{"path":""}""")).also { lastCall = it }
-        log.got("tree", "0\n\nmilk.txt", answers = lastCall)
+        (log.call("search", """{"path":""}""")).also { lastCall = it }
+        log.got("search", "0\n\nmilk.txt", answers = lastCall)
 
         val rows = log.rows()
         assertEquals("three events", 3, rows.size)
@@ -310,7 +310,7 @@ class AgentLogTest {
     @Test
     fun `a body with newlines in it is one row, and comes back whole`() {
         val listing = "milk.txt\nnotes.txt"
-        log.got("tree", "0\n$listing", answers = lastCall)
+        log.got("search", "0\n$listing", answers = lastCall)
 
         val rows = AgentLog.open(project).rows()
         assertEquals("one event", 1, rows.size)
@@ -386,7 +386,7 @@ class AgentLogTest {
         // not carry a call with no answer — every endpoint refuses that, and an agent that
         // meets the refusal at the start of a session has no way back.
         log.told("do the thing")
-        (log.call("tree", "{}")).also { lastCall = it }
+        (log.call("search", "{}")).also { lastCall = it }
         // Opening alone does nothing: a screen that drew the box must not have edited the
         // evidence. The seal belongs to the start of a session.
         val before = sessionLines()
@@ -400,7 +400,7 @@ class AgentLogTest {
 
         assertEquals("a result was written", 3, rows.size)
         assertTrue("for the call", rows.last().kind == AgentLog.GOT)
-        assertEquals("under the tool's name", "tree", rows.last().name)
+        assertEquals("under the tool's name", "search", rows.last().name)
         assertTrue("with a failure and a reason", rows.last().body.startsWith("1 "))
         assertTrue(
             "that says what happened: ${rows.last().body}",
@@ -426,8 +426,8 @@ class AgentLogTest {
         // agent's own words and there is no row to end a burst on. What is left is the boundary a
         // person actually sees: they spoke, and then they spoke again.
         log.told("first task")
-        (log.call("tree", "{}")).also { lastCall = it }
-        log.got("tree", "0\nnothing", answers = lastCall)
+        (log.call("search", "{}")).also { lastCall = it }
+        log.got("search", "0\nnothing", answers = lastCall)
         log.note("agent", "there is nothing to do")
         log.told("second task")
         log.note("agent", "done")
@@ -445,8 +445,8 @@ class AgentLogTest {
         // in the agent rather than as housekeeping.
         repeat(6) { n ->
             log.told("task $n")
-            (log.call("tree", "{}")).also { lastCall = it }
-            log.got("tree", "0\nnothing", answers = lastCall)
+            (log.call("search", "{}")).also { lastCall = it }
+            log.got("search", "0\nnothing", answers = lastCall)
             log.note("agent", "finished $n")
         }
         val before = log.rows().size
@@ -606,8 +606,8 @@ class AgentLogTest {
     @Test
     fun `a reset empties the context and deletes nothing`() {
         log.told("rename milk.txt")
-        (log.call("tree", """{"path":""}""")).also { lastCall = it }
-        log.got("tree", "0\nmilk.txt", answers = lastCall)
+        (log.call("search", """{"path":""}""")).also { lastCall = it }
+        log.got("search", "0\nmilk.txt", answers = lastCall)
         log.note("agent", "found it")
         val evidence = sessionLines()
 
@@ -678,8 +678,8 @@ class AgentLogTest {
         val other = File(System.getProperty("java.io.tmpdir"), "agent-log-other-${System.nanoTime()}")
         other.mkdirs()
         val theirs = AgentLog.open(other)
-        (log.call("tree", """{"path":""}""")).also { lastCall = it }
-        theirs.call("tree", """{"path":""}""")
+        (log.call("search", """{"path":""}""")).also { lastCall = it }
+        theirs.call("search", """{"path":""}""")
 
         assertEquals("the same number in two projects", log.rows().last().id, theirs.rows().last().id)
         val mine = agentFor(log).messages(log.contextRows()).flatMap { it.calls }.map { it.id }
@@ -829,7 +829,7 @@ class AgentLogTest {
         // would put a tool result in the context with no call above it — a request every
         // endpoint refuses, written by the app's own repair.
         log.told("a task")
-        (log.call("tree", """{"path":""}""")).also { lastCall = it }
+        (log.call("search", """{"path":""}""")).also { lastCall = it }
         log.reset()
 
         val sealed = log.beginSession()

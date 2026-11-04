@@ -62,13 +62,13 @@ class AgentChatTest {
             listOf(
                 told("first"),
                 turn(),
-                call("tree"),
-                got("tree", "0\nmilk.txt"),
+                call("search"),
+                got("search", "0\nmilk.txt"),
                 said("done"),
                 told("second"),
                 turn(),
-                call("tree"),
-                got("tree", "0\ndairy.txt"),
+                call("search"),
+                got("search", "0\ndairy.txt"),
                 said("done again"),
             )
         )
@@ -94,7 +94,7 @@ class AgentChatTest {
     @Test
     fun `an empty record has nothing to show`() {
         assertNull(AgentChat.box(emptyList()))
-        assertNull("a record that starts mid-conversation is not a conversation", AgentChat.box(listOf(call("tree"))))
+        assertNull("a record that starts mid-conversation is not a conversation", AgentChat.box(listOf(call("search"))))
     }
 
     // ---- what a turn is -----------------------------------------------------
@@ -105,8 +105,8 @@ class AgentChatTest {
             listOf(
                 told("look"),
                 turn(),
-                call("tree"),
-                got("tree", "0\n"),
+                call("search"),
+                got("search", "0\n"),
                 call("read"),
                 got("read", "0\nhello"),
                 said("one file"),
@@ -119,7 +119,7 @@ class AgentChatTest {
             // **The ending's caption is `agent`.** It used to be `concluded`, drawn from a
             // `CONCLUDE` row; the ending is the model's own note now, and a note is drawn under the
             // name it was written with.
-            listOf("tree", "read", "agent"),
+            listOf("search", "read", "agent"),
             box?.turns?.first()?.lines?.map { it.caption },
         )
     }
@@ -131,8 +131,8 @@ class AgentChatTest {
         val box = AgentChat.box(
             listOf(
                 told("look"),
-                call("tree"),
-                got("tree", "0\n"),
+                call("search"),
+                got("search", "0\n"),
                 said("one file"),
             )
         )
@@ -146,13 +146,13 @@ class AgentChatTest {
     fun `a call and its result are one line`() {
         val lines = AgentChat.lines(
             listOf(
-                call("tree", """{"path":""}"""),
-                got("tree", "0\n\nmilk.txt"),
+                call("search", """{"path":""}"""),
+                got("search", "0\n\nmilk.txt"),
             )
         )
 
         assertEquals("one line", 1, lines.size)
-        assertEquals("named by the tool", "tree", lines[0].caption)
+        assertEquals("named by the tool", "search", lines[0].caption)
         assertEquals(
             "with the status and the one sentence that matters",
             "0 · milk.txt",
@@ -177,9 +177,9 @@ class AgentChatTest {
 
     @Test
     fun `a call nobody answered says so`() {
-        val lines = AgentChat.lines(listOf(call("tree")))
+        val lines = AgentChat.lines(listOf(call("search")))
 
-        assertEquals("tree", lines[0].caption)
+        assertEquals("search", lines[0].caption)
         assertEquals("no answer yet", lines[0].body)
         assertTrue("which is not a success", lines[0].failed)
     }
@@ -243,8 +243,8 @@ class AgentChatTest {
         val rows = listOf(
             told("look"),
             turn(),
-            call("tree"),
-            got("tree", "0\n"),
+            call("search"),
+            got("search", "0\n"),
             said("Nothing to change."),
         ) + poll + poll
 
@@ -340,8 +340,8 @@ class AgentChatTest {
         val rows = listOf(
             told("look"),
             turn(),
-            call("tree"),
-            got("tree", "0\n"),
+            call("search"),
+            got("search", "0\n"),
         ) + poll + poll
 
         val box = AgentChat.box(rows)

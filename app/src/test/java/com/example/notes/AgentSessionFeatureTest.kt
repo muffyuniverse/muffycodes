@@ -623,7 +623,7 @@ class AgentSessionFeatureTest : FeatureTest() {
     fun `resetting clears the working context, keeps the evidence, and says so`() {
         listening()
         val door = ScriptedDoor(
-            Reply("", listOf(Call("c1", "tree", """{"path":""}"""))),
+            Reply("", listOf(Call("c1", "search", """{"path":""}"""))),
             Reply("there is one file"),
             Reply("done again"),
         )
@@ -664,7 +664,7 @@ class AgentSessionFeatureTest : FeatureTest() {
         )
         assertTrue(
             "with everything that happened still in it",
-            record("groceries").rows().any { it.kind == AgentLog.CALL && it.name == "tree" },
+            record("groceries").rows().any { it.kind == AgentLog.CALL && it.name == "search" },
         )
         assertTrue(
             "the press and the act are on the trace",
