@@ -907,7 +907,7 @@ object AgentChat {
         body = summary(got.body),
         failed = failed(got.body),
         // **The pair's size, and the call's was the one that could be huge.** A call carries the
-        // model's arguments — a whole file's text, when it used `edit` to write one — so the row a
+        // model's arguments — a whole file's text, when it used `write` to make one — so the row a
         // person most needs the size of is often the one with no visible body at all. Both numbers
         // are the rows' own, written once when each row was written.
         tokens = call.size + got.size,

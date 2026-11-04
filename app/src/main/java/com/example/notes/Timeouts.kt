@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * **Every command gets one**, because any command can be slow on a phone: a `read` of a huge log, a
  * `tree` of a huge project, a `history` of a file saved a thousand times. [Deadline.check] is what
- * each of them calls inside its own loop. The commands that write once — `create`, `edit`, `move` —
+ * each of them calls inside its own loop. The commands that write once — `write`, `move` —
  * have either finished or not started when the time passes, so "nothing was kept" is true for them
  * without their asking anything.
  */

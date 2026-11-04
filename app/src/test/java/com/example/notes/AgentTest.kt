@@ -174,7 +174,7 @@ class AgentTest {
             Reply(
                 "",
                 listOf(
-                    call("edit", """{"path":"../groceries/notes.txt","grep":"somebody","replace":"nobody"}""")
+                    call("write", """{"path":"../groceries/notes.txt","grep":"somebody","text":"nobody"}""")
                 ),
             ),
             Reply("understood"),
@@ -214,7 +214,7 @@ class AgentTest {
             Reply(
                 "",
                 listOf(
-                    call("edit", """{"path":"milk.txt","grep":"two","replace":"three"}""")
+                    call("write", """{"path":"milk.txt","grep":"two","text":"three"}""")
                 ),
             ),
             Reply("could not"),
@@ -232,7 +232,7 @@ class AgentTest {
             Reply(
                 "",
                 listOf(
-                    call("edit", """{"path":"milk.txt","grep":"two","replace":"three"}""")
+                    call("write", """{"path":"milk.txt","grep":"two","text":"three"}""")
                 ),
             ),
             Reply("done"),
@@ -261,8 +261,8 @@ class AgentTest {
                 "",
                 listOf(
                     call(
-                        "edit",
-                        """{"path":"muffycodes_data/prompts/project_prompt.txt","grep":"Nothing","replace":"Everything"}""",
+                        "write",
+                        """{"path":"muffycodes_data/prompts/project_prompt.txt","grep":"Nothing","text":"Everything"}""",
                     )
                 ),
             ),
@@ -1490,7 +1490,7 @@ class AgentTest {
         // the same path by another name. A command that needs a file says so before it does anything.
         val before = File(ws.repoOf("shopping"), "milk.txt").readText()
 
-        for (name in listOf("edit", "delete", "create", "move", "restore", "history")) {
+        for (name in listOf("write", "delete", "move", "restore", "history")) {
             for (path in listOf("", ".")) {
                 val body = tool(name, """{"path":"$path"}""")
                 assertTrue(
@@ -1582,7 +1582,7 @@ class AgentTest {
     fun `create will not write over a file, and says what is there`() {
         ws.write(File(ws.repoOf("shopping"), "milk.txt"), "two litres")
 
-        val body = tool("create", """{"path":"milk.txt","text":"three"}""")
+        val body = tool("write", """{"path":"milk.txt","text":"three"}""")
 
         assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
         assertTrue("naming the path: $body", body.contains("milk.txt"))
@@ -1590,15 +1590,41 @@ class AgentTest {
     }
 
     @Test
-    fun `at zero inserts at the top of an empty file`() {
-        ws.write(File(ws.repoOf("shopping"), "blank.txt"), "")
-
-        val body = tool("edit", """{"path":"blank.txt","at":0,"replace":"first line"}""")
+    fun `write makes the file and its folders when neither is there`() {
+        // **The operator's merge**: *"if path doesn't exist it creates it automatically (folders and
+        // files)"*. So there is no `create` to call and no "there is already something here" to
+        // dodge — one call makes the tree and writes the text.
+        val body = tool("write", """{"path":"deep/inner/new.md","text":"hello"}""")
 
         assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
-        // An empty file is one empty line, so inserting above it keeps the newline that line ends
-        // with — the file gains a line and loses none.
-        assertEquals("and the line is the file", "first line\n", File(ws.repoOf("shopping"), "blank.txt").readText())
+        assertEquals("and the text is there", "hello",
+            File(ws.repoOf("shopping"), "deep/inner/new.md").readText())
+    }
+
+    @Test
+    fun `write over an existing file replaces it whole`() {
+        // **`path` + `text` with no selector is a whole-file write**, which is what makes `create`
+        // and `edit` one tool: creating and overwriting are the same act, and the earlier `create`
+        // refused the second because it could only ever make a new one.
+        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "one\ntwo\nthree")
+
+        val body = tool("write", """{"path":"milk.txt","text":"just this"}""")
+
+        assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
+        assertEquals("nothing of the old text is left", "just this",
+            ws.read(File(ws.repoOf("shopping"), "milk.txt")))
+    }
+
+    @Test
+    fun `a selector against a file that is not there is refused, not created empty`() {
+        // **The one case a missing path is not a write.** A model that sends `from`/`to` or `grep`
+        // believes it is changing something that exists; making an empty file and answering "done"
+        // would be a lie about work that never happened.
+        val body = tool("write", """{"path":"gone.txt","from":1,"to":2,"text":"x"}""")
+
+        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
+        assertTrue("and it says the file is missing: $body", body.contains("no file"))
+        assertFalse("nothing was made", File(ws.repoOf("shopping"), "gone.txt").exists())
     }
 
     @Test
@@ -1627,7 +1653,7 @@ class AgentTest {
     fun `edit replaces a block of lines by number`() {
         ws.write(File(ws.repoOf("shopping"), "milk.txt"), "one\ntwo\nthree\nfour")
 
-        val body = tool("edit", """{"path":"milk.txt","from":2,"to":3,"replace":"TWO"}""")
+        val body = tool("write", """{"path":"milk.txt","from":2,"to":3,"text":"TWO"}""")
 
         assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
         assertEquals("the block was replaced, the rest untouched", "one\nTWO\nfour",
@@ -1635,37 +1661,32 @@ class AgentTest {
     }
 
     @Test
-    fun `edit inserts after the line it is given, and 0 puts the line at the top`() {
-        ws.write(File(ws.repoOf("shopping"), "milk.txt"), "one\ntwo\nthree")
-
-        assertTrue(tool("edit", """{"path":"milk.txt","at":1,"replace":"and half"}""")
-            .startsWith(AgentLog.SUCCESS))
-        assertEquals("one\nand half\ntwo\nthree", ws.read(File(ws.repoOf("shopping"), "milk.txt")))
-
-        assertTrue(tool("edit", """{"path":"milk.txt","at":0,"replace":"first"}""")
-            .startsWith(AgentLog.SUCCESS))
-        assertEquals("first\none\nand half\ntwo\nthree", ws.read(File(ws.repoOf("shopping"), "milk.txt")))
-    }
-
-    @Test
-    fun `an at beyond the file is refused rather than silently appended`() {
+    fun `at is gone, and the refusal names what replaced it`() {
+        // **`at` was a line cursor for repeated inserts.** Two shapes could express "here" - the
+        // cursor and a range - and a model that used both got a refusal. With `at` gone there is one
+        // way, which is why this is a guard rather than a feature: the key is refused as unknown,
+        // like any other name the tool does not take.
         ws.write(File(ws.repoOf("shopping"), "milk.txt"), "one\ntwo")
 
-        val body = tool("edit", """{"path":"milk.txt","at":9,"replace":"nowhere"}""")
+        val body = tool("write", """{"path":"milk.txt","at":1,"text":"and half"}""")
 
         assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
-        assertEquals("and the file is untouched", "one\ntwo", ws.read(File(ws.repoOf("shopping"), "milk.txt")))
+        assertTrue("naming the key: $body", body.contains("at"))
+        assertTrue("and the keys it does take: $body", body.contains("path"))
+        assertEquals("with nothing changed", "one\ntwo", ws.read(File(ws.repoOf("shopping"), "milk.txt")))
     }
 
     @Test
     fun `edit will not take two shapes at once`() {
         ws.write(File(ws.repoOf("shopping"), "milk.txt"), "one\ntwo")
 
-        val body = tool("edit", """{"path":"milk.txt","grep":"one","at":1,"replace":"x"}""")
+        val body = tool("write", """{"path":"milk.txt","grep":"one","text":"x","from":1}""")
 
-        assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
-        assertTrue("and it says why: $body", body.contains("one of"))
-        assertEquals("with nothing changed", "one\ntwo", ws.read(File(ws.repoOf("shopping"), "milk.txt")))
+        // **`grep` with a range is the one pair allowed**, so this must be accepted - it is one
+        // selection with a bound, not two edits. The refused pair is `text` and a selector at once.
+        assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
+        assertEquals("the match inside the range changed", "x\ntwo",
+            ws.read(File(ws.repoOf("shopping"), "milk.txt")))
     }
 
     @Test
@@ -1676,7 +1697,7 @@ class AgentTest {
         // do for a pattern.
         ws.write(File(ws.repoOf("shopping"), "n.txt"), "a1 b22 c333\n")
 
-        val body = tool("edit", """{"path":"n.txt","grep":"\\d+","replace":"N"}""")
+        val body = tool("write", """{"path":"n.txt","grep":"\\d+","text":"N"}""")
 
         assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
         assertEquals("every number, each replaced", "aN bN cN\n", ws.read(File(ws.repoOf("shopping"), "n.txt")))
@@ -1691,8 +1712,8 @@ class AgentTest {
         ws.write(file, "milk\nbread\nmilk again\neggs\nmilk last\n")
 
         val body = tool(
-            "edit",
-            """{"path":"milk.txt","from":2,"to":4,"grep":"milk","replace":"WATER"}""",
+            "write",
+            """{"path":"milk.txt","from":2,"to":4,"grep":"milk","text":"WATER"}""",
         )
 
         assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
@@ -1722,8 +1743,8 @@ class AgentTest {
         val args = org.json.JSONObject()
             .put("path", "milk.txt")
             .put("grep", "^milk$")
-            .put("replace", pasted)
-        val body = tool("edit", args.toString())
+            .put("text", pasted)
+        val body = tool("write", args.toString())
 
         assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
         assertEquals("the file has the word, not the number", "first\nWATER\nthird\n", ws.read(file))
@@ -1734,7 +1755,7 @@ class AgentTest {
         // **Reported from the live log:** "when you use grep as an argument to edit the line numbers
         // get passed as well — they shouldn't". The old answer was `2: litres`, so pasting it wrote
         // the number. The selector answers with the match now, and this is the test that keeps the
-        // two ends agreeing: what `read grep` gives is exactly what `edit replace` can take.
+        // two ends agreeing: what `read grep` gives is exactly what `write` can take.
         val file = File(ws.repoOf("shopping"), "milk.txt")
         ws.write(file, "first\ntwo litres\nthird\n")
 
@@ -1750,8 +1771,8 @@ class AgentTest {
         val args = org.json.JSONObject()
             .put("path", "milk.txt")
             .put("grep", "litres")
-            .put("replace", text)
-        val body = tool("edit", args.toString())
+            .put("text", text)
+        val body = tool("write", args.toString())
 
         assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
         assertEquals("the file says the word, not a number", "first\ntwo litres\nthird\n", ws.read(file))
@@ -1765,13 +1786,15 @@ class AgentTest {
         ws.write(File(ws.repoOf("shopping"), "notes.txt"), big)
         ws.write(File(ws.repoOf("shopping"), "todo.txt"), "top\nbottom")
 
+        // **A whole-file write from a `read` call**, which is the shape `at` used to carry: the
+        // paste is the new text of the file, and it never passes through the conversation.
         val body = tool(
-            "edit",
-            """{"path":"todo.txt","at":1,"replace":{"tool":"read","args":{"path":"notes.txt"}}}""",
+            "write",
+            """{"path":"todo.txt","text":{"tool":"read","args":{"path":"notes.txt"}}}""",
         )
 
         assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
-        assertEquals("the whole source came through", "top\n$big\nbottom",
+        assertEquals("the whole source came through", big,
             ws.read(File(ws.repoOf("shopping"), "todo.txt")))
     }
 
@@ -1780,8 +1803,8 @@ class AgentTest {
         ws.write(File(ws.repoOf("shopping"), "todo.txt"), "text")
 
         val body = tool(
-            "edit",
-            """{"path":"todo.txt","at":0,"replace":{"tool":"delete","args":{"path":"notes.txt"}}}""",
+            "write",
+            """{"path":"todo.txt","text":{"tool":"delete","args":{"path":"notes.txt"}}}""",
         )
 
         assertTrue("refused: $body", body.startsWith(AgentLog.FAILURE))
@@ -1835,8 +1858,8 @@ class AgentTest {
         val file = File(ws.repoOf("shopping"), "milk.txt")
         ws.write(file, "one\ntwo")
 
-        val edited = tool("edit", """{"path":"milk.txt","grep":"one","replce":"three"}""")
-        val created = tool("create", """{"path":"new.txt","text":"hi","force":true}""")
+        val edited = tool("write", """{"path":"milk.txt","grep":"one","replce":"three"}""")
+        val created = tool("write", """{"path":"new.txt","text":"hi","force":true}""")
 
         assertTrue("the edit is refused: $edited", edited.startsWith(AgentLog.FAILURE))
         assertTrue("the create is refused: $created", created.startsWith(AgentLog.FAILURE))
@@ -2128,7 +2151,7 @@ class AgentTest {
         // replacement would write that single line over a file full of text and report success.
         ws.write(File(ws.repoOf("shopping"), "shapes.txt"), "circle red\nbox blue\nstar gold")
         val body = tools().run(
-            Call("e1", "edit", """{"path":"shapes.txt","grep":"blue","replace":"green"}"""),
+            Call("w1", "write", """{"path":"shapes.txt","grep":"blue","text":"green"}"""),
         )
 
         assertTrue("it worked: $body", body.startsWith(AgentLog.SUCCESS))
@@ -2140,11 +2163,12 @@ class AgentTest {
     }
 
     @Test
-    fun `an edit that says where but not what refuses, instead of deleting the lines`() {
-        // **This is the data loss, and it is one missing key.** `replacementText` read `replace`
-        // with `optString`, which answers `""` for a key that is not there — so `from`/`to` with no
-        // `replace`, which is exactly what the description invites ("`from`/`to` alone replaces that
-        // whole block of lines"), replaced the block with nothing and answered "0 … changed".
+    fun `a write that says where but not what refuses, instead of deleting the lines`() {
+        // **This is the data loss, and it is one missing key.** The replacement was read with
+        // `optString`, which answers `""` for a key that is not there — so `from`/`to` with no
+        // replacement, which is exactly what the description used to invite, replaced the block with
+        // nothing and answered "0 … changed". That lesson is why the shape check refuses *before*
+        // anything is read: a call that says where but not what never reaches the file.
         //
         // Reported as: "The call answers 0 … changed, but the file then reads back as a single blank
         // line — the original contents are gone. It happened every time." It did: `from`/`to` with
@@ -2153,11 +2177,12 @@ class AgentTest {
         val shapes = File(ws.repoOf("shopping"), "shapes.txt")
         ws.write(shapes, "circle red\nbox blue\nstar gold")
         val body = tools().run(
-            Call("e2", "edit", """{"path":"shapes.txt","from":1,"to":3}"""),
+            Call("w2", "write", """{"path":"shapes.txt","from":1,"to":3}"""),
         )
 
         assertTrue("it is refused: $body", body.startsWith(AgentLog.FAILURE))
-        assertTrue("and it says what is missing: $body", body.contains("replace"))
+        // **The refusal names `text`, which is the key that replaced `replace`.**
+        assertTrue("and it says what is missing: $body", body.contains("text"))
         assertEquals(
             "and every line is still there",
             "circle red\nbox blue\nstar gold",
@@ -2174,7 +2199,7 @@ class AgentTest {
         // moment a mistake stops being undoable. `create` commits, so the file has a version from the
         // moment it exists — this test is what says the commit reaches the file rather than only the
         // folder it is in.
-        val body = tool("create", """{"path":"notes/plan.md","text":"first line"}""")
+        val body = tool("write", """{"path":"notes/plan.md","text":"first line"}""")
         assertTrue("created: $body", body.startsWith(AgentLog.SUCCESS))
 
         val history = tool("history", """{"path":"notes/plan.md"}""")
@@ -2195,7 +2220,7 @@ class AgentTest {
         val shapes = File(ws.repoOf("shopping"), "shapes.txt")
         ws.write(shapes, "circle red\nbox blue\nstar gold")
         val body = tools().run(
-            Call("e3", "edit", """{"path":"shapes.txt","from":2,"to":2,"replace":""}"""),
+            Call("w3", "write", """{"path":"shapes.txt","from":2,"to":2,"text":""}"""),
         )
 
         assertTrue("it worked: $body", body.startsWith(AgentLog.SUCCESS))
@@ -2302,7 +2327,7 @@ class AgentTest {
         // final newlines and escaping. A forget names ids, so there is no text to change.
         log.told("a task")
         val answer = tools().run(
-            Call("c9", "edit", JSONObject().put("path", "agent/session.log")
+            Call("c9", "write", JSONObject().put("path", "agent/session.log")
                 .put("text", "").toString()),
         )
 
@@ -3348,7 +3373,7 @@ class AgentTest {
                     "",
                     // A file each time, so the idle guard never fires: each call really changes
                     // the project, and the turn still does not end.
-                    listOf(Call("c${++n}", "create", """{"path":"f$n.txt","text":"$n"}""")),
+                    listOf(Call("c${++n}", "write", """{"path":"f$n.txt","text":"$n"}""")),
                 ),
             )
         }

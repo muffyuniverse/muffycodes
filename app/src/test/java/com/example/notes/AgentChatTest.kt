@@ -166,8 +166,8 @@ class AgentChatTest {
     fun `a refusal is marked, and says its reason`() {
         val lines = AgentChat.lines(
             listOf(
-                call("edit", """{"path":"locked.txt"}"""),
-                got("edit", "1\n\"locked.txt\" is locked, so it cannot be changed"),
+                call("write", """{"path":"locked.txt"}"""),
+                got("write", "1\n\"locked.txt\" is locked, so it cannot be changed"),
             )
         )
 
@@ -201,10 +201,10 @@ class AgentChatTest {
         // A result whose call is in the conversation before. It is not dropped: an interrupted
         // turn is exactly the thing a person needs to see waiting for them.
         val lines = AgentChat.lines(
-            listOf(got("edit", "1 the app was closed before this answered"))
+            listOf(got("write", "1 the app was closed before this answered"))
         )
 
-        assertEquals("edit", lines[0].caption)
+        assertEquals("write", lines[0].caption)
         assertTrue("and it is visibly a failure", lines[0].failed)
     }
 

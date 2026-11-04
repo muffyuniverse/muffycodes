@@ -358,9 +358,19 @@ class AgentTools(
             "tree" to setOf("path", "depth", "name", "grep", "from", "to"),
             "search" to setOf("query", "in", "paths", "history"),
             "read" to setOf("path", "from", "to", "grep", "revision"),
-            "edit" to setOf("path", "grep", "replace", "from", "to", "at", "text"),
+            // **One tool where `create` and `edit` were two.** Report: "merge create and edit into
+            // one command 'write' - if path doesn't exist it creates it automatically (folders and
+            // files)". So `write` is the only way anything is written, and there is no second name
+            // for the same act to learn.
+            //
+            // **`replace` is gone.** The operator's question was why it exists when `text` does: the
+            // answer was that the line shape had taken `text`, so the regex shape needed another
+            // name for exactly the same thing. `text` is the new text in every shape now.
+            //
+            // **`at` is gone too.** It was a cursor between lines for repeated edits; every shape
+            // that remains says where it acts by naming the place.
+            "write" to setOf("path", "grep", "from", "to", "text", "revision"),
             "forget" to setOf("ids"),
-            "create" to setOf("path", "text"),
             "delete" to setOf("path"),
             "move" to setOf("path", "into", "name", "copy"),
             "history" to setOf("path", "grep", "from", "to"),
@@ -473,7 +483,7 @@ class AgentTools(
                     "`number: line` — where it is, for a next call that names a place. A pattern " +
                     "that matches **part of a line** (`\\d+`, `TODO`) answers with the text it " +
                     "matched, every match, no number — for a next call that pastes it into " +
-                    "`edit`'s `replace`. It is applied inside `from`/`to` rather than to the whole " +
+                    "`write`'s `text`. It is applied inside `from`/`to` rather than to the whole " +
                     "file. A pattern is a regular expression, case-insensitive, matched inside one " +
                     "line. A file is shown exactly as it is stored, columns and all. " +
                     "Your own `agent/context.log` is the rows in your context as " +
@@ -486,25 +496,26 @@ class AgentTools(
                     "\"grep\":\"a pattern to select\",\"revision\":\"an id from history\"}",
             ),
             spec(
-                "edit",
-                "Change part of a file. Say **where** with `grep`, `from`/`to` or `at`, and " +
-                    "**what** with `replace`: the two are one call, not two. `grep` replaces every " +
-                    "match, the same pattern `read` takes, narrowed to `from`/`to` when those are " +
-                    "given. `from`/`to` without `grep` replaces that block of lines; `at` inserts " +
-                    "after that line, 0 putting it at the top. `replace` is required with those and " +
-                    "is the text to put there — `\"replace\": \"\"` deletes the lines on purpose. " +
-                    "`text` writes the whole file and needs no other selector. `replace` may also be " +
-                    "a `read` call, which copies that call's answer out of another file without it " +
-                    "passing through this conversation.",
+                "write",
+                "Write a file: **make it, or change it**. Three shapes, and `text` is the new " +
+                    "text in all of them. " +
+                    "`{path, text}` writes the whole file, and **makes the file and its folders if " +
+                    "they are not there** - so the same call creates and overwrites. " +
+                    "`{path, from, to, text}` replaces those lines; `{path, grep, text}` replaces " +
+                    "every match of the pattern `read` takes, and `from`/`to` may narrow it. " +
+                    "One call changes one thing: two selectors in one call is refused, because a " +
+                    "call that means two edits is a call whose result you cannot check. " +
+                    "`\"text\": \"\"` deletes those lines on purpose. " +
+                    "`text` may also be a `read` call - `{\"tool\":\"read\",\"args\":{...}}` - " +
+                    "which copies that call's answer out of another file without it passing " +
+                    "through this conversation, so a large paste is never refused for its size. " +
+                    "**Read before you write.** A file you have not read is one you may be about " +
+                    "to overwrite with a guess.",
                 // **Every argument the tool reads is in the example, and that is load-bearing.**
                 // `spec()` derives the schema from this sample, so a key left out of it is an
-                // argument the model is never told it may send - while the runner still reads it and
-                // refuses a call that omits what the schema invited. `from`, `to`, `at` and `text`
-                // were described in the prose above and missing from the example, so the schema
-                // described three of the seven ways to edit a file.
-                "{\"path\":\"the file\",\"grep\":\"the text to replace\",\"replace\":\"what " +
-                    "to put there\",\"from\":1,\"to\":20,\"at\":0,\"text\":\"the whole new " +
-                    "file, when that is simpler\"}",
+                // argument the model is never told it may send - while the runner still reads it.
+                "{\"path\":\"the file, relative to the project\",\"text\":\"the new text\"," +
+                    "\"grep\":\"a pattern, when replacing matches\",\"from\":1,\"to\":20}",
             ),
             spec(
                 "forget",
@@ -515,11 +526,6 @@ class AgentTools(
                     "you want gone in that one call: a row per request spends a request per row at " +
                     "the moment your context is largest.",
                 """{"ids":"2 5 7-12 14"}""",
-            ),
-            spec(
-                "create",
-                "Make a new file, with its folders if they do not exist.",
-                """{"path":"the file","text":"its contents"}""",
             ),
             spec("delete", "Delete a file, or a folder and everything in it.", """{"path":"what to delete"}"""),
             spec(
@@ -817,9 +823,8 @@ class AgentTools(
             "tree" -> tree(args, deadline)
             "search" -> searchTool(args, deadline)
             "read" -> read(args, deadline)
-            "edit" -> edit(args, deadline)
+            "write" -> write(args, deadline)
             "forget" -> forget(args)
-            "create" -> create(args, deadline)
             "delete" -> delete(args, deadline)
             "move" -> move(args, deadline)
             "history" -> history(args, deadline)
@@ -1667,7 +1672,7 @@ class AgentTools(
      * The text a `read` selects — **the body with no `0` or `1` on the front.**
      *
      * The prefix belongs to a result that enters the conversation, and one caller is not a result:
-     * `edit`'s `replace` may be a `read` call whose text goes straight into a file. That is also why
+     * `write`'s `text` may be a `read` call whose text goes straight into a file. That is also why
      * nothing here is measured against the operator's limit — [read] puts its answer through
      * [trim], and a replacement never does.
      */
@@ -1729,7 +1734,7 @@ class AgentTools(
         // to edit the line numbers get passed as well — they shouldn't". Both come from the same
         // decision: the old answer was `12: …the whole line, cut to a window…`, so a model that
         // wanted the matching text had to strip a number and a truncation mark off it, and a model
-        // that pasted the answer into `edit` wrote `12:` into the file.
+        // that pasted the answer into `write` wrote `12:` into the file.
         //
         // A pattern selects **the text it matches**, so that is the answer: every match, one per
         // line, exactly the characters the regex matched and nothing around them. `findAll` rather
@@ -1800,48 +1805,100 @@ class AgentTools(
         return Result.success(lines.subList(from - 1, end))
     }
 
-    private fun edit(args: JSONObject, deadline: Deadline): String {
-        val file = resolveFile(args.optString("path"))
-            .getOrElse { return refusal(it.message ?: "that path cannot be changed") }
+    /**
+     * **Write a file: make it, or change it.**
+     *
+     * The operator, report 29: *"merge create and edit into one command `write` - if path doesn't exist
+     * it creates it automatically (folders and files)"*. So there is one way anything is written and no
+     * second name for the same act.
+     *
+     * Three shapes, and **`text` is the new text in all three** — that is what removed `replace`:
+     *
+     * | call | what it does |
+     * |---|---|
+     * | `{path, text}` | the whole file becomes `text`; the file and its folders are made if missing |
+     * | `{path, from, to, text}` | those lines become `text` |
+     * | `{path, grep, text}` | every match of `grep` becomes `text`; `from`/`to` may bound it |
+     *
+     * **`at` is gone.** It was a cursor between lines for repeated edits, and every shape that
+     * remains says where it acts by naming the place. A cursor was a fourth way to say "here" beside
+     * `from`/`to`, and the model that used both got a refusal.
+     */
+    private fun write(args: JSONObject, deadline: Deadline): String {
+        val asked = args.optString("path").trim()
+        if (asked.isEmpty()) {
+            return refusal("Say which file to write: {\"path\":\"notes/x.md\",\"text\":\"…\"}")
+        }
+        val file = resolveFile(asked)
+            .getOrElse { return refusal(it.message ?: "that path cannot be written") }
         mayWrite(file)?.let { return refusal(it) }
-        if (!file.isFile) return refusal("There is no file at ${rel(file)}")
-        // **Exactly one way to say what changes.** Two selectors at once is two edits in one call,
-        // and a call that means two things is a call whose result the model cannot check. The
-        // refusal names all four shapes, because the model that sent two is guessing at the shape.
-        // **One selector, and `grep` may be narrowed by a range.** The old rule refused two
-        // selectors outright, which made "replace this pattern, but only between these lines"
-        // impossible to say — reported from the live log: "grep and from-to cant be used together
-        // (should have been grep within from-to selection)". That is one selection with a bound,
-        // not two edits: the range says where to look and the pattern says what to change, exactly
-        // as `read` composes them. Every other pair is still refused.
+
         val hasText = args.has("text")
         val find = pattern(args.optString("grep", ""))
             .getOrElse { return refusal("That is not a pattern: ${it.message}") }
         val hasFind = find != null
         val hasRange = args.has("from") || args.has("to")
-        val hasAt = args.has("at")
-        val given = listOf(hasText, hasFind, hasRange, hasAt).count { it }
-        if (given == 0) {
-            return refusal(
-                "Say what to change: `grep` and `replace` for a pattern, `from`/`to` for a block " +
-                    "of lines, `at` to insert a line, or `text` to write the whole file",
+        val given = listOf(hasText, hasFind, hasRange).count { it }
+
+        // **Nothing at that path means "make it", and that is the only case a missing file is not a
+        // refusal.** A selector against a file that does not exist is a model that believes it is
+        // editing something; answering "done" would be a lie about work that never happened.
+        if (!file.exists()) {
+            if (hasFind || hasRange) {
+                return refusal(
+                    "There is no file at ${rel(file)}, so there is nothing to select from it. " +
+                        "To make it, send `path` and `text` alone.",
+                )
+            }
+            val parent = file.parentFile ?: return refusal("That path has no folder in it")
+            if (!parent.isDirectory) {
+                val made = makeFolders(parent)
+                if (made.isFailure) {
+                    return refusal(made.exceptionOrNull()?.message ?: "the folder could not be made")
+                }
+            }
+            deadline.check("write")
+            // **The same `replacementText` the other shapes use**, so a `read` call pastes into a
+            // file that does not exist yet — "make this file from that one" is one call, not two.
+            val body = replacementText(args, deadline)
+                .getOrElse { return refusal(it.message ?: "that text cannot be read") }
+            val made = ws.createFile(parent, file.name, body)
+            return made.fold(
+                onSuccess = { commit("Created ${file.name}", "made ${rel(file)}") },
+                onFailure = { refusal(it.message ?: "it could not be made") },
             )
         }
-        // A range beside a pattern is the one allowed pair; a range on its own is a block edit.
+
+        if (!file.isFile) return refusal("${rel(file)} is a folder, so there is no text to write")
+        // **One selector.** Two at once is two edits in one call, and a call that means two things is
+        // a call whose result the model cannot check. `grep` may still be narrowed by a range: the
+        // range says where to look and the pattern says what to change, exactly as `read` composes
+        // them, and the operator reported that pair being wrongly refused.
+        if (!hasText && !hasFind && !hasRange) {
+            return refusal(
+                "Say what to write. `text` alone replaces the whole file; `from`/`to` with `text` " +
+                    "replaces those lines; `grep` with `text` replaces every match.",
+            )
+        }
         if (given > 1 && !(hasFind && hasRange)) {
             return refusal(
-                "Give one of `text`, `grep`, `from`/`to` or `at` — `grep` may be narrowed by " +
-                    "`from`/`to`, and nothing else pairs: a call that means two edits cannot be checked",
+                "Give `text` alone, or `from`/`to` with `text`, or `grep` with `text`. `grep` may " +
+                    "be narrowed by `from`/`to`; nothing else pairs, because a call that means two " +
+                    "edits cannot be checked.",
             )
         }
-        // **The write path asks, and a failure is a refusal.** `edit` computes the whole new file
+        // **The write path asks, and a failure is a refusal.** A write computes the whole new file
         // from what it just read, so an unreadable file that answered `""` would be rewritten as one
         // empty line — which is exactly the data loss that was reported.
-        val before = readWhole(file, deadline, "edit")
+        val before = readWhole(file, deadline, "write")
             .getOrElse { return refusal(it.message ?: "${rel(file)} could not be read, so nothing was changed") }
         val lines = before.split("\n")
         val text = when {
-            hasText -> args.optString("text")
+            // **`text` may be a `read` call**, so it goes through `replacementText` like the other
+            // two shapes. Reading it with `optString` here would answer `""` for an object and
+            // silently empty the file — the exact data loss this shape exists to avoid.
+            hasText -> replacementText(args, deadline)
+                .getOrElse { return refusal(it.message ?: "that text cannot be read") }
             hasFind -> {
                 // **The match is the replacement's whole extent, and it is a pattern.** `before
                 // .replace(find, put)` took a literal, so the key was called `find` and behaved
@@ -1851,7 +1908,8 @@ class AgentTools(
                 // answered `12: the line`, and a model that fed that answer back as `replace`
                 // wrote the line number into the file. Nothing here goes through a formatter: the
                 // argument is the text, and a nested `read` is that call's body.
-                val put = replacementText(args, deadline).getOrElse { return refusal(it.message ?: "that replacement cannot be read") }
+                val put = replacementText(args, deadline)
+                    .getOrElse { return refusal(it.message ?: "that replacement cannot be read") }
                 // **Per line, like every other command.** A pattern is a test of one line here, as
                 // it is in `read` and `tree`; applying it to the whole file would make `^milk`
                 // match only at position 0, which is the bug that made `tree` miss a file whose
@@ -1917,7 +1975,8 @@ class AgentTools(
                 if (from > to) {
                     return refusal("There is no line $from: the file has ${lines.size} lines")
                 }
-                val put = replacementText(args, deadline).getOrElse { return refusal(it.message ?: "that replacement cannot be read") }
+                val put = replacementText(args, deadline)
+                    .getOrElse { return refusal(it.message ?: "that replacement cannot be read") }
                 // **An empty replacement here means the lines are gone, not that one blank line
                 // stands in their place.** These are whole lines, so "replace them with nothing" is
                 // "there are none of them" — a person who selects three lines and deletes them
@@ -1931,30 +1990,16 @@ class AgentTools(
                 val replacement = if (put.isEmpty()) emptyList() else put.split("\n")
                 (lines.take(from - 1) + replacement + lines.drop(to)).joinToString("\n")
             }
-            else -> {
-                // **`at` is a place between lines, which a range cannot say.** `from:11,to:10` would
-                // be an empty range that happens to mean "here", and a model that meant "here" would
-                // write that exactly once before it got it wrong. Zero prepends; the number of lines
-                // appends.
-                val at = count(args, "at", -1)
-                    .getOrElse { return refusal(it.message ?: "that place cannot be used") }
-                if (at < 0 || at > lines.size) {
-                    return refusal(
-                        "`at` is the line to insert after, from 0 (the top) to ${lines.size} " +
-                            "(the end); $at is not one of them",
-                    )
-                }
-                val put = replacementText(args, deadline).getOrElse { return refusal(it.message ?: "that replacement cannot be read") }
-                // **An empty insert adds nothing**, which is the same rule as above read the other
-                // way: nothing between two lines leaves the two lines as they were.
-                val inserted = if (put.isEmpty()) emptyList() else put.split("\n")
-                (lines.take(at) + inserted + lines.drop(at)).joinToString("\n")
-            }
+            // **The whole file, and it may be a `read` call** — the paste that must not pass
+            // through the conversation. `replacementText` is what allows that without turning one
+            // call into a small program: `read` is the only tool it accepts.
+            else -> replacementText(args, deadline)
+                .getOrElse { return refusal(it.message ?: "that text cannot be read") }
         }
         if (text == before) return success("${rel(file)} already said that, so nothing changed")
         // **Asked before the one write, because the write is atomic.** A `write` either lands whole
         // or not at all, so the question to ask is only whether there is still time to start it.
-        deadline.check("edit")
+        deadline.check("write")
         // **Through the funnel.** A locked file, a hidden name, the record itself or a structural
         // folder is refused by `write`, and the refusal is the whole answer.
         //
@@ -1964,11 +2009,11 @@ class AgentTools(
         // to change it, so none of that has to be checked.
         noticeStale(file)
         if (!ws.write(file, text)) return refusal("${rel(file)} cannot be changed")
-        return commit("Edited ${file.name}", "${rel(file)} changed")
+        return commit("Wrote ${file.name}", "${rel(file)} changed")
     }
 
     /**
-     * What `replace` says: text, or the body of a `read` call.
+     * What `text` says: text, or the body of a `read` call.
      *
      * **Only `read` is allowed there.** A replacement that could name any tool would turn one call
      * into a small program with an order nobody wrote down; `read` is the one tool whose whole job is
@@ -1980,26 +2025,10 @@ class AgentTools(
      * hundred kilobytes is exactly the case a tool must not refuse for being large.
      */
     private fun replacementText(args: JSONObject, deadline: Deadline): Result<String> {
-        // **A missing `replace` is not an empty one, and the difference was data loss.**
-        //
-        // `optString` answers `""` for a key that is not there, so `from`/`to` or `at` with no
-        // `replace` — which is what a model writes when it reads "`from`/`to` alone replaces that
-        // block of lines" and does not see that it must still say what with — deleted the block and
-        // reported success. Reported as "the file then reads back as a single blank line — the
-        // original contents are gone", and it is the whole file when the range was the whole file.
-        //
-        // Deleting is a real edit and it stays possible: `"replace": ""` says so. A key that is
-        // absent is a model that has not said what it wants yet, and the refusal tells it the two
-        // ways to mean nothing on purpose.
-        if (!args.has("replace")) {
-            return Result.failure(
-                IllegalArgumentException(
-                    "This edit says where but not what: give `replace` with the text to put " +
-                        "there, or \"replace\": \"\" to remove those lines on purpose",
-                ),
-            )
-        }
-        val call = args.optJSONObject("replace") ?: return Result.success(args.optString("replace"))
+        // **An absent `text` is refused by the shape check, not defaulted here.** That check is in
+        // [write]: a call that says where but not what is refused before this is reached, which is
+        // where the data loss used to be. `"text": ""` remains the way to mean nothing on purpose.
+        val call = args.optJSONObject("text") ?: return Result.success(args.optString("text"))
         val tool = call.optString("tool").trim()
         if (tool != "read") {
             return Result.failure(
@@ -2143,28 +2172,6 @@ class AgentTools(
     private fun idOf(value: Any?): Int = whole(value) ?: throw IllegalArgumentException(
         "`ids` are row numbers, or ranges like `7..12`, and ${quoted(value)} is neither",
     )
-
-    private fun create(args: JSONObject, deadline: Deadline): String {
-        val file = resolveFile(args.optString("path"))
-            .getOrElse { return refusal(it.message ?: "that path cannot be made") }
-        deadline.check("create")
-        if (file.exists()) return refusal("There is already something at ${rel(file)}")
-        val parent = file.parentFile ?: return refusal("That path has no folder in it")
-        mayWrite(file)?.let { return refusal(it) }
-        if (!parent.isDirectory) {
-            // Folders are made by the funnel too, so a locked ancestor is refused rather than
-            // quietly written around.
-            val made = makeFolders(parent)
-            if (made.isFailure) {
-                return refusal(made.exceptionOrNull()?.message ?: "the folder could not be made")
-            }
-        }
-        val made = ws.createFile(parent, file.name, args.optString("text", ""))
-        return made.fold(
-            onSuccess = { commit("Created ${file.name}", "made ${rel(file)}") },
-            onFailure = { refusal(it.message ?: "it could not be made") },
-        )
-    }
 
     private fun makeFolders(dir: File): Result<Unit> {
         if (dir.isDirectory) return Result.success(Unit)
@@ -2969,7 +2976,7 @@ class AgentTools(
      * ## What it refuses
      *
      * A folder, because a project is a tree and a flat Downloads folder cannot hold one honestly. A
-     * path outside the project, because `read` and `edit` already refuse one and an exit that could
+     * path outside the project, because `read` and `write` already refuse one and an exit that could
      * reach any file on the phone would undo that. And everything, when the app gave no way to write —
      * see the [downloads] constructor parameter.
      */
@@ -3028,7 +3035,7 @@ class AgentTools(
         }
         val file = File(projectDir, asked.trim('/'))
         // **Inside the project, by the resolved path** — the same [withinProject] rule `read` and
-        // `edit` use, so an exit that reaches any file on the phone cannot exist by a different route.
+        // `write` use, so an exit that reaches any file on the phone cannot exist by a different route.
         // A `../` that escapes is caught here, and so is a symlink pointing out.
         if (!withinProject(file)) {
             return refusal(
@@ -3319,7 +3326,7 @@ class AgentTools(
      * ## The destination is inside the project
      *
      * `into` is resolved by the same rule every other write uses, so an unpack cannot write into
-     * another project or outside the account — the boundary is the one `edit` and `create` already
+     * another project or outside the account — the boundary is the one `write` already
      * honour, not a second rule invented here.
      */
     private fun unpack(args: JSONObject, deadline: Deadline): String {
@@ -3644,7 +3651,7 @@ class AgentTools(
      * **A refusal keeps its `1`** when it is filed: the status is the call's, not the filing's.
      *
      * Two results are deliberately not measured, and neither passes through here: one going to a file
-     * (`background`'s work), and one going into another file (`edit`'s replacement).
+     * (`background`'s work), and one going into another file (`write`'s replacement).
      */
     fun forConversation(call: Call, body: String): String {
         // **In tokens, like every other limit.** A character count was a second unit that had to be
@@ -3684,7 +3691,7 @@ class AgentTools(
      * A file's text, or why it could not be read — **because those are not the same answer.**
      *
      * The old shape answered `""` for every failure, and an empty string is a real file: one empty
-     * line. `edit` reads the file to compute what changes, so a failed read meant it computed the
+     * line. `write` reads the file to compute what changes, so a failed read meant it computed the
      * new contents of a file it believed was empty, wrote that over the original, and answered "0 …
      * changed". That is how a grep-and-replace emptied a file — the read failed and nothing said so.
      *

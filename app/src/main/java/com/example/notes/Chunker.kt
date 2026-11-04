@@ -26,7 +26,7 @@ package com.example.notes
  * ## A chunk knows where it is
  *
  * [Chunk.start] and [Chunk.end] are **line numbers, both included, starting at 1** — the same
- * convention `read` and `edit` use, so a search hit can be read with no translation.
+ * convention `read` and `write` use, so a search hit can be read with no translation.
  */
 object Chunker {
 

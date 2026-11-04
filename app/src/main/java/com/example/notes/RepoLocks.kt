@@ -16,7 +16,7 @@ import java.util.concurrent.locks.ReentrantLock
  *
  * There are **two** workers — `AppViewModel.worker` and `AgentRunner.worker` — and the runner's runs
  * every tool call, including `AgentTools.commit` → `ProjectGit.commitOutcome` →
- * `GitService.commitAll`. So a save in the editor and an agent's `edit` could commit to one
+ * `GitService.commitAll`. So a save in the editor and an agent's `write` could commit to one
  * repository at the same time, and because `inFlight` was never passed, the first of the two to hit
  * a lock called `clearStaleLock` — which **deleted the other's live `index.lock`** and retried.
  *

@@ -849,7 +849,7 @@ class Agent(
         }
         // **The one place the result limit applies**, because this is the one place a result enters
         // the conversation. A backgrounded command's body goes straight to its file, and so does the
-        // text an `edit` copies out of one, so neither is measured — the limit is a conversation
+        // text a `write` copies out of one, so neither is measured — the limit is a conversation
         // budget, not a size cap on work.
         return tools.forConversation(call, body)
     }

@@ -219,7 +219,7 @@ class AgentChatScreenTest {
         // A bare tool name beside a Close button reads as a verb you could press. Saying "call" makes
         // it a label, and a label cannot be mistaken for a control.
         val door = ScriptedDoor(
-            Reply("", listOf(call("create", """{"path":"shapes"}"""))),
+            Reply("", listOf(call("write", """{"path":"shapes"}"""))),
             Reply("Made the folder."),
         )
         chat(door)
@@ -257,7 +257,7 @@ class AgentChatScreenTest {
         // still be on that page. Before the fix it was on the last one again, because fullscreen's
         // `at` was a local that died with it.
         val door = ScriptedDoor(
-            Reply("", listOf(call("create", """{"path":"shapes"}"""))),
+            Reply("", listOf(call("write", """{"path":"shapes"}"""))),
             Reply("Made the folder."),
         )
         chat(door)
@@ -286,7 +286,7 @@ class AgentChatScreenTest {
         compose.waitForIdle()
         // **The call's page, by its caption.** The bubble draws the page's caption above its body,
         // so `create` on the screen means the bubble is showing the call rather than the reply.
-        compose.onNodeWithText("create").assertExists()
+        compose.onNodeWithText("write").assertExists()
 
         // And opening fullscreen again lands on the same page rather than resetting.
         compose.onAllNodesWithContentDescription("Read this message fullscreen").onLast().performClick()
