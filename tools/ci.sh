@@ -146,6 +146,26 @@ done
 RUN_ID="$(printf '%s' "$RUN" | cut -d' ' -f1)"
 echo "run $RUN_ID  https://github.com/$REPO/actions/runs/$RUN_ID"
 
+# **How long the run's own state may stand still before this says so.**
+#
+# GitHub's run record can wedge: every job finishes — the logs end with "Cleaning
+# up orphan processes" — while the run still answers `in_progress` with a
+# `started_at` of null and an `updated_at` frozen at the moment it started. That
+# happened once and cost seven minutes of a watcher sleeping on a run that was
+# already over, and the log said nothing but a repeated `in_progress/`, so the
+# only way to tell a wedge from a slow build was to go and ask by hand.
+#
+# So the state is remembered, and a run whose state has not changed for
+# STALL_MINUTES is called what it is: **stalled, with the jobs that are settled**.
+# It is a warning and not a verdict, because the run is not this script's to
+# declare over — but a person watching now knows which of the two they are
+# looking at.
+# Overridable so the check itself can be run against a known-wedged run without
+# waiting six minutes for it to fire.
+STALL_MINUTES="${CI_STALL_MINUTES:-6}"
+same_state=0
+last_state=""
+
 while :; do
     state="$(gh run list --repo "$REPO" --limit 20 \
         --json databaseId,status,conclusion \
@@ -153,6 +173,13 @@ while :; do
         2>/dev/null | head -1)"
     echo "$(date +%H:%M:%S) $state"
     case "$state" in completed/*) break ;; esac
+
+    if [ "$state" = "$last_state" ]; then
+        same_state=$((same_state + 1))
+    else
+        same_state=0
+        last_state="$state"
+    fi
 
     # Jobs run beside each other now, so the run is not over when the answer
     # is. A red suite is known about fifty seconds before the run finishes —
@@ -166,6 +193,47 @@ while :; do
         echo "failed early: $failed"
         state="completed/failure"
         break
+    fi
+
+    # **The other way a job is known to have failed: its steps.**
+    #
+    # The check above reads the *job's* conclusion, and a wedged run answers
+    # `null` for that on every job while the steps inside it are already marked.
+    # A test job that ran and failed was therefore invisible here until a timeout.
+    # Asking the steps costs one call per job and only once a run looks quiet.
+    if [ "$same_state" -ge $(( STALL_MINUTES * 60 / INTERVAL )) ]; then
+        echo "— the run has not changed state for ${STALL_MINUTES} min; asking the jobs —"
+        stalled_failed=""
+        settled=0
+        running=0
+        for jid in $(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" --jq '.jobs[].id' 2>/dev/null); do
+            jstate="$(gh api "repos/$REPO/actions/jobs/$jid" \
+                --jq '"\(.name)\t\(.status)\t\([.steps[] | select(.conclusion == "failure") | .name] | join(" / "))"' \
+                2>/dev/null || true)"
+            [ -z "$jstate" ] && continue
+            jname="$(printf '%s' "$jstate" | cut -f1)"
+            jstatus="$(printf '%s' "$jstate" | cut -f2)"
+            jbad="$(printf '%s' "$jstate" | cut -f3)"
+            if [ "$jstatus" = "completed" ]; then
+                settled=$((settled + 1))
+            else
+                running=$((running + 1))
+            fi
+            if [ -n "$jbad" ]; then
+                stalled_failed="$stalled_failed ${jname} (${jbad});"
+            fi
+            echo "  · $jname  $jstatus${jbad:+  FAILED STEP: $jbad}"
+        done
+        if [ -n "$stalled_failed" ]; then
+            echo "failed early (from steps, run state never settled):$stalled_failed"
+            state="completed/failure"
+            break
+        fi
+        if [ "$running" -eq 0 ] && [ "$settled" -gt 0 ]; then
+            echo "— every job is settled but the run still says in_progress: this is the wedge,"
+            echo "  not a slow build. Cancel it (gh run cancel $RUN_ID) and push again. —"
+        fi
+        same_state=0
     fi
     if [ "$(date +%s)" -gt "$deadline" ]; then
         echo "RESULT: timeout (still $state)"
