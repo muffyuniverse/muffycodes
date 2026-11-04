@@ -156,6 +156,10 @@ class IndexQueueTest {
             "the reset says it stranded commits",
             Maintenance.waiting(ws.projectDir("shopping")),
         )
+        // **And the marker is cleared here**, because the queue's own pass would otherwise run a
+        // collection inside a test's temp folder after the test ended — the same reason `clear()` is
+        // called in `tearDown`.
+        File(File(ws.projectDir("shopping"), AgentLog.DIR), Maintenance.MARKER).delete()
     }
 
     // ---- 3: many asks, one pass -------------------------------------------
@@ -172,10 +176,11 @@ class IndexQueueTest {
             models = { Config(embedding = PICK) },
         )
 
+        val before = IndexQueue.passes
         repeat(5) { IndexQueue.want("shopping", "a change was saved") }
-        settle()
+        settle(before)
 
-        assertEquals("one pass", 1, IndexQueue.passes)
+        assertEquals("one pass", before + 1, IndexQueue.passes)
         assertEquals("and the project was indexed once", 1, fake.embedded.count { it == "the milk went sour\n" })
     }
 
@@ -191,7 +196,7 @@ class IndexQueueTest {
         )
 
         IndexQueue.want("shopping", "the project was added")
-        settle()
+        settle(IndexQueue.passes)
 
         val rows = AgentLog.open(ws.projectDir("shopping")).rows()
         val row = rows.firstOrNull { it.name == "index" }
@@ -207,7 +212,7 @@ class IndexQueueTest {
         IndexQueue.configure(ws = ws, embedder = Fake(), models = { null })
 
         IndexQueue.want("shopping", "a change was saved")
-        settle()
+        settle(IndexQueue.passes)
 
         val row = AgentLog.open(ws.projectDir("shopping")).rows().first { it.name == "index" }
         assertTrue("it names the setting: ${row.body}", "Embedding model" in row.body)
@@ -222,10 +227,13 @@ class IndexQueueTest {
         )
         ws.repoOf("shopping").deleteRecursively()
 
+        // **`passes` is the process's count, not this test's**, and other tests in this class have
+        // already run passes — so what is asserted is that this ask caused one more.
+        val before = IndexQueue.passes
         IndexQueue.want("shopping", "a change was saved")
-        settle()
+        settle(before)
 
-        assertEquals("the pass ran and reported", 1, IndexQueue.passes)
+        assertEquals("the pass ran and reported", before + 1, IndexQueue.passes)
     }
 
     @Test
@@ -235,7 +243,10 @@ class IndexQueueTest {
         IndexQueue.clear()
 
         IndexQueue.want("shopping", "a change was saved")
-        settle()
+        // **No pass will ever come, so this waits for the queue to be idle rather than for one.**
+        // A deadline of its own, because `settle` is about a pass that is expected.
+        val until = System.currentTimeMillis() + 1_000
+        while (System.currentTimeMillis() < until && !IndexQueue.idle) Thread.sleep(10)
 
         assertEquals("no pass", 0, IndexQueue.passes)
     }
@@ -250,10 +261,14 @@ class IndexQueueTest {
      * last pass, and an assertion that ran then would read the log before the row was written — a
      * test that passes on a fast machine and fails in CI for a reason unrelated to the code.
      */
-    private fun settle() {
+    private fun settle(was: Int) {
         val until = System.currentTimeMillis() + 15_000
         while (System.currentTimeMillis() < until) {
-            if (IndexQueue.idle) return
+            // **`idle` alone is not enough, and CI proved it.** The worker sets itself free between
+            // taking a job and starting it, so a poll that lands in that gap reads "idle" and asserts
+            // about a pass that has not run — a test that passes on a fast machine and fails on a
+            // runner. Idle *and* a pass having happened is the only state worth asserting about.
+            if (IndexQueue.idle && IndexQueue.passes > was) return
             Thread.sleep(10)
         }
     }
