@@ -211,6 +211,38 @@ class DrawingTest {
     }
 
     @Test
+    fun `a typed stroke width is clamped, and nonsense leaves the width alone`() {
+        // **The operator**: "add stroke size field where you can type size number."
+        //
+        // The two answers are deliberately different. `900` says "as wide as you allow", so it is
+        // clamped — the person meant something wide and the field should not silently do nothing.
+        // `abc` says nothing at all, so it is null and the width stays where it was; turning it into a
+        // default would be the field typing on the person's behalf.
+        assertEquals("a number is a number", 12f, Drawing.widthOf("12"), 0.001f)
+        assertEquals("a comma is a decimal point in half of Europe", 7.5f, Drawing.widthOf("7,5"), 0.001f)
+        assertEquals("spaces are not content", 4f, Drawing.widthOf("  4  "), 0.001f)
+        assertEquals("too wide is as wide as allowed", Drawing.MAX_WIDTH, Drawing.widthOf("900"), 0.001f)
+        assertEquals("too thin is a hairline", 1f, Drawing.widthOf("0"), 0.001f)
+        assertEquals("a negative is a hairline too", 1f, Drawing.widthOf("-5"), 0.001f)
+
+        assertNull("a word is not a number", Drawing.widthOf("abc"))
+        assertEquals("nor is an empty field", null, Drawing.widthOf(""))
+        assertNull("nor is NaN", Drawing.widthOf("NaN"))
+    }
+
+    @Test
+    fun `a colour prints as the hex every other tool uses`() {
+        // The field beside the wheel, and a designer's spec sheet, and a browser's inspector all say
+        // `#E53935` — so that is what the app prints, not a Kotlin `Color.toString()`.
+        assertEquals("#E53935", Drawing.hex(0xFFE53935.toInt()))
+        assertEquals("#000000", Drawing.hex(0xFF000000.toInt()))
+        // **The alpha byte is not printed**, because every stroke is opaque: the picker hides its own
+        // alpha slider and the strokes are baked into a PNG, so a printed alpha would be a number that
+        // is always FF and never anything else.
+        assertEquals("#1E88E5", Drawing.hex(0xFF1E88E5.toInt()))
+    }
+
+    @Test
     fun `the pinch limits are the operator's numbers`() {
         // **"limit min zoom by 30% ... and max zoom by 300%."** Asserted as literals rather than
         // against the constants, because a test that read `MIN_ZOOM` would pass whatever the constant

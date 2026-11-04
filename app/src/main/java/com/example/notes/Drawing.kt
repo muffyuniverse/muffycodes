@@ -110,6 +110,40 @@ object Drawing {
     val WIDTHS = listOf(4f, 10f, 24f)
 
     /**
+     * **The widest stroke a typed number may ask for**, in picture pixels.
+     *
+     * A stroke is drawn as a rounded line; past about a fifth of the picture it stops being a line and
+     * becomes a shape, and a person who typed 900 by mistake would fill the canvas with one drag. 64 is
+     * generous — wider than any of the offered [WIDTHS] — and still a line.
+     */
+    const val MAX_WIDTH = 64f
+
+    /**
+     * **A stroke width, from what a person typed** — or null when it is not a number.
+     *
+     * The operator: "add stroke size field where you can type size number." Null rather than a clamp
+     * for input that is not a number at all, because a field that turned "abc" into 24 would be a field
+     * that typed something on the person's behalf. A number out of range *is* clamped, and that is the
+     * difference: 900 says "as wide as you allow", "abc" says nothing.
+     */
+    fun widthOf(typed: String): Float? {
+        // **A comma is a decimal point in half of Europe**, and the keyboard offers one on the number
+        // pad in those locales. Replacing it is the whole of what this function does about input.
+        val clean = typed.trim().replace(',', '.')
+        val value = clean.toFloatOrNull() ?: return null
+        if (value != value) return null // NaN, which `toFloatOrNull` accepts
+        return value.coerceIn(1f, MAX_WIDTH)
+    }
+
+    /**
+     * **A colour as `#RRGGBB`**, for the field beside the wheel.
+     *
+     * The hex form rather than `Color.toString()`'s, because it is the one every other tool a person
+     * uses prints — a designer's spec sheet and a browser's inspector both say `#E53935`.
+     */
+    fun hex(colour: Int): String = "#%06X".format(colour and 0xFFFFFF)
+
+    /**
      * The strokes with the last one removed — **the whole of undo.**
      *
      * A stack of stroke lists is unnecessary: the strokes are a list, and undo is `dropLast`. Keeping
@@ -622,13 +656,17 @@ fun DrawingSurface(
                             } else if (drawing) {
                                 // A line and a box keep two points — where it started and where it is
                                 // now. The pen keeps every one, because its shape is the path.
-                                current = if (tool == Drawing.Tool.PEN) current + at else
+                                // **`chosen`, which is non-null whenever `drawing` is** — the flag is
+                                // only set in the branch that checked it. Reading `tool` here would
+                                // mean the handler could see a tool chosen *after* this gesture began,
+                                // which is the staleness `liveStrokes` exists to avoid.
+                                current = if (chosen == Drawing.Tool.PEN) current + at else
                                     listOf(current.firstOrNull() ?: at, at)
                             }
                         } while (event.changes.any { it.pressed })
 
-                        if (drawing && current.isNotEmpty()) {
-                            onAdd(Drawing.Stroke(tool, current, colour, width))
+                        if (drawing && current.isNotEmpty() && chosen != null) {
+                            onAdd(Drawing.Stroke(chosen, current, colour, width))
                         }
                         current = emptyList()
                     }

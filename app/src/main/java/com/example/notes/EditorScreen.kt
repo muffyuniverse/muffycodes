@@ -1,23 +1,35 @@
 package com.example.notes
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -27,20 +39,21 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.SingleChoiceSegmentedButtonRowScope
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.SingleChoiceSegmentedButtonRowScope
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -49,42 +62,38 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.unit.dp
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import kotlin.math.roundToInt
-import kotlinx.coroutines.launch
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.foundation.gestures.rememberDraggableState
-import androidx.compose.foundation.gestures.draggable
-import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.Animatable
-import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.height
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.animation.core.animate
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * The editor: the file's name in the top row, and its text below.
@@ -1217,34 +1226,49 @@ private fun DrawMode(
     }
     val bitmap = (picture as PictureOpen.Ready).bitmap
     val shown = remember(bitmap) { bitmap.asImageBitmap() }
+    /**
+     * **What the size field holds**, kept separate from [width] rather than derived from it.
+     *
+     * A field whose text was recomputed from the width would fight the person typing "1" on the way to
+     * "12": the value clamps and re-renders between keystrokes. So the text is what they typed, the
+     * width is what the drawing uses, and the two are joined by [Drawing.widthOf] — which is also where
+     * the refusal lives, so a field holding something unusable leaves the width where it was.
+     */
+    var typed by remember { mutableStateOf(width.toInt().toString()) }
 
     Column(modifier = Modifier.fillMaxSize()) {
+        // **The tools are icons, and the eraser is one of them.** The operator: "turn erase into icon
+        // and put one color picker button on the same row after it." A row of words beside a canvas is
+        // a row a person has to read; a pen, a line, a box and an eraser are four shapes that can be
+        // recognised without reading.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             for (one in Drawing.Tool.entries) {
-                // The eraser is named for what it does to the *strokes*, which is the rule the
-                // drawing object already states — a person rubbing out an arrow over a screenshot
-                // must not lose the screenshot.
-                val label = when (one) {
-                    Drawing.Tool.PEN -> "Pen"
-                    Drawing.Tool.LINE -> "Line"
-                    Drawing.Tool.BOX -> "Box"
-                    Drawing.Tool.ERASER -> "Erase"
-                }
+                // **Tapping the chosen tool takes it off.** That is the only way into "no tool", which
+                // is the look-and-move mode: one finger pans, two pinch. A separate "Hand" tool would
+                // be a fifth thing to learn, and the operator asked for the toggle instead.
                 FilterChip(
                     selected = tool == one,
-                    onClick = { Trace.tap("draw tool", label.lowercase()); onTool(one) },
-                    label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+                    onClick = {
+                        Trace.tap("draw tool", one.name.lowercase())
+                        onTool(if (tool == one) null else one)
+                    },
+                    label = { ToolGlyph(one) },
+                    // **Narrow, because four of them and a colour button share the row.** The default
+                    // chip padding is sized for a word; a 20dp glyph needs about half of it.
+                    modifier = Modifier.height(36.dp),
                 )
             }
+            Spacer(Modifier.width(4.dp))
+            // **One colour button, not four swatches.** It shows the colour in force and opens the
+            // wheel; four swatches were four decisions in the way of the drawing.
+            ColourButton(colour = colour, onColour = { Trace.tap("draw colour", Drawing.hex(it)); onColour(it) })
             Spacer(Modifier.weight(1f))
-            // Undo is a button rather than a gesture: a shake-to-undo is invisible, and the strokes
-            // are session-only so there is nothing else to reach for.
             TextButton(onClick = { Trace.tap("draw undo"); onUndo() }, enabled = strokes.isNotEmpty()) {
                 Text("Undo")
             }
@@ -1252,48 +1276,42 @@ private fun DrawMode(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp),
+                .padding(horizontal = 8.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            for (shade in Drawing.COLOURS) {
-                Box(
-                    modifier = Modifier
-                        .size(28.dp)
-                        .clip(CircleShape)
-                        .background(Color(shade))
-                        .border(
-                            width = if (shade == colour) 3.dp else 1.dp,
-                            color = if (shade == colour) MaterialTheme.colorScheme.onSurface
-                            else MaterialTheme.colorScheme.outline,
-                            shape = CircleShape,
-                        )
-                        .clickable {
-                            Trace.tap("draw colour", shade.toUInt().toString(16).takeLast(6))
-                            onColour(shade)
-                        },
-                )
-            }
-            Spacer(Modifier.width(8.dp))
+            Text(
+                "Size",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            // **Typed, and the offered widths are still there as buttons.** The operator: "add stroke
+            // size field where you can type size number." A field alone makes a person guess the range;
+            // the buttons say the common ones and the field is for anything else.
             for (thick in Drawing.WIDTHS) {
-                Box(
-                    modifier = Modifier
-                        .size(28.dp)
-                        .clip(CircleShape)
-                        .clickable { Trace.tap("draw width"); onWidth(thick) },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size((thick.coerceAtMost(20f)).dp)
-                            .clip(CircleShape)
-                            .background(
-                                if (thick == width) MaterialTheme.colorScheme.onSurface
-                                else MaterialTheme.colorScheme.outline,
-                            ),
-                    )
-                }
+                TextButton(
+                    onClick = { Trace.tap("draw width"); onWidth(thick) },
+                    colors = if (thick == width) ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.primary,
+                    ) else ButtonDefaults.textButtonColors(),
+                ) { Text(thick.toInt().toString()) }
             }
+            OutlinedTextField(
+                value = typed,
+                onValueChange = { text ->
+                    // **Only digits and one separator**, so the field cannot hold something it would
+                    // then have to refuse. Anything else that arrives (a paste) is filtered the same
+                    // way rather than being rejected after the fact.
+                    val clean = text.filter { it.isDigit() || it == '.' || it == ',' }.take(5)
+                    typed = clean
+                    Drawing.widthOf(clean)?.let { onWidth(it) }
+                },
+                label = { Text("px", style = MaterialTheme.typography.labelSmall) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                modifier = Modifier.width(78.dp).height(52.dp),
+                textStyle = MaterialTheme.typography.labelSmall,
+            )
         }
         DrawingSurface(
             picture = shown,
@@ -1561,4 +1579,137 @@ private fun Picker(label: String, choices: List<GitService.CommitInfo>, selected
             }
         }
     }
+}
+
+/**
+ * **The four tools as shapes**, drawn rather than imported.
+ *
+ * `Edit`, `ShowChart` and the rest of the set this needs live in material-icons-extended, and this app
+ * does not carry that for four glyphs — the same reason [LinkedGlyph] and [UnsyncGlyph] are drawn.
+ *
+ * Each is the *mark it makes*: a pen is a nib, a line is a diagonal, a box is a frame, and an eraser is
+ * a tilted block with the corner it rubs with. A person recognises those faster than they read "Erase",
+ * which is the whole point of the operator's request.
+ */
+@Composable
+private fun ToolGlyph(tool: Drawing.Tool) {
+    val tint = MaterialTheme.colorScheme.onSurface
+    val label = when (tool) {
+        Drawing.Tool.PEN -> "Pen"
+        Drawing.Tool.LINE -> "Line"
+        Drawing.Tool.BOX -> "Box"
+        Drawing.Tool.ERASER -> "Erase"
+    }
+    Canvas(modifier = Modifier.size(20.dp).semantics { contentDescription = label }) {
+        val w = size.width
+        val h = size.height
+        val stroke = w * 0.12f
+        when (tool) {
+            // A nib: a filled triangle with a slit, which is what a pen tip looks like from above.
+            Drawing.Tool.PEN -> {
+                val tip = Path().apply {
+                    moveTo(w * 0.5f, h * 0.94f)
+                    lineTo(w * 0.14f, h * 0.30f)
+                    lineTo(w * 0.86f, h * 0.30f)
+                    close()
+                }
+                drawPath(tip, tint)
+                drawLine(
+                    MaterialTheme.colorScheme.surface,
+                    Offset(w * 0.5f, h * 0.30f),
+                    Offset(w * 0.5f, h * 0.74f),
+                    stroke * 0.5f,
+                )
+            }
+            Drawing.Tool.LINE -> drawLine(
+                tint,
+                Offset(w * 0.14f, h * 0.86f),
+                Offset(w * 0.86f, h * 0.14f),
+                stroke,
+                StrokeCap.Round,
+            )
+            Drawing.Tool.BOX -> drawRect(
+                tint,
+                topLeft = Offset(w * 0.14f, h * 0.22f),
+                size = androidx.compose.ui.geometry.Size(w * 0.72f, h * 0.56f),
+                style = Stroke(width = stroke, cap = StrokeCap.Round),
+            )
+            // **A tilted block with a flat end**, which is how an eraser is drawn everywhere: the
+            // flat end is the part that rubs, and the tilt is what tells it from a rectangle.
+            Drawing.Tool.ERASER -> {
+                val body = Path().apply {
+                    moveTo(w * 0.20f, h * 0.76f)
+                    lineTo(w * 0.62f, h * 0.22f)
+                    lineTo(w * 0.88f, h * 0.42f)
+                    lineTo(w * 0.46f, h * 0.94f)
+                    close()
+                }
+                drawPath(body, tint)
+                drawLine(
+                    MaterialTheme.colorScheme.surface,
+                    Offset(w * 0.34f, h * 0.62f),
+                    Offset(w * 0.60f, h * 0.80f),
+                    stroke * 0.7f,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * **One button showing the colour in force, which opens the wheel.**
+ *
+ * The operator: "put one color picker button on the same row after it. And make it a color wheel popup
+ * window - look if there is a premade material for that."
+ *
+ * **There is not one, and this is why.** Compose Material 3 has no colour picker: `MaterialColors` is a
+ * palette of *roles* (primary, surface) chosen by a design system, not a wheel a person points at. The
+ * nearest thing is the deprecated `androidx.compose.material` `ColorPicker`, which never existed. So the
+ * swatch is the button and the wheel is the platform's own picker, which is the same wheel every other
+ * app on the person's phone shows.
+ */
+@Composable
+private fun ColourButton(colour: Int, onColour: (Int) -> Unit) {
+    val context = LocalContext.current
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .background(Color(colour))
+            .border(2.dp, MaterialTheme.colorScheme.outline, CircleShape)
+            .clickable {
+                // **The system picker, because a wheel is a wheel.** Building one is a canvas, a hue
+                // ring and a hit test — and the platform already has one that the person has used
+                // before, in the same place, with the same gestures.
+                dialogColour(context, colour, onColour)
+            }
+            .semantics { contentDescription = "Colour" },
+    )
+}
+
+/**
+ * **The platform's colour picker, as a dialog.**
+ *
+ * `ColorPickerDialog` has been in the framework since API 26 and is what a person's other apps show.
+ * It is not Compose, so it is drawn in its own window — which is what "popup window" means here and is
+ * the one place in this app where a framework dialog is the right answer: the alternative is drawing a
+ * wheel and getting the hit test wrong.
+ */
+private fun dialogColour(context: android.content.Context, current: Int, onColour: (Int) -> Unit) {
+    val dialog = android.app.Dialog(context)
+    val picker = android.widget.ColorPicker(context).apply {
+        // **Opaque, always.** A translucent stroke on a drawing is invisible over the picture's own
+        // colours, and the strokes are baked into the PNG — there is no alpha to composite against.
+        setAlphaSliderVisible(false)
+        // The framework picker's own constructor signature differs before API 29; `color` handles both.
+        color = current
+    }
+    dialog.setContentView(android.widget.FrameLayout(context).apply {
+        addView(picker)
+    })
+    picker.setOnColorChangedListener { picked ->
+        onColour(picked or (0xFF shl 24))
+        dialog.dismiss()
+    }
+    dialog.show()
 }
