@@ -1820,6 +1820,80 @@ class AgentTest {
     }
 
     @Test
+    fun `multi lets one pattern select a whole block by its opening and closing text`() {
+        // **The operator's own case**: "if agent needs to replace a function block by grepping its
+        // signature and curly braces how doe he do that?" It could not, and the limit was ours —
+        // `hit`/`hits` hand the engine one line at a time, so `.` never meets a newline. `multi`
+        // compiles with DOTALL and runs over the whole selection.
+        val file = File(ws.repoOf("shopping"), "code.kt")
+        ws.write(file, "fun a() {\n    one\n}\nfun b() {\n    two\n}\n")
+
+        // **`[\s\S]` is the idiom** that needs no flag knowledge, and `.*?` works here too because
+        // DOTALL is what `multi` turns on.
+        val body = tool("read", """{"path":"code.kt","grep":"fun a\\([\\s\\S]*?\\n\\}","multi":true}""")
+
+        assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
+        assertTrue("the whole block, not one line: $body", body.contains("one"))
+        // **Answered by its extent**, so the next call can name the place.
+        assertTrue("and it says which lines it spans: $body", body.contains("1-3:"))
+    }
+
+    @Test
+    fun `without multi a pattern is still tested one line at a time`() {
+        // The default is unchanged and deliberate: one line, one line number, one cheap excerpt. A
+        // pattern needing a newline simply does not match, which is what every existing call assumes.
+        ws.write(File(ws.repoOf("shopping"), "code.kt"), "fun a() {\n    one\n}\n")
+
+        val body = tool("read", """{"path":"code.kt","grep":"fun a\\([\\s\\S]*?\\n\\}"}""")
+
+        assertTrue("nothing matched: $body", body.contains("nothing in"))
+    }
+
+    @Test
+    fun `multi write replaces a whole block by its opening and closing text`() {
+        ws.write(File(ws.repoOf("shopping"), "code.kt"), "head\nfun a() {\n    one\n}\ntail\n")
+
+        val body = tool(
+            "write",
+            """{"path":"code.kt","grep":"fun a\\([\\s\\S]*?\\n\\}","text":"fun a() { }","multi":true}""",
+        )
+
+        assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
+        assertEquals("the block is one line, the rest untouched", "head\nfun a() { }\ntail",
+            ws.read(File(ws.repoOf("shopping"), "code.kt")))
+    }
+
+    @Test
+    fun `read takes the path at sha form that search and history answer with`() {
+        // **The promise that was half true.** `search {history}` and `history` answer a version as
+        // `path@sha7`, and the description said `read {revision}` accepts that form. It did not:
+        // `resolveFile` reads `@` as part of a filename, so copying a search hit got "there is no
+        // file at notes.md@a1b2c3d".
+        val file = File(ws.repoOf("shopping"), "milk.txt")
+        ws.write(file, "two litres")
+        git.commit("shopping", "milk")
+        val id = git.versions("shopping", "milk.txt").first().shortId
+        ws.write(file, "three litres")
+
+        val body = tool("read", """{"path":"milk.txt@$id"}""")
+
+        assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
+        assertEquals("the old version, read by the composite path", "0\ntwo litres", body)
+    }
+
+    @Test
+    fun `a file whose name contains an at sign is still read as itself`() {
+        // **The split is on the LAST `@`, and only when the tail looks like a git id.** A real file
+        // called `budget@home.md` must not be mistaken for a version of `budget`.
+        ws.write(File(ws.repoOf("shopping"), "budget@home.md"), "the household budget")
+
+        val body = tool("read", """{"path":"budget@home.md"}""")
+
+        assertTrue("accepted: $body", body.startsWith(AgentLog.SUCCESS))
+        assertEquals("the file's own text", "0\nthe household budget", body)
+    }
+
+    @Test
     fun `delete takes the whole folder, which is what its description says`() {
         // **The tool does what the spec promises.** The spec said "one file or an empty folder" while
         // the tool removed any folder and everything in it — and no test called `delete` at all, which
