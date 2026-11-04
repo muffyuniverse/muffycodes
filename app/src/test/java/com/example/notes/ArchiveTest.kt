@@ -82,21 +82,47 @@ class ArchiveTest {
         write("src/util/Text.kt", "fun text() {}")
         write("README.md", "# readme")
 
-        val answer = tools().run(call("""{"pack":["src/","README.md"],"as":"agent/out.zip"}"""))
+        val answer = tools().run(call("""{"path":"src/"}"""))
 
         assertTrue("it is an answer: ${answer.replace("\n", " | ")}", answer.startsWith("0\n"))
-        assertTrue("the zip is there", File(project(), "agent/out.zip").isFile)
-        val names = java.util.zip.ZipFile(File(project(), "agent/out.zip")).use { zip ->
+        // **Beside the input, same name, other suffix** — the whole of report 38.
+        assertTrue("the zip is beside the folder: $answer", File(project(), "src.zip").isFile)
+        val names = java.util.zip.ZipFile(File(project(), "src.zip")).use { zip ->
             zip.entries().asSequence().map { it.name }.toList()
         }
-        // **Sorted, because the walk's order is `ws.list`'s and not the call's.** A zip's entry
-        // order is a fact about the walk; what matters is that every file is there at its own path,
-        // and asserting the walk's order would pin a detail the person never sees.
+        // **Named from the packed folder's own parent**, so unpacking it beside `src/` gives back
+        // `src/main/Main.kt`. Sorted, because entry order is the walk's and not the call's.
         assertEquals(
-            "every file, at its own path",
-            listOf("README.md", "src/Main.kt", "src/util/Text.kt"),
+            "every file, under the packed folder's own name",
+            listOf("src/Main.kt", "src/util/Text.kt"),
             names.sorted(),
         )
+    }
+
+    @Test
+    fun `pack names the zip after its input and appends the suffix`() {
+        // **Appended, not replaced.** `a.tar` packed to `a.zip` would be a name the caller never
+        // said, and one that could collide with a file that already means something else.
+        write("notes.tar", "not really a tarball")
+
+        val answer = tools().run(call("""{"path":"notes.tar"}"""))
+
+        assertTrue("accepted: $answer", answer.startsWith("0\n"))
+        assertTrue("the suffix is added to the whole name: $answer", File(project(), "notes.tar.zip").isFile)
+    }
+
+    @Test
+    fun `a second pack of the same thing makes a new name instead of overwriting`() {
+        // **The caller never chose this name**, so a free one is a service rather than a surprise —
+        // the same reasoning `Workspace.freeName` records for imports. The number goes after the
+        // whole name, which is what makes `src 2.zip` (and not `src.zip 2`) the result.
+        write("src/Main.kt", "fun main() {}")
+        tools().run(call("""{"path":"src/"}"""))
+        val second = tools().run(call("""{"path":"src/"}"""))
+
+        assertTrue("accepted: $second", second.startsWith("0\n"))
+        assertTrue("the second zip has its own name: $second", File(project(), "src 2.zip").isFile)
+        assertTrue("and the first is untouched", File(project(), "src.zip").isFile)
     }
 
     @Test
@@ -105,11 +131,11 @@ class ArchiveTest {
         // empty at the moment they needed it — and the agent has already been told it worked.
         write("README.md", "# readme")
 
-        val answer = tools().run(call("""{"pack":["README.md","missing.txt"],"as":"agent/out.zip"}"""))
+        val answer = tools().run(call("""{"path":"missing.txt"}"""))
 
         assertTrue("it is a refusal: $answer", answer.startsWith("1\n"))
         assertTrue("and names what is missing: $answer", answer.contains("missing.txt"))
-        assertFalse("and nothing was written", File(project(), "agent/out.zip").exists())
+        assertFalse("and nothing was written", File(project(), "missing.txt.zip").exists())
     }
 
     @Test
@@ -117,12 +143,17 @@ class ArchiveTest {
         // **A zip whose contents depend on the order the sources were listed** is a file nobody can
         // reason about, and the second copy silently wins.
         write("src/Main.kt", "one")
-        write("src/Main.kt", "two")
 
-        val answer = tools().run(call("""{"pack":["src/","src/Main.kt"],"as":"agent/out.zip"}"""))
+        // **One path means one source, so a duplicate entry can no longer come from the call.** The
+        // rule still guards the walk: a link inside the project can point at a file the walk already
+        // reached, and that is the only remaining way two entries can collide.
+        val answer = tools().run(call("""{"path":"src/"}"""))
 
-        assertTrue("it is a refusal: $answer", answer.startsWith("1\n"))
-        assertTrue("and names the entry: $answer", answer.contains("src/Main.kt"))
+        assertTrue("it worked: $answer", answer.startsWith("0\n"))
+        val names = java.util.zip.ZipFile(File(project(), "src.zip")).use { zip ->
+            zip.entries().asSequence().map { it.name }.toList()
+        }
+        assertEquals("one entry, once", 1, names.size)
     }
 
     @Test
@@ -137,10 +168,12 @@ class ArchiveTest {
         File(project(), "agent/session.log").apply { parentFile?.mkdirs() }
             .writeText("   1     4 TOLD    in  operator  task\n")
 
-        val answer = tools().run(call("""{"pack":["."],"as":"agent/out.zip"}"""))
+        // **`shopping` is the project, so packing `.` packs the project itself.** The zip lands
+        // beside it — in the account rather than in the project — and the record stays out.
+        val answer = tools().run(call("""{"path":"."}"""))
 
         assertTrue("it worked: ${answer.replace("\n", " | ")}", answer.startsWith("0\n"))
-        val names = java.util.zip.ZipFile(File(project(), "agent/out.zip")).use { zip ->
+        val names = java.util.zip.ZipFile(File(ws.accountDir, "shopping.zip")).use { zip ->
             zip.entries().asSequence().map { it.name }.toList()
         }
         assertTrue("the readme is in: $names", names.contains("README.md"))
@@ -153,11 +186,12 @@ class ArchiveTest {
     fun `unpack writes a tree into the folder it was told to`() {
         zipWith("agent/lib.zip", mapOf("lib/a.kt" to "a", "lib/b/c.kt" to "c"))
 
-        val answer = tools().run(call("""{"unpack":"agent/lib.zip","into":"vendor/lib"}"""))
+        val answer = tools().run(call("""{"path":"agent/lib.zip","unpack":true}"""))
 
         assertTrue("it is an answer: ${answer.replace("\n", " | ")}", answer.startsWith("0\n"))
-        assertEquals("a", File(project(), "vendor/lib/lib/a.kt").readText())
-        assertEquals("c", File(project(), "vendor/lib/lib/b/c.kt").readText())
+        // **Beside the zip, named after it without its suffix** — `agent/lib.zip` → `agent/lib/`.
+        assertEquals("a", File(project(), "agent/lib/lib/a.kt").readText())
+        assertEquals("c", File(project(), "agent/lib/lib/b/c.kt").readText())
     }
 
     @Test
@@ -166,7 +200,7 @@ class ArchiveTest {
         // same reasoning `artifact` already follows. The names are what a model asks next about.
         zipWith("agent/lib.zip", mapOf("lib/a.kt" to "fun a() {}", "lib/b.kt" to "fun b() {}"))
 
-        val answer = tools().run(call("""{"unpack":"agent/lib.zip","into":"vendor/lib"}"""))
+        val answer = tools().run(call("""{"path":"agent/lib.zip","unpack":true}"""))
 
         assertTrue("the names are there: $answer", answer.contains("lib/a.kt"))
         assertTrue("and the second: $answer", answer.contains("lib/b.kt"))
@@ -183,12 +217,13 @@ class ArchiveTest {
             mapOf("ok.txt" to "fine", "../../outside.txt" to "escaped"),
         )
 
-        val answer = tools().run(call("""{"unpack":"agent/evil.zip","into":"vendor/lib"}"""))
+        val answer = tools().run(call("""{"path":"agent/evil.zip","unpack":true}"""))
 
         assertTrue("it is a refusal: $answer", answer.startsWith("1\n"))
         assertTrue("and names the entry: $answer", answer.contains("../../outside.txt"))
         assertTrue("and says why: $answer", answer.contains("climbs out"))
-        assertFalse("the safe entry was NOT written either", File(project(), "vendor/lib/ok.txt").exists())
+        // **Derived destination, so the untouched folder is the one beside the zip.**
+        assertFalse("the safe entry was NOT written either", File(project(), "agent/evil/ok.txt").exists())
         assertFalse("and nothing escaped", File(project(), "outside.txt").exists())
     }
 
@@ -196,7 +231,7 @@ class ArchiveTest {
     fun `a zip with an absolute entry is refused`() {
         zipWith("agent/abs.zip", mapOf("/etc/passwd" to "root"))
 
-        val answer = tools().run(call("""{"unpack":"agent/abs.zip","into":"vendor/lib"}"""))
+        val answer = tools().run(call("""{"path":"agent/abs.zip","unpack":true}"""))
 
         assertTrue("it is a refusal: $answer", answer.startsWith("1\n"))
         assertTrue("and names the entry: $answer", answer.contains("/etc/passwd"))
@@ -209,23 +244,29 @@ class ArchiveTest {
         // same climb as `../../`. A check that only knew `/` would let this one through.
         zipWith("agent/win.zip", mapOf("..\\..\\outside.txt" to "escaped"))
 
-        val answer = tools().run(call("""{"unpack":"agent/win.zip","into":"vendor/lib"}"""))
+        val answer = tools().run(call("""{"path":"agent/win.zip","unpack":true}"""))
 
         assertTrue("it is a refusal: $answer", answer.startsWith("1\n"))
         assertTrue("and says why: $answer", answer.contains("climbs out"))
     }
 
     @Test
-    fun `an unpack cannot write outside the project`() {
-        // **The boundary every other write already honours**, not a second rule invented here: an
-        // unpack into another project is refused by the same `resolve` that refuses an `edit` there.
-        zipWith("agent/lib.zip", mapOf("a.txt" to "a"))
+    fun `an unpack of another project's zip is refused by the write rule`() {
+        // **The boundary every other write already honours**, not a second rule invented here. The
+        // destination is now derived, so the case that reaches this rule is a zip that lives in
+        // another project: the read is allowed and the write is not, which is exactly the axis
+        // `mayWrite` names.
         ws.projectDir("work").mkdirs()
+        ZipOutputStream(File(ws.projectDir("work"), "lib.zip").outputStream()).use { zip ->
+            zip.putNextEntry(ZipEntry("a.txt"))
+            zip.write("a".toByteArray())
+            zip.closeEntry()
+        }
 
-        val answer = tools().run(call("""{"unpack":"agent/lib.zip","into":"../work/vendor"}"""))
+        val answer = tools().run(call("""{"path":"../work/lib.zip","unpack":true}"""))
 
         assertTrue("it is a refusal: $answer", answer.startsWith("1\n"))
-        assertFalse("and nothing landed there", File(ws.projectDir("work"), "vendor").exists())
+        assertFalse("and nothing landed there", File(ws.projectDir("work"), "lib").exists())
     }
 
     // ---- the round trip -----------------------------------------------------
@@ -238,33 +279,41 @@ class ArchiveTest {
         write("src/util/Text.kt", "fun text() {}")
         write("README.md", "# readme")
 
-        tools().run(call("""{"pack":["src/","README.md"],"as":"agent/out.zip"}"""))
-        tools().run(call("""{"unpack":"agent/out.zip","into":"copy"}"""))
+        // **Both sides derive their own destination**, so a round trip needs no names at all:
+        // packing `.` writes `shopping.zip` beside the project, and unpacking it writes `shopping/`
+        // beside that — a second copy of the tree, with the same shape.
+        tools().run(call("""{"path":"."}"""))
+        tools().run(call("""{"path":"../shopping.zip","unpack":true}"""))
 
-        assertEquals("fun main() {}", File(project(), "copy/src/Main.kt").readText())
-        assertEquals("fun text() {}", File(project(), "copy/src/util/Text.kt").readText())
-        assertEquals("# readme", File(project(), "copy/README.md").readText())
+        assertEquals("fun main() {}", File(ws.accountDir, "shopping/src/Main.kt").readText())
+        assertEquals("fun text() {}", File(ws.accountDir, "shopping/src/util/Text.kt").readText())
+        assertEquals("# readme", File(ws.accountDir, "shopping/README.md").readText())
     }
 
     // ---- the two modes, and what a call with neither gets --------------------
 
     @Test
-    fun `a call with neither mode is refused with both shapes`() {
+    fun `a call with no path is refused with both shapes`() {
         // The model has to be able to see what it should have written, which is why both examples
         // are in the refusal rather than only the one it did not use.
-        val answer = tools().run(call("""{"as":"agent/out.zip"}"""))
+        val answer = tools().run(call("""{}"""))
 
         assertTrue("it is a refusal: $answer", answer.startsWith("1\n"))
-        assertTrue("and offers pack: $answer", answer.contains("pack"))
-        assertTrue("and unpack: $answer", answer.contains("unpack"))
+        assertTrue("and says what it takes: $answer", answer.contains("`path`"))
+        assertTrue("and names the flag: $answer", answer.contains("unpack"))
     }
 
     @Test
-    fun `asking for both modes at once is refused`() {
-        val answer = tools().run(call("""{"pack":["README.md"],"as":"x.zip","unpack":"x.zip"}"""))
+    fun `the two-mode call is gone, and its old keys are refused by name`() {
+        // **`unpack` is a boolean now, so the value cannot contradict `path`.** The refusal this
+        // test used to check is unreachable by construction — and `as`/`into` are now unknown keys,
+        // which is a *better* failure: it names the keys the command does take, so a model that
+        // remembers the old shape is corrected in one round rather than guessing at a new one.
+        val answer = tools().run(call("""{"path":"README.md","as":"x.zip"}"""))
 
         assertTrue("it is a refusal: $answer", answer.startsWith("1\n"))
-        assertTrue("and says to do one: $answer", answer.contains("one thing at a time"))
+        assertTrue("and names the key it cannot take: $answer", answer.contains("`as`"))
+        assertTrue("and the keys it does: $answer", answer.contains("`path`"))
     }
 
     @Test

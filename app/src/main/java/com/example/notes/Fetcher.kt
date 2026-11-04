@@ -182,11 +182,18 @@ object Fetched {
      * How large a download may be, **and it is a refusal, never a truncation.**
      *
      * A truncated file is worse than no file: the agent believes it has the archive, `unpack` fails
-     * halfway through it, and the cause is three steps back. Twenty megabytes is a dependency tarball
-     * and a release asset; a 2 GB ISO is not something an agent should be pulling onto a phone, and
-     * the refusal names the size and the cap so it can tell the person rather than retrying.
+     * halfway through it, and the cause is three steps back.
+     *
+     * **100 MB, raised from 20 on the operator's word** (report 36: *"make it so that fetch can load
+     * up to 100MB at a time"*). Twenty refused archives that were genuinely a dependency — a vendored
+     * library's source tarball is tens of megabytes once it carries its tests and fixtures — and the
+     * cap was the tool's opinion rather than the person's. A hundred is still a refusal and still not
+     * a truncation, and it is still small enough that a 2 GB ISO cannot arrive by accident.
+     *
+     * **Every sentence that mentions the cap reads this constant**, so the number cannot go stale in a
+     * description, a test or a refusal — the same rule as `SettingsStore.DEFAULT_MAX_RESULT`.
      */
-    const val LIMIT_BYTES: Long = 20L * 1024 * 1024
+    const val LIMIT_BYTES: Long = 100L * 1024 * 1024
 
     /**
      * A safe file name for [url] — **the last path segment, cleaned.**

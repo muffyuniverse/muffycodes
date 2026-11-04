@@ -425,7 +425,10 @@ class AgentTools(
             // the tool list is two descriptions in every request's cache prefix for one thing. Only
             // one of the two key sets is ever used per call, and a call naming neither is refused
             // with both shapes.
-            "archive" to setOf("pack", "as", "unpack", "into"),
+            // **One path, and one flag.** Report 38: *"make archive simpler: -u (flag to unarchive)
+            // path (path of what you want to un/archive)"*. So there is no destination key at all —
+            // the output is a property of the input, not something the caller has to invent.
+            "archive" to setOf("path", "unpack"),
             // **No `into`.** A fetched file lands in `agent/fetched/` always, and `unpack` is what
             // moves it into the project — the operator's *"everything can land there"*, and the
             // reason vendoring is two visible steps rather than one that commits 40 MB.
@@ -724,23 +727,23 @@ class AgentTools(
             ),
             spec(
                 "archive",
-                "Put files into a zip, or take a zip apart. **Two modes, one tool.** " +
-                    "`pack` takes a list of files and folders and `as` names the zip it makes — " +
-                    "use it when `downloads` refuses a folder, or to hand several files to a " +
-                    "person as one. `unpack` takes a zip and `into` the folder to write it in, " +
-                    "which is how a fetched dependency gets into the project. " +
-                    "`pack` writes only inside this project; `unpack` refuses an entry whose name " +
-                    "is absolute or climbs out with `..`, and says which entry, because that is " +
-                    "the one way a zip can write outside where it was told to. " +
+                "Put something into a zip, or take a zip apart. **One path, and `unpack` says " +
+                    "which way.** Without it, `path` is packed; with `unpack: true`, `path` is " +
+                    "opened. " +
+                    "**The result lands beside the input with the same name and the other " +
+                    "suffix** — `src` becomes `src.zip`, `lib.zip` becomes `lib/` — so nothing has " +
+                    "to be named and a round trip puts things back where they were. An occupied " +
+                    "name gets the next free one (`lib 2/`), because the caller never chose it. " +
+                    "A folder packs everything under it, keeping the paths, and leaves the app's " +
+                    "own folders out. " +
+                    "`unpack` refuses an entry whose name is absolute or climbs out with `..` and " +
+                    "says which entry, because that is the one way a zip can write outside where " +
+                    "it was told to. " +
                     "**An unpack answers with the entry names, never the bytes** — a zip in this " +
                     "conversation is binary that costs the whole context to say nothing.",
-                // **All four keys in the one example, because the schema is built from it.** A
-                // schema that named only the keys of one mode would refuse the other mode's call
-                // before it ran — the same defect `no tool takes an argument it never describes`
-                // exists to catch, seen from the other side. The description carries the two shapes
-                // in prose; this carries them in the only place the parser reads.
-                "{\"pack\":[\"src/\",\"README.md\"],\"as\":\"agent/out.zip\"," +
-                    "\"unpack\":\"agent/fetched/lib.zip\",\"into\":\"vendor/lib\"}",
+                // **Two keys, both shown, because the schema is built from the example.** A schema
+                // that named only one shape would refuse the other before it ran.
+                "{\"path\":\"src\",\"unpack\":true}",
             ),
             spec(
                 "fetch",
@@ -3377,74 +3380,57 @@ class AgentTools(
      * **Entry names, never bytes** (D4). A zip in the conversation is binary that costs the whole
      * context to say nothing, which is the same reasoning `artifact` already follows.
      */
+    /**
+     * Packs [path], or unpacks it when `unpack` is set.
+     *
+     * **One thing is derived here and nowhere else**: the output path. Report 38's rule is that the
+     * answer lands *beside the input* with the same name and the other suffix, so the caller never
+     * names it — which removes `as` and `into`, and with them the two ways a call could ask for
+     * something that contradicts itself.
+     */
     private fun archive(args: JSONObject, deadline: Deadline): String {
-        val packing = args.has("pack")
-        val unpacking = args.has("unpack")
-        if (packing && unpacking) {
+        val raw = args.optString("path", "").trim()
+        if (raw.isEmpty()) {
             return refusal(
-                "`archive` does one thing at a time: `pack` to make a zip, or `unpack` to open one.",
+                "`archive` takes `path` — {\"path\":\"src/\"} to pack, " +
+                    "{\"path\":\"src.zip\",\"unpack\":true} to open.",
             )
         }
-        if (!packing && !unpacking) {
-            return refusal(
-                "`archive` needs `pack` (a list of files, with `as` naming the zip) or `unpack` " +
-                    "(a zip, with `into` naming the folder).",
-            )
+        val source = resolve(raw).getOrElse {
+            return refusal(it.message ?: "that path cannot be read")
         }
-        return if (packing) pack(args, deadline) else unpack(args, deadline)
+        if (!source.exists()) return refusal("There is nothing at \"$raw\".")
+        // **`unpack` is a boolean, so `false` means pack.** Reading it with `optBoolean` is what
+        // makes `{"path":"x.zip","unpack":false}` the same call as `{"path":"x.zip"}` — a key that
+        // is present but false must not become a third mode nobody described.
+        return if (args.optBoolean("unpack", false)) unpack(source, deadline) else pack(source, deadline)
     }
 
     /**
-     * Puts files and folders into one zip.
+     * Puts [source] — a file or a whole folder — into a zip **beside it**, with `.zip` appended.
      *
-     * **Folders are walked, and their contents go in with their paths.** A zip of `src/` that kept
-     * only the folder name would unpack to nothing, so the entries are `src/Main.kt` and so on —
-     * which is also what makes a round trip through `unpack` reproduce the tree.
+     * **The name is derived, never given.** `src` becomes `src.zip`; `lib.tar` becomes `lib.tar.zip`.
+     * The suffix is *appended* rather than replacing the last extension because `a.tar` packed to
+     * `a.zip` would be a name the caller never said and could collide with a file that already means
+     * something else.
      *
-     * **A missing source is a refusal, not a skipped file.** A zip that quietly lacks the file the
-     * agent meant to send is a zip the person finds empty at the moment they needed it.
+     * **A missing source is refused by the dispatcher**, and a duplicate entry is refused here rather
+     * than overwritten: two sources reaching one entry name would make a zip whose contents depend on
+     * the order they were listed, which is a file nobody can reason about.
      */
-    private fun pack(args: JSONObject, deadline: Deadline): String {
-        val sources = args.optJSONArray("pack")
-            ?: return refusal(
-                "`pack` takes a list: {\"pack\":[\"src/\",\"README.md\"],\"as\":\"agent/out.zip\"}",
-            )
-        if (sources.length() == 0) return refusal("`pack` needs at least one file or folder.")
-        val asName = args.optString("as", "").trim()
-        if (asName.isEmpty()) {
-            return refusal("`pack` needs `as`, the path of the zip to make.")
-        }
-        val target = resolve(asName).getOrElse {
-            return refusal(it.message ?: "that path cannot be written")
-        }
-        if (target.isDirectory) return refusal("${rel(target)} is a folder, and a zip is a file.")
+    private fun pack(source: File, deadline: Deadline): String {
+        val target = free(File(source.parentFile, source.name ?: "archive"), ".zip")
         // **Collected before anything is written**, so a bad source refuses the call rather than
         // leaving a half-made zip on disk for the agent to mistake for a complete one.
         val entries = mutableListOf<Pair<String, File>>()
-        for (i in 0 until sources.length()) {
-            val raw = sources.optString(i, "").trim()
-            if (raw.isEmpty()) return refusal("`pack[$i]` is empty.")
-            val source = resolve(raw).getOrElse {
-                return refusal("`pack[$i]`: ${it.message ?: "that path cannot be read"}")
-            }
-            if (!source.exists()) return refusal("There is nothing at \"$raw\" to pack.")
-            if (!source.isFile && !source.isDirectory) {
-                return refusal("\"$raw\" is neither a file nor a folder.")
-            }
-            collectForPack(source, entries, deadline)
-        }
+        collectForPack(source, source, entries, deadline)
         if (entries.isEmpty()) {
-            return refusal("There is nothing inside ${sources.length()} source(s) to pack.")
+            return refusal("There is nothing inside ${rel(source)} to pack.")
         }
-        // **Duplicates refused rather than overwritten.** Two sources that reach the same entry
-        // name would make a zip whose contents depend on the order they were listed, which is a
-        // file nobody can reason about.
-        val names = entries.map { it.first }
-        val repeated = names.groupBy { it }.filterValues { it.size > 1 }.keys
+        val repeated = entries.map { it.first }.groupBy { it }.filterValues { it.size > 1 }.keys
         if (repeated.isNotEmpty()) {
             return refusal(
-                "Two sources would write the same entry: " + repeated.joinToString(", ") { "\"$it\"" } +
-                    ". Name them differently, or pack them separately.",
+                "Two files would write the same entry: " + repeated.joinToString(", ") { "\"$it\"" } + ".",
             )
         }
         return try {
@@ -3481,11 +3467,18 @@ class AgentTools(
      */
     private fun collectForPack(
         source: File,
+        base: File,
         into: MutableList<Pair<String, File>>,
         deadline: Deadline,
     ) {
+        // **Named from the packed thing's own folder**, so packing `src/` writes `main/Main.kt` and
+        // unpacking it beside `src/` puts the files back inside `src 2/` — a round trip that
+        // reproduces the tree. This used to be the project-relative path, which was right when `as`
+        // named the destination and wrong now that the destination is derived from the input.
+        val name = source.relativeToOrNull(base.parentFile)?.invariantSeparatorsPath
+            ?: (source.name ?: "file")
         if (source.isFile) {
-            into.add(rel(source) to source)
+            into.add(name to source)
             return
         }
         // **`ws.list` rather than `listFiles`**, so dot-folders stay out of a zip the person is
@@ -3499,12 +3492,17 @@ class AgentTools(
         for (entry in ws.list(source)) {
             deadline.check("archive")
             if (ws.isStructural(entry.file)) continue
-            if (entry.isFolder) collectForPack(entry.file, into, deadline) else into.add(rel(entry.file) to entry.file)
+            if (entry.isFolder) {
+                collectForPack(entry.file, base, into, deadline)
+            } else {
+                val at = entry.file.relativeToOrNull(base.parentFile)?.invariantSeparatorsPath
+                into.add((at ?: rel(entry.file)) to entry.file)
+            }
         }
     }
 
     /**
-     * Takes a zip apart into a folder of the project.
+     * Takes [zipFile] apart **into a folder beside it**, named after the zip without its suffix.
      *
      * ## Zip-slip, refused by name
      *
@@ -3517,30 +3515,16 @@ class AgentTools(
      * The refusal **names the entry**, because "this zip is unsafe" leaves the person unable to see
      * which file in it is the problem.
      *
-     * ## The destination is inside the project
+     * ## The destination is beside the zip, and inside the project
      *
-     * `into` is resolved by the same rule every other write uses, so an unpack cannot write into
-     * another project or outside the account — the boundary is the one `write` already
-     * honour, not a second rule invented here.
+     * The folder is derived from the zip's own path, so it is inside the project whenever the zip is
+     * — and `mayWrite` is still the funnel every write asks, because a zip in `agent/fetched/` is
+     * writable and one that arrived from another project is not.
      */
-    private fun unpack(args: JSONObject, deadline: Deadline): String {
-        val zipPath = args.optString("unpack", "").trim()
-        if (zipPath.isEmpty()) return refusal("`unpack` needs the path of a zip.")
-        val zipFile = resolve(zipPath).getOrElse {
-            return refusal(it.message ?: "that path cannot be read")
-        }
-        if (!zipFile.isFile) return refusal("There is no file at \"$zipPath\".")
-        val intoName = args.optString("into", "").trim()
-        if (intoName.isEmpty()) {
-            return refusal(
-                "`unpack` needs `into`, the folder to write in — " +
-                    "{\"unpack\":\"agent/fetched/lib.zip\",\"into\":\"vendor/lib\"}",
-            )
-        }
-        val into = resolve(intoName).getOrElse {
-            return refusal(it.message ?: "that path cannot be written")
-        }
-        if (into.isFile) return refusal("${rel(into)} is a file, and `into` needs a folder.")
+    private fun unpack(zipFile: File, deadline: Deadline): String {
+        val folder = zipFile.name.substringBeforeLast('.', zipFile.name)
+        val parent = zipFile.parentFile ?: zipFile
+        val into = free(File(parent, folder.ifBlank { "unpacked" }), "")
         // **The one funnel every write asks**, and skipping it was a real hole: `resolve` allows a
         // single `..` so an agent can READ another project, and an unpack that only resolved would
         // have written there — the cross-project rule is "read-only", and this is the tool that
@@ -3568,7 +3552,7 @@ class AgentTools(
                     // safe entries landed and only the bad one was skipped.
                     return refusal(
                         "Nothing was unpacked. ${refused.size} entry(s) would write outside " +
-                            "\"$intoName\":\n" + refused.take(10).joinToString("\n") { "- $it" } +
+                            "${rel(into)}:\n" + refused.take(10).joinToString("\n") { "- $it" } +
                             if (refused.size > 10) "\n- … and ${refused.size - 10} more" else "",
                     )
                 }
@@ -3597,6 +3581,24 @@ class AgentTools(
                     ""
                 },
         )
+    }
+
+    /**
+     * [name] with a free suffix, so a second `archive` of the same thing makes `src 2.zip`.
+     *
+     * **`Workspace.freeName` is the app's rule for this and it does not fit here**, because it
+     * inserts the number *before* the extension: `src.zip` would become `src 2.zip` — which is right
+     * for a zip and wrong for a folder, where `src 2` is the only sensible next name. So the suffix
+     * is passed in and the number goes after the whole name: `src` → `src 2`, `src.zip` → `src 2.zip`.
+     */
+    private fun free(base: File, suffix: String): File {
+        var n = 2
+        var candidate = File(base.parentFile, base.name + suffix)
+        while (candidate.exists()) {
+            candidate = File(base.parentFile, base.name + " " + n + suffix)
+            n++
+        }
+        return candidate
     }
 
     /**

@@ -33,9 +33,9 @@ Full analysis in `/root/Downloads/PROPOSAL-tool-api-2026-11-04.md`. **All 17 wer
 | 33 | regex selection is per-symbol? | **CLOSED** `effe08f` · `multi: true` added; no cap of its own |
 | 34 | `move` needs no `name` | **CLOSED** `effe08f` · `into` is the destination, name and all |
 | 35 | remove `from`/`to` **only if** regex can select lines | **CLOSED** `effe08f` · it is **our** per-line loop, not regex; `multi` lifts it. `from`/`to` kept where lines are real |
-| 36 | `fetch` up to 100 MB | **PLANNED** step 3 · `LIMIT_BYTES` is 20 MB |
+| 36 | `fetch` up to 100 MB | **CLOSED** step 3 · `LIMIT_BYTES` is 100 MB; every sentence reads the constant |
 | 37 | split `downloads` into `download`/`upload` | **PLANNED** step 4 · three tools, `download` capped 100 MB |
-| 38 | `archive`: `-u` flag + one path | **PLANNED** step 3 · `unpack: true`, output beside input |
+| 38 | `archive`: `-u` flag + one path | **CLOSED** step 3 · `{path}` packs, `{path, unpack:true}` opens, output beside input, next free name |
 | 39 | prompt still tells about `ask`/`conclude` | **CLOSED** `989c502` · brief rewritten, test reads the live brief |
 
 ---
