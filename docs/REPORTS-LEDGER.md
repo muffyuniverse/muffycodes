@@ -21,7 +21,7 @@ Full analysis in `/root/Downloads/PROPOSAL-tool-api-2026-11-04.md`. **All 17 wer
 |---|---|---|
 | 22 | "1 session" row is still visible — remove it | **OPEN** · not a tool report; belongs to the project-screen batch |
 | 23 | clone/move to Downloads as a choice | **PLANNED** step 4 · ⋮ gains "Copy to Downloads" |
-| 24 | search regex or text? if reranked why regex? | **PLANNED** step 5 · semantic, account-wide; three catalogues already exist (40 embedding, 12 rerank) |
+| 24 | search regex or text? if reranked why regex? | **PLANNED** step 5 · semantic, account-wide, **no regex fallback** — a failure is `1`+reason, a timeout is `Deadline` |
 | 25 | `paths` 10–100 instead of ≥1, default 10 | **SETTLED** · operator: "keep 100 max"; spec text will state 1 minimum. §2 |
 | 26 | `tree`: rename `name`/`grep` → `name`/`content` | **PLANNED** step 2 |
 | 27 | why does `tree` have `from`/`to` | **PLANNED** step 2 · dropped |

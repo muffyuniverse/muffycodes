@@ -173,9 +173,28 @@ not the 10× the old argument assumed.
    added on disk while the app was closed was never counted by anything. A table of known files makes the
    answer a query over what exists versus what is indexed, which is what makes it able to *notice* an
    embedding bug rather than hide it.
-3. **Read path.** Embed the query → score → rerank top ~30 → answer path + line. **Fall back to the regex
-   walk** when the index is behind or the model is unset, and *say so*: "the semantic index is behind by 12
-   files; this is a text search." A degraded answer that admits it is usable; a silent one is not.
+3. **Read path.** Embed the query → score → rerank top ~30 → answer path + line.
+
+   **No regex fallback.** You are right, and the machinery already exists on all three sides:
+
+   - **A failure is `1` + a sentence.** `refusal(said)` is exactly that, and the protocol already says
+     "0 worked, 1 did not, read the rest and do not guess".
+   - **A timeout is `Deadline`.** `tools.run` already hands every command one, `check(tool)` throws
+     `StoppedException`, and `Stopped.body` writes "stopped after N s; nothing was kept". An embedding
+     request that does not answer is the same case as a slow `read` — it stops and says so.
+   - **A big answer is filed, not cut.** `forConversation` writes it to `agent/background_results/` and
+     answers with the path.
+
+   So a fallback would be a **second mechanism doing a worse job than the first**: it would answer a
+   question with a text search the person did not ask for, and the "this is a text search" sentence is
+   the kind of hedging that makes an agent believe it searched when it did not. What is left is the one
+   honest case — **no model chosen yet** — and that is a refusal that names the setting, not a silent
+   route to a different tool.
+
+   **And "how many files are not indexed yet" is not a fallback trigger.** It is a *note* on a successful
+   answer: the search runs, and the answer says "12 files are not indexed yet, so this may be
+   incomplete". That is the same shape as the existing "stopped at N paths; narrow `in` for the rest" — a
+   successful result that states its own limit, rather than a different result.
 4. **`tree` keeps the regex** — that is the whole point of two tools.
 
 **Account-wide**, per your answer: the walk covers every project, so `search`'s reach does not change, and
@@ -207,5 +226,9 @@ Every step lands with its ledger row marked in the same commit, per `docs/REPORT
   prefix. One cache miss per conversation, once.
 - **Step 5's write path is the only step that can corrupt an index.** It must be idempotent and resumable —
   a half-written index has to be repairable by re-running the walk, not by deleting the database.
+- **Step 5 adds a network dependency to a tool that had none.** `read`, `tree` and `write` work offline
+  forever; `search` will not, once it is semantic. The refusal must say so plainly ("no embedding model is
+  chosen"), because an agent that reads a network error as "nothing matches" will conclude the corpus is
+  empty and act on it.
 - **`MediaStore` cannot be tested in CI** (no device). The listing gets a unit test against a fake
   resolver, and the honest limitation is written into the tool's description rather than trusted to memory.
