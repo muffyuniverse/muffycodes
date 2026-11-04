@@ -631,18 +631,18 @@ fun DrawingSurface(
                             val at = currentView.toPicture(down.position.x, down.position.y)
                             // **The rule is `oneFinger`'s**, so this handler and a test cannot
                             // disagree about what a finger does.
-                            when (oneFinger(chosen)) {
-                                OneFinger.PAN -> panning = true
-                                OneFinger.ERASE -> {
+                            when (Drawing.oneFinger(chosen)) {
+                                Drawing.OneFinger.PAN -> panning = true
+                                Drawing.OneFinger.ERASE -> {
                                     erasing = true
                                     Drawing.hit(liveStrokes, at, 8f / currentView.zoom)?.let(onErase)
                                 }
-                                OneFinger.DRAW -> {
+                                Drawing.OneFinger.DRAW -> {
                                     drawing = true
                                     current = listOf(at)
                                 }
                             }
-                        } else if (oneFinger(chosen) == OneFinger.PAN) {
+                        } else if (Drawing.oneFinger(chosen) == Drawing.OneFinger.PAN) {
                             // **A gesture that began with two fingers, in the look mode**, is a
                             // pinch; if it loses one it keeps panning rather than becoming a stroke.
                             panning = true
@@ -672,7 +672,7 @@ fun DrawingSurface(
                                 // The stroke is still dropped, because the person changed what they
                                 // were doing and a mark left half-made is not one they meant. What
                                 // does not happen is the zoom.
-                                if (!twoFingers(chosen)) {
+                                if (!Drawing.twoFingers(chosen)) {
                                     if (drawing || erasing) {
                                         current = emptyList()
                                         drawing = false
