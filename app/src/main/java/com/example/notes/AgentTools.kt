@@ -1878,19 +1878,16 @@ class AgentTools(
         // a call whose result the model cannot check. `grep` may still be narrowed by a range: the
         // range says where to look and the pattern says what to change, exactly as `read` composes
         // them, and the operator reported that pair being wrongly refused.
-        if (!hasText && !hasFind && !hasRange) {
+        // **Every shape writes `text`, without exception.** There used to be two checks here and one
+        // of them was unreachable, which is how `{path, from, to}` with no text got as far as the file
+        // and answered "already said that, nothing changed" — the no-op that reads like success. The
+        // selector says *where*, `text` says *what*, and a call that names only the place has not
+        // said what to do yet.
+        if (!hasText) {
             return refusal(
-                "Say what to write. `text` alone replaces the whole file; `from`/`to` with `text` " +
-                    "replaces those lines; `grep` with `text` replaces every match.",
-            )
-        }
-        // **`text` is not a competing selector — it is what every shape writes.** Counting it as one
-        // refused "replace these lines with this text", which is the block shape itself. The only
-        // pair that is two edits is a pattern *and* a range used without text, and `grep` narrowed by
-        // a range is one selection with a bound, exactly as `read` composes them.
-        if (hasFind && hasRange && !hasText) {
-            return refusal(
-                "`grep` with `from`/`to` says where to look but not what to write. Add `text`.",
+                "This write says where but not what. Add `text`: with `from`/`to` it replaces those " +
+                    "lines, with `grep` it replaces every match, and on its own it replaces the whole " +
+                    "file. `\"text\": \"\"` means those lines are gone on purpose.",
             )
         }
         // **The write path asks, and a failure is a refusal.** A write computes the whole new file
