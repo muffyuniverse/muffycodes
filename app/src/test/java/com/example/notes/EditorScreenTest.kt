@@ -1122,6 +1122,7 @@ class EditorScreenTest {
         // **Two commits after the sync, so the two defaults must differ.** With one, both pairs
         // would be the same and the test could pass while the rule was not there.
         scene.project("groceries")
+        scene.open("groceries")
         val file = scene.file("milk.txt", "one")
         scene.sync("groceries")
         // **The editor has to be open to save a version**, and it has to be the file the versions
@@ -1162,6 +1163,7 @@ class EditorScreenTest {
         // mode." A person who tapped a row of a list called "Changes to send" has already said what
         // they want to see.
         scene.project("groceries")
+        scene.open("groceries")
         val file = scene.file("milk.txt", "one")
         scene.sync("groceries")
         scene.viewModel.openEditor(file)
