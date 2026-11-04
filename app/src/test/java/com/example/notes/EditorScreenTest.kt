@@ -1132,6 +1132,10 @@ class EditorScreenTest {
         scene.saveAsVersion("three")
 
         scene.viewModel.openChangedFile("milk.txt")
+        // **The screen asks for the diff when it draws in that mode**, which is what a person
+        // pressing the row gets. Driven here so the test does not need a composable to reach the
+        // view model's own answer.
+        scene.viewModel.openDiff("milk.txt")
 
         scene.await("the diff to choose its two ends", 20_000) {
             scene.viewModel.diffFrom != null && scene.viewModel.diffTo != null
