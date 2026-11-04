@@ -26,10 +26,10 @@ Full analysis in `/root/Downloads/PROPOSAL-tool-api-2026-11-04.md`. **All 17 wer
 | 26 | `tree`: rename `name`/`grep` → `name`/`content` | **PLANNED** step 2 |
 | 27 | why does `tree` have `from`/`to` | **PLANNED** step 2 · dropped |
 | 28 | `history` does not need `from`/`to` | **PLANNED** step 2 · dropped |
-| 29 | merge `create`+`edit` into `write` | **PLANNED** step 1 |
+| 29 | merge `create`+`edit` into `write` | **CLOSED** `b078981` · 21 tools where 22 were; count asserted |
 | 30 | remove `from`/`to` from commands | **PLANNED** step 2 · kept on `read` only |
-| 31 | remove `at` | **PLANNED** step 1 · dies with the merge |
-| 32 | what does `replace` mean on `write`? | **SETTLED** · option A (whole-file); **`replace` is deleted** — `text` is the new text in every shape |
+| 31 | remove `at` | **CLOSED** `b078981` · guard test refuses the key |
+| 32 | what does `replace` mean on `write`? | **CLOSED** `b078981` · `replace` deleted; `text` is the new text in all three shapes |
 | 33 | regex selection is per-symbol? | **SETTLED** · `multi: true` granted; it carries **no cap of its own** — `forConversation` already bounds every result |
 | 34 | `move` needs no `name` | **PLANNED** step 2 |
 | 35 | remove `from`/`to` **only if** regex can select lines | **SETTLED** · `multi` granted; `from`/`to` stay on `read`/`write` only |
