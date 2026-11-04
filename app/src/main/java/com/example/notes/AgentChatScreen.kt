@@ -372,22 +372,19 @@ fun AgentChatScreen(
                     ) {
                         Text("Reset")
                     }
-                    // **One control, and its label is what it will do.** An agent is on or off;
-                    // a switch would need a name for the on state that is not a button's.
+                    // **No start/stop button, because there is nothing for it to decide.** The
+                    // operator: "no need for start/stop the agent button - it should start when he
+                    // gets user message and stop when he has waited beyond waiting timeout."
                     //
-                    // **And a turn in flight is already on**, which is the half that was wrong. A
-                    // person who has just sent a message and watched it start working is not offered
-                    // "Start the agent" — the agent is running, whether or not a session row has been
-                    // written yet. Offering to start what is already going is how a header teaches a
-                    // person not to trust it.
-                    val on = ChatBar.on(viewModel.chatWorking, session?.running == true)
-                    TextButton(
-                        onClick = {
-                            if (on) viewModel.stopAgent(project) else viewModel.startAgent(project)
-                        },
-                    ) {
-                        Text(if (on) "Stop the agent" else "Start the agent")
-                    }
+                    // Which is what already happens: `sendChat` turns a stopped session back on
+                    // ("the person is the switch: there is no other control they would have used"),
+                    // and the runner writes a stopped session when the wait runs out. So the button
+                    // offered a state a person could not usefully be in — an agent on with nobody
+                    // having said anything, burning a keepalive to stay warm in silence.
+                    //
+                    // The state is still *shown*, in the bar's second line, which is the part a
+                    // person needs: "idle · waiting" says the agent is listening, and "stopped" says
+                    // why it is not.
                     // **The report button, which this screen never had.** The operator asked for it
                     // twice - "bug report icon still isnt added to agent chat as I instructed in an
                     // older report from yesterday" - and it is the screen where a report is most
@@ -1297,6 +1294,4 @@ internal object ChatBar {
     fun status(working: Boolean, sessionLabel: String?): String =
         if (working) "working" else sessionLabel ?: "idle · waiting"
 
-    /** True when the one control should offer to stop: a turn in flight is already on. */
-    fun on(working: Boolean, running: Boolean): Boolean = working || running
 }

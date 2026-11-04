@@ -3645,9 +3645,18 @@ class AppViewModel @JvmOverloads constructor(
     var chatBox: AgentChat.Box? by mutableStateOf(null)
         private set
 
-    /** Bumped on every read, so a box that is byte-identical still redraws. */
+    /**
+     * Bumped when a read produced a different conversation, **not on every read**.
+     *
+     * The screen keys its view state on it — the open bubble, each message's page, and what is being
+     * read fullscreen — so a poll that found nothing new must not move it, or a fullscreen page is
+     * closed by a timer. See [applyChat].
+     */
     var chatGeneration: Int by mutableStateOf(0)
         private set
+
+    /** True once a conversation has been read at all, so an empty first read still counts. */
+    private var chatRead: Boolean = false
 
     /** True while a burst is running. */
     var chatWorking: Boolean by mutableStateOf(false)
@@ -4397,8 +4406,14 @@ class AppViewModel @JvmOverloads constructor(
      */
     private fun applyChat(rows: List<AgentLog.Row>, follow: Boolean) {
         val box = AgentChat.box(rows)
-        val same = chatBox == box
+        // **The first read always counts, even when it is empty.** `box` is null for a conversation
+        // with no operator message yet, and null before the first read as well — so a "bump only when
+        // it changed" rule would leave `chatGeneration` at 0 for a project nobody has spoken in, and
+        // the two places that wait for a conversation to be read would wait for ever. Something *was*
+        // read; that it found nothing is an answer, not the absence of one.
+        val same = chatRead && chatBox == box
         chatBox = box
+        chatRead = true
         if (!same) chatGeneration++
     }
 

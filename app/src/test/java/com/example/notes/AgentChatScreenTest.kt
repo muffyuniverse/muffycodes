@@ -805,11 +805,23 @@ class AgentChatScreenTest {
     }
 
     @Test
-    fun `the control offers Stop while a turn is running`() {
-        // Offering to start what is already going is how a header teaches a person not to trust it.
-        assertTrue("a turn in flight is on", ChatBar.on(working = true, running = false))
-        assertTrue("and so is a running session", ChatBar.on(working = false, running = true))
-        assertTrue("and both", ChatBar.on(working = true, running = true))
-        assertFalse("only an idle project is off", ChatBar.on(working = false, running = false))
+    fun `there is no start or stop control, because a message is the control`() {
+        // **The operator**: "no need for start/stop the agent button - it should start when he gets
+        // user message and stop when he has waited beyond waiting timeout."
+        //
+        // Asserted as the absence of the two labels rather than as the absence of a function,
+        // because the *screen* is what the person saw. A view-model function that started a session
+        // still exists and is still used — by `sendChat`, which is the act the operator named.
+        chat(
+            object : Door {
+                override fun turn(request: Request): Result<Reply> = error("nothing is asked")
+            },
+        )
+        compose.waitForIdle()
+
+        // **Both labels, because either one alone would leave the control there** — the button
+        // showed one or the other depending on state.
+        compose.onAllNodesWithText("Start the agent").assertCountEquals(0)
+        compose.onAllNodesWithText("Stop the agent").assertCountEquals(0)
     }
 }
