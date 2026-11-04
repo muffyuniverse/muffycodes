@@ -579,12 +579,19 @@ object AgentChat {
                 )
             }
             if (burst.none { it.kind != AgentLog.TOLD }) continue
-            // A burst that only kept the conversation warm is the idle line, not a message.
-            if (burst.none { it.kind == AgentLog.CALL } &&
-                burst.any { it.kind == AgentLog.NOTE && it.name == PING }
-            ) {
-                continue
-            }
+            // **A burst that only kept the conversation warm is the idle line, not a message.**
+            //
+            // **"Only", and it used to mean "no calls" — which dropped real messages.** A warm turn
+            // writes no `TOLD`, so it joins the burst above it; a reply that called nothing and then
+            // sat idle while the keepalive pinged therefore had a `PING` note in its burst and no
+            // `CALL`, and the test passed for it. The operator saw the result: "the last message from
+            // agent disappeared in chat but still visible in the log" — the log has the `agent` row,
+            // and the box had decided its burst was warmth.
+            //
+            // So the question is what the burst *says*, not what it called: a burst with an
+            // utterance, a result or a notice is a message, and only one with nothing but the ping's
+            // own bookkeeping is not.
+            if (burst.all { it.kind == AgentLog.TOLD || it.warmth }) continue
             val pages = mutableListOf<Page>()
             val pending = mutableMapOf<Int, AgentLog.Row>()
             // **What the whole burst cost**, summed across its replies: the footer is one per

@@ -85,6 +85,19 @@ class AgentLogTest {
     }
 
     @Test
+    fun `the record and the chat agree on the name a ping's note carries`() {
+        // **Two literals, in two layers, so something has to hold them together.** `AgentLog` cannot
+        // name `AgentChat.PING` — the record does not know what the chat screen is called — but
+        // `Row.warmth` decides whether a burst is only warmth by comparing against its own copy, and
+        // the chat screen writes rows with the other one.
+        //
+        // **What breaks if they drift**: every keepalive would stop being recognised as warmth, and a
+        // conversation that has been idle for an hour would fill with one message per ping instead of
+        // one line. A test is the cheapest place for that to be impossible.
+        assertEquals("the record's copy of the ping's name", AgentChat.PING, AgentLog.PING_NAME)
+    }
+
+    @Test
     fun `the ids are one sequence over the whole record`() {
         // Reading the id back out of the file rather than trusting the return value: an id counter
         // that restarted at 1 on every open would make two rows share a number, and a forget would

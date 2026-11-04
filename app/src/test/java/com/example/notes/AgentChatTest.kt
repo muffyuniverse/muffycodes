@@ -2,6 +2,7 @@ package com.example.notes
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -282,6 +283,48 @@ class AgentChatTest {
             box!!.messages.filter { it.side == AgentChat.Side.OPERATOR }.map { it.body },
         )
         assertEquals("and it has no idle line of its own yet", null, box?.idle)
+    }
+
+    @Test
+    fun `a reply that was pinged afterwards is still a message`() {
+        // **The operator's report**: "for some reason the last message from agent disappeared in
+        // chat but still visible in the log."
+        //
+        // The log had the `agent` row; the box had decided its burst was warmth. A warm turn writes
+        // no `TOLD`, so it joins the burst above it — and the skip that dropped a burst with no
+        // `CALL` in it also dropped this one: the reply called nothing, then the keepalive pinged,
+        // and the burst that held the words the person was reading looked like an idle check.
+        //
+        // **The shape that matters is the one with no `TOLD` between them**, because that is what
+        // makes the ping land in the reply's own burst. With a `TOLD` the ping starts a new burst and
+        // the old test passed — which is why this bug survived a suite that already tested pings.
+        val words = said("Nothing to change.")
+        val rows = listOf(told("look"), turn(), words) + ping()
+
+        val box = AgentChat.box(rows)!!
+
+        val agent = box.bubbles.lastOrNull { it.caption == "agent" }
+        assertNotNull("**the reply is still drawn**", agent)
+        assertEquals("and it is the words the log holds", "Nothing to change.", agent!!.body)
+        assertEquals("there is no separate idle line for it", null, box.idle)
+    }
+
+    @Test
+    fun `a burst that is nothing but warmth is still the idle line`() {
+        // **The falsification for the test above.** Dropping the skip entirely would make every
+        // ping its own message, which is the thing the idle line exists to prevent — so this asserts
+        // that warmth alone still collapses.
+        val poll = ping()
+        val rows = listOf(told("anything new?")) + poll + poll
+
+        val box = AgentChat.box(rows)
+
+        assertEquals("no message came of it", 0, box?.turns?.size)
+        assertEquals(
+            "the checks are one line",
+            "idle since #${poll[1].id} · 2 checks",
+            box?.idle,
+        )
     }
 
     @Test

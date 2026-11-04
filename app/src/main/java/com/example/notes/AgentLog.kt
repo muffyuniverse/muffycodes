@@ -154,6 +154,14 @@ class AgentLog private constructor(
         const val GOT = "GOT"
         const val NOTE = "NOTE"
 
+        /**
+         * The name a keepalive's note carries, and **`AgentChat.PING` is pinned against it by a
+         * test.** Two literals because the two classes are in different layers — the record does not
+         * know what the chat screen is called — so the pair has to be held together somewhere, and
+         * a test is that somewhere.
+         */
+        const val PING_NAME = "ping"
+
 
         /** A result's first line: the call worked. */
         const val SUCCESS = "0"
@@ -448,6 +456,17 @@ class AgentLog private constructor(
     ) {
         /** An operator's message begins a conversation, and a terminating tool ends it. */
         val startsBurst: Boolean get() = kind == TOLD
+        /**
+         * **A row that exists only to keep the connection warm.**
+         *
+         * The request boundary and the ping's own note, and nothing else. A warm turn writes these
+         * two and no `TOLD`, so it joins the burst above it — which is the point, and also the
+         * reason this has to be asked of *every* row rather than by looking for a `PING` somewhere:
+         * a burst with a real reply and a later ping has one, and calling that burst "warmth" is
+         * how a message disappeared from the chat while the log still had it.
+         */
+        val warmth: Boolean
+            get() = kind == TURN || (kind == NOTE && name == PING_NAME)
         // **`endsBurst` used to live here, and it is gone rather than returning false.** It was true
         // for an `ASK`/`CONCLUDE` row, and those are gone: a turn now ends with the agent's own words
         // and no call, which is a note — and a note cannot end a burst without every other note
