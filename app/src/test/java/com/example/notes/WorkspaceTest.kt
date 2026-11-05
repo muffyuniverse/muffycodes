@@ -554,7 +554,6 @@ class WorkspaceTest {
         val file = File(dir, "milk.txt").apply { writeText("two litres") }
 
         assertEquals("no lock", Workspace.Hold.NONE, workspace.hold(file, emptySet()))
-        assertEquals("and nothing stops it", Workspace.Unsync.NONE, workspace.unsync(file))
     }
 
     @Test
@@ -598,13 +597,13 @@ class WorkspaceTest {
             Workspace.Hold.APP,
             workspace.hold(log, emptySet()),
         )
-        // **The second mark has to inherit too, and it is the one that was missing entirely.**
+        // **The mark has to inherit too, and it is the one that was missing entirely.**
         // The operator: "it shows, but why only red lock and not also red disconnect?" - the
         // disconnect was nested inside the text-file branch, which an app-held row never reaches.
         assertEquals(
             "and it is kept off GitHub as well as out of reach",
-            Workspace.Unsync.APP,
-            workspace.unsync(log),
+            Workspace.Hold.APP,
+            workspace.hold(log, emptySet()),
         )
 
         // **A file beside it is nobody's.** The rule is about being *inside* the folder, so a
@@ -719,7 +718,6 @@ class WorkspaceTest {
         val key = File(dir, ".env").apply { writeText("OPENROUTER_KEY=sk-or-...") }
 
         assertEquals("held by the app", Workspace.Hold.APP, workspace.hold(key, emptySet()))
-        assertEquals("and kept out of the repository", Workspace.Unsync.APP, workspace.unsync(key))
         // **The mark is not decoration.** A red lock the write funnel ignored would promise
         // something the save did not honour.
         assertFalse("so the funnel refuses a write", workspace.write(key, "replaced"))
@@ -768,28 +766,64 @@ class WorkspaceTest {
     }
 
     @Test
-    fun `unsync is a list of paths this phone keeps, not a git ignore`() {
-        // **The distinction the whole feature turns on.** A `.gitignore` line would untrack the file:
-        // out of the index, out of future commits, unversioned here. Unsyncing leaves it tracked and
-        // committed and only keeps it out of the tree that is *sent*, so the answer lives in the
-        // app's own flags beside pins and locks.
+    fun `a secret is kept out of the index by git itself, not by a derived tree`() {
+        // **This replaced the unsync mechanism, and it is the test that says the replacement is
+        // safe.** Unsyncing used to keep a key off GitHub by deriving a commit without it; that is
+        // deleted, so the only thing standing between a `.env` and GitHub is `.git/info/exclude`.
+        // If this fails, a key is pushed.
+        //
+        // `.git/info/exclude` rather than `.gitignore` on purpose: it is local, it is never pushed,
+        // and it protects every clone regardless of what a project's own ignore file says.
         val dir = project()
-        val file = File(dir, "notes.txt").apply { writeText("mine") }
+        workspace.ensureSecretIgnores(dir)
+        val key = File(dir, ".env").apply { writeText("TOKEN=abc") }
+        val note = File(dir, "notes.txt").apply { writeText("mine") }
 
-        assertEquals("nothing yet", Workspace.Unsync.NONE, workspace.unsync(file))
-        // A `.gitignore` line is NOT an unsync - it is a different act with a different consequence.
-        File(dir, Workspace.IGNORE).writeText("notes.txt\n")
-        assertEquals("an ignore is not an unsync", Workspace.Unsync.NONE, workspace.unsync(file))
+        // Asked of git, which is the authority — not of a list the app keeps.
+        val repo = org.eclipse.jgit.api.Git.init().setDirectory(dir).setInitialBranch("main").call()
+        try {
+            org.eclipse.jgit.api.Git(repo.repository).use { git ->
+                git.add().addFilepattern(".").call()
+            }
+            val tracked = repo.repository.readDirCache().let { cache ->
+                (0 until cache.entryCount).map { cache.getEntry(it).path }
+            }
+            assertTrue("the note is tracked: $tracked", tracked.contains("notes.txt"))
+            assertFalse("and the key is not: $tracked", tracked.any { it.endsWith(".env") })
+            assertTrue("the key is still on the phone", key.isFile)
+            assertEquals("with its contents", "TOKEN=abc", key.readText())
+        } finally {
+            repo.close()
+        }
+    }
 
-        val path = workspace.pathString(workspace.relative(file)!!)
-        workspace.setUnsynced(setOf(path))
-        assertEquals("the person unsynced it", Workspace.Unsync.USER, workspace.unsync(file))
-        assertEquals("and it is left out of what is sent", listOf("notes.txt"), workspace.unsentFrom("shopping"))
+    @Test
+    fun `the app's own folders are kept out of the index too`() {
+        // The other half of the same rule: `agent/`, `.muffy/` and `requests/` are the app's
+        // bookkeeping and must not be committed. They were omitted from the derived tree before;
+        // now they are excluded by git, and this says so rather than assuming it.
+        val dir = project()
+        workspace.ensureIgnore(dir)
+        File(dir, "agent").mkdirs()
+        File(dir, "agent/context.log").writeText("a conversation")
+        File(dir, "notes.txt").writeText("mine")
 
-        // And back again: the toggle has two directions, which the ignore button never had.
-        workspace.setUnsynced(emptySet())
-        assertEquals("and it is sent again", Workspace.Unsync.NONE, workspace.unsync(file))
-        assertTrue("with nothing left out", workspace.unsentFrom("shopping").isEmpty())
+        val repo = org.eclipse.jgit.api.Git.init().setDirectory(dir).setInitialBranch("main").call()
+        try {
+            org.eclipse.jgit.api.Git(repo.repository).use { git ->
+                git.add().addFilepattern(".").call()
+            }
+            val tracked = repo.repository.readDirCache().let { cache ->
+                (0 until cache.entryCount).map { cache.getEntry(it).path }
+            }
+            assertTrue("the note is tracked: $tracked", tracked.contains("notes.txt"))
+            assertFalse(
+                "and nothing under agent/ is: $tracked",
+                tracked.any { it.startsWith("agent/") },
+            )
+        } finally {
+            repo.close()
+        }
     }
 
     // ---- the four folders, and the prompt that names them -------------------
@@ -897,13 +931,15 @@ class WorkspaceTest {
         File(dir, ".env").writeText("KEY=sk-or-...")
         File(dir, "notes.txt").writeText("mine")
 
-        // **Found by walking, not by the stored list.** The app's rule is about names, so the only
-        // way to apply it is to look at what is actually in the project - a stored list could not
-        // know about a file somebody made a second ago.
-        assertEquals(
-            "the secret is left out and the note is not",
-            listOf(".env"),
-            workspace.unsentFrom("shopping"),
+        // **And git is told, which is what keeps it out now.** The rule used to be applied by
+        // omitting the path from a derived tree at push time; that mechanism is deleted, so the
+        // name has to reach `.git/info/exclude` or the key travels. Asked of git, not of the list.
+        workspace.ensureSecretIgnores(dir)
+        val exclude = File(dir, ".git/info/exclude")
+        assertTrue("the exclude file was written", exclude.isFile)
+        assertTrue(
+            "and it names the secret: ${exclude.readText()}",
+            exclude.readText().lineSequence().any { it.trim() == ".env" },
         )
     }
 }

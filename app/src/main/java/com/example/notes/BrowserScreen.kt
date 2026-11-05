@@ -105,7 +105,7 @@ class BrowserActions(
 /**
  * The folder the app is showing: the account's root, or any folder inside a project.
  *
- * **The account's root is the Projects screen** (§6): one row per project, each with its unsynced
+ * **The account's root is the Projects screen** (§6): one row per project, each with its unsent
  * count, a `⋮` menu and the add button. There is no `projects/` level to walk into. Anywhere else
  * it is an ordinary folder listing (§3): what you made, and nothing the app made.
  */
@@ -406,7 +406,7 @@ fun BrowserScreen(
 }
 
 /**
- * Account, project, the unsynced count and the sync button, in one slim row.
+ * Account, project and the count of unsent work, in one slim row.
  *
  * Public because §7 says **every** screen while a project is open carries it. It is
  * one function rather than one per screen so the row cannot drift apart — the
@@ -799,9 +799,12 @@ private fun EntryList(viewModel: AppViewModel, actions: BrowserActions) {
     // the file on every draw did not: the lock was written, the answer changed, and Compose had
     // nothing observable to recompose for.
     val lockedPaths = viewModel.lockedPaths
-    // **The unsync set is read here for the same reason.** Both marks are answers about state the
-    // view model holds; reading one from state and the other from the file was the whole bug.
-    val unsyncedPaths = viewModel.unsyncedPaths
+    // **The ignore set is read here for the same reason.** Both marks are answers about state the
+    // view model holds; reading one from state and the other from a call was the whole bug.
+    // **Ignored is asked of git, per path, and cached for the frame.** It is the same question
+    // `git status` answers and the same one that decides what is committed — so the row cannot
+    // disagree with what will actually be sent.
+    val ignoredPaths = viewModel.ignoredPaths
     if (entries.isEmpty()) {
         EmptyState(
             title = if (viewModel.isSearching) "Nothing matches" else "Nothing here yet",
@@ -841,11 +844,11 @@ private fun EntryList(viewModel: AppViewModel, actions: BrowserActions) {
                 // twenty lock icons would read as twenty things the person did - `hold` keeps that
                 // rule because it asks about this path only.
                 hold = ws?.hold(entry.file, lockedPaths) ?: Workspace.Hold.NONE,
-                // **From state, like the lock beside it.** `ws.unsync(file)` re-read the flags
+                // **From state, like the lock beside it.** Asking git per row would walk the tree
                 // file on every call, which Compose cannot see - so a tap that changed the file
                 // changed nothing the row was watching and the icon waited for some other redraw.
                 // Reported twice: "sync connect icon doesnt update visually after tapping on it".
-                unsync = ws?.unsync(entry.file, unsyncedPaths) ?: Workspace.Unsync.NONE,
+                unsync = ignoredPaths[entry.file.absolutePath] ?: false,
                 selected = viewModel.isSelected(entry.file),
                 choosing = viewModel.selected.isNotEmpty(),
                 // A hidden folder and the record's `agent/` are the app's
@@ -886,14 +889,14 @@ private fun EntryRow(
      */
     hold: Workspace.Hold = Workspace.Hold.NONE,
     /**
-     * Who is keeping this row out of the repository, from [Workspace.unsync].
+     * Whether git ignores this row — the same question `git status` answers.
      *
-     * **It had no state at all before this.** The button was drawn the same way whatever the truth
-     * was, so a file that was already ignored still offered "Stop sending", and one the app keeps
-     * out offered a tap that could not work. The operator's rule - grey unset, black set by the
-     * person, red set by the app - is what makes the three cases visible.
+     * **A plain tracked/untracked switch**, which is what the operator asked for: "gitignore should
+     * be just classic gitignore, not as sync currently implemented but a simple tracked/untracked
+     * switch". It used to be a third mechanism — a tracked file kept out of a derived tree — and the
+     * row said "not sent" because that was true of a thing that no longer exists.
      */
-    unsync: Workspace.Unsync = Workspace.Unsync.NONE,
+    ignored: Boolean = false,
     actions: BrowserActions,
     onOpen: () -> Unit,
 ) {
@@ -959,7 +962,7 @@ private fun EntryRow(
             //
             // It is a sibling of the lock rather than part of it because they answer different
             // questions, and a row can have one without the other.
-            if (unsync == Workspace.Unsync.APP) {
+            if (hold == Workspace.Hold.APP) {
                 UnsyncGlyph(
                     tint = APP_HOLD,
                     description = "${entry.name} is kept out of the repository by the app",
@@ -1030,11 +1033,15 @@ private fun EntryRow(
                 //
                 // The unset state is the *normal* one - most files are sent - so it gets the
                 // ordinary mark, and the broken chain is the exception a person is looking for.
-                val stopped = unsync == Workspace.Unsync.USER
+                val stopped = ignored
                 val tint = if (stopped) MaterialTheme.colorScheme.onSurface
                 else MaterialTheme.colorScheme.outline
-                val said = if (stopped) "${entry.name} is not sent to GitHub"
-                else "Stop sending ${entry.name} to GitHub"
+                // **"Ignored" is the word now**, because that is the mechanism: the path is in
+                // `.gitignore` and out of the index. "Not sent" described the derived tree, which
+                // no longer exists — and a person who wants to know why a file is missing from
+                // GitHub is looking for the word git itself uses.
+                val said = if (stopped) "${entry.name} is ignored: it is not on GitHub"
+                else "Ignore ${entry.name}, so it is not on GitHub"
                 if (stopped) {
                     UnsyncGlyph(tint = tint, description = said)
                 } else {

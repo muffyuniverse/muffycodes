@@ -206,7 +206,6 @@ class AppViewModel @JvmOverloads constructor(
      * Held in state for the same reason [lockedPaths] is: the row's icon has to redraw when it
      * changes, and asking `.muffy/unsync.json` on every call gave Compose no reason to.
      */
-    var unsyncedPaths: Set<String> by mutableStateOf(emptySet())
         private set
 
     /**
@@ -371,6 +370,29 @@ class AppViewModel @JvmOverloads constructor(
         }
 
     private var messageState: String? by mutableStateOf(null)
+
+    /**
+     * Every path git ignores in the project being browsed, keyed by absolute path.
+     *
+     * **Asked of git, not of a flag file.** `.gitignore` is the only authority on what is ignored —
+     * a pattern the app never wrote (`build/`, `*.log`) answers honestly here, and a second list
+     * kept by the app would be a second answer that could disagree with the one that decides what is
+     * sent. It is computed when the project is opened and after any change to an ignore, and read by
+     * the row so the mark and the truth cannot drift.
+     */
+    var ignoredPaths: Map<String, Boolean> by mutableStateOf(emptyMap())
+        private set
+
+    /** Re-reads the ignore state of [project], for the rows that draw it. */
+    fun refreshIgnored(project: String) {
+        val ws = workspace ?: return
+        val dir = ws.projectDir(project)
+        ignoredPaths = git?.open(project)?.use { repo ->
+            GitService.ignoredPaths(repo).associate { rel ->
+                File(dir, rel).absolutePath to true
+            }
+        } ?: emptyMap()
+    }
 
     /** The number of unsynced changes of each project, from `git status`. */
     var changesByProject: Map<String, Int> by mutableStateOf(emptyMap())
@@ -849,7 +871,6 @@ class AppViewModel @JvmOverloads constructor(
         entries = currentDir?.let { ws.list(it) } ?: emptyList()
         pins = ws.pins()
         lockedPaths = ws.locked()
-        unsyncedPaths = ws.unsynced()
         agentSessions = AgentSessions(ws.accountDir).read()
         refreshHeartbeat(ws)
         // The first refresh of a new process is where a session that survived a reboot gets its
@@ -861,6 +882,10 @@ class AppViewModel @JvmOverloads constructor(
         // otherwise be acted on again by the next press.
         selected = selected.filterTo(mutableSetOf()) { ws.fileAt(it.split("/")).exists() }
         refreshChanges()
+        // **The ignore marks are re-read on every refresh**, for the reason the lock had to be: a
+        // value Compose cannot see does not redraw the row, so an icon read from a call rather than
+        // from state would stay wrong after the tap that changed it.
+        currentProject?.let(::refreshIgnored)
         // **One funnel for "the screen changed".** Every change this app makes ends in
         // `refresh()`, so this is the one place that can answer a tap without forty
         // call sites having to remember to. A change that leaves the signature alone
@@ -2143,57 +2168,6 @@ class AppViewModel @JvmOverloads constructor(
         }
         refresh()
         commitProject(project, if (ignore) "Ignored $inside" else "Tracked $inside")
-    }
-
-    /**
-     * Keeps [file] off GitHub, or sends it again — **one act, both directions.**
-     *
-     * **Not `.gitignore`.** An ignore would untrack the file: out of the index, out of future
-     * commits, unversioned on the phone. Unsyncing is the other thing: the file stays tracked, every
-     * save still makes a version, the local history keeps all of them, and only the tree that is
-     * *sent* leaves it out. The operator's distinction, and the reason the button is not called
-     * Ignore.
-     *
-     * A file the app holds - a secret, or the app's own bookkeeping - cannot be unsynced *or*
-     * synced: the app already keeps it off GitHub, and a tap that claimed to change that would be
-     * lying. Those are drawn as marks rather than buttons, so this should not be reached; the guard
-     * is here so the rule lives with the act rather than only with the drawing.
-     */
-    fun toggleUnsynced(file: File) {
-        val ws = workspace ?: return
-        if (ws.unsync(file) == Workspace.Unsync.APP) {
-            message = "The app keeps ${file.name} off GitHub, and only the app can change that"
-            return
-        }
-        val path = ws.relative(file) ?: return
-        val key = ws.pathString(path)
-        val was = key in unsyncedPaths
-        Trace.tap(if (was) "sync again" else "unsync", file.name)
-        val next = if (was) unsyncedPaths - key else unsyncedPaths + key
-        ws.setUnsynced(next)
-        unsyncedPaths = next
-        // **Said, because the state is not visible in the file.** A lock shows on the row; whether a
-        // file will be sent is a fact about the next push, so the sentence is where a person learns
-        // it - and the sentence differs by direction, because only one of them has a caveat.
-        message = if (was) {
-            "${file.name} will be sent again on the next sync"
-        } else {
-            // **The caveat, and only when it is true.** Unsyncing stops future sends; it does not
-            // take back what GitHub already has. Saying so on a file that was never pushed would be
-            // noise, so the question is asked of the repository.
-            val project = ws.projectOf(file)
-            val inside = path.drop(1).joinToString("/")
-            val pushed = project != null && git?.open(project)?.use { repo ->
-                GitService.wasPushed(repo, inside)
-            } == true
-            if (pushed) {
-                "${file.name} will not be sent again. Its earlier versions stay on GitHub — this " +
-                    "stops future sends, it does not take back what was sent."
-            } else {
-                "${file.name} will not be sent to GitHub"
-            }
-        }
-        refresh()
     }
 
     /** True when [file] may not be written — itself, or because a folder above it is.

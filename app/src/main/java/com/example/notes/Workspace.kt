@@ -414,7 +414,7 @@ class Workspace(val accountDir: File) {
         if (appHold(file) == Hold.APP) return Hold.APP
         val path = relative(file)?.let(::pathString) ?: return Hold.NONE
         // **A lock covers what is inside it, and the row has to say so.** The operator's report:
-        // "when folder is locked or unsynced then all of its content also get icons with the same
+        // "when folder is locked then all of its content also get icons with the same
         // state (red locked parent means red locked children etc)". [isLocked] already enforced
         // this - a child of a locked folder could not be written - and the *icon* said it could,
         // because this asked `isLockedHere`'s question ("did I lock this one?") rather than "is
@@ -444,99 +444,10 @@ class Workspace(val accountDir: File) {
      * [USER] is a path on that list. [APP] is the same list, plus the app's own secret rule - see
      * [appHold] - which the person cannot lift.
      */
-    enum class Unsync {
-        /** Sent as normal. */
-        NONE,
-
-        /** The person unsynced it. Tappable, and tapping syncs it again. */
-        USER,
-
-        /** The app keeps it off GitHub. Shown, and **not liftable**. */
-        APP,
-    }
-
-    /** The paths the person has unsynced, as paths from the account root. */
-    fun unsynced(): Set<String> = readFlags(UNSYNC_FILE)
-
-    /** Replaces the unsynced paths. */
-    fun setUnsynced(paths: Set<String>) = writeFlags(UNSYNC_FILE, paths)
-
-    /**
-     * The unsync state of [file], answered once.
-     *
-     * **APP wins**, because the app's rule cannot be lifted: reporting USER on a secret would offer
-     * a toggle whose other position is still refused.
-     */
-    fun unsync(file: File): Unsync = unsync(file, unsynced())
-
-    /**
-     * The same answer, from a set the caller already holds — **which is what makes it redraw.**
-     *
-     * The no-argument form re-reads `.muffy/unsynced.json` on every call. That is fine for a tool
-     * asking once and wrong for a row drawn by Compose: the read is invisible to the runtime, so a
-     * tap that changed the file changed no state the row was watching, and the icon stayed as it was
-     * until something else happened to redraw the list. Reported twice, in two builds: "sync connect
-     * icon doesnt update visually after tapping on it", and then "sync icon still lags to change
-     * after tapping".
-     *
-     * **The lock had this exact bug and was fixed the same way**, and its comment is the one that
-     * explains why: "asking `.muffy/locked.json` on every call meant Compose had no reason to redraw
-     * the row when the lock changed". The fix was applied to one of the two marks and not the other.
-     */
-    fun unsync(file: File, kept: Set<String>): Unsync {
-        if (appHold(file) == Hold.APP) return Unsync.APP
-        val path = relative(file)?.let(::pathString) ?: return Unsync.NONE
-        if (path in kept) return Unsync.USER
-        // **The same inheritance as the lock, and for the same reason.** Keeping a folder off GitHub
-        // keeps everything in it off GitHub - that is what `unsyncPaths` builds for the push - so a
-        // child row that showed no mark was describing a file that would not be sent as one that
-        // would. Operator: "when folder is locked or unsynced then all of its content also get icons
-        // with the same state".
-        return if (kept.any { it.isNotEmpty() && path.startsWith("$it/") }) Unsync.USER else Unsync.NONE
-    }
-
-    /**
-     * The project-relative paths to leave out of the tree that goes to GitHub.
-     *
-     * **What the push actually uses.** A path is left out when the person unsynced it or the app
-     * holds it - and a folder takes its contents with it, which is the rule a person expects from
-     * "do not send this" and the one that makes unsyncing a folder mean something.
-     *
-     * Only this project's paths are returned, because that is the only tree being sent: an unsync in
-     * another project is not this one's business.
-     */
-    fun unsentFrom(project: String): List<String> {
-        val dir = projectDir(project)
-        val paths = unsynced()
-        val out = sortedSetOf<String>()
-        // The person's list first, as project-relative paths.
-        paths.forEach { key ->
-            val prefix = "$project/"
-            if (key.startsWith(prefix)) out += key.removePrefix(prefix)
-        }
-        // Then the app's rule, walked from what is actually in the project: the secret patterns are
-        // about names, so they have to be matched against real files rather than guessed at.
-        dir.walkTopDown().forEach { file ->
-            if (file == dir) return@forEach
-            val rel = file.absolutePath.removePrefix(dir.absolutePath).removePrefix("/")
-                .replace(File.separatorChar, '/')
-            if (rel.isEmpty()) return@forEach
-            if (appHold(file) == Hold.APP) {
-                out += rel
-                if (file.isDirectory) out += dir.walkTopDown()
-                    .filter { it != dir && it.absolutePath.startsWith(file.absolutePath) }
-                    .map { it.absolutePath.removePrefix(dir.absolutePath).removePrefix("/")
-                        .replace(File.separatorChar, '/') }
-                    .toList()
-            }
-        }
-        return out.toList()
-    }
-
     /**
      * The names that hold a credential, and are therefore **held by the app**.
      *
-     * This is the producer that makes [Hold.APP] and [Unsync.APP] real. Until it existed the app had
+     * This is the producer that makes [Hold.APP] real. Until it existed the app had
      * the two states and no way to reach them, so the red mark could never be drawn and the rule
      * "what is set by app cannot be unset" governed nothing.
      *
@@ -1643,7 +1554,6 @@ class Workspace(val accountDir: File) {
          * So the list is the app's own, beside `pins.json` and `locked.json`, and the push derives
          * the tree it sends from it.
          */
-        const val UNSYNC_FILE = "unsync.json"
 
         /** git's own store. Not shown, because it is not a file a person browses. */
         const val GIT_DIR = ".git"

@@ -468,6 +468,19 @@ object GitService {
      * never wrote (a `build/` line, a `*.log`) answers honestly. A second list of ignored paths kept
      * by the app would be a second answer that can disagree with the one that decides what is sent.
      */
+    /**
+     * Every path git ignores, as repository-relative paths.
+     *
+     * **One status call for the whole project**, because the row asks about every entry on screen and
+     * a call per row would walk the working tree once per file. The caller maps them onto the files
+     * it is drawing.
+     */
+    fun ignoredPaths(repo: Repository): List<String> = try {
+        Git(repo).use { git -> git.status().call().ignored.map { it.trimEnd('/') } }
+    } catch (t: Throwable) {
+        emptyList()
+    }
+
     fun isIgnored(repo: Repository, path: String): Boolean = try {
         Git(repo).use { git -> git.status().call().ignored.any { it.trimEnd('/') == path.trimEnd('/') } }
     } catch (t: Throwable) {
@@ -1623,166 +1636,6 @@ object GitService {
             RemoteResult(Secrets.explain(e, "Push failed"), false)
         }
     }
-
-    /**
-     * Pushes the current branch **with [omit] left out of the tree that is sent.**
-     *
-     * **This is what "unsync" means, and it is not `.gitignore`.** An ignore would untrack the file:
-     * it would leave the index, stop being committed, and stop being versioned on the phone. The
-     * operator's distinction is the opposite - the file stays tracked and stays in the local history
-     * with every version it ever had, and is simply never sent.
-     *
-     * The mechanism is a **derived commit**. `HEAD` is left exactly as it is; a new commit is written
-     * whose parent is `HEAD` and whose tree is `HEAD`'s tree minus [omit], and *that* commit is what
-     * the refspec sends. So:
-     *
-     * - the phone's history is untouched - every unsynced file keeps its commits and its versions
-     * - GitHub's branch never receives those paths from now on
-     * - nothing has to be remembered about what was sent: the next push derives the tree again
-     *
-     * **`force` stays true**, because the derived commit is not a descendant of what the remote
-     * holds - it is a sibling. A plain push would be rejected as a non-fast-forward.
-     *
-     * What this does **not** do is remove paths GitHub already has. Their earlier commits are on the
-     * remote and stay there; taking them back would mean rewriting the remote's history, which is a
-     * different and much louder act. The caller says so in a sentence rather than implying
-     * otherwise.
-     */
-    fun pushWithout(
-        repo: Repository,
-        token: String?,
-        omit: List<String>,
-        author: GitAuthor,
-        message: String,
-    ): RemoteResult {
-        if (omit.isEmpty()) return pushForce(repo, token)
-        // **The filter is switched off around this push too**, for the reason spelled out in `push`:
-        // JGit's LFS pre-push hook asks for a connection before it knows it has anything to send, and
-        // on a phone that request dies inside `SshSupport` and takes the whole push with it.
-        val wasEnabled = repo.config.getBoolean("filter", "lfs", "useJGitBuiltin", false)
-        if (wasEnabled) {
-            repo.config.setBoolean("filter", "lfs", "useJGitBuiltin", false)
-            repo.config.save()
-        }
-        try {
-            return pushDerived(repo, token, omit, author, message)
-        } finally {
-            if (wasEnabled) {
-                repo.config.setBoolean("filter", "lfs", "useJGitBuiltin", true)
-                repo.config.save()
-            }
-        }
-    }
-
-    private fun pushDerived(
-        repo: Repository,
-        token: String?,
-        omit: List<String>,
-        author: GitAuthor,
-        message: String,
-    ): RemoteResult {
-        return try {
-            val local = currentBranch(repo)
-            val onto = remoteBranch(repo, local) ?: local
-            val head = repo.resolve("HEAD") ?: return RemoteResult("There is nothing to send yet", false)
-            // **The derived tree, built from `HEAD`'s own tree.** Walking the parent's tree and
-            // skipping the omitted paths keeps every other entry - including their modes and their
-            // exact object ids - so the commit differs from `HEAD` in exactly the omitted paths and
-            // in nothing else.
-            val omitted = omit.map { it.trim('/') }.filter { it.isNotEmpty() }.toSet()
-            val derived = writeTreeWithout(repo, head, omitted)
-                ?: return RemoteResult("The tree could not be prepared for sending", false)
-            val commit = repo.newObjectInserter().use { inserter ->
-                val builder = org.eclipse.jgit.lib.CommitBuilder()
-                builder.setTreeId(derived)
-                builder.setParentId(head)
-                builder.setAuthor(author.ident())
-                builder.setCommitter(author.ident())
-                builder.setMessage(message)
-                val id = inserter.insert(builder)
-                inserter.flush()
-                id
-            }
-            // The derived commit is addressable but not on any branch of its own: it is sent by id,
-            // and the local branch never points at it, which is what keeps the phone's history the
-            // phone's.
-            Git(repo).use { git ->
-                val command = git.push()
-                    .setRemote("origin")
-                    .setForce(true)
-                    // **`.name`, because a `RefSpec` parses a string and an `ObjectId` renders as
-                    // `AnyObjectId[e55...]`** - which git rejects as "Invalid ref name", and the
-                    // sync then looked like a push that failed for no stated reason.
-                    .setRefSpecs(RefSpec("${commit.name}:refs/heads/$onto"))
-                credentials(token)?.let { command.setCredentialsProvider(it) }
-                val results = command.call()
-                val updates = results.flatMap { it.remoteUpdates }
-                val messages = updates.mapNotNull { it.message }.filter { it.isNotBlank() }
-                    .joinToString("; ")
-                val ok = updates.isNotEmpty() && updates.all {
-                    it.status == RemoteRefUpdate.Status.OK ||
-                        it.status == RemoteRefUpdate.Status.UP_TO_DATE
-                }
-                RemoteResult(Secrets.scrub(messages.ifBlank {
-                    if (ok) "Pushed" else "Nothing was pushed"
-                }), ok)
-            }
-        } catch (e: Throwable) {
-            RemoteResult(Secrets.explain(e, "Push failed"), false)
-        }
-    }
-
-    /**
-     * `HEAD`'s tree with [omit] left out, written into the repository.
-     *
-     * **Built from the parent tree rather than from the working directory.** The working directory is
-     * what is on disk *now*, which is not necessarily what `HEAD` says - and a push that quietly
-     * included uncommitted work would send something nobody asked to send. Reading the tree means the
-     * derived commit differs from `HEAD` only by the omitted paths.
-     *
-     * `DirCacheEditor` rather than a hand-rolled walk: it is JGit's own way of producing a tree from
-     * a tree, it keeps every surviving entry's id, mode and attributes, and `rm` takes a whole
-     * subtree when the path names a folder - which is the rule a person expects from "do not send
-     * this".
-     */
-    private fun writeTreeWithout(repo: Repository, head: AnyObjectId, omit: Set<String>): ObjectId? =
-        try {
-            RevWalk(repo).use { walk ->
-                val tree = walk.parseCommit(head).tree
-                val cache = org.eclipse.jgit.dircache.DirCache.newInCore()
-                // **`addTree` copies the tree in whole**, recursively, so every nested entry arrives
-                // with its own id and mode; only then are the omitted paths taken out, which is what
-                // keeps everything else byte-identical to `HEAD`. The signature is
-                // `addTree(prefix, stage, reader, tree)` - an instance method on the builder.
-                // `DirCacheBuilder` is not `AutoCloseable`, so the reader is the only thing closed.
-                repo.newObjectReader().use { reader ->
-                    val builder = cache.builder()
-                    builder.addTree(
-                        ByteArray(0),
-                        org.eclipse.jgit.dircache.DirCacheEntry.STAGE_0,
-                        reader,
-                        tree,
-                    )
-                    builder.finish()
-                }
-                // **`DeleteTree`, not `DeletePath`.** A path that names a folder has to take its
-                // contents with it, and `DeletePath` removes one entry - so unsyncing `keys/` would
-                // have left `keys/id_rsa` in the tree that was sent, which is the one outcome this
-                // feature exists to prevent. `DeleteTree` handles a file and a folder the same way.
-                val editor = cache.editor()
-                omit.forEach { path ->
-                    editor.add(org.eclipse.jgit.dircache.DirCacheEditor.DeleteTree(path))
-                }
-                editor.finish()
-                repo.newObjectInserter().use { inserter ->
-                    val id = cache.writeTree(inserter)
-                    inserter.flush()
-                    id
-                }
-            }
-        } catch (e: Throwable) {
-            null
-        }
 
     /**
      * Every path held by [ref], or none when it does not resolve.

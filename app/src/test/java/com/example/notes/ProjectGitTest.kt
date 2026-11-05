@@ -893,14 +893,14 @@ class ProjectGitTest {
         assertTrue(git.sync("Shopping").success)
 
         assertEquals("nothing to send", 0, git.changes("Shopping").total)
-        // **Still excluded, and that is right for the app's OWN folders.** `agent/`, `.muffy/` and
-        // `requests/` are bookkeeping the app writes, not the person's work: there is no version of
-        // them worth keeping and no sense in which a person "unsynced" them. `.git/info/exclude`
-        // keeps them out of git entirely, which is the older and still correct answer for these.
+        // **Still excluded, and now for every path.** `agent/`, `.muffy/` and `requests/` are
+        // bookkeeping the app writes, not the person's work. `.git/info/exclude` keeps them out of
+        // git entirely.
         //
-        // **Unsync is the different act, for the person's own files** - see `WorkspaceTest`, where
-        // an unsynced note stays committed here and is left out of the tree that is sent. The two
-        // mechanisms are deliberately not the same thing.
+        // **This is now the only mechanism.** The other one — a tracked file kept out of a derived
+        // tree that was force-pushed — is deleted, because the operator replaced it with classic
+        // gitignore: "a simple tracked/untracked switch". So a path is either tracked and sent, or
+        // ignored and not, and there is no third state for a test to distinguish.
         assertTrue(
             "the record has no commit at all",
             git.log("Shopping", "${AgentLog.DIR}/session.log").isEmpty(),

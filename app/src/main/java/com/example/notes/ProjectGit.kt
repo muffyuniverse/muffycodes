@@ -280,15 +280,6 @@ class ProjectGit(
                 // made above and stays exactly as it is; the push derives a tree without them, so a
                 // file the person unsynced keeps every version it has on this phone and never
                 // reaches GitHub. An empty list falls through to the ordinary push.
-                val omitted = workspace.unsentFrom(project)
-                if (omitted.isNotEmpty()) {
-                    Trace.note(
-                        "not sent",
-                        "$project: ${omitted.size} — " +
-                            omitted.take(12).joinToString(", ") +
-                            (if (omitted.size > 12) " +${omitted.size - 12} more" else ""),
-                    )
-                }
                 // **The pictures first, and this order is not a preference.** A pointer names its
                 // bytes by SHA-256, and GitHub refuses a push whose tree references an object it
                 // does not hold (`GH008`). So the bytes have to be there before the ref that names
@@ -307,16 +298,16 @@ class ProjectGit(
                     )
                 } else {
                     // A push that fails leaves the row saying there is work to send, which is the
-                    // truth, and is what makes the button something a person can press again —
-                    // nothing has to be recorded either way, because the count is asked of the
-                    // repository (see [changes]).
-                    GitService.pushWithout(
-                        it,
-                        tokenProvider(),
-                        omitted,
-                        authorProvider(),
-                        note.trim().ifBlank { "Sync" },
-                    )
+                    // truth, and is what makes the next attempt meaningful — nothing has to be
+                    // recorded either way, because the count is asked of the repository.
+                    //
+                    // **Ordinary push, not a derived tree.** There used to be a third mechanism here:
+                    // "unsync" left a file tracked and derived a commit without it, which could only
+                    // be delivered by force because that commit was on no local branch. The operator
+                    // replaced it with classic gitignore — "a simple tracked/untracked switch" — so
+                    // what is on this phone's `main` and what is on GitHub's are now the same
+                    // history, and the push is a fast-forward like any other.
+                    GitService.push(it, tokenProvider())
                 }
             } catch (e: Throwable) {
                 GitService.RemoteResult(Secrets.describe(e), false)
