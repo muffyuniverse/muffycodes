@@ -200,12 +200,21 @@ class NamingFeatureTest : FeatureTest() {
         assertNotNull(Workspace.nameProblem("   "))
     }
 
-    /** Makes a file with [name] and answers the name it was actually given. */
+    /**
+     * Makes a file with [name] and answers the name it was actually given.
+     *
+     * **Asked of the entries, not of [made]**, because the point of these tests is precisely that
+     * the app does not change the name — a helper that went through the same rule would agree with
+     * itself whatever happened.
+     */
     private fun madeFileNamed(name: String): String {
         scene.signedIn()
-        val project = scene.project("groceries")
+        scene.project("groceries")
         scene.open("groceries")
         assertTrue("made", scene.viewModel.createFile(name))
-        return scene.names().single { it != project && it != "agent" && !it.startsWith(".") }
+        val made = scene.viewModel.entries.map { it.name }
+            .single { !it.startsWith(".") && it != "agent" }
+        assertTrue("and it is on disk as $made", File(scene.viewModel.currentDir!!, made).isFile)
+        return made
     }
 }
