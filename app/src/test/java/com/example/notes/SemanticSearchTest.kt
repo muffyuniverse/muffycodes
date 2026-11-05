@@ -166,6 +166,37 @@ class SemanticSearchTest {
     }
 
     @Test
+    fun `a version older than forty saves is still found`() {
+        // **The window is gone, and this is the test that says so.** The history pass used to read
+        // the newest forty commits, inherited from the text-mode list where forty is how far a person
+        // scrolls. For an index that was the wrong question - "where did I write about this" is not
+        // "somewhere in the last forty saves" - and the operator's answer was that history is
+        // unbounded: the app is for medium projects, and squashing a bigger one is git's job.
+        val git = ProjectGit(ws, { null }, { GitAuthor("Test", "test@example.com") })
+        val file = File(File(ws.accountDir, "shopping"), "milk.txt")
+        write("shopping", "milk.txt", "the milk went sour\n")
+        git.init("shopping").getOrThrow()
+        val oldest = RepoHistory(ws.projectDir("shopping")).log().last().id
+        // **Forty-one saves on top**, which is one past the window that used to exist. Not sixty:
+        // each save is a real commit in a real repository, and the point is the boundary rather than
+        // the distance - a test that proves "the window is gone" in four seconds rather than seven is
+        // a test that runs in every shard.
+        for (i in 1..41) {
+            write("shopping", "milk.txt", "the milk was poured away, revision $i\n")
+            requireNotNull(git.commit("shopping", "save $i"))
+        }
+
+        val answer = engine()
+            .answer(null, "milk", paths = 10, depth = 8, Deadline.none(), history = true)
+            .getOrThrow()
+
+        assertTrue(
+            "the oldest save is still indexed: $answer",
+            answer.contains("milk.txt@${oldest.take(7)}"),
+        )
+    }
+
+    @Test
     fun `without history, a deleted line is not answered`() {
         savedTwice()
         write("shopping", "milk.txt", "nothing about dairy here\n")

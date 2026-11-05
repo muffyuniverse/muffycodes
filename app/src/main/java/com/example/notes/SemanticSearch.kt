@@ -401,7 +401,18 @@ class SemanticSearch(
                 // **What is already held, asked once.** Every skip below is then a set lookup rather
                 // than a tree read, which is what keeps a repeated pass cheap.
                 val held = index.versions()
-                GitService.walkChanges(it, limit = VERSIONS_PER_PATH, deadline = deadline) { _, changes ->
+                // **Every commit, with no window.** This used to read the newest forty, inherited
+                // from the text-mode history where forty was how far a person scrolls. For an index
+                // that is the wrong question: the answer to "where did I write about this" is not
+                // "somewhere in the last forty saves", and the measured cost of the whole history of
+                // a medium project is $0.31 to embed and about seventeen minutes for the first pass.
+                // The operator's line: *"our app is supposed to support medium sized projects, not
+                // giants"*, and squashing a project that outgrows that is git's job, not ours.
+                //
+                // **`READ_ALL`, not a large number**, because a number would be a ceiling that
+                // pretends to be a bound: `walkChanges` counts commits, and a project with more is a
+                // project the person can squash.
+                GitService.walkChanges(it, deadline = deadline) { _, changes ->
                     if (stopped != null) return@walkChanges
                     for (change in changes) {
                         if (stopped != null) return@walkChanges
@@ -905,16 +916,6 @@ class SemanticSearch(
          * size, so the note can say which file and why.
          */
         const val MAX_CHARS = 400_000
-
-        /**
-         * How many commits back the history pass reads.
-         *
-         * **The same bound the text-mode history uses** ([AgentTools.VERSIONS_CONSIDERED]), so
-         * `search {history}` means one thing in both modes: the newest forty saves of anything, not
-         * "everything that ever happened". A thousand-save file is a thousand trees to open, and a
-         * person asking what a file used to say means the recent answers.
-         */
-        const val VERSIONS_PER_PATH = AgentTools.VERSIONS_CONSIDERED
 
         /** Folder levels below the project that the walk will follow. A tree, not a graph. */
         const val WALK_DEPTH = 24
