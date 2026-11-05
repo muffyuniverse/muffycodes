@@ -184,7 +184,7 @@ class EditorScreenTest {
         compose.onNodeWithText("three litres").assertIsDisplayed()
         compose.onNodeWithText("View").performClick()
 
-        val renamed = File(scene.viewModel.currentDir!!, "shopping_list.txt")
+        val renamed = File(scene.viewModel.currentDir!!, "shopping list.txt")
         assertTrue("the file was renamed", renamed.isFile)
         // Saving happens on the app's worker, so the file answers just after the
         // button does — the same wait a person never notices.
@@ -204,13 +204,13 @@ class EditorScreenTest {
         compose.onNodeWithText("milk.txt").performTextReplacement("shopping list")
         compose.onNodeWithText("shopping list").performImeAction()
 
-        compose.onNodeWithText("shopping_list.txt").assertIsDisplayed()
+        compose.onNodeWithText("shopping list.txt").assertIsDisplayed()
         assertTrue(
             "the file, renamed",
-            File(scene.viewModel.currentDir!!, "shopping_list.txt").isFile,
+            File(scene.viewModel.currentDir!!, "shopping list.txt").isFile,
         )
 
-        compose.onNodeWithText("shopping_list.txt").performTextReplacement("groceries")
+        compose.onNodeWithText("shopping list.txt").performTextReplacement("groceries")
         compose.onNodeWithText("groceries").performImeAction()
 
         compose.onNodeWithText("groceries.txt").assertIsDisplayed()
@@ -916,9 +916,11 @@ class EditorScreenTest {
         compose.onNodeWithText("Shopping List").performImeAction()
 
         val dir = scene.viewModel.currentDir!!
+        // **The name as typed.** It used to be `shopping_list.txt`, because the app lowercased
+        // and joined; the rewriter is gone and a name is the person's.
         assertTrue(
-            "under the app's one name shape",
-            File(dir, "shopping_list.txt").isFile,
+            "under the name that was typed",
+            File(dir, "Shopping List.txt").isFile,
         )
         assertFalse("and not under the old one", File(dir, "milk.txt").exists())
     }

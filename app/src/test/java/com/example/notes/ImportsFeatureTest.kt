@@ -152,14 +152,15 @@ class ImportsFeatureTest {
 
     @Test
     fun `a name that is only a symbol and a number keeps the number`() {
-        // Cleaning removes punctuation, not meaning: `(1)` is how a phone writes the
-        // second copy of a picture, and the 1 is the only part that says which one.
+        // **`(1)` is a name, not punctuation to remove.** It is how a phone writes the second copy
+        // of a picture, and the number is the only part that says which one. The app used to strip
+        // it to `1.png`; a name is now kept unless it cannot be checked out on Windows.
         val dir = File(context.cacheDir, "shape3-${System.nanoTime()}").apply { mkdirs() }
         val uri = uriWith("(1).png", "x".toByteArray())
 
         Imports.filesInto(context, listOf(uri), dir)
 
-        assertEquals("1.png", dir.listFiles()!!.single().name)
+        assertEquals("(1).png", dir.listFiles()!!.single().name)
     }
 
     @Test
