@@ -445,6 +445,76 @@ class Workspace(val accountDir: File) {
      * [appHold] - which the person cannot lift.
      */
     /**
+     * What a path that did not exist a moment ago should be, by who made it.
+     *
+     * **The operator's two defaults are deliberately opposite**, and this is where the difference
+     * lives. A person's new file is **locked and ignored**: it is theirs, the agent may read it but
+     * not change it, and it is not on GitHub until they say so. An agent's new file is **tracked and
+     * unlocked**: it is work the agent did on the project, it belongs in the repository, and the
+     * person can lock it later if they disagree.
+     *
+     * **Why an explicit call rather than a flag on `write`.** A boolean would be a value a caller
+     * could get backwards and never notice; a named function at the point of creation says who is
+     * acting, and the two call sites read as the two sentences they are. It also keeps the decision
+     * out of `write` itself, so a person saving through the editor cannot accidentally take the
+     * agent's default.
+     *
+     * **Ignoring is not hiding.** A locked file is read-only to the agent, not invisible: `read` and
+     * `search` still find it, which is what "locked doesnt mean blind, it means readonly" asks for.
+     */
+    fun createdByOperator(file: File) {
+        // **The lock first, so the ignore is not blocked by it.** `.gitignore` lives in the project
+        // root and is not inside the file being locked, but a project-level lock would refuse the
+        // write — and a creation that silently skipped half of its own rule is the failure mode
+        // this app keeps fixing.
+        val rel = relative(file) ?: return
+        setLocked(locked() + pathString(rel))
+        ignore(file)
+    }
+
+    /** The other default: an agent's new file is tracked, unlocked, and belongs to the project. */
+    fun createdByAgent(file: File) {
+        // **Unlocked explicitly rather than "left alone".** A path can inherit a lock from a folder
+        // above it, and a file made inside a locked folder would otherwise be locked by accident —
+        // so the answer to "is this new file the agent's to change" is stated, not assumed.
+        val rel = relative(file) ?: return
+        setLocked(locked() - pathString(rel))
+        track(file)
+    }
+
+    /** Adds [file] to the project's `.gitignore`, so git stops tracking it. */
+    private fun ignore(file: File) {
+        val project = projectOf(file) ?: return
+        val rel = relative(file) ?: return
+        val inside = rel.drop(1).joinToString("/").let { if (file.isDirectory) "$it/" else it }
+        if (inside.isEmpty()) return
+        val ignoreFile = File(projectDir(project), IGNORE)
+        val current = if (ignoreFile.isFile) read(ignoreFile) else ""
+        if (current.lineSequence().any { it.trim() == inside }) return
+        val text = buildString {
+            append(current)
+            if (current.isNotEmpty() && !current.endsWith("\n")) append("\n")
+            appendLine(inside)
+        }
+        write(ignoreFile, text)
+    }
+
+    /** Takes [file] back out of the project's `.gitignore`. */
+    private fun track(file: File) {
+        val project = projectOf(file) ?: return
+        val rel = relative(file) ?: return
+        val inside = rel.drop(1).joinToString("/").let { if (file.isDirectory) "$it/" else it }
+        val ignoreFile = File(projectDir(project), IGNORE)
+        if (!ignoreFile.isFile) return
+        val lines = read(ignoreFile).lineSequence().toMutableList()
+        if (lines.none { it.trim() == inside }) return
+        val kept = lines.filterNot { it.trim() == inside }
+            .let { if (it.isNotEmpty() && it.last().isEmpty()) it.dropLast(1) else it }
+        val text = kept.joinToString("\n").let { if (it.isEmpty()) "" else "$it\n" }
+        write(ignoreFile, text)
+    }
+
+    /**
      * The names that hold a credential, and are therefore **held by the app**.
      *
      * This is the producer that makes [Hold.APP] real. Until it existed the app had

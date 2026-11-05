@@ -515,16 +515,19 @@ object GitService {
      * resolution is ordinary editing — read the markers, write the file — so a tool for it would be
      * a second way to edit. Nothing is committed on a conflict, so the tree stays exactly as git left
      * it with the markers in place, which is what `read` will show.
+     *
+     * **The merge commit carries the repository's configured identity**, because JGit's `MergeCommand`
+     * takes no author and there is no honest way to pass one. That identity is set when the project
+     * is made ([ProjectGit] writes it), so the commit is attributed the same way every other commit
+     * on this phone is — which is the answer we would have given the parameter anyway.
      */
-    fun merge(repo: Repository, their: AnyObjectId, author: GitAuthor): Merged =
+    fun merge(repo: Repository, their: AnyObjectId): Merged =
         try {
             Git(repo).use { git ->
                 val result = git.merge()
                     .include(their)
                     .setCommit(true)
                     .setMessage("Merge what GitHub had")
-                    .setAuthor(author.ident())
-                    .setCommitter(author.ident())
                     .call()
                 val status = result.mergeStatus
                 if (status == org.eclipse.jgit.api.MergeResult.MergeStatus.CONFLICTING) {
@@ -538,7 +541,7 @@ object GitService {
                 } else if (result.mergeStatus.isSuccessful) {
                     Merged(
                         ok = true,
-                        paths = result.mergedCommits.flatMap { commit ->
+                        paths = result.mergedCommits.flatMap { commit: RevCommit ->
                             changedPathsAgainstParent(repo, commit)
                         }.distinct(),
                         said = "Merged",
@@ -620,13 +623,20 @@ object GitService {
      * it is drawing.
      */
     fun ignoredPaths(repo: Repository): List<String> = try {
-        Git(repo).use { git -> git.status().call().ignored.map { it.trimEnd('/') } }
+        Git(repo).use { git -> git.status().call().ignoredNotInIndex.map { it.trimEnd('/') } }
     } catch (t: Throwable) {
         emptyList()
     }
 
     fun isIgnored(repo: Repository, path: String): Boolean = try {
-        Git(repo).use { git -> git.status().call().ignored.any { it.trimEnd('/') == path.trimEnd('/') } }
+        Git(repo).use { git ->
+            // **`ignoredNotInIndex`, not "ignored".** JGit has no plain `ignored` set; this one is
+            // exactly the question being asked — a path matched by an ignore rule *and* absent from
+            // the index, which is the state the button produces and the state that stops it being
+            // sent. A path that is ignored by a rule but still tracked is deliberately NOT counted:
+            // git keeps committing it, so calling it ignored would be a lie the row tells.
+            git.status().call().ignoredNotInIndex.any { it.trimEnd('/') == path.trimEnd('/') }
+        }
     } catch (t: Throwable) {
         false
     }

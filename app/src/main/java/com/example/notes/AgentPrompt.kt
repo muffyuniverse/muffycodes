@@ -135,7 +135,13 @@ object AgentPrompt {
           - A locked file, and anything inside a locked folder, is read-only. A tool that would
             change it is refused, and the refusal is the answer: do not try another way.
           - Names that start with a dot, and the folders the app keeps, are not yours.
-          - Save is a commit on the phone. Nothing you do is pushed to GitHub; the person pushes.
+          - Save is a commit on the phone. **Pushing to GitHub is yours to decide**: `state` says
+            what is unsent, `pull` brings in what GitHub has, and `push` sends. There is no button
+            for the person to press instead, so work that is committed and never pushed is work
+            that only this phone has.
+          - **`push` is never forced.** If GitHub refuses because it has commits this phone does
+            not, that is a conflict: `pull`, resolve what it names, then `push` again. A force
+            would discard somebody else's commit, and there is no way to ask for one.
           - **A result that would not fit is written to a file and you are told where.** The answer
             gives the path under agent/background_results/ and how many characters it was. Read it in
             ranges — `from`/`to` for lines, `grep` for the ones that match — rather than guessing at

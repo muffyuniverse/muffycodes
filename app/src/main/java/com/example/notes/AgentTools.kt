@@ -2338,7 +2338,13 @@ class AgentTools(
         // removal. It is not a file any more: the context is a column, and `forget` is the only way
         // to change it, so none of that has to be checked.
         noticeStale(file)
+        // **Asked before the write, because the write is what makes it false.** An agent-created
+        // file is tracked and unlocked, which is the opposite of what a person's new file gets —
+        // see `Workspace.createdByAgent`. Capturing this first is the whole of the distinction: a
+        // path that did not exist a moment ago was made by the agent.
+        val existed = file.exists()
         if (!ws.write(file, text)) return refusal("${rel(file)} cannot be changed")
+        if (!existed) ws.createdByAgent(file)
         return commit("Wrote ${file.name}", "${rel(file)} changed")
     }
 

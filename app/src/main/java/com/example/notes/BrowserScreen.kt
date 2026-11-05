@@ -848,7 +848,7 @@ private fun EntryList(viewModel: AppViewModel, actions: BrowserActions) {
                 // file on every call, which Compose cannot see - so a tap that changed the file
                 // changed nothing the row was watching and the icon waited for some other redraw.
                 // Reported twice: "sync connect icon doesnt update visually after tapping on it".
-                unsync = ignoredPaths[entry.file.absolutePath] ?: false,
+                ignored = ignoredPaths[entry.file.absolutePath] ?: false,
                 selected = viewModel.isSelected(entry.file),
                 choosing = viewModel.selected.isNotEmpty(),
                 // A hidden folder and the record's `agent/` are the app's

@@ -388,7 +388,7 @@ class ProjectGit(
                     if (GitService.isAncestor(it, upstream, head)) {
                         return@use Pulled(true, said = "Already up to date")
                     }
-                    val result = GitService.merge(it, upstream, authorProvider())
+                    val result = GitService.merge(it, upstream)
                     Pulled(
                         ok = result.ok,
                         arrived = result.paths,
