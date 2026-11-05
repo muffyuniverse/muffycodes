@@ -1,4 +1,10 @@
-# Binaries: one version, forever
+# Binaries: one version, forever — **SUPERSEDED**
+
+> **This plan was not built.** It designed a history rewrite to drop old binary blobs. The operator then
+> chose LFS, which removes the need for the rewrite's *purpose* while keeping its mechanism for the store:
+> see `docs/PLAN-lfs-2026-11-05.md`. Kept because §1 (why a smudge destroys work under a full-replacement
+> pull) and §3 (the two mistakes in the first rewrite attempt) are still the reasons the final design has
+> the shape it has.
 
 **What this is.** Non-text files in a project — a drawing, a photo, a dropped `.pdf` — are **tracked** by
 git, pushed and pulled like anything else, and **kept at exactly one version**: the newest. Text keeps its
