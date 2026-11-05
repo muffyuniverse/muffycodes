@@ -301,12 +301,26 @@ class Workspace(val accountDir: File) {
      * name gets — `notes` is a note. A file with an extension this app does not
      * recognise is unknown, and is never opened as text.
      */
-    fun kindOf(file: File): EntryKind = when {
-        file.isDirectory -> EntryKind.FOLDER
-        file.extension.lowercase() in IMAGE_EXTENSIONS -> EntryKind.IMAGE
-        file.extension.isEmpty() -> EntryKind.TEXT
-        file.extension.lowercase() in TEXT_EXTENSIONS -> EntryKind.TEXT
-        else -> EntryKind.UNKNOWN
+    fun kindOf(file: File): EntryKind =
+        if (file.isDirectory) EntryKind.FOLDER else kindOfPath(file.name)
+
+    /**
+     * The same rule as [kindOf], for a **path git knows and the disk may not**.
+     *
+     * **One rule, two inputs.** The listing asks about a [File] it can stat; the index asks about a
+     * path that came out of a diff, where the file may have been deleted since and where building a
+     * `File` would answer `UNKNOWN` for a name the history definitely holds text for. Restating the
+     * extension lists beside that second caller would be a second copy of the rule, and the two
+     * would drift the first time an image type was added.
+     */
+    fun kindOfPath(name: String): EntryKind {
+        val extension = name.substringAfterLast('.', "").lowercase()
+        return when {
+            extension in IMAGE_EXTENSIONS -> EntryKind.IMAGE
+            extension.isEmpty() -> EntryKind.TEXT
+            extension in TEXT_EXTENSIONS -> EntryKind.TEXT
+            else -> EntryKind.UNKNOWN
+        }
     }
 
     /**

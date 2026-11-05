@@ -176,6 +176,33 @@ class SemanticSearchTest {
     }
 
     @Test
+    fun `a saved picture is never indexed, and its bytes never reach a vector`() {
+        // **A picture's bytes are not text, and `looksBinary` is a guess that a PNG survives.** It
+        // decodes as UTF-8 with replacement characters, holds plenty of bytes that are valid
+        // characters, and passes. Indexing it would embed noise at 400 KB a version and pollute every
+        // answer it appeared in - so the rule is the *kind*, which is a fact about the name.
+        val git = ProjectGit(ws, { null }, { GitAuthor("Test", "test@example.com") })
+        write("shopping", "milk.txt", "the milk went sour\n")
+        val picture = File(File(ws.accountDir, "shopping"), "page.png")
+        // **Real PNG magic bytes, then text a search could match** - so a pass that indexed it would
+        // be caught by the words rather than only by the count.
+        picture.writeBytes(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A) +
+            "milk milk milk the milk went sour".toByteArray())
+        git.init("shopping").getOrThrow()
+        // A second save, so the picture is a *version* as well as a current file - the history half
+        // is where the guess used to be the only check.
+        write("shopping", "milk.txt", "the milk was poured away\n")
+        requireNotNull(git.commit("shopping", "second"))
+
+        val answer = engine()
+            .answer(null, "milk", paths = 10, depth = 8, Deadline.none(), history = true)
+            .getOrThrow()
+
+        assertFalse("the picture is not a row: $answer", answer.contains("page.png"))
+        assertTrue("while the text still is: $answer", answer.contains("milk.txt"))
+    }
+
+    @Test
     fun `a version that changes one line does not re-embed the whole file`() {
         // **The measurement the whole design rests on.** A file's chunks are keyed by their text, so
         // a version differing in one paragraph shares every other vector with the version before it —

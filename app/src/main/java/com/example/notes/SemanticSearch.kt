@@ -426,6 +426,13 @@ class SemanticSearch(
                         // name the listing hides must not come back through the history.
                         val parts = change.path.split('/')
                         if (parts.any { it == AgentLog.DIR || ws.isHidden(it) }) continue
+                        // **Text only, by the same rule the tree walk uses.** The check below is
+                        // `looksBinary`, which is a *guess* about bytes decoded as UTF-8 - and a PNG
+                        // often survives it, because compressed data holds plenty of bytes that are
+                        // valid characters. A picture's bytes would be embedded as noise, at 400 KB a
+                        // version, and would pollute every answer they appeared in. The kind is a fact
+                        // about the name, and it is the one the listing already trusts.
+                        if (ws.kindOfPath(change.path) != EntryKind.TEXT) continue
                         // **Binary and oversized content is skipped silently here.** A version is not
                         // something a person chose to index, so a failure to take one must not turn
                         // into a note on every answer; the working tree half already reports the
