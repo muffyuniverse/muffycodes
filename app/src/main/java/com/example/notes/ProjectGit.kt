@@ -29,7 +29,6 @@ class ProjectGit(
     private val workspace: Workspace,
     private val tokenProvider: () -> String?,
     private val authorProvider: () -> GitAuthor,
-    /** How many commits a project's history keeps; 0 means no limit. */
 
     /**
      * How to ask for a background index pass, or a no-op.

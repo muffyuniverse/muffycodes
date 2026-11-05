@@ -333,11 +333,13 @@ class ProjectsFeatureTest : FeatureTest() {
         scene.await("the local project", 30_000) {
             scene.viewModel.projectNames.contains("scratch") && !scene.viewModel.busy
         }
+        // **No history length any more** — the fourth argument used to be `keepProvider`, and the
+        // setting it read is gone. What this test asks is that a project that was just created has
+        // nothing waiting, which needs no argument at all.
         val git = ProjectGit(
             scene.workspace!!,
             { null },
             { GitAuthor("Test", "test@example.com") },
-            { 50 },
         )
         val changes = git.changes("scratch")
         assertEquals("nothing is waiting: $changes", 0, changes.staged + changes.unstaged + changes.untracked)
