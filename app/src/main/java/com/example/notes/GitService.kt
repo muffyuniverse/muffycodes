@@ -60,14 +60,18 @@ object GitService {
      * Idempotent, because it is called from more than one place and a second registration is not an
      * error; `setInstance` simply replaces the instance with an equivalent one.
      */
-    fun registerLfs() {
-        try {
-            org.eclipse.jgit.lfs.BuiltinLFS.register()
-        } catch (t: Throwable) {
-            // **A phone that cannot register LFS still edits and commits.** The consequence is that
-            // binaries are stored whole in git rather than as pointers, which is what every build
-            // before this one did; failing the app over it would be a worse trade than the storage.
-        }
+    fun registerLfs(): Boolean = try {
+        org.eclipse.jgit.lfs.BuiltinLFS.register()
+        true
+    } catch (t: Throwable) {
+        // **A phone that cannot register LFS still edits and commits.** The consequence is that
+        // pictures are stored whole in git rather than as pointers, which is what every build before
+        // this one did; failing the app over it would be a worse trade than the storage.
+        //
+        // **But it is not swallowed.** The answer is returned so a caller that cares — a test, a
+        // trace — can say so. A registration that failed silently is indistinguishable from one
+        // that worked, right up until somebody notices their pictures are megabytes.
+        false
     }
 
     /**
