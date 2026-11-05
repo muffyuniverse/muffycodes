@@ -295,23 +295,24 @@ class ProjectGit(
                     // **Nothing is pushed over a picture that did not arrive.** The tree would name
                     // an object GitHub does not have, and the sync would report a failure the person
                     // cannot act on. Saying which picture is the actionable half.
-                    return@hold GitService.RemoteResult(
+                    GitService.RemoteResult(
                         "Nothing was sent, because a picture could not be uploaded: " +
                             (pictures.why ?: "${pictures.failed} of them failed"),
                         false,
                     )
+                } else {
+                    // A push that fails leaves the row saying there is work to send, which is the
+                    // truth, and is what makes the button something a person can press again —
+                    // nothing has to be recorded either way, because the count is asked of the
+                    // repository (see [changes]).
+                    GitService.pushWithout(
+                        it,
+                        tokenProvider(),
+                        omitted,
+                        authorProvider(),
+                        note.trim().ifBlank { "Sync" },
+                    )
                 }
-                // A push that fails leaves the row saying there is work to send, which is the
-                // truth, and is what makes the button something a person can press again — nothing
-                // has to be recorded either way, because the count is asked of the repository
-                // (see [changes]).
-                GitService.pushWithout(
-                    it,
-                    tokenProvider(),
-                    omitted,
-                    authorProvider(),
-                    note.trim().ifBlank { "Sync" },
-                )
             } catch (e: Throwable) {
                 GitService.RemoteResult(Secrets.describe(e), false)
             }

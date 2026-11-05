@@ -52,7 +52,11 @@ class LfsSyncTest {
         // report that it did not arrive. So the pointer set is read from `HEAD`'s tree, not the disk.
         commitPicture("page.png", PNG)
 
-        assertEquals("one pointer in the tree", listOf(sha256(PNG) to PNG.size.toLong()), LfsSync.pointersIn(repo))
+        assertEquals(
+            "one pointer in the tree, naming the bytes and the place",
+            listOf(LfsSync.Pointer(sha256(PNG), PNG.size.toLong(), "page.png")),
+            LfsSync.pointersIn(repo),
+        )
         assertTrue("and its bytes are in the store", LfsSync.fileOf(repo, sha256(PNG))!!.isFile)
     }
 

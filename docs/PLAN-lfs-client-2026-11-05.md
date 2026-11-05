@@ -38,6 +38,31 @@ lfs objects downloaded: 0
 No exception, no warning, exit status success. A person gets a 127-byte text file where their drawing
 should be.
 
+### The second measurement: the filter breaks every push
+
+Found while wiring it up, and it is not about pictures at all.
+
+**With `filter.lfs.useJGitBuiltin` enabled, every push throws.** A probe against a bare repository, with
+one text file and no pictures:
+
+```
+without BuiltinLFS.register():  PUSH OK
+with    BuiltinLFS.register():  PUSH FAILED: NullPointerException
+  Cannot invoke "SshSessionFactory.getSession(...)" because the return value of
+  "SshSessionFactory.getInstance()" is null
+  at org.eclipse.jgit.util.SshSupport.runSshCommand(SshSupport.java:71)
+  at LfsConnectionFactory.getSshAuthentication(LfsConnectionFactory.java:186)
+  at LfsConnectionFactory.discoverLfsUrl(...)
+  at LfsPrePushHook.call(LfsPrePushHook.java:102)
+```
+
+`LfsPrePushHook.call()` asks for a connection **before** it checks whether it has anything to upload, and
+`SshSupport` dereferences a session factory that nothing on Android configures. A project of text files
+cannot be synced at all.
+
+**The hook short-circuits on an empty pointer set** (`findObjectsToPush().isEmpty()`), so the fix is to
+turn the filter off for the duration of a push and restore it in a `finally`. Both push paths do this.
+
 ### Why it happens
 
 `LfsConnectionFactory` has one authentication path and it is SSH (`git-lfs-authenticate`). Over HTTPS it
@@ -230,7 +255,8 @@ still in the tree; it should not be left there "just in case".
 
 | Risk | What we do about it |
 |---|---|
-| **CI cannot test against private GitHub** | Steps 1, 5, 6, 7 test offline against a bare repo and a stub; the private-repo case is a manual gate documented in §4. |
+| **CI cannot test against private GitHub** | Steps 1, 5, 6, 7 test offline against a bare repo and a stub; the private-repo case is a manual gate documented in §4. `MUFFY_LFS_TEST_TOKEN` is set as a repository secret for the run that does test it. |
+| **The filter breaks every push** | Measured, and guarded: `GitService.push` and `pushWithout` switch `filter.lfs.useJGitBuiltin` off for their duration. A test pushes a text-only project with the filter on. |
 | **A 401 during upload leaves the tree unpushed** | Step 4 order: objects first, ref second; a failed upload does not move the ref, so the next sync retries rather than pushing a tree GitHub will reject. |
 | **S3 redirects** | Follow redirects on download; assert the response is the object's size, not a redirect body. |
 | **Token scopes** | LFS needs `repo` write, already granted. Nothing new. |

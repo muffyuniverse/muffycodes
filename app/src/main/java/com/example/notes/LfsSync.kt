@@ -78,17 +78,19 @@ object LfsSync {
             ?: return Done(why = "This project has no GitHub address to fetch pictures from")
         if (token.isNullOrBlank()) return Done(why = "Signing in again is needed before pictures can be fetched")
         val wanted = pointersIn(repo)
-        val absent = wanted.filter { (oid, _) -> fileOf(repo, oid)?.isFile != true }
+        // **One entry per object, not per path.** The same bytes can be two files, and the store holds
+        // them once; downloading per path would fetch the same object twice.
+        val absent = wanted.filter { fileOf(repo, it.oid)?.isFile != true }.distinctBy { it.oid }
         if (absent.isEmpty()) return Done()
-        val batch = LfsClient.batch(endpoint, token, "download", absent.map { it.first to it.second })
+        val batch = LfsClient.batch(endpoint, token, "download", absent.map { it.oid to it.size })
             .getOrElse { return Done(why = it.message) }
         var received = 0
         var failed = batch.failed.size
         var why: String? = null
-        for ((oid, size) in absent) {
-            val action = batch.actions[oid] ?: continue
-            val target = fileOf(repo, oid) ?: continue
-            val result = LfsClient.download(action, target, size)
+        for (pointer in absent) {
+            val action = batch.actions[pointer.oid] ?: continue
+            val target = fileOf(repo, pointer.oid) ?: continue
+            val result = LfsClient.download(action, target, pointer.size)
             if (result.isSuccess) received++ else {
                 failed++
                 if (why == null) why = result.exceptionOrNull()?.message
@@ -110,27 +112,28 @@ object LfsSync {
         val workTree = repo.workTree ?: return emptyList()
         val dir: File = workTree
         val out = mutableListOf<String>()
-        for ((oid, paths) in pointersIn(repo).groupBy({ it.first }, { it.second })) {
-            if (fileOf(repo, oid)?.isFile == true) continue
+        for (pointer in pointersIn(repo)) {
+            if (fileOf(repo, pointer.oid)?.isFile == true) continue
             // Only the paths whose file on disk is still the pointer text — a file that was never
             // checked out is missing for a different reason and is not this function's question.
-            paths.forEach { path ->
-                val file = File(dir, path)
-                if (file.isFile && looksLikePointer(file)) out += path
-            }
+            val file = File(dir, pointer.path)
+            if (file.isFile && looksLikePointer(file)) out += pointer.path
         }
         return out.sorted()
     }
 
+    /** One pointer in the tree: the object it names, how big that object is, and where it is. */
+    data class Pointer(val oid: String, val size: Long, val path: String)
+
     /**
-     * Every pointer in `HEAD`'s tree, as `oid to size` — the set both directions work from.
+     * Every pointer in `HEAD`'s tree — the set both directions work from.
      *
      * Read from the tree rather than from disk, because the working tree may hold bytes for a pointer
      * and the question "what does this project contain" is answered by what is committed.
      */
-    fun pointersIn(repo: Repository): List<Pair<String, Long>> {
+    fun pointersIn(repo: Repository): List<Pointer> {
         val head = repo.resolve("HEAD") ?: return emptyList()
-        val out = mutableListOf<Pair<String, Long>>()
+        val out = mutableListOf<Pointer>()
         RevWalk(repo).use { walk ->
             val commit = walk.parseCommit(head)
             TreeWalk(repo).use { tw ->
@@ -151,7 +154,9 @@ object LfsSync {
                     } catch (e: Throwable) {
                         null
                     }
-                    if (pointer != null) out += pointer.oid.name to pointer.size
+                    if (pointer != null) {
+                        out += Pointer(pointer.oid.name, pointer.size, tw.pathString)
+                    }
                 }
             }
         }
