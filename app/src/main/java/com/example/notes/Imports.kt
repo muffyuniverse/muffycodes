@@ -53,10 +53,14 @@ object Imports {
                 1 -> "Imported 1 file"
                 else -> "Imported $copied files"
             }
+            // **A rename is reported, and a name that was kept is not** — the sentence used to be
+            // the only place a person learned what their file had been called. Now that the name
+            // usually *is* what they called it, saying so on every import would be noise, so the
+            // sentence only appears when something changed.
             if (renamed.isEmpty()) return count
             val shown = renamed.take(2).joinToString("; ") { (from, to) -> "\"$from\" → $to" }
             val rest = if (renamed.size > 2) " and ${renamed.size - 2} more" else ""
-            return "$count — named to fit: $shown$rest"
+            return "$count — renamed so it can be checked out: $shown$rest"
         }
     }
 
@@ -225,7 +229,16 @@ object Imports {
         // the old rewriter was removing. A name that cannot be checked out on Windows is replaced
         // rather than refused here, because an import has no dialog to refuse *into*.
         val asIs = name.trim().ifBlank { "imported" }
-        val usable = if (Workspace.nameProblem(asIs) == null) asIs else "imported"
+        // **The extension survives the fallback.** Replacing `a:b.png` with `imported` would drop
+        // the only part of the name that says what the file is — and the app decides what may be
+        // edited from the extension, so a picture would arrive as "text" and the editor would be
+        // free to rewrite its bytes.
+        val usable = if (Workspace.nameProblem(asIs) == null) {
+            asIs
+        } else {
+            val extension = asIs.substringAfterLast('.', "")
+            if (extension.isEmpty()) "imported" else "imported.$extension"
+        }
         return File(dir, Workspace.freeName(dir, usable))
     }
 }

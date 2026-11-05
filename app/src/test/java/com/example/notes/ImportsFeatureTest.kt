@@ -132,7 +132,10 @@ class ImportsFeatureTest {
         assertEquals("Holo and Lawrence, Kraft - Spice and Wolf.jpeg", made)
         assertEquals("one file", 1, report.copied)
         assertEquals("and nothing was renamed", emptyList<Pair<String, String>>(), report.renamed)
-        assertTrue("the message carries the name", report.said().contains(made))
+        // **The sentence says nothing about the name when the name was kept.** It used to be the
+        // only place a person learned what their file had been called; now that it is what they
+        // called it, repeating it on every import would be noise.
+        assertEquals("and the message just counts", "Imported 1 file", report.said())
     }
 
     @Test
