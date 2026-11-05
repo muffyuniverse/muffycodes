@@ -77,6 +77,7 @@ class ProjectGitTest {
     fun `restoring text still works, because text keeps its versions`() {
         // **The refusal is about pictures, not about restore.** A test that only proves the refusal
         // would pass just as well if `restore` had stopped working altogether.
+        workspace.createProjectFolders("shopping").getOrThrow()
         val git = gitFor()
         val file = File(workspace.projectDir("shopping"), "milk.txt")
         workspace.write(file, "one\n")
@@ -224,22 +225,21 @@ class ProjectGitTest {
         val git = gitFor()
         git.init("Shopping").getOrThrow()
         git.open("Shopping")!!.use { GitService.setRemoteUrl(it, bare.absolutePath) }
+        // **The first version is sent before the counting starts.** A project's first version now
+        // carries `.gitattributes` — committed content, which is what makes a clone elsewhere
+        // understand LFS pointers — and the remote did not exist when it was made. Pushing it here
+        // leaves the project genuinely clean, so the numbers below are about the edits and nothing
+        // else. Lowering the expected counts instead would have kept the test passing while it
+        // stopped asking its question.
+        assertTrue("the first version is sent", git.sync("Shopping").success)
         assertEquals("a new project has nothing to send", 0, git.changes("Shopping").total)
 
         val worktree = workspace.repoOf("Shopping")
         File(worktree, "milk.txt").writeText("two litres")
         git.commit("Shopping", "Edited milk.txt")
 
-        // **Two files, because the attribute file was never sent either.** The first version carries
-        // `.gitattributes`, and the remote was set after that version was made — so it is waiting
-        // alongside the edit. The assertion is about the edit being *included*, which is the
-        // question this test asks.
-        assertEquals("two files, one of them the edit", 2, git.changes("Shopping").ahead)
-        assertEquals("and the row agrees", 2, git.changes("Shopping").total)
-        assertTrue(
-            "the edit is one of them: ${git.unsentPaths("Shopping")}",
-            git.unsentPaths("Shopping").contains("milk.txt"),
-        )
+        assertEquals("one file, one thing to send", 1, git.changes("Shopping").ahead)
+        assertEquals("and the row says so", 1, git.changes("Shopping").total)
 
         // **Two saves of one file are still one file to send.** A commit count said "2" here and
         // said "1" for a batch that moved ten files; the row is about what GitHub does not have.
@@ -803,17 +803,12 @@ class ProjectGitTest {
         git.init("Shopping").getOrThrow()
         git.open("Shopping")?.use { GitService.setRemoteUrl(it, bare.absolutePath) }
 
-        // **One file, and it is the attribute file.** A project's first version now carries
-        // `.gitattributes`, which is committed content by design — that is what makes a clone
-        // elsewhere understand LFS pointers. Nothing was pushed before the remote was set, so that
-        // one file is genuinely waiting; before this, the first version was empty and the answer
-        // was zero.
-        val waiting = git.changes("Shopping")
-        assertEquals("the attribute file, and nothing else", 1, waiting.total)
-        assertTrue(
-            "and it is that file: ${git.unsentPaths("Shopping")}",
-            git.unsentPaths("Shopping").contains(".gitattributes"),
-        )
+        // **Sent first, so the question is about being clean.** The first version carries
+        // `.gitattributes` — committed content, which is what makes a clone elsewhere understand LFS
+        // pointers — and the remote was set after it was made. Sending it leaves the project with
+        // nothing waiting, which is what this test is named for.
+        assertTrue("the first version is sent", git.sync("Shopping").success)
+        assertEquals(0, git.changes("Shopping").total)
     }
 
     @Test
