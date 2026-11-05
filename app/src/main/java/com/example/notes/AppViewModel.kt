@@ -2047,10 +2047,17 @@ class AppViewModel @JvmOverloads constructor(
         val ws = workspace ?: return
         val target = ws.relative(file) ?: return
         val key = ws.pathString(target)
-        // Named by the direction it was pressed: a switch's trace says what the person
-        // did, not what the app ended up believing.
-        Trace.tap(if (key in lockedPaths) "unlock" else "lock", file.name)
-        val next = if (key in lockedPaths) lockedPaths - key else lockedPaths + key
+        // **Read from the workspace, not from this screen's copy of it.**
+        //
+        // `lockedPaths` is state for drawing, refreshed when the list is. Anything that locks a file
+        // without going through this function — `createdByOperator`, which runs when a person makes a
+        // file — writes the workspace and leaves the screen's copy stale until the next refresh. A
+        // toggle reading the stale copy then *locks* a file that is already locked, and the row's
+        // button does the opposite of what it says. Measured: the creation default made every file a
+        // person created look unlocked to this function.
+        val current = ws.locked()
+        Trace.tap(if (key in current) "unlock" else "lock", file.name)
+        val next = if (key in current) current - key else current + key
         ws.setLocked(next)
         lockedPaths = next
         // No message. The row's icon changes, which is the whole answer to "is it
@@ -2160,6 +2167,19 @@ class AppViewModel @JvmOverloads constructor(
                 // **Added, not restored from a version.** The file on disk is the truth; a person who
                 // tracked it again is saying "send this", and what is on the phone is what to send.
                 GitService.track(repo, inside)
+                // **And a binary gets an LFS line before it is ever committed.** Without this the
+                // choice to track a `.pdf` or a `.zip` costs the person their repository: a tracked
+                // binary with no attribute is committed whole, into ordinary history, and stays in
+                // every clone for ever — this app never rewrites history. Written before the commit
+                // below, so the attribute and the file arrive in the same commit and the pointer
+                // rule is in force from the first byte.
+                //
+                // Only a file the app cannot read as text needs it; a picture already has its line
+                // from `ensureLfsAttributes`, and a text file must not be turned into a pointer.
+                val extension = file.name.substringAfterLast('.', "")
+                if (extension.isNotEmpty() && Workspace.kindOfPath(file.name) == EntryKind.UNKNOWN) {
+                    GitService.ensureLfsAttribute(ws.projectDir(project), extension)
+                }
             }
         }
 
@@ -2488,6 +2508,12 @@ class AppViewModel @JvmOverloads constructor(
             return false
         }
         refresh()
+        // **The lock list is re-read here, because a creation writes it below the screen's feet.**
+        // `createdByOperator` runs inside `Workspace.createFile`, which is called before this — so
+        // `refresh()` above already picked the new lock up. This line is the one that keeps it true
+        // for any future path that changes a lock without calling `refresh()`: the row draws from
+        // `lockedPaths`, and a stale copy draws an open padlock on a locked file.
+        workspace?.let { lockedPaths = it.locked() }
         touched?.let { commitProjectOf(it, what) }
         // The change has a name, and the name is what a person needs to see. It was
         // being passed in and only ever used for the commit message, so a file could

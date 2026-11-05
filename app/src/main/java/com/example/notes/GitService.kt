@@ -150,6 +150,42 @@ object GitService {
         .joinToString("") { "*.$it filter=lfs diff=lfs merge=lfs -text\n" }
 
     /**
+     * Makes git store files ending in [extension] through LFS, in [dir].
+     *
+     * **A binary the person chose to track needs this, and without it the choice costs them the
+     * repository.** A `.pdf` or a `.zip` is not in [Workspace.IMAGE_EXTENSIONS], so no attribute
+     * covers it — and a tracked binary with no attribute is committed **whole, into ordinary git
+     * history, for ever**: a 40 MB video in one commit stays in every clone of that repository
+     * until the history is rewritten, which this app never does. Tracking one is the person saying
+     * "this belongs on GitHub", and this is what makes that sentence safe to act on.
+     *
+     * The extension is normalised to lower case, because `.PDF` and `.pdf` are the same kind of
+     * file and two lines for one kind would be a second rule for the same thing.
+     */
+    fun ensureLfsAttribute(dir: File, extension: String) {
+        val ext = extension.lowercase().removePrefix(".").trim()
+        if (ext.isEmpty()) return
+        try {
+            val attributes = File(dir, ".gitattributes")
+            val wanted = "*.$ext filter=lfs diff=lfs merge=lfs -text"
+            val was = if (attributes.isFile) attributes.readText() else ""
+            // **Matched on the attribute, not on the extension.** A project may already carry its
+            // own line for this kind — written by hand, or by another tool — and a second line for
+            // the same pattern would be two rules that happen to agree today.
+            val covered = was.lines().any { line ->
+                val trimmed = line.trim()
+                trimmed.startsWith("*.$ext ") && "filter=lfs" in trimmed
+            }
+            if (covered) return
+            val now = if (was.isEmpty() || was.endsWith("\n")) "$was$wanted\n" else "$was\n$wanted\n"
+            attributes.writeText(now)
+        } catch (t: Throwable) {
+            // A project that could not be told still commits; its binary is stored whole, which is
+            // what every build before this one did.
+        }
+    }
+
+    /**
      * How many versions a reader may return.
      *
      * Not a limit on the history: how far back a person can go is the setting in

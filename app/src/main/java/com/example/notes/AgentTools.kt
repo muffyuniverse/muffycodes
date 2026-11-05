@@ -4146,12 +4146,39 @@ class AgentTools(
                 // has just written a file needs to see that the write is not yet a commit.
                 lines += "uncommitted: ${changes.staged + changes.unstaged} staged or changed, " +
                     "${changes.untracked} untracked"
+                // **What the push will leave behind, said out loud.** An ignored file is not a change
+                // and not unsent — it is a file that is on the phone and will never be on GitHub until
+                // somebody says so. Without this line a project holding a 40 MB video and one note
+                // reports "Nothing to send", which is true of the note and a lie about the project:
+                // the agent would tell the person their work is on GitHub when half of it is not.
+                val ignored = GitService.ignoredPaths(it)
+                if (ignored.isNotEmpty()) {
+                    // The largest first, because it is the one worth acting on and the reason the
+                    // number is worth printing at all.
+                    val largest = ignored
+                        .mapNotNull { path -> File(it.workTree, path).let { f -> if (f.isFile) f else null } }
+                        .maxByOrNull { it.length() }
+                    lines += "ignored, so not sent and never will be until tracked: " +
+                        "${ignored.size} path(s)" +
+                        (largest?.let {
+                            val where = Workspace.pathBelow(repo.workTree, it) ?: it.name
+                            " — the largest is $where at ${Workspace.bytesFor(it.length())}"
+                        } ?: "")
+                }
                 // A merge left half-finished is the one state where a push would carry markers.
                 val merging = File(it.directory, "MERGE_HEAD").isFile
                 if (merging) lines += "**a merge is in progress and has not been committed**"
                 val said = when {
                     merging -> "Finish the merge first."
-                    unsent == 0 && (tracks == null || tracks.first == 0) -> "Nothing to send."
+                    // **"Nothing to send" is about the tracked work, and now says so.** The ignored
+                    // line above is the rest of the answer; a sentence that claimed the project was
+                    // fully sent while the line above it named an ignored video would be the agent
+                    // contradicting itself in one message.
+                    unsent == 0 && (tracks == null || tracks.first == 0) && ignored.isEmpty() ->
+                        "Nothing to send."
+                    unsent == 0 && (tracks == null || tracks.first == 0) ->
+                        "Nothing tracked is unsent — but some paths are ignored and will not go " +
+                            "to GitHub unless they are tracked."
                     tracks != null && tracks.second > 0 ->
                         "GitHub has moved: pull before a push can land."
                     else -> "There is work to send."

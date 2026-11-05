@@ -280,6 +280,9 @@ class SelectionFeatureTest : FeatureTest() {
         val before = scene.headId()
 
         scene.viewModel.toggleLocked(file)
+        // **The screen's copy of the lock list is refreshed by the change itself**, which is what
+        // this assertion is really about: `hold` draws from `lockedPaths`, so a toggle that wrote
+        // the workspace and left the copy behind would show an open padlock on a locked file.
         assertTrue("unlocked", scene.viewModel.hold(file) == null)
         scene.viewModel.toggleLocked(file)
 
