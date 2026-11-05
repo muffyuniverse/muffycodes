@@ -296,7 +296,10 @@ class SelectionFeatureTest : FeatureTest() {
             // "unlocked" and there was no way to tell whether the lock was still there, the path
             // was wrong, or the toggle never ran.
             "unlocked — path=${ws.relative(file)}, locked=${ws.locked()}, " +
-                "hold=${ws.hold(file, ws.locked())}",
+                "hold=${ws.hold(file, ws.locked())}, " +
+                "vmLocked=${scene.viewModel.lockedPaths}, " +
+                "same=${scene.viewModel.lockedPaths == ws.locked()}, " +
+                "trail=" + com.example.notes.Trace.report().lines.take(3).joinToString("|"),
             ws.hold(file, ws.locked()) == Workspace.Hold.NONE,
         )
         scene.viewModel.toggleLocked(file)
