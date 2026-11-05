@@ -105,7 +105,10 @@ object LfsSync {
      * answer is a sentence to the person, never a picture that will not open.
      */
     fun missing(repo: Repository): List<String> {
-        val dir = repo.workTree ?: return emptyList()
+        // **A bare repository has no working tree**, and a pointer is a fact about a file on disk —
+        // so there is nothing here to be missing.
+        val workTree = repo.workTree ?: return emptyList()
+        val dir: File = workTree
         val out = mutableListOf<String>()
         for ((oid, paths) in pointersIn(repo).groupBy({ it.first }, { it.second })) {
             if (fileOf(repo, oid)?.isFile == true) continue
