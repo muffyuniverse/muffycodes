@@ -217,11 +217,16 @@ class WorkspaceTest {
     }
 
     @Test
-    fun `a name starting with a dot is refused`() {
-        assertTrue(workspace.nameProblem(".ssh") != null)
-        assertTrue(workspace.nameProblem("a/b") != null)
-        assertTrue(workspace.nameProblem("  ") != null)
-        assertNull(workspace.nameProblem("Shopping list.txt"))
+    fun `a name that cannot be a path is refused, and an ordinary one is not`() {
+        // **A dot name is refused rather than rewritten**, which is the change: the app used to
+        // turn `.ssh` into `ssh` silently. A name is the person's, so the answer is a sentence.
+        assertNotNull(Workspace.nameProblem(".ssh"))
+        assertNotNull(Workspace.nameProblem("a/b"))
+        assertNotNull(Workspace.nameProblem("  "))
+        // **And the names the old rewriter was mangling are allowed**, which is the half a rule
+        // like this gets wrong: `Shopping list.txt` has a capital and a space and is fine.
+        assertNull(Workspace.nameProblem("Shopping list.txt"))
+        assertNull(Workspace.nameProblem("a-b_c.txt"))
     }
 
     @Test

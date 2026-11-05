@@ -3425,7 +3425,7 @@ class AppViewModel @JvmOverloads constructor(
         // **As typed, and only blank falls back.** The app no longer rewrites names — see
         // `Workspace.nameProblem` for the measurement that removed it.
         val clean = name.trim().ifBlank { "local" }
-        val problem = ws.nameProblem(clean)
+        val problem = Workspace.nameProblem(clean)
         if (problem != null) {
             message = problem
             onDone(false)
@@ -3513,7 +3513,7 @@ class AppViewModel @JvmOverloads constructor(
         // repository's own name. A name GitHub refuses is reported by GitHub, which
         // is the only place that knows what it will accept.
         val clean = name.trim()
-        val problem = ws.nameProblem(clean)
+        val problem = Workspace.nameProblem(clean)
         if (problem != null) {
             message = problem
             onDone(false)
@@ -3592,7 +3592,7 @@ class AppViewModel @JvmOverloads constructor(
         val token = activeLogin?.let { credentials.token(it) }.orEmpty()
         val login = activeLogin
         val clean = newName.trim()
-        val problem = ws.nameProblem(clean)
+        val problem = Workspace.nameProblem(clean)
         if (problem != null) {
             message = problem
             return
