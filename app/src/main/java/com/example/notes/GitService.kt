@@ -608,6 +608,44 @@ object GitService {
     }
 
     /**
+     * The paths the newest commit changed, against its parent.
+     *
+     * **The commit's own diff, not the working tree's.** After a commit the working tree is clean, so
+     * `git status` says nothing changed — which is the question "is there work to save", not "what did
+     * the save just write". A parentless commit is diffed against the empty tree, so its whole contents
+     * are its changes.
+     *
+     * Used by the binary rule: a commit that wrote a picture is the only moment the app knows which
+     * path needs its older versions collapsed.
+     */
+    fun changedPaths(repo: Repository, commitId: AnyObjectId): List<String> {
+        return try {
+            val commit = RevWalk(repo).use { it.parseCommit(commitId) }
+            val older: AbstractTreeIterator = if (commit.parentCount == 0) {
+                EmptyTreeIterator()
+            } else {
+                treeOf(repo, commit.getParent(0).id) ?: EmptyTreeIterator()
+            }
+            val parser = CanonicalTreeParser()
+            repo.newObjectReader().use { reader -> parser.reset(reader, commit.tree.id) }
+            val out = mutableListOf<String>()
+            DiffFormatter(DISCARD).use { diff ->
+                diff.setRepository(repo)
+                for (entry in diff.scan(older, parser)) {
+                    // **A deletion counts.** It is a change to the path, and a picture that was removed
+                    // still has old versions in older trees — which is exactly what a binary must not
+                    // keep.
+                    val path = entry.newPath.ifEmpty { entry.oldPath }
+                    if (path.isNotEmpty()) out += path
+                }
+            }
+            out.distinct()
+        } catch (e: Throwable) {
+            emptyList()
+        }
+    }
+
+    /**
      * [commitAll], answering with all three outcomes instead of folding a failure into
      * "nothing to do".
      */

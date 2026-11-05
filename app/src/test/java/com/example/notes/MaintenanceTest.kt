@@ -247,4 +247,146 @@ class MaintenanceTest {
         assertTrue("it said it was busy: $said", said.contains("busy"))
         assertTrue("and the marker survived for the next start", Maintenance.waiting(dir))
     }
+
+    // ---- 4 and 5: a binary keeps one version, and the bytes go ----------------
+
+    @Test
+    fun `saving a picture twice leaves one stored object, and every commit points at it`() {
+        // **The whole of binary retention, in one assertion.** A picture has no history worth keeping:
+        // its versions are megabytes each and they do not compress. So after two saves the repository
+        // must hold ONE set of bytes, and every commit that mentions the path must name it.
+        //
+        // What makes this hard is that LFS does not delete anything by itself. `git gc` collects the
+        // object database and has never looked inside `.git/lfs/objects`, so without the tree rewrite
+        // and the sweep both versions stay on disk for ever - measured earlier: 200, 400, 600, 800 KB,
+        // one per save, none collected.
+        val git = ProjectGit(ws, { null }, { GitAuthor("Test", "test@example.com") })
+        write("milk.txt", "the milk went sour\n")
+        git.init("shopping").getOrThrow()
+        val picture = File(ws.projectDir("shopping"), "page.png")
+        picture.writeBytes(PNG_A)
+        git.commit("shopping", "a picture")
+
+        picture.writeBytes(PNG_B)
+        git.commit("shopping", "drawn on")
+
+        val repo = git.open("shopping")!!
+        repo.use {
+            // **One object in the store, not two.** This is the fact the whole plan rests on.
+            assertEquals("one set of bytes", 1, lfsObjects(it).size)
+            // **And every commit names it**, which is what makes the old one unreachable rather than
+            // merely unreferenced by the newest commit.
+            val named = commits(it).map { c ->
+                org.eclipse.jgit.treewalk.TreeWalk
+                    .forPath(it, "page.png", *arrayOf<org.eclipse.jgit.lib.AnyObjectId>(c.tree))
+                    ?.getObjectId(0)?.name
+            }.filterNotNull().distinct()
+            assertEquals("every commit holds the same pointer: $named", 1, named.size)
+        }
+    }
+
+    @Test
+    fun `the sweep removes the bytes nothing points at, and keeps the ones that are used`() {
+        // **`gc` does not know this directory exists.** Two objects on disk, one pointer in the trees:
+        // the sweep must delete exactly the other one, and must not touch a file whose oid is still
+        // named by a commit.
+        val git = ProjectGit(ws, { null }, { GitAuthor("Test", "test@example.com") })
+        write("milk.txt", "the milk went sour\n")
+        git.init("shopping").getOrThrow()
+        val picture = File(ws.projectDir("shopping"), "page.png")
+        picture.writeBytes(PNG_A)
+        git.commit("shopping", "a picture")
+
+        val repo = git.open("shopping")!!
+        repo.use {
+            val before = lfsObjects(it)
+            assertEquals("one object to begin with", 1, before.size)
+            // **A second object written straight into the store**, which is the shape a version the
+            // rewrite has not yet reached takes. Its oid is nobody's pointer.
+            val orphan = File(it.directory, "lfs/objects/ab/cd/abcdef0123456789")
+            orphan.parentFile?.mkdirs()
+            orphan.writeBytes(ByteArray(4096))
+            assertEquals("two now", 2, lfsObjects(it).size)
+
+            val freed = LfsStore.sweep(it)
+
+            assertEquals("only the orphan went", 1, lfsObjects(it).size)
+            assertTrue("and the used one survived", before.single().isFile)
+            assertEquals("the freed size is the orphan's", 4096L, freed)
+        }
+    }
+
+    @Test
+    fun `a picture saved under a new name keeps both`() {
+        // **The other half of the rule.** One version per file, not one version per project: saving
+        // under a new name is the operator's versioning option, so the original must survive the
+        // rewrite and the sweep untouched.
+        val git = ProjectGit(ws, { null }, { GitAuthor("Test", "test@example.com") })
+        write("milk.txt", "the milk went sour\n")
+        git.init("shopping").getOrThrow()
+        val dir = ws.projectDir("shopping")
+        File(dir, "page.png").writeBytes(PNG_A)
+        git.commit("shopping", "a picture")
+        File(dir, "page-2.png").writeBytes(PNG_B)
+        git.commit("shopping", "a copy")
+
+        val repo = git.open("shopping")!!
+        repo.use {
+            assertEquals("both pictures are stored", 2, lfsObjects(it).size)
+            LfsStore.sweep(it)
+            assertEquals("and the sweep keeps both", 2, lfsObjects(it).size)
+        }
+    }
+
+    @Test
+    fun `a pass sweeps the picture store as well as the repository`() {
+        // **The wiring, which is where the last version of this feature failed.** The rewrite and the
+        // sweep both worked and nothing called them. The marker is the one thing that connects a save
+        // to the housekeeping it needs.
+        val git = ProjectGit(ws, { null }, { GitAuthor("Test", "test@example.com") })
+        write("milk.txt", "the milk went sour\n")
+        git.init("shopping").getOrThrow()
+        val picture = File(ws.projectDir("shopping"), "page.png")
+        picture.writeBytes(PNG_A)
+        git.commit("shopping", "a picture")
+        // An orphan, so there is something for the pass to reclaim.
+        git.open("shopping")!!.use {
+            val orphan = File(it.directory, "lfs/objects/ab/cd/abcdef0123456789")
+            orphan.parentFile?.mkdirs()
+            orphan.writeBytes(ByteArray(2048))
+        }
+        Maintenance.mark(ws.projectDir("shopping"), "a picture was saved")
+
+        val done = Maintenance.run(ws).single()
+
+        assertEquals("it was attempted", "shopping", done.project)
+        assertTrue("and it says how much was reclaimed: ${done.said()}", done.said().contains("picture data"))
+        git.open("shopping")!!.use {
+            assertEquals("the orphan is gone", 1, lfsObjects(it).size)
+        }
+    }
+
+    /** Every file under `.git/lfs/objects`, which is the store `gc` never looks at. */
+    private fun lfsObjects(repo: org.eclipse.jgit.lib.Repository): List<File> {
+        val root = LfsStore.dirOf(repo)
+        if (!root.isDirectory) return emptyList()
+        return root.walkTopDown().filter { it.isFile }.toList()
+    }
+
+    private fun commits(repo: org.eclipse.jgit.lib.Repository) =
+        org.eclipse.jgit.revwalk.RevWalk(repo).use { walk ->
+            walk.markStart(walk.parseCommit(repo.resolve("HEAD")))
+            walk.toList()
+        }
+
+    private companion object {
+        /**
+         * Two PNGs that differ in their bytes.
+         *
+         * Real magic bytes, so a reader that guesses by content agrees with the name — and small,
+         * because the store's behaviour is what is being tested, not the picture.
+         */
+        val PNG_A: ByteArray = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A) + "one".toByteArray()
+        val PNG_B: ByteArray = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A) + "two".toByteArray()
+    }
 }

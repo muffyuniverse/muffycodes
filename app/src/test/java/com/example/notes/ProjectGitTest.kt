@@ -57,6 +57,10 @@ class ProjectGitTest {
         // call would be given may already be gone - and writing the pointer over the picture would
         // replace an image with JSON that happens to be valid UTF-8. The operation is refused rather
         // than repaired: a file with one version has nothing to restore *from*.
+        //
+        // **The folders first.** `init` makes the repository but not the project folder, and the
+        // first version of this test wrote into a directory that did not exist yet.
+        workspace.createProjectFolders("shopping").getOrThrow()
         val git = gitFor()
         val picture = File(workspace.projectDir("shopping"), "page.png")
         // Real PNG magic bytes, so this is a picture by content as well as by name.
@@ -77,7 +81,6 @@ class ProjectGitTest {
     fun `restoring text still works, because text keeps its versions`() {
         // **The refusal is about pictures, not about restore.** A test that only proves the refusal
         // would pass just as well if `restore` had stopped working altogether.
-        workspace.createProjectFolders("shopping").getOrThrow()
         val git = gitFor()
         val file = File(workspace.projectDir("shopping"), "milk.txt")
         workspace.write(file, "one\n")

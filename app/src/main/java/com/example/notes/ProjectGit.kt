@@ -66,6 +66,12 @@ class ProjectGit(
         // work in one project at the same moment would otherwise both see "no repository" and both
         // initialise, and the second `git init` on an existing repository is the least harmful of
         // the outcomes — the harmful one is a commit landing while the refs are being written.
+        // **Registered before any repository is touched.** JGit reaches the LFS filter through an
+        // SPI, and until it is set every LFS operation silently does nothing — a commit stores raw
+        // bytes, the attribute is ignored, and there is no error anywhere to say so. Registering
+        // here rather than only at app start means a test and a fresh process both get it, and the
+        // call is idempotent.
+        GitService.registerLfs()
         // **The attribute goes in BEFORE the first commit.** `initOrOpen` commits whatever is on
         // disk as the initial version, so writing the file afterwards leaves it untracked — and then
         // the next save commits it as a change the person did not make, which is both a lie in the
@@ -173,6 +179,34 @@ class ProjectGit(
                 // fails with the project refusing every save for ever.
                 val outcome = GitService.commitEverything(it, what, authorProvider(), inFlight = false)
                 if (outcome.written) {
+                    // **A binary has one version, and this is where that is made true.**
+                    //
+                    // The commit just written holds the newest bytes; every earlier commit that held
+                    // this path is rewritten to hold the same blob, which is what makes the old LFS
+                    // objects unreachable. Done here because this is the only moment the app knows
+                    // both facts at once: which paths this commit touched, and that a commit just
+                    // happened. `Maintenance` then reclaims the bytes at the next app start.
+                    //
+                    // **Only non-text paths, and only when a commit was written.** A text file's
+                    // history is the product, so collapsing it would destroy the feature; and a commit
+                    // that wrote nothing touched nothing.
+                    val touched = outcome.id?.let { id ->
+                        GitService.changedPaths(it, ObjectId.fromString(id))
+                    }.orEmpty()
+                    val binaries = touched.filter { Workspace.kindOfPath(it) != EntryKind.TEXT }
+                    if (binaries.isNotEmpty()) {
+                        // **Held already**, so this is inside the same lock the commit was written
+                        // under: a rewrite that ran beside another writer's commit would move the ref
+                        // out from under it.
+                        var collapsed = 0
+                        for (path in binaries) collapsed += HistoryPrune.keepLatest(it, path)
+                        if (collapsed > 0) {
+                            // **A marker, not a collection.** `gc` and the LFS sweep are proportional
+                            // to the whole repository; running them inside a save would make the save
+                            // wait for them. The unreachable objects are harmless until then.
+                            Maintenance.mark(repoDir(project))
+                        }
+                    }
                     prune(it, project)
                     // **Every change the app makes is one commit, so this is the single signal that
                     // the project's text changed** — the editor, the agent's `write`, a delete, a

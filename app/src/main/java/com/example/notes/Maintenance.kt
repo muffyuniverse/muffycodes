@@ -55,6 +55,15 @@ object Maintenance {
         val rows: Int,
         val vectors: Int,
         val collected: Boolean,
+        /**
+         * Bytes of stored picture data the sweep reclaimed.
+         *
+         * **Separate from [collected], because it is a different store.** `gc` collects the object
+         * database and has never looked inside `.git/lfs/objects` — so a pass that collected the
+         * repository and left every old picture in place would have done the smaller half of the work
+         * and reported success.
+         */
+        val freed: Long = 0L,
         /** Null when the work finished; the reason it did not, otherwise. */
         val stopped: String?,
         /** False when the project had no repository, which is "nothing to do" rather than a fault. */
@@ -69,9 +78,13 @@ object Maintenance {
                 rows == 1 -> "1 index row was left behind"
                 else -> "$rows index rows were left behind"
             }
-            val freed = if (vectors == 0) "" else ", releasing $vectors vector(s)"
+            val released = if (vectors == 0) "" else ", releasing $vectors vector(s)"
             val gc = if (collected) "; the repository was collected" else "; the collection did not run"
-            return "$swept$freed$gc"
+            // **Named in the sentence, because it is invisible otherwise.** A picture's old versions
+            // are the largest thing this app ever deletes, and a pass that reclaimed them silently
+            // would look exactly like a pass that reclaimed nothing.
+            val space = if (freed <= 0L) "" else "; ${Fetcher.size(freed)} of picture data was removed"
+            return "$swept$released$gc$space"
         }
     }
 
@@ -141,7 +154,7 @@ object Maintenance {
             // **A running agent means "not now".** `tryHold` is a point-in-time check, and a `gc`
             // that got the lock would hold it for a minute with an agent's next commit behind it.
             if (busy(project)) {
-                out += Done(project, why, 0, 0, false, "its agent is switched on")
+                out += Done(project, why, 0, 0, false, stopped = "its agent is switched on")
                 continue
             }
             val done = one(ws, project, why, dir, deadline)
@@ -161,6 +174,7 @@ object Maintenance {
         var rows = 0
         var vectors = 0
         var collected = false
+        var freed = 0L
         var stopped: String? = null
         var repository = false
         // **The lock is taken without waiting.** A commit in flight is milliseconds away from done,
@@ -209,15 +223,24 @@ object Maintenance {
                     // **Now, and only now.** `gc` deletes the objects the sweep just proved dead.
                     collected = HistoryPrune.collect(it)
                     if (!collected) stopped = "the repository could not be collected"
+                    // **And the picture store, which `gc` does not touch.** The tree rewrite made the
+                    // old pointers unreachable; this deletes the bytes they named. Ordered after the
+                    // collection because `gc` is the thing that could fail, and a store swept before a
+                    // failed collection would have deleted bytes whose pointers a later recovery might
+                    // still reach.
+                    //
+                    // **Not fatal.** A store that could not be swept keeps its bytes, which is a few
+                    // megabytes rather than a lost picture.
+                    freed = LfsStore.sweep(it)
                 }
             } finally {
                 index.close()
             }
         }
         if (!held) {
-            return Done(project, why, 0, 0, false, "the project was busy, so it will try next time")
+            return Done(project, why, 0, 0, false, stopped = "the project was busy, so it will try next time")
         }
-        val done = Done(project, why, rows, vectors, collected, stopped, tried = repository)
+        val done = Done(project, why, rows, vectors, collected, freed, stopped, tried = repository)
         // **The marker goes only when the work did.** A failed collection keeps it, so the next start
         // asks again rather than silently never collecting.
         if (stopped == null) {
