@@ -136,10 +136,15 @@ object HistoryPrune {
             builder.finish()
             val entry = cache.getEntry(path) ?: return null
             val editor = cache.editor()
+            // **`PathEdit` is an abstract class, not a functional interface.** The lambda form does not
+            // compile — `fileMode` and `setObjectId` come back unresolved because the parameter is not
+            // a `DirCacheEntry` — so it is subclassed with the one method that matters.
             editor.add(
-                org.eclipse.jgit.dircache.DirCacheEditor.PathEdit(path) { e ->
-                    e.fileMode = entry.fileMode
-                    e.setObjectId(blob)
+                object : org.eclipse.jgit.dircache.DirCacheEditor.PathEdit(path) {
+                    override fun apply(e: org.eclipse.jgit.dircache.DirCacheEntry) {
+                        e.fileMode = entry.fileMode
+                        e.setObjectId(blob)
+                    }
                 },
             )
             editor.finish()
