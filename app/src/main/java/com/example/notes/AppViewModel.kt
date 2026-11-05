@@ -88,10 +88,12 @@ class AppViewModel @JvmOverloads constructor(
      *
      * `NONE` is not a silent no-op: a pass that cannot embed says so in its note, which is the same
      * sentence a build with no credentials shows.
+     *
+     * **Null means "build the live one when a pass first asks"**, which is where the key is read —
+     * `activeLogin` is not initialised until the object is, and a person may add their key after the
+     * app opens.
      */
-    private val embedder: Embedder = Embedder.openRouter(
-        key = { activeLogin?.let { credentials.modelKey(it) } },
-    ),
+    private val embedder: Embedder? = null,
 ) : AndroidViewModel(app) {
 
     /** The accounts on this phone. */
@@ -530,7 +532,13 @@ class AppViewModel @JvmOverloads constructor(
     private fun indexer(ws: Workspace): (String, String) -> Unit {
         IndexQueue.configure(
             ws = ws,
-            embedder = embedder,
+            // **Built here rather than in the constructor**, because the key is read from
+            // `activeLogin`, which is not initialised until the object is — and because reading it
+            // per pass is right anyway: a person may add their key after the app opens, and the next
+            // pass should find it. A test passes [Embedder.NONE] and never reaches the network.
+            embedder = embedder ?: Embedder.openRouter(
+                key = { activeLogin?.let { credentials.modelKey(it) } },
+            ),
             models = { ModelConfigFile.load(ws.accountDir).getOrNull() },
             context = app,
         )
