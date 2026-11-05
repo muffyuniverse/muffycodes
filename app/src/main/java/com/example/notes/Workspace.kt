@@ -468,13 +468,31 @@ class Workspace(val accountDir: File) {
         // write — and a creation that silently skipped half of its own rule is the failure mode
         // this app keeps fixing.
         val rel = relative(file) ?: return
-        // **The ignore first, and this order is load-bearing.** `ignore` writes `.gitignore` through
-        // `write`, which refuses a locked path — so locking first would make the app's own rule
-        // refuse itself, and the file would be locked and still tracked. Measured, not assumed:
-        // with the lock first the `.gitignore` line never appeared.
-        ignore(file)
+        // **Locked always, ignored only when the app cannot classify it.**
+        //
+        // The first version ignored everything a person made, and wiring it up showed what that
+        // costs: an ignored file is not committed, so the person's own note had no version and no
+        // undo — and "every change is a version" is the promise this app exists for. Ignoring is
+        // about *not sending to GitHub*, but git cannot commit-and-not-push, so ignoring also means
+        // not versioning. The operator's rule is narrower than it first read: only what the app
+        // cannot open is held back, "same as with pictures", which stay tracked.
+        //
+        // The ignore comes first when it happens, and the order is load-bearing: `ignore` writes
+        // `.gitignore` through `write`, which refuses a locked path, so locking first would make
+        // the app's own rule refuse itself.
+        if (shouldIgnoreOnCreate(file)) ignore(file)
         setLocked(locked() + pathString(rel))
     }
+
+    /**
+     * Whether a new file should be held back from git until the person says otherwise.
+     *
+     * **Only what the app cannot classify.** A text file and a picture are both understood, so both
+     * are tracked and both have a history. A `.zip`, a `.pdf`, a `.mp4` is a file this app can
+     * neither open nor judge, and sending it to GitHub spends storage on something nobody has said
+     * they want there — so it waits, visibly, behind the same switch a picture uses.
+     */
+    fun shouldIgnoreOnCreate(file: File): Boolean = kindOf(file) == EntryKind.UNKNOWN
 
     /** The other default: an agent's new file is tracked, unlocked, and belongs to the project. */
     fun createdByAgent(file: File) {
@@ -483,7 +501,9 @@ class Workspace(val accountDir: File) {
         // so the answer to "is this new file the agent's to change" is stated, not assumed.
         val rel = relative(file) ?: return
         setLocked(locked() - pathString(rel))
-        track(file)
+        // The same rule as a person's file, because it is about the *kind*, not the author: what
+        // the app cannot classify waits for a decision whoever made it.
+        if (shouldIgnoreOnCreate(file)) ignore(file) else track(file)
     }
 
     /** Adds [file] to the project's `.gitignore`, so git stops tracking it. */

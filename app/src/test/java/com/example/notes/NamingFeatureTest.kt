@@ -148,6 +148,12 @@ class NamingFeatureTest : FeatureTest() {
         // Measured against a real repository: GitHub created files named `zz:a.txt`, `zz?a.txt`,
         // `zz a.txt` and `CON` and answered `201 Created` to every one. The app was not protecting
         // the remote from anything; it was renaming the person's file for a rule that did not exist.
+        // **The setup happens once, then four names are tried in the same folder.** The helper used
+        // to do the setup itself, so calling it four times made the project four times — and the
+        // second call found two new entries, which is the duplicate the helper then tripped over.
+        scene.signedIn()
+        scene.project("groceries")
+        scene.open("groceries")
         assertEquals("My Notes (draft).txt", madeFileNamed("My Notes (draft).txt"))
         assertEquals("Shopping list.txt", madeFileNamed("Shopping list.txt"))
         assertEquals("PHOTO.JPEG", madeFileNamed("PHOTO.JPEG"))
@@ -206,10 +212,8 @@ class NamingFeatureTest : FeatureTest() {
      * the app does not change the name — a helper that went through the same rule would agree with
      * itself whatever happened.
      */
+    /** Makes [name] in the open folder and answers the name it was actually stored under. */
     private fun madeFileNamed(name: String): String {
-        scene.signedIn()
-        scene.project("groceries")
-        scene.open("groceries")
         // **The entries before and after**, so the answer is the one this call made rather than
         // "the only entry" — a project's folder holds more than the file being tested.
         val before = scene.viewModel.entries.map { it.name }.toSet()

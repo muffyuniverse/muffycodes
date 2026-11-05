@@ -37,6 +37,34 @@ the size caption is not a UI tweak: it is a field that has to be computed and ca
 
 ---
 
+## 0b. What wiring it up taught, before the rule was written down
+
+The first implementation of §1 ignored **every** file a person made, reading the operator's rule as
+"operator files are ignored". Fourteen tests failed, and the reason is the most important finding in
+this plan:
+
+> **An ignored file is not committed.** `stageEverything` runs `git add .`, which honours
+> `.gitignore` — so an ignored file has **no version, no undo, and no history**. Ignoring is about
+> not sending to GitHub, but git cannot commit-and-not-push, so ignoring *also* means not versioning.
+
+"Every change is a version" is the promise this app exists for. A person's note with no history is
+a worse product than a note that reaches GitHub.
+
+**So the rule is narrower than it first read, and the operator's own words support it:** *"unknown
+should be gitignored by default … same as with pictures"* — pictures are **tracked**. What is held
+back is only what the app cannot classify.
+
+| Creation | Locked | Ignored | History |
+|---|---|---|---|
+| Text file, by the person | yes | **no** | yes |
+| Picture, by the person | yes | **no** | yes (LFS) |
+| `.zip`/`.pdf`/`.mp4`, by the person | yes | **yes** | none until tracked |
+| Anything, by the agent | no | only if `UNKNOWN` | yes unless `UNKNOWN` |
+
+That table is the whole of §1. Everything below assumes it.
+
+---
+
 ## 1. Part one — binary tracking: UNKNOWN ignored by default
 
 ### 1.1 The rule the operator set
@@ -89,9 +117,9 @@ never silently ignore it. This is not analytics; it is the sentence that stops a
 
 | # | Step | File | Proof |
 |---|---|---|---|
-| 1.1 | Add `Workspace.shouldIgnoreOnCreate(kind)` → true for `UNKNOWN` | `Workspace.kt` | unit test: `UNKNOWN` true, `TEXT`/`IMAGE`/`FOLDER` false |
-| 1.2 | Wire it into **both** creation doors — `createdByOperator` and `createdByAgent` | `Workspace.kt` | two tests side by side, as with the existing creation-default tests |
-| 1.3 | **Call `createdByOperator` from the real operator doors** (`createFile`, `createImage`, `importFiles`) — today it has no app caller, which is a pre-existing gap | `AppViewModel.kt` | a test that creates a file through the view model and asserts it is locked + ignored |
+| 1.1 | ~~Add `shouldIgnoreOnCreate`~~ **DONE** — true only for `UNKNOWN` | `Workspace.kt:495` | tested |
+| 1.2 | ~~Wire into both doors~~ **DONE** — `createdByOperator` locks always, ignores only `UNKNOWN`; `createdByAgent` tracks unless `UNKNOWN` | `Workspace.kt` | tested |
+| 1.3 | ~~Call `createdByOperator` from the real operator doors~~ **DONE** — `createFile`, `createFolder`, `createImage`, `importFiles`, `importFolder` | `AppViewModel.kt` | door tests, not function tests |
 | 1.4 | Tracking a binary adds an LFS attribute line for its extension | `GitService.kt`, `Workspace.kt` | test: track a `.pdf`, assert `.gitattributes` names `*.pdf filter=lfs` |
 | 1.5 | `state` reports the ignored count and names the largest | `AgentTools.kt` | test: an ignored 2 MB file makes `state` say so |
 | 1.6 | Prompt line: an ignored file is not sent; say so rather than assume | `AgentPrompt.kt` | prompt contains the rule |
@@ -253,6 +281,89 @@ time**. Phase 2 must either fix the key or measure the cost of not fixing it.
 | 3.4 | Fix or measure the `event_name` cache split | cache hit rate before/after |
 | 3.5 | Measure runner-minutes/day and shard sizing | numbers in the plan |
 | 3.6 | Document the failure modes and how a person notices | a section in the plan |
+
+---
+
+## 3b. Part three-and-a-half — the public facade repository
+
+### 3b.1 What was asked
+
+> "rename muffycodes into pechka-ai and move it to private repo, and use public repo for workflows
+> and artifacts … when you add a github account to pechka it automatically creates an opensource
+> facade repo to use for workflows, and when users add their projects allow them to both add
+> existing private projects and create new private projects (now only public are allowed) … add
+> private (no licence) option as first inside window where they choose project licence"
+
+### 3b.2 Measured — this works, and here is exactly how far
+
+| Question | Answer | How measured |
+|---|---|---|
+| Can a workflow in a **public** repo check out a **private** repo? | **Yes**, with a PAT in a secret | `actions/checkout` `token:` input; docs |
+| Does the private repo need to be public? | **No** — the token carries the access | same |
+| Are a public repo's **Actions minutes** free? | **Yes, unmetered** | GitHub billing |
+| Can the artifact **list** be read without auth? | **YES — HTTP 200**, no token | `curl` on run `42108218327` → `total_count: 1` |
+| Can the artifact **bytes** be downloaded without auth? | **NO — HTTP 401** | `curl -L .../artifacts/<id>/zip` → 401, 120 bytes |
+| Are workflow **logs** readable by anyone? | **Only by a logged-in GitHub account** — any account | GitHub docs, verbatim |
+
+**So the facade is real, and the boundary is sharper than expected:** the *existence, names and
+sizes* of artifacts in the public repo are world-readable, but the *contents* are not. What is
+world-readable is metadata — and metadata is not harmless: an artifact named
+`test-report-milk.txt-failure` tells a stranger that a private project has a file called
+`milk.txt`. The plan below closes that.
+
+### 3b.3 The design that keeps user code private
+
+**Two repositories, and the private one is the only one that ever sees code.**
+
+- `pechka-ai` — **private**. Holds the app, the user's projects, everything.
+- `pechka-ai-ci` — **public**, created per account. Holds **nothing but the workflow file**:
+  a `workflow_dispatch`/`repository_dispatch` receiver that checks out the private repo with a
+  token, runs the build, and uploads artifacts.
+
+The public repo's own contents are therefore one YAML file and a README. **No user code is ever
+committed to it** — it is checked out, built, and discarded with the runner.
+
+**The leak that must be closed by construction, not by care:**
+
+1. **Artifact names must not carry file names.** Name them `report`, `apk`, `logs` — never
+   `test-report-milk.txt`. A name is public metadata; a name is user data.
+2. **Job and step names must not carry file names either**, for the same reason — they are public.
+3. **Workflow logs are readable by any logged-in account.** A test failure prints the file path and
+   the assertion text. So either the private run's logs must not be the public run's logs, or the
+   tests must not print content. **This is the hard one and it is not solved by the facade** — it
+   is a property of running the tests in a public repo at all.
+4. **Secrets are safe.** A public repo's secrets are still secret; the risk is *echoing* them, which
+   is why the app's own rule ("never print the token") is not a style rule.
+
+**Recommendation:** the facade is worth building for **the app's own CI** (the app is going to be
+open source anyway — it is public today). It is **not** safe as the default for a **user's private
+project**, because item 3 cannot be closed: a failing test in a public repo prints private text to a
+public log. For user projects the honest options are (a) leave them public-only, or (b) run their CI
+in *their* private repo and pay the minutes.
+
+### 3b.4 What to build, in order
+
+| # | Step | Depends on |
+|---|---|---|
+| 3b.1 | Rename the repo to `pechka-ai` and make it **private** — do this **last**, after the facade exists, or CI stops | 3b.2 |
+| 3b.2 | Create the public facade repo by hand once, and prove a build runs from it | nothing |
+| 3b.3 | Move the workflow YAML into the facade; the private repo keeps the code | 3b.2 |
+| 3b.4 | Only then: the app creates a facade repo on account-add (`POST /user/repos`, `private: false`) | 3b.3 |
+| 3b.5 | **Private option in the licence window**, listed first, meaning "no licence, private" | independent |
+
+**3b.5 is the small one and can ship first.** The licence list comes from
+`GitHub.licences(token)` (`GitHub.kt:196`); a private project has no licence and no public
+visibility, so the option is a distinct first entry rather than a licence value. The window is
+`Dialogs.kt:481`.
+
+### 3b.5 The one thing to check before believing this
+
+**A public repo's `GITHUB_TOKEN` cannot read a private repo.** The facade needs a **separate PAT**
+stored as a secret in the *public* repo — and that PAT is a standing credential to a private
+repository, sitting in a repository the world can see the settings of. It must be a fine-grained
+token scoped to **one repository, read-only**, and it must be rotated. This is a real, if small,
+increase in attack surface, and it is the price of the design. Say so in the plan rather than
+discovering it later.
 
 ---
 

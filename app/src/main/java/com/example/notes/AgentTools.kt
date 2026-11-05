@@ -4123,6 +4123,9 @@ class AgentTools(
      * never sent is the one answer that would make a push look unnecessary when it is the whole job.
      */
     private fun state(): String {
+        // **Not traced.** `state` changes nothing and reads nothing that moves, so a line per call
+        // would be noise — the trace is a record of acts, and asking a question is not one. The
+        // number it answers with is in the conversation already.
         val repo = git.open(project)
             ?: return refusal("This project has no repository yet")
         return repo.use {
@@ -4163,6 +4166,18 @@ class AgentTools(
     /** Fetches and merges what GitHub has, answering the conflicted paths rather than failing. */
     private fun pull(): String {
         val result = git.pull(project)
+        // **A pull can change the files under the agent's feet**, so it is in the log: a model that
+        // read a file, pulled, and then wrote would overwrite what arrived, and the trace is the
+        // only place that shows the order those two things happened in.
+        Trace.note(
+            "pull",
+            "$project · " + when {
+                result.conflicted.isNotEmpty() -> "conflicted in ${result.conflicted.size} path(s)"
+                !result.ok -> "did not finish"
+                result.arrived.isEmpty() -> "nothing new"
+                else -> "brought in ${result.arrived.size} path(s)"
+            },
+        )
         if (result.conflicted.isNotEmpty()) {
             return refusal(
                 result.said.ifBlank {
@@ -4214,6 +4229,11 @@ class AgentTools(
         if (dirty < 0) return refusal("This project's repository could not be read")
 
         val result = git.push(project)
+        // **A push is the one act that leaves the phone**, so the log says so whether it worked or
+        // not. Without it a person reading the trace could not tell that the agent had sent
+        // anything to GitHub at all — the trace would show the writes and then stop, and "the
+        // project is on GitHub" would be an assertion with nothing behind it.
+        Trace.note("push", "${project} · ${if (result.success) "sent" else "refused"}")
         if (result.success) return success(result.message.ifBlank { "Pushed" })
         // **Rejected means the remote moved.** `RemoteResult` carries the server's own words, so the
         // answer passes them on rather than guessing — but it says what they mean.

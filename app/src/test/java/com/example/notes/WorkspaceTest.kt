@@ -342,9 +342,29 @@ class WorkspaceTest {
 
         val rel = workspace.pathString(workspace.relative(made)!!)
         assertTrue("the person's file is locked: $rel", workspace.locked().contains(rel))
-        assertTrue(
-            "and ignored, so it is not on GitHub",
+        assertFalse(
+            // **A text file is still tracked, and that is the point.** Ignoring it would also mean
+            // not committing it — an ignored file has no version and no undo — and "every change is
+            // a version" is the promise this app exists for. Only a file the app cannot classify
+            // waits behind the switch.
+            "and still tracked, so it has a history",
             File(project, Workspace.IGNORE).let { it.isFile && it.readText().contains("milk.txt") },
+        )
+    }
+
+    @Test
+    fun `a binary a person makes through the door waits, because the app cannot classify it`() {
+        val project = workspace.createProjectFolders("Shopping").getOrThrow()
+        File(project, ".git").mkdirs()
+        workspace.ensureIgnore(project)
+
+        val made = workspace.createFile(project, "receipt.pdf", "not really a pdf").getOrThrow()
+
+        val rel = workspace.pathString(workspace.relative(made)!!)
+        assertTrue("it is still the person's, so locked: $rel", workspace.locked().contains(rel))
+        assertTrue(
+            "and ignored, so it does not spend GitHub's storage until they say so",
+            File(project, Workspace.IGNORE).let { it.isFile && it.readText().contains("receipt.pdf") },
         )
     }
 
@@ -358,9 +378,10 @@ class WorkspaceTest {
 
         val rel = workspace.pathString(workspace.relative(made)!!)
         assertTrue("the person's folder is locked: $rel", workspace.locked().contains(rel))
-        assertTrue(
-            // The trailing slash is what makes it a folder rule, and it is the form the app writes.
-            "and ignored as a folder",
+        assertFalse(
+            // A folder is not a binary: it holds what its files are, and those decide for
+            // themselves. Ignoring the folder would ignore the notes inside it.
+            "and still tracked, because a folder is not a file type",
             File(project, Workspace.IGNORE).let {
                 it.isFile && it.readText().lines().any { line -> line.trim() == "drafts/" }
             },

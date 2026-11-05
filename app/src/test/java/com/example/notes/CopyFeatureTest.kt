@@ -201,7 +201,10 @@ class CopyFeatureTest : FeatureTest() {
     fun `a locked file can be copied, because copying does not change it`() {
         // Given a locked file
         val original = aFile("milk.txt", "two litres")
-        scene.viewModel.toggleLocked(original)
+        // **Already locked, because the person made it.** `createFile` is the person's door, and a
+        // file made through it is locked and ignored — so this test no longer has to lock it, and
+        // toggling here would *unlock* it and quietly test the opposite case.
+        //
         // **The row's hold.** A person's lock does not stop the person, so `isLocked` is false
         // for it by design - what this test needs is that the lock is *there*.
         assertTrue(

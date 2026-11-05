@@ -272,12 +272,18 @@ class SelectionFeatureTest : FeatureTest() {
         // The lock lives in `.muffy`, so it changes nothing in the file and makes no
         // commit. Locking a note and then syncing must not carry the lock to GitHub,
         // and unlocking must not undo anything.
+        // **The file is made through the person's door, so it arrives locked** — and the point of
+        // this test is what a lock does *not* touch, so it unlocks and re-locks rather than
+        // toggling once, which would leave it unlocked and prove nothing.
         val file = scene.file("milk.txt", "two litres")
+        assertTrue("locked to begin with", scene.viewModel.hold(file) == Workspace.Hold.USER)
         val before = scene.headId()
 
         scene.viewModel.toggleLocked(file)
+        assertTrue("unlocked", scene.viewModel.hold(file) == null)
+        scene.viewModel.toggleLocked(file)
 
-        assertTrue("locked", scene.viewModel.hold(file) == Workspace.Hold.USER)
+        assertTrue("locked again", scene.viewModel.hold(file) == Workspace.Hold.USER)
         assertEquals("the file is untouched", "two litres", file.readText())
         assertEquals("and nothing was committed", before, scene.headId())
 
