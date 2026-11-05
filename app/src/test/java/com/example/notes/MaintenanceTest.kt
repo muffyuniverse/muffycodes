@@ -268,7 +268,15 @@ class MaintenanceTest {
 
         git.open("shopping")!!.use {
             val used = storedObjects(it)
-            assertEquals("one object to begin with", 1, used.size)
+            // **Diagnosed before it is asserted.** If the clean filter did not run, the store is
+            // empty and the sweep has nothing to keep — and the failure would read as a sweep bug
+            // rather than as the filter not being applied. This says which it is.
+            assertEquals(
+                "the picture was stored as bytes (a pointer in the tree, its bytes beside it): " +
+                    "the store holds ${used.size} object(s)",
+                1,
+                used.size,
+            )
             // **A second object written straight into the store**, which is the shape a version no
             // commit points at takes. Its oid is nobody's pointer.
             val orphan = File(it.directory, "lfs/objects/ab/cd/abcdef0123456789")
