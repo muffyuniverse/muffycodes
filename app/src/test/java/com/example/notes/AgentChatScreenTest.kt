@@ -92,10 +92,27 @@ class AgentChatScreenTest {
      * worker that is writing the record.
      */
     private fun awaitTurns(count: Int) {
-        scene.await("$count turns\n    the record holds:\n${record()}") {
-            scene.viewModel.chatBox?.turns?.size == count && !scene.viewModel.chatWorking
+        val until = System.currentTimeMillis() + 10_000
+        while (System.currentTimeMillis() < until) {
+            if (scene.viewModel.chatBox?.turns?.size == count && !scene.viewModel.chatWorking) {
+                compose.waitForIdle()
+                return
+            }
+            // **The main looper, the same way `Scenario.await` does it.** The read is posted from the
+            // worker to the main thread, and this harness only runs that looper while something
+            // idles it.
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+            Thread.sleep(4)
         }
-        compose.waitForIdle()
+        // **Read at the moment of failure, not before the wait.** The first version built this
+        // string as the wait's description, which is evaluated once at the call — so it reported the
+        // record as it was *before* the turn, which is exactly the evidence a timeout needs to
+        // contain.
+        throw AssertionError(
+            "waited 10000 ms for $count turns\n" +
+                "    the record holds:\n${record()}\n" +
+                scene.diagnose(),
+        )
     }
 
     /**
