@@ -416,6 +416,16 @@ class SemanticSearch(
                         } catch (e: Throwable) {
                             null
                         } ?: continue
+                        // **The same exclusions the tree walk makes, made again here.** `gather`
+                        // leaves out `agent/` because it holds the log, the fetched pages and this
+                        // index; git holds those paths too, for any project that committed before
+                        // the ignore list existed or that has one in its own history. Indexing them
+                        // from history would put back exactly what the walk refuses — including the
+                        // index's own database, which is the recursion the walk names.
+                        // **`ws.isHidden`, the app's own rule**, not a second one written here: a
+                        // name the listing hides must not come back through the history.
+                        val parts = change.path.split('/')
+                        if (parts.any { it == AgentLog.DIR || ws.isHidden(it) }) continue
                         // **Binary and oversized content is skipped silently here.** A version is not
                         // something a person chose to index, so a failure to take one must not turn
                         // into a note on every answer; the working tree half already reports the

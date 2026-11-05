@@ -48,6 +48,121 @@ class ProjectGitTest {
             .close()
     }
 
+    // ---- what each commit changed, and which commit a blob came from ---------
+
+    /**
+     * **The two primitives everything about saved versions rests on.**
+     *
+     * `walkChanges` is the one pass over history that both the indexer and the answer use, and
+     * `VersionResolver` is how a blob id — which is what the index stores, because it survives a
+     * prune — becomes a commit id, which is what a person can read. Neither had a test of its own:
+     * they were only ever exercised through a search, where a failure looks like "nothing matched".
+     */
+    @Test
+    fun `walkChanges reports what each commit changed, newest first`() {
+        val git = gitFor()
+        workspace.write(File(workspace.projectDir("shopping"), "milk.txt"), "one\n")
+        workspace.write(File(workspace.projectDir("shopping"), "bread.txt"), "two\n")
+        git.init("shopping")
+        workspace.write(File(workspace.projectDir("shopping"), "milk.txt"), "one, and more\n")
+        git.commit("shopping", "second")
+
+        val seen = mutableListOf<Pair<String, List<String>>>()
+        val repo = git.open("shopping")!!
+        repo.use { GitService.walkChanges(it) { commit, changes -> seen += commit.message to changes.map { c -> c.path } } }
+
+        // **Newest first**, which is what makes the resolver cheap: the version a person asks about
+        // is usually one of the first few commits.
+        assertEquals("two commits", 2, seen.size)
+        assertEquals("the newest first", "second", seen[0].first)
+        assertEquals("and it changed one file", listOf("milk.txt"), seen[0].second)
+        // **The first commit lists everything it holds**, because it is diffed against nothing.
+        assertEquals("the first commit", "Initial commit", seen[1].first)
+        assertTrue("holding both files: ${seen[1].second}", seen[1].second.containsAll(listOf("milk.txt", "bread.txt")))
+    }
+
+    @Test
+    fun `a deletion is not a change with a blob`() {
+        // **A deletion has no content**, so it is not something the index can hold a version of.
+        // Reporting it with the zero id would be a row keyed by a blob that does not exist.
+        val git = gitFor()
+        val file = File(workspace.projectDir("shopping"), "milk.txt")
+        workspace.write(file, "one\n")
+        git.init("shopping")
+        file.delete()
+        git.commit("shopping", "removed it")
+
+        val repo = git.open("shopping")!!
+        val reported = mutableListOf<Pair<String, String>>()
+        repo.use { GitService.walkChanges(it) { _, changes -> changes.forEach { c -> reported += c.path to c.blob } } }
+
+        // **Absent, not present-with-a-zero-id.** `walkChanges` skips deletions outright, so there is
+        // no row for the index to key by a blob that does not exist.
+        assertTrue(
+            "the deletion is not in the walk: $reported",
+            reported.none { it.first == "milk.txt" },
+        )
+    }
+
+    @Test
+    fun `a blob resolves to the newest commit that put it there`() {
+        val git = gitFor()
+        val file = File(workspace.projectDir("shopping"), "milk.txt")
+        workspace.write(file, "one\n")
+        git.init("shopping")
+        workspace.write(file, "two\n")
+        val second = git.commit("shopping", "second")!!
+        workspace.write(file, "three\n")
+        git.commit("shopping", "third")
+
+        val repo = git.open("shopping")!!
+        repo.use {
+            // **The blob of the middle version**, found by walking, so the test asks about a real
+            // pair rather than a made-up id.
+            var blob: String? = null
+            GitService.walkChanges(it) { commit, changes ->
+                if (commit.id == second) blob = changes.first { c -> c.path == "milk.txt" }.blob
+            }
+            val found = GitService.VersionResolver(it).resolve(setOf("milk.txt" to blob!!))
+
+            assertEquals("the commit that wrote it", second, found["milk.txt" to blob])
+        }
+    }
+
+    @Test
+    fun `a blob no commit reaches resolves to nothing`() {
+        // **The prune case, and the reason the answer drops the row rather than naming a dead id.**
+        val git = gitFor()
+        workspace.write(File(workspace.projectDir("shopping"), "milk.txt"), "one\n")
+        git.init("shopping")
+
+        val repo = git.open("shopping")!!
+        repo.use {
+            val found = GitService.VersionResolver(it).resolve(setOf("milk.txt" to "0".repeat(40)))
+            assertTrue("nothing reaches it", found.isEmpty())
+        }
+    }
+
+    @Test
+    fun `a blob reads back by its own id, without a path or a commit`() {
+        // **`bytesAt` takes a revision and walks a tree**, so it cannot read a blob id at all — that
+        // was a real defect: every saved version read as null and was skipped without a word.
+        val git = gitFor()
+        workspace.write(File(workspace.projectDir("shopping"), "milk.txt"), "the milk went sour\n")
+        git.init("shopping")
+
+        val repo = git.open("shopping")!!
+        repo.use {
+            var blob: String? = null
+            GitService.walkChanges(it) { _, changes -> blob = changes.first { c -> c.path == "milk.txt" }.blob }
+            assertEquals(
+                "the text of that version",
+                "the milk went sour\n",
+                GitService.bytesOf(it, blob!!)?.let { raw -> String(raw, Charsets.UTF_8) },
+            )
+        }
+    }
+
     @After
     fun cleanUp() {
         root.deleteRecursively()
