@@ -228,16 +228,23 @@ class Scenario(
         // never match for a picture — it would wait twenty seconds and report a commit that did
         // happen as one that did not. So for a picture the question is whether the newest version
         // *names the bytes on disk*, which is what "it is recorded" means once LFS holds them.
-        val onDisk = file.readBytes()
-        val digest = java.security.MessageDigest.getInstance("SHA-256")
-            .digest(onDisk)
-            .joinToString("") { "%02x".format(it) }
+        // **Read inside the wait, not before it.** `createImage` writes through a worker, so the
+        // file may not exist yet when this is called — reading it once up front made the digest a
+        // digest of nothing, and the comparison then failed for ever.
         val isPicture = Workspace.kindOfPath(file.name) == EntryKind.IMAGE
         await("the project's history to record $what", 20_000) {
             val newest = history.head()
             if (newest == null || newest == before) return@await false
             val inTree = history.fileAt(relative, newest) ?: return@await false
-            if (isPicture) inTree.contains(digest) else inTree == String(onDisk)
+            if (isPicture) {
+                val onDisk = if (file.isFile) file.readBytes() else return@await false
+                val digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(onDisk)
+                    .joinToString("") { "%02x".format(it) }
+                inTree.contains(digest)
+            } else {
+                inTree == file.readText()
+            }
         }
     }
 

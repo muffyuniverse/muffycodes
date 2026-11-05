@@ -75,6 +75,15 @@ class LfsSyncTest {
         // not open.
         commitPicture("page.png", PNG)
         LfsSync.fileOf(repo, sha256(PNG))!!.delete()
+        // **The working tree is left holding the pointer**, which is what a clone produces: git
+        // writes the pointer and the smudge is supposed to replace it with the bytes. Writing the
+        // pointer here is the honest reconstruction of that state — deleting the store alone would
+        // leave the real picture on disk, and the app would rightly say nothing was missing.
+        File(root, "page.png").writeText(
+            "version https://git-lfs.github.com/spec/v1\n" +
+                "oid sha256:${sha256(PNG)}\n" +
+                "size ${PNG.size}\n",
+        )
 
         assertEquals("the path is named", listOf("page.png"), LfsSync.missing(repo))
     }
@@ -101,30 +110,58 @@ class LfsSyncTest {
     }
 
     @Test
-    fun `with no GitHub address the transfer says so rather than trying`() {
+    fun `with no GitHub address a picture that has to go says so rather than trying`() {
         // **A failure has to say what happened.** A project that stays on the phone has no endpoint,
         // and the answer names that rather than reporting a network error that never occurred.
+        //
+        // **The bytes are deleted first, so there is genuinely something to send.** A project whose
+        // store already holds everything answers "nothing to do" before it looks for an address —
+        // which is right, and is a different case from this one.
         commitPicture("page.png", PNG)
+        LfsSync.fileOf(repo, sha256(PNG))!!.delete()
 
         val sent = LfsSync.push(repo, "a-token", remoteUrl = null)
         assertFalse("it did not succeed", sent.ok)
         assertTrue("and it says why: ${sent.why}", sent.why!!.contains("no GitHub address"))
-
-        val got = LfsSync.pull(repo, "a-token", remoteUrl = null)
-        assertFalse("the same on the way in", got.ok)
-        assertTrue("with the same reason", got.why!!.contains("no GitHub address"))
     }
 
     @Test
-    fun `with no token the transfer asks for a sign-in rather than sending anonymously`() {
+    fun `a picture that is missing from the store needs an address to be fetched from`() {
+        // The same on the way in: the pointer is in the tree, the bytes are not in the store, and
+        // there is nowhere to ask.
+        commitPicture("page.png", PNG)
+        LfsSync.fileOf(repo, sha256(PNG))!!.delete()
+
+        val got = LfsSync.pull(repo, "a-token", remoteUrl = null)
+        assertFalse("it did not succeed", got.ok)
+        assertTrue("with the reason: ${got.why}", got.why!!.contains("no GitHub address"))
+    }
+
+    @Test
+    fun `with no token a picture that has to go asks for a sign-in rather than sending anonymously`() {
         // **Anonymous is a 401 dressed up as a network problem.** The real cause is that nobody is
         // signed in, so that is what the sentence says.
         commitPicture("page.png", PNG)
+        LfsSync.fileOf(repo, sha256(PNG))!!.delete()
 
         val sent = LfsSync.push(repo, null, "https://github.com/owner/repo.git")
 
         assertFalse("it did not succeed", sent.ok)
         assertTrue("and it asks for a sign-in: ${sent.why}", sent.why!!.contains("Signing in again"))
+    }
+
+    @Test
+    fun `a project whose pictures are all present has nothing to send and nothing to fetch`() {
+        // **The case that made every text project fail its sync.** Nothing to move means no address
+        // and no token are needed, so the answer is success — not a sentence about pictures the
+        // project does not have to send.
+        commitPicture("page.png", PNG)
+
+        val sent = LfsSync.push(repo, null, remoteUrl = null)
+        assertTrue("nothing to send is not a failure: ${sent.why}", sent.ok)
+
+        val got = LfsSync.pull(repo, null, remoteUrl = null)
+        assertTrue("and nothing to fetch either: ${got.why}", got.ok)
     }
 
     // ---- helpers ---------------------------------------------------------------
