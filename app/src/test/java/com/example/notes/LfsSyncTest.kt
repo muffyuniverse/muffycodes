@@ -40,6 +40,10 @@ class LfsSyncTest {
         // at all; without it the attribute is ignored and the tree stores the raw picture.
         GitService.registerLfs()
         GitService.enableLfs(repo)
+        // **The attribute is what tells git the file is a pointer.** Without it the clean filter never
+        // runs, whatever is registered, and the tree stores the raw picture — which is the silent
+        // no-op this test file would otherwise be asserting against.
+        GitService.ensureLfsAttributes(root)
     }
 
     @After
