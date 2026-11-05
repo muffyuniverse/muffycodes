@@ -88,9 +88,15 @@ object LfsStore {
      * the content, and no chance of deleting the wrong one through a path guess.
      */
     fun sweep(repo: Repository): Long {
-        val keep = reachable(repo)
         val root = dirOf(repo)
         if (!root.isDirectory) return 0L
+        val keep = reachable(repo)
+        // **An empty answer is not proof that nothing is used.** If the store holds objects and no
+        // commit names any of them, the likelier explanation is that the pointers could not be read
+        // — a repository whose filter was never registered stores pictures whole, so its trees hold
+        // no pointers at all while its store is full. Deleting on that answer would destroy every
+        // picture in the project. So the sweep refuses and says it did nothing.
+        if (keep.isEmpty() && root.walkTopDown().any { it.isFile }) return -1L
         var freed = 0L
         // Two levels deep, which is the layout: objects/ab/cd/abcdef...
         root.listFiles()?.forEach { first ->

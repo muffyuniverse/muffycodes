@@ -103,13 +103,19 @@ class SettingsScreenTest {
     }
 
     @Test
-    fun `the history field says what it counts`() {
+    fun `the history block says every version is kept, and names no number`() {
         settings()
 
         // Below the fold now that the agent's block sits directly under the account, and a screen
         // is not "not showing" something because it is further down the same page.
         compose.onNodeWithText("Change history").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Versions kept").performScrollTo().assertIsDisplayed()
+        // **There is no length to set, and the absence is the feature.** A field asking a person to
+        // guess how many versions to keep was removed; the block explains what is kept instead.
+        compose.onNodeWithText("Versions kept").assertDoesNotExist()
+        compose.onNodeWithText(
+            "Every version of every file is kept, text and pictures alike. A picture is stored " +
+                "once by its content, so an unchanged picture costs nothing the second time.",
+        ).performScrollTo().assertIsDisplayed()
     }
 
     @Test

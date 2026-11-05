@@ -46,6 +46,11 @@ class MaintenanceTest {
         ws = Workspace(account)
         ws.ensure()
         ws.projectDir("shopping").mkdirs()
+        // **The filter has to exist before a picture is saved**, or the tree holds the raw bytes and
+        // there is nothing in the store to sweep — which made these tests assert against an empty
+        // store and pass for the wrong reason. `init` does this for the app; a test that calls the
+        // git layer directly has to do it itself.
+        GitService.registerLfs()
     }
 
     private fun write(path: String, text: String): File {

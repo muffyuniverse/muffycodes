@@ -137,6 +137,7 @@ class LfsClientTest {
         // **Parsed, not spliced.** A remote may carry a port, a missing `.git`, or a trailing slash,
         // and each of those would break a `replace(".git", ...)`.
         assertEquals(
+            "**`.git` is kept**, because that is where GitHub's endpoint lives",
             "https://github.com/owner/repo.git/info/lfs",
             LfsClient.endpointOf("https://github.com/owner/repo.git"),
         )
@@ -147,8 +148,8 @@ class LfsClientTest {
         )
         assertEquals(
             "a trailing slash is not doubled",
-            "https://github.com/owner/repo/info/lfs",
-            LfsClient.endpointOf("https://github.com/owner/repo/"),
+            "https://github.com/owner/repo.git/info/lfs",
+            LfsClient.endpointOf("https://github.com/owner/repo.git/"),
         )
         assertNull("an ssh remote has no HTTP endpoint", LfsClient.endpointOf("git@github.com:owner/repo.git"))
         assertNull("and neither does nonsense", LfsClient.endpointOf("not a url"))
@@ -182,7 +183,7 @@ class LfsClientTest {
     }
 
     private fun encoded(pair: String): String =
-        android.util.Base64.encodeToString(pair.toByteArray(), android.util.Base64.NO_WRAP)
+        java.util.Base64.getEncoder().encodeToString(pair.toByteArray())
 
     private fun temporaryFolder(): File =
         Files.createTempDirectory("lfsclient").toFile().also { it.deleteOnExit() }

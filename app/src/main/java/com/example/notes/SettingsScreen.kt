@@ -936,8 +936,8 @@ fun SettingsScreen(
             // and squashing a history is git's job rather than a note-taking app's.
             Text("Change history", style = MaterialTheme.typography.titleMedium)
             Text(
-                "Every version of every text file is kept. A picture keeps one: saving a change " +
-                    "replaces it, so save under a new name to keep both.",
+                "Every version of every file is kept, text and pictures alike. A picture is stored " +
+                    "once by its content, so an unchanged picture costs nothing the second time.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

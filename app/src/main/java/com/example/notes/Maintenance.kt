@@ -226,8 +226,14 @@ object Maintenance {
                     // looked inside. Reachability is read from the pointers in the trees, so a file
                     // whose oid no commit names is by definition dead. Zero means there was nothing
                     // to reclaim, which is a different answer from "it could not run".
-                    freed = LfsStore.sweep(it)
-                    collected = true
+                    val reclaimed = LfsStore.sweep(it)
+                    // **`-1` is "it refused", not "-1 bytes".** A store holding objects that no
+                    // commit names is a repository whose pointers could not be read; deleting on
+                    // that answer would destroy every picture, so the sweep declines and this
+                    // reports that it did not run rather than inventing a number.
+                    freed = if (reclaimed < 0) 0L else reclaimed
+                    collected = reclaimed >= 0
+                    if (!collected) stopped = "the picture store could not be read"
                 }
             } finally {
                 index.close()

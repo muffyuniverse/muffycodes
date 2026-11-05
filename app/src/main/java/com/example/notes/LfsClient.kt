@@ -64,7 +64,10 @@ object LfsClient {
     fun endpointOf(remoteUrl: String): String? = try {
         val url = URL(remoteUrl.trim())
         if (url.protocol != "https" && url.protocol != "http") return null
-        val path = url.path.trimEnd('/').removeSuffix(".git")
+        // **`.git` is kept, not stripped.** GitHub's own endpoint is
+        // `https://github.com/<owner>/<repo>.git/info/lfs` — the suffix goes after `.git`, and a
+        // clone URL with `.git` is what the app stores. Stripping it asks a URL that does not exist.
+        val path = url.path.trimEnd('/')
         if (path.count { it == '/' } < 2) return null
         val port = if (url.port > 0) ":${url.port}" else ""
         "${url.protocol}://${url.host}$port$path/info/lfs"
@@ -248,7 +251,10 @@ object LfsClient {
     /** `Basic base64("x-access-token:<token>")`, which is the form GitHub answered `200` to. */
     fun basic(token: String): String {
         val pair = "x-access-token:$token"
-        return "Basic " + android.util.Base64.encodeToString(pair.toByteArray(), android.util.Base64.NO_WRAP)
+        // **`java.util.Base64`, not `android.util.Base64`.** The latter is a stub in a JVM unit
+        // test — it throws "not mocked" — and this class is tested against a local server. The
+        // result is the same string; only the dependency on a device changes.
+        return "Basic " + java.util.Base64.getEncoder().encodeToString(pair.toByteArray())
     }
 
     /** The batch response's header object as a plain map, since it is not always present. */
