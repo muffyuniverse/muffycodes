@@ -115,7 +115,12 @@ object LfsStore {
         root.listFiles()?.forEach { first ->
             first.listFiles()?.forEach { second ->
                 second.listFiles()?.forEach { stored ->
-                    val oid = first.name + second.name + stored.name
+                    // **The file is named by the whole oid, not by its tail.** JGit writes
+                    // `objects/a3/be/a3bea3f9…` — the fan-out folders repeat the prefix, so
+                    // concatenating them onto the name produced a 68-character string that matched
+                    // nothing, and every stored object was deleted. Measured: the name is all 64
+                    // characters.
+                    val oid = stored.name
                     if (oid in keep) return@forEach
                     val size = stored.length()
                     if (stored.delete()) freed += size
