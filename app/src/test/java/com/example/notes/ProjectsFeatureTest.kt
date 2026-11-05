@@ -569,6 +569,69 @@ class ProjectsFeatureTest : FeatureTest() {
     }
 
     @Test
+    fun `tracking an ignored file again puts it back in the repository`() {
+        // **The other direction of one act.** Ignoring is completed by taking the path out of the
+        // index; tracking is completed by putting it back. Without this the button is a one-way
+        // door, and a person who ignored a file by mistake has no way to undo it from the app —
+        // which is what "a simple tracked/untracked switch" means it must not be.
+        scene.project("groceries")
+        val ws = scene.workspace!!
+        val dir = ws.projectDir("groceries")
+        val file = File(dir, "notes.txt")
+        val git = ProjectGit(ws, { null }, { GitAuthor("Muffy", "muffy@example.com") })
+        ws.write(file, "something worth sending")
+        git.commitOutcome("groceries", "a save")
+
+        scene.viewModel.ignoreInGit(file)
+        scene.await("the ignore to be committed", 30_000) {
+            !scene.repo("groceries").tracked().contains("notes.txt")
+        }
+
+        // The same button, pressed again, because the state is what decides the direction.
+        scene.viewModel.ignoreInGit(file)
+        scene.await("the path to be tracked again", 30_000) {
+            scene.repo("groceries").tracked().contains("notes.txt")
+        }
+
+        val said = scene.viewModel.message.orEmpty()
+        assertTrue("it says it is tracked again: $said", said.contains("Tracking notes.txt again"))
+        assertEquals("with what is on the phone, not a history walk", "something worth sending",
+            file.readText())
+        // **And the line is gone from `.gitignore`**, or the next save would untrack it again and the
+        // button would appear not to have worked.
+        val ignore = File(dir, Workspace.IGNORE)
+        val text = if (ignore.isFile) ignore.readText() else ""
+        assertFalse("the ignore line was removed: $text", text.contains("notes.txt"))
+    }
+
+    @Test
+    fun `ignoring a folder and then tracking it again takes the whole folder`() {
+        // **The folder rule, both ways.** A folder goes into `.gitignore` with a trailing slash, and
+        // taking it out has to match that line rather than the bare name — otherwise the line stays,
+        // the folder stays ignored, and the button says it is tracked.
+        scene.project("groceries")
+        val ws = scene.workspace!!
+        val dir = ws.projectDir("groceries")
+        val folder = File(dir, "drafts").apply { mkdirs() }
+        File(folder, "one.txt").writeText("one")
+        val git = ProjectGit(ws, { null }, { GitAuthor("Muffy", "muffy@example.com") })
+        git.commitOutcome("groceries", "the folder")
+
+        scene.viewModel.ignoreInGit(folder)
+        scene.await("the folder to be ignored", 30_000) {
+            File(dir, Workspace.IGNORE).let { it.isFile && it.readText().contains("drafts/") }
+        }
+        scene.viewModel.ignoreInGit(folder)
+        scene.await("the folder to be tracked again", 30_000) {
+            !File(dir, Workspace.IGNORE).let { it.isFile && it.readText().contains("drafts/") }
+        }
+
+        val text = File(dir, Workspace.IGNORE).readText()
+        assertFalse("the trailing-slash line is gone: $text", text.contains("drafts/"))
+        assertFalse("and the bare name is not left behind: $text", text.contains("drafts"))
+    }
+
+    @Test
     fun `a local project keeps its versions like any other`() {
         scene.viewModel.createLocalProject("scratch")
         scene.await("the local project", 30_000) {

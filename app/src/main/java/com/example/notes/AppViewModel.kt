@@ -2043,64 +2043,106 @@ class AppViewModel @JvmOverloads constructor(
         val ws = workspace ?: return
         val path = ws.relative(file) ?: return
         val project = ws.projectOf(file) ?: return
-        val inside = path.drop(1).joinToString("/").let {
-            if (file.isDirectory) "$it/" else it
+        val inside = insideOf(ws, file, path) ?: return
+        // **The state is asked of git, not of a flag.** Whether a path is ignored is a question
+        // `.gitignore` answers, and a second copy of that answer is a second thing that can be
+        // wrong. The index is asked the same way for "is it tracked", which is the other half of
+        // what the button changes.
+        val ignored = git?.open(project)?.use { repo -> GitService.isIgnored(repo, inside) } ?: false
+        setIgnored(file, project, inside, !ignored)
+    }
+
+    /**
+     * The project-relative path of [file], as git writes it: folders keep a trailing slash.
+     *
+     * **Without the slash git still ignores the path**, but a person reading `.gitignore` cannot tell
+     * a folder from a file, and the ignore file is a document they may read.
+     */
+    private fun insideOf(ws: Workspace, file: File, path: List<String>): String? {
+        val inside = path.drop(1).joinToString("/").let { if (file.isDirectory) "$it/" else it }
+        return inside.ifEmpty { null }
+    }
+
+    /**
+     * Tracks [file], or ignores it — **one act, both directions.**
+     *
+     * **This is classic gitignore and nothing else.** An ignored path is in `.gitignore` *and* out of
+     * the index, so it is not committed and not sent. The other mechanism this app had — leaving a
+     * file tracked and deriving a tree without it — needed a force-push to deliver, because the
+     * commit being sent was on no local branch. That is gone: what is on the phone's `main` and what
+     * is on GitHub's are now the same history, which is what lets the agent push at all.
+     *
+     * The four sentences are four different situations, and the dangerous one says so every time:
+     * ignoring stops a path being *sent from now on* and does not take back what was sent. The
+     * commit that carried it is still in the remote's history and `git cat-file` still prints it
+     * after the file is gone from a fresh clone. Measured, not assumed.
+     */
+    private fun setIgnored(file: File, project: String, inside: String, ignore: Boolean) {
+        val ws = workspace ?: return
+        Trace.tap(if (ignore) "ignore" else "track", inside)
+        val ignoreFile = File(ws.projectDir(project), Workspace.IGNORE)
+        val current = if (ignoreFile.isFile) ws.read(ignoreFile) else ""
+        val lines = current.lineSequence().toMutableList()
+        val has = lines.any { it.trim() == inside }
+
+        val text = if (ignore) {
+            if (has) current else buildString {
+                append(current)
+                if (current.isNotEmpty() && !current.endsWith("\n")) append("\n")
+                appendLine(inside)
+            }
+        } else {
+            // **Every copy goes**, not just the first: a file appended to twice has two lines, and
+            // removing one leaves it ignored while the button says it is tracked.
+            //
+            // **Rebuilt from the lines that stay, and exactly one trailing blank dropped.**
+            // `lineSequence()` splits a final newline into a trailing empty string, so joining
+            // naively would grow the file by a blank line every time a path was tracked again — and
+            // a `.gitignore` that grows on each tap is a file the person did not write. Only *one*
+            // is dropped: blank lines the person put there themselves are theirs.
+            lines.filterNot { it.trim() == inside }
+                .let { if (it.isNotEmpty() && it.last().isEmpty()) it.dropLast(1) else it }
+                .joinToString("\n")
+                .let { if (it.isEmpty()) "" else "$it\n" }
         }
-        if (inside.isEmpty()) return
-        Trace.tap("add to gitignore", inside)
-        val ignore = File(ws.projectDir(project), Workspace.IGNORE)
-        val current = if (ignore.isFile) ws.read(ignore) else ""
-        if (current.lineSequence().any { it.trim() == inside }) {
-            message = "$inside is already ignored"
-            return
+        if (ignore != has || text != current) {
+            // **Written through the funnel, so a locked project's `.gitignore` is still refused** —
+            // and then said, rather than looking like a tap that did nothing.
+            if (!ws.write(ignoreFile, text)) {
+                Trace.failure(if (ignore) "ignore" else "track", "refused")
+                message = "Could not change .gitignore here"
+                return
+            }
         }
-        val text = buildString {
-            append(current)
-            if (current.isNotEmpty() && !current.endsWith("\n")) append("\n")
-            appendLine(inside)
-        }
-        // **Written through the funnel, so a locked project's `.gitignore` is still refused** —
-        // and then said, rather than looking like a tap that did nothing.
-        if (!ws.write(ignore, text)) {
-            Trace.failure("add to gitignore", "refused")
-            message = "Could not change .gitignore here"
-            return
-        }
-        // **The line alone does not stop a file that is already in the repository.** `.gitignore`
-        // is an *untracked* filter: git tested against itself keeps committing a path it already
-        // knows, and every file a person has saved is already tracked because a save commits. So
-        // the ignore is completed by taking the path out of the index — the file stays on the
-        // phone, editable, and stops being sent. Without this the button wrote a line, committed
-        // it, and said "Ignoring x" while x went on being pushed.
-        // **Asked before the untrack, because untracking is what makes it untrue.** The question is
-        // "does GitHub have a copy of this path", and once the path is out of the index a fresh
-        // answer would be about a different state. It is also the question the person actually has:
-        // a file is ignored *because* it holds something that should not travel.
-        var pushed = false
+
+        // **The line alone does not stop a file that is already in the repository.** `.gitignore` is
+        // an *untracked* filter: git keeps committing a path it already knows, and every file a
+        // person has saved is already tracked because a save commits. So ignoring is completed by
+        // taking the path out of the index, and tracking is completed by putting it back.
         var stillTracked = false
+        var wasPushed = false
         git?.open(project)?.use { repo ->
-            pushed = GitService.wasPushed(repo, inside)
-            stillTracked = !GitService.untrack(repo, inside)
+            if (ignore) {
+                // Asked before the untrack, because untracking is what makes it untrue.
+                wasPushed = GitService.wasPushed(repo, inside)
+                stillTracked = !GitService.untrack(repo, inside)
+            } else {
+                // **Added, not restored from a version.** The file on disk is the truth; a person who
+                // tracked it again is saying "send this", and what is on the phone is what to send.
+                GitService.track(repo, inside)
+            }
         }
-        // **Two sentences, because there are two situations and only one of them is dangerous.**
-        //
-        // Ignoring stops a path being *sent from now on*. It does not take back what was sent: the
-        // commit that carried it is still in the remote's history and `git cat-file` still prints it
-        // after the file is gone from a fresh clone. Measured, not assumed. So a person who ignores a
-        // file because it holds a key has not removed the key, and the sentence has to say so.
-        //
-        // **Every time, and for every path** - not only for names that look like secrets. The app
-        // cannot judge what is a secret, and a list of patterns would be right about the names
-        // somebody thought of and silently wrong about every other file.
+
         message = when {
-            stillTracked -> "Ignoring $inside, but it is still in the repository"
-            pushed ->
+            ignore && stillTracked -> "Ignoring $inside, but it is still in the repository"
+            ignore && wasPushed ->
                 "Ignoring $inside. Its earlier versions stay on GitHub — ignoring stops it being " +
                     "sent from now on; it does not take back what was sent."
-            else -> "Ignoring $inside"
+            ignore -> "Ignoring $inside"
+            else -> "Tracking $inside again — it will be sent on the next push"
         }
         refresh()
-        commitProject(project, "Ignored $inside")
+        commitProject(project, if (ignore) "Ignored $inside" else "Tracked $inside")
     }
 
     /**

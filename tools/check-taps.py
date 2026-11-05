@@ -50,9 +50,17 @@ VOCABULARY = {
     # a row's own switches
     "lock", "unlock", "pin", "unpin", "select", "unselect",
     # what a row's menu offers, and what the selection bar offers
-    # `unsync` / `sync again` are the pair that replaced `add to gitignore`: the act is not an
-    # ignore (which would untrack the file) but keeping it off GitHub while it stays tracked here.
-    "move", "copy", "delete", "rename", "add to gitignore", "unsync", "sync again",
+    # **`ignore` / `track` are the pair that replaced `unsync` / `sync again`**, and the history is
+    # worth keeping because it went in a circle. `add to gitignore` came first; it was replaced by
+    # `unsync` because an ignore untracks the file and the app wanted a tracked file kept off GitHub;
+    # and now the operator has ruled the other way — "gitignore should be just classic gitignore, not
+    # as sync currently implemented but a simple tracked/untracked switch". So the act is an ignore
+    # again, and the derived-tree mechanism that made `unsync` necessary is deleted rather than kept.
+    #
+    # `add to gitignore`, `unsync` and `sync again` stay in the vocabulary because a log written by
+    # an older build still holds them, and a trace that cannot be read is not a trace.
+    "move", "copy", "delete", "rename",
+    "add to gitignore", "unsync", "sync again", "ignore", "track",
     # **Taking a copy out of a folder the app keeps.** A different name from `copy` because
     # it is a different button: the one item a system-locked row offers, and the trace
     # should name what the person pressed rather than the code path behind it.

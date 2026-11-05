@@ -446,6 +446,35 @@ object GitService {
     }
 
     /**
+     * Puts [path] back in the index, so it is committed and sent again.
+     *
+     * **The file on disk is the truth.** Tracking again is a person saying "send this", and what is
+     * on the phone is what to send — not whatever version a history walk would find. A path that is
+     * not on disk is not added, because there is nothing to add; the caller learns that from `false`.
+     */
+    fun track(repo: Repository, path: String): Boolean = try {
+        Git(repo).use { git ->
+            git.add().addFilepattern(path.trimEnd('/')).call()
+        }
+        repo.readDirCache().getEntry(path.trimEnd('/')) != null
+    } catch (t: Throwable) {
+        false
+    }
+
+    /**
+     * Whether git would ignore [path] — **asked of git, not of a flag.**
+     *
+     * `isIgnored` is the same check the working tree uses, so a path matched by a pattern the app
+     * never wrote (a `build/` line, a `*.log`) answers honestly. A second list of ignored paths kept
+     * by the app would be a second answer that can disagree with the one that decides what is sent.
+     */
+    fun isIgnored(repo: Repository, path: String): Boolean = try {
+        Git(repo).use { git -> git.status().call().ignored.any { it.trimEnd('/') == path.trimEnd('/') } }
+    } catch (t: Throwable) {
+        false
+    }
+
+    /**
      * Whether [path] was ever **pushed** — that is, whether GitHub has a copy of it.
      *
      * **Asked of the remote-tracking ref, not of `HEAD`.** `refs/remotes/origin/<branch>` is git's
