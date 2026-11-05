@@ -41,11 +41,24 @@ object LfsStore {
      */
     fun reachable(repo: Repository): Set<String> {
         val out = mutableSetOf<String>()
-        val branch = repo.fullBranch ?: repo.branch ?: return out
-        val ref = repo.findRef(branch) ?: return out
+        // **`HEAD`, not a branch name.** `fullBranch` answers the *symbolic* ref when HEAD is
+        // detached and the short name otherwise, and `findRef` on the short name fails — so a
+        // repository between two states answers "nothing is reachable", which the sweep treats as
+        // "delete everything". `HEAD` always resolves to a commit when there is one.
+        val head = try {
+            repo.resolve("HEAD")
+        } catch (e: Throwable) {
+            null
+        } ?: return out
+        // **A commit id, walked directly** — no ref object needed, and nothing to fail to resolve.
+        val tip = try {
+            RevWalk(repo).use { it.parseCommit(head) }
+        } catch (e: Throwable) {
+            null
+        } ?: return out
         try {
             RevWalk(repo).use { walk ->
-                walk.markStart(walk.parseCommit(ref.objectId))
+                walk.markStart(tip)
                 for (commit in walk) {
                     TreeWalk(repo).use { tw ->
                         tw.addTree(commit.tree)
