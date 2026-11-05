@@ -95,6 +95,7 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * The editor: the file's name in the top row, and its text below.
@@ -137,7 +138,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun EditorScreen(
     viewModel: AppViewModel,
-    file: java.io.File,
+    file: File,
     onBack: () -> Unit,
     onOpenHistory: () -> Unit,
     onReport: () -> Unit = {},
@@ -251,6 +252,11 @@ fun EditorScreen(
      * PNG, and two documents that can disagree is the thing this codebase spends its time avoiding.
      */
     var strokes by remember(session) { mutableStateOf<List<Drawing.Stroke>>(emptyList()) }
+    // **The picture waiting to be written, and whether the window asking where is open.** A drawing
+    // has one version, so saving it is a decision — over the file it came from, or beside it — and the
+    // bytes are held until the person has said which.
+    var pendingPicture by remember(session) { mutableStateOf<ByteArray?>(null) }
+    var askingPicture by remember(session) { mutableStateOf(false) }
     /**
      * **The tool in force, or null for none.**
      *
@@ -613,29 +619,15 @@ fun EditorScreen(
                 Button(
                     onClick = {
                         if (kind == EntryKind.IMAGE) {
-                            // **The strokes are baked into the picture, and the list is cleared.**
-                            // Clearing matters: what is now on disk includes them, so keeping them
-                            // would draw every mark twice on the next save — the same bug in the
-                            // other direction from losing them.
+                            // **The strokes are baked, then the person is asked where they go.**
+                            // A picture keeps one version, so "save" and "save a copy" are different
+                            // acts and the window is the only place the choice can be made. The
+                            // stroke list is cleared when the write happens, not here, so cancelling
+                            // leaves the drawing exactly as it was.
                             (decoded as? PictureOpen.Ready)?.let { open ->
                                 if (strokes.isNotEmpty()) {
-                                    val flattened = Drawing.flatten(open.bitmap, strokes)
-                                    viewModel.savePicture(flattened)
-                                    strokes = emptyList()
-                                    // **The base becomes what was just written.** It used to stay the
-                                    // picture from *before* the strokes, so View — which re-reads the
-                                    // file — showed them and Draw, which draws `decoded` plus the
-                                    // stroke list it had just emptied, did not. The operator's report:
-                                    // "see why changes after saving are visible in view mode, but
-                                    // become invisible in draw mode".
-                                    //
-                                    // Decoding the bytes the app just encoded is the one way to be
-                                    // sure the two screens agree: it is the same image View will read
-                                    // back off disk, not a second guess at it.
-                                    decoded = android.graphics.BitmapFactory
-                                        .decodeByteArray(flattened, 0, flattened.size)
-                                        ?.let { PictureOpen.Ready(it) }
-                                        ?: decoded
+                                    pendingPicture = Drawing.flatten(open.bitmap, strokes)
+                                    askingPicture = true
                                 }
                             }
                         } else {
@@ -794,6 +786,39 @@ fun EditorScreen(
         }
     }
 
+    // **Where the drawing goes**, asked before anything is written. A picture has one version, so
+    // this window is the whole of a picture's versioning: keep the name to replace, type a new one to
+    // keep both. Cancelling drops the bytes and leaves the strokes on the canvas.
+    val drawing = pendingPicture
+    if (askingPicture && drawing != null) {
+        SavePictureDialog(
+            current = file.name,
+            onDismiss = {
+                askingPicture = false
+                pendingPicture = null
+            },
+            onSave = { name ->
+                askingPicture = false
+                pendingPicture = null
+                // **The target is the file's own folder with whatever name was typed**, which is what
+                // makes "save as a copy" a file operation rather than a history one.
+                val target = File(file.parentFile, name)
+                viewModel.savePicture(drawing, target)
+                // **The strokes are cleared only now**, because the write has been asked for and the
+                // bytes that include them are what went with it. Keeping them would draw every mark
+                // twice on the next save.
+                strokes = emptyList()
+                // **The base becomes what was just written**, decoded from the same bytes the file
+                // now holds, so View and Draw agree: View re-reads the file, and Draw draws `decoded`
+                // plus an empty stroke list.
+                decoded = android.graphics.BitmapFactory
+                    .decodeByteArray(drawing, 0, drawing.size)
+                    ?.let { PictureOpen.Ready(it) }
+                    ?: decoded
+            },
+        )
+    }
+
     // **The question, drawn outside the layout** so it can appear over whatever mode is showing. The
     // answer is what changes the mode: dismissing leaves the person in Draw with the drawing intact,
     // which is the whole point of asking rather than warning after the fact.
@@ -950,7 +975,7 @@ private sealed interface PictureState {
 @Composable
 private fun Reader(
     viewModel: AppViewModel,
-    file: java.io.File,
+    file: File,
     text: String,
     onLink: (String) -> Unit,
     onStep: (Int) -> Unit,

@@ -158,6 +158,82 @@ fun NewImageDialog(
     )
 }
 
+/**
+ * How a drawing is saved, when saving it destroys what was there.
+ *
+ * **A picture has one version.** There is no history to go back to, so "save" and "save a copy" are
+ * genuinely different acts and the person has to choose which one they mean — the operator's words:
+ * *"when we change a binary we should show a save screen with current path and name preset but with
+ * ability for user to save the change as a different file — that will be our versioning option for
+ * binaries"*.
+ *
+ * **The name is preset to the file's own**, so the ordinary act — save it where it is — is one press.
+ * The other button is what makes a second version possible at all: a new name is a new file, with its
+ * own single version, and the old one keeps its own.
+ *
+ * **The sentence about loss is on the window, not in a toast afterwards.** A person pressing Replace
+ * is told, before they press, that the picture they have now will be gone.
+ */
+@Composable
+fun SavePictureDialog(
+    current: String,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    // The extension is kept out of the field: a person typing "page" means "page.png", and a name
+    // typed without one would be saved as a picture the app then refuses to open.
+    val stem = current.substringBeforeLast('.', current)
+    val extension = current.substringAfterLast('.', "")
+    var name by remember(current) { mutableStateOf(stem) }
+    val asked = name.trim()
+    // **The same name means replace; a different one means a copy.** One field, because that is how a
+    // person thinks about it — the choice is the name, not a mode.
+    val replacing = asked.equals(stem, ignoreCase = true)
+    val target = if (extension.isEmpty()) asked else "$asked.$extension"
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Save this picture") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Name") },
+                    singleLine = true,
+                    isError = asked.isEmpty(),
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = if (replacing) {
+                        "This replaces \"$current\". A picture keeps one version, so the one you " +
+                            "have now will be gone."
+                    } else {
+                        "Saves as \"$target\", beside the picture you are editing. Both are kept, " +
+                            "each with its own single version."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (replacing) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = asked.isNotEmpty(),
+                onClick = {
+                    onSave(target)
+                    onDismiss()
+                },
+            ) { Text(if (replacing) "Replace" else "Save as a copy") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
 /** Asks a yes-or-no question. */
 @Composable
 fun ConfirmDialog(

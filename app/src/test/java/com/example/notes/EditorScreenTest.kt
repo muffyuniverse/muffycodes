@@ -1063,6 +1063,74 @@ class EditorScreenTest {
     }
 
     @Test
+    fun `a picture saved under a new name keeps both, each with one version`() {
+        // **The whole of a picture's versioning.** A binary has no history, so keeping two states of
+        // it is two FILES - the operator's words: *"save the change as a different file — that will be
+        // our versioning option for binaries"*. This is the test that says the option exists and that
+        // the original is not a casualty of it.
+        scene.project("groceries").open("groceries")
+        val first = scene.file("page.png")
+        first.writeBytes(ONE_PIXEL_PNG)
+        scene.viewModel.openEditor(first)
+        scene.await("the picture to open") { scene.viewModel.editingFile == first }
+
+        val copy = File(first.parentFile, "page-2.png")
+        scene.viewModel.savePicture(OTHER_PIXEL_PNG, copy)
+        scene.await("the copy to be written") { copy.isFile && copy.length() > 0 }
+
+        assertEquals("the new file has the new bytes", OTHER_PIXEL_PNG.toList(), copy.readBytes().toList())
+        assertEquals(
+            "and the original is untouched, which is what makes this versioning rather than moving",
+            ONE_PIXEL_PNG.toList(),
+            first.readBytes().toList(),
+        )
+    }
+
+    @Test
+    fun `saving a picture over itself replaces it, and says so before it happens`() {
+        // **The other half of the same decision.** Replacing is allowed and is the ordinary case —
+        // the name is preset to the file's own — but it destroys the only version there is, so the
+        // window says so first. What this pins is that the replacement really is a replacement: the
+        // old bytes are not kept anywhere.
+        scene.project("groceries").open("groceries")
+        val file = scene.file("page.png")
+        file.writeBytes(ONE_PIXEL_PNG)
+        scene.viewModel.openEditor(file)
+        scene.await("the picture to open") { scene.viewModel.editingFile == file }
+
+        scene.viewModel.savePicture(OTHER_PIXEL_PNG, file)
+        scene.await("the picture to be replaced") { !file.readBytes().contentEquals(ONE_PIXEL_PNG) }
+
+        assertEquals("the new bytes", OTHER_PIXEL_PNG.toList(), file.readBytes().toList())
+        assertEquals(
+            "and no copy was made beside it",
+            1,
+            (file.parentFile?.listFiles() ?: emptyArray()).count { it.name.endsWith(".png") },
+        )
+    }
+
+    @Test
+    fun `a drawing is not saved into a name that is not a picture`() {
+        // **A name is a promise about content.** Writing PNG bytes into `notes.txt` would give the
+        // person a file the app then opens as text - a page of replacement characters that looks
+        // like corruption, and a picture they can no longer see. The refusal names the name.
+        scene.project("groceries").open("groceries")
+        val file = scene.file("page.png")
+        file.writeBytes(ONE_PIXEL_PNG)
+        scene.viewModel.openEditor(file)
+        scene.await("the picture to open") { scene.viewModel.editingFile == file }
+
+        val wrong = File(file.parentFile, "notes.txt")
+        scene.viewModel.savePicture(OTHER_PIXEL_PNG, wrong)
+
+        assertFalse("nothing was written under that name", wrong.exists())
+        assertTrue(
+            "and the person was told why: ${scene.viewModel.message}",
+            scene.viewModel.message.orEmpty().contains("not a picture name"),
+        )
+    }
+
+    @Test
     fun `the bytes a save writes are the bytes the screen keeps as its base`() {
         // **The operator's report**: "see why changes after saving are visible in view mode, but
         // become invisible in draw mode".

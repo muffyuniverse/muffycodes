@@ -3038,25 +3038,48 @@ class AppViewModel @JvmOverloads constructor(
      * keystroke. Drawing produces one save when they press the button, so there is nothing to
      * coalesce and a delay would only make the button feel broken.
      */
-    fun savePicture(bytes: ByteArray) {
+    /**
+     * Writes a picture that was drawn on, **either over the file it came from or as a new one.**
+     *
+     * **`target` is what makes a picture's versioning a file operation.** A binary has exactly one
+     * version (see `docs/PLAN-lfs-2026-11-05.md`): saving over it destroys what was there, and saving
+     * beside it keeps both as two files. The screen asks which, and this is the one place both answers
+     * land — the same funnel for locks, the record's protection, and the commit, so a new file cannot
+     * skip a rule the old one obeys.
+     *
+     * **A new name does not delete the original.** The person asked for a copy; the file they were
+     * editing keeps its own version, and the one they made starts with its own.
+     */
+    fun savePicture(bytes: ByteArray, target: File? = null) {
         val ws = workspace ?: return
         val file = editingFile ?: return
         // The mirror of `saveEditor`'s refusal, and held here rather than only on the screen for the
         // same reason: a guarantee held only by the caller is a convention.
         if (ws.kindOf(file) != EntryKind.IMAGE) return
         if (isLocked(file)) return
+        // **The destination is a picture too**, or the bytes would be written into a text file and
+        // the name would promise something the content is not.
+        val into = target ?: file
+        if (ws.kindOfPath(into.name) != EntryKind.IMAGE) {
+            message = "\"${into.name}\" is not a picture name, so the drawing was not saved there."
+            return
+        }
+        if (isLocked(into)) {
+            message = "\"${into.name}\" is locked, so the drawing was not saved there."
+            return
+        }
 
-        val tap = Trace.tap("save", file.name)
+        val tap = Trace.tap("save", into.name)
         val g = git
-        val name = file.name
-        val project = ws.projectOf(file)
+        val name = into.name
+        val project = ws.projectOf(into) ?: ws.projectOf(file)
         val login = activeLogin
         onWorker {
             if (login == null || !accounts.exists(login)) return@onWorker
             // **Written through the workspace's own funnel**, so the app's locks and the record's
             // protection are asked here exactly as they are for a text save. A picture is not a
             // special case that gets to skip them.
-            if (!ws.writeBytes(file, bytes)) {
+            if (!ws.writeBytes(into, bytes)) {
                 Trace.failed(tap, "That picture could not be written", "save")
                 main.post { message = "That picture could not be written" }
                 return@onWorker

@@ -313,16 +313,6 @@ class Workspace(val accountDir: File) {
      * extension lists beside that second caller would be a second copy of the rule, and the two
      * would drift the first time an image type was added.
      */
-    fun kindOfPath(name: String): EntryKind {
-        val extension = name.substringAfterLast('.', "").lowercase()
-        return when {
-            extension in IMAGE_EXTENSIONS -> EntryKind.IMAGE
-            extension.isEmpty() -> EntryKind.TEXT
-            extension in TEXT_EXTENSIONS -> EntryKind.TEXT
-            else -> EntryKind.UNKNOWN
-        }
-    }
-
     /**
      * True for a name that is **never shown**, because showing it would be noise.
      *
@@ -1660,6 +1650,25 @@ class Workspace(val accountDir: File) {
 
         /** The extensions treated as pictures rather than text (§9). */
         val IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp")
+
+        /**
+         * What a **name** is, by the same rule [kindOf] applies to a file.
+         *
+         * **In the companion, because two of its three callers have no workspace.** The listing has
+         * one; `GitService` is an object and the index asks about a path out of a diff, where there is
+         * no instance to ask and no `File` to stat — a path in a commit may not exist on disk at all.
+         * Restating the extension lists beside those callers would be a second copy of the rule, and
+         * the two would drift the first time a picture format was added.
+         */
+        fun kindOfPath(name: String): EntryKind {
+            val extension = name.substringAfterLast('.', "").lowercase()
+            return when {
+                extension in IMAGE_EXTENSIONS -> EntryKind.IMAGE
+                extension.isEmpty() -> EntryKind.TEXT
+                extension in TEXT_EXTENSIONS -> EntryKind.TEXT
+                else -> EntryKind.UNKNOWN
+            }
+        }
 
         /**
          * The extensions the app will open in the editor (§9: "code, anything not
