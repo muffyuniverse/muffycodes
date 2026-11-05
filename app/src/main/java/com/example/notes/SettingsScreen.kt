@@ -927,20 +927,19 @@ fun SettingsScreen(
 
             // ---- how much change history is kept ----
             //
-            // **One sentence, and it is now true.** The old one described a local history "that
-            // holds everything outside one", and that repository is gone: every file on this phone
-            // is inside a project, and every project has its own history. Keeping the sentence
-            // would have been the app describing a repository that no longer exists.
+            // **There is no history length, and the sentence says why rather than vanishing.**
+            //
+            // A setting that shortened the history existed because a phone cannot hold every version
+            // of everything. That is still true of pictures, and it is answered by keeping exactly one
+            // version of each rather than by a number a person has to choose — so the choice moved
+            // from this screen into the file's kind. Text is unbounded because text compresses 120x,
+            // and squashing a history is git's job rather than a note-taking app's.
             Text("Change history", style = MaterialTheme.typography.titleMedium)
             Text(
-                "How many versions are kept in each project. Empty keeps all of them.",
+                "Every version of every text file is kept. A picture keeps one: saving a change " +
+                    "replaces it, so save under a new name to keep both.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            LengthField(
-                label = "Versions kept",
-                value = settings.historyLength,
-                onValueChange = { settings.keepHistory(it) },
             )
 
             // ---- how much of the request log is kept ----

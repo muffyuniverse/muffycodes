@@ -65,15 +65,6 @@ class SettingsStore(context: Context, name: String = "settings") {
     fun onboardingDone(count: Int): Boolean = onboardingAt >= count
 
     /**
-     * How many changes — local commits — are kept on this phone. 0 keeps all.
-     *
-     * Applies to the phone's own change history and to each project's individual
-     * limit alike.
-     */
-    var historyLength: Int by mutableStateOf(prefs.getInt(KEY_HISTORY, legacyLength()))
-        private set
-
-    /**
      * How many days of request log are kept — **the operator's number, and off by default.**
      *
      * The log is written on every response, including the keepalives sent every four minutes while
@@ -143,17 +134,6 @@ class SettingsStore(context: Context, name: String = "settings") {
         this.useDark = useDark
         prefs.edit().putBoolean(KEY_DARK, useDark).apply()
         Trace.said(if (useDark) "dark colours" else "light colours")
-    }
-
-    /** Sets the change history length; a negative number means no limit. */
-    fun keepHistory(value: Int) {
-        val clean = value.coerceAtLeast(0)
-        // Named with the number, because "0" and "" mean different things and the
-        // difference is exactly what a person reports as "it keeps everything now".
-        Trace.tap("history limit", if (clean == 0) "all" else clean.toString())
-        historyLength = clean
-        prefs.edit().putInt(KEY_HISTORY, clean).apply()
-        Trace.said(if (clean == 0) "every version is kept" else "the last $clean versions are kept")
     }
 
     /**
@@ -694,16 +674,6 @@ class SettingsStore(context: Context, name: String = "settings") {
     val sessionLimit: Long get() = sessionTokens.toLong()
 
     /**
-     * The two lengths older builds stored separately, read once for the migration.
-     *
-     * The larger of the two is kept: a person who had set either history longer
-     * than the other meant to be able to go back that far, and reading the smaller
-     * would silently delete versions they had asked to keep.
-     */
-    private fun legacyLength(): Int =
-        maxOf(prefs.getInt(KEY_APP_HISTORY, 0), prefs.getInt(KEY_PROJECT_HISTORY, 0))
-
-    /**
      * **Every setting back to the number the app shipped with.**
      *
      * One function, because a reset that restates the defaults is a second copy of them and the two
@@ -725,7 +695,6 @@ class SettingsStore(context: Context, name: String = "settings") {
         // happens to be first. A reset to the wrong theme is a reset that looks like a bug.
         selectTheme(DEFAULT_THEME)
         selectDarkVariant(false)
-        keepHistory(0)
         keepRequests(0)
         keepTrigger(0)
         keepHard(0)
@@ -762,7 +731,6 @@ class SettingsStore(context: Context, name: String = "settings") {
 
     const val KEY_THEME = "theme"
         const val KEY_DARK = "use_dark"
-        const val KEY_HISTORY = "history_length"
 
         /** Which onboarding page a person reached. Absent means they have not started. */
         const val KEY_ONBOARDING_AT = "onboarding_at"
@@ -974,8 +942,6 @@ class SettingsStore(context: Context, name: String = "settings") {
         const val MAX_REMIND_MINUTES = 10_080
 
         /** The two keys older builds wrote; read once, then ignored. */
-        const val KEY_APP_HISTORY = "app_history_length"
-        const val KEY_PROJECT_HISTORY = "project_history_length"
 
         /** The number a typed field means. */
         fun parseLength(text: String): Int = text.trim().toIntOrNull()?.coerceAtLeast(0) ?: 0

@@ -22,13 +22,11 @@ class ProjectGitTest {
     private lateinit var root: File
     private lateinit var workspace: Workspace
     private lateinit var bare: File
-    private var keep = 0
 
     private fun gitFor(token: String? = null) = ProjectGit(
         workspace = workspace,
         tokenProvider = { token },
         authorProvider = { author },
-        keepProvider = { keep },
     )
 
     @Before
@@ -815,19 +813,28 @@ class ProjectGitTest {
     }
 
     @Test
-    fun `a project's history is shortened after a sync`() {
+    fun `seven syncs keep all seven versions, because nothing shortens a history now`() {
+        // **The inverse of the test that used to be here**, and the inversion is the point: there was
+        // a length, a person chose it, and a sync shortened the history to it. The length is gone
+        // because the answer turned out to be about the *kind* of file rather than about a count —
+        // text compresses 120x, so keeping all of it costs almost nothing, and a picture keeps one
+        // version instead. A test that still asserted a shortened history would be asserting a
+        // feature that was removed on purpose.
         workspace.createProjectFolders("Shopping").getOrThrow()
         val git = gitFor()
         git.init("Shopping").getOrThrow()
         git.open("Shopping")?.use { GitService.setRemoteUrl(it, bare.absolutePath) }
-        keep = 3
 
         repeat(7) { i ->
             File(workspace.repoOf("Shopping"), "count.txt").writeText("value $i")
             assertTrue(git.sync("Shopping").success)
         }
 
-        assertEquals("the project keeps the length it was given", 3, git.log("Shopping").size)
+        // Seven saves, seven sync commits on top of the first version — and none of them dropped.
+        assertTrue(
+            "every version is still there: ${git.log("Shopping").size}",
+            git.log("Shopping").size >= 8,
+        )
         assertEquals("value 6", File(workspace.repoOf("Shopping"), "count.txt").readText())
     }
 

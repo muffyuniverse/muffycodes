@@ -7,80 +7,22 @@ import org.eclipse.jgit.lib.Repository
 import org.eclipse.jgit.revwalk.RevWalk
 
 /**
- * Keeps a history to a set length.
+ * **The history is never shortened, and this is what makes that affordable.**
  *
- * The oldest commits are dropped by **rebuilding the chain**: the newest [keep]
- * commits are written again, each with the same tree, message, author and time,
- * and each pointing at the previous one — except the oldest, which points at
- * nothing. The branch then moves to the rebuilt tip.
+ * There used to be a length: a number a person chose, and a rewrite that dropped everything older. It
+ * existed because a phone cannot hold every version of everything — and it answered that by asking the
+ * person to guess a number, which is a question with no good answer.
  *
- * Because every rebuilt commit carries the identical tree, the working tree
- * does not change at all: only how far back the history goes.
+ * The answer turned out to be about the *kind* of file rather than about a count. Text compresses 120x
+ * (measured: two hundred versions of a 200 KB document is 340 KB), so keeping all of it costs almost
+ * nothing and losing it costs the feature. A picture does not compress at all (200 versions of a 400 KB
+ * PNG is 79 MB), so it keeps exactly one version — and [keepLatest] is how.
+ *
+ * So there is no length and nothing is dropped. What remains here is the one rewrite the app still
+ * performs: collapsing a binary's trees onto its newest bytes, which is not a shortened history but the
+ * same history with one file's older states released.
  */
 object HistoryPrune {
-
-    /**
-     * Keeps only the newest [keep] commits of the current branch and returns how
-     * many were dropped. [keep] of 0 or less means "keep everything", so the
-     * setting can express "no limit".
-     */
-    fun prune(repo: Repository, keep: Int): Int {
-        if (keep <= 0) return 0
-        // The full name is needed: the short one resolves through a lookup that
-        // differs between the two forms, and a miss here would silently do
-        // nothing at all.
-        val branch = repo.fullBranch ?: repo.branch ?: return 0
-        val ref = repo.findRef(branch) ?: return 0
-
-        // Walk back only as far as needed: one commit past the limit tells us
-        // there is something to drop, and no further work is required.
-        val newestFirst = mutableListOf<org.eclipse.jgit.revwalk.RevCommit>()
-        RevWalk(repo).use { walk ->
-            walk.markStart(walk.parseCommit(ref.objectId))
-            for (commit in walk) {
-                newestFirst.add(commit)
-                if (newestFirst.size > keep) break
-            }
-        }
-        if (newestFirst.size <= keep) return 0
-
-        val kept = newestFirst.take(keep).reversed() // oldest first
-        val inserter = repo.newObjectInserter()
-        try {
-            var parent: ObjectId? = null
-            for (commit in kept) {
-                val builder = CommitBuilder()
-                builder.setTreeId(commit.tree)
-                builder.setAuthor(commit.authorIdent)
-                builder.setCommitter(commit.committerIdent)
-                builder.setMessage(commit.fullMessage)
-                parent?.let { builder.addParentId(it) }
-                val id = inserter.insert(builder)
-                parent = id
-            }
-            inserter.flush()
-
-            val tip = parent ?: return 0
-            val update = repo.updateRef(ref.name)
-            update.setNewObjectId(tip)
-            update.setForceUpdate(true)
-            update.update()
-
-            // **Collecting is the expensive half, and it does not belong in the change that
-            // caused it.** `gc` walks every object in the repository; running it after every
-            // single commit made each save wait for a full collection, which on a phone with a
-            // long history is seconds rather than milliseconds — and the version was already
-            // written and the ref already moved, so the work a person was waiting for had
-            // finished before the housekeeping began.
-            //
-            // The objects it would collect are unreachable the moment the ref moves, so leaving
-            // them is a few kilobytes on disk and no incorrectness at all. [collect] does it on
-            // demand, where somebody can be told how long it takes.
-            return newestFirst.size - keep
-        } finally {
-            inserter.close()
-        }
-    }
 
     /**
      * Makes every commit that holds [path] hold the same blob — the one at HEAD.

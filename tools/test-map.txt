@@ -50,7 +50,6 @@ AccountsFeatureTest app/src/main/java/com/example/notes/AccountStore.kt app/src/
 ProjectsFeatureTest app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitHub.kt app/src/main/java/com/example/notes/Workspace.kt
 SyncFeatureTest app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/ProjectGit.kt app/src/main/java/com/example/notes/GitService.kt app/src/main/java/com/example/notes/GitHub.kt
 HistoryFeatureTest app/src/main/java/com/example/notes/HistoryPrune.kt app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/GitService.kt
-RetentionFeatureTest app/src/main/java/com/example/notes/SettingsStore.kt app/src/main/java/com/example/notes/HistoryPrune.kt app/src/main/java/com/example/notes/ProjectGit.kt
 ImportsFeatureTest app/src/main/java/com/example/notes/Imports.kt
 MarkdownTest app/src/main/java/com/example/notes/Markdown.kt
 SelectionFeatureTest app/src/main/java/com/example/notes/AppViewModel.kt app/src/main/java/com/example/notes/Workspace.kt app/src/main/java/com/example/notes/ProjectGit.kt

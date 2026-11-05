@@ -792,4 +792,30 @@ class HistoryFeatureTest : FeatureTest() {
         assertTrue("no remote is configured", remotes.isEmpty())
         assertTrue("and it still has its own commits", log().isNotEmpty())
     }
+
+    // ---- 6. there is no history length, and nothing shortens a history --------
+
+    @Test
+    fun `many saves are all still there, because nothing shortens a history`() {
+        // **The setting is gone, and this is the test that says so by consequence rather than by
+        // name.** A test that only asserted "there is no `historyLength`" would compile against a
+        // build where nothing read it and still pass with the prune running — so this asks the
+        // repository: a hundred saves, a hundred versions, none dropped.
+        //
+        // The reason is measured rather than aesthetic: text compresses 120x, so two hundred versions
+        // of a 200 KB document is 340 KB. Keeping all of it costs almost nothing and losing it costs
+        // the feature.
+        start()
+        // **Twelve, not a hundred.** The claim is "nothing shortens a history", and the setting this
+        // replaced defaulted to 0 — so a prune, if one still ran, would need a number to run at.
+        // Twelve saves is past any length the setting could have been given in a test and cheap enough
+        // to run in a shard; a hundred would be a slower test making the same point.
+        val file = scene.file("milk.txt", "save 0")
+        repeat(12) { i -> scene.saveAsVersion("save ${i + 1}") }
+
+        val versions = scene.repo(scene.workspace!!.projectOf(file)!!).log(null).size
+
+        assertTrue("every save is a version, and none were dropped: $versions", versions >= 12)
+        assertEquals("and the newest is what the file holds", "save 12", file.readText())
+    }
 }

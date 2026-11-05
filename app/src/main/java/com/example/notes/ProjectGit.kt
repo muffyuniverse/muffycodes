@@ -29,7 +29,7 @@ class ProjectGit(
     private val tokenProvider: () -> String?,
     private val authorProvider: () -> GitAuthor,
     /** How many commits a project's history keeps; 0 means no limit. */
-    private val keepProvider: () -> Int = { 0 },
+
     /**
      * How to ask for a background index pass, or a no-op.
      *
@@ -207,7 +207,6 @@ class ProjectGit(
                             Maintenance.mark(repoDir(project))
                         }
                     }
-                    prune(it, project)
                     // **Every change the app makes is one commit, so this is the single signal that
                     // the project's text changed** — the editor, the agent's `write`, a delete, a
                     // move, a restore: they all arrive here. The queue is asked rather than told, so
@@ -286,11 +285,6 @@ class ProjectGit(
                 // The sync's own message, on its own commit, so that the push carries
                 // a reason to GitHub rather than only a list of files.
                 GitService.commitMarker(it, note, authorProvider())
-                // Shorten before pushing, not after. The push is what carries the
-                // history to GitHub, so a prune that ran afterwards would shorten
-                // this phone's copy and leave the repository as long as it was —
-                // the length would only appear to take effect on the next sync.
-                prune(it, project)
                 // **What is sent is `HEAD` minus the unsynced paths.** The local commit is already
                 // made above and stays exactly as it is; the push derives a tree without them, so a
                 // file the person unsynced keeps every version it has on this phone and never
@@ -378,26 +372,6 @@ class ProjectGit(
         }
     }
 
-    /**
-     * Applies the project's history length, when one is set.
-     *
-     * **What a prune leaves behind is a marker, not a collection.** It moves a ref, so the dropped
-     * commits and their trees are unreachable but still on disk; deleting them is `git gc`, which is
-     * proportional to the whole repository and has no place inside a save. [Maintenance] collects at
-     * app start, where a person is not waiting, and only for a project that said something is
-     * waiting — which is this.
-     */
-    private fun prune(repo: Repository, project: String) {
-        val keep = keepProvider()
-        if (keep <= 0) return
-        try {
-            if (HistoryPrune.prune(repo, keep) > 0) {
-                Maintenance.mark(workspace.projectDir(project), "the history was shortened")
-            }
-        } catch (e: Throwable) {
-            // A history that could not be shortened is still a working history.
-        }
-    }
 
     /** Replaces the project's files with what the remote holds. */
     fun replaceWithRemote(project: String): GitService.RemoteResult {

@@ -937,12 +937,7 @@ private fun Dialogs(
 
         is Pending.DeleteEntry -> ConfirmDialog(
             title = "Delete ${pending.entry.name}?",
-            text = if (pending.entry.isFolder) {
-                "The folder and everything inside it goes. It can be brought back " +
-                    "from the history."
-            } else {
-                "The file goes. It can be brought back from the history."
-            },
+            text = deleteWarning(pending.entry),
             confirm = "Delete",
             destructive = true,
             onDismiss = dismiss,
@@ -1065,6 +1060,28 @@ private fun NewProjectUI(viewModel: AppViewModel, dismiss: () -> Unit) {
  * which screen did not answer. A trace that said `saveEditor` would be a stack trace
  * with extra steps.
  */
+/**
+ * What the delete confirmation says, given what is being deleted.
+ *
+ * **A picture is the one deletion that cannot be undone.** Text keeps every version, so "it can be
+ * brought back from the history" is true of it. A picture keeps exactly one — the newest — and the
+ * store is swept to what the newest commits reference, so the bytes this deletes are the only bytes
+ * there were. Saying "it can be brought back" there would be a promise the app cannot keep, in the
+ * one place where being wrong costs the person their work.
+ *
+ * **A function rather than a `when` inside the dialog**, because a sentence this important is worth
+ * a test, and a test cannot read a composable's parameters without a screen.
+ */
+fun deleteWarning(entry: Entry): String = when {
+    entry.isFolder ->
+        "The folder and everything inside it goes. It can be brought back from the history — " +
+            "except pictures, which keep only one version."
+    entry.kind == EntryKind.IMAGE ->
+        "The picture goes, and this cannot be undone. A picture is not kept in the history — " +
+            "only one version exists, and this is it."
+    else -> "The file goes. It can be brought back from the history."
+}
+
 private fun tap(what: String, detail: String = ""): Int = Trace.tap(what, detail)
 
 /**

@@ -160,12 +160,12 @@ fun HistoryScreen(
                     verticalArrangement = Arrangement.Center,
                 ) {
                     Text(
-                        if (loading) "Reading the history…" else "No earlier versions",
+                        if (loading) "Reading the history…" else emptyHistoryTitle(kind),
                         style = MaterialTheme.typography.titleMedium,
                     )
                     if (!loading) {
                         Text(
-                            "A version appears here as soon as something changes.",
+                            emptyHistoryNote(kind),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -310,3 +310,24 @@ internal fun appVoice(message: String): Boolean {
     )
     return message.trim().substringBefore(' ') in verbs
 }
+
+/**
+ * The heading when there are no versions to show, given what the file is.
+ *
+ * **A picture has no history, and the screen says so rather than looking broken.** "No earlier
+ * versions" is the right answer for a file that has never changed and a wrong one for a picture that
+ * has been saved ten times — those ten saves are real, and they are not versions.
+ */
+fun emptyHistoryTitle(kind: EntryKind): String =
+    if (kind == EntryKind.IMAGE) "A picture has no versions" else "No earlier versions"
+
+/**
+ * The sentence under [emptyHistoryTitle] — **the way to keep two states, which is the only thing a
+ * person can do about it.**
+ */
+fun emptyHistoryNote(kind: EntryKind): String =
+    if (kind == EntryKind.IMAGE) {
+        "Saving a change replaces it. Save under a new name to keep both."
+    } else {
+        "A version appears here as soon as something changes."
+    }

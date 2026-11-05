@@ -517,7 +517,6 @@ class AppViewModel @JvmOverloads constructor(
         workspace = ws,
         tokenProvider = { activeLogin?.let { credentials.token(it) } },
         authorProvider = { author },
-        keepProvider = { settings.historyLength },
         index = indexer(ws),
     )
 
@@ -3447,7 +3446,6 @@ class AppViewModel @JvmOverloads constructor(
                     if (accounts.isProvisional(activeLogin)) PROVISIONAL_AUTHOR
                     else accounts.account(activeLogin ?: "")?.author() ?: DEFAULT_AUTHOR
                 },
-                { settings.historyLength },
                 index = indexer(ws),
             )
             val made = git.init(clean)
@@ -3539,7 +3537,6 @@ class AppViewModel @JvmOverloads constructor(
                 ws,
                 { credentials.token(login) },
                 { accounts.account(login)?.author() ?: DEFAULT_AUTHOR },
-                { settings.historyLength },
                 index = indexer(ws),
             )
             val clone = git.cloneInto(clean, url)
@@ -3628,8 +3625,7 @@ class AppViewModel @JvmOverloads constructor(
                     ws,
                     { credentials.token(login) },
                     { accounts.account(login)?.author() ?: DEFAULT_AUTHOR },
-                    { settings.historyLength },
-                )
+                    )
                 // A null here is not a failure: the folder was renamed, and only
                 // the address of the repository could not follow.
                 api?.cloneUrlFor(login, clean)?.let { remote ->
@@ -3841,7 +3837,6 @@ class AppViewModel @JvmOverloads constructor(
                 ws,
                 { credentials.token(login) },
                 { accounts.account(login)?.author() ?: DEFAULT_AUTHOR },
-                { settings.historyLength },
                 index = indexer(ws),
             ).cloneInto(repo.name, repo.cloneUrl)
             // **Nothing is written into an imported project.** It arrives with whatever the person

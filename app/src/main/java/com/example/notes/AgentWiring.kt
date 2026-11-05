@@ -89,7 +89,6 @@ object AgentWiring {
             workspace = ws,
             tokenProvider = { credentials.token(login) },
             authorProvider = { author },
-            keepProvider = { settings.historyLength },
             index = { project, why -> IndexQueue.want(project, why) },
         )
         // **The indexer, wired before anything can commit.** Both the runner and the screen build a

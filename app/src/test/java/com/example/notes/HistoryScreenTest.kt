@@ -15,6 +15,8 @@ import androidx.compose.ui.test.swipeLeft
 import org.junit.After
 import org.junit.Rule
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -192,5 +194,35 @@ class HistoryScreenTest {
         compose.onNodeWithText(">").performClick()
 
         waitFor("2 of 4")
+    }
+
+    // ---- 7. a picture's history says what it is ------------------------------
+
+    @Test
+    fun `a picture's empty history explains itself, and a text file's does not need to`() {
+        // **The sentence that stops the screen looking broken.** A picture saved ten times has no
+        // versions to show, and "No earlier versions" would be the right answer for a file nobody has
+        // touched — so it would be read as "this app has lost my saves". The heading names the rule
+        // and the note names the only thing a person can do about it.
+        val pictureTitle = emptyHistoryTitle(EntryKind.IMAGE)
+        val pictureNote = emptyHistoryNote(EntryKind.IMAGE)
+        assertTrue("it names the kind: $pictureTitle", pictureTitle.contains("picture"))
+        assertTrue("it says there are no versions: $pictureTitle", pictureTitle.contains("no versions"))
+        assertTrue(
+            "and the note says how to keep two states: $pictureNote",
+            pictureNote.contains("new name"),
+        )
+
+        // **A text file keeps its own sentence**, because a text file really does gain versions and
+        // the note is telling the truth about it.
+        assertEquals("No earlier versions", emptyHistoryTitle(EntryKind.TEXT))
+        assertTrue(
+            "and it promises versions: ${emptyHistoryNote(EntryKind.TEXT)}",
+            emptyHistoryNote(EntryKind.TEXT).contains("version appears"),
+        )
+        assertFalse(
+            "a text file is never told it has no versions: ${emptyHistoryTitle(EntryKind.TEXT)}",
+            emptyHistoryTitle(EntryKind.TEXT).contains("no versions"),
+        )
     }
 }

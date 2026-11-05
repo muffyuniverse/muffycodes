@@ -94,11 +94,11 @@ object LfsStore {
         // Two levels deep, which is the layout: objects/ab/cd/abcdef...
         root.listFiles()?.forEach { first ->
             first.listFiles()?.forEach { second ->
-                second.listFiles()?.forEach { object ->
-                    val oid = first.name + second.name + object.name
+                second.listFiles()?.forEach { stored ->
+                    val oid = first.name + second.name + stored.name
                     if (oid in keep) return@forEach
-                    val size = object.length()
-                    if (object.delete()) freed += size
+                    val size = stored.length()
+                    if (stored.delete()) freed += size
                 }
                 // An empty fan-out folder is litter, and harmless to remove.
                 if (second.listFiles()?.isEmpty() == true) second.delete()

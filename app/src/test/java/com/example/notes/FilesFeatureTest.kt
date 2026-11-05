@@ -303,4 +303,35 @@ class FilesFeatureTest : FeatureTest() {
 
         assertTrue("the pin is still there", again.pins.contains("milk.txt"))
     }
+
+    // ---- 8. deleting a picture is the one irreversible act -------------------
+
+    @Test
+    fun `deleting a picture warns that it cannot be undone, and deleting text does not`() {
+        // **The one place the app has to be louder than usual.** Text keeps every version, so a
+        // deleted text file can be brought back and the confirmation says so. A picture keeps exactly
+        // one — the newest — and the store is swept to what the newest commits reference, so the bytes
+        // a delete removes are the only bytes there were.
+        //
+        // Both halves are asserted, because a warning that appeared on every file would be noise a
+        // person learns to ignore, which is worse than no warning at all.
+        val picture = Entry("page.png", File("/tmp/page.png"), EntryKind.IMAGE)
+        val text = Entry("milk.txt", File("/tmp/milk.txt"), EntryKind.TEXT)
+        val folder = Entry("drafts", File("/tmp/drafts"), EntryKind.FOLDER)
+
+        val forPicture = deleteWarning(picture)
+        assertTrue("it says it cannot be undone: $forPicture", forPicture.contains("cannot be undone"))
+        assertTrue("and why: $forPicture", forPicture.contains("only one version"))
+
+        val forText = deleteWarning(text)
+        assertFalse("a text file gains no warning: $forText", forText.contains("cannot be undone"))
+        assertTrue("and keeps its promise: $forText", forText.contains("brought back"))
+
+        val forFolder = deleteWarning(folder)
+        assertFalse("a folder is not itself a picture: $forFolder", forFolder.contains("cannot be undone"))
+        assertTrue(
+            "but it says pictures inside are the exception: $forFolder",
+            forFolder.contains("except pictures"),
+        )
+    }
 }

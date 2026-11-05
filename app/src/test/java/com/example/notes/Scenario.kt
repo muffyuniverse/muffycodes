@@ -227,23 +227,6 @@ class Scenario(
             val newest = history.head()
             newest != null && newest != before && history.fileAt(relative, newest) == file.readText()
         }
-        // **And for the length to be applied, when one is set.** The length is applied by shortening
-        // the history *after* the commit is written, so the newest version exists for a moment in a
-        // history that is one too long. A test that read at that moment and then asserted "three are
-        // kept" was racing the prune and read four — the same value its `await` had just rejected.
-        //
-        // Waiting here rather than in each test, because every change has this question. The pruned
-        // tip is a **rewritten commit**, so "the head is no longer the one that was written" is what
-        // says the shortening happened; a size alone could still be the previous history's.
-        val keep = settings.historyLength
-        if (keep > 0) {
-            val written = projectHead(project)
-            if (versions(project) > keep) {
-                await("the history to be shortened to $keep", 20_000) {
-                    versions(project) <= keep && projectHead(project) != written
-                }
-            }
-        }
     }
 
     /** How many versions a project's history holds. */
