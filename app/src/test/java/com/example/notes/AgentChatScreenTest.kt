@@ -92,10 +92,25 @@ class AgentChatScreenTest {
      * worker that is writing the record.
      */
     private fun awaitTurns(count: Int) {
-        scene.await("$count turns") {
+        scene.await("$count turns\n    the record holds:\n${record()}") {
             scene.viewModel.chatBox?.turns?.size == count && !scene.viewModel.chatWorking
         }
         compose.waitForIdle()
+    }
+
+    /**
+     * What the record actually holds, when a wait for a turn times out.
+     *
+     * **The diagnosis the assertion could not carry.** `Scenario.diagnose` says what the app said and
+     * what the repositories hold, which is the right question for a save and the wrong one for a
+     * conversation: a turn that never reached the box is a row that was never written, and no
+     * repository knows about it. The log is the evidence, so it is what a red run prints.
+     */
+    private fun record(): String = try {
+        val dir = scene.viewModel.workspace!!.projectDir("groceries")
+        AgentLog.open(dir).rows().joinToString("\n") { "      ${it.kind} ${it.name} ${it.body.take(60)}" }
+    } catch (e: Throwable) {
+        "      the record could not be read: ${e.message}"
     }
 
     @Test
