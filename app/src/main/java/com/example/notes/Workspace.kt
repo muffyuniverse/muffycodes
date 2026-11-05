@@ -41,7 +41,11 @@ data class Entry(
     fun caption(): String {
         val what = when {
             isFolder -> children?.let { if (it == 1) "1 item" else "$it items" } ?: ""
-            else -> size?.let(Workspace::bytesFor) ?: ""
+            // **A lambda rather than a reference to the companion's function.** `Workspace::bytesFor`
+            // reads as the same thing and is not: a callable reference to a companion member is
+            // resolved against the class, and the compiler answered "inapplicable candidate" — which
+            // is the same trap that made `nameProblem` unresolvable through an instance.
+            else -> size?.let { Workspace.bytesFor(it) } ?: ""
         }
         val where = file.absolutePath
         return if (what.isEmpty()) where else "$what · $where"
@@ -720,51 +724,6 @@ class Workspace(val accountDir: File) {
 
     /** A path from the account root as one string, as git names it. */
     fun pathString(path: List<String>): String = path.joinToString("/")
-
-    /**
-     * A byte count as a person reads it: `0 B`, `1023 B`, `1.0 KB`, `12.4 MB`.
-     *
-     * **One function, because there are now three places that need it** — the row's caption, the
-     * agent's answer about an ignored file, and any later screen that asks how big something is.
-     * Three copies of a formatter are three chances to disagree about whether 1024 is `1 KB` or
-     * `1024 B`.
-     *
-     * The unit is **1024-based** and labelled `KB`, which is what every file manager on a phone
-     * shows and what a person comparing the number against their storage settings expects. Binary
-     * prefixes (`KiB`) would be more correct and less familiar; a person reading `1.0 KB` about a
-     * 1024-byte file is not being misled in any way that matters, and one that says `0.98 KiB` is
-     * being given precision they did not ask for.
-     *
-     * One decimal place below 100, none above: `1.4 KB` and `124 KB`, because the tenth of a
-     * kilobyte stops being information once the number is three digits long.
-     */
-    fun bytesFor(bytes: Long): String {
-        if (bytes < 0) return "unknown"
-        if (bytes < 1024) return "$bytes B"
-        val units = listOf("KB", "MB", "GB", "TB")
-        var value = bytes.toDouble() / 1024
-        var unit = 0
-        while (value >= 1024 && unit < units.lastIndex) {
-            value /= 1024
-            unit++
-        }
-        // **Rounded after the choice of unit, not before.** `1023.96 KB` rounds to `1024.0 KB`, and
-        // a formatter that stopped there would print the boundary it was supposed to have crossed.
-        val shown = if (value < 100) String.format("%.1f", value) else String.format("%.0f", value)
-        return if (shown.endsWith(".0")) "${shown.dropLast(2)} ${units[unit]}" else "$shown ${units[unit]}"
-    }
-
-    /**
-     * [child]'s path below [root], with `/` separators, or null when it is not inside.
-     *
-     * A message about a file the agent has to name needs a project-relative path, and `File`
-     * arithmetic in a string template prints an absolute path on a phone — `/data/user/0/…` — which
-     * is noise in a conversation and tells the model nothing it can use.
-     */
-    fun pathBelow(root: File, child: File): String? {
-        val relative = child.relativeToOrNull(root) ?: return null
-        return relative.path.replace(File.separatorChar, '/')
-    }
 
     // ---- text --------------------------------------------------------------
 
@@ -1803,6 +1762,52 @@ class Workspace(val accountDir: File) {
         const val GIT_DIR = ".git"
 
         /** The extensions treated as pictures rather than text (§9). */
+        /**
+         * A byte count as a person reads it: `0 B`, `1023 B`, `1 KB`, `12.4 MB`.
+         *
+         * **In the companion, because three callers have no workspace** — a row's caption, the
+         * agent's answer about an ignored file, and any later screen. Three copies of a formatter
+         * are three chances to disagree about whether 1024 is `1 KB` or `1024 B`.
+         *
+         * 1024-based and labelled `KB`, which is what every file manager on a phone shows. Binary
+         * prefixes (`KiB`) would be more correct and less familiar, and a person comparing the
+         * number against their storage settings expects this one.
+         *
+         * One decimal below 100, none above: `1.4 KB` and `124 KB`, because a tenth of a kilobyte
+         * stops being information once the number is three digits long.
+         */
+        fun bytesFor(bytes: Long): String {
+            if (bytes < 0) return "unknown"
+            if (bytes < 1024) return "$bytes B"
+            val units = listOf("KB", "MB", "GB", "TB")
+            var value = bytes.toDouble() / 1024
+            var unit = 0
+            while (value >= 1024 && unit < units.lastIndex) {
+                value /= 1024
+                unit++
+            }
+            // **Rounded after the choice of unit, not before.** `1023.96 KB` rounds to `1024.0 KB`,
+            // and a formatter that stopped there would print the boundary it was meant to cross.
+            val shown = if (value < 100) String.format("%.1f", value) else String.format("%.0f", value)
+            return if (shown.endsWith(".0")) {
+                "${shown.dropLast(2)} ${units[unit]}"
+            } else {
+                "$shown ${units[unit]}"
+            }
+        }
+
+        /**
+         * [child]'s path below [root], with `/` separators, or null when it is not inside.
+         *
+         * A message that names a file needs a project-relative path, and `File` arithmetic in a
+         * string template prints an absolute path on a phone — `/data/user/0/…` — which is noise in
+         * a conversation and tells a model nothing it can use.
+         */
+        fun pathBelow(root: File, child: File): String? {
+            val relative = child.relativeToOrNull(root) ?: return null
+            return relative.path.replace(File.separatorChar, '/')
+        }
+
         val IMAGE_EXTENSIONS = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp")
 
         /**
