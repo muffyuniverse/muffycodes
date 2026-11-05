@@ -288,10 +288,10 @@ class Scenario(
 
     /** Makes a file in the folder that is open and waits for it to be there. */
     fun file(name: String, text: String = ""): File {
-        // The name the app will actually use: it puts every name into one shape,
-        // so a harness that looked for `shopping-list.txt` would wait forever for a
-        // file the app had correctly called `shopping_list.txt`.
-        val made = Workspace.cleanName(Workspace.withDefaultExtension(name), "untitled")
+        // **The name the app will actually use, which is now the name as typed.** The app no longer
+        // rewrites names — see `Workspace.nameProblem` for the measurement that removed it — so the
+        // harness asks for what it asked for, and only a blank name falls back.
+        val made = Workspace.withDefaultExtension(name).trim().ifBlank { "untitled" }
         val file = File(viewModel.currentDir!!, made)
         val before = headOf(file)
         viewModel.createFile(name)
@@ -315,7 +315,8 @@ class Scenario(
      * person's press does — the size dialogue's choice, the writer, the commit and the redraw.
      */
     fun picture(name: String, canvas: Look.Canvas = Look.DEFAULT_CANVAS): File {
-        val made = Workspace.cleanName(if (name.contains('.')) name else "$name.png", "drawing.png")
+        val made = (if (name.contains('.')) name.trim() else "${name.trim()}.png")
+            .ifBlank { "drawing.png" }
         val file = File(viewModel.currentDir!!, made)
         val before = headOf(file)
         viewModel.createImage(name, canvas)
@@ -327,7 +328,7 @@ class Scenario(
     /** Makes a folder in the folder that is open. */
     fun folder(name: String): File {
         require(!name.contains("/")) { "a folder is made in the folder that is open, not at a path" }
-        val made = Workspace.cleanName(name, "folder")
+        val made = name.trim().ifBlank { "folder" }
         val file = File(viewModel.currentDir!!, made)
         viewModel.createFolder(name)
         await("\"$made\" to be made") { viewModel.entries.any { it.name == made } }
@@ -351,11 +352,10 @@ class Scenario(
      */
     fun localProject(name: String): Scenario {
         viewModel.createLocalProject(name)
-        // **Waits for the name the app actually made.** A local project's name goes through
-        // `Workspace.cleanName`, which lowercases it - so asking for "Shopping" makes `shopping`,
-        // and a caller that then opens "Shopping" opens a folder that is not there. Waiting on the
-        // cleaned name means the caller can use [made] and be right.
-        val made = Workspace.cleanName(name, "local")
+        // **Waits for the name the app actually made.** A local project's name is checked rather
+        // than rewritten, so asking for "Shopping" now makes `Shopping` — but a name that is
+        // refused makes nothing at all, and this waits for the one that happened.
+        val made = name.trim().ifBlank { "local" }
         await("local project \"$made\" to exist") {
             viewModel.projectNames.any { it == made }
         }
@@ -363,8 +363,8 @@ class Scenario(
         return this
     }
 
-    /** The name a project was actually given, after [Workspace.cleanName] had it. */
-    fun made(name: String): String = Workspace.cleanName(name, "local")
+    /** The name a project was actually given: the name as typed, or `local` when it was blank. */
+    fun made(name: String): String = name.trim().ifBlank { "local" }
 
     fun project(name: String, licence: String = "mit"): Scenario {
         viewModel.createProject(name, licence)

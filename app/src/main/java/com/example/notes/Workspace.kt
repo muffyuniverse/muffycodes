@@ -767,7 +767,9 @@ class Workspace(val accountDir: File) {
 
     fun createFolder(dir: File, name: String): Result<File> {
         lockProblem(dir)?.let { return Result.failure(IllegalArgumentException(it)) }
-        val safe = cleanName(name, "folder")
+        // **The name as typed.** No rewriting — see `nameProblem` for the measurement that removed
+        // it. Only a blank name falls back, because there is nothing to keep.
+        val safe = name.trim().ifBlank { "folder" }
         nameProblem(safe)?.let { return Result.failure(IllegalArgumentException(it)) }
         val target = File(dir, safe)
         if (target.exists()) {
@@ -784,7 +786,7 @@ class Workspace(val accountDir: File) {
     /** Makes a file with some text in it. Refused when [dir] is locked. */
     fun createFile(dir: File, name: String, text: String = ""): Result<File> {
         lockProblem(dir)?.let { return Result.failure(IllegalArgumentException(it)) }
-        val safe = cleanName(name, "untitled")
+        val safe = name.trim().ifBlank { "untitled" }
         nameProblem(safe)?.let { return Result.failure(IllegalArgumentException(it)) }
         val target = File(dir, safe)
         if (target.exists()) {
@@ -820,7 +822,8 @@ class Workspace(val accountDir: File) {
      */
     fun createImage(dir: File, name: String, canvas: Look.Canvas): Result<File> {
         lockProblem(dir)?.let { return Result.failure(IllegalArgumentException(it)) }
-        val safe = cleanName(if (name.trim().contains('.')) name else "$name.png", "untitled.png")
+        val safe = (if (name.trim().contains('.')) name.trim() else "${name.trim()}.png")
+            .ifBlank { "untitled.png" }
         nameProblem(safe)?.let { return Result.failure(IllegalArgumentException(it)) }
         val target = File(dir, safe)
         if (target.exists()) {
@@ -841,7 +844,7 @@ class Workspace(val accountDir: File) {
      *
      * [tidy] is false for a project folder, which is named after its repository: the
      * name of a repository is GitHub's, and one that was pulled in already has it.
-     * Putting that through [cleanName] would rename `muffyuniverse/muffycodes` on the
+     * Checking it with [nameProblem] would refuse `muffyuniverse/muffycodes` on the
      * phone and leave the remote called something else.
      */
     fun rename(file: File, newName: String, tidy: Boolean = true): Result<File> {
@@ -860,9 +863,13 @@ class Workspace(val accountDir: File) {
         // is not decoration here: it is how §9 decides what may be edited and what
         // must be left alone, so dropping it by accident would turn a picture into
         // "text" and let the editor rewrite its bytes.
-        val typed = cleanName(newName, file.nameWithoutExtension.ifBlank { "untitled" })
+        // **The name as typed**, and the extension is kept only when none was given — because the
+        // extension is how the app decides what may be edited, so dropping it by accident would turn
+        // a picture into "text" and let the editor rewrite its bytes. Nothing is lowercased or
+        // otherwise rewritten; see `nameProblem`.
+        val typed = newName.trim().ifBlank { file.nameWithoutExtension.ifBlank { "untitled" } }
         val safe = if ('.' !in typed && file.isFile && file.extension.isNotEmpty()) {
-            "$typed.${cleanName(file.extension)}"
+            "$typed.${file.extension}"
         } else {
             typed
         }
@@ -1083,14 +1090,6 @@ class Workspace(val accountDir: File) {
     }
 
     /** Why [name] cannot be used, or null when it can. */
-    fun nameProblem(name: String): String? = when {
-        name.isBlank() -> "A name is needed"
-        name == "." || name == ".." -> "That name cannot be used"
-        name.startsWith(".") -> "A name cannot start with a dot"
-        name.contains('/') || name.contains('\\') -> "A name cannot contain a slash"
-        else -> null
-    }
-
     /** The locked paths. Read once and kept, because every write asks. */
     private var lockedCache: Set<String>? = null
 
@@ -1255,7 +1254,7 @@ class Workspace(val accountDir: File) {
     fun createProjectFolders(name: String): Result<File> {
         accountDir.mkdirs()
         // A project's folder is named after its repository, and is **not** put
-        // through [cleanName]. The name of a repository is GitHub's, and one that
+        // through the naming rule. The name of a repository is GitHub's, and one that
         // was pulled in already has it: renaming `muffyuniverse/muffycodes` to
         // `muffycodes` on the phone would make the folder and the remote disagree
         // about what the project is called. The one name shape governs what a person
@@ -1278,50 +1277,105 @@ class Workspace(val accountDir: File) {
 
     companion object {
         /** Enough for any real name, and well under a filesystem's limit. */
-        const val MAX_STEM = 60
+        /**
+         * The characters Microsoft says a file name cannot contain.
+         *
+         * Quoted from *Naming Files, Paths, and Namespaces*: `< > : " / \ | ? *`, plus integer zero
+         * and the range 1–31. The slash and backslash are listed here as well as in the message
+         * above, because a name arriving from an import can carry one and both rules have to agree.
+         */
+        val WINDOWS_RESERVED_CHARS: Set<Char> =
+            setOf('<', '>', ':', '"', '/', '\\', '|', '?', '*')
 
-        /** Extensions are short; anything longer is not one. */
-        const val MAX_EXTENSION = 12
+        /**
+         * The names Windows reserves for devices, from the same page.
+         *
+         * **Not a guess and not "starts with COM".** Microsoft's list is `CON`, `PRN`, `AUX`, `NUL`,
+         * `COM1`–`COM9`, `LPT1`–`LPT9` — with the superscript digits ¹ ² ³ — and the page says
+         * explicitly that `COM56` is *not* reserved. A prefix rule would refuse names that work.
+         */
+        val WINDOWS_RESERVED_NAMES: Set<String> = setOf(
+            "CON", "PRN", "AUX", "NUL",
+            "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+            "COM¹", "COM²", "COM³",
+            "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+            "LPT¹", "LPT²", "LPT³",
+        )
+
+        /** A ceiling that is about a name rather than a path; git and every filesystem allow this. */
+        const val MAX_NAME = 120
 
         /**
          * [name] in the one shape the app writes, or [fallback] when nothing of it
          * survives — a name made only of symbols becomes the fallback rather than
          * a row of underscores.
          */
-        fun cleanName(name: String, fallback: String = "untitled"): String {
-            val trimmed = name.trim()
-            // The extension is what follows the last dot, and only when something
-            // is left of it: `.txt` is a name, not an extension.
-            val dot = trimmed.lastIndexOf('.')
-            val rawStem = if (dot > 0) trimmed.substring(0, dot) else trimmed
-            val rawExtension = if (dot > 0) trimmed.substring(dot + 1) else ""
-            val stem = joined(rawStem).take(MAX_STEM).trim('_').ifBlank { fallback }
-            val extension = joined(rawExtension).replace("_", "").take(MAX_EXTENSION)
-            return if (extension.isEmpty()) stem else "$stem.$extension"
+        /**
+         * Why [name] cannot be a path in a project, or null when it can.
+         *
+         * **This replaced a rewriter, and the replacement is the point.** The app used to lowercase
+         * a name and turn every run of anything else into one `_`, so `My Notes (draft).txt` was
+         * silently stored as `my_notes_draft.txt`. Measured, and the reason it had to go: **GitHub
+         * accepts all of those characters.** A probe against a real repository created files named
+         * `zz:a.txt`, `zz?a.txt`, `zz*a.txt`, `zz a.txt`, `CON` and `zz..a.txt`, and every one
+         * answered `201 Created`. So the app was not protecting the remote from anything — it was
+         * renaming the person's file for a rule that did not exist.
+         *
+         * **What is checked is what actually breaks a clone.** git stores any byte sequence, but a
+         * repository that contains a name Windows cannot create cannot be checked out there, and the
+         * failure arrives as `error: invalid path` on somebody else's machine — a long way from the
+         * tap that caused it. The list is Microsoft's own, quoted in the comment on
+         * [WINDOWS_RESERVED_NAMES] and [WINDOWS_RESERVED_CHARS].
+         *
+         * **A refusal, not a correction**, because a name is the person's: "that name has a colon in
+         * it, and a colon cannot be checked out on Windows" is a sentence they can act on, and
+         * `my_notes_draft.txt` is a file they did not ask for.
+         */
+        fun nameProblem(name: String): String? = when {
+            name.isBlank() -> "A name is needed"
+            name == "." || name == ".." -> "That name cannot be used"
+            name.startsWith(".") -> "A name cannot start with a dot"
+            name.contains('/') || name.contains('\\') -> "A name cannot contain a slash"
+            name.any { it in WINDOWS_RESERVED_CHARS } -> {
+                val which = name.first { it in WINDOWS_RESERVED_CHARS }
+                "A name cannot contain $which — Windows cannot check it out"
+            }
+            // **Control characters are refused separately from the list**, because the message a
+            // person needs is different: a name carrying a newline looks empty on screen and there
+            // is nothing to point at.
+            name.any { it.code in 1..31 } -> "A name cannot contain control characters"
+            name.endsWith(" ") || name.endsWith(".") ->
+                "A name cannot end with a space or a full stop"
+            isReservedName(name) -> {
+                "$name is a name Windows reserves for a device, so it cannot be checked out there"
+            }
+            name.length > MAX_NAME -> "A name cannot be longer than $MAX_NAME characters"
+            else -> null
         }
 
-        /** [text] lowercased, with every run of anything else turned into one `_`. */
-        private fun joined(text: String): String {
-            val out = StringBuilder(text.length)
-            var lastWasSeparator = true
-            for (ch in text.lowercase()) {
-                if (ch.isLetterOrDigit()) {
-                    out.append(ch)
-                    lastWasSeparator = false
-                } else if (!lastWasSeparator) {
-                    out.append('_')
-                    lastWasSeparator = true
-                }
-            }
-            return out.toString()
+        /**
+         * True when Windows would treat [name] as a device rather than a file.
+         *
+         * **The extension does not save it.** Microsoft: *"avoid these names followed immediately by
+         * an extension; for example, NUL.txt and NUL.tar.gz are both equivalent to NUL."* So the
+         * test is on the stem, and `CON.txt` is refused for the same reason `CON` is.
+         */
+        private fun isReservedName(name: String): Boolean {
+            val stem = name.substringBefore('.').trim().uppercase()
+            if (stem in WINDOWS_RESERVED_NAMES) return true
+            // **`COM1`–`COM9` and `LPT1`–`LPT9`, and no further.** Microsoft's note is explicit that
+            // `COM56` is not reserved, so a rule of "starts with COM" would refuse names that work.
+            // The superscript digits are reserved too, and are included in the list above.
+            return stem.length == 4 && stem.take(3) in setOf("COM", "LPT") && stem.last() in '1'..'9'
         }
+
         /**
          * A name in [dir] that is not taken: the name itself, or "name 2", "name 3"…
          *
          * The extension stays on the end, where a person and the app's own reader both
          * expect it: `milk.txt` becomes `milk 2.txt`, never `milk.txt 2`.
          *
-         * It is here, beside [cleanName], because it is a **naming rule** rather than
+         * It is here, beside [nameProblem], because it is a **naming rule** rather than
          * something a particular account does.
          *
          * **An import is its only caller, and that is the point.** A copy or a move refuses an

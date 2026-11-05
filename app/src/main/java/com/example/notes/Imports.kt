@@ -18,7 +18,7 @@ import java.io.File
  * because the commonest thing to import is a picture or a PDF and reading those
  * as UTF-8 is how they arrive corrupted.
  *
- * **Names are cleaned on the way in** ([Workspace.cleanName]). A document arrives
+ * **Names are checked on the way in** ([Workspace.nameProblem]). A document arrives
  * with whatever name its sender chose — `Holo and Lawrence, Kraft - Spice and
  * Wolf.jpeg` — and a name is a path component in two git repositories and in the
  * folder tree that *is* the account. Cleaning here rather than refusing later
@@ -220,7 +220,12 @@ object Imports {
      * still adds a copy instead of replacing what was there.
      */
     fun freeName(dir: File, name: String): File {
-        val clean = Workspace.cleanName(name, "imported")
-        return File(dir, Workspace.freeName(dir, clean))
+        // **As it arrived, and only an unusable name is replaced.** A document is the person's, and
+        // rewriting its name was a rule the remote never asked for — GitHub accepts every character
+        // the old rewriter was removing. A name that cannot be checked out on Windows is replaced
+        // rather than refused here, because an import has no dialog to refuse *into*.
+        val asIs = name.trim().ifBlank { "imported" }
+        val usable = if (Workspace.nameProblem(asIs) == null) asIs else "imported"
+        return File(dir, Workspace.freeName(dir, usable))
     }
 }

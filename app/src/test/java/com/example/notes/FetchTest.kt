@@ -243,7 +243,7 @@ class FetchTest {
 
     @Test
     fun `the file keeps the name the server gave it`() {
-        // **`Workspace.cleanName` is the wrong rule here**, for the reason `artifact` already found:
+        // **The project naming rule is wrong here**, for the reason `artifact` already found:
         // it lowercases and turns separators into `_`, so `lib-1.2.tar.gz` would arrive as
         // `lib_1_2_tar_gz` and the extension a person needs to recognise the file would be gone.
         assertEquals("lib-1.2.tar.gz", Fetched.nameFor("https://example.com/dl/lib-1.2.tar.gz"))

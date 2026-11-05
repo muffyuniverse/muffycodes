@@ -86,7 +86,7 @@ object Release {
     /**
      * An artifact's name, kept but made safe — **the one rule both the tool and the menu use.**
      *
-     * **Not `Workspace.cleanName`.** That is a naming policy for things a person makes: lowercase,
+     * **Not the project naming rule.** That is a policy for things a person makes:
      * every separator turned into `_`. An artifact's name is the workflow's own label, so
      * `app-release` must stay `app-release` — a person looking for the file they were told about, and
      * a model reading back what it fetched, both need the name they were given. Only what could leave

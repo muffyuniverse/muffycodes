@@ -3281,7 +3281,7 @@ class AgentTools(
         if (bytes.error != null) return refusal(ciSaid(bytes.error, bytes.status))
         val data = bytes.value ?: return refusal("GitHub returned no bytes for \"$wanted\".")
         val dir = File(File(File(projectDir, RESULTS_DIR), "ci"), "artifacts")
-        // **Not `Workspace.cleanName`.** That rule is for names a person types, and it lowercases and
+        // **Not the project naming rule.** That rule is for names a person types, and it is a
         // turns every separator into `_` — so `app-release` arrived as `app_release`, which is a
         // different file from the one the workflow made and one a person would not recognise. An
         // artifact's name belongs to the workflow, so it is kept and only made safe: anything that

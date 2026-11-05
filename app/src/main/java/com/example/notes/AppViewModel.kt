@@ -3324,7 +3324,7 @@ class AppViewModel @JvmOverloads constructor(
                     val ws = workspace!!
                     val dir = File(File(ws.projectDir(project), AgentLog.DIR), "ci/artifacts")
                     // **The artifact's own name, made safe rather than re-styled** — see
-                    // `AgentTools.safeArtifactName` for why `cleanName` is the wrong rule here.
+                    // `AgentTools.safeArtifactName` for why the project naming rule is wrong here.
                     val file = File(dir, Release.artifactName(first.name) + ".zip")
                     try {
                         dir.mkdirs()
@@ -3414,15 +3414,17 @@ class AppViewModel @JvmOverloads constructor(
      * folder has never been there. That is what makes it useful for work that does not belong to any
      * repository: the app's history and the agent still apply, and nothing leaves the phone.
      *
-     * The name is put through [Workspace.cleanName], unlike a GitHub project's: this one is a folder
-     * the person typed, not a repository whose name GitHub already accepted.
+     * The name is checked with [Workspace.nameProblem], unlike a GitHub project's: this one is a
+     * folder the person typed, not a repository whose name GitHub already accepted.
      */
     fun createLocalProject(
         name: String,
         onDone: (Boolean) -> Unit = {},
     ) {
         val ws = workspace ?: return
-        val clean = Workspace.cleanName(name, "local")
+        // **As typed, and only blank falls back.** The app no longer rewrites names — see
+        // `Workspace.nameProblem` for the measurement that removed it.
+        val clean = name.trim().ifBlank { "local" }
         val problem = ws.nameProblem(clean)
         if (problem != null) {
             message = problem
@@ -3506,7 +3508,7 @@ class AppViewModel @JvmOverloads constructor(
             onDone(false)
             return
         }
-        // Deliberately not put through `Workspace.cleanName`: this name becomes a
+        // Deliberately not put through the project naming rule: this name becomes a
         // repository on GitHub, and a project that was pulled in already carries the
         // repository's own name. A name GitHub refuses is reported by GitHub, which
         // is the only place that knows what it will accept.

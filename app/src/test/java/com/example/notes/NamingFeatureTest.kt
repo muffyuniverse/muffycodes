@@ -2,6 +2,8 @@ package com.example.notes
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -121,35 +123,89 @@ class NamingFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `a long name is cut short rather than refused`() {
+    fun `a name too long to be a path is refused, not cut short`() {
+        // **Cutting a name is the same mistake as rewriting it**: the person asked for a name and
+        // would get a different one. A length that cannot be stored is a refusal with a sentence.
         val long = "a".repeat(200)
-        assertTrue("made", scene.viewModel.createFolder(long))
-
-        val written = made()
-        assertEquals("cut to the app's limit", Workspace.MAX_STEM, written.length)
-        assertTrue("and it was made", File(scene.viewModel.currentDir!!, written).isDirectory)
+        assertFalse("refused", scene.viewModel.createFolder(long))
+        assertTrue(
+            "and the message names the limit: ${scene.viewModel.message}",
+            scene.viewModel.message.orEmpty().contains("longer than"),
+        )
     }
 
     @Test
     fun `a name keeps a word from another script`() {
-        // Cleaning is not transliteration. A Cyrillic title stays readable, lowercased
-        // and joined by underscores; turning it into `untitled` would be losing the
-        // only part of the name that says what the file is.
+        // A Cyrillic title stays exactly as typed. Turning it into `untitled`, or lowercasing it,
+        // would lose the only part of the name that says what the file is.
         assertTrue("made", scene.viewModel.createFile("Транспортная логистика"))
-        assertEquals("транспортная_логистика.txt", made())
+        assertEquals("Транспортная логистика.txt", made())
+    }
+
+    @Test
+    fun `a name the person typed is kept exactly as they typed it`() {
+        // **The rewriter is gone, and this is why.** It lowercased and turned every run of anything
+        // else into one underscore, so `My Notes (draft).txt` was stored as `my_notes_draft.txt`.
+        // Measured against a real repository: GitHub created files named `zz:a.txt`, `zz?a.txt`,
+        // `zz a.txt` and `CON` and answered `201 Created` to every one. The app was not protecting
+        // the remote from anything; it was renaming the person's file for a rule that did not exist.
+        assertEquals("My Notes (draft).txt", madeFileNamed("My Notes (draft).txt"))
+        assertEquals("Shopping list.txt", madeFileNamed("Shopping list.txt"))
+        assertEquals("PHOTO.JPEG", madeFileNamed("PHOTO.JPEG"))
+        assertEquals("a  b__c.txt", madeFileNamed("a  b__c.txt"))
+    }
+
+    @Test
+    fun `a name that cannot be checked out on Windows is refused, not corrected`() {
+        // **A refusal rather than a rename**, because the name is the person's: "that name has a
+        // colon in it" is a sentence they can act on, and `my_notes.txt` is a file they did not ask
+        // for. The list is Microsoft's own — a repository holding one of these cannot be checked
+        // out on Windows, and the failure arrives on somebody else's machine.
+        for (bad in listOf("a:b.txt", "a?b.txt", "a*b.txt", "a\"b.txt", "a<b.txt", "a|b.txt")) {
+            assertNotNull("$bad must be refused", Workspace.nameProblem(bad))
+        }
+        // **Trailing space and full stop**, which Microsoft lists separately from the characters.
+        assertNotNull(Workspace.nameProblem("notes."))
+        assertNotNull(Workspace.nameProblem("notes "))
+
+        // **And the names that are fine stay fine.** A rule that refused everything would pass the
+        // loop above and be useless.
+        for (good in listOf("notes.txt", "Shopping list.txt", "a-b_c.txt", "v1.2.txt", "a#b.txt")) {
+            assertNull("$good must be allowed", Workspace.nameProblem(good))
+        }
+    }
+
+    @Test
+    fun `a device name is refused, and its extension does not save it`() {
+        // Microsoft: "avoid these names followed immediately by an extension; for example, NUL.txt
+        // and NUL.tar.gz are both equivalent to NUL". So the test is on the stem.
+        for (bad in listOf("CON", "CON.txt", "nul.tar.gz", "COM1", "LPT9.log", "aux.md")) {
+            assertNotNull("$bad must be refused", Workspace.nameProblem(bad))
+        }
+        // **`COM56` is NOT reserved** — Microsoft says so explicitly — so a "starts with COM" rule
+        // would refuse a name that works.
+        assertNull(Workspace.nameProblem("COM56.txt"))
+        assertNull(Workspace.nameProblem("CONSOLE.txt"))
+        assertNull(Workspace.nameProblem("console.txt"))
     }
 
     @Test
     fun `the rule is one function, not a habit of the screens`() {
-        // Asked directly, so that a screen that forgot to call it is a compile-time
-        // gap rather than a name with a space in it.
-        assertEquals("shopping_list.txt", Workspace.cleanName("Shopping list.txt"))
-        assertEquals("a_b_c", Workspace.cleanName("a  b__c"))
-        assertEquals("notes", Workspace.cleanName("  notes  "))
-        assertEquals("photo.jpeg", Workspace.cleanName("PHOTO.JPEG"))
-        assertEquals("archive_tar.gz", Workspace.cleanName("archive.tar.gz"))
-        assertEquals("untitled", Workspace.cleanName("   "))
-        assertEquals("untitled", Workspace.cleanName("///"))
-        assertEquals("v1_2_readme.md", Workspace.cleanName("v1.2 README.md"))
+        // Asked directly, so that a screen that forgot to call it is a compile-time gap rather than
+        // a name that silently breaks a clone.
+        assertNotNull(Workspace.nameProblem("a:b"))
+        assertNull(Workspace.nameProblem("fine.txt"))
+        // Blank still needs a name, and the callers fall back rather than refuse.
+        assertNotNull(Workspace.nameProblem(""))
+        assertNotNull(Workspace.nameProblem("   "))
+    }
+
+    /** Makes a file with [name] and answers the name it was actually given. */
+    private fun madeFileNamed(name: String): String {
+        scene.signedIn()
+        val project = scene.project("groceries")
+        scene.open("groceries")
+        assertTrue("made", scene.viewModel.createFile(name))
+        return scene.names().single { it != project && it != "agent" && !it.startsWith(".") }
     }
 }

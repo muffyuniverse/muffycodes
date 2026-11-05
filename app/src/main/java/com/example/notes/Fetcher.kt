@@ -198,7 +198,7 @@ object Fetched {
     /**
      * A safe file name for [url] — **the last path segment, cleaned.**
      *
-     * `Workspace.cleanName` is the wrong rule here for the reason `artifact` already found: it
+     * The project naming rule is wrong here for the reason `artifact` already found: it
      * lowercases and turns separators into `_`, so `lib-1.2.tar.gz` would arrive as `lib_1_2_tar_gz`
      * and the extension a person needs to recognise the file would be gone. So the name is kept and
      * only made safe, and a URL with no usable last segment falls back to a name from the host.

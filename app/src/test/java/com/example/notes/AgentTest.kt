@@ -2459,12 +2459,10 @@ class AgentTest {
     fun `a file the agent creates is tracked, and a file a person creates is not`() {
         // **The two defaults, side by side**, because they are deliberately opposite and the point
         // is that the difference is decided by who acted rather than by a setting.
-        // **A name the funnel will not rewrite.** `cleanName` lowercases and turns every run of
-        // anything that is not a letter or a digit into one `_`, so `agent-made.txt` is made as
-        // `agent_made.txt` — the first version of this test asserted the name it asked for and
-        // failed against the name the app correctly produced.
-        val said = call("write", JSONObject().put("path", "agentmade.txt").put("text", "hello"))
-        val byAgent = File(ws.projectDir("shopping"), "agentmade.txt")
+        // **A name with a hyphen, which the app now keeps.** The rewriter used to turn this into
+        // `agent_made.txt`; it is gone, and a name is the person's — see `Workspace.nameProblem`.
+        val said = call("write", JSONObject().put("path", "agent-made.txt").put("text", "hello"))
+        val byAgent = File(ws.projectDir("shopping"), "agent-made.txt")
         assertTrue("the agent's write succeeded: $said", said.startsWith("0"))
         assertTrue(
             "the file exists at ${byAgent.absolutePath} — the tool said: $said " +
@@ -2477,7 +2475,7 @@ class AgentTest {
         )
 
         // A person's creation, through the same function the editor uses.
-        val byPerson = File(ws.projectDir("shopping"), "personmade.txt")
+        val byPerson = File(ws.projectDir("shopping"), "person-made.txt")
         ws.write(byPerson, "mine")
         ws.createdByOperator(byPerson)
         assertTrue(
@@ -2487,7 +2485,7 @@ class AgentTest {
         assertTrue(
             "and ignored, so it is not on GitHub",
             File(ws.repoOf("shopping"), Workspace.IGNORE).let {
-                it.isFile && it.readText().contains("personmade.txt")
+                it.isFile && it.readText().contains("person-made.txt")
             },
         )
     }
