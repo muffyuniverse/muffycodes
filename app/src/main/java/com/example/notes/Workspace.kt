@@ -468,8 +468,12 @@ class Workspace(val accountDir: File) {
         // write — and a creation that silently skipped half of its own rule is the failure mode
         // this app keeps fixing.
         val rel = relative(file) ?: return
-        setLocked(locked() + pathString(rel))
+        // **The ignore first, and this order is load-bearing.** `ignore` writes `.gitignore` through
+        // `write`, which refuses a locked path — so locking first would make the app's own rule
+        // refuse itself, and the file would be locked and still tracked. Measured, not assumed:
+        // with the lock first the `.gitignore` line never appeared.
         ignore(file)
+        setLocked(locked() + pathString(rel))
     }
 
     /** The other default: an agent's new file is tracked, unlocked, and belongs to the project. */
@@ -777,6 +781,7 @@ class Workspace(val accountDir: File) {
         }
         return if (target.mkdirs()) {
             markTrackable(target)
+            createdByOperator(target)
             Result.success(target)
         } else {
             Result.failure(IllegalStateException("Could not make the folder"))
@@ -802,6 +807,12 @@ class Workspace(val accountDir: File) {
                     IllegalStateException("\"$safe\" cannot be made here"),
                 )
             }
+            // **The operator's default, and until now nothing called it.** The rule "a file the
+            // person makes is locked and ignored" was written, tested in isolation, and then never
+            // invoked by the app — so every file a person created was editable by the agent and
+            // went straight to GitHub. `createFile` is the door the person's New File comes
+            // through, and the agent does not use it (it has its own `createdByAgent` call).
+            createdByOperator(target)
             Result.success(target)
         } catch (e: Exception) {
             Result.failure(IllegalStateException("Could not make the file"))
@@ -833,6 +844,9 @@ class Workspace(val accountDir: File) {
             // `put`, not `write`: the lock funnel is already asked above, and `write` takes text.
             put(target, "")
             target.writeBytes(Look.blank(canvas))
+            // The person drew it, so it is theirs: locked and ignored, like any other file they
+            // make. The picture is still tracked the moment they say so — `track` is the switch.
+            createdByOperator(target)
             Result.success(target)
         } catch (e: Exception) {
             Result.failure(IllegalStateException("Could not make the picture"))

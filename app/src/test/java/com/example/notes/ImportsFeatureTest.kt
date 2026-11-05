@@ -172,6 +172,29 @@ class ImportsFeatureTest {
     }
 
     @Test
+    fun `an import says which names it made, so the caller can act on them`() {
+        // **The list the caller needs to apply a creation default.** It cannot be derived: `renamed`
+        // is empty when nothing was renamed, which is the common case now that names are kept — so
+        // a caller holding only a count and a rename list would have to look at the whole folder,
+        // and would then apply the default to files that were already there.
+        val dir = File(context.cacheDir, "made-${System.nanoTime()}").apply { mkdirs() }
+        File(dir, "already-here.txt").writeText("not this one")
+
+        val report = Imports.filesInto(
+            context,
+            listOf(uriWith("one.txt", "1".toByteArray()), uriWith("two.txt", "2".toByteArray())),
+            dir,
+        ).getOrThrow()
+
+        assertEquals("both arrived", 2, report.copied)
+        assertEquals("and it names exactly those", listOf("one.txt", "two.txt"), report.made)
+        assertTrue(
+            "and not the file that was already there",
+            "already-here.txt" !in report.made,
+        )
+    }
+
+    @Test
     fun `a name that is only a symbol and a number keeps the number`() {
         // **`(1)` is a name, not punctuation to remove.** It is how a phone writes the second copy
         // of a picture, and the number is the only part that says which one. The app used to strip

@@ -329,6 +329,45 @@ class WorkspaceTest {
     }
 
     @Test
+    fun `a file a person makes through the door is locked and ignored`() {
+        // **The door, not the function.** `createdByOperator` was written, documented and tested in
+        // isolation — and nothing in the app called it, so "a file the person makes is locked and
+        // ignored" was a rule that never fired. This test goes through `createFile`, which is the
+        // call the person's New File makes, so it fails if the wiring is removed.
+        val project = workspace.createProjectFolders("Shopping").getOrThrow()
+        File(project, ".git").mkdirs()
+        workspace.ensureIgnore(project)
+
+        val made = workspace.createFile(project, "milk.txt", "two litres").getOrThrow()
+
+        val rel = workspace.pathString(workspace.relative(made)!!)
+        assertTrue("the person's file is locked: $rel", workspace.locked().contains(rel))
+        assertTrue(
+            "and ignored, so it is not on GitHub",
+            File(project, Workspace.IGNORE).let { it.isFile && it.readText().contains("milk.txt") },
+        )
+    }
+
+    @Test
+    fun `a folder a person makes through the door is locked and ignored`() {
+        val project = workspace.createProjectFolders("Shopping").getOrThrow()
+        File(project, ".git").mkdirs()
+        workspace.ensureIgnore(project)
+
+        val made = workspace.createFolder(project, "drafts").getOrThrow()
+
+        val rel = workspace.pathString(workspace.relative(made)!!)
+        assertTrue("the person's folder is locked: $rel", workspace.locked().contains(rel))
+        assertTrue(
+            // The trailing slash is what makes it a folder rule, and it is the form the app writes.
+            "and ignored as a folder",
+            File(project, Workspace.IGNORE).let {
+                it.isFile && it.readText().lines().any { line -> line.trim() == "drafts/" }
+            },
+        )
+    }
+
+    @Test
     fun `a project is its own repository and its files are tracked`() {
         // The merge, stated as a test: the folder a person sees *is* the repository — and the
         // app's two lines are in git's own exclude list, so nothing of the app's is ever committed

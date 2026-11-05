@@ -1867,6 +1867,14 @@ class AppViewModel @JvmOverloads constructor(
         busy = true
         onWorker {
             val result = Imports.filesInto(getApplication(), uris, dir)
+            // **What arrived is the person's.** They chose these files, so the agent must not
+            // rewrite them unasked, and a binary the app cannot classify must not spend GitHub's
+            // storage until the person says it should. Done here rather than inside `Imports`
+            // because that object has no workspace — and a default that needs a workspace belongs
+            // where the workspace is.
+            result.getOrNull()?.made?.forEach { name ->
+                workspace?.createdByOperator(File(dir, name))
+            }
             main.post {
                 busy = false
                 if (afterChange(result, "Imported into ${dir.name}/", dir)) {
@@ -1888,6 +1896,11 @@ class AppViewModel @JvmOverloads constructor(
         busy = true
         onWorker {
             val result = Imports.folderInto(getApplication(), tree, dir)
+            // The same default as a single file: what the person imported is theirs, and what the
+            // app cannot classify waits for them to say it should go to GitHub.
+            result.getOrNull()?.made?.forEach { path ->
+                workspace?.createdByOperator(File(dir, path))
+            }
             main.post {
                 busy = false
                 if (afterChange(result, "Imported a folder into ${dir.name}/", dir)) {

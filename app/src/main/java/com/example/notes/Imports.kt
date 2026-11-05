@@ -44,7 +44,20 @@ object Imports {
      * The renames are kept because a name that changes silently is the reason a
      * person reports that their file did not import.
      */
-    data class Report(val copied: Int, val renamed: List<Pair<String, String>> = emptyList()) {
+    data class Report(
+        val copied: Int,
+        val renamed: List<Pair<String, String>> = emptyList(),
+        /**
+         * The names this import actually created, in order.
+         *
+         * **Not derivable from the other two fields.** [renamed] is empty when nothing was renamed,
+         * which is the common case now that names are kept — so a caller that wants to act on "the
+         * files that just arrived" cannot reconstruct them from a count and a rename list. Without
+         * this, the caller's only option is to look at everything in the folder, which would apply
+         * the creation default to files that were already there.
+         */
+        val made: List<String> = emptyList(),
+    ) {
 
         /** One sentence for the screen. */
         fun said(): String {
@@ -75,6 +88,7 @@ object Imports {
         if (!into.isDirectory) throw IllegalStateException("That folder is not there any more")
         var copied = 0
         val renamed = mutableListOf<Pair<String, String>>()
+        val made = mutableListOf<String>()
         val failures = mutableListOf<String>()
         uris.forEach { uri ->
             val asked = try {
@@ -94,6 +108,7 @@ object Imports {
                 }
                 val target = freeName(into, asked)
                 if (target.name != asked.trim()) renamed += asked.trim() to target.name
+                made += target.name
                 val input = context.contentResolver.openInputStream(uri)
                     ?: throw IllegalStateException(
                         "\"$asked\" is no longer available to the app. It may have been " +
@@ -115,7 +130,7 @@ object Imports {
         if (copied == 0 && failures.isNotEmpty()) {
             Result.failure(IllegalStateException(failures.first()))
         } else {
-            Result.success(Report(copied, renamed))
+            Result.success(Report(copied, renamed, made))
         }
     } catch (e: Throwable) {
         Result.failure(e)
@@ -138,8 +153,11 @@ object Imports {
         val renamed = mutableListOf<Pair<String, String>>()
         if (target.name != asked.trim()) renamed += asked.trim() to target.name
         if (!target.mkdirs()) throw IllegalStateException("Could not make \"${target.name}\"")
-        val copied = copyTree(context, tree, DocumentsContract.getTreeDocumentId(tree), target, renamed, 0)
-        Result.success(Report(copied, renamed))
+        val made = mutableListOf<String>()
+        val copied = copyTree(
+            context, tree, DocumentsContract.getTreeDocumentId(tree), target, renamed, made, 0,
+        )
+        Result.success(Report(copied, renamed, made))
     } catch (e: Throwable) {
         Result.failure(e)
     }
@@ -151,6 +169,7 @@ object Imports {
         documentId: String,
         target: File,
         renamed: MutableList<Pair<String, String>>,
+        made: MutableList<String>,
         depth: Int,
     ): Int {
         if (depth > MAX_DEPTH) return 0
@@ -175,13 +194,15 @@ object Imports {
                 if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
                     if (!child.mkdirs()) continue
                     if (child.listFiles()?.isEmpty() != false) File(child, Workspace.KEEPER).writeText("")
-                    copied += copyTree(context, tree, id, child, renamed, depth + 1)
+                    made += relativeTo(target, child)
+                    copied += copyTree(context, tree, id, child, renamed, made, depth + 1)
                 } else {
                     val source = DocumentsContract.buildDocumentUriUsingTree(tree, id)
                     runCatching {
                         context.contentResolver.openInputStream(source)?.use { input ->
                             child.outputStream().use { output -> input.copyTo(output) }
                         } ?: return@runCatching
+                        made += relativeTo(target, child)
                         copied++
                     }
                 }
@@ -189,6 +210,16 @@ object Imports {
         }
         return copied
     }
+
+    /**
+     * [child]'s path relative to the folder the import started in, with `/` separators.
+     *
+     * A folder import can make files several levels down, and the caller needs a path it can hand
+     * to the workspace rather than a bare name — two files called `milk.txt` in different folders
+     * are different files, and a name alone would lock the wrong one.
+     */
+    private fun relativeTo(root: File, child: File): String =
+        child.relativeTo(root).path.replace(File.separatorChar, '/')
 
     /** The name a document provider gives a thing, or null when it will not say. */
     private fun displayName(context: Context, uri: Uri): String? {
