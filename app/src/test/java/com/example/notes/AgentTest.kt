@@ -2462,7 +2462,11 @@ class AgentTest {
         val byAgent = File(ws.repoOf("shopping"), "agent-made.txt")
         val said = call("write", JSONObject().put("path", "agent-made.txt").put("text", "hello"))
         assertTrue("the agent's write succeeded: $said", said.startsWith("0"))
-        assertTrue("the file exists at ${byAgent.absolutePath}: $said", byAgent.isFile)
+        assertTrue(
+            "the file exists at ${byAgent.absolutePath} — the tool said: $said " +
+                "and the project holds ${ws.repoOf("shopping").list()?.joinToString()}",
+            byAgent.isFile,
+        )
         assertTrue(
             "and is not locked — the agent may change its own work",
             !ws.locked().contains(ws.pathString(ws.relative(byAgent)!!)),

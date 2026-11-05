@@ -791,7 +791,15 @@ class Workspace(val accountDir: File) {
             return Result.failure(IllegalArgumentException("There is already a \"$safe\" here"))
         }
         return try {
-            write(target, text)
+            // **`write` answers false for a refusal, and that answer was being dropped.** The
+            // function then reported success over a file that was never written — so a caller could
+            // say "created" about nothing at all. The refusal is a failure like any other, and the
+            // message is the funnel's own sentence rather than a generic one.
+            if (!write(target, text)) {
+                return Result.failure(
+                    IllegalStateException("\"$safe\" cannot be made here"),
+                )
+            }
             Result.success(target)
         } catch (e: Exception) {
             Result.failure(IllegalStateException("Could not make the file"))
