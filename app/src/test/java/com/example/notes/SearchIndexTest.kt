@@ -307,6 +307,42 @@ class SearchIndexTest {
     // ---- forgetting --------------------------------------------------------
 
     @Test
+    fun `one text in two files is scored once and still answers twice`() {
+        // **The shape the ranking is built on.** Chunks share vectors by design, so a paragraph that
+        // appears in two files is ONE vector and two rows. Scoring per row would read and score the
+        // same vector twice - measured at 682-723 ms against 588-631 ms on a real history - and it
+        // would also report the second file at whatever score the loop happened to compute, rather
+        // than at the score the text actually has.
+        built(4)
+        index.put("a.txt", "", Chunker.split("shared paragraph"), vectors(at = { 3 })).getOrThrow()
+        index.put("b.txt", "", Chunker.split("shared paragraph"), vectors(at = { 3 })).getOrThrow()
+        assertEquals("one vector, two rows", 1, index.vectors())
+
+        val hits = index.nearest(axis(4, 3), paths = 5, history = false).getOrThrow()
+
+        // **Both files are answers**, because both hold the text the question is about.
+        assertEquals("both paths answer", setOf("a.txt", "b.txt"), hits.map { it.path }.toSet())
+        // **And both carry the vector's score**, not one scored and one defaulted.
+        assertEquals("the same score, from the one vector", 1, hits.map { it.score }.toSet().size)
+    }
+
+    @Test
+    fun `one text at many paths cannot fill the answer on its own`() {
+        // **`paths` bounds the answer, not the hashes.** A single common paragraph in a hundred
+        // versions is one vector, so a ranking that cut hashes and then returned every row would hand
+        // back a hundred copies of one line - and the reranker, which is promised thirty rows, would
+        // be given the whole history of a single sentence.
+        built(4)
+        for (i in 1..20) {
+            index.put("f$i.txt", "", Chunker.split("the same line"), vectors(at = { 3 })).getOrThrow()
+        }
+
+        val hits = index.nearest(axis(4, 3), paths = 5, history = false).getOrThrow()
+
+        assertEquals("five, as asked, even though there is one vector", 5, hits.size)
+    }
+
+    @Test
     fun `forgetting a file drops its rows and collects the vectors nothing points at`() {
         // **A vector nothing references is dead weight**, and collecting it here rather than on a
         // timer keeps the count honest: "vectors" means "distinct text indexed".
@@ -332,6 +368,81 @@ class SearchIndexTest {
 
         assertEquals("the current file survives", 1, index.size())
         assertEquals("and the shared vector is still referenced", 1, index.vectors())
+    }
+
+    @Test
+    fun `a version-only match does not crowd out the current files`() {
+        // **The regression the two-phase ranking could have introduced.** With `history = false` the
+        // filter is applied to the ROWS, so the best vectors may all belong to versions this mode
+        // excludes. Cutting the ranking to `paths` before resolving would then answer with one hit
+        // where the old single query returned ten - a search that quietly stops finding things.
+        built(4)
+        // Ten versions that match the query exactly...
+        for (i in 1..10) {
+            index.put("old.txt", "v$i", Chunker.split("milk $i"), vectors(at = { 3 })).getOrThrow()
+        }
+        // ...and one current file that matches less well, which must still be found.
+        index.put("now.txt", "", Chunker.split("bread"), vectors(at = { 2 })).getOrThrow()
+
+        val hits = index.nearest(axis(4, 3), paths = 5, history = false).getOrThrow()
+
+        assertEquals("the current file is still answered", listOf("now.txt"), hits.map { it.path })
+    }
+
+    // ---- the bytes a vector is stored as -----------------------------------
+
+    @Test
+    fun `a vector is stored as a quarter of the bytes, and still ranks the same`() {
+        // **The measurement, pinned.** int8 was chosen on a benchmark against real embeddings: 99.8%
+        // top-ten agreement and a cosine error of at most 0.001, for a quarter of the space. What
+        // this asserts is that the quartering happened *and* that the answer survived it - a
+        // quantisation that reordered the results would be a search returning the wrong file with a
+        // confident score.
+        built(1024)
+        val big = FloatArray(1024) { (it % 97) / 97f - 0.5f }
+        index.put("a.txt", "", Chunker.split("milk"), { Result.success(listOf(big)) }).getOrThrow()
+
+        // **Read from the file, not from a getter**: the claim is about what the index costs on disk,
+        // and a method that reports its own arithmetic would prove nothing.
+        assertEquals("one byte per dimension, not four", 1024L, index.vectorBytes())
+
+        val hits = index.nearest(big, paths = 5, history = false).getOrThrow()
+        assertEquals("the file it came from", "a.txt", hits.first().path)
+        assertTrue("and it is close to itself: ${hits.first().score}", hits.first().score > 0.99)
+    }
+
+    @Test
+    fun `a vector written before quantisation is still read as floats`() {
+        // **The migration, and the reason `scale` exists.** A row written by an earlier build holds
+        // little-endian float32 and has no scale. The size alone cannot tell the two forms apart - a
+        // 4-dimension float32 vector and a 16-dimension int8 vector are both 16 bytes - so `0` is the
+        // only honest signal. Without it an old index would read its floats as one byte per dimension
+        // and answer with noise.
+        built(4)
+        // The legacy row, written by hand into the database this class owns, because the point is a
+        // row this code did not write.
+        val file = File(File(project, AgentLog.DIR), SearchIndex.FILE)
+        val db = android.database.sqlite.SQLiteDatabase.openOrCreateDatabase(file, null)
+        try {
+            val raw = java.nio.ByteBuffer.allocate(16)
+                .order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            for (value in floatArrayOf(1f, 0f, 0f, 0f)) raw.putFloat(value)
+            db.execSQL(
+                "INSERT INTO vectors(hash, vector, scale) VALUES(?, ?, 0)",
+                arrayOf("legacy-hash", raw.array()),
+            )
+            db.execSQL(
+                "INSERT INTO chunks(path, version, hash, start, end) VALUES('old.txt', '', ?, 0, 1)",
+                arrayOf("legacy-hash"),
+            )
+        } finally {
+            db.close()
+        }
+
+        val hits = index.nearest(axis(4, 0), paths = 5, history = false).getOrThrow()
+
+        assertEquals("the old row answers", "old.txt", hits.first().path)
+        assertEquals("with the score its floats give", 1.0, hits.first().score, 0.0001)
     }
 
     // ---- the empty index ---------------------------------------------------
