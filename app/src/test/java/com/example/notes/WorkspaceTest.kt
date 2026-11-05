@@ -389,6 +389,50 @@ class WorkspaceTest {
     }
 
     @Test
+    fun `a byte count is shown the way a person reads it`() {
+        // **The awkward values, not the round ones.** A formatter tested only on `1.0 KB` and
+        // `2.5 MB` is a formatter that prints `1024.0 KB` at the boundary it was supposed to have
+        // crossed, and nobody notices until a file is exactly a megabyte.
+        assertEquals("0 B", Workspace.bytesFor(0))
+        assertEquals("1023 B", Workspace.bytesFor(1023))
+        assertEquals("1 KB", Workspace.bytesFor(1024))
+        assertEquals("1.4 KB", Workspace.bytesFor(1464))
+        assertEquals("1 MB", Workspace.bytesFor(1024L * 1024))
+        // 1023.96 KB is 1024 KB less 41 bytes: it must cross into MB, not print the boundary.
+        assertEquals("1 MB", Workspace.bytesFor(1024L * 1024 - 41))
+        assertEquals("12.4 MB", Workspace.bytesFor((12.4 * 1024 * 1024).toLong()))
+        assertEquals("1 GB", Workspace.bytesFor(1024L * 1024 * 1024))
+        // A file whose size the phone will not say is not a file of zero bytes.
+        assertEquals("unknown", Workspace.bytesFor(-1))
+    }
+
+    @Test
+    fun `a row says its size and its path, and a folder says how many things it holds`() {
+        // **A folder is counted, not sized.** Summing everything under a folder is a walk per row on
+        // every listing, and a project with a deep tree would make opening a folder slow for a number
+        // nobody reads. The count is what the row shows instead.
+        val dir = File(workspace.accountDir, "sizes-${System.nanoTime()}").apply { mkdirs() }
+        File(dir, "milk.txt").writeText("two litres")
+        File(dir, "notes").mkdirs()
+        File(dir, "notes/a.txt").writeText("a")
+        File(dir, "notes/b.txt").writeText("b")
+
+        val listed = workspace.list(dir)
+        val milk = listed.single { it.name == "milk.txt" }
+        val notes = listed.single { it.name == "notes" }
+
+        assertEquals("ten bytes, said plainly", "10 B", Workspace.bytesFor(milk.size!!))
+        assertTrue(
+            "the caption carries the path a person would paste",
+            milk.caption().endsWith(milk.file.absolutePath),
+        )
+        assertTrue("and the size before it", milk.caption().startsWith("10 B · "))
+        assertEquals("a folder has no size", null, notes.size)
+        assertEquals("and says how many things it holds", 2, notes.children)
+        assertTrue("said as a count", notes.caption().startsWith("2 items · "))
+    }
+
+    @Test
     fun `a project is its own repository and its files are tracked`() {
         // The merge, stated as a test: the folder a person sees *is* the repository — and the
         // app's two lines are in git's own exclude list, so nothing of the app's is ever committed

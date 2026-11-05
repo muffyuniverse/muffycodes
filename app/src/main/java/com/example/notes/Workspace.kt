@@ -20,8 +20,32 @@ data class Entry(
     val name: String,
     val file: File,
     val kind: EntryKind,
+    /**
+     * How many bytes a **file** holds; `null` for a folder.
+     *
+     * **A folder has no size, and pretending otherwise is the expensive mistake.** Summing a folder
+     * means walking everything under it — per row, on every listing — and a project with a
+     * `node_modules`-sized tree would make opening a folder slow for a number nobody reads. The row
+     * shows [children] instead, which is a `listFiles()` the listing is already close to doing.
+     *
+     * `null` rather than `0`, because "not measured" and "empty" are different facts and a caption
+     * that printed `0 B` for a folder would be saying something false.
+     */
+    val size: Long? = null,
+    /** How many things a **folder** holds; `null` for a file. */
+    val children: Int? = null,
 ) {
     val isFolder: Boolean get() = kind == EntryKind.FOLDER
+
+    /** The caption under the name: what it is, and where it is. */
+    fun caption(): String {
+        val what = when {
+            isFolder -> children?.let { if (it == 1) "1 item" else "$it items" } ?: ""
+            else -> size?.let(Workspace::bytesFor) ?: ""
+        }
+        val where = file.absolutePath
+        return if (what.isEmpty()) where else "$what · $where"
+    }
 }
 
 /**
@@ -276,7 +300,16 @@ class Workspace(val accountDir: File) {
         val children = dir.listFiles() ?: return emptyList()
         return children
             .filter { !isHidden(it.name) && !isAppOwned(it) }
-            .map { Entry(it.name, it, kindOf(it)) }
+            .map { child ->
+                // **One `stat` per file, and none per folder.** `length()` is a cheap attribute on a
+                // path the listing already stat'ed to learn whether it is a directory; a folder's
+                // contents are counted, not sized, for the reason in [Entry.size].
+                if (child.isDirectory) {
+                    Entry(child.name, child, EntryKind.FOLDER, children = child.listFiles()?.size)
+                } else {
+                    Entry(child.name, child, kindOf(child), size = child.length())
+                }
+            }
             .sortedWith(compareBy({ !it.isFolder }, { it.name.lowercase() }))
     }
 

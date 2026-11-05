@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -928,6 +929,28 @@ private fun EntryRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            // **Size and path, and the path is the point.** The operator asked for "a small size
+            // and path caption ... make it selectable so that operator can copy the path".
+            //
+            // **Selectable, and only this line is.** `SelectionContainer` wraps the caption rather
+            // than the row: a selectable row would eat the tap that opens a file and the long press
+            // that chooses it, which are the two gestures the list exists for. Wrapping the smallest
+            // thing that needs selecting is what lets both live in one row.
+            //
+            // **The path is absolute.** A project-relative one is shorter and useless here: the
+            // person is copying it to paste somewhere else on the phone, and `/data/user/0/...` is
+            // what every other tool on that phone understands.
+            if (entry.caption().isNotEmpty()) {
+                SelectionContainer {
+                    Text(
+                        text = entry.caption(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
         if (hold == Workspace.Hold.APP) {
             // **A mark, not a toggle.** The app set this one, and the operator's rule is that what
