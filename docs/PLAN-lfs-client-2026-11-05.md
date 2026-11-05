@@ -217,23 +217,82 @@ so nobody reads a green build as proof.
 
 ---
 
-## 5. Steps, in order, each independently shippable
+## 5. Delivery
 
-| # | Step | Ends with |
-|---|---|---|
-| 1 | Restore `LfsStore.kt` and its tests from `d24622d^` | store logic back, still unwired |
-| 2 | Restore dependencies, `registerLfs`, `enableLfs`, `ensureLfsAttributes`, `LFS_ATTRIBUTE`, packaging excludes | a picture is stored as a pointer locally |
-| 3 | `LfsClient` — URL discovery, batch, upload, download, verify, with a stub-server test | the HTTP half exists and is tested offline |
-| 4 | `LfsSync.push` before `push`, wired into `ProjectGit.sync` | objects reach GitHub before the ref |
-| 5 | `LfsSync.pull` after `fetch`, before checkout | **the measured bug is fixed** |
-| 6 | `LfsSync.missing` after every checkout, reported through `Notices` | no silent pointer |
-| 7 | `prune` at app start, after a successful push | deleted pictures release their bytes |
-| 8 | Delete the rewrite: `HistoryPrune.keepLatest`, `treeWith`, `expireReflog`, `collect`; restore `prune`'s caller to nothing; drop `Maintenance.freed` | history is never rewritten |
-| 9 | `docs/PLAN-lfs-2026-11-05.md` §0 rewritten: JGit's client is unusable on a private repo, ours replaces it | the record matches the code |
-| 10 | `tools/test-map.txt` rows for `LfsClient`, `LfsSync` | the map check passes |
+**All ten steps are done and CI is green** (run `42057895480`, 904 tests, 0 failures, APK built).
 
-**Step 8 is the one that removes the risk the operator was worried about.** Until it lands, the rewrite is
-still in the tree; it should not be left there "just in case".
+| # | Step | State | Note |
+|---|---|---|---|
+| 1 | `LfsStore` restored | **done** | `c14963f` |
+| 2 | Dependencies, `registerLfs`, `enableLfs`, `ensureLfsAttributes`, `LFS_ATTRIBUTE` | **done** | `68a77b5` |
+| 3 | `LfsClient` with a local-server test | **done** | `48bf8b5` |
+| 4 | `LfsSync.push` before the push | **done** | `76d2396` |
+| 5 | `LfsSync.pull` before checkout | **done** | `76d2396` |
+| 6 | `LfsSync.missing` reported after a pull | **done** | `76d2396` |
+| 7 | `LfsStore.sweep` at app start | **done** | `c14963f` |
+| 8 | The rewrite deleted — `HistoryPrune` gone | **done** | `76d2396` |
+| 9 | This document | **done** | |
+| 10 | `tools/test-map.txt` rows | **done** | |
+
+### What reality contradicted
+
+Five things the plan got wrong, recorded so the next reader does not re-derive them.
+
+1. **The filter broke every push, not just picture pushes.** §0 now carries the measurement. The fix
+   is in `GitService.push`/`pushWithout`: the filter is off for the duration and restored in a
+   `finally`. This was not foreseeable from the plan and would have shipped as "sync is broken".
+
+2. **The stored file is named by the whole oid, not its tail.** JGit writes
+   `objects/a3/be/a3bea3f9…` — the fan-out folders *repeat* the prefix. `LfsStore.sweep` concatenated
+   them, produced a 68-character name, matched nothing, and **deleted every stored picture on every
+   pass**. Three retention tests caught it (`778cb46`).
+
+3. **An empty reachable set is not proof that nothing is used.** A repository whose filter was never
+   registered stores pictures whole, so its trees hold no pointers while its store is full — and the
+   sweep would read that as "everything is dead". It now answers `-1` and `Maintenance` reports that it
+   did not run (`328efde`).
+
+4. **`reachable` must walk `HEAD`, not a branch name.** `fullBranch` answers a short name in some
+   states, `findRef` on it returns null, and the walk never started (`1c84977`).
+
+5. **A project with no pictures must not need an address or a token.** Both guards checked the
+   endpoint first, so every text project's sync failed with a sentence about pictures it does not have.
+   Both now answer early when there is nothing to move (`9863a57`).
+
+### The manual gate — **closed, measured**
+
+Run on a private repository (`muffyuniverse/lfs-gate`, now archived) through the same sequence the app
+uses. The picture was 26 bytes, the pointer in the tree was 127.
+
+```
+1. pointer in tree, bytes stored: true
+2. upload needed: false (GitHub already has it)
+4. push refs/heads/main -> OK
+5. clone left a pointer: true
+7. bytes arrived: true size=26
+   identical to what was saved: true
+```
+
+And GitHub's own view of the project afterwards — the full project, picture included:
+
+```
+.gitattributes   milk.txt   page.png
+```
+
+with `page.png` on the server being the pointer text, `version https://git-lfs.github.com/spec/v1`,
+whose oid matches the bytes that came back on the clone.
+
+**Three things this run proved that CI cannot:**
+
+1. **The batch call authenticates with `Basic`** on a private repository — the step JGit skips.
+2. **`verify` is required.** GitHub answers an upload with a signed URL, and the object does not exist
+   for a download until `verify` is called on it: without it the download batch answers
+   `404 Object does not exist on the server`.
+3. **A push with the filter off succeeds**, which is the workaround for the `LfsPrePushHook` NPE.
+
+**One thing it corrected in this plan.** The probe first reported `push: ok` over a repository that
+received nothing, because it trusted the absence of an exception. The ref update's own status is the
+verdict — `refs/heads/main -> OK` — and `GitService.push` already reads it that way.
 
 ---
 
