@@ -3060,7 +3060,7 @@ class AppViewModel @JvmOverloads constructor(
         // **The destination is a picture too**, or the bytes would be written into a text file and
         // the name would promise something the content is not.
         val into = target ?: file
-        if (ws.kindOfPath(into.name) != EntryKind.IMAGE) {
+        if (Workspace.kindOfPath(into.name) != EntryKind.IMAGE) {
             message = "\"${into.name}\" is not a picture name, so the drawing was not saved there."
             return
         }

@@ -443,7 +443,7 @@ class SemanticSearch(
                         // valid characters. A picture's bytes would be embedded as noise, at 400 KB a
                         // version, and would pollute every answer they appeared in. The kind is a fact
                         // about the name, and it is the one the listing already trusts.
-                        if (ws.kindOfPath(change.path) != EntryKind.TEXT) continue
+                        if (Workspace.kindOfPath(change.path) != EntryKind.TEXT) continue
                         // **Binary and oversized content is skipped silently here.** A version is not
                         // something a person chose to index, so a failure to take one must not turn
                         // into a note on every answer; the working tree half already reports the
