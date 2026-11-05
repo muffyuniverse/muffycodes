@@ -1015,54 +1015,6 @@ fun PlaceDialog(
 }
 
 /**
- * Asks what a sync was for.
- *
- * A project's history is the app narrating files — a save says nothing but "Saved" —
- * which is the right message for an undo step and the wrong one for the history on
- * GitHub, where the question is why a push happened. So the push asks, and what is
- * typed becomes the sync's own commit.
- */
-@Composable
-fun SyncDialog(
-    project: String,
-    changes: Int,
-    onDismiss: () -> Unit,
-    onSync: (String) -> Unit,
-) {
-    var note by remember(project) {
-        mutableStateOf(if (changes > 0) "$changes change${if (changes == 1) "" else "s"}" else "")
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Sync $project") },
-        text = {
-            Column {
-                Text(
-                    if (changes > 0) {
-                        "These changes will be committed, then pushed. Say what they " +
-                            "were for, and it becomes the message GitHub shows."
-                    } else {
-                        "Nothing is waiting. Syncing only pushes what is already here."
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                OutlinedTextField(
-                    value = note,
-                    onValueChange = { note = it },
-                    label = { Text("What changed?") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = { onSync(note) }) { Text("Sync") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
-
-/**
  * The bug button: one press, everywhere, from any screen.
  *
  * It is deliberately the smallest thing in each app bar and the same thing on every

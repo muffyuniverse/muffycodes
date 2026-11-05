@@ -26,7 +26,7 @@ object CommitMessage {
      * [appVoice] hides it from the screen anyway. Naming the file (`Edited milk.txt`) was the
      * app narrating itself in a place nobody reads, at every save, forever.
      *
-     * The note typed in `SyncDialog` is untouched: that one is the person's words, and it is the
+     * A person's own sentence is untouched where one exists: that is their words, and it is the
      * only message a history ever shows.
      */
     const val SAVE = "Saved"

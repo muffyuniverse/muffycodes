@@ -135,7 +135,6 @@ private sealed interface Pending {
     data object CopySelected : Pending
     data object MoveSelected : Pending
     data object DeleteSelected : Pending
-    data class SyncProject(val project: String) : Pending
     data class RestoreDeleted(val folder: File) : Pending
     data class DeleteEntry(val entry: Entry) : Pending
     data class ReplaceProject(val project: String) : Pending
@@ -491,7 +490,6 @@ private fun AppRoot(viewModel: AppViewModel) {
                 actions = actions,
                 onAddProject = { tap("add project"); pending = Pending.AddProject },
                 onRowChat = { project -> viewModel.openChat(project) },
-                onRowSync = { project -> tap("sync", project); pending = Pending.SyncProject(project) },
                 onRowRename = { project -> tap("rename project", project); pending = Pending.RenameProject(project) },
                 onRowDelete = { project -> tap("delete project", project); pending = Pending.DeleteProject(project) },
                 onRowPublish = { project -> tap("publish", project); pending = Pending.PublishProject(project) },
@@ -909,17 +907,6 @@ private fun Dialogs(
             viewModel.deleteSelected()
         },
     )
-
-        is Pending.SyncProject -> SyncDialog(
-            project = pending.project,
-            changes = viewModel.changesOf(pending.project),
-            onDismiss = dismiss,
-            onSync = { note ->
-                Trace.tap("confirm sync", pending.project)
-                dismiss()
-                viewModel.sync(pending.project, note)
-            },
-        )
 
         is Pending.RestoreDeleted -> RestoreDeletedDialog(
             viewModel = viewModel,

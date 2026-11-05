@@ -541,8 +541,10 @@ object GitService {
                 } else if (result.mergeStatus.isSuccessful) {
                     Merged(
                         ok = true,
-                        paths = result.mergedCommits.flatMap { commit: RevCommit ->
-                            changedPathsAgainstParent(repo, commit)
+                        // **`mergedCommits` are object ids, not commits** — the walk has to parse
+                        // them, which is what `changedPathsAgainstParent` does.
+                        paths = result.mergedCommits.flatMap { id: ObjectId ->
+                            changedPathsAgainstParent(repo, id)
                         }.distinct(),
                         said = "Merged",
                     )
@@ -555,10 +557,10 @@ object GitService {
         }
 
     /** The paths one commit changed against its first parent, or none for a root commit. */
-    private fun changedPathsAgainstParent(repo: Repository, commit: RevCommit): List<String> =
+    private fun changedPathsAgainstParent(repo: Repository, id: ObjectId): List<String> =
         try {
             RevWalk(repo).use { walk ->
-                val parsed = walk.parseCommit(commit)
+                val parsed = walk.parseCommit(id)
                 val parent = parsed.parents.firstOrNull()
                 val old: AbstractTreeIterator = parent?.let { treeOf(repo, it) } ?: EmptyTreeIterator()
                 val out = mutableListOf<String>()

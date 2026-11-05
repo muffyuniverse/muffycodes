@@ -118,7 +118,6 @@ fun BrowserScreen(
     actions: BrowserActions,
     onAddProject: () -> Unit,
     onRowChat: (String) -> Unit,
-    onRowSync: (String) -> Unit,
     /** Exports the project's newest artifact, or the project's own files when it has none. */
     onRowExport: (String) -> Unit = {},
     onRowRename: (String) -> Unit,
@@ -311,7 +310,7 @@ fun BrowserScreen(
         ChangesWindow(viewModel)
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             Column(modifier = Modifier.fillMaxSize()) {
-                ProjectSlimRow(viewModel, onRowSync)
+                ProjectSlimRow(viewModel)
 
                 // **One line, and only when a key on the phone is missing from CI.** The person has
                 // the material, the build cannot see it, and their next release would be unsigned —
@@ -362,7 +361,7 @@ fun BrowserScreen(
                     // most to learn about what the agent costs.
                     HeartbeatCard(viewModel.heartbeat)
                     ProjectList(
-                        viewModel, onRowChat, onRowSync, onRowRename, onRowDelete,
+                        viewModel, onRowChat, onRowRename, onRowDelete,
                         onRowPublish, onRowKeepLocal, onRowExport,
                     )
                 } else {
@@ -552,7 +551,6 @@ fun SlimRow(
     project: String,
     changes: Int,
     busy: Boolean,
-    onSync: () -> Unit,
     /** Offered only where a screen can open the window: the browser, which is the project. */
     onSeeChanges: (() -> Unit)? = null,
 ) {
@@ -589,24 +587,17 @@ fun SlimRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Spacer(Modifier.width(8.dp))
+            // **No Sync button, and no button where it was.** The operator moved the decision to
+            // the agent: "we can remove this functionality and transfer it to agent so that it can
+            // determine when to push". A person pressing Sync would be a second writer deciding the
+            // same question, and the two could disagree about which commit is being sent.
+            //
+            // **The count stays**, because it is information rather than an action: it is how a
+            // person learns that work exists which GitHub does not have. What it cannot do is say
+            // when the agent will send it — nothing can, which is the trade the operator chose.
             if (busy) {
+                Spacer(Modifier.width(8.dp))
                 CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-            } else if (changes > 0) {
-                // **A button that would do nothing says so.** Sync with nothing changed is a
-                // request with no answer, and a person pressing it cannot tell "already up to
-                // date" from "it did not work".
-                //
-                // **And no number on it.** The count was on the button for a while, and it
-                // read as a second, competing number beside the one in the row. Reported from
-                // the live log: "and why sync button itself started to show a number? remove
-                // it". The row already says how many; the button says what pressing it does.
-                Button(
-                    onClick = onSync,
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
-                ) { Text("Sync") }
-            } else {
-                TextButton(onClick = onSync, enabled = false) { Text("Sync") }
             }
         }
     }
@@ -651,7 +642,6 @@ private fun SigningRow(viewModel: AppViewModel, onSend: (String) -> Unit) {
 private fun ProjectList(
     viewModel: AppViewModel,
     onChat: (String) -> Unit,
-    onSync: (String) -> Unit,
     onRename: (String) -> Unit,
     onDelete: (String) -> Unit,
     /** Local -> synced: give it a repository, which asks for a licence first. */
@@ -739,13 +729,10 @@ private fun ProjectList(
                                     },
                                 )
                             } else {
-                                DropdownMenuItem(
-                                    text = { Text("Sync") },
-                                    onClick = {
-                                        menu = false
-                                        onSync(name)
-                                    },
-                                )
+                                // **No "Sync" here either.** The row lost its button and the menu
+                                // would have been the same act with a different door — the
+                                // operator moved this decision to the agent, and a second door
+                                // would make the removal look like a layout change.
                                 DropdownMenuItem(
                                     text = { Text("Keep local only…") },
                                     onClick = {
@@ -1216,7 +1203,7 @@ private fun EmptyState(title: String, text: String) {
  * there is exactly one place that can be wrong.
  */
 @Composable
-fun ProjectSlimRow(viewModel: AppViewModel, onSync: (String) -> Unit) {
+fun ProjectSlimRow(viewModel: AppViewModel) {
     // **Only inside the repo.** The row carries Sync, and Sync sends what is in
     // the worktree — offering it one level above, where nothing of the project is
     // on screen, raises a question the screen cannot answer.
@@ -1245,7 +1232,6 @@ fun ProjectSlimRow(viewModel: AppViewModel, onSync: (String) -> Unit) {
         project = project,
         changes = viewModel.changesOf(project),
         busy = viewModel.busy,
-        onSync = { onSync(project) },
         onSeeChanges = { viewModel.openChanges(project) },
     )
     HorizontalDivider()
