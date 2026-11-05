@@ -48,6 +48,48 @@ class ProjectGitTest {
             .close()
     }
 
+    // ---- a picture has one version, so it cannot be put back ----------------
+
+    @Test
+    fun `restoring a picture is refused by name, and changes nothing`() {
+        // **The data-corruption case.** Under LFS the tree holds a 130-byte pointer and the bytes
+        // live in a store that is pruned to what the newest commits reference, so the version this
+        // call would be given may already be gone - and writing the pointer over the picture would
+        // replace an image with JSON that happens to be valid UTF-8. The operation is refused rather
+        // than repaired: a file with one version has nothing to restore *from*.
+        val git = gitFor()
+        val picture = File(workspace.projectDir("shopping"), "page.png")
+        // Real PNG magic bytes, so this is a picture by content as well as by name.
+        picture.writeBytes(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A) + "one".toByteArray())
+        git.init("shopping").getOrThrow()
+        val before = picture.readBytes()
+
+        val outcome = git.restore("shopping", "page.png", "HEAD")
+
+        assertTrue("it is refused: ${outcome.exceptionOrNull()?.message}", outcome.isFailure)
+        val said = outcome.exceptionOrNull()?.message.orEmpty()
+        assertTrue("and it names the file: $said", said.contains("page.png"))
+        assertTrue("and says why: $said", said.contains("only one version"))
+        assertTrue("the picture on disk is untouched", before.contentEquals(picture.readBytes()))
+    }
+
+    @Test
+    fun `restoring text still works, because text keeps its versions`() {
+        // **The refusal is about pictures, not about restore.** A test that only proves the refusal
+        // would pass just as well if `restore` had stopped working altogether.
+        val git = gitFor()
+        val file = File(workspace.projectDir("shopping"), "milk.txt")
+        workspace.write(file, "one\n")
+        git.init("shopping").getOrThrow()
+        val first = RepoHistory(workspace.projectDir("shopping")).log().first().id
+        workspace.write(file, "two\n")
+        requireNotNull(git.commit("shopping", "second"))
+
+        git.restore("shopping", "milk.txt", first).getOrThrow()
+
+        assertEquals("the old text is back", "one\n", file.readText())
+    }
+
     // ---- what each commit changed, and which commit a blob came from ---------
 
     /**

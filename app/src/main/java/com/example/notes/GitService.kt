@@ -1321,6 +1321,20 @@ object GitService {
      */
     fun restore(repo: Repository, path: String, revisionId: String, deadline: Deadline? = null) {
         val clean = path.trim('/')
+        // **A picture has no versions, so there is nothing to put back.** LFS stores a pointer in the
+        // tree and the bytes in a content-addressed store that is pruned to what the newest commits
+        // reference — so the version this call was given may already be gone, and writing the pointer
+        // over the picture would replace an image with 130 bytes of JSON. The refusal comes before
+        // anything is opened, because the answer does not depend on the repository.
+        //
+        // **The app says this elsewhere too** (the history screen and the delete warning), and it is
+        // the same sentence each time: a binary keeps one version, so it cannot be brought back.
+        if (Workspace.kindOfPath(clean) != EntryKind.TEXT) {
+            throw IllegalStateException(
+                "\"$clean\" is not text, and a picture or another binary has only one version. " +
+                    "Saving it again replaces it, and nothing older can be put back.",
+            )
+        }
         val target = File(repo.workTree, clean)
         val walk = RevWalk(repo)
         try {

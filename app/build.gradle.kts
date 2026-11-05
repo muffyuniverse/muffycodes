@@ -137,6 +137,14 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            // **JGit's LFS jar is SIGNED**, and its signature files are not resource content: they
+            // describe a jar that no longer exists once AGP has merged everything into one APK. Two
+            // of them collide with every other jar's `MANIFEST.MF`, which is what fails
+            // `mergeDebugJavaResource` with nothing in the message that names the cause.
+            excludes += "/META-INF/{ECLIPSE_.SF,ECLIPSE_.RSA,ECLIPSE_.DSA}"
+            excludes += "/META-INF/*.SF"
+            excludes += "/META-INF/*.RSA"
+            excludes += "/META-INF/*.DSA"
         }
     }
 }
