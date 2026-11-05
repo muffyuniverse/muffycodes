@@ -63,6 +63,20 @@ class AppViewModel @JvmOverloads constructor(
      * gives, and that is asserted separately.
      */
     private val signInGitHub: () -> GitHub = { HttpGitHub() },
+    /**
+     * Whether this phone runs the **app-start housekeeping** — the sweep and `git gc` that reclaim
+     * what a prune and a pull leave behind.
+     *
+     * **A seam rather than a rule, and it exists because of what the work is.** Housekeeping is a
+     * concern of *the app being opened*: a `gc` runs for seconds to minutes, it holds a repository
+     * for the length of it, and it is exactly right once per launch. A view model built in a test is
+     * not a launch — it is a screen somebody is inspecting — and hundreds of them in one shard, each
+     * starting a thread that walks a temp folder, is work nobody asked for competing with the thing
+     * the test is measuring.
+     *
+     * The default is `true`, so the app is unchanged and only a test says otherwise.
+     */
+    private val housekeeping: Boolean = true,
 ) : AndroidViewModel(app) {
 
     /** The accounts on this phone. */
@@ -501,6 +515,16 @@ class AppViewModel @JvmOverloads constructor(
     private fun indexer(ws: Workspace): (String, String) -> Unit {
         IndexQueue.configure(
             ws = ws,
+            // **`embedder` is a seam, like `signInGitHub`, and for the same kind of reason.** Every
+            // commit asks this queue for a pass, so a live embedder here opens a socket to
+            // OpenRouter on a background thread with a 20-second connect timeout — in a suite that
+            // commits thousands of times, and in every test that has no key at all. The queue then
+            // holds its worker for the length of those timeouts, and whatever waits behind that
+            // worker times out instead.
+            //
+            // **The default is the live one**, so the app behaves as it did; a test passes [NONE]
+            // and gets a refusal it can read. That refusal is not a silent no-op: a pass that cannot
+            // embed says so in its note, the same sentence a build with no credentials shows.
             embedder = Embedder.openRouter(
                 key = { activeLogin?.let { credentials.modelKey(it) } },
             ),
@@ -539,7 +563,7 @@ class AppViewModel @JvmOverloads constructor(
         // the whole repository and has no place inside a save. It runs here — app start, daemon
         // thread, only for a project that said something is waiting — and it is posted rather than
         // called so that nothing above it waits for a `gc`.
-        main.post { housekeeping() }
+        if (housekeeping) main.post { runHousekeeping() }
     }
 
     /**
@@ -550,7 +574,7 @@ class AppViewModel @JvmOverloads constructor(
      * marker, so the next start tries again — which is the same rule the pass itself follows when a
      * lock is taken.
      */
-    private fun housekeeping() {
+    private fun runHousekeeping() {
         val ws = workspace ?: return
         // **No thread unless something is waiting.** A start where nothing has been pruned or pulled
         // is the ordinary start, and spawning a worker for it costs a thread and a file read on every

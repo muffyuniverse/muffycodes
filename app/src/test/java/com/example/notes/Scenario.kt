@@ -116,6 +116,11 @@ class Scenario(
         // once so that what is being tested is the behaviour, not the pause.
         saveDebounceMs = 0,
         signInGitHub = signInGitHub ?: { HttpGitHub() },
+        // **No housekeeping.** It is a concern of *the app being opened*: a `gc` holds a repository
+        // for seconds to minutes, and a shard builds hundreds of these view models. The pass has its
+        // own tests (`MaintenanceTest`) and its own seam; a feature test that started one would be
+        // measuring a background walk of a temp folder.
+        housekeeping = false,
     )
 
     val login: String get() = AppViewModel.TEST_ACCOUNT
@@ -151,6 +156,7 @@ class Scenario(
         settings = settings,
         saveDebounceMs = 0,
         signInGitHub = { DiskGitHub(viewModel.accounts.devGitHubDir(login), login) },
+        housekeeping = false,
     )
 
     /** The GitHub the account is talking to, for asking what really happened. */
