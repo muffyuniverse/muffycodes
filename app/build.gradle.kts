@@ -342,6 +342,20 @@ dependencies {
     // JGit: a pure-Java git implementation, so no native code is needed on Android.
     implementation("org.eclipse.jgit:org.eclipse.jgit:6.10.1.202505221210-r")
 
+    // **Large files, in Java, with no `git-lfs` binary.** The official client is a Go program and
+    // there is no android-arm64 build of it — but JGit's own implementation is pure Java and this is
+    // the same version as the JGit above, which matters: the LFS classes are registered into JGit
+    // through an SPI, and a mismatched pair would fail at run time rather than at build time.
+    //
+    // **Checked, not assumed:** every class in this artifact was scanned for `ProcessBuilder` and
+    // `Runtime.exec`, and the only one that spawns anything is `InstallBuiltinLfsCommand`, which this
+    // app never calls. The client speaks the batch API over plain HTTPS.
+    //
+    // gson is its only dependency, and it is here for that reason rather than for this app's own JSON
+    // — which is `org.json`, already on the platform.
+    implementation("org.eclipse.jgit:org.eclipse.jgit.lfs:6.10.1.202505221210-r")
+    implementation("com.google.code.gson:gson:2.11.0")
+
     // **GitHub's secret API needs libsodium's sealed box**, and there is no way around it: the
     // endpoint takes an `encrypted_value` produced by crypto_box_seal (X25519 + HSalsa20 +
     // XSalsa20Poly1305), and Android's own crypto has neither XSalsa20 nor Poly1305.

@@ -173,10 +173,12 @@ class SemanticSearchTest {
         // "somewhere in the last forty saves" - and the operator's answer was that history is
         // unbounded: the app is for medium projects, and squashing a bigger one is git's job.
         val git = ProjectGit(ws, { null }, { GitAuthor("Test", "test@example.com") })
-        val file = File(File(ws.accountDir, "shopping"), "milk.txt")
         write("shopping", "milk.txt", "the milk went sour\n")
         git.init("shopping").getOrThrow()
-        val oldest = RepoHistory(ws.projectDir("shopping")).log().last().id
+        // **Read now, not after the saves.** `log()` answers newest-first with its own limit, so
+        // asking it at the end for "the last one" gives the oldest *of the window it returned* rather
+        // than the oldest save - which is exactly the mistake this test made first.
+        val oldest = RepoHistory(ws.projectDir("shopping")).log().first().id
         // **Forty-one saves on top**, which is one past the window that used to exist. Not sixty:
         // each save is a real commit in a real repository, and the point is the boundary rather than
         // the distance - a test that proves "the window is gone" in four seconds rather than seven is

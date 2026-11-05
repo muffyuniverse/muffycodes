@@ -50,6 +50,77 @@ object GitService {
     const val ORIGIN = "refs/remotes/origin/"
 
     /**
+     * Registers JGit's built-in LFS client, **once, before any repository is opened.**
+     *
+     * **JGit reaches for this through an SPI**, so until it is set every LFS operation silently does
+     * nothing: a commit stores the raw bytes and the attribute is ignored, with no error anywhere.
+     * That is the failure this call exists to prevent — it looks exactly like "LFS is not supported"
+     * rather than like a missing registration.
+     *
+     * Idempotent, because it is called from more than one place and a second registration is not an
+     * error; `setInstance` simply replaces the instance with an equivalent one.
+     */
+    fun registerLfs() {
+        try {
+            org.eclipse.jgit.lfs.BuiltinLFS.register()
+        } catch (t: Throwable) {
+            // **A phone that cannot register LFS still edits and commits.** The consequence is that
+            // binaries are stored whole in git rather than as pointers, which is what every build
+            // before this one did; failing the app over it would be a worse trade than the storage.
+        }
+    }
+
+    /**
+     * Turns LFS on for one repository, and says whether it is on.
+     *
+     * **`filter.lfs.useJGitBuiltin` is not optional.** `BuiltinLFS.isEnabled` reads it and answers
+     * false without it, so the filter is a silent no-op — verified by committing a PNG with the
+     * attribute set and watching the tree store the raw bytes. This is the one line that makes the
+     * difference between LFS working and appearing not to.
+     */
+    fun enableLfs(repo: Repository): Boolean = try {
+        val config = repo.config
+        config.setBoolean("filter", "lfs", "useJGitBuiltin", true)
+        config.save()
+        true
+    } catch (t: Throwable) {
+        false
+    }
+
+    /**
+     * The line that makes git treat a picture as a pointer, **written into the person's repository.**
+     *
+     * `.gitattributes` is committed content, which is the point: a clone anywhere else then knows
+     * which files are pointers, and a repository whose attribute lived only in this app's own storage
+     * would arrive as 130-byte files that look like corruption. The cost is that a line appears in
+     * the person's project — and it is the line every LFS repository in the world has.
+     */
+    fun ensureLfsAttributes(dir: File) {
+        try {
+            val attributes = File(dir, ".gitattributes")
+            val line = LFS_ATTRIBUTE
+            val was = if (attributes.isFile) attributes.readText() else ""
+            if (was.lineSequence().any { it.trim() == line.trim() }) return
+            val now = if (was.isEmpty() || was.endsWith("\n")) was + line else was + "\n" + line
+            attributes.writeText(now)
+        } catch (t: Throwable) {
+            // A project that could not be told still commits; its pictures are stored whole, which is
+            // what every build before this one did.
+        }
+    }
+
+    /**
+     * Which paths are stored as LFS pointers — **one line per kind the app can draw or show.**
+     *
+     * Written as a list rather than one wildcard so that adding a picture format is one edit here and
+     * nothing else. The `-text` is git's own requirement: it stops git from trying to convert line
+     * endings in a binary, which would corrupt the bytes before they are ever hashed.
+     */
+    private val LFS_ATTRIBUTE: String = Workspace.IMAGE_EXTENSIONS
+        .sorted()
+        .joinToString("") { "*.$it filter=lfs diff=lfs merge=lfs -text\n" }
+
+    /**
      * How many versions a reader may return.
      *
      * Not a limit on the history: how far back a person can go is the setting in

@@ -66,11 +66,24 @@ class ProjectGit(
         // work in one project at the same moment would otherwise both see "no repository" and both
         // initialise, and the second `git init` on an existing repository is the least harmful of
         // the outcomes — the harmful one is a commit landing while the refs are being written.
-        RepoLocks.hold(dir, "init") { GitService.initOrOpen(dir, authorProvider()).close() }
+        RepoLocks.hold(dir, "init") {
+            val repo = GitService.initOrOpen(dir, authorProvider())
+            try {
+                // **Before anything is committed**, so the very first picture a person saves is a
+                // pointer rather than a 400 KB blob in the object store.
+                GitService.enableLfs(repo)
+            } finally {
+                repo.close()
+            }
+        }
         // After the repository, because the lines live in `.git/info/exclude` — they are the app's
         // own local rule, not a file in the person's repository.
         workspace.ensureIgnore(dir)
         workspace.ensureSecretIgnores(dir)
+        // **In the person's repository, not the app's storage.** A clone elsewhere has to know which
+        // files are pointers, and an attribute only this app could read would make a picture arrive
+        // as 130 bytes of JSON that looks like corruption.
+        GitService.ensureLfsAttributes(dir)
         Result.success(Unit)
     } catch (e: Throwable) {
         Result.failure(e)
@@ -391,9 +404,17 @@ class ProjectGit(
             deadline,
         )
         if (result.success) {
-            open(project)?.use { repo -> GitService.scrubRemoteUrls(repo) }
+            open(project)?.use { repo ->
+                GitService.scrubRemoteUrls(repo)
+                // **A cloned project arrives with the attribute already committed** — that is what
+                // makes LFS portable — but the *filter* is per-repository configuration, and a
+                // clone does not carry it. Without this the pointers would be checked out as
+                // pointers: a project of 130-byte files that look like corruption.
+                GitService.enableLfs(repo)
+            }
             workspace.ensureIgnore(dir)
             workspace.ensureSecretIgnores(dir)
+            GitService.ensureLfsAttributes(dir)
             // **The comprehensive pass, asked for once, right after the tree lands.** A clone writes
             // hundreds of files at once and commits none of them, so the commit hook above never
             // fires for it — and a project that arrived from GitHub is exactly the case where the
