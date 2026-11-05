@@ -116,12 +116,12 @@ class ImportsFeatureTest {
     }
 
     @Test
-    fun `a name from the picker arrives in the app's one shape`() {
-        // The names a phone's Downloads really holds: spaces, commas, brackets,
-        // capitals, a Cyrillic title. Each of them is a path in two git repositories
-        // and in the folder tree that is the account, so each is cleaned on the way
-        // in — and the report says which ones changed, because a name that changes
-        // silently is why a person reports that their file did not import.
+    fun `a name from the picker arrives exactly as it was called`() {
+        // **The names a phone's Downloads really holds are kept.** This used to assert
+        // `holo_and_lawrence_kraft_spice_and_wolf.jpeg` — the rewriter lowercased and joined it.
+        // Measured against a real repository, GitHub accepts spaces, commas and capitals, so the
+        // rename was for a rule that did not exist, and the report that explained it was explaining
+        // an act the app should not have taken.
         val dir = File(context.cacheDir, "shape-${System.nanoTime()}").apply { mkdirs() }
         val uri = uriWith("Holo and Lawrence, Kraft - Spice and Wolf.jpeg", "x".toByteArray())
 
@@ -129,25 +129,43 @@ class ImportsFeatureTest {
         val report = result.getOrThrow()
 
         val made = dir.listFiles()!!.single().name
-        assertEquals("holo_and_lawrence_kraft_spice_and_wolf.jpeg", made)
+        assertEquals("Holo and Lawrence, Kraft - Spice and Wolf.jpeg", made)
         assertEquals("one file", 1, report.copied)
-        assertEquals(
-            "and it said what it called it",
-            listOf("Holo and Lawrence, Kraft - Spice and Wolf.jpeg" to made),
-            report.renamed,
-        )
-        assertTrue("the message carries the new name", report.said().contains(made))
+        assertEquals("and nothing was renamed", emptyList<Pair<String, String>>(), report.renamed)
+        assertTrue("the message carries the name", report.said().contains(made))
     }
 
     @Test
-    fun `a name with no letters at all still arrives, under a name the app can use`() {
+    fun `a name of symbols arrives under that name`() {
+        // **`!!!.png` is a legal file name everywhere git goes**, so it is kept. The app used to
+        // replace it with `imported.png` because its rule demanded letters — and then reported the
+        // change, which is the app apologising for an act it should not have taken.
         val dir = File(context.cacheDir, "shape2-${System.nanoTime()}").apply { mkdirs() }
         val uri = uriWith("!!!.png", "x".toByteArray())
 
         val report = Imports.filesInto(context, listOf(uri), dir).getOrThrow()
 
+        assertEquals("!!!.png", dir.listFiles()!!.single().name)
+        assertEquals("and nothing was renamed", emptyList<Pair<String, String>>(), report.renamed)
+    }
+
+    @Test
+    fun `a name Windows cannot check out is replaced, and the report says so`() {
+        // **The one place a name is still changed**, and it is reported: an import has no dialog to
+        // refuse into, so a name that cannot be checked out becomes `imported`. The report is what
+        // keeps it honest — a file that arrives under a name nobody expected reads as a file that
+        // did not arrive.
+        val dir = File(context.cacheDir, "shape4-${System.nanoTime()}").apply { mkdirs() }
+        val uri = uriWith("a:b.png", "x".toByteArray())
+
+        val report = Imports.filesInto(context, listOf(uri), dir).getOrThrow()
+
         assertEquals("imported.png", dir.listFiles()!!.single().name)
-        assertEquals("and it says so", listOf("!!!.png" to "imported.png"), report.renamed)
+        assertEquals(
+            "and it says what it called it",
+            listOf("a:b.png" to "imported.png"),
+            report.renamed,
+        )
     }
 
     @Test
@@ -168,9 +186,13 @@ class ImportsFeatureTest {
         // `archive.tar.gz` is a gzip of a tar: numbering it as `archive 2.tar.gz`
         // would rename the thing rather than the copy, so the number goes before the
         // final extension only.
+        //
+        // **The name is now kept, so the collision is against the name as it arrives** — the file
+        // already there has to be spelled the way the importer spells it, or the two never collide
+        // and the numbering is never exercised.
         val dir = File(context.cacheDir, "names3-${System.nanoTime()}").apply { mkdirs() }
-        File(dir, "archive_tar.gz").writeText("one")
+        File(dir, "archive.tar.gz").writeText("one")
 
-        assertEquals("archive_tar 2.gz", Imports.freeName(dir, "archive.tar.gz").name)
+        assertEquals("archive.tar 2.gz", Imports.freeName(dir, "archive.tar.gz").name)
     }
 }
