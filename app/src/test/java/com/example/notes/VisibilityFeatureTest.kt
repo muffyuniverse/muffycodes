@@ -130,8 +130,9 @@ class VisibilityFeatureTest : FeatureTest() {
         scene.file("Milk.txt")
         scene.file("apple.txt")
 
-        // Called for in lowercase, because that is how the app writes a name it makes.
-        assertEquals(listOf(".muffy", "system", "zebra", "apple.txt", "milk.txt"), scene.names())
+        // **Sorted case-insensitively, which is the ordering rule** — and the names keep their
+        // capitals now, because the app no longer lowercases what a person typed.
+        assertEquals(listOf(".muffy", "system", "zebra", "apple.txt", "Milk.txt"), scene.names())
     }
 
     @Test

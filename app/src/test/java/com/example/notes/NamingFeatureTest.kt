@@ -9,15 +9,17 @@ import org.junit.Test
 import java.io.File
 
 /**
- * One shape for every name the app writes.
+ * A name is checked, not rewritten.
  *
- * A name here is not a label on a screen: it is a path component in two git
- * repositories and in the folder tree that *is* the account. So the promise is
- * concrete — lowercase letters, digits and single underscores — and every way a
- * name gets in (typing one, renaming, importing from the phone's picker) has to
- * obey it. The counterpart promise is that the app says so when it changes what
- * was asked for, because a file that arrives under a name nobody expected reads
- * as a file that did not arrive.
+ * It used to be rewritten: lowercased, with every run of anything else turned into one underscore.
+ * **Measured, and the rule was never real** — GitHub created files named `zz:a.txt`, `zz?a.txt`,
+ * `zz a.txt` and `CON` and answered `201 Created` to every one. So the app was renaming the person's
+ * file to satisfy nothing.
+ *
+ * What is checked now is what actually breaks a clone: the characters Microsoft lists for Windows,
+ * control characters, a trailing space or full stop, the reserved device names, and a length no
+ * filesystem would store. A name that fails is **refused with a sentence**, because a name is the
+ * person's and a quietly different one is a file they did not ask for.
  */
 class NamingFeatureTest : FeatureTest() {
 
@@ -39,37 +41,31 @@ class NamingFeatureTest : FeatureTest() {
         scene.names().single { !Workspace.isSystemLocked(it) && it != Workspace.SYSTEM_PROJECT }
 
     @Test
-    fun `a name typed with capitals and spaces is written the one way`() {
+    fun `a name typed with capitals and spaces is kept as typed`() {
+        // **This test used to assert the opposite**, and the change is the point: there is no
+        // rewrite to report, so there is no "(was ...)" sentence to check either.
         assertTrue("made", scene.viewModel.createFile("My Shopping List"))
         val written = made()
 
-        assertEquals("my_shopping_list.txt", written)
+        assertEquals("My Shopping List.txt", written)
         assertTrue("and the file is there", File(scene.viewModel.currentDir!!, written).isFile)
     }
 
     @Test
-    fun `the app says which name it used when it had to change one`() {
-        scene.viewModel.createFile("My Shopping List")
-
-        assertEquals(
-            "the message names both",
-            "Created my_shopping_list.txt (was \"My Shopping List.txt\")",
-            scene.viewModel.message,
-        )
-    }
-
-    @Test
-    fun `a folder obeys the same rule as a file`() {
+    fun `a folder keeps the name it was given, brackets and all`() {
         assertTrue("made", scene.viewModel.createFolder("Old Letters (2024)"))
 
-        assertEquals("old_letters_2024", made())
+        assertEquals("Old Letters (2024)", made())
     }
 
     @Test
-    fun `a name made only of symbols still makes something`() {
+    fun `a name of symbols is a name, and only a blank one falls back`() {
+        // **The old rule turned `!!!` into `folder`**, which is a name nobody typed. Brackets and
+        // exclamation marks are legal everywhere git goes, so the only name that has nothing to
+        // keep is a blank one.
         assertTrue("made", scene.viewModel.createFolder("!!!"))
 
-        assertEquals("a name of only symbols falls back", "folder", made())
+        assertEquals("!!!", made())
     }
 
     @Test
@@ -79,7 +75,7 @@ class NamingFeatureTest : FeatureTest() {
         assertTrue("renamed", scene.viewModel.rename(file, "Shopping List"))
 
         val written = made()
-        assertEquals("shopping_list.txt", written)
+        assertEquals("Shopping List.txt", written)
         assertTrue("the text came with it", File(file.parentFile, written).readText() == "two litres")
     }
 
@@ -95,7 +91,7 @@ class NamingFeatureTest : FeatureTest() {
 
         assertTrue("renamed", scene.viewModel.rename(file, "My Photo"))
 
-        val made = File(file.parentFile, "my_photo.png")
+        val made = File(file.parentFile, "My Photo.png")
         assertTrue("it kept its extension", made.isFile)
         assertEquals("still a picture", EntryKind.IMAGE, scene.workspace!!.kindOf(made))
     }
@@ -109,17 +105,16 @@ class NamingFeatureTest : FeatureTest() {
 
         assertEquals("still a picture", EntryKind.IMAGE, scene.workspace!!.kindOf(file))
         assertTrue("renamed", scene.viewModel.rename(file, "quiet"))
-        assertTrue("and now lowercase", File(file.parentFile, "quiet.png").isFile)
+        assertTrue("and it is there", File(file.parentFile, "quiet.png").isFile)
     }
 
     @Test
-    fun `a dot at the start cannot make a name the app hides`() {
-        // A name the app owns is one starting with a dot (§3). Letting a typed name
-        // start with one would hide a person's own file from every screen.
-        assertTrue("made", scene.viewModel.createFile(".secret"))
-
-        assertEquals("secret.txt", made())
-        assertFalse("and it is not hidden", scene.workspace!!.isHidden(made()))
+    fun `a dot at the start is refused, not silently rewritten`() {
+        // A name the app owns is one starting with a dot (§3). Letting a typed name start with one
+        // would hide a person's own file from every screen — and now that names are not rewritten,
+        // the answer is a refusal rather than a quiet `secret.txt`.
+        assertFalse("refused", scene.viewModel.createFile(".secret"))
+        assertNotNull("and the message says why", scene.viewModel.message)
     }
 
     @Test

@@ -21,7 +21,9 @@ class FilesFeatureTest : FeatureTest() {
     fun `a new file gets the default extension when the name has none`() {
         scene.file("Shopping")
 
-        assertTrue("the name got .txt", scene.names().contains("shopping.txt"))
+        // **The name is kept as typed**, which is the change: it used to be lowercased on the way
+        // in, so this asserted `shopping.txt`. Only the extension is added.
+        assertTrue("the name got .txt", scene.names().contains("Shopping.txt"))
     }
 
     @Test
