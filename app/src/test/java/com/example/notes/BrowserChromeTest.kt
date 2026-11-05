@@ -77,7 +77,6 @@ class BrowserChromeTest {
                         ),
                         onAddProject = {},
                         onRowChat = {},
-                        onRowSync = {},
                         onRowRename = {},
                         onRowDelete = {},
                         onCreateFile = {},

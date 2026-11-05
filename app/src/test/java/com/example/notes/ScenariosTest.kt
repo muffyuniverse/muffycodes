@@ -103,7 +103,6 @@ class ScenariosTest {
             actions = noActions(),
             onAddProject = {},
             onRowChat = {},
-            onRowSync = {},
             onRowRename = {},
             onRowDelete = {},
             onCreateFile = {},
@@ -1082,27 +1081,12 @@ class ScenariosTest {
         }
     }
 
-    @Test
-    fun `the window that syncs, with changes to send`() {
-        scenario(
-            compose, "22-a-window-syncing",
-            "A window syncing, with two changes waiting.",
-            "the message the sync will be committed under.",
-            screen = {
-                window {
-                    SyncDialog(project = "groceries", changes = 2, onDismiss = {}, onSync = {})
-                }
-            },
-        ) {
-            before()
-            then("Nothing is synced.") {}
-            after()
-            result(
-                "The window says how many changes are going and lets the message be changed, " +
-                    "because the message is what the history will say about them for ever.",
-            )
-        }
-    }
+    // **The sync window is gone, and this says why rather than leaving a gap.** It existed so a
+    // person could name the commit their push would make. The operator moved the decision to the
+    // agent — "we can remove this functionality and transfer it to agent so that it can determine
+    // when to push" — so there is no window, no button and no note to type. The scenario numbering
+    // is left alone: 22 is missing on purpose, because renumbering would silently change what every
+    // later scenario number means in a log or a report.
 
     @Test
     fun `the window that reports a problem`() {

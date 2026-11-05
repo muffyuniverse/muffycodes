@@ -786,7 +786,7 @@ class WorkspaceTest {
                 git.add().addFilepattern(".").call()
             }
             val tracked = repo.repository.readDirCache().let { cache ->
-                (0 until cache.entryCount).map { cache.getEntry(it).path }
+                (0 until cache.entryCount).map { cache.getEntry(it).pathString }
             }
             assertTrue("the note is tracked: $tracked", tracked.contains("notes.txt"))
             assertFalse("and the key is not: $tracked", tracked.any { it.endsWith(".env") })
@@ -814,7 +814,7 @@ class WorkspaceTest {
                 git.add().addFilepattern(".").call()
             }
             val tracked = repo.repository.readDirCache().let { cache ->
-                (0 until cache.entryCount).map { cache.getEntry(it).path }
+                (0 until cache.entryCount).map { cache.getEntry(it).pathString }
             }
             assertTrue("the note is tracked: $tracked", tracked.contains("notes.txt"))
             assertFalse(

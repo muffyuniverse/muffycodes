@@ -2421,6 +2421,87 @@ class AgentTest {
 
     private fun tools() = AgentTools(ws, "shopping", git, log)
 
+    /** Calls a tool the way the loop does, and answers the raw result. */
+    private fun call(tool: String, args: JSONObject = JSONObject()) =
+        tools().run(Call("c-$tool", tool, args.toString()))
+
+    @Test
+    fun `state says there is nothing to send before anything was pushed`() {
+        // **"unknown", not "0 ahead".** A branch GitHub has never seen is not zero commits ahead of
+        // it — it has never been sent. Answering zero would tell an agent the work was delivered
+        // when nothing has ever left the phone, which is the one wrong answer that matters here.
+        val said = call("state")
+        assertTrue("it answers: $said", said.startsWith("0"))
+        assertTrue("it names the project: $said", said.contains("project: shopping"))
+        assertTrue(
+            "and says the remote state is unknown rather than zero: $said",
+            said.contains("unknown"),
+        )
+        assertTrue("and that there is nothing to send: $said", said.contains("Nothing to send"))
+    }
+
+    @Test
+    fun `push refuses while there is an uncommitted change`() {
+        // **A push sends commits, not files.** If a write had not committed, pushing would deliver
+        // something the agent never chose — and the agent would believe its change had gone.
+        val file = File(ws.repoOf("shopping"), "milk.txt")
+        ws.write(file, "three litres")
+        val said = call("push")
+        assertTrue("it is refused: $said", said.startsWith("1"))
+        assertTrue("and says why: $said", said.contains("uncommitted"))
+        assertTrue(
+            "and points at the fix: $said",
+            said.contains("write"),
+        )
+    }
+
+    @Test
+    fun `a file the agent creates is tracked, and a file a person creates is not`() {
+        // **The two defaults, side by side**, because they are deliberately opposite and the point
+        // is that the difference is decided by who acted rather than by a setting.
+        val byAgent = File(ws.repoOf("shopping"), "agent-made.txt")
+        val said = call("write", JSONObject().put("path", "agent-made.txt").put("text", "hello"))
+        assertTrue("the agent's write succeeded: $said", said.startsWith("0"))
+        assertTrue("the file exists", byAgent.isFile)
+        assertTrue(
+            "and is not locked — the agent may change its own work",
+            !ws.locked().contains(ws.pathString(ws.relative(byAgent)!!)),
+        )
+
+        // A person's creation, through the same function the editor uses.
+        val byPerson = File(ws.repoOf("shopping"), "person-made.txt")
+        ws.write(byPerson, "mine")
+        ws.createdByOperator(byPerson)
+        assertTrue(
+            "the person's file is locked",
+            ws.locked().contains(ws.pathString(ws.relative(byPerson)!!)),
+        )
+        assertTrue(
+            "and ignored, so it is not on GitHub",
+            File(ws.repoOf("shopping"), Workspace.IGNORE).let {
+                it.isFile && it.readText().contains("person-made.txt")
+            },
+        )
+    }
+
+    @Test
+    fun `a locked file is still readable, because locked means read-only`() {
+        // **The operator's sentence, as a test.** "locked doesnt mean blind, it means readonly" —
+        // so a lock must refuse a change and permit a read. A lock that hid the file would break
+        // every question an agent asks about a project it has been locked out of part of.
+        val file = File(ws.repoOf("shopping"), "private.txt")
+        ws.write(file, "a secret worth reading")
+        ws.createdByOperator(file)
+
+        val read = call("read", JSONObject().put("path", "private.txt"))
+        assertTrue("reading is allowed: $read", read.startsWith("0"))
+        assertTrue("and answers the text: $read", read.contains("a secret worth reading"))
+
+        val wrote = call("write", JSONObject().put("path", "private.txt").put("text", "changed"))
+        assertTrue("writing is refused: $wrote", wrote.startsWith("1"))
+        assertEquals("and the file is untouched", "a secret worth reading", file.readText())
+    }
+
     /** Calls `forget` the way the loop does, and answers the result. */
     private fun forget(vararg ids: Int): String = tools().run(
         Call("c9", "forget", JSONObject().put("ids", org.json.JSONArray(ids.toList())).toString()),
