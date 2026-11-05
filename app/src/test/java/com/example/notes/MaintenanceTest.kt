@@ -276,10 +276,10 @@ class MaintenanceTest {
             // unreachable rather than merely unreferenced by the newest commit.
             val named = commits(it).mapNotNull { c -> blobAt(it, "page.png", c.name) }.distinct()
             assertEquals("every commit holds the same blob: $named", 1, named.size)
-            assertFalse("and it is not the first one", named.single() == first.name)
+            assertFalse("and it is not the first one", named.single() == first)
             assertTrue(
-                "which is the newest bytes: ${repoBytes(it, named.single())}",
-                repoBytes(it, named.single()).contentEquals(PNG_B),
+                "which is the newest bytes",
+                repoBytes(it, named.single()!!).contentEquals(PNG_B),
             )
         }
     }
@@ -313,7 +313,7 @@ class MaintenanceTest {
             assertEquals("every commit is still there", 2, commits(it).size)
             assertTrue(
                 "and the newest bytes are still the picture",
-                repoBytes(it, blobAt(it, "page.png", "HEAD").name).contentEquals(PNG_B),
+                repoBytes(it, blobAt(it, "page.png", "HEAD")!!).contentEquals(PNG_B),
             )
         }
     }
@@ -338,7 +338,7 @@ class MaintenanceTest {
             assertTrue("the first picture's bytes survive", it.objectDatabase.has(first))
             assertTrue(
                 "and the copy is a picture too",
-                repoBytes(it, blobAt(it, "page-2.png", "HEAD").name).contentEquals(PNG_B),
+                repoBytes(it, blobAt(it, "page-2.png", "HEAD")!!).contentEquals(PNG_B),
             )
         }
     }
@@ -364,18 +364,21 @@ class MaintenanceTest {
         }
     }
 
-    /** The blob a path holds at [rev]. */
-    private fun blobAt(repo: org.eclipse.jgit.lib.Repository, path: String, rev: String): org.eclipse.jgit.lib.ObjectId? =
-        try {
-            val commit = org.eclipse.jgit.revwalk.RevWalk(repo).use { it.parseCommit(repo.resolve(rev)) }
-            org.eclipse.jgit.treewalk.TreeWalk.forPath(repo, path, commit.tree)?.getObjectId(0)
-        } catch (e: Throwable) {
-            null
-        }
+    /** The blob a path holds at [rev], or in [rev]'s commit when a commit id is given. */
+    private fun blobAt(
+        repo: org.eclipse.jgit.lib.Repository,
+        path: String,
+        rev: String,
+    ): org.eclipse.jgit.lib.ObjectId? = try {
+        val commit = org.eclipse.jgit.revwalk.RevWalk(repo).use { it.parseCommit(repo.resolve(rev)) }
+        org.eclipse.jgit.treewalk.TreeWalk.forPath(repo, path, commit.tree)?.getObjectId(0)
+    } catch (e: Throwable) {
+        null
+    }
 
     /** The bytes a blob holds, so "it is the picture" can be asserted rather than inferred. */
-    private fun repoBytes(repo: org.eclipse.jgit.lib.Repository, id: String): ByteArray =
-        repo.open(org.eclipse.jgit.lib.ObjectId.fromString(id)).bytes
+    private fun repoBytes(repo: org.eclipse.jgit.lib.Repository, id: org.eclipse.jgit.lib.ObjectId): ByteArray =
+        repo.open(id).bytes
 
     private fun commits(repo: org.eclipse.jgit.lib.Repository) =
         org.eclipse.jgit.revwalk.RevWalk(repo).use { walk ->
