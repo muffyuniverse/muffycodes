@@ -4103,6 +4103,25 @@ class AppViewModel @JvmOverloads constructor(
         }
     }
 
+    /**
+     * Ends a turn that never started, **so the screen is not left waiting.**
+     *
+     * A turn is `chatWorking = true` from the moment the person presses Enter. Every path out of
+     * `speak`'s callback clears it, and a path that returns before the callback never runs — which is
+     * a chat box that waits for an answer to a question the record never heard.
+     */
+    private fun finishTurn(project: String, said: String) {
+        chatWorking = false
+        chatLive = ""
+        chatWriting = ""
+        chatSpent = null
+        burstSpent = AgentChat.Spend(0, 0)
+        message = said
+        Trace.failure(said)
+        applyEnd(project, Agent.End.Stopped(said), System.currentTimeMillis())
+        refresh()
+    }
+
     /** What to tell the loop when the person speaks mid-turn, or stops the agent. */
     private var interrupt: String? = null
 
@@ -4120,7 +4139,19 @@ class AppViewModel @JvmOverloads constructor(
      */
     private fun runTurn(project: String, said: String, then: (List<AgentLog.Row>, Agent.End) -> Unit) {
         val ws = workspace ?: return
-        val g = git ?: return
+        // **A turn that cannot start must say so.** This was `git ?: return`, and it returned into
+        // nothing: no row, no message, `chatWorking` left true — a screen that waits for ever and a
+        // record that does not mention the question. `git` is a property that now wires the index
+        // queue on every read, so it can fail for reasons that have nothing to do with the turn.
+        val g = try {
+            git
+        } catch (e: Throwable) {
+            finishTurn(project, Secrets.explain(e, "The agent could not start"))
+            return
+        } ?: run {
+            finishTurn(project, "There is no project for this conversation yet")
+            return
+        }
         val model = modelConfig.active
         val door = doorFor(model, project)
         // The two limits, with this pin's ceiling — read once per turn, because the pin does not
