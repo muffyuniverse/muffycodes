@@ -230,8 +230,16 @@ class ProjectGitTest {
         File(worktree, "milk.txt").writeText("two litres")
         git.commit("Shopping", "Edited milk.txt")
 
-        assertEquals("one file, one thing to send", 1, git.changes("Shopping").ahead)
-        assertEquals("and the row says so", 1, git.changes("Shopping").total)
+        // **Two files, because the attribute file was never sent either.** The first version carries
+        // `.gitattributes`, and the remote was set after that version was made — so it is waiting
+        // alongside the edit. The assertion is about the edit being *included*, which is the
+        // question this test asks.
+        assertEquals("two files, one of them the edit", 2, git.changes("Shopping").ahead)
+        assertEquals("and the row agrees", 2, git.changes("Shopping").total)
+        assertTrue(
+            "the edit is one of them: ${git.unsentPaths("Shopping")}",
+            git.unsentPaths("Shopping").contains("milk.txt"),
+        )
 
         // **Two saves of one file are still one file to send.** A commit count said "2" here and
         // said "1" for a batch that moved ten files; the row is about what GitHub does not have.
@@ -795,8 +803,17 @@ class ProjectGitTest {
         git.init("Shopping").getOrThrow()
         git.open("Shopping")?.use { GitService.setRemoteUrl(it, bare.absolutePath) }
 
-        // The first commit is the empty one the repository starts with.
-        assertEquals(0, git.changes("Shopping").total)
+        // **One file, and it is the attribute file.** A project's first version now carries
+        // `.gitattributes`, which is committed content by design — that is what makes a clone
+        // elsewhere understand LFS pointers. Nothing was pushed before the remote was set, so that
+        // one file is genuinely waiting; before this, the first version was empty and the answer
+        // was zero.
+        val waiting = git.changes("Shopping")
+        assertEquals("the attribute file, and nothing else", 1, waiting.total)
+        assertTrue(
+            "and it is that file: ${git.unsentPaths("Shopping")}",
+            git.unsentPaths("Shopping").contains(".gitattributes"),
+        )
     }
 
     @Test
