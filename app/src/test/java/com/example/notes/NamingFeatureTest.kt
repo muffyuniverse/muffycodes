@@ -105,7 +105,11 @@ class NamingFeatureTest : FeatureTest() {
 
         assertEquals("still a picture", EntryKind.IMAGE, scene.workspace!!.kindOf(file))
         assertTrue("renamed", scene.viewModel.rename(file, "quiet"))
-        assertTrue("and it is there", File(file.parentFile, "quiet.png").isFile)
+        // **`quiet.PNG`, not `quiet.png`.** The rename keeps the extension the file already had,
+        // and that extension is upper case because the file is. Lowercasing it was the rewriter, and
+        // the rewriter is gone — a rename that changed a picture's extension case for no reason is
+        // the kind of quiet correction this change removes.
+        assertTrue("and it is there", File(file.parentFile, "quiet.PNG").isFile)
     }
 
     @Test
@@ -206,9 +210,11 @@ class NamingFeatureTest : FeatureTest() {
         scene.signedIn()
         scene.project("groceries")
         scene.open("groceries")
+        // **The entries before and after**, so the answer is the one this call made rather than
+        // "the only entry" — a project's folder holds more than the file being tested.
+        val before = scene.viewModel.entries.map { it.name }.toSet()
         assertTrue("made", scene.viewModel.createFile(name))
-        val made = scene.viewModel.entries.map { it.name }
-            .single { !it.startsWith(".") && it != "agent" }
+        val made = scene.viewModel.entries.map { it.name }.single { it !in before }
         assertTrue("and it is on disk as $made", File(scene.viewModel.currentDir!!, made).isFile)
         return made
     }
