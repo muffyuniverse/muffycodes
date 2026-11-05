@@ -77,6 +77,21 @@ class AppViewModel @JvmOverloads constructor(
      * The default is `true`, so the app is unchanged and only a test says otherwise.
      */
     private val housekeeping: Boolean = true,
+    /**
+     * Where a background index pass gets its vectors.
+     *
+     * **The live one by default, and a test passes [Embedder.NONE].** Every commit asks
+     * [IndexQueue] for a pass, so a test that commits anything would otherwise open a socket to
+     * OpenRouter — with a twenty-second connect timeout — on a thread nothing is waiting for. That
+     * is not a fake being substituted for a real thing; it is the real thing happening at the wrong
+     * time, and it makes every such test a test of the network's availability.
+     *
+     * `NONE` is not a silent no-op: a pass that cannot embed says so in its note, which is the same
+     * sentence a build with no credentials shows.
+     */
+    private val embedder: Embedder = Embedder.openRouter(
+        key = { activeLogin?.let { credentials.modelKey(it) } },
+    ),
 ) : AndroidViewModel(app) {
 
     /** The accounts on this phone. */
@@ -515,19 +530,7 @@ class AppViewModel @JvmOverloads constructor(
     private fun indexer(ws: Workspace): (String, String) -> Unit {
         IndexQueue.configure(
             ws = ws,
-            // **`embedder` is a seam, like `signInGitHub`, and for the same kind of reason.** Every
-            // commit asks this queue for a pass, so a live embedder here opens a socket to
-            // OpenRouter on a background thread with a 20-second connect timeout — in a suite that
-            // commits thousands of times, and in every test that has no key at all. The queue then
-            // holds its worker for the length of those timeouts, and whatever waits behind that
-            // worker times out instead.
-            //
-            // **The default is the live one**, so the app behaves as it did; a test passes [NONE]
-            // and gets a refusal it can read. That refusal is not a silent no-op: a pass that cannot
-            // embed says so in its note, the same sentence a build with no credentials shows.
-            embedder = Embedder.openRouter(
-                key = { activeLogin?.let { credentials.modelKey(it) } },
-            ),
+            embedder = embedder,
             models = { ModelConfigFile.load(ws.accountDir).getOrNull() },
             context = app,
         )
