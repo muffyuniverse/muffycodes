@@ -5171,6 +5171,18 @@ class AppViewModel @JvmOverloads constructor(
             message = "${dir.name} is not a project, so there is no history to bring anything back from"
             return false
         }
+        // **A binary is not in the history, so there is nothing to bring back.** A picture has one
+        // version — the newest — and the LFS store keeps only what the newest commits reference, so
+        // the bytes at `gone.revision` may already be gone. Offering it back would be offering
+        // something that may not exist, and writing a pointer over it would replace a picture with
+        // JSON. The person is told instead of being shown a button that might work.
+        //
+        // **A folder is allowed**, because it may hold text; the per-file refusal below decides.
+        if (!gone.isFolder && Workspace.kindOfPath(gone.name) != EntryKind.TEXT) {
+            message = "\"${gone.name}\" is not text, and a picture has only one version — it " +
+                "cannot be brought back. Deleting one is permanent."
+            return false
+        }
         val repo = git
         val under = path.drop(1) + gone.name.split("/")
         fun bytesAt(name: String): ByteArray? = repo?.bytesAt(project, name, gone.revision)
@@ -5183,6 +5195,10 @@ class AppViewModel @JvmOverloads constructor(
             val prefix = under.joinToString("/")
             val held = repo?.paths(project, prefix, gone.revision).orEmpty()
             for (name in held) {
+                // **The same rule inside a folder.** A folder's version may hold pictures, and a
+                // picture's bytes at that version may no longer exist; skipping it leaves the folder
+                // restored without the pictures it used to hold, which the answer says.
+                if (Workspace.kindOfPath(name) != EntryKind.TEXT) continue
                 val bytes = bytesAt(name) ?: continue
                 val target = ws.fileAt(path + gone.name.split("/") +
                     name.removePrefix("$prefix/").split("/"))

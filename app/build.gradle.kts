@@ -137,10 +137,17 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
-            // **JGit's LFS jar is SIGNED**, and its signature files are not resource content: they
-            // describe a jar that no longer exists once AGP has merged everything into one APK. Two
-            // of them collide with every other jar's `MANIFEST.MF`, which is what fails
-            // `mergeDebugJavaResource` with nothing in the message that names the cause.
+            // **JGit and its LFS jar both ship `OSGI-INF/l10n/plugin.properties`**, with different
+            // contents (49 and 63 bytes). AGP cannot merge two files at one path and fails
+            // `mergeDebugJavaResource` with "2 files found with path ..." — the actual cause, which
+            // the one-line job summary does not print.
+            //
+            // **OSGi metadata is Eclipse plugin wiring**, used when JGit runs inside an Eclipse
+            // runtime. It is inert in an APK: nothing here reads a plugin manifest, and the class
+            // files that do the work are unaffected. The signed-jar files are excluded for the
+            // adjacent reason — they certify the artifact on Maven Central, not the APK it is
+            // compiled into, and they collide with every other jar's `MANIFEST.MF`.
+            excludes += "/OSGI-INF/**"
             excludes += "/META-INF/{ECLIPSE_.SF,ECLIPSE_.RSA,ECLIPSE_.DSA}"
             excludes += "/META-INF/*.SF"
             excludes += "/META-INF/*.RSA"

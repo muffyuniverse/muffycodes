@@ -66,6 +66,11 @@ class ProjectGit(
         // work in one project at the same moment would otherwise both see "no repository" and both
         // initialise, and the second `git init` on an existing repository is the least harmful of
         // the outcomes — the harmful one is a commit landing while the refs are being written.
+        // **The attribute goes in BEFORE the first commit.** `initOrOpen` commits whatever is on
+        // disk as the initial version, so writing the file afterwards leaves it untracked — and then
+        // the next save commits it as a change the person did not make, which is both a lie in the
+        // history and a "1 changed" on a project nobody has touched.
+        GitService.ensureLfsAttributes(dir)
         RepoLocks.hold(dir, "init") {
             val repo = GitService.initOrOpen(dir, authorProvider())
             try {
@@ -80,10 +85,6 @@ class ProjectGit(
         // own local rule, not a file in the person's repository.
         workspace.ensureIgnore(dir)
         workspace.ensureSecretIgnores(dir)
-        // **In the person's repository, not the app's storage.** A clone elsewhere has to know which
-        // files are pointers, and an attribute only this app could read would make a picture arrive
-        // as 130 bytes of JSON that looks like corruption.
-        GitService.ensureLfsAttributes(dir)
         Result.success(Unit)
     } catch (e: Throwable) {
         Result.failure(e)
@@ -414,7 +415,11 @@ class ProjectGit(
             }
             workspace.ensureIgnore(dir)
             workspace.ensureSecretIgnores(dir)
-            GitService.ensureLfsAttributes(dir)
+            // **Not `ensureLfsAttributes` here.** A cloned project carries the attribute *committed*,
+            // because that is what makes LFS portable — writing it again would either be a no-op or,
+            // on a repository that predates it, a change the person did not make appearing in their
+            // "1 changed". A project without the line keeps its pictures stored whole, which is what
+            // every build before this one did.
             // **The comprehensive pass, asked for once, right after the tree lands.** A clone writes
             // hundreds of files at once and commits none of them, so the commit hook above never
             // fires for it — and a project that arrived from GitHub is exactly the case where the

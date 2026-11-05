@@ -628,20 +628,21 @@ class HistoryFeatureTest : FeatureTest() {
     }
 
     @Test
-    fun `a deleted picture comes back as the same bytes, not as text`() {
+    fun `a deleted picture cannot be brought back, and the refusal says why`() {
+        // **This test used to assert the opposite**, and the change is the point: it proved a
+        // picture came back byte for byte, which was right while a picture had versions. A binary now
+        // keeps one version — the newest — and the LFS store keeps only what the newest commits
+        // reference, so the bytes at an old revision may already be gone. Offering it back would be
+        // offering something that may not exist.
+        //
+        // The operator's rule: *"no restore for binaries - warn that they will not be tracked by
+        // history and removal is irrevercible"*.
         start()
-        // A version is not always text. Writing a UTF-8 reading of a picture back
-        // over it replaces the picture with a row of replacement characters, which
-        // is a restore that destroys the thing it restored.
         scene.folder("pictures")
         scene.openIn("pictures")
         val bytes = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0xFF.toByte(), 0x00)
         val picture = File(scene.viewModel.currentDir!!, "dot.png")
         picture.writeBytes(bytes)
-        // Written behind the app's back, so it needs a real change to carry it into the
-        // history — every commit takes everything that is waiting, which is what makes a file
-        // dropped in by another app show up at all. A file, not a folder: an empty folder is not
-        // a change, so it would carry nothing.
         scene.file("marker.txt", "a change to carry the picture in")
         scene.await("the picture to be recorded", 20_000) {
             scene.trackedFiles().contains("pictures/dot.png")
@@ -651,10 +652,16 @@ class HistoryFeatureTest : FeatureTest() {
 
         val offered = scene.viewModel.deletedIn(scene.viewModel.currentDir!!)
             .firstOrNull { it.name == "dot.png" }
-        assertTrue("it is offered back", offered != null)
-        assertTrue("put back", scene.viewModel.restoreDeleted(scene.viewModel.currentDir!!, offered!!))
-
-        assertTrue("byte for byte", picture.readBytes().contentEquals(bytes))
+        assertTrue("it is still offered, because the row exists", offered != null)
+        assertFalse(
+            "but bringing it back is refused",
+            scene.viewModel.restoreDeleted(scene.viewModel.currentDir!!, offered!!),
+        )
+        assertFalse("so nothing was written", picture.exists())
+        assertTrue(
+            "and the person is told the deletion is permanent: ${scene.viewModel.message}",
+            scene.viewModel.message.orEmpty().contains("permanent"),
+        )
     }
 
     @Test
