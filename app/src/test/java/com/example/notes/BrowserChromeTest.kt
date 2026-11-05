@@ -345,6 +345,12 @@ class BrowserChromeTest {
         val only = scene.folder("only")
         val file = File(only, "milk.txt")
         scene.workspace!!.write(file, "two litres")
+        // **Unlocked, deliberately.** `scene.folder` goes through `createFolder`, which is the
+        // person's door and now locks what it makes — so the row would already carry a lock and this
+        // test would be asserting the opposite of its own subject. Unlocking puts the row back in
+        // the state the test is about.
+        scene.viewModel.toggleLocked(only)
+        scene.viewModel.refresh()
         scene.open("groceries", "only")
         browser()
 

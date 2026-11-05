@@ -956,7 +956,7 @@ private fun EntryRow(
                     modifier = Modifier.padding(horizontal = 12.dp),
                 )
             }
-        } else if (!choosing && !system && entry.kind != EntryKind.UNKNOWN) {
+        } else if (!choosing && !system) {
             // **A folder carries the marks too, and it is the row where they matter most.**
             // Reported: "why folders made by agents dont have lock and sync icons?" and, earlier,
             // "why logs dont inherit red lock and unsync icons?".
@@ -967,8 +967,15 @@ private fun EntryRow(
             // drawn, so a person who locked `drafts/` saw the lock on no row at all and could not
             // tell whether the lock had taken.
             //
-            // **`UNKNOWN` stays out**, because a binary the app cannot open has no lock to offer in
-            // a menu that would not let you edit it anyway.
+            // **`UNKNOWN` used to be excluded, and that became the one row that mattered most.**
+            // The gate read `kind != UNKNOWN`, on the reasoning that a binary the app cannot open
+            // has no lock to offer — which is true of the *lock*. But the ignore switch is the one
+            // control a binary needs: a `.pdf` or a `.zip` arrives ignored by default, and the row
+            // that would let the person send it was the row that drew no switch at all. A file
+            // waiting behind a door with no handle is the silent no-op this app keeps removing.
+            //
+            // So the row is drawn for every kind now. The lock is meaningless on a binary and
+            // harmless; the ignore switch is the whole point.
             //
             // The lock sits to the left of the menu, and only where it can mean
             // something: a file this app would otherwise let you write.

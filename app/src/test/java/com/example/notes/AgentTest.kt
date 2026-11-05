@@ -2182,7 +2182,11 @@ class AgentTest {
     fun `move with copy leaves the original, and a taken name is refused`() {
         val dir = ws.repoOf("shopping")
         ws.write(File(dir, "milk.txt"), "two litres")
-        ws.createFolder(dir, "drafts")
+        // **`mkdirs`, not `createFolder`, and the difference is the test's own subject.**
+        // `createFolder` is the person's door, so it locks what it makes — and an agent copying into
+        // a folder the person locked is *correctly* refused, which would make this test about the
+        // lock rather than about `copy`. A destination the person did not lock is what it needs.
+        File(dir, "drafts").mkdirs()
 
         val body = tool("move", """{"path":"milk.txt","into":"drafts","copy":true}""")
 
@@ -2251,7 +2255,8 @@ class AgentTest {
         // writing, which `Workspace.copy` now does, not to forbid the act.
         val dir = ws.repoOf("shopping")
         ws.write(File(dir, "milk.txt"), "two litres")
-        ws.createFolder(dir, "drafts")
+        // A destination the person did not lock — see the note in the test above.
+        File(dir, "drafts").mkdirs()
 
         val body = tool("move", """{"path":"milk.txt","into":"drafts/dairy.txt","copy":true}""")
 
@@ -2482,8 +2487,12 @@ class AgentTest {
             "the person's file is locked",
             ws.locked().contains(ws.pathString(ws.relative(byPerson)!!)),
         )
-        assertTrue(
-            "and ignored, so it is not on GitHub",
+        assertFalse(
+            // **A text file is not ignored, and that is the rule.** Ignoring it would also mean not
+            // committing it — an ignored file has no version and no undo — so only a file the app
+            // cannot classify waits behind the switch. The operator's words: "unknown should be
+            // gitignored by default ... same as with pictures", and pictures are tracked.
+            "and still tracked, so the person's own note has a history",
             File(ws.repoOf("shopping"), Workspace.IGNORE).let {
                 it.isFile && it.readText().contains("person-made.txt")
             },
