@@ -1162,7 +1162,6 @@ class Workspace(val accountDir: File) {
 
     /** Why [name] cannot be used, or null when it can. */
     /** The locked paths. Read once and kept, because every write asks. */
-    private var lockedCache: Set<String>? = null
 
     /**
      * Why [file] cannot be renamed, moved or deleted, or null when it can.
@@ -1213,7 +1212,22 @@ class Workspace(val accountDir: File) {
      * in the text would be content the person did not write, and a marker in the
      * name would change the name the file has.
      */
-    fun locked(): Set<String> = lockedCache ?: readFlags(LOCKED_FILE).also { lockedCache = it }
+    /**
+     * The person's locked paths, **read from disk every time**.
+     *
+     * **The cache this used to keep was wrong, and the wrongness was invisible.** `AppViewModel.workspace`
+     * is a computed property — `activeLogin?.let { Workspace(accounts.dirOf(it)) }` — so every access
+     * builds a *new* `Workspace`. A cache therefore belongs to one short-lived object and is never
+     * shared: the object that read `locked()` before a change keeps the old answer for ever, while
+     * the one that made the change has the new one. Measured: after a successful unlock, a
+     * `Workspace` that had been asked earlier still answered `[milk.txt]`, so the row drew a shut
+     * padlock on an unlocked file and the next tap re-locked it.
+     *
+     * The file is a few hundred bytes and is read on a handful of paths per screen change, so
+     * reading it is cheaper than the coordination a correct cache would need — and a cache that is
+     * right by accident is worse than no cache at all.
+     */
+    fun locked(): Set<String> = readFlags(LOCKED_FILE)
 
     /** Replaces the locked paths. */
     fun setLocked(paths: Set<String>) = writeFlags(LOCKED_FILE, paths)
@@ -1304,11 +1318,9 @@ class Workspace(val accountDir: File) {
         val array = JSONArray()
         paths.sorted().forEach { array.put(it) }
         put(File(stateDir, name), array.toString())
-        // **The cache is updated where the file is written, or a rewrite lifts a lock.**
-        // `rewriteFlagPaths` moved every locked path to the new folder name after the
-        // `repo` → `GitHub` migration, and the cache kept the old paths: the lock read as
-        // gone, on a file nobody had unlocked. One writer, one cache.
-        if (name == LOCKED_FILE) lockedCache = paths
+        // **No cache to update, and that is the fix.** There used to be one, keyed to a
+        // `Workspace` instance — and `AppViewModel.workspace` builds a new instance on every
+        // access, so the cache was never shared and could only ever be stale. See `locked()`.
     }
 
     // ---- creating a project on disk ---------------------------------------

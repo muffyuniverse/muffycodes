@@ -291,26 +291,27 @@ class SelectionFeatureTest : FeatureTest() {
         // **`Hold.NONE`, not null.** `hold` answers an enum and never null, so `== null` is a
         // comparison the compiler folds away — the warning said "Condition is always 'false'" and
         // it was right: this assertion could not have passed whatever the code did.
+        // **Two `Workspace` objects, on purpose.** `AppViewModel.workspace` is a computed property
+        // that builds a new one on every access, so `ws` here and the one the toggle used are
+        // different objects. That is exactly what caught the stale lock cache: this object had read
+        // `locked()` before the change, and with the cache it kept answering `[milk.txt]` for ever
+        // while the screen's copy said `[]`. Asking a *second, independent* object is the assertion
+        // that would have failed then, and it is the one that matters — a row draws from a
+        // `Workspace` it did not necessarily make.
+        val after = Workspace(ws.accountDir)
         assertTrue(
-            // **The message carries the evidence**, because this failed once with only the word
-            // "unlocked" and there was no way to tell whether the lock was still there, the path
-            // was wrong, or the toggle never ran.
-            "unlocked — path=${ws.relative(file)}, locked=${ws.locked()}, " +
-                "hold=${ws.hold(file, ws.locked())}, " +
-                "vmLocked=${scene.viewModel.lockedPaths}, " +
-                "same=${scene.viewModel.lockedPaths == ws.locked()}, " +
-                "trail=" + com.example.notes.Trace.report().lines.take(3).joinToString("|"),
-            ws.hold(file, ws.locked()) == Workspace.Hold.NONE,
+            "unlocked, and a fresh reader agrees",
+            after.hold(file, after.locked()) == Workspace.Hold.NONE,
         )
         scene.viewModel.toggleLocked(file)
 
-        assertTrue("locked again", ws.hold(file, ws.locked()) == Workspace.Hold.USER)
+        assertTrue("locked again", after.hold(file, after.locked()) == Workspace.Hold.USER)
         assertEquals("the file is untouched", "two litres", file.readText())
         assertEquals("and nothing was committed", before, scene.headId())
 
         // It survives the app looking at the tree again, which is what a fresh
         // screen does.
         scene.viewModel.refresh()
-        assertTrue("still locked", ws.hold(file, ws.locked()) == Workspace.Hold.USER)
+        assertTrue("still locked", after.hold(file, after.locked()) == Workspace.Hold.USER)
     }
 }
