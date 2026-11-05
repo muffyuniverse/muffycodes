@@ -37,6 +37,12 @@ object LfsSync {
      * only those are uploaded.
      */
     fun push(repo: Repository, token: String?, remoteUrl: String?): Done {
+        // **Nothing to send is nothing to do, and it is checked first.** A project of text files has
+        // no objects, so there is no reason to require an address or a token for it — and demanding
+        // one made every sync of a text project fail with a sentence about pictures that project
+        // does not have.
+        val stored = storedObjects(repo)
+        if (stored.isEmpty()) return Done()
         val endpoint = remoteUrl?.let { LfsClient.endpointOf(it) }
             ?: return Done(why = "This project has no GitHub address to send pictures to")
         if (token.isNullOrBlank()) {
@@ -44,8 +50,6 @@ object LfsSync {
             // network problem; the real cause is that nobody is signed in.
             return Done(why = "Signing in again is needed before pictures can be sent")
         }
-        val stored = storedObjects(repo)
-        if (stored.isEmpty()) return Done()
         val objects = stored.map { it.name to it.length() }
         val batch = LfsClient.batch(endpoint, token, "upload", objects).getOrElse {
             return Done(why = it.message)
@@ -74,14 +78,15 @@ object LfsSync {
      * on disk where the picture should be, no error anywhere.
      */
     fun pull(repo: Repository, token: String?, remoteUrl: String?): Done {
+        // **Nothing missing is nothing to do**, checked before the address and the token for the same
+        // reason as [push]: a project with no pictures must not need either.
+        val absent = pointersIn(repo)
+            .filter { fileOf(repo, it.oid)?.isFile != true }
+            .distinctBy { it.oid }
+        if (absent.isEmpty()) return Done()
         val endpoint = remoteUrl?.let { LfsClient.endpointOf(it) }
             ?: return Done(why = "This project has no GitHub address to fetch pictures from")
         if (token.isNullOrBlank()) return Done(why = "Signing in again is needed before pictures can be fetched")
-        val wanted = pointersIn(repo)
-        // **One entry per object, not per path.** The same bytes can be two files, and the store holds
-        // them once; downloading per path would fetch the same object twice.
-        val absent = wanted.filter { fileOf(repo, it.oid)?.isFile != true }.distinctBy { it.oid }
-        if (absent.isEmpty()) return Done()
         val batch = LfsClient.batch(endpoint, token, "download", absent.map { it.oid to it.size })
             .getOrElse { return Done(why = it.message) }
         var received = 0

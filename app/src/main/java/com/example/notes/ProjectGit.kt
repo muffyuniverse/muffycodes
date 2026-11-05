@@ -66,6 +66,15 @@ class ProjectGit(
         // work in one project at the same moment would otherwise both see "no repository" and both
         // initialise, and the second `git init` on an existing repository is the least harmful of
         // the outcomes — the harmful one is a commit landing while the refs are being written.
+        // **The attribute goes in before the repository is made**, so the very first commit already
+        // holds it and a project that has just been created has nothing waiting to be sent. Writing
+        // it afterwards left `.gitattributes` as an uncommitted change in every new project — which
+        // the app then reported as "1 change" before anybody had touched anything.
+        //
+        // In the person's repository, not the app's storage: a clone elsewhere has to know which
+        // files are pointers, and an attribute only this app could read would make a picture arrive
+        // as 130 bytes of JSON that looks like corruption.
+        GitService.ensureLfsAttributes(dir)
         RepoLocks.hold(dir, "init") {
             val repo = GitService.initOrOpen(dir, authorProvider())
             try {
@@ -83,10 +92,6 @@ class ProjectGit(
         // own local rule, not a file in the person's repository.
         workspace.ensureIgnore(dir)
         workspace.ensureSecretIgnores(dir)
-        // **In the person's repository, not the app's storage.** A clone elsewhere has to know which
-        // files are pointers, and an attribute only this app could read would make a picture arrive
-        // as 130 bytes of JSON that looks like corruption.
-        GitService.ensureLfsAttributes(dir)
         Result.success(Unit)
     } catch (e: Throwable) {
         Result.failure(e)
@@ -459,7 +464,12 @@ class ProjectGit(
             }
             workspace.ensureIgnore(dir)
             workspace.ensureSecretIgnores(dir)
-            GitService.ensureLfsAttributes(dir)
+            // **Not written here.** A project cloned from GitHub that holds pictures already carries
+            // the attribute — it is committed content, which is the whole point of it — and writing
+            // it again would leave the freshly-arrived project with an uncommitted change nobody
+            // made. Only a clone of a project that has no attribute gets one, and then it is
+            // genuinely new content that has to be committed like anything else.
+            GitService.ensureLfsAttributesIfMissing(dir)
             // **The comprehensive pass, asked for once, right after the tree lands.** A clone writes
             // hundreds of files at once and commits none of them, so the commit hook above never
             // fires for it — and a project that arrived from GitHub is exactly the case where the

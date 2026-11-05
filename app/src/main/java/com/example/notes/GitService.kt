@@ -120,6 +120,21 @@ object GitService {
     }
 
     /**
+     * Writes the attribute **only when the project has no `.gitattributes` at all.**
+     *
+     * The difference matters after a clone. A project that came from GitHub with pictures in it
+     * already carries the attribute as committed content — writing it again would leave a change
+     * nobody made, and the app would report a freshly-arrived project as having work to send. A
+     * project with no attribute and no pictures does not need one; and a project with pictures but
+     * no attribute could not have arrived that way, so the only case this serves is a clone of a
+     * project whose attribute was never written — where the new file is genuinely new content.
+     */
+    fun ensureLfsAttributesIfMissing(dir: File) {
+        if (File(dir, ".gitattributes").isFile) return
+        ensureLfsAttributes(dir)
+    }
+
+    /**
      * Which paths are stored as LFS pointers — **one line per kind the app can draw or show.**
      *
      * Written as a list rather than one wildcard so that adding a picture format is one edit here and

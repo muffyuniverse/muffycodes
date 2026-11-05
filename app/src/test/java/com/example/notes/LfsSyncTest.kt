@@ -36,6 +36,9 @@ class LfsSyncTest {
             .setGitDir(File(root, ".git"))
             .setWorkTree(root)
             .build()
+        // **Registered as well as enabled**, because the SPI is what makes the clean filter exist
+        // at all; without it the attribute is ignored and the tree stores the raw picture.
+        GitService.registerLfs()
         GitService.enableLfs(repo)
     }
 
